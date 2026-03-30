@@ -1,0 +1,151 @@
+import { departments } from '@/data/departments';
+import React from 'react';
+import { Outlet } from 'react-router-dom';
+import DepartmentCard from '../DepartmentCard';
+
+// مكون بسيط لأيقونات التواصل الاجتماعي (SVG)
+const SocialIcon = ({ path, href, colorClass }: { path: string; href: string; colorClass: string }) => (
+  <a
+    href={href}
+    target="_blank"
+    rel="noopener noreferrer"
+    className={`p-2 bg-white dark:bg-slate-800 rounded-full shadow-md hover:shadow-lg transform hover:-translate-y-1 transition-all duration-300 ${colorClass}`}
+  >
+    <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+      <path d={path} />
+    </svg>
+  </a>
+);
+
+const Contact: React.FC = () => {
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900 font-sans transition-colors duration-300" dir="rtl">
+      
+      {/* --- الهيدر الرئيسي مع الشعار (مصغر) --- */}
+      <header className="bg-gradient-to-r from-cyan-600 to-slate-800 dark:from-slate-800 dark:to-slate-900 pt-6 pb-8 px-4 shadow-md">
+        <div className="container mx-auto">
+          
+          {/* عنوان الصفحة */}
+          <div className="text-center">
+            <h1 className="text-2xl md:text-3xl font-bold text-white mb-3">
+              تواصل معنا
+            </h1>
+            <p className="text-slate-200 dark:text-slate-300 max-w-xl mx-auto text-sm md:text-base leading-relaxed">
+              فريقنا جاهز لخدمتكم في كافة أقسام شركتنا
+            </p>
+          </div>
+        </div>
+      </header>
+
+      {/* --- قسم الأقسام --- */}
+      <main className="container mx-auto px-4 py-8">
+        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-5 mb-6 border border-slate-100 dark:border-slate-700">
+          <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-4 text-center">
+            أقسام الشركة
+          </h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {departments.map((dept) => (
+              <DepartmentCard key={dept.id} department={dept} />
+            ))}
+          </div>
+        </div>
+      </main>
+
+      {/* نافذة منبثقة */}
+      <Outlet />
+      
+      {/* --- الفوتر مع الشعار الصغير (مصغر) --- */}
+      <footer className="bg-slate-800 dark:bg-slate-900 pt-6 pb-4 px-4 border-t border-slate-700">
+        <div className="container mx-auto">
+          
+          {/* الشعار الصغير في الفوتر */}
+          <div className="flex justify-center mb-4">
+            <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-700/50 backdrop-blur-sm">
+              {/* استخدام صورة الشعار الصغيرة من مجلد public */}
+              <img 
+                src="/logo-small.png" 
+                alt="K.T.R.A Logo"
+                className="h-6 w-auto"
+                onError={(e) => {
+                  // في حال فشل تحميل الصورة، نعرض الشعار النصي الصغير
+                  e.currentTarget.style.display = 'none';
+                  const parent = e.currentTarget.parentElement;
+                  if (parent) {
+                    parent.innerHTML = `
+                      <div class="flex items-center gap-2">
+                        <div class="text-sm font-bold text-white tracking-wide">
+                          K.T.R.A
+                        </div>
+                        <div class="h-5 w-0.5 bg-cyan-500 rounded-full"></div>
+                        <div class="text-lg font-bold text-cyan-400">
+                          K
+                        </div>
+                      </div>
+                    `;
+                  }
+                }}
+              />
+            </div>
+          </div>
+          
+          {/* وسائل التواصل الاجتماعي */}
+          <div className="text-center mb-4">
+            <h3 className="text-white font-medium mb-3 text-base">
+              تابعونا على وسائل التواصل
+            </h3>
+            
+            <div className="flex justify-center gap-3 mb-4">
+              <SocialIcon 
+                href="https://facebook.com"
+                colorClass="text-blue-600 hover:bg-blue-50 dark:hover:bg-slate-700"
+                path="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"
+              />
+
+              <SocialIcon 
+                href="https://www.tiktok.com/@ktra.import.group?_r=1&_t=ZS-92CBUzi08iW"
+                colorClass="text-pink-600 hover:bg-pink-50 dark:hover:bg-slate-700"
+                path="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"
+              />
+
+              <SocialIcon 
+                href="https://www.tiktok.com/@ktra.import.group?_r=1&_t=ZS-92CBUzi08iW"
+                colorClass="text-black dark:text-white hover:bg-slate-200 dark:hover:bg-slate-700"
+                path="M12.525.02c1.31-.02 2.61-.01 3.91-.02.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.35-1.17 1.02-1.25 1.73-.04.55.03 1.1.27 1.6.41.87 1.27 1.54 2.23 1.66 1.09.13 2.23-.39 2.82-1.29.35-.53.53-1.17.53-1.81.01-4.52.01-9.03 0-13.55.01-.73-.01-1.47.01-2.2z"
+              />
+              
+              {/* أيقونة LinkedIn */}
+              <SocialIcon 
+                href="https://linkedin.com"
+                colorClass="text-blue-700 hover:bg-blue-50 dark:hover:bg-slate-700"
+                path="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"
+              />
+            </div>
+          </div>
+
+          {/* معلومات الاتصال المختصرة */}
+          <div className="flex flex-col md:flex-row justify-center gap-3 md:gap-6 mb-4 text-center">
+            <div>
+              <div className="text-white font-medium text-xs mb-1">الهاتف</div>
+              <div className="text-slate-300 text-sm">+966 11 123 4567</div>
+            </div>
+            <div className="hidden md:block text-slate-500">|</div>
+            <div>
+              <div className="text-white font-medium text-xs mb-1">البريد الإلكتروني</div>
+              <div className="text-slate-300 text-sm">info@ktra-sa.com</div>
+            </div>
+          </div>
+
+          {/* الحقوق */}
+          <div className="text-center pt-4 border-t border-slate-700">
+            <div className="text-slate-400 text-xs">
+              <p>© 2024 K.T.R.A - المؤسسة العامة للنقل</p>
+              <p className="mt-1">جميع الحقوق محفوظة</p>
+            </div>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+};
+
+export default Contact;

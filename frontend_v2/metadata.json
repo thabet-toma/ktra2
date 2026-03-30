@@ -1,0 +1,5 @@
+{
+  "name": "Smart Product Search Platform",
+  "description": "An intelligent web application designed to help import companies find products from major Chinese markets like AliExpress, Alibaba, and 1688. Users can upload a product image, provide a brief description, and set a target price to automatically search for identical or similar items within the specified price range.",
+  "requestFramePermissions": []
+}

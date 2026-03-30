@@ -1,0 +1,4 @@
+Source: C:\Users\asus\Desktop\ثابت\منصة\smart-product-search-platform
+Dest: C:\Users\asus\Desktop\ktra\frontend_v2
+SOURCE EXISTS, starting copytree...
+DONE COPY

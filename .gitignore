@@ -1,0 +1,35 @@
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.db
+
+# Env & secrets (never commit)
+.env
+.env.*
+!.env.example
+serviceAccountKey.json
+*.pem
+
+# Node / frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db
+
+# Logs & misc
+*.log
+.cache/
+
+# Duplicate / nested legacy frontend copy (keep out of this repo)
+smart-product-search-platform/
+frontend_v2/smart-product-search-platform/

@@ -1,0 +1,545 @@
+import React, { useState, useMemo, useEffect } from "react";
+import { Deal, DealStatus, Supplier } from "../../../types";
+import { SupplierViewModal } from "@/components/common/SupplierViewModal";
+// 🟢 1. استيراد مودال التعديل
+import { SupplierModal } from "@/components/common/SupplierModal";
+import {
+  Package,
+  DollarSign,
+  CheckCircle2,
+  AlertCircle,
+  Factory,
+  FileText,
+  ChevronDown,
+  User,
+  Filter,
+  Search,
+  SortAsc,
+  SortDesc,
+  Eye,
+  Truck,
+  Clock,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
+  Printer,
+  Calendar,
+  X,
+  Edit,
+  ArrowUpRight
+} from "lucide-react";
+
+interface DealListProps {
+  deals: Deal[];
+  onEdit: (deal: Deal) => void;
+  onPrint: (deal: Deal) => void;
+  onDelete: (dealId: string) => void;
+  allDbItems?: any[];
+  allSuppliers?: Supplier[];
+  compactMode?: boolean;
+}
+
+export const DealList: React.FC<DealListProps> = ({
+  deals,
+  onEdit,
+  onPrint,
+  onDelete,
+  allDbItems,
+  allSuppliers,
+  compactMode = true,
+}) => {
+  const [selectedDealForActivity, setSelectedDealForActivity] = useState<string | null>(null);
+  const [expandedDeals, setExpandedDeals] = useState<Set<string>>(new Set());
+  const [hoveredImage, setHoveredImage] = useState<{ dealId: string, index: number } | null>(null);
+
+  // States للعرض
+  const [viewSupplierId, setViewSupplierId] = useState<string | null>(null);
+
+  // 🟢 2. States جديدة للتعديل
+  const [showSupplierEditModal, setShowSupplierEditModal] = useState(false);
+  const [supplierToEdit, setSupplierToEdit] = useState<Supplier | null>(null);
+
+  // States for Filters & Sorting
+  const [selectedOperationalStatus, setSelectedOperationalStatus] = useState<string>("all");
+  const [selectedPaymentStatus, setSelectedPaymentStatus] = useState<string>("all");
+  const [searchTerm, setSearchTerm] = useState<string>("");
+  const [sortField, setSortField] = useState<"date" | "amount" | "status">("date");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+
+  const [showDateFilter, setShowDateFilter] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const itemsPerPage = 20;
+
+  const formatDate = (dateString?: string) => {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '-';
+    return date.toLocaleDateString('en-GB');
+  };
+
+  // --- Helper Functions ---
+  const calculateDealFinancials = (deal: Deal) => {
+    const items = deal.items || [];
+    let calculatedSubtotal = 0;
+    if (items.length > 0) {
+      calculatedSubtotal = items.reduce((sum, item) => {
+        const qty = parseFloat(item.quantity as any) || 0;
+        const price = parseFloat(item.unitPrice as any) || 0;
+        return sum + (qty * price);
+      }, 0);
+    } else {
+      calculatedSubtotal = parseFloat(deal.subtotal as any) || 0;
+    }
+
+    const discountAmount = parseFloat(deal.discountAmount as any) || 0;
+    const shippingCost = deal.shippingIncluded ? 0 : (parseFloat(deal.shippingCost as any) || 0);
+    const netAfterDiscount = Math.max(0, calculatedSubtotal - discountAmount);
+    const taxableBase = netAfterDiscount + shippingCost;
+
+    let taxAmount = 0;
+    if (deal.taxType === 'amount') {
+      taxAmount = parseFloat(deal.taxAmount as any) || 0;
+    } else {
+      const taxRate = parseFloat(deal.taxRate as any) || 0;
+      taxAmount = taxableBase * (taxRate / 100);
+    }
+
+    const grandTotal = taxableBase + taxAmount;
+    const paidAmount = deal.payments?.reduce((sum, p) => sum + (parseFloat(p.amount as any) || 0), 0) || 0;
+    const remainingAmount = grandTotal - paidAmount;
+
+    return { grandTotal, paidAmount, remainingAmount };
+  };
+
+  // ... (باقي دوال الحالة والفلترة كما هي للحفاظ على نظافة الكود) ...
+  // (getOperationalStatus, getPaymentStatusFromPayments, getSupplierDisplayName, etc.)
+
+  // سأقوم بإدراج الدوال الأساسية فقط لتشغيل الكود
+  type OperationalStatus = "initial" | "manufacturing_started" | "production_completed" | "shipping_preparation" | "shipping_in_progress" | "shipped" | "cancelled";
+  type PaymentStatus = "not_paid" | "claim_raised" | "payment_pending_confirmation" | "partially_paid" | "paid";
+
+  const getOperationalStatus = (status: DealStatus): OperationalStatus => {
+    if (["manufacturing_started", "production_completed", "shipping_preparation", "shipping_in_progress", "shipped", "cancelled"].includes(status)) {
+      return status as OperationalStatus;
+    }
+    return "initial";
+  };
+
+  const getPaymentStatusFromPayments = (deal: Deal): PaymentStatus => {
+    const { grandTotal, paidAmount } = calculateDealFinancials(deal);
+    if (grandTotal === 0 && paidAmount === 0) return "not_paid";
+    if (grandTotal === 0 && paidAmount > 0) return "paid";
+    const percentage = (paidAmount / grandTotal) * 100;
+    if (percentage >= 99) return "paid";
+    if (percentage > 0) return "partially_paid";
+    return "not_paid";
+  };
+
+  const getOpStyles = (status: OperationalStatus) => { const styles: any = { initial: "bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700", manufacturing_started: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800", production_completed: "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-300 dark:border-purple-800", shipping_preparation: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800", shipping_in_progress: "bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/20 dark:text-teal-300 dark:border-teal-800", shipped: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800", cancelled: "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800", }; return styles[status] || styles["initial"]; };
+  const getPayStyles = (status: PaymentStatus) => { const styles: any = { not_paid: "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300", claim_raised: "bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-300", payment_pending_confirmation: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300", partially_paid: "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300", paid: "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300", }; return styles[status] || styles["not_paid"]; };
+  const getOpText = (status: OperationalStatus) => { const map: any = { initial: "أولية", manufacturing_started: "تصنيع", production_completed: "تم التصنيع", shipping_preparation: "تجهيز شحن", shipping_in_progress: "جاري الشحن", shipped: "مكتملة", cancelled: "ملغاة" }; return map[status] || status; };
+  const getPayText = (status: PaymentStatus) => { const map: any = { not_paid: "غير مدفوعة", claim_raised: "رفع مطالبة", payment_pending_confirmation: "بانتظار تأكيد", partially_paid: "مدفوعة جزئياً", paid: "مدفوعة كلياً" }; return map[status] || status; };
+  const getOpIcon = (status: OperationalStatus) => { const icons: any = { initial: <FileText className="w-3 h-3" />, manufacturing_started: <Factory className="w-3 h-3" />, production_completed: <CheckCircle2 className="w-3 h-3" />, shipping_preparation: <Package className="w-3 h-3" />, shipping_in_progress: <Truck className="w-3 h-3" />, shipped: <CheckCircle2 className="w-3 h-3" />, cancelled: <XCircle className="w-3 h-3" />, }; return icons[status]; };
+  const getPayIcon = (status: PaymentStatus) => { const icons: any = { not_paid: <AlertCircle className="w-3 h-3" />, claim_raised: <AlertTriangle className="w-3 h-3" />, payment_pending_confirmation: <Clock className="w-3 h-3" />, partially_paid: <DollarSign className="w-3 h-3" />, paid: <CheckCircle className="w-3 h-3" />, }; return icons[status]; };
+
+  const getSupplierDisplayName = (deal: Deal): string => {
+    if (!allSuppliers || !deal.supplierId) return deal.factoryName || "مورد غير محدد";
+    const supplier = allSuppliers.find((s) => s.id === deal.supplierId);
+    if (supplier) {
+      if (supplier.alias && supplier.alias.trim() !== '') {
+        return `${supplier.tradeName} (${supplier.alias})`;
+      }
+      return supplier.tradeName;
+    }
+    return deal.factoryName || "مورد غير محدد";
+  };
+
+  const getDealImages = (deal: Deal) => {
+    const images: string[] = [];
+    deal.items?.forEach(item => {
+      if (item.imageUrls?.length) images.push(...item.imageUrls.slice(0, 3));
+      if (images.length >= 3) return;
+    });
+    return images.slice(0, 3);
+  };
+
+  const resetAllFilters = () => {
+    setSelectedOperationalStatus("all");
+    setSelectedPaymentStatus("all");
+    setSearchTerm("");
+    setDateFrom("");
+    setDateTo("");
+    setShowDateFilter(false);
+    setCurrentPage(1);
+  };
+
+  const filteredDeals = useMemo(() => {
+    return deals.filter((deal) => {
+      const operationalStatus = getOperationalStatus(deal.status);
+      if (selectedOperationalStatus !== "all" && operationalStatus !== selectedOperationalStatus) return false;
+      const paymentStatus = getPaymentStatusFromPayments(deal);
+      if (selectedPaymentStatus !== "all" && paymentStatus !== selectedPaymentStatus) return false;
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        const matchesNumbers = deal.dealNumber?.toLowerCase().includes(term) || deal.originalOfferNumber?.toLowerCase().includes(term) || (deal as any).supplierInvoiceNumber?.toLowerCase().includes(term);
+        const matchesSupplier = deal.factoryName?.toLowerCase().includes(term) || allSuppliers?.find(s => s.id === deal.supplierId)?.tradeName?.toLowerCase().includes(term) || allSuppliers?.find(s => s.id === deal.supplierId)?.alias?.toLowerCase().includes(term);
+        const matchesItems = deal.items?.some(item => item.name?.toLowerCase().includes(term));
+        if (!matchesNumbers && !matchesSupplier && !matchesItems) return false;
+      }
+      if (dateFrom || dateTo) {
+        const dealDateStr = deal.dealDate || deal.createdAt;
+        if (!dealDateStr) return false;
+        const dealDate = new Date(dealDateStr);
+        dealDate.setHours(0, 0, 0, 0);
+        if (dateFrom) { const from = new Date(dateFrom); from.setHours(0, 0, 0, 0); if (dealDate < from) return false; }
+        if (dateTo) { const to = new Date(dateTo); to.setHours(23, 59, 59, 999); if (dealDate > to) return false; }
+      }
+      return true;
+    });
+  }, [deals, selectedOperationalStatus, selectedPaymentStatus, searchTerm, allSuppliers, dateFrom, dateTo]);
+
+  const sortedDeals = useMemo(() => {
+    return [...filteredDeals].sort((a, b) => {
+      let comparison = 0;
+      switch (sortField) {
+        case "date": const dateA = new Date(a.dealDate || 0).getTime(); const dateB = new Date(b.dealDate || 0).getTime(); comparison = dateB - dateA; break;
+        case "amount": comparison = calculateDealFinancials(b).grandTotal - calculateDealFinancials(a).grandTotal; break;
+        case "status": comparison = (a.status || "").localeCompare(b.status || ""); break;
+      }
+      return sortDirection === "asc" ? -comparison : comparison;
+    });
+  }, [filteredDeals, sortField, sortDirection]);
+
+  const totalPages = Math.ceil(sortedDeals.length / itemsPerPage);
+  const paginatedDeals = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return sortedDeals.slice(startIndex, startIndex + itemsPerPage);
+  }, [sortedDeals, currentPage]);
+
+  useEffect(() => setCurrentPage(1), [selectedOperationalStatus, selectedPaymentStatus, searchTerm, dateFrom, dateTo]);
+  const goToPage = (page: number) => { if (page >= 1 && page <= totalPages) { setCurrentPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
+  const toggleDealExpand = (dealId: string) => { setExpandedDeals((prev) => { const newSet = new Set(prev); if (newSet.has(dealId)) newSet.delete(dealId); else newSet.add(dealId); return newSet; }); };
+
+  return (
+    <div className="space-y-3">
+      {/* --- Filter Bar --- */}
+      <div className="bg-white dark:bg-gray-800 p-2 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2 mb-2">
+          {/* ... (نفس كود الفلاتر العلوية) ... */}
+          <div className="flex items-center gap-1.5">
+            <Filter className="w-3.5 h-3.5 text-gray-500" />
+            <span className="font-medium text-gray-700 dark:text-gray-300 text-xs">فلاتر البحث</span>
+            <span className="text-xs bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
+              {filteredDeals.length} صفقة
+            </span>
+          </div>
+          <div className="flex gap-1.5">
+            <button
+              onClick={() => setShowDateFilter(!showDateFilter)}
+              className={`px-2 py-1 rounded-lg flex items-center gap-1 text-xs transition-colors ${showDateFilter
+                ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
+                : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                }`}
+              title="فلترة بالتاريخ"
+            >
+              <Calendar className="w-3 h-3" />
+              <span>التاريخ</span>
+              {(dateFrom || dateTo) && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />}
+            </button>
+
+            <button onClick={() => setSortField("date")} className={`px-2 py-1 rounded-lg flex items-center gap-0.5 text-xs ${sortField === "date" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"}`}>
+              {sortField === "date" && sortDirection === "desc" ? <SortDesc className="w-3 h-3" /> : <SortAsc className="w-3 h-3" />} التاريخ
+            </button>
+            <button onClick={() => setSortField("amount")} className={`px-2 py-1 rounded-lg text-xs ${sortField === "amount" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"}`}>
+              المبلغ
+            </button>
+            <button onClick={() => setSortDirection(prev => prev === "asc" ? "desc" : "asc")} className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-xs">
+              {sortDirection === "desc" ? "تنازلي" : "تصاعدي"}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-1.5">
+          {/* ... (نفس كود حقول البحث) ... */}
+          <div className="relative">
+            <Search className="absolute right-2 top-1/2 transform -translate-y-1/2 w-3 h-3 text-gray-400" />
+            <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ابحث (رقم الصفقة، الفاتورة، المورد)..." className="w-full p-1.5 pr-7 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400" />
+          </div>
+          <select value={selectedOperationalStatus} onChange={(e) => setSelectedOperationalStatus(e.target.value)} className="p-1.5 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-900 dark:text-white">
+            <option value="all">كل الحالات</option>
+            <option value="initial">أولية</option>
+            <option value="manufacturing_started">تصنيع</option>
+            <option value="production_completed">تم تصنيع</option>
+            <option value="shipping_preparation">تجهيز شحن</option>
+            <option value="shipped">مكتملة</option>
+            <option value="cancelled">ملغاة</option>
+          </select>
+          <select value={selectedPaymentStatus} onChange={(e) => setSelectedPaymentStatus(e.target.value)} className="p-1.5 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-900 dark:text-white">
+            <option value="all">كل الدفعات</option>
+            <option value="not_paid">غير مدفوعة</option>
+            <option value="claim_raised">رفع مطالبة</option>
+            <option value="payment_pending_confirmation">بانتظار تأكيد</option>
+            <option value="partially_paid">مدفوعة جزئياً</option>
+            <option value="paid">مدفوعة كلياً</option>
+          </select>
+          <button onClick={resetAllFilters} className="p-1.5 text-xs bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors">
+            إعادة تعيين
+          </button>
+        </div>
+
+        {showDateFilter && (
+          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100 dark:border-gray-700 animate-in fade-in slide-in-from-top-1">
+            {/* ... (نفس كود فلاتر التاريخ) ... */}
+            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-900/50 p-1.5 rounded-lg border border-gray-200 dark:border-gray-600">
+              <span className="text-xs text-gray-500 font-medium">من:</span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="p-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-gray-700 dark:text-gray-200 outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-900/50 p-1.5 rounded-lg border border-gray-200 dark:border-gray-600">
+              <span className="text-xs text-gray-500 font-medium">إلى:</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="p-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-gray-700 dark:text-gray-200 outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            {(dateFrom || dateTo) && (
+              <button
+                onClick={() => { setDateFrom(""); setDateTo(""); }}
+                className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                title="مسح التاريخ"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* --- Deal List --- */}
+      <div className="space-y-2">
+        {paginatedDeals.map((deal) => {
+          // ... (حسابات الصفقة) ...
+          const { grandTotal, paidAmount, remainingAmount } = calculateDealFinancials(deal);
+          const operationalStatus = getOperationalStatus(deal.status);
+          const paymentStatus = getPaymentStatusFromPayments(deal);
+          const supplierDisplayName = getSupplierDisplayName(deal);
+          const images = getDealImages(deal);
+          const isExpanded = expandedDeals.has(deal.id);
+
+          return (
+            <div key={deal.id} className="relative group rounded-lg border transition-all duration-200 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:shadow-md hover:z-20 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-gray-700/50">
+              {/* Main Compact Row */}
+              <div className="flex items-center justify-between p-3 cursor-pointer" onClick={() => toggleDealExpand(deal.id)}>
+                {/* Left Side: Images & Info */}
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  {/* ... (صور الصفقة) ... */}
+                  {images.length > 0 && (
+                    <div className="relative flex-shrink-0 z-10" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex -space-x-2">
+                        {images.slice(0, 2).map((img, idx) => {
+                          const item = deal.items?.find(i => i.imageUrls?.includes(img) || i.factoryImageUrl === img);
+                          const itemName = item?.name || "منتج";
+                          return (
+                            <div key={idx} className="relative group/image" onMouseEnter={() => setHoveredImage({ dealId: deal.id, index: idx })} onMouseLeave={() => setHoveredImage(null)}>
+                              <div className="w-9 h-9 rounded-md border-2 border-white dark:border-gray-800 shadow-sm overflow-hidden hover:scale-110 transition-transform duration-200">
+                                <img src={img} alt="" className="w-full h-full object-cover" />
+                              </div>
+                              {hoveredImage?.dealId === deal.id && hoveredImage?.index === idx && (
+                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50">
+                                  <div className="bg-gray-900 text-white text-xs px-2 py-1 rounded shadow-lg whitespace-nowrap">
+                                    {itemName}
+                                    <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                        {images.length > 2 && (
+                          <div className="w-9 h-9 rounded-md border-2 border-white dark:border-gray-800 bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] font-bold text-gray-500 dark:text-gray-400 z-0">
+                            +{images.length - 2}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-[10px] font-bold text-gray-900 dark:text-white text-sm truncate">{deal.dealNumber}</span>
+                      {deal.originalOfferNumber && (
+                        <span
+                          title={deal.originalOfferNumber}
+                          className="font-bold text-gray-900 dark:text-white text-sm truncate max-w-[240px] bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded border border-blue-100 dark:border-blue-800 flex-shrink-0"
+                        >
+                          {deal.originalOfferNumber}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                      {/* 🟢 زر فتح المورد (عرض) */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (deal.supplierId) setViewSupplierId(deal.supplierId);
+                        }}
+                        className="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:underline transition-colors text-left"
+                      >
+                        {supplierDisplayName}
+                      </button>
+                      <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                      <span className="flex-shrink-0">{deal.items?.length || 0} منتج</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Middle & Right ... (نفس الكود) */}
+                <div className="hidden sm:flex items-center gap-2 mx-4">
+                  <div className={`px-2 py-1 rounded-md text-xs border flex items-center gap-1.5 font-medium ${getOpStyles(operationalStatus)}`}>
+                    {getOpIcon(operationalStatus)}
+                    <span className="hidden lg:inline">{getOpText(operationalStatus)}</span>
+                  </div>
+                  <div className={`px-2 py-1 rounded-md text-xs border flex items-center gap-1.5 font-medium ${getPayStyles(paymentStatus)}`}>
+                    {getPayIcon(paymentStatus)}
+                    <span className="hidden lg:inline">{getPayText(paymentStatus)}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <div className="font-bold text-gray-900 dark:text-white text-sm">${grandTotal.toLocaleString()}</div>
+                    <div className="text-[10px] text-gray-400">{formatDate(deal.dealDate)}</div>
+                  </div>
+                  <div className="flex items-center gap-1 pl-1">
+                    {/* New Tab Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(`${window.location.origin}?view=deals-management&id=${deal.id}`, '_blank');
+                      }}
+                      className="p-1.5 hover:bg-white dark:hover:bg-gray-700 rounded-full text-gray-400 hover:text-blue-600 transition-colors"
+                      title="فتح في نافذة جديدة"
+                    >
+                      <ArrowUpRight className="w-4 h-4" />
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); onPrint(deal); }} className="p-1.5 hover:bg-white dark:hover:bg-gray-700 rounded-full text-gray-400 hover:text-blue-600 transition-colors" title="طباعة"><Printer className="w-4 h-4" /></button>
+                    <button onClick={(e) => { e.stopPropagation(); onEdit(deal); }} className="p-1.5 hover:bg-white dark:hover:bg-gray-700 rounded-full text-gray-400 hover:text-blue-600 transition-colors" title="تعديل"><Edit className="w-4 h-4" /></button>
+                    <div className={`p-1 rounded-full transition-transform duration-200 ${isExpanded ? 'rotate-180 bg-gray-100 dark:bg-gray-700' : ''}`}><ChevronDown className="w-4 h-4 text-gray-500" /></div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Expanded Details Section */}
+              {isExpanded && (
+                <div className="border-t border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-black/20 p-3 rounded-b-lg">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-xs">
+                        <User className="w-3.5 h-3.5 text-gray-400" />
+                        <span className="text-gray-500">المورد:</span>
+                        {/* 🟢 زر فتح المورد (عرض) أيضاً في القسم الموسع */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (deal.supplierId) setViewSupplierId(deal.supplierId);
+                          }}
+                          className="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:underline transition-colors text-left"
+                        >
+                          {supplierDisplayName}
+                        </button>
+                      </div>
+                      {/* ... باقي التفاصيل ... */}
+                      <div className="sm:hidden flex flex-wrap gap-2 mt-2">
+                        <span className={`px-2 py-1 rounded text-xs ${getOpStyles(operationalStatus)}`}>{getOpText(operationalStatus)}</span>
+                        <span className={`px-2 py-1 rounded text-xs ${getPayStyles(paymentStatus)}`}>{getPayText(paymentStatus)}</span>
+                      </div>
+                    </div>
+                    {/* ... باقي الأعمدة (Financials, Products, Footer Actions) ... */}
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700 text-center">
+                        <div className="text-[10px] text-gray-500 mb-0.5">المدفوع</div>
+                        <div className="text-sm font-bold text-emerald-600">${paidAmount.toLocaleString()}</div>
+                      </div>
+                      <div className="bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700 text-center">
+                        <div className="text-[10px] text-gray-500 mb-0.5">المتبقي</div>
+                        <div className="text-sm font-bold text-amber-600">${remainingAmount.toLocaleString()}</div>
+                      </div>
+                      <div className="bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700 text-center">
+                        <div className="text-[10px] text-gray-500 mb-0.5">الإجمالي</div>
+                        <div className="text-sm font-bold text-blue-600">${grandTotal.toLocaleString()}</div>
+                      </div>
+                    </div>
+                    <div className="lg:col-span-1">
+                      <div className="text-xs font-medium text-gray-500 mb-1.5">أبرز المنتجات</div>
+                      <div className="flex flex-wrap gap-1">
+                        {deal.items?.slice(0, 3).map((item, i) => (
+                          <span key={i} className="px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-[10px] text-gray-700 dark:text-gray-300">
+                            {item.name} <span className="text-gray-400 mx-1">x{item.quantity}</span>
+                          </span>
+                        ))}
+                        {(deal.items?.length || 0) > 3 && (
+                          <span className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded text-[10px] text-gray-500">
+                            +{(deal.items?.length || 0) - 3}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="md:col-span-2 lg:col-span-3 flex justify-end gap-2 pt-2 mt-2 border-t border-gray-200 dark:border-gray-700">
+                      <button onClick={() => setSelectedDealForActivity(deal.id)} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded text-xs hover:bg-gray-50 transition-colors">سجل النشاطات</button>
+                      <button onClick={() => { if (confirm('حذف؟')) onDelete(deal.id) }} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 rounded text-xs hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">حذف</button>
+                      <button onClick={() => onEdit(deal)} className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium shadow-sm transition-colors">إدارة الصفقة الكاملة</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex justify-center gap-2 mt-4">
+          <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 disabled:opacity-50 transition-colors dark:text-white">السابقة</button>
+          <span className="px-3 py-1.5 text-xs text-gray-600 dark:text-gray-400 flex items-center">{currentPage} / {totalPages}</span>
+          <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages} className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 disabled:opacity-50 transition-colors dark:text-white">التالية</button>
+        </div>
+      )}
+
+      {/* 4. عرض مودال المورد في أسفل الصفحة */}
+      <SupplierViewModal
+        isOpen={!!viewSupplierId}
+        supplierId={viewSupplierId}
+        onClose={() => setViewSupplierId(null)}
+        // 🟢 5. دالة التعديل (تفتح مودال التعديل)
+        onEdit={(supplier) => {
+          setViewSupplierId(null); // إغلاق مودال العرض
+          setSupplierToEdit(supplier); // تعيين المورد المراد تعديله
+          setShowSupplierEditModal(true); // فتح مودال التعديل
+        }}
+      />
+
+      {/* 🟢 6. مودال التعديل */}
+      <SupplierModal
+        isOpen={showSupplierEditModal}
+        onClose={() => {
+          setShowSupplierEditModal(false);
+          setSupplierToEdit(null);
+        }}
+        onSaveSuccess={() => {
+          // التحديث يتم تلقائياً لأن البيانات تأتي من الأب (Firestore Subscription)
+        }}
+        editingSupplier={supplierToEdit}
+      />
+    </div>
+  );
+};

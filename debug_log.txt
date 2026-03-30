@@ -1,0 +1,96 @@
+--- NEW REQUEST ---
+Lines count: 2
+Data: {'transaction_date': '2026-02-01', 'description': '', 'is_posted': False, 'lines': [{'account': 1, 'debit': 0, 'credit': 1000}, {'account': 2, 'debit': 1000, 'credit': 0}]}
+Header saved ID: 8
+Lines saved. Validating...
+Django Validation Error: Transaction date 2026-02-01 is not within any OPEN fiscal period for tenant 1.
+--- NEW REQUEST ---
+Lines count: 2
+Data: {'transaction_date': '2026-02-01', 'description': '', 'is_posted': False, 'lines': [{'account': 1, 'debit': 0, 'credit': 1000}, {'account': 2, 'debit': 1000, 'credit': 0}]}
+Header saved ID: 9
+Lines saved. Validating...
+Django Validation Error: Transaction date 2026-02-01 is not within any OPEN fiscal period for tenant 1.
+--- NEW REQUEST ---
+Lines count: 2
+Data: {'transaction_date': '2026-02-01', 'description': '', 'is_posted': False, 'lines': [{'account': 1, 'debit': 0, 'credit': 1000}, {'account': 2, 'debit': 1000, 'credit': 0}]}
+Header saved ID: 10
+Lines saved. Validating...
+Django Validation Error: Transaction date 2026-02-01 is not within any OPEN fiscal period for tenant 1.
+--- NEW REQUEST ---
+Lines count: 2
+Data: {'transaction_date': '2026-02-01', 'description': '', 'is_posted': False, 'lines': [{'account': 1, 'debit': 0, 'credit': 1000}, {'account': 3, 'debit': 1000, 'credit': 0}]}
+Header saved ID: 11
+Lines saved. Validating...
+Validation Passed.
+--- NEW REQUEST ---
+Lines count: 2
+Data: {'transaction_date': '2026-02-01', 'description': '', 'is_posted': False, 'lines': [{'account': 1, 'debit': 0, 'credit': 1000}, {'account': 5, 'debit': 1000, 'credit': 0}]}
+Header saved ID: 12
+Lines saved. Validating...
+Validation Passed.
+--- NEW REQUEST ---
+Lines count: 2
+Data: {'transaction_date': '2026-02-01', 'description': '', 'is_posted': False, 'lines': [{'account': 1, 'debit': 0, 'credit': 1000}, {'account': 2, 'debit': 1000, 'credit': 0}]}
+Header saved ID: 13
+Lines saved. Validating...
+Validation Passed.
+--- NEW REQUEST ---
+Lines count: 2
+Data: {'transaction_date': '2026-02-01', 'description': '', 'is_posted': False, 'lines': [{'account': 2, 'debit': 0, 'credit': 1000}, {'account': 7, 'debit': 1000, 'credit': 0}]}
+Header saved ID: 14
+Lines saved. Validating...
+Validation Passed.
+--- NEW REQUEST ---
+Lines count: 2
+Data: {'transaction_date': '2026-02-01', 'description': '', 'is_posted': False, 'lines': [{'account': 7, 'debit': 0, 'credit': 1000}, {'account': 12, 'debit': 1000, 'credit': 0}]}
+Header saved ID: 15
+Lines saved. Validating...
+Validation Passed.
+--- NEW REQUEST ---
+Lines count: 2
+Data: {'transaction_date': '2026-02-01', 'description': '', 'is_posted': False, 'lines': [{'account': 1, 'debit': 0, 'credit': 1000}, {'account': 7, 'debit': 1000, 'credit': 0}]}
+Header saved ID: 16
+Lines saved. Validating...
+Validation Passed.
+--- NEW REQUEST ---
+Lines count: 2
+Data: {'transaction_date': '2026-02-02', 'description': 'فاتورة', 'is_posted': False, 'lines': [{'account': 8, 'debit': 0, 'credit': 1000}, {'account': 10, 'debit': 1000, 'credit': 0}]}
+Exception: Traceback (most recent call last):
+  File "C:\Users\asus\Desktop\ktra\accounting\views.py", line 127, in create
+    header = serializer.save(tenant=tenant_obj)
+  File "C:\Users\asus\Desktop\ktra\venv\Lib\site-packages\rest_framework\serializers.py", line 210, in save
+    self.instance = self.create(validated_data)
+                    ~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\asus\Desktop\ktra\venv\Lib\site-packages\rest_framework\serializers.py", line 977, in create
+    raise_errors_on_nested_writes('create', self, validated_data)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\asus\Desktop\ktra\venv\Lib\site-packages\rest_framework\serializers.py", line 842, in raise_errors_on_nested_writes
+    assert not any(
+           ^^^^^^^^
+    ...<5 lines>...
+    ), (
+    ^
+AssertionError: The `.create()` method does not support writable nested fields by default.
+Write an explicit `.create()` method for serializer `accounting.serializers.JournalHeaderSerializer`, or set `read_only=True` on nested serializer fields.
+
+--- NEW REQUEST ---
+Lines count: 2
+Data: {'transaction_date': '2026-02-03', 'description': '', 'is_posted': False, 'lines': [{'account': 9, 'debit': 0, 'credit': 1000}, {'account': 10, 'debit': 1000, 'credit': 0}]}
+Exception: Traceback (most recent call last):
+  File "C:\Users\asus\Desktop\ktra\accounting\views.py", line 127, in create
+    header = serializer.save(tenant=tenant_obj)
+  File "C:\Users\asus\Desktop\ktra\venv\Lib\site-packages\rest_framework\serializers.py", line 210, in save
+    self.instance = self.create(validated_data)
+                    ~~~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\asus\Desktop\ktra\venv\Lib\site-packages\rest_framework\serializers.py", line 977, in create
+    raise_errors_on_nested_writes('create', self, validated_data)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\asus\Desktop\ktra\venv\Lib\site-packages\rest_framework\serializers.py", line 842, in raise_errors_on_nested_writes
+    assert not any(
+           ^^^^^^^^
+    ...<5 lines>...
+    ), (
+    ^
+AssertionError: The `.create()` method does not support writable nested fields by default.
+Write an explicit `.create()` method for serializer `accounting.serializers.JournalHeaderSerializer`, or set `read_only=True` on nested serializer fields.
+
