@@ -51,10 +51,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToSignup, onGoTo
         setShowResend(true);
       } else if (err.message === "ACCOUNT_NOT_APPROVED") {
         setError("حسابك بانتظار موافقة المدير.");
+      } else if (err.message === "INVALID_CREDENTIALS" || err.message === "Invalid credentials.") {
+        setError("البريد الإلكتروني أو كلمة المرور غير صحيحة. إن وُجد الحقلان username و email في قاعدة البيانات، يجب أن يطابقا البريد الذي تدخله.");
       } else if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
         setError("البريد الإلكتروني أو كلمة المرور غير صحيحة.");
+      } else if (err instanceof TypeError && String(err.message).includes("fetch")) {
+        setError("تعذر الاتصال بالخادم. تأكد أن Django يعمل وأن VITE_API_URL صحيح.");
       } else {
-        setError("حدث خطأ أثناء تسجيل الدخول.");
+        setError(err?.message ? `تعذر تسجيل الدخول: ${err.message}` : "حدث خطأ أثناء تسجيل الدخول.");
       }
     } finally {
       setIsLoading(false);

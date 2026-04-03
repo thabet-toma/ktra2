@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.db import transaction
+from django.db.models import Prefetch
 from .models import (
     LogisticsDeal, LogisticsDealItem, LogisticsShipment,
     LogisticsClearance, LogisticsExpense, LogisticsShipmentDeal,
@@ -40,6 +41,20 @@ class BaseTenantViewSet(viewsets.ModelViewSet):
 class LogisticsDealViewSet(BaseTenantViewSet):
     queryset = LogisticsDeal.objects.all().order_by('-order_date')
     serializer_class = LogisticsDealSerializer
+
+    def get_queryset(self):
+        return (
+            super()
+            .get_queryset()
+            .select_related('partner', 'currency', 'tenant', 'created_by')
+            .prefetch_related(
+                Prefetch(
+                    'items',
+                    queryset=LogisticsDealItem.objects.select_related('product', 'deal'),
+                ),
+                'payments',
+            )
+        )
 
     def perform_create(self, serializer):
         tenant = Tenant.objects.first()

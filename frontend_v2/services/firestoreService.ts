@@ -1442,7 +1442,13 @@ export const suppliersService = {
       balanceDate: p?.balance_date || "",
       email: p?.email || "",
       notes: p?.notes || "",
-      logoUrl: p?.logo_url || "",
+      logoUrl: String(
+        p?.image_path ||
+          p?.logo_url ||
+          p?.logoUrl ||
+          (Array.isArray(p?.attachments) && p.attachments[0]?.file_path) ||
+          ""
+      ).trim(),
       salesRepName: p?.sales_rep_name || "",
       salesRepWechat: p?.sales_rep_wechat || "",
       salesRepPhone: p?.sales_rep_phone || "",

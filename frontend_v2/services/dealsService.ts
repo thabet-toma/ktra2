@@ -52,6 +52,10 @@ function mapPaymentFromSql(p: any, idx: number): DealPayment {
 function mapItemFromSql(i: any, idx: number) {
   const qty = Number(i?.quantity || 0);
   const unit = Number(i?.unit_price || 0);
+  const rawUrls = i?.image_urls ?? i?.imageUrls;
+  const imageUrls = Array.isArray(rawUrls)
+    ? rawUrls.map((u: any) => String(u || "").trim()).filter(Boolean)
+    : [];
   return {
     id: String(i?.id ?? `i-${idx}`),
     itemId: String(i?.product ?? i?.id ?? ""),
@@ -59,7 +63,7 @@ function mapItemFromSql(i: any, idx: number) {
     categoryId: "",
     categoryName: "",
     specifications: i?.notes || "",
-    imageUrls: [],
+    imageUrls,
     quantity: qty,
     unitPrice: unit,
     totalPrice: Number(i?.total_price || qty * unit),
@@ -70,6 +74,21 @@ function mapItemFromSql(i: any, idx: number) {
 function mapDealFromSql(d: SqlDeal): Deal {
   const payments = (d?.payments || []).map((p: any, idx: number) => mapPaymentFromSql(p, idx));
   const items = (d?.items || []).map((i: any, idx: number) => mapItemFromSql(i, idx));
+  const quoteImagesRaw = d?.quote_images ?? d?.quoteImages;
+  const quoteImages = Array.isArray(quoteImagesRaw)
+    ? quoteImagesRaw.map((u: any) => String(u || "").trim()).filter(Boolean)
+    : [];
+  const quotePdfsRaw = d?.quote_pdfs ?? d?.quotePdfs;
+  const quotePdfs = Array.isArray(quotePdfsRaw)
+    ? quotePdfsRaw
+        .map((row: any) => ({
+          name: String(row?.name || "quote.pdf"),
+          url: String(row?.url || row?.file_path || "").trim(),
+          size: Number(row?.size || 0),
+          type: String(row?.type || "application/pdf"),
+        }))
+        .filter((x) => x.url)
+    : [];
   const totalAmount = Number(d?.total_amount || 0);
   const paid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
   const partnerField = d?.partner;
@@ -93,6 +112,8 @@ function mapDealFromSql(d: SqlDeal): Deal {
     supplierId: String(partnerId || d?.partner_id || d?.PartnerID || d?.partner_name || ""),
     factoryName: d?.partner_name || d?.partner?.name || d?.factory_name || "",
     supplierInvoiceNumber: pickFirst(d?.supplier_invoice_number, d?.supplierInvoiceNumber, d?.pi_number, d?.piNumber),
+    quoteImages: quoteImages.length ? quoteImages : undefined,
+    quotePdfs: quotePdfs.length ? quotePdfs : undefined,
     status: mapStatusFromSql(d?.status),
     installments: [],
     installmentPlanEnabled: Boolean(d?.installment_plan_enabled),

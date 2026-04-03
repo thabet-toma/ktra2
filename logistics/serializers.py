@@ -18,20 +18,96 @@ class LogisticsPaymentSerializer(serializers.ModelSerializer):
 class LogisticsDealItemSerializer(serializers.ModelSerializer):
     product_name = serializers.CharField(source='product.name_ar', read_only=True)
     total_price = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    image_urls = serializers.SerializerMethodField()
 
     class Meta:
         model = LogisticsDealItem
-        fields = ['id', 'product', 'product_name', 'quantity', 'unit_price', 'total_price', 'notes']
+        fields = [
+            'id', 'product', 'product_name', 'quantity', 'unit_price', 'total_price', 'notes',
+            'image_urls',
+        ]
+
+    def get_image_urls(self, obj):
+        try:
+            from core.models import SystemAttachment
+
+            if not obj.product_id:
+                return []
+            flt = {'related_table': 'products', 'related_id': obj.product_id}
+            deal = getattr(obj, 'deal', None)
+            if deal is not None:
+                flt['tenant_id'] = deal.tenant_id
+            elif getattr(obj, 'product', None) is not None:
+                flt['tenant_id'] = obj.product.tenant_id
+            return list(
+                SystemAttachment.objects.filter(**flt)
+                .order_by('id')
+                .values_list('file_path', flat=True)
+            )
+        except Exception:
+            return []
 
 class LogisticsDealSerializer(serializers.ModelSerializer):
     items = LogisticsDealItemSerializer(many=True)
     payments = LogisticsPaymentSerializer(many=True, required=False)
     partner_name = serializers.CharField(source='partner.name', read_only=True)
+    quote_images = serializers.SerializerMethodField()
+    quote_pdfs = serializers.SerializerMethodField()
 
     class Meta:
         model = LogisticsDeal
         fields = '__all__'
         read_only_fields = ['id', 'tenant', 'created_by', 'is_posted', 'journal', 'total_amount']
+
+    def get_quote_images(self, obj):
+        try:
+            from core.models import SystemAttachment
+
+            rows = SystemAttachment.objects.filter(
+                tenant_id=obj.tenant_id,
+                related_table='logistics_deals',
+                related_id=obj.id,
+            ).order_by('id')
+            out = []
+            for a in rows:
+                ft = (a.file_type or '').lower()
+                path = (a.file_path or '').lower()
+                if 'pdf' in ft or path.endswith('.pdf'):
+                    continue
+                if a.file_path:
+                    out.append(a.file_path)
+            return out
+        except Exception:
+            return []
+
+    def get_quote_pdfs(self, obj):
+        try:
+            from core.models import SystemAttachment
+
+            rows = SystemAttachment.objects.filter(
+                tenant_id=obj.tenant_id,
+                related_table='logistics_deals',
+                related_id=obj.id,
+            ).order_by('id')
+            out = []
+            for a in rows:
+                ft = (a.file_type or '').lower()
+                path = (a.file_path or '').lower()
+                is_pdf = 'pdf' in ft or path.endswith('.pdf')
+                if not is_pdf or not a.file_path:
+                    continue
+                name = (a.file_type or 'quote.pdf')
+                if 'quote pdf' in name.lower():
+                    name = name.split(':', 1)[-1].strip() or 'quote.pdf'
+                out.append({
+                    'name': name[:255],
+                    'url': a.file_path,
+                    'size': 0,
+                    'type': 'application/pdf',
+                })
+            return out
+        except Exception:
+            return []
 
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])

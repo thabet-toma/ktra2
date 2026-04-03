@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.authtoken.models import Token
@@ -89,7 +90,8 @@ def login_view(request):
         return JsonResponse({"detail": "Invalid JSON"}, status=400)
     email = (body.get("email") or "").strip()
     password = body.get("password") or ""
-    user = User.objects.filter(username=email).first()
+    # Signup يضع نفس قيمة البريد في username، لكن تعديلات يدوية على DB قد تفصل الحقلين.
+    user = User.objects.filter(Q(username__iexact=email) | Q(email__iexact=email)).first()
     if not user or not user.check_password(password):
         return JsonResponse({"detail": "Invalid credentials"}, status=401)
     if not user.is_active:

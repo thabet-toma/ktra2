@@ -148,6 +148,35 @@ def _auth_ok(request):
     return bool(token_key and Token.objects.filter(key=token_key).exists())
 
 
+def _sync_django_user_active_from_user_mirror(path: str, data: dict) -> None:
+    """
+    Approval in the UI updates `users/<pk>` mirror JSON (`isApproved`) via /api/mapper/.
+    Login still enforces Django auth_user.is_active — keep them aligned.
+    """
+    if not data or "isApproved" not in data:
+        return
+    segments = [s for s in path.strip("/").split("/") if s]
+    if len(segments) != 2 or segments[0] != "users":
+        return
+    try:
+        uid = int(segments[1])
+    except (TypeError, ValueError):
+        return
+    try:
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        user = User.objects.filter(pk=uid).first()
+        if not user:
+            return
+        want_active = bool(data["isApproved"])
+        if user.is_active != want_active:
+            user.is_active = want_active
+            user.save(update_fields=["is_active"])
+    except Exception:
+        return
+
+
 @method_decorator(csrf_exempt, name='dispatch')
 class MapperView(View):
     def get(self, request, subpath):
@@ -221,6 +250,7 @@ class MapperView(View):
         else:
             doc.data = body
         doc.save()
+        _sync_django_user_active_from_user_mirror(path, doc.data)
         # Auto-sync mirror suppliers to SQL partners
         if segments and segments[0] == "suppliers" and len(segments) == 2:
             _sync_partner_from_mirror_supplier(doc.data)

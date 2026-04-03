@@ -42,8 +42,9 @@ export const loginUser = async (email: string, password: string): Promise<User> 
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
         if (response.status === 403 && data.code === 'NOT_APPROVED') throw new Error("ACCOUNT_NOT_APPROVED");
-        if (response.status === 403) throw new Error("EMAIL_NOT_VERIFIED");
-        throw new Error("Invalid credentials.");
+        if (response.status === 403 && data.code === 'EMAIL_NOT_VERIFIED') throw new Error("EMAIL_NOT_VERIFIED");
+        if (response.status === 403) throw new Error(String(data.detail || "FORBIDDEN"));
+        throw new Error("INVALID_CREDENTIALS");
     }
     localStorage.setItem("token", data.token);
     if (data.user?.id) {
@@ -88,9 +89,13 @@ export const logoutUser = async () => {
 };
 
 export const fetchUserProfile = async (uid: string): Promise<User | null> => {
-    const response = await fetch(`${API_URL}/hr/users/${uid}/`, {
-        headers: getHeaders(),
-    });
-    if (!response.ok) return null;
-    return await response.json() as User;
+    try {
+        const response = await fetch(`${API_URL}/hr/users/${uid}/`, {
+            headers: getHeaders(),
+        });
+        if (!response.ok) return null;
+        return (await response.json()) as User;
+    } catch {
+        return null;
+    }
 };
