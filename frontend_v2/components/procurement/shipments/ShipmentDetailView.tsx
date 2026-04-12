@@ -1,6 +1,8 @@
 // components/shipments/ShipmentDetailView.tsx
-import React, { useState } from 'react';
-import { Shipment } from '../../../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Shipment, Deal } from '../../../types';
+import { dealsService } from '../../../services/dealsService';
+import { effectiveDealTitleForDisplay } from '../../../utils/dealTitleDisplay';
 import {
     Truck, Ship, Plane, Calendar, Package, DollarSign,
     FileText, User, Hash, Box, Scale, Navigation,
@@ -19,6 +21,39 @@ interface ShipmentDetailViewProps {
 
 export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment, onClose }) => {
     const [isPrinting, setIsPrinting] = useState(false);
+    const [liveDeals, setLiveDeals] = useState<Deal[]>([]);
+
+    useEffect(() => {
+        return dealsService.subscribeToDeals(setLiveDeals);
+    }, []);
+
+    /** صفوف الصفقات مع دمج أحدث بيانات من SQL (نفس شاشة الصفقة) */
+    const resolvedShipmentDeals = useMemo(() => {
+        const rows = shipment.deals || [];
+        return rows.map((row) => {
+            const live = liveDeals.find((d) => String(d.id) === String(row.dealId));
+            if (!live) return row;
+            const notesMerged = (live.internalNotes || row.notes || "").trim();
+            const descRaw =
+                String(live.dealDescription || row.dealDescriptionRaw || "").trim() || undefined;
+            return {
+                ...row,
+                dealNumber: live.dealNumber,
+                originalOfferNumber: live.originalOfferNumber || row.originalOfferNumber || "",
+                totalAmount: live.totalAmount,
+                totalVolume: Number(live.totalVolume || 0),
+                totalWeightKg: Number(live.totalWeightKg ?? live.totalWeight ?? 0),
+                dealDescriptionRaw: descRaw,
+                notes: notesMerged || row.notes,
+                displayTitle: effectiveDealTitleForDisplay({
+                    description: live.dealDescription || row.dealDescriptionRaw,
+                    notes: notesMerged || row.notes,
+                    original_offer_number: live.originalOfferNumber || row.originalOfferNumber,
+                    ref_number: live.dealNumber || row.dealNumber,
+                }),
+            };
+        });
+    }, [shipment.deals, liveDeals]);
 
     // --- Helpers ---
     const formatDate = (dateString?: string) => {
@@ -129,10 +164,16 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
     const shippingInfo = shipment.shippingInfo;
     const isSea = shippingInfo?.shippingType === 'sea';
     const shipmentNumber = shipment.agentShipmentNumber || shipment.shipmentNumber;
-    const totalDeals = shipment.deals?.length || 0;
+    const totalDeals = resolvedShipmentDeals.length || 0;
     const totalCost = shipment.totalShippingCostUsd || 0;
-    const totalVolume = shipment.totalVolume || shipment.deals?.reduce((sum, d) => sum + (d.totalVolume || 0), 0) || 0;
-    const totalWeight = shipment.totalWeightKg || shipment.deals?.reduce((sum, d) => sum + (d.totalWeightKg || 0), 0) || 0;
+    const totalVolume =
+        resolvedShipmentDeals.length > 0
+            ? resolvedShipmentDeals.reduce((sum, d) => sum + (Number(d.totalVolume) || 0), 0)
+            : Number(shipment.totalVolume) || 0;
+    const totalWeight =
+        resolvedShipmentDeals.length > 0
+            ? resolvedShipmentDeals.reduce((sum, d) => sum + (Number(d.totalWeightKg) || 0), 0)
+            : Number(shipment.totalWeightKg) || 0;
 
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:p-0">
@@ -578,7 +619,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                         </div>
 
                         {/* Deals Summary */}
-                        {shipment.deals && shipment.deals.length > 0 && (
+                        {resolvedShipmentDeals.length > 0 && (
                             <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
                                 <div className="border-b border-gray-200 dark:border-gray-700 p-4">
                                     <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
@@ -601,10 +642,21 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {shipment.deals.map((deal, index) => (
+                                                {resolvedShipmentDeals.map((deal) => (
                                                     <tr key={deal.dealId} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                                         <td className="px-3 py-2">
-                                                            <div className="font-medium text-gray-900 dark:text-white">{deal.dealNumber}</div>
+                                                            <div className="font-medium text-gray-900 dark:text-white leading-snug">
+                                                                {deal.displayTitle && deal.displayTitle !== deal.dealNumber ? (
+                                                                    <>
+                                                                        <span className="block">{deal.displayTitle}</span>
+                                                                        <span className="text-xs font-mono text-gray-500 dark:text-gray-400">
+                                                                            {deal.dealNumber}
+                                                                        </span>
+                                                                    </>
+                                                                ) : (
+                                                                    deal.dealNumber
+                                                                )}
+                                                            </div>
                                                         </td>
                                                         <td className="px-3 py-2">
                                                             <div className="font-mono text-gray-700 dark:text-gray-300">{deal.originalOfferNumber}</div>
@@ -637,13 +689,13 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                                         المجاميع
                                                     </td>
                                                     <td className="px-3 py-3 text-center text-blue-600 dark:text-blue-400">
-                                                        ${shipment.deals.reduce((sum, d) => sum + (d.distributedCost || 0), 0).toLocaleString()}
+                                                        ${resolvedShipmentDeals.reduce((sum, d) => sum + (d.distributedCost || 0), 0).toLocaleString()}
                                                     </td>
                                                     <td className="px-3 py-3 text-center text-red-600 dark:text-red-400">
-                                                        ${shipment.deals.reduce((sum, d) => sum + (d.extraCosts || 0), 0).toLocaleString()}
+                                                        ${resolvedShipmentDeals.reduce((sum, d) => sum + (d.extraCosts || 0), 0).toLocaleString()}
                                                     </td>
                                                     <td className="px-3 py-3 text-center text-gray-900 dark:text-white">
-                                                        ${shipment.deals.reduce((sum, d) => sum + (d.distributedCost || 0) + (d.extraCosts || 0), 0).toLocaleString()}
+                                                        ${resolvedShipmentDeals.reduce((sum, d) => sum + (d.distributedCost || 0) + (d.extraCosts || 0), 0).toLocaleString()}
                                                     </td>
                                                 </tr>
                                             </tbody>

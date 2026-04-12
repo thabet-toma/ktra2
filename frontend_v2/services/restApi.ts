@@ -7,11 +7,32 @@ const NETWORK_HINT =
   "تعذر الاتصال بالخادم (شبكة/CORS). تحقق: (1) تشغيل Django (2) VITE_API_URL ينتهي بـ /api " +
   `(الحالي: ${API_BASE}) (3) سجّل الدخول ليُرسل التوكن`;
 
+const FETCH_TIMEOUT_MS = 120_000;
+
 async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  const signalFromCaller = init?.signal;
+  const timeoutFn = (AbortSignal as unknown as { timeout?: (ms: number) => AbortSignal })
+    .timeout;
+  const mergedInit: RequestInit = {
+    ...init,
+    signal:
+      signalFromCaller ??
+      (typeof timeoutFn === "function" ? timeoutFn(FETCH_TIMEOUT_MS) : undefined),
+  };
   try {
-    return await fetch(url, init);
+    return await fetch(url, mergedInit);
   } catch (e) {
     const name = e instanceof Error ? e.name : "";
+    const domName = e instanceof DOMException ? e.name : "";
+    if (
+      name === "TimeoutError" ||
+      domName === "TimeoutError" ||
+      domName === "AbortError"
+    ) {
+      throw new Error(
+        "انتهت مهلة انتظار الخادم (دقيقتان). تحقق من تشغيل Django والشبكة، ثم أعد المحاولة."
+      );
+    }
     if (name === "TypeError" || String(e).includes("fetch")) {
       throw new Error(NETWORK_HINT);
     }

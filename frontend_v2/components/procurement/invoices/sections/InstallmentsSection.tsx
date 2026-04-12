@@ -5,6 +5,12 @@ import {
   Calendar, UploadCloud, Loader2, Eye, X
 } from 'lucide-react';
 import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
+import type { LocalPayments } from '@/types';
+import {
+  clearanceAndLogisticsFeesForGrandTotal,
+  invoiceVatBaseIls,
+  sumTaxesAndFeesExtras,
+} from '@/utils/invoiceTaxesAndFees';
 
 interface Installment {
   id: string;
@@ -24,13 +30,19 @@ interface InstallmentsSectionProps {
   taxRate?: number;
   shippingCost?: number;
   shippingIncluded?: boolean;
-  localPayments?: any;
+  localPayments?: Partial<LocalPayments> | null;
   onToggleInstallmentPlan: (enabled: boolean) => void;
   onAddInstallment: () => void;
   onRemoveInstallment: (index: number) => void;
   onUpdateInstallment: (index: number, field: string, value: any) => void;
   readOnly?: boolean;
   currency?: 'USD' | 'ILS';
+  /** يُفضَّل لفواتير الشيكل ليطابق الملخص الرئيسي (ض.ق.م مبلغ/نسبة + تخليص) */
+  grandTotalFromForm?: number;
+  /** مبلغ ض.ق.م الفاتورة — لبنود «بعد ض.ق.م» في الرسوم الإضافية */
+  mainVatForExtras?: number;
+  /** ليطابق أساس ض.ق.م والإجمالي (شحن دولي من التحويل + نقل من metadata) */
+  conversionMetadata?: Record<string, unknown> | null;
 }
 
 export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
@@ -41,13 +53,16 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
   taxRate = 0,
   shippingCost = 0,
   shippingIncluded = false,
-  localPayments = {},
+  localPayments = {} as Partial<LocalPayments>,
   onToggleInstallmentPlan,
   onAddInstallment,
   onRemoveInstallment,
   onUpdateInstallment,
   readOnly = false,
-  currency = 'USD'
+  currency = 'USD',
+  grandTotalFromForm,
+  mainVatForExtras = 0,
+  conversionMetadata = null,
 }) => {
   const symbol = currency === 'ILS' ? '₪' : '$';
 
@@ -55,22 +70,35 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
 
   // دالة حساب المدفوعات المحلية
   const calculateTotalLocalPayments = () => {
-    if (!localPayments || localPayments.includedInPrice) return 0;
-
-    if (localPayments.calculationMethod === 'lump_sum') {
-      return localPayments.lumpSumAmount || 0;
-    }
-
-    if (localPayments.calculationMethod === 'detailed') {
-      return (
-        (localPayments.customsClearanceFees || 0) +
-        (localPayments.customsDuties || 0) +
-        (localPayments.portFees || 0) +
-        (localPayments.internalShippingFees || 0)
-      );
-    }
-
-    return 0;
+    const lp: Partial<LocalPayments> = localPayments ?? {};
+    if (lp.includedInPrice) return 0;
+    if (lp.calculationMethod === 'lump_sum') return lp.lumpSumAmount || 0;
+    const subtotal = items.reduce((sum, item) => {
+      const qty = item.quantity || 0;
+      const price = item.unitPrice || 0;
+      const itemDisc = item.itemDiscount || 0;
+      return sum + Math.max(0, qty * price - itemDisc);
+    }, 0);
+    const netAfterDiscount = Math.max(0, subtotal - discountAmount);
+    const ship =
+      currency === 'ILS' ? 0 : shippingIncluded ? 0 : shippingCost;
+    const taxableBaseIls = netAfterDiscount + ship;
+    const vatBaseEst = invoiceVatBaseIls(
+      taxableBaseIls,
+      conversionMetadata,
+      lp as LocalPayments
+    );
+    const mv =
+      typeof mainVatForExtras === "number" && Number.isFinite(mainVatForExtras)
+        ? Math.max(0, mainVatForExtras)
+        : Math.max(0, vatBaseEst * ((taxRate || 0) / 100));
+    return (
+      clearanceAndLogisticsFeesForGrandTotal(lp as LocalPayments, conversionMetadata) +
+      sumTaxesAndFeesExtras(lp, taxableBaseIls, {
+        mainVatIls: mv,
+        invoiceVatBaseIls: vatBaseEst,
+      })
+    );
   };
 
   const totalLocalPayments = calculateTotalLocalPayments();
@@ -87,13 +115,16 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
 
     const netAfterDiscount = Math.max(0, subtotal - discountAmount);
     const taxAmount = netAfterDiscount * (taxRate / 100);
-    const shipping = shippingIncluded ? 0 : shippingCost;
+    const shipping =
+      currency === 'ILS' ? 0 : shippingIncluded ? 0 : shippingCost;
 
-    // الإجمالي الكامل: المنتجات + الضريبة + الشحن + المدفوعات المحلية
     return netAfterDiscount + taxAmount + shipping + totalLocalPayments;
   };
 
-  const grandTotal = calculateGrandTotal();
+  const grandTotal =
+    typeof grandTotalFromForm === 'number' && Number.isFinite(grandTotalFromForm)
+      ? grandTotalFromForm
+      : calculateGrandTotal();
   const totalPaidAmount = installments
     .filter(inst => inst.status === 'paid')
     .reduce((sum, inst) => sum + (inst.amount || 0), 0);

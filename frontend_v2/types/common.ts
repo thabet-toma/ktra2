@@ -26,6 +26,7 @@ export type AppView =
     | "price-offers"
     | "deals-management"
     | "shipments-management"
+    | "customs-clearance"
     | "cash-boxes"
     | "cash-box-details"
     | "gallery"
@@ -39,7 +40,12 @@ export type AppView =
     | "sql-products"
     | "sql-partners"
     | "sql-deals"
-    | "sql-shipments";
+    | "sql-shipments"
+    | "smart-assistant"
+    | "accounting-fiscal-periods"
+    | "accounting-exchange-rates"
+    | "stock-levels"
+    | "stock-movements";
 
 export interface Attachment {
     id: string;

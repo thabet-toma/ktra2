@@ -49,8 +49,24 @@ def _to_decimal(v, default: Decimal = Decimal("0")) -> Decimal:
     if v is None or v == "":
         return default
     try:
-        return Decimal(str(v))
+        s = str(v).strip()
+        # رفض القيم الغير صالحة مثل NaN وInfinity
+        if s.lower() in ("nan", "inf", "-inf", "infinity", "-infinity", "none", "null"):
+            return default
+        return Decimal(s)
     except (InvalidOperation, ValueError, TypeError):
+        return default
+
+
+def _to_int(v, default: int = 0) -> int:
+    if v is None or v == "":
+        return default
+    try:
+        f = float(str(v).strip())
+        if f != f:  # NaN check
+            return default
+        return int(f)
+    except (ValueError, TypeError):
         return default
 
 
@@ -430,6 +446,14 @@ class Command(BaseCommand):
                     shipping_cost_estimate=_to_decimal(d.get("shippingCost") or 0),
                     discount_amount=_to_decimal(d.get("discountAmount") or 0),
                     remaining_amount=_to_decimal(d.get("remainingAmount") or 0),
+                    # الحقول المفقودة من الهجرة الأولى
+                    total_weight=_to_decimal(d.get("totalWeight") or 0),
+                    total_cbm=_to_decimal(d.get("totalVolume") or d.get("totalCbm") or 0),
+                    total_weight_kg=_to_decimal(d.get("totalWeightKg") or 0),
+                    production_days=_to_int(d.get("productionDays")),
+                    delivery_days=_to_int(d.get("deliveryDays")),
+                    warranty_duration=_to_int(d.get("warrantyDuration")) or None,
+                    certificates=_truncate(d.get("certificates") or "", 255) or "",
                     is_posted=False,
                 )
                 created_deals += 1
@@ -467,6 +491,21 @@ class Command(BaseCommand):
                 deal_obj.shipping_cost_estimate = _to_decimal(d.get("shippingCost") or deal_obj.shipping_cost_estimate or 0)
                 deal_obj.discount_amount = _to_decimal(d.get("discountAmount") or deal_obj.discount_amount or 0)
                 deal_obj.remaining_amount = _to_decimal(d.get("remainingAmount") or deal_obj.remaining_amount or 0)
+                # backfill الحقول المفقودة من الهجرة الأولى
+                if d.get("totalWeight"):
+                    deal_obj.total_weight = _to_decimal(d.get("totalWeight"))
+                if d.get("totalVolume") or d.get("totalCbm"):
+                    deal_obj.total_cbm = _to_decimal(d.get("totalVolume") or d.get("totalCbm") or 0)
+                if d.get("totalWeightKg"):
+                    deal_obj.total_weight_kg = _to_decimal(d.get("totalWeightKg"))
+                if d.get("productionDays"):
+                    deal_obj.production_days = _to_int(d.get("productionDays"))
+                if d.get("deliveryDays"):
+                    deal_obj.delivery_days = _to_int(d.get("deliveryDays"))
+                if d.get("warrantyDuration"):
+                    deal_obj.warranty_duration = _to_int(d.get("warrantyDuration")) or None
+                if d.get("certificates"):
+                    deal_obj.certificates = _truncate(d.get("certificates") or "", 255) or ""
                 deal_obj.save()
 
             # items
@@ -587,6 +626,7 @@ class Command(BaseCommand):
                 break
 
             sd = ship_doc.to_dict() or {}
+            si = sd.get("shippingInfo") or {}  # الحقول المتداخلة في shippingInfo
 
             agent_id = sd.get("shippingAgentId")
             shipping_partner = None
@@ -595,51 +635,77 @@ class Command(BaseCommand):
 
             shipment_number = sd.get("shipmentNumber") or sd.get("agentShipmentNumber") or ship_doc.id
             shipment_number_clean = str(shipment_number)[:50]
-            status = _map_shipment_status(sd.get("status") or (sd.get("shippingInfo") or {}).get("shipmentStatus", {}).get("status"))
+            status = _map_shipment_status(
+                sd.get("status") or si.get("shipmentStatus", {}).get("status")
+            )
 
-            departure_date = _parse_date(sd.get("departureDate"))
-            arrival_date = _parse_date(sd.get("arrivalDate"))
+            departure_date = _parse_date(sd.get("departureDate") or si.get("departureDate"))
+            arrival_date = _parse_date(sd.get("arrivalDate") or si.get("arrivalDate"))
             ship_notes = sd.get("notes") or sd.get("shipmentNotes") or ""
+
+            # --- قيم الحقول المشتركة ---
+            shared_fields = {
+                "shipping_agent": shipping_partner,
+                "bill_of_lading": _truncate(
+                    sd.get("billOfLadingNumber") or si.get("billOfLadingNumber") or sd.get("bill_of_lading") or None, 100
+                ),
+                "container_number": _truncate(
+                    sd.get("containerNumber") or si.get("containerNumber") or sd.get("container_number") or None, 100
+                ),
+                "departure_date": departure_date,
+                "arrival_date": arrival_date,
+                "status": status,
+                "notes": ship_notes if ship_notes else None,
+                "remaining_amount": _to_decimal(sd.get("remainingAmount") or 0),
+                "total_shipping_cost_usd": _to_decimal(sd.get("totalShippingCostUsd") or 0),
+                "total_volume": _to_decimal(sd.get("totalVolume") or 0),
+                "total_weight_kg": _to_decimal(sd.get("totalWeightKg") or 0),
+                "shipping_type": _truncate(
+                    sd.get("shippingType") or si.get("shippingType") or sd.get("shipping_type") or "sea", 20
+                ) or "sea",
+                "unit_type": sd.get("unitType") or sd.get("unit_type") or None,
+                # الحقول المفقودة من الهجرة الأولى
+                "shipment_name": _truncate(sd.get("shipmentName") or sd.get("shipment_name") or "", 255) or None,
+                "agent_shipment_number": _truncate(
+                    sd.get("agentShipmentNumber") or si.get("agentShipmentNumber") or "", 100
+                ) or None,
+                "israeli_side_name": _truncate(sd.get("israeliSideName") or sd.get("israeli_side_name") or "", 255) or None,
+                "ship_name": _truncate(
+                    sd.get("shipName") or si.get("shipName") or sd.get("ship_name") or "", 255
+                ) or None,
+                "international_shipping_company": _truncate(
+                    sd.get("internationalShippingCompany") or si.get("internationalShippingCompany") or "", 255
+                ) or None,
+                "bill_of_lading_file": _truncate(
+                    sd.get("billOfLadingFile") or si.get("billOfLadingFile") or "", 500
+                ) or None,
+                "flight_number": _truncate(si.get("flightNumber") or sd.get("flightNumber") or "", 100) or None,
+                "airway_bill_number": _truncate(si.get("airwayBillNumber") or sd.get("airwayBillNumber") or "", 100) or None,
+                "from_term": _truncate(si.get("fromTerm") or sd.get("fromTerm") or "", 100) or None,
+                "to_term": _truncate(si.get("toTerm") or sd.get("toTerm") or "", 100) or None,
+                "imo_number": _truncate(si.get("imoNumber") or sd.get("imoNumber") or "", 50) or None,
+                "mmsi_number": _truncate(si.get("mmsiNumber") or sd.get("mmsiNumber") or "", 50) or None,
+                "tracking_link": _truncate(
+                    si.get("trackingLink") or sd.get("trackingLink") or sd.get("tracking_link") or "", 500
+                ) or None,
+            }
 
             shipment_obj, created = LogisticsShipment.objects.get_or_create(
                 tenant=tenant,
                 shipment_number=shipment_number_clean,
-                defaults={
-                    "shipping_agent": shipping_partner,
-                    "bill_of_lading": _truncate(
-                        sd.get("billOfLadingNumber") or sd.get("bill_of_lading") or None, 100
-                    ),
-                    "container_number": _truncate(
-                        sd.get("containerNumber") or sd.get("container_number") or None, 100
-                    ),
-                    "departure_date": departure_date,
-                    "arrival_date": arrival_date,
-                    "status": status,
-                    "notes": ship_notes if ship_notes else None,
-                    "remaining_amount": _to_decimal(sd.get("remainingAmount") or 0),
-                    "total_shipping_cost_usd": _to_decimal(sd.get("totalShippingCostUsd") or 0),
-                    "total_volume": _to_decimal(sd.get("totalVolume") or 0),
-                    "total_weight_kg": _to_decimal(sd.get("totalWeightKg") or 0),
-                    "shipping_type": _truncate(sd.get("shippingType") or sd.get("shipping_type") or "sea", 20)
-                    or "sea",
-                    "unit_type": sd.get("unitType") or sd.get("unit_type") or None,
-                },
+                defaults=shared_fields,
             )
 
             if write and not created:
-                shipment_obj.shipping_agent = shipping_partner
-                shipment_obj.status = status
-                shipment_obj.departure_date = departure_date
-                shipment_obj.arrival_date = arrival_date
-                shipment_obj.notes = ship_notes if ship_notes else None
-                shipment_obj.remaining_amount = _to_decimal(sd.get("remainingAmount") or 0)
-                shipment_obj.total_shipping_cost_usd = _to_decimal(sd.get("totalShippingCostUsd") or 0)
-                shipment_obj.total_volume = _to_decimal(sd.get("totalVolume") or 0)
-                shipment_obj.total_weight_kg = _to_decimal(sd.get("totalWeightKg") or 0)
-                shipment_obj.shipping_type = _truncate(
-                    sd.get("shippingType") or sd.get("shipping_type") or "sea", 20
-                ) or "sea"
-                shipment_obj.unit_type = sd.get("unitType") or sd.get("unit_type") or None
+                for k, v in shared_fields.items():
+                    # نحدّث فقط إن كان الحقل فارغاً في SQL أو له قيمة جديدة من Firestore
+                    current = getattr(shipment_obj, k, None)
+                    if v and not current:
+                        setattr(shipment_obj, k, v)
+                    elif k in ("status", "departure_date", "arrival_date",
+                               "remaining_amount", "total_shipping_cost_usd",
+                               "total_volume", "total_weight_kg", "shipping_agent"):
+                        setattr(shipment_obj, k, v)
                 shipment_obj.save()
 
             deals = sd.get("deals") or []

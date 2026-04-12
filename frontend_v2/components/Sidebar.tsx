@@ -13,14 +13,15 @@ import { GalleryIcon } from "./icons/GalleryIcon";
 import {
   ChevronDown, ChevronUp, Package, FileText, History,
   Handshake, Users, Menu, X, ChevronRight, ChevronLeft, Info,
-  Calculator, BookMarked, Scale, BookOpen, Banknote
+  Calculator, BookMarked, Scale, BookOpen, Banknote, Sparkles,
+  CalendarDays, ArrowLeftRight, Boxes, BarChart3,
 } from 'lucide-react';
 
 
 interface SidebarProps {
   user: User;
   activeView: AppView;
-  setView: (view: AppView) => void;
+  setView: (view: AppView, targetId?: string) => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) => {
@@ -36,6 +37,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "accounting-cheques", label: "الشيكات", icon: <Banknote className="h-4 w-4" /> },
     { view: "accounting-general-ledger", label: "الأستاذ العام", icon: <BookOpen className="h-4 w-4" /> },
     { view: "accounting-trial-balance", label: "ميزان المراجعة", icon: <Scale className="h-4 w-4" /> },
+    { view: "accounting-fiscal-periods", label: "الفترات المالية", icon: <CalendarDays className="h-4 w-4" /> },
+    { view: "accounting-exchange-rates", label: "أسعار الصرف", icon: <ArrowLeftRight className="h-4 w-4" /> },
   ];
 
   useEffect(() => {
@@ -58,6 +61,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "items-management" as AppView, label: "الأصناف", icon: <DashboardIcon className="h-5 w-5" /> },
     { view: "supplier-management" as AppView, label: "الموردين", icon: <UsersIcon className="h-5 w-5" /> },
     { view: "shipments-management" as AppView, label: "إدارة الشحنات", icon: <Package className="h-5 w-5" /> },
+    { view: "customs-clearance" as AppView, label: "التخليص الجمركي", icon: <FileText className="h-5 w-5" /> },
+    { view: "stock-levels" as AppView, label: "أرصدة المخزون", icon: <BarChart3 className="h-5 w-5" /> },
+    { view: "stock-movements" as AppView, label: "حركات المخزون", icon: <Boxes className="h-5 w-5" /> },
   ];
 
   const financeLinks = [
@@ -116,6 +122,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           >
             <TasksIcon className="h-6 w-6 flex-shrink-0" />
             {showText && <span className="mr-3 text-right flex-1">{user.role === 'manager' ? "إدارة المهام" : "مهامي"}</span>}
+          </button>
+
+          <button
+            onClick={() => { setView("smart-assistant"); if (isMobile) setIsMobileMenuOpen(false); }}
+            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("smart-assistant") ? "bg-violet-600 text-white shadow-md" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
+            title="المساعد الذكي"
+          >
+            <Sparkles className="h-6 w-6 flex-shrink-0" />
+            {showText && <span className="mr-3 text-right flex-1">المساعد الذكي</span>}
           </button>
 
           {/* إدارة الموظفين */}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Invoice,
   InvoiceItem,
@@ -14,18 +14,27 @@ import {
   ArrowRight,
   Loader2,
   Paperclip,
-  Info,
   DollarSign,
   Coins,
   Briefcase,
-  Calculator
+  Calculator,
+  RefreshCw,
 } from "lucide-react";
 import { ItemsTableSection } from "@/components/forms/shared/ItemsTableSection";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
 import {
-  invoicesService,
   suppliersService,
 } from "@/services/firestoreService";
+import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
+import { mapPurchaseInvoiceDtoToInvoice } from "@/utils/mapPurchaseInvoiceDto";
+import { dealsService } from "@/services/dealsService";
+import { shipmentsService } from "@/services/shipmentsService";
+import { formatInvoiceImportLogisticsLine } from "@/utils/invoiceConversionUtils";
+import {
+  invoiceGrandTotalIls,
+  invoiceVatBaseIls,
+} from "@/utils/invoiceTaxesAndFees";
+import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { CollapsibleSection } from "@/components/ui/CollapsibleSection";
 import { ItemSearchModal } from "../price-offers/ItemSearchModal";
 import {
@@ -36,14 +45,15 @@ import {
   ConversionDetailsSection,
   NISItemsTable,
   NISFinancialSummary,
-  NISLocalPayments,
+  NISInvoiceTaxStrip,
 } from "./sections";
 
 interface InvoiceFormProps {
   invoice: Partial<Invoice> | null;
   currentUser: User;
   onCancel: () => void;
-  onSave?: () => void;
+  /** يُستدعى بعد حفظ ناجح — يمرَّر معرف الفاتورة في SQL لتحديث الرابط */
+  onSave?: (ctx: { id: string }) => void;
   allDbItems: Item[];
   dealData?: any;
   readOnly?: boolean;
@@ -63,8 +73,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [saving, setSaving] = useState(false);
+  const [recalcBusy, setRecalcBusy] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showItemSearch, setShowItemSearch] = useState(false);
+  /** بيانات الفاتورة والمورد — تُعرض من رأس الصفحة عند الضغط على «تفاصيل» */
+  const [invoiceHeaderDetailsOpen, setInvoiceHeaderDetailsOpen] = useState(false);
+  /** وصف الصفقة من SQL عند غيابه في الفاتورة المحمّلة */
+  const [fetchedDealDescription, setFetchedDealDescription] = useState("");
 
   const [dealInfo, setDealInfo] = useState<DealInvoiceInfo>(() => {
     return (
@@ -88,6 +103,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     initialInvoice?.dealInfo?.activityLog || []
   );
 
+  const effectiveShippingForTotals = (data: Partial<Invoice>) => {
+    if (data.currency === "ILS") return 0;
+    return data.shippingIncluded ? 0 : data.shippingCost || 0;
+  };
+
   // Load Suppliers
   useEffect(() => {
     const unsubSuppliers = suppliersService.subscribeToSuppliers(setSuppliers);
@@ -103,74 +123,81 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       (sum, item) => sum + (item.totalPrice || 0),
       0
     );
-    const validShipping = nextData.shippingIncluded
-      ? 0
-      : nextData.shippingCost || 0;
+    const validShipping = effectiveShippingForTotals(nextData);
     const afterDiscount = Math.max(
       0,
       itemsSubtotal - (nextData.discountAmount || 0)
     );
-    const taxableBase = afterDiscount + validShipping;
+    const merchandiseBase = afterDiscount + validShipping;
+    const vatBase = invoiceVatBaseIls(
+      merchandiseBase,
+      nextData.conversionMetadata as Record<string, unknown> | null,
+      nextData.localPayments
+    );
 
     let taxAmount = 0;
     if (nextData.taxType === 'amount') {
       taxAmount = nextData.taxAmount || 0;
     } else {
-      taxAmount = taxableBase * ((nextData.taxRate || 0) / 100);
+      taxAmount = vatBase * ((nextData.taxRate || 0) / 100);
     }
+    const mainVatRounded = roundSqlMoney2(taxAmount);
 
-    const calculateTotalLocalPayments = () => {
-      const lp = nextData.localPayments;
-      if (!lp || lp.includedInPrice) return 0;
-      if (lp.calculationMethod === 'lump_sum') return lp.lumpSumAmount || 0;
-      return (
-        (lp.customsClearanceFees || 0) +
-        (lp.customsDuties || 0) +
-        (lp.portFees || 0) +
-        (lp.internalShippingFees || 0) +
-        (lp.palestinianTaxCustoms || 0)
-      );
-    };
-
-    const totalLocalPayments = calculateTotalLocalPayments();
-    const grandTotal = taxableBase + taxAmount + totalLocalPayments;
+    const grandTotal = roundSqlMoney2(
+      invoiceGrandTotalIls(
+        merchandiseBase,
+        mainVatRounded,
+        nextData.conversionMetadata as Record<string, unknown> | null,
+        nextData.localPayments
+      )
+    );
 
     setFormData((prev) => ({
       ...prev,
       ...updatedFields,
-      subtotal: itemsSubtotal,
-      taxAmount,
-      grandTotal,
+      subtotal: roundSqlMoney2(itemsSubtotal),
+      taxAmount: mainVatRounded,
+      grandTotal: roundSqlMoney2(grandTotal),
     }));
   };
 
-  // Initialize form data
+  // فاتورة جديدة (بدون id من SQL)
   useEffect(() => {
-    if (!initialInvoice?.id) {
-      setFormData((prev) => ({
-        ...prev,
-        items: prev.items || [],
-        status: "incomplete",
-        discountAmount: 0,
-        taxRate: 0,
-        subtotal: 0,
-        grandTotal: 0,
-        createdAt: new Date().toISOString(),
-        isHistorical: dealData ? true : false,
-        dealId: dealData?.id,
-        dealNumber: dealData?.dealNumber,
-        invoiceName: dealData?.internalNotes || "",
-        invoiceDate: dealData?.dealDate || new Date().toISOString().split('T')[0],
-        dealInfo: dealInfo,
-        currency: dealData ? 'ILS' : 'USD',
-      }));
-    } else if (initialInvoice.dealInfo) {
+    if (initialInvoice?.id) return;
+    setFormData((prev) => ({
+      ...prev,
+      items: prev.items || [],
+      status: "incomplete",
+      discountAmount: 0,
+      taxRate: 0,
+      subtotal: 0,
+      grandTotal: 0,
+      createdAt: new Date().toISOString(),
+      isHistorical: dealData ? true : false,
+      dealId: dealData?.id,
+      dealNumber: dealData?.dealNumber,
+      invoiceName: dealData?.dealDescription || dealData?.internalNotes || "",
+      invoiceDate: dealData?.dealDate || new Date().toISOString().split("T")[0],
+      dealInfo: dealInfo,
+      currency: dealData ? "ILS" : "USD",
+    }));
+  }, [initialInvoice, dealData]);
+
+  // فاتورة محفوظة: عند جلب التفاصيل الكاملة من الـ API (بنود، وصف…) نحدّث النموذج
+  useEffect(() => {
+    if (!initialInvoice?.id) return;
+    setFormData((prev) => ({
+      ...prev,
+      ...initialInvoice,
+      items: initialInvoice.items ?? prev.items ?? [],
+    }));
+    if (initialInvoice.dealInfo) {
       setDealInfo(initialInvoice.dealInfo);
       setInstallments(initialInvoice.installments || []);
       setInstallmentPlanEnabled(initialInvoice.installmentPlanEnabled || false);
       setDealActivities(initialInvoice.dealInfo.activityLog || []);
     }
-  }, [initialInvoice, dealData]);
+  }, [initialInvoice]);
 
   // Sync state to formData
   useEffect(() => {
@@ -233,32 +260,89 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         installmentPlanEnabled: installmentPlanEnabled,
       };
 
+      const partnerId = Number(String(payload.supplierId || '').trim());
+      const sqlBody: Record<string, unknown> = {
+        invoice_name: payload.invoiceName || null,
+        invoice_date: payload.invoiceDate || null,
+        partner: Number.isFinite(partnerId) && partnerId > 0 ? partnerId : undefined,
+        deal: payload.dealId ? Number(payload.dealId) : null,
+        subtotal: roundSqlMoney2(payload.subtotal ?? 0),
+        discount_amount: roundSqlMoney2(payload.discountAmount ?? 0),
+        tax_rate: roundSqlMoney4(payload.taxRate ?? 0),
+        tax_amount: roundSqlMoney2(payload.taxAmount ?? 0),
+        tax_type: payload.taxType || 'percentage',
+        shipping_cost: roundSqlMoney2(payload.shippingCost ?? 0),
+        shipping_included: payload.shippingIncluded || false,
+        grand_total: roundSqlMoney2(payload.grandTotal ?? 0),
+        local_payments_json: payload.localPayments || null,
+        conversion_metadata_json: payload.conversionMetadata || null,
+        status: payload.status || 'draft',
+        notes: payload.notes || null,
+        supplier_invoice_number: payload.supplierInvoiceNumber || null,
+        factory_name: payload.factoryName || null,
+        items: (payload.items || []).map((item: any) => ({
+          product: item.itemId ? Number(item.itemId) || null : null,
+          name: item.name,
+          quantity: roundSqlMoney4(item.quantity ?? 0),
+          unit_price: roundSqlMoney4(item.unitPrice ?? 0),
+          total_price: roundSqlMoney2(item.totalPrice ?? 0),
+          notes: item.notes || null,
+          hs_code: item.hsCodePrimary || null,
+          landed_unit_price_ils:
+            item.landedUnitPriceIls != null && item.landedUnitPriceIls !== ""
+              ? roundSqlMoney4(item.landedUnitPriceIls)
+              : null,
+          landed_line_total_ils:
+            item.landedLineTotalIls != null && item.landedLineTotalIls !== ""
+              ? roundSqlMoney2(item.landedLineTotalIls)
+              : null,
+        })),
+      };
+
+      let savedSqlId: string;
       if (isNew) {
-        payload.createdBy = currentUser.id;
-        payload.createdAt = now;
-
         if (dealData?.id) {
-          payload.dealId = dealData.id;
-          payload.dealNumber = dealData.dealNumber;
+          sqlBody.deal = Number(dealData.id) || null;
         }
-
-        await invoicesService.addInvoiceToDb(payload);
-        setFormData(prev => ({ ...prev, id: invoiceId }));
+        const created = await purchaseInvoiceApi.create(sqlBody as any);
+        savedSqlId = String(created.id);
+        setFormData((prev) => ({ ...prev, id: savedSqlId }));
       } else {
         if (formData.isHistorical) {
           alert("لا يمكن تعديل الفواتير المؤرشفة");
           setSaving(false);
           return;
         }
-        await invoicesService.updateInvoiceInDb(payload as Invoice);
+        await purchaseInvoiceApi.update(Number(formData.id), sqlBody as any);
+        savedSqlId = String(formData.id);
       }
 
-      if (onSave) onSave();
-      alert("تم حفظ الفاتورة بنجاح");
+      const dealIdForWorkflow = formData.dealId || dealData?.id || payload.dealId;
+      if (dealIdForWorkflow) {
+        try {
+          await dealsService.patchShippingWorkflow(String(dealIdForWorkflow), "sw_released");
+        } catch {
+          /* لا نمنع نجاح حفظ الفاتورة */
+        }
+        try {
+          await shipmentsService.patchLinkedShipmentsRouteForDeal(
+            String(dealIdForWorkflow),
+            "released"
+          );
+        } catch {
+          /* نفس الأمر — الشحنة قد لا تكون في SQL */
+        }
+      }
 
+      if (onSave) onSave({ id: savedSqlId });
+      alert("تم حفظ الفاتورة بنجاح");
     } catch (error) {
       console.error("Error saving invoice:", error);
-      alert("حدث خطأ أثناء الحفظ");
+      const msg =
+        error instanceof Error && error.message?.trim()
+          ? error.message.trim()
+          : "حدث خطأ أثناء الحفظ";
+      alert(msg);
     } finally {
       setSaving(false);
     }
@@ -279,8 +363,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       imageUrls: item.imageUrls,
       hsCodePrimary: item.hsCodePrimary,
       quantity: 1,
-      unitPrice: lastPrice || 0,
-      totalPrice: lastPrice || 0,
+      unitPrice: roundSqlMoney4(lastPrice || 0),
+      totalPrice: roundSqlMoney2(lastPrice || 0),
     };
 
     const updatedItems = [...(formData.items || []), newItem];
@@ -295,7 +379,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     if (field === "quantity" || field === "unitPrice") {
       const qty = newItems[index].quantity || 0;
       const price = newItems[index].unitPrice || 0;
-      newItems[index].totalPrice = qty * price;
+      newItems[index].totalPrice = roundSqlMoney2(qty * price);
     }
 
     recalculateTotals({ items: newItems });
@@ -312,28 +396,37 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         const updated = { ...prev, [field]: value };
         const items = updated.items || [];
         const itemsSubtotal = items.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
-        const validShipping = updated.shippingIncluded ? 0 : (updated.shippingCost || 0);
+        const validShipping = effectiveShippingForTotals(updated);
         const afterDiscount = Math.max(0, itemsSubtotal - (updated.discountAmount || 0));
-        const taxableBase = afterDiscount + validShipping;
+        const merchandiseBase = afterDiscount + validShipping;
+        const vatBase = invoiceVatBaseIls(
+          merchandiseBase,
+          updated.conversionMetadata as Record<string, unknown> | null,
+          updated.localPayments
+        );
 
         let taxAmount = 0;
         if (updated.taxType === 'amount') {
           taxAmount = updated.taxAmount || 0;
         } else {
-          taxAmount = taxableBase * ((updated.taxRate || 0) / 100);
+          taxAmount = vatBase * ((updated.taxRate || 0) / 100);
         }
+        const mainVatRounded = roundSqlMoney2(taxAmount);
 
-        const lp = updated.localPayments;
-        const totalLocalPayments = (!lp || lp.includedInPrice) ? 0 : (
-          (lp.customsClearanceFees || 0) +
-          (lp.customsDuties || 0) +
-          (lp.portFees || 0) +
-          (lp.internalShippingFees || 0) +
-          (lp.palestinianTaxCustoms || 0)
+        const grandTotal = roundSqlMoney2(
+          invoiceGrandTotalIls(
+            merchandiseBase,
+            mainVatRounded,
+            updated.conversionMetadata as Record<string, unknown> | null,
+            updated.localPayments
+          )
         );
-
-        const grandTotal = taxableBase + taxAmount + totalLocalPayments;
-        return { ...updated, subtotal: itemsSubtotal, taxAmount, grandTotal };
+        return {
+          ...updated,
+          subtotal: roundSqlMoney2(itemsSubtotal),
+          taxAmount: mainVatRounded,
+          grandTotal: roundSqlMoney2(grandTotal),
+        };
       });
       return;
     }
@@ -379,6 +472,151 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
   };
 
+  const handleRecalculateLanded = async () => {
+    if (!formData.shipment || !formData.id) {
+      alert("لا توجد شحنة مرتبطة أو الفاتورة غير محفوظة بعد.");
+      return;
+    }
+    const meta = formData.conversionMetadata as Record<string, unknown> | undefined;
+    const dr = Number(
+      meta?.["remaining_balance_rate_deal"] ??
+        meta?.["remainingBalanceRate"] ??
+        3.6
+    );
+    const sr = Number(
+      meta?.["remaining_balance_rate_shipment"] ??
+        meta?.["shipmentRemainingRate"] ??
+        meta?.["remainingBalanceRate"] ??
+        3.6
+    );
+    const basis = String(
+      meta?.["clearance_cost_basis"] ?? meta?.["clearanceCostBasis"] ?? ""
+    ).toLowerCase();
+    const useCl = basis === "cost_lines";
+    setRecalcBusy(true);
+    try {
+      const res = await purchaseInvoiceApi.recalculateLandedCost({
+        shipment_id: Number(formData.shipment),
+        deal_remaining_rate: dr,
+        shipment_remaining_rate: sr,
+        use_cost_lines: useCl,
+      });
+      const full = await purchaseInvoiceApi.get(Number(formData.id));
+      setFormData(mapPurchaseInvoiceDtoToInvoice(full));
+      const msg =
+        typeof res?.message === "string" && res.message.trim()
+          ? res.message
+          : res?.updated
+            ? "تم إعادة حساب تكلفة الرسوم والبنود من الخادم."
+            : "لم تُحدَّث الفاتورة من الخادم.";
+      alert(msg);
+    } catch (e) {
+      console.error(e);
+      alert(e instanceof Error ? e.message : "تعذّر إعادة الحساب");
+    } finally {
+      setRecalcBusy(false);
+    }
+  };
+
+  /** أساس البضاعة + شحن الفاتورة (لنسب «البضاعة» في بنود الرسوم الإضافية) */
+  const ilsMerchandiseBase = useMemo(() => {
+    const items = formData.items || [];
+    const itemsSubtotal = items.reduce((s, i) => s + (Number(i.totalPrice) || 0), 0);
+    const validShipping = effectiveShippingForTotals(formData);
+    return Math.max(0, itemsSubtotal - (formData.discountAmount || 0)) + validShipping;
+  }, [
+    formData.items,
+    formData.discountAmount,
+    formData.currency,
+    formData.shippingIncluded,
+    formData.shippingCost,
+  ]);
+
+  /** أساس ض.ق.م: بضاعة + شحن دولي + تخليص + نقل محلي (كل ما قبل ض.ق.م الفاتورة) */
+  const ilsVatBase = useMemo(
+    () =>
+      invoiceVatBaseIls(
+        ilsMerchandiseBase,
+        formData.conversionMetadata as Record<string, unknown> | null,
+        formData.localPayments
+      ),
+    [ilsMerchandiseBase, formData.conversionMetadata, formData.localPayments]
+  );
+
+  /** وصف الصفقة (عربي) — من صفقة مفتوحة أو من حقل اسم/وصف الفاتورة أو جلب من الصفقة */
+  const headerDealDescription = useMemo(() => {
+    const fromDeal = String(dealData?.dealDescription ?? "").trim();
+    const fromInvoice = String(formData.invoiceName ?? "").trim();
+    const fromFetched = String(fetchedDealDescription ?? "").trim();
+    return fromDeal || fromInvoice || fromFetched;
+  }, [dealData?.dealDescription, formData.invoiceName, fetchedDealDescription]);
+
+  useEffect(() => {
+    const fromDeal = String(dealData?.dealDescription ?? "").trim();
+    const fromInv = String(formData.invoiceName ?? "").trim();
+    const did = formData.dealId;
+    if (!did || fromDeal || fromInv) {
+      setFetchedDealDescription("");
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const d = await dealsService.getDeal(String(did));
+        if (!cancelled) {
+          setFetchedDealDescription(String(d?.dealDescription ?? "").trim());
+        }
+      } catch {
+        if (!cancelled) setFetchedDealDescription("");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.dealId, formData.invoiceName, dealData?.dealDescription]);
+
+  /** اسم المورد للعرض في الرأس */
+  const headerSupplierName = useMemo(() => {
+    const sid = formData.supplierId;
+    const fromList = sid
+      ? suppliers.find((s) => s.id === sid)?.tradeName
+      : undefined;
+    return (
+      String(fromList ?? "").trim() ||
+      String(formData.factoryName ?? "").trim() ||
+      String(formData.supplierSnapshot?.tradeName ?? "").trim() ||
+      String(formData.dealInfo?.supplierSnapshot?.tradeName ?? "").trim()
+    );
+  }, [
+    formData.supplierId,
+    formData.factoryName,
+    formData.supplierSnapshot,
+    formData.dealInfo?.supplierSnapshot,
+    suppliers,
+  ]);
+
+  /** فواتير شيكل بنسبة: مزامنة taxAmount/grandTotal مع الأساس (غالباً كانت tax_amount=0 في DB) */
+  useEffect(() => {
+    if (readOnly || formData.isHistorical) return;
+    if (formData.currency !== "ILS") return;
+    if (formData.taxType === "amount") return;
+    if (!(formData.items || []).length) return;
+    recalculateTotals({});
+  }, [
+    readOnly,
+    formData.isHistorical,
+    formData.currency,
+    formData.taxType,
+    formData.items,
+    formData.discountAmount,
+    formData.shippingCost,
+    formData.shippingIncluded,
+    formData.conversionMetadata,
+    formData.localPayments,
+    formData.taxRate,
+    ilsMerchandiseBase,
+  ]);
+
   return (
     <div className="bg-gray-50 dark:bg-gray-900 min-h-screen pb-20">
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-30 shadow-sm">
@@ -390,17 +628,73 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             >
               <ArrowRight className="w-5 h-5 text-gray-500" />
             </button>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                {formData.id ? `تعديل الفاتورة: ${formData.invoiceNumber}` : "إنشاء فاتورة جديدة"}
-                {formData.isHistorical && <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">مؤرشف</span>}
-                {formData.dealId && <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">مرتبطة بصفقة</span>}
-                <span className={`text-xs ml-2 px-2 py-0.5 rounded ${formData.currency === 'ILS' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
-                  العملة: {formData.currency === 'ILS' ? 'شيقل (₪)' : 'دولار ($)'}
-                </span>
-              </h1>
-              <p className="text-sm text-gray-500">
-                {formData.dealNumber ? `الفاتورة مرتبطة بالصفقة: ${formData.dealNumber}` : "إدارة تفاصيل فاتورة المشتريات"}
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <h1 className="text-xl font-bold text-gray-900 dark:text-white flex flex-wrap items-center gap-2">
+                  {formData.id ? `تعديل الفاتورة: ${formData.invoiceNumber}` : "إنشاء فاتورة جديدة"}
+                  {formData.isHistorical && <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">مؤرشف</span>}
+                  {formData.dealId && <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">مرتبطة بصفقة</span>}
+                  <span className={`text-xs px-2 py-0.5 rounded ${formData.currency === 'ILS' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+                    العملة: {formData.currency === 'ILS' ? 'شيكل (₪)' : 'دولار ($)'}
+                  </span>
+                </h1>
+                <button
+                  type="button"
+                  onClick={() => setInvoiceHeaderDetailsOpen((o) => !o)}
+                  aria-expanded={invoiceHeaderDetailsOpen}
+                  title={invoiceHeaderDetailsOpen ? "إخفاء" : "عرض بيانات الفاتورة والمورد"}
+                  className={`text-sm font-semibold shrink-0 rounded-md px-2 py-0.5 transition-colors underline-offset-2 hover:underline ${
+                    invoiceHeaderDetailsOpen
+                      ? "text-blue-800 dark:text-blue-200 bg-blue-100 dark:bg-blue-900/50 ring-1 ring-blue-300 dark:ring-blue-600"
+                      : "text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
+                  }`}
+                >
+                  تفاصيل
+                </button>
+              </div>
+              <p className="text-sm text-gray-500 dark:text-gray-400 space-y-1">
+                {formData.importLogistics ? (
+                  <>
+                    {formData.dealNumber ? (
+                      <span className="block">
+                        مرتبطة بالصفقة {formData.dealNumber}
+                        {headerDealDescription ? (
+                          <span className="block mt-0.5 text-gray-700 dark:text-gray-300 font-medium">
+                            وصف الصفقة: {headerDealDescription}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : null}
+                    <span className="block mt-1 text-indigo-700 dark:text-indigo-300 font-medium">
+                      {formatInvoiceImportLogisticsLine(formData.importLogistics)}
+                    </span>
+                  </>
+                ) : formData.dealNumber ? (
+                  <>
+                    <span className="block">
+                      الفاتورة مرتبطة بالصفقة: {formData.dealNumber}
+                    </span>
+                    {headerDealDescription ? (
+                      <span className="block text-gray-700 dark:text-gray-300 font-medium">
+                        وصف الصفقة: {headerDealDescription}
+                      </span>
+                    ) : null}
+                  </>
+                ) : (
+                  <>
+                    <span className="block">إدارة تفاصيل فاتورة المشتريات</span>
+                    {formData.dealId && headerDealDescription ? (
+                      <span className="block text-gray-700 dark:text-gray-300 font-medium">
+                        وصف الصفقة: {headerDealDescription}
+                      </span>
+                    ) : null}
+                  </>
+                )}
+                {headerSupplierName ? (
+                  <span className="block text-gray-700 dark:text-gray-300 font-medium">
+                    المورد: {headerSupplierName}
+                  </span>
+                ) : null}
               </p>
             </div>
           </div>
@@ -412,6 +706,26 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             >
               رجوع
             </button>
+            {!readOnly && formData.shipment && formData.id && formData.currency === "ILS" ? (
+              <button
+                type="button"
+                onClick={() => void handleRecalculateLanded()}
+                disabled={recalcBusy || formData.isPosted}
+                title={
+                  formData.isPosted
+                    ? "الترحيل لا يغيّر النسب والحصص المعروضة (محفوظة في الفاتورة). إعادة الحساب من الخادم معطّلة للمرحّل — ألغِ الترحيل لتجديد الأرقام."
+                    : undefined
+                }
+                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-600 rounded-lg flex items-center gap-2 text-sm font-semibold disabled:opacity-50 hover:bg-slate-200 dark:hover:bg-slate-700"
+              >
+                {recalcBusy ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-4 h-4" />
+                )}
+                إعادة حساب التكلفة
+              </button>
+            ) : null}
             {!readOnly && (
               <button
                 onClick={handleSave}
@@ -426,34 +740,55 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
-        <CollapsibleSection title="بيانات الفاتورة والمورد" icon={Info} defaultOpen={true}>
-          <InvoiceBasicInfo
-            data={formData}
-            setData={setFormData}
-            suppliers={suppliers}
-            readOnly={readOnly || formData.isHistorical}
-            items={formData.items}
-          />
-        </CollapsibleSection>
+      {invoiceHeaderDetailsOpen ? (
+        <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
+          <div className="max-w-7xl mx-auto px-4 py-4">
+            <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-3">بيانات الفاتورة والمورد</p>
+            <InvoiceBasicInfo
+              data={formData}
+              setData={setFormData}
+              suppliers={suppliers}
+              readOnly={readOnly || formData.isHistorical}
+              items={formData.items}
+            />
+          </div>
+        </div>
+      ) : null}
 
+      <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
         {formData.currency === 'ILS' ? (
           <div className="space-y-6">
-            {formData.conversionMetadata && (
-              <ConversionDetailsSection metadata={formData.conversionMetadata} />
+            {(formData.conversionMetadata || formData.importLogistics) && (
+              <ConversionDetailsSection
+                metadata={formData.conversionMetadata}
+                importLogistics={formData.importLogistics}
+                shippingIncluded={Boolean(formData.shippingIncluded)}
+                invoiceShippingCostIls={formData.shippingCost}
+                invoiceClearanceId={formData.clearanceId}
+              />
             )}
 
-            <CollapsibleSection title="سلة المنتجات (شيقل)" icon={Briefcase} defaultOpen={true}>
+            <CollapsibleSection title="سلة المنتجات (شيكل)" icon={Briefcase} defaultOpen={true}>
               <NISItemsTable
                 items={formData.items || []}
                 conversionRate={formData.conversionMetadata?.dealEffectiveRate || 1}
+                invoiceTaxAmount={formData.taxAmount || 0}
+                localPayments={formData.localPayments || {}}
+                taxableBaseIls={ilsMerchandiseBase}
+                invoiceVatBaseIls={ilsVatBase}
+                conversionMetadata={formData.conversionMetadata}
               />
             </CollapsibleSection>
 
-            <NISLocalPayments
-              data={formData.localPayments || {}}
-              onUpdate={(field, val) => handleUpdateFinancial(field, val)}
-              readOnly={readOnly || formData.isHistorical}
+            <NISInvoiceTaxStrip
+              taxType={formData.taxType || "percentage"}
+              taxRate={formData.taxRate || 0}
+              taxAmount={formData.taxAmount || 0}
+              localPayments={formData.localPayments || {}}
+              taxableBaseIls={ilsMerchandiseBase}
+              vatBaseIls={ilsVatBase}
+              readOnly={readOnly || !!formData.isHistorical}
+              onFinancial={handleUpdateFinancial}
             />
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -474,6 +809,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                     onUpdateInstallment={handleUpdateInstallment}
                     readOnly={formData.isHistorical || false}
                     currency={formData.currency}
+                    grandTotalFromForm={
+                      formData.currency === "ILS" ? formData.grandTotal : undefined
+                    }
+                    mainVatForExtras={formData.taxAmount || 0}
+                    conversionMetadata={formData.conversionMetadata}
                   />
                 </CollapsibleSection>
               </div>
@@ -484,9 +824,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                   discountAmount={formData.discountAmount || 0}
                   taxAmount={formData.taxAmount || 0}
                   taxRate={formData.taxRate || 0}
-                  shippingCost={formData.shippingCost || 0}
+                  shippingCost={0}
                   grandTotal={formData.grandTotal || 0}
                   localPayments={formData.localPayments || {}}
+                  taxableBaseIls={ilsMerchandiseBase}
+                  invoiceVatBaseIls={ilsVatBase}
+                  hideShippingRow
                 />
               </div>
             </div>

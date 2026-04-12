@@ -9,6 +9,12 @@ export interface ShipmentDealInfo {
     distributedCost: number;
     extraCosts?: number;
     notes?: string;
+    /** حقل description من SQL (قصير) */
+    dealDescriptionRaw?: string;
+    /** عنوان جاهز للعرض: وصف أو أول سطر عربي من الملاحظات أو رقم الصفقة */
+    displayTitle?: string;
+    factoryName?: string;
+    partnerName?: string;
 }
 
 export type ShipmentStatus =

@@ -4,7 +4,7 @@ import { AppView } from '../../types';
 import { PlusCircle, FileText, Users, ShoppingCart, Truck } from 'lucide-react';
 
 interface QuickActionsProps {
-    onNavigate: (view: AppView) => void;
+    onNavigate: (view: AppView, targetId?: string) => void;
     userRole: string;
 }
 

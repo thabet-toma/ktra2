@@ -60,11 +60,29 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
         }
     };
 
+    /** يطابق عمود Status في SQL (Pending, In-Transit, …) بعد mapShipmentFromSql → lowercase */
+    const normalizeLogisticsStatusKey = (raw: string) =>
+        raw.toLowerCase().trim().replace(/\s+/g, '-').replace(/_/g, '-');
+
+    const SQL_SHIPMENT_STATUS_AR: Record<string, string> = {
+        pending: 'قيد الانتظار',
+        'in-transit': 'في الطريق',
+        arrived: 'وصلت',
+        clearing: 'جاري التخليص الجمركي',
+        cleared: 'تم التخليص',
+    };
+
     // دالة لترجمة حالة الشحنة من shippingInfo
     const getShipmentStatusText = (shipment: Shipment) => {
         if (!shipment.shippingInfo?.shipmentStatus?.status) return 'لم تبدأ';
 
-        const status = shipment.shippingInfo.shipmentStatus.status;
+        const statusRaw = shipment.shippingInfo.shipmentStatus.status;
+        const coarseKey = normalizeLogisticsStatusKey(statusRaw);
+        if (SQL_SHIPMENT_STATUS_AR[coarseKey]) {
+            return SQL_SHIPMENT_STATUS_AR[coarseKey];
+        }
+
+        const status = statusRaw;
         if (shipment.shippingInfo.shippingType === 'sea') {
             switch (status) {
                 case 'agent_warehouse': return 'مستودع وكيل';
@@ -75,7 +93,7 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                 case 'israel_customs_clearance': return 'تخليص إسرائيل';
                 case 'released': return 'مفرج عنها';
                 case 'delivered_local': return 'تم التسليم';
-                default: return status;
+                default: return typeof status === 'string' && status.length ? status : '—';
             }
         } else {
             switch (status) {
@@ -88,7 +106,7 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                 case 'israel_customs_clearance': return 'تخليص إسرائيل';
                 case 'released': return 'مفرج عنها';
                 case 'delivered_local': return 'تم التسليم';
-                default: return status;
+                default: return typeof status === 'string' && status.length ? status : '—';
             }
         }
     };
@@ -97,7 +115,24 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
     const getShipmentStatusIcon = (shipment: Shipment) => {
         if (!shipment.shippingInfo?.shipmentStatus?.status) return <Clock className="w-3 h-3" />;
 
-        const status = shipment.shippingInfo.shipmentStatus.status;
+        const statusRaw = shipment.shippingInfo.shipmentStatus.status;
+        const coarseKey = normalizeLogisticsStatusKey(statusRaw);
+        switch (coarseKey) {
+            case 'pending':
+                return <Clock className="w-3 h-3" />;
+            case 'in-transit':
+                return <Navigation className="w-3 h-3" />;
+            case 'arrived':
+                return <Anchor className="w-3 h-3" />;
+            case 'clearing':
+                return <FileText className="w-3 h-3" />;
+            case 'cleared':
+                return <PackageCheck className="w-3 h-3" />;
+            default:
+                break;
+        }
+
+        const status = statusRaw;
         if (shipment.shippingInfo.shippingType === 'sea') {
             switch (status) {
                 case 'agent_warehouse': return <Warehouse className="w-3 h-3" />;
@@ -279,14 +314,20 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                             <div className="flex items-center gap-1" title="الحجم">
                                                 <Box className="w-3 h-3 text-blue-500" />
                                                 <span className="font-mono font-bold text-sm text-gray-700 dark:text-gray-200">
-                                                    {(shipment.totalVolume || shipment.deals?.reduce((sum, d) => sum + (d.totalVolume || 0), 0) || 0).toFixed(1)}
+                                                    {(shipment.deals && shipment.deals.length > 0
+                                                        ? shipment.deals.reduce((sum, d) => sum + (Number(d.totalVolume) || 0), 0)
+                                                        : Number(shipment.totalVolume) || 0
+                                                    ).toFixed(1)}
                                                 </span>
                                                 <span className="text-[10px] text-gray-400">م³</span>
                                             </div>
                                             <div className="flex items-center gap-1" title="الوزن">
                                                 <Scale className="w-3 h-3 text-purple-500" />
                                                 <span className="font-mono font-bold text-sm text-gray-700 dark:text-gray-200">
-                                                    {(shipment.totalWeightKg || shipment.deals?.reduce((sum, d) => sum + (d.totalWeightKg || 0), 0) || 0).toFixed(0)}
+                                                    {(shipment.deals && shipment.deals.length > 0
+                                                        ? shipment.deals.reduce((sum, d) => sum + (Number(d.totalWeightKg) || 0), 0)
+                                                        : Number(shipment.totalWeightKg) || 0
+                                                    ).toFixed(0)}
                                                 </span>
                                                 <span className="text-[10px] text-gray-400">كجم</span>
                                             </div>

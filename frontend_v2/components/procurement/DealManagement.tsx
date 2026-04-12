@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Deal, DealItem, PriceOffer, User, DealStatus, Item, Supplier } from '../../types'; // 1. تأكد من استيراد Supplier
 import { priceOffersService, itemsService, suppliersService } from '../../services/firestoreService'; // 2. استيراد suppliersService
 import { dealsService } from '../../services/dealsService';
@@ -17,9 +18,32 @@ import { PriceOfferSelectionModal } from './price-offers/PriceOfferSelectionModa
 
 interface DealManagementProps {
     currentUser: User;
+    /** فتح قيد اليومية من شاشة الصفقة — null = قيد جديد للترحيل اليدوي */
+    onOpenAccountingJournal?: (
+        journalId: number | null,
+        dealRef?: { dealId: string; dealNumber: string; displayName: string }
+    ) => void;
 }
 
-export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) => {
+export const DealManagement: React.FC<DealManagementProps> = ({
+    currentUser,
+    onOpenAccountingJournal,
+}) => {
+    const navigate = useNavigate();
+    const location = useLocation();
+    const newFormInitRef = useRef(false);
+
+    const dealsPathMatch = useMemo(() => {
+        const path = (location.pathname || '/').replace(/\/$/, '') || '/';
+        if (path !== '/deals' && !path.startsWith('/deals/')) return null;
+        if (path === '/deals') return { mode: 'list' as const };
+        const m = path.match(/^\/deals\/(.+)$/);
+        const seg = m ? decodeURIComponent(m[1]) : '';
+        if (seg === 'new') return { mode: 'new' as const };
+        if (!seg) return { mode: 'list' as const };
+        return { mode: 'deal' as const, id: seg };
+    }, [location.pathname]);
+
     const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
     const [deals, setDeals] = useState<Deal[]>([]);
     const [priceOffers, setPriceOffers] = useState<PriceOffer[]>([]);
@@ -39,42 +63,38 @@ export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) =
     const [viewStyle, setViewStyle] = useState<'grid' | 'list'>('grid');
     const [compactMode, setCompactMode] = useState(true);
 
-    const getStatusColor = (status: DealStatus) => {
-        const colors = {
-            'initial': 'bg-gray-100 text-gray-700 border-gray-200',
-            'first_payment_pending': 'bg-orange-50 text-orange-700 border-orange-200',
-            'first_payment_done': 'bg-blue-50 text-blue-700 border-blue-200',
-            'first_payment_confirmed': 'bg-green-50 text-green-700 border-green-200',
-            'production_completed': 'bg-purple-50 text-purple-700 border-purple-200',
-            'second_payment_pending': 'bg-orange-50 text-orange-700 border-orange-200',
-            'second_payment_done': 'bg-blue-50 text-blue-700 border-blue-200',
-            'second_payment_confirmed': 'bg-green-50 text-green-700 border-green-200',
-            'shipping_preparation': 'bg-amber-50 text-amber-700 border-amber-200',
-            'shipped': 'bg-teal-50 text-teal-700 border-teal-200',
-            'completed': 'bg-emerald-100 text-emerald-800 border-emerald-200',
-            'cancelled': 'bg-red-50 text-red-700 border-red-200'
+    const getStatusColor = (status: DealStatus): string => {
+        const colors: Record<string, string> = {
+            'initial':                   'bg-gray-100 text-gray-700 border-gray-200',
+            'manufacturing_started':     'bg-sky-50 text-sky-700 border-sky-200',
+            'first_payment_pending':     'bg-orange-50 text-orange-700 border-orange-200',
+            'first_payment_done':        'bg-blue-50 text-blue-700 border-blue-200',
+            'first_payment_confirmed':   'bg-green-50 text-green-700 border-green-200',
+            'production_completed':      'bg-purple-50 text-purple-700 border-purple-200',
+            'second_payment_pending':    'bg-orange-50 text-orange-700 border-orange-200',
+            'second_payment_done':       'bg-blue-50 text-blue-700 border-blue-200',
+            'second_payment_confirmed':  'bg-green-50 text-green-700 border-green-200',
+            'shipping_preparation':      'bg-amber-50 text-amber-700 border-amber-200',
+            'shipping_in_progress':      'bg-teal-50 text-teal-700 border-teal-200',
+            'shipped':                   'bg-teal-100 text-teal-800 border-teal-300',
+            'completed':                 'bg-emerald-100 text-emerald-800 border-emerald-200',
+            'cancelled':                 'bg-red-50 text-red-700 border-red-200',
         };
-        return colors[status] || colors['initial'];
+        return colors[status] ?? colors['initial'];
     };
+
+    useEffect(() => {
+        const path = (location.pathname || '/').replace(/\/$/, '') || '/';
+        const onDealsRoute = path === '/deals' || path.startsWith('/deals/');
+        if (!onDealsRoute) {
+            navigate('/deals', { replace: true });
+        }
+    }, [location.pathname, navigate]);
 
     // جلب البيانات
     useEffect(() => {
         const unsubDeals = dealsService.subscribeToDeals((fetchedDeals) => {
             setDeals(fetchedDeals);
-
-            // Check for Deep Link ID strictly once on initial load (or when deals first arrive)
-            // We use a simple check: if we haven't selected a deal yet and we have a URL param
-            const params = new URLSearchParams(window.location.search);
-            const targetId = params.get('id');
-            if (targetId && fetchedDeals.length > 0) {
-                const targetDeal = fetchedDeals.find(d => d.id === targetId);
-                if (targetDeal) {
-                    setCurrentDeal({ ...targetDeal });
-                    setViewMode('form');
-                    // Optional: Clear param so reload doesn't get stuck? 
-                    // No, preserving it allows sharing the URL.
-                }
-            }
         });
         const unsubOffers = priceOffersService.subscribeToPriceOffers((offers) => {
             setPriceOffers(offers.filter(o =>
@@ -97,6 +117,79 @@ export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) =
         };
     }, []);
 
+    // قراءة ?ref=D-XXXX للانتقال من صفحة قيد اليومية
+    const dealRefFromQuery = useMemo(() => {
+        const p = new URLSearchParams(location.search);
+        return p.get('ref') || '';
+    }, [location.search]);
+
+    useEffect(() => {
+        if (!dealsPathMatch) return;
+        if (dealsPathMatch.mode === 'list') {
+            newFormInitRef.current = false;
+            setViewMode('list');
+            setCurrentDeal(null);
+            // إن وُجد ?ref= وتوفرت الصفقات → ابحث وافتح
+            if (dealRefFromQuery && deals.length > 0) {
+                const target = deals.find(
+                    d => String(d.dealNumber).toUpperCase() === dealRefFromQuery.toUpperCase()
+                );
+                if (target) {
+                    setCurrentDeal({ ...target });
+                    setViewMode('form');
+                }
+            }
+            return;
+        }
+        if (dealsPathMatch.mode === 'deal') {
+            const id = dealsPathMatch.id;
+            if (deals.length === 0) return;
+            const target = deals.find((d) => String(d.id) === String(id));
+            if (target) {
+                setCurrentDeal({ ...target });
+                setViewMode('form');
+            } else {
+                navigate('/deals', { replace: true });
+            }
+            return;
+        }
+        const draft = (location.state as { draftDeal?: Partial<Deal> } | null)?.draftDeal;
+        if (draft) {
+            newFormInitRef.current = true;
+            setCurrentDeal(draft);
+            setViewMode('form');
+            navigate('/deals/new', { replace: true, state: {} });
+            return;
+        }
+        if (newFormInitRef.current) return;
+        newFormInitRef.current = true;
+        void (async () => {
+            try {
+                const dealNumber = await dealsService.getNextDealNumber();
+                setCurrentDeal({
+                    dealNumber,
+                    status: 'initial',
+                    remainingAmount: 0,
+                    items: [],
+                    subtotal: 0,
+                    shippingCost: 0,
+                    discountAmount: 0,
+                    taxRate: 0,
+                    taxAmount: 0,
+                    payments: [],
+                    statusHistory: [],
+                    quoteImages: [],
+                    quotePdfs: []
+                });
+                setViewMode('form');
+            } catch (e) {
+                console.error(e);
+                newFormInitRef.current = false;
+                navigate('/deals', { replace: true });
+            }
+        })();
+    }, [dealsPathMatch, deals, location.state, navigate, dealRefFromQuery]);
+
     // تصفية الصفقات
     useEffect(() => {
         let result = deals;
@@ -105,11 +198,15 @@ export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) =
             const term = searchTerm.toLowerCase();
             result = result.filter(deal =>
                 deal.dealNumber?.toLowerCase().includes(term) ||
+                deal.dealDescription?.toLowerCase().includes(term) ||
                 deal.factoryName?.toLowerCase().includes(term) ||
                 deal.originalOfferNumber?.toLowerCase().includes(term) ||
+                deal.supplierSnapshot?.tradeName?.toLowerCase().includes(term) ||
+                deal.supplierSnapshot?.alias?.toLowerCase().includes(term) ||
+                deal.supplierSnapshot?.legalName?.toLowerCase().includes(term) ||
                 deal.items?.some(item =>
-                    item.name.toLowerCase().includes(term) ||
-                    item.categoryName.toLowerCase().includes(term)
+                    item.name?.toLowerCase().includes(term) ||
+                    item.categoryName?.toLowerCase().includes(term)
                 )
             );
         }
@@ -138,25 +235,9 @@ export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) =
         }
     };
 
-    const handleCreateNew = async () => {
-        const dealNumber = await dealsService.getNextDealNumber();
-
-        setCurrentDeal({
-            dealNumber: dealNumber,
-            status: 'initial',
-            remainingAmount: 0,
-            items: [],
-            subtotal: 0,
-            shippingCost: 0,
-            discountAmount: 0,
-            taxRate: 0,
-            taxAmount: 0,
-            payments: [],
-            statusHistory: [],
-            quoteImages: [],
-            quotePdfs: []
-        });
-        setViewMode('form');
+    const handleCreateNew = () => {
+        newFormInitRef.current = false;
+        navigate('/deals/new');
     };
 
     const handleCreateFromPriceOffer = async (priceOfferId: string) => {
@@ -196,8 +277,8 @@ export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) =
                 quotePdfs: selectedOffer.quote_pdfs || []
             };
 
-            setCurrentDeal(dealData);
-            setViewMode('form');
+            newFormInitRef.current = false;
+            navigate('/deals/new', { state: { draftDeal: dealData } });
 
         } catch (error) {
             console.error('Error:', error);
@@ -208,13 +289,17 @@ export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) =
     };
 
     const handleEdit = (deal: Deal) => {
-        setCurrentDeal({ ...deal });
-        setViewMode('form');
+        window.open(
+            `${window.location.origin}/deals/${encodeURIComponent(deal.id)}`,
+            '_blank',
+            'noopener,noreferrer'
+        );
     };
 
     const handleSave = async () => {
         setViewMode('list');
         setCurrentDeal(null);
+        navigate('/deals');
     };
 
     const handleDelete = async (dealId: string) => {
@@ -230,9 +315,9 @@ export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) =
     const stats = {
         total: deals.length,
         active: deals.filter(d => !['completed', 'cancelled'].includes(d.status)).length,
-        pendingPayment: deals.filter(d => d.status.includes('payment_pending')).length,
-        inProduction: deals.filter(d => d.status === 'production_completed').length,
-        shipped: deals.filter(d => d.status === 'shipped').length,
+        pendingPayment: deals.filter(d => ['first_payment_pending', 'second_payment_pending'].includes(d.status)).length,
+        inManufacturing: deals.filter(d => ['manufacturing_started', 'first_payment_confirmed', 'second_payment_confirmed'].includes(d.status)).length,
+        shipped: deals.filter(d => ['shipped', 'completed'].includes(d.status)).length,
         totalValue: deals.reduce((sum, d) => sum + (d.totalAmount || 0), 0),
         pendingAmount: deals.reduce((sum, d) => sum + (d.remainingAmount || 0), 0)
     };
@@ -407,8 +492,8 @@ export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) =
                             <div className="bg-gradient-to-r from-purple-50 to-violet-100 dark:from-purple-900/30 dark:to-violet-900/50 p-3 rounded-xl border border-purple-200 dark:border-purple-800/30">
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <p className="text-xs text-purple-600 dark:text-purple-400">قيد التصنيع</p>
-                                        <p className="text-lg font-bold text-purple-900 dark:text-purple-300">{stats.inProduction}</p>
+                                        <p className="text-xs text-purple-600 dark:text-purple-400">في التصنيع</p>
+                                        <p className="text-lg font-bold text-purple-900 dark:text-purple-300">{stats.inManufacturing}</p>
                                     </div>
                                     <Factory className="w-5 h-5 text-purple-500" />
                                 </div>
@@ -477,8 +562,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) =
                                         onEdit={handleEdit}
                                         onPrint={(deal) => setDealToPrint(deal)}
                                         onDelete={handleDelete}
-                                        allDbItems={items}
-                                        // 5. تمرير الموردين هنا
+                                        // تمرير الموردين
                                         allSuppliers={suppliers}
                                         compactMode={compactMode}
                                     />
@@ -534,6 +618,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) =
                                         onClick={() => {
                                             setViewMode('list');
                                             setCurrentDeal(null);
+                                            navigate('/deals');
                                         }}
                                         className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
                                     >
@@ -566,8 +651,10 @@ export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) =
                             onCancel={() => {
                                 setViewMode('list');
                                 setCurrentDeal(null);
+                                navigate('/deals');
                             }}
                             compactMode={compactMode}
+                            onOpenAccountingJournal={onOpenAccountingJournal}
                         />
                     </div>
                 )}
@@ -583,8 +670,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({ currentUser }) =
                         onClose={() => setDealToPrint(null)}
                         onEdit={() => {
                             setDealToPrint(null);
-                            setCurrentDeal(dealToPrint);
-                            setViewMode('form');
+                            navigate(`/deals/${encodeURIComponent(dealToPrint.id)}`);
                         }}
                     />
                 </div>

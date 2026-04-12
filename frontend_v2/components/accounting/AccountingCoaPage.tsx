@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import type { AccountingAccount } from "../../types/accounting";
 import {
@@ -10,7 +10,19 @@ import {
   Trash2,
   X,
   Save,
+  MoreHorizontal,
+  BookOpen,
+  ExternalLink,
+  Factory,
 } from "lucide-react";
+
+const TYPE_LETTER: Record<string, string> = {
+  Asset: "أ",
+  Liability: "خ",
+  Equity: "ح",
+  Revenue: "إ",
+  Expense: "م",
+};
 
 const ACCOUNT_TYPES = [
   { v: "Asset", l: "أصول" },
@@ -43,6 +55,9 @@ interface RowProps {
   onEdit: (a: AccountingAccount) => void;
   onDelete: (id: number) => void;
   query: string;
+  onOpenGeneralLedger?: (accountId: number) => void;
+  onOpenSupplier?: (partnerId: number) => void;
+  onOpenRowMenu: (account: AccountingAccount, anchor: HTMLElement | null) => void;
 }
 
 const CoaRow: React.FC<RowProps> = ({
@@ -55,24 +70,49 @@ const CoaRow: React.FC<RowProps> = ({
   onEdit,
   onDelete,
   query,
+  onOpenGeneralLedger,
+  onOpenSupplier,
+  onOpenRowMenu,
 }) => {
   const children = byParent.get(account.id) ?? [];
   const hasChildren = children.length > 0;
   const isOpen = open[account.id] === true;
+  const lp = account.linked_partner;
+  /** الاسم المستعار (عربي) من Partner.name؛ لا نعرض اسم حساب GL الإنجليزي كعنوان رئيسي عند وجود مورد */
+  const aliasName = (lp?.trade_name || "").trim();
+  const displayName = lp
+    ? aliasName || "—"
+    : (account.name || "").trim() || "—";
+  const subLegal =
+    lp?.legal_name?.trim() &&
+    lp.legal_name.trim().toLowerCase() !== aliasName.toLowerCase()
+      ? lp.legal_name.trim()
+      : null;
 
   const q = query.trim().toLowerCase();
   const isMatch =
     !!q &&
     ((account.code ?? "").toLowerCase().includes(q) ||
-      (account.name ?? "").toLowerCase().includes(q));
+      (account.name ?? "").toLowerCase().includes(q) ||
+      (lp?.trade_name ?? "").toLowerCase().includes(q) ||
+      (lp?.legal_name ?? "").toLowerCase().includes(q));
 
   const indentPx = depth * 16;
   const rightOffset = Math.max(0, (depth - 1) * 16);
   const linkWidth = Math.max(12, (depth - 1) * 16);
 
+  const typeLetter =
+    depth === 0 && account.account_type
+      ? TYPE_LETTER[account.account_type] || account.account_type[0]
+      : null;
+
   return (
     <div className="select-none group">
       <div
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onOpenRowMenu(account, e.currentTarget as HTMLElement);
+        }}
         className={[
           "flex items-center gap-2 py-2 px-3 rounded-lg",
           "hover:bg-gray-100 dark:hover:bg-gray-800/80",
@@ -91,11 +131,11 @@ const CoaRow: React.FC<RowProps> = ({
           {depth > 0 && (
             <>
               <div
-                className="absolute inset-y-0 w-px bg-gray-200 dark:bg-gray-700"
+                className="absolute inset-y-0 w-px bg-gray-300 dark:bg-gray-500"
                 style={{ right: rightOffset }}
               />
               <div
-                className="absolute top-1/2 h-px bg-gray-200 dark:bg-gray-700 -translate-y-1/2"
+                className="absolute top-1/2 h-px bg-gray-300 dark:bg-gray-500 -translate-y-1/2"
                 style={{ right: rightOffset, width: linkWidth }}
               />
             </>
@@ -117,11 +157,53 @@ const CoaRow: React.FC<RowProps> = ({
         ) : (
           <span className="w-6 h-6" />
         )}
+        {typeLetter && (
+          <span
+            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-indigo-100 text-xs font-bold text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200"
+            title="حساب رئيسي"
+          >
+            {typeLetter}
+          </span>
+        )}
+        {!typeLetter && lp && (
+          <span
+            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+            title="حساب مرتبط بمورد"
+          >
+            <Factory className="w-4 h-4" />
+          </span>
+        )}
+        {!typeLetter && !lp && <span className="w-7 flex-shrink-0" />}
         <span className="font-mono text-sm text-blue-600 dark:text-blue-400 w-20">
           {account.code || "—"}
         </span>
-        <span className="flex-1 text-sm font-medium text-gray-900 dark:text-gray-100">
-          {account.name}
+        <span className="flex-1 min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100">
+          <span className="block truncate" title={displayName}>
+            {displayName}
+          </span>
+          {subLegal && (
+            <span className="block truncate text-[11px] font-normal uppercase tracking-wide text-gray-400 dark:text-gray-500 mt-0.5">
+              {subLegal}
+            </span>
+          )}
+          {lp && !aliasName && (
+            <span className="block text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">
+              أضف اسماً مستعاراً للمورد (الحقل Name) ليظهر هنا
+            </span>
+          )}
+          {lp && (
+            <button
+              type="button"
+              className="mt-0.5 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenSupplier?.(lp.id);
+              }}
+            >
+              <ExternalLink className="w-3 h-3" />
+              تفاصيل المورد
+            </button>
+          )}
         </span>
         <span className="text-xs text-gray-500 hidden md:inline">
           {ACCOUNT_TYPES.find((t) => t.v === account.account_type)?.l ||
@@ -161,9 +243,31 @@ const CoaRow: React.FC<RowProps> = ({
         >
           <Trash2 className="w-4 h-4" />
         </button>
+        <button
+          type="button"
+          title="خيارات"
+          className="p-1.5 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenRowMenu(account, e.currentTarget);
+          }}
+        >
+          <MoreHorizontal className="w-4 h-4" />
+        </button>
+        <button
+          type="button"
+          title="الأستاذ العام"
+          className="p-1.5 text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenGeneralLedger?.(account.id);
+          }}
+        >
+          <BookOpen className="w-4 h-4" />
+        </button>
       </div>
       {hasChildren && isOpen && (
-        <div>
+        <div className="relative me-3 pe-2 border-e-2 border-gray-400 dark:border-gray-500 min-h-[2px]">
           {children.map((c) => (
             <CoaRow
               key={c.id}
@@ -176,6 +280,9 @@ const CoaRow: React.FC<RowProps> = ({
               onEdit={onEdit}
               onDelete={onDelete}
               query={query}
+              onOpenGeneralLedger={onOpenGeneralLedger}
+              onOpenSupplier={onOpenSupplier}
+              onOpenRowMenu={onOpenRowMenu}
             />
           ))}
         </div>
@@ -184,7 +291,15 @@ const CoaRow: React.FC<RowProps> = ({
   );
 };
 
-export const AccountingCoaPage: React.FC = () => {
+export interface AccountingCoaPageProps {
+  onOpenGeneralLedger?: (accountId: number) => void;
+  onOpenSupplier?: (partnerId: number) => void;
+}
+
+export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
+  onOpenGeneralLedger,
+  onOpenSupplier,
+}) => {
   const [accounts, setAccounts] = useState<AccountingAccount[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -203,6 +318,25 @@ export const AccountingCoaPage: React.FC = () => {
     parent: null as number | null,
     is_active: true,
   });
+
+  const [rowMenu, setRowMenu] = useState<{
+    account: AccountingAccount;
+    anchor: DOMRect;
+  } | null>(null);
+  const rowMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!rowMenu) return;
+    const close = (e: MouseEvent) => {
+      if (rowMenuRef.current?.contains(e.target as Node)) return;
+      setRowMenu(null);
+    };
+    const tid = window.setTimeout(() => document.addEventListener("click", close), 0);
+    return () => {
+      window.clearTimeout(tid);
+      document.removeEventListener("click", close);
+    };
+  }, [rowMenu]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -251,8 +385,10 @@ export const AccountingCoaPage: React.FC = () => {
     for (const a of accounts) {
       const code = (a.code ?? "").toLowerCase();
       const name = (a.name ?? "").toLowerCase();
+      const trade = (a.linked_partner?.trade_name ?? "").toLowerCase();
+      const legal = (a.linked_partner?.legal_name ?? "").toLowerCase();
 
-      if (code.includes(q) || name.includes(q)) {
+      if (code.includes(q) || name.includes(q) || trade.includes(q) || legal.includes(q)) {
         visibleIds.add(a.id);
         // add ancestors to keep hierarchy
         let cur = parentById.get(a.id);
@@ -436,9 +572,75 @@ export const AccountingCoaPage: React.FC = () => {
                   onEdit={openEdit}
                   onDelete={remove}
                   query={searchTerm}
+                  onOpenGeneralLedger={onOpenGeneralLedger}
+                  onOpenSupplier={onOpenSupplier}
+                  onOpenRowMenu={(acc, el) => {
+                    if (el) {
+                      const r = el.getBoundingClientRect();
+                      setRowMenu({ account: acc, anchor: r });
+                    }
+                  }}
                 />
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {rowMenu && (
+        <div
+          ref={rowMenuRef}
+          className="fixed z-[70] min-w-[200px] rounded-lg border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-600 dark:bg-gray-800"
+          style={{
+            top: Math.min(rowMenu.anchor.bottom + 4, window.innerHeight - 200),
+            left: Math.min(rowMenu.anchor.left, window.innerWidth - 220),
+          }}
+        >
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+            onClick={() => {
+              openCreate(rowMenu.account);
+              setRowMenu(null);
+            }}
+          >
+            <Plus className="h-4 w-4" />
+            إنشاء حساب فرعي
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+            onClick={() => {
+              openEdit(rowMenu.account);
+              setRowMenu(null);
+            }}
+          >
+            <Pencil className="h-4 w-4" />
+            تعديل الحساب
+          </button>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+            onClick={() => {
+              onOpenGeneralLedger?.(rowMenu.account.id);
+              setRowMenu(null);
+            }}
+          >
+            <BookOpen className="h-4 w-4" />
+            الأستاذ العام
+          </button>
+          {rowMenu.account.linked_partner && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+              onClick={() => {
+                onOpenSupplier?.(rowMenu.account.linked_partner!.id);
+                setRowMenu(null);
+              }}
+            >
+              <ExternalLink className="h-4 w-4" />
+              بطاقة المورد
+            </button>
           )}
         </div>
       )}

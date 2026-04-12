@@ -66,10 +66,19 @@ export const ShipmentShippingDetails: React.FC<ShipmentShippingDetailsProps> = (
     // القوائم لحساب شريط التقدم
     const seaStatuses = ['agent_warehouse', 'china_customs_clearance', 'on_board', 'at_sea', 'arrived_port', 'israel_customs_clearance', 'released', 'delivered_local'];
     const airStatuses = ['agent_warehouse', 'delivered_to_shipping_company', 'china_customs_clearance', 'departed', 'in_transit', 'arrived_airport', 'israel_customs_clearance', 'released', 'delivered_local'];
+    /** تُحدَّد تلقائياً عند حفظ فاتورة المشتريات (إطلاق / تسليم محلي) */
+    const routeStatusesManualOnly = new Set<string>(['released', 'delivered_local']);
 
     const currentStatuses = shippingInfo.shippingType === 'sea' ? seaStatuses : airStatuses;
     const currentIndex = currentStatuses.indexOf(shippingInfo.shipmentStatus?.status || 'agent_warehouse');
     const progressPercentage = ((currentIndex + 1) / currentStatuses.length) * 100;
+
+    const formatStatusDate = (raw: string | undefined) => {
+        if (!raw || !String(raw).trim()) return '—';
+        const d = new Date(raw);
+        if (Number.isNaN(d.getTime())) return '—';
+        return d.toLocaleDateString('ar-EG', { day: 'numeric', month: 'short', year: 'numeric' });
+    };
 
     const renderTrackingButtons = () => {
         if (shippingInfo.shippingType === 'sea') {
@@ -206,28 +215,36 @@ export const ShipmentShippingDetails: React.FC<ShipmentShippingDetailsProps> = (
                             )}
                         </div>
                         <div className="text-xs opacity-70 font-mono">
-                            {new Date(shippingInfo.shipmentStatus.statusDate).toLocaleDateString('en-GB')}
+                            {formatStatusDate(shippingInfo.shipmentStatus.statusDate)}
                         </div>
                     </div>
                 )}
 
                 {/* Status Buttons Grid */}
                 <div className="grid grid-cols-4 gap-2 mb-4">
-                    {currentStatuses.map((statusKey) => (
+                    {currentStatuses.map((statusKey) => {
+                        const autoOnly = routeStatusesManualOnly.has(statusKey);
+                        const isCurrent = shippingInfo.shipmentStatus?.status === statusKey;
+                        return (
                         <button
                             key={statusKey}
                             type="button"
-                            onClick={() => handleShipmentStatusChange(statusKey)}
+                            disabled={autoOnly}
+                            title={autoOnly ? 'تُحدَّد تلقائياً عند حفظ فاتورة مرتبطة بالصفقة' : undefined}
+                            onClick={() => !autoOnly && handleShipmentStatusChange(statusKey)}
                             className={`p-2 rounded-lg text-xs font-medium flex flex-col items-center justify-center gap-1 transition-all h-16
-                                ${shippingInfo.shipmentStatus?.status === statusKey
+                                ${isCurrent
                                     ? 'bg-blue-600 text-white shadow-md transform scale-105'
-                                    : 'bg-gray-50 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                    : autoOnly
+                                        ? 'bg-gray-100 dark:bg-gray-800/80 text-gray-400 dark:text-gray-500 cursor-not-allowed opacity-75'
+                                        : 'bg-gray-50 dark:bg-gray-700/50 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
                                 }`}
                         >
                             {getStatusIcon(statusKey)}
                             <span className="text-[10px] text-center leading-tight">{getStatusText(statusKey)}</span>
                         </button>
-                    ))}
+                        );
+                    })}
                 </div>
 
                 {/* Add Note Button */}

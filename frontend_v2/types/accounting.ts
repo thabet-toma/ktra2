@@ -1,3 +1,9 @@
+export interface AccountingLinkedPartner {
+  id: number;
+  trade_name: string;
+  legal_name: string | null;
+}
+
 export interface AccountingAccount {
   id: number;
   code: string | null;
@@ -5,6 +11,8 @@ export interface AccountingAccount {
   parent: number | null;
   account_type: string | null;
   is_active: boolean;
+  /** حساب مرتبط بمورد: الاسم التجاري (المستعار) للعرض في الشجرة */
+  linked_partner?: AccountingLinkedPartner | null;
 }
 
 export interface JournalLineDto {
@@ -24,6 +32,9 @@ export interface JournalHeaderDto {
   reference_id?: number | null;
   description?: string | null;
   is_posted?: boolean;
+  currency?: number | null;
+  exchange_rate?: string | number;
+  currency_code?: string | null;
   lines: JournalLineDto[];
 }
 
@@ -79,4 +90,41 @@ export interface GeneralLedgerResponse {
     credit: number;
     balance: number;
   }>;
+}
+
+export interface ExchangeRateDto {
+  id: number;
+  from_currency: number;
+  to_currency: number;
+  from_currency_code?: string;
+  to_currency_code?: string;
+  rate: string | number;
+  effective_date: string;
+}
+
+export interface FiscalPeriodDto {
+  id: number;
+  name: string;
+  start_date: string;
+  end_date: string;
+  status: "Open" | "Closed";
+  is_closed: boolean;
+}
+
+export interface TaxRateDto {
+  id: number;
+  name: string;
+  code: string;
+  rate: string | number;
+  tax_account: number;
+  tax_account_name?: string;
+  is_active: boolean;
+}
+
+export interface CurrencyDto {
+  CurrencyID: number;
+  Code: string;
+  Name: string | null;
+  Symbol: string | null;
+  IsBaseCurrency: boolean;
 }

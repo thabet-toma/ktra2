@@ -101,7 +101,7 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
       {/* ================= القسم الرئيسي ================= */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
         {/* 1. المورد */}
-        <div className="md:col-span-4 space-y-1">
+        <div className="md:col-span-5 space-y-1">
           <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
             <Building className="w-3 h-3 text-blue-500" />
             المورد / المصنع <span className="text-red-500">*</span>
@@ -119,24 +119,8 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
           </div>
         </div>
 
-        {/* 2. اسم الفاتورة */}
-        <div className="md:col-span-3 space-y-1">
-          <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
-            <Tag className="w-3 h-3 text-purple-500" />
-            وصف الفاتورة
-          </label>
-          <input
-            type="text"
-            value={data.invoiceName || ""}
-            onChange={(e) => setData({ ...data, invoiceName: e.target.value })}
-            disabled={readOnly}
-            className="w-full h-10 px-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-1 focus:ring-purple-500 placeholder-gray-400"
-            placeholder="مثال: طلبية شتاء 2025"
-          />
-        </div>
-
-        {/* 3. التاريخ */}
-        <div className="md:col-span-3 space-y-1">
+        {/* 2. التاريخ */}
+        <div className="md:col-span-4 space-y-1">
           <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
             <Calendar className="w-3 h-3 text-orange-500" />
             التاريخ
@@ -150,8 +134,8 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
           />
         </div>
 
-        {/* 4. الحالة */}
-        <div className="md:col-span-2 space-y-1">
+        {/* 3. الحالة */}
+        <div className="md:col-span-3 space-y-1">
           <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
             <CheckCircle className="w-3 h-3 text-green-500" />
             الحالة
@@ -168,6 +152,22 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
             <option value="incomplete">غير مكتملة</option>
             <option value="completed">مكتملة</option>
           </select>
+        </div>
+
+        {/* 4. وصف الفاتورة — حقل متعدد الأسطر مثل وصف الصفقة */}
+        <div className="md:col-span-12 space-y-1">
+          <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
+            <Tag className="w-3 h-3 text-purple-500" />
+            وصف الفاتورة (عنوان عربي / ملخص)
+          </label>
+          <textarea
+            value={data.invoiceName || ""}
+            onChange={(e) => setData({ ...data, invoiceName: e.target.value })}
+            disabled={readOnly}
+            rows={4}
+            className="w-full min-h-[5.5rem] px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm leading-relaxed focus:ring-1 focus:ring-purple-500 placeholder-gray-400 resize-y"
+            placeholder="مثال: مجموعة إنفيرتر — نفس أسلوب وصف الصفقة بالعربي"
+          />
         </div>
       </div>
 

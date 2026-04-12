@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { Invoice, User, Supplier } from '../../../types';
+import { formatTaxPercentLabel } from '../../../utils/sqlMoneyRound';
 import { Printer, X, MapPin, Phone, Mail, FileText, Building2, Truck, Hash, Calendar, DollarSign, CreditCard, Edit, ExternalLink, Box } from 'lucide-react';
 
 interface InvoicePrintViewProps {
@@ -26,6 +27,11 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
         if (!dateString) return '-';
         return new Date(dateString).toLocaleDateString('en-GB');
     };
+
+    const printLanded = invoice.items.some(
+        (it) =>
+            (it.landedUnitPriceIls ?? 0) > 0 && (it.landedLineTotalIls ?? 0) > 0
+    );
 
     const getSupplierAddress = () => {
         if (invoice.supplierSnapshot?.address) return invoice.supplierSnapshot.address;
@@ -175,7 +181,13 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                                 <th className="py-2 px-2 w-24 border-r border-gray-600">التصنيف</th>
                                 <th className="py-2 px-2 w-14 text-center border-r border-gray-600">الكمية</th>
                                 <th className="py-2 px-2 w-24 text-left border-r border-gray-600">سعر الوحدة</th>
-                                <th className="py-2 px-2 w-24 text-left">الإجمالي</th>
+                                {printLanded && (
+                                    <th className="py-2 px-2 w-28 text-left border-r border-gray-600 bg-amber-900/90">نهائي / وحدة</th>
+                                )}
+                                <th className="py-2 px-2 w-24 text-left border-r border-gray-600">الإجمالي</th>
+                                {printLanded && (
+                                    <th className="py-2 px-2 w-28 text-left bg-amber-900/90">إجمالي نهائي</th>
+                                )}
                             </tr>
                         </thead>
                         <tbody className="text-[11px]">
@@ -205,7 +217,17 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                                     <td className="py-2 px-2 border-l border-gray-200 text-gray-600">{item.categoryName}</td>
                                     <td className="py-2 px-2 text-center font-bold border-l border-gray-200 text-sm">{item.quantity}</td>
                                     <td className="py-2 px-2 text-left font-mono border-l border-gray-200" dir="ltr">{formatCurrency(item.unitPrice)}</td>
-                                    <td className="py-2 px-2 text-left font-bold font-mono bg-gray-50 text-sm" dir="ltr">{formatCurrency(item.totalPrice)}</td>
+                                    {printLanded && (
+                                        <td className="py-2 px-2 text-left font-mono border-l border-gray-200 bg-amber-50" dir="ltr">
+                                            {item.landedUnitPriceIls != null ? formatCurrency(item.landedUnitPriceIls) : "—"}
+                                        </td>
+                                    )}
+                                    <td className="py-2 px-2 text-left font-bold font-mono bg-gray-50 text-sm border-l border-gray-200" dir="ltr">{formatCurrency(item.totalPrice)}</td>
+                                    {printLanded && (
+                                        <td className="py-2 px-2 text-left font-bold font-mono bg-amber-50 text-sm" dir="ltr">
+                                            {item.landedLineTotalIls != null ? formatCurrency(item.landedLineTotalIls) : "—"}
+                                        </td>
+                                    )}
                                 </tr>
                             ))}
                         </tbody>
@@ -229,7 +251,7 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                             )}
                             {totals.taxAmount > 0 && (
                                 <div className="flex justify-between border-b border-gray-100 pb-1.5">
-                                    <span>الضرائب ({invoice.taxRate}%):</span>
+                                    <span>الضرائب ({formatTaxPercentLabel(invoice.taxRate)}%):</span>
                                     <span className="font-mono font-bold" dir="ltr">{formatCurrency(totals.taxAmount)}</span>
                                 </div>
                             )}

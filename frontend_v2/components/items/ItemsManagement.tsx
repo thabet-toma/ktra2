@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Item, Category, SubCategory, Brand, Invoice, Supplier, User } from '@/types';
 import {
     itemsService, categoriesService,
@@ -89,6 +89,68 @@ export const ItemsManagement: React.FC<ItemsManagementProps> = ({ user }) => {
             });
         }
     }, [items]);
+
+    /** الأصناف من SQL تحمل category_name بينما التصنيفات قد تكون فقط في Firestore — ندمج الاثنين للفلاتر */
+    const categoriesForFilter = useMemo(() => {
+        const map = new Map<string, Category>();
+        for (const c of categories) {
+            if (c?.id) map.set(String(c.id), { ...c, id: String(c.id) });
+        }
+        for (const item of items) {
+            const id =
+                item.categoryId != null && String(item.categoryId).trim() !== ""
+                    ? String(item.categoryId).trim()
+                    : "";
+            const name = (item.categoryName || "").trim();
+            if (!id && !name) continue;
+            const key = id || `name:${name}`;
+            if (!map.has(key)) {
+                map.set(key, {
+                    id: id || key,
+                    name: name || (id ? `تصنيف #${id}` : "—"),
+                });
+            } else if (id && name) {
+                const cur = map.get(key)!;
+                if (!cur.name || cur.name.startsWith("تصنيف #")) cur.name = name;
+            }
+        }
+        return Array.from(map.values()).sort((a, b) =>
+            (a.name || "").localeCompare(b.name || "", "ar")
+        );
+    }, [categories, items]);
+
+    const subCategoriesForFilter = useMemo(() => {
+        const map = new Map<string, SubCategory>();
+        for (const s of subCategories) {
+            if (s?.id)
+                map.set(String(s.id), {
+                    ...s,
+                    id: String(s.id),
+                    categoryId: String(s.categoryId || ""),
+                });
+        }
+        for (const item of items) {
+            const id =
+                item.subCategoryId != null &&
+                String(item.subCategoryId).trim() !== ""
+                    ? String(item.subCategoryId).trim()
+                    : "";
+            const name = (item.subCategoryName || "").trim();
+            if (!id && !name) continue;
+            const cid = String(item.categoryId || "");
+            const key = id || `name:${name}:${cid}`;
+            if (!map.has(key)) {
+                map.set(key, {
+                    id: id || key,
+                    name: name || (id ? `فرعي #${id}` : "—"),
+                    categoryId: cid,
+                });
+            }
+        }
+        return Array.from(map.values()).sort((a, b) =>
+            (a.name || "").localeCompare(b.name || "", "ar")
+        );
+    }, [subCategories, items]);
 
     const handleCreateNew = () => {
         setCurrentItem({
@@ -190,8 +252,8 @@ export const ItemsManagement: React.FC<ItemsManagementProps> = ({ user }) => {
                     {viewMode === 'list' && (
                         <ItemsList
                             items={items}
-                            categories={categories}
-                            subCategories={subCategories}
+                            categories={categoriesForFilter}
+                            subCategories={subCategoriesForFilter}
                             onAddNew={handleCreateNew}
                             onEdit={handleEditItem}
                             onView={handleViewDetails}

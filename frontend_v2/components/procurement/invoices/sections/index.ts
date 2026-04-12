@@ -6,4 +6,4 @@ export { ShipmentDetails } from './ShipmentDetails';
 export { ConversionDetailsSection } from './ConversionDetailsSection';
 export { NISItemsTable } from './NISItemsTable';
 export { NISFinancialSummary } from './NISFinancialSummary';
-export { NISLocalPayments } from './NISLocalPayments';
+export { NISInvoiceTaxStrip } from './NISInvoiceTaxStrip';

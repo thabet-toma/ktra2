@@ -17,9 +17,14 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
+from core import assistant_views, agent_db_view, dashboard_api
+
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/mapper/', include('bridge.urls')),
+    path('api/assistant/chat/', assistant_views.assistant_chat),
+    path('api/agent/query/', agent_db_view.agent_query),
+    path('api/dashboard/', dashboard_api.trade_dashboard),
     path('api/', include('partners.urls')),
     path('api/accounting/', include('accounting.urls')),
     path('api/inventory/', include('inventory.urls')),

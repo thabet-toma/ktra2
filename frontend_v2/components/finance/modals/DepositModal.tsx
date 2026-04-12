@@ -1,15 +1,23 @@
 import React, { useState } from 'react';
 import { X, ArrowDownLeft } from 'lucide-react';
 import { cashBoxTransactionsService } from '../../../services/firestoreService';
+import { accountingApi } from '../../../services/accountingApi';
 import { CashBox } from '../../../types';
 
 interface DepositModalProps {
     isOpen: boolean;
     onClose: () => void;
     cashBox: CashBox;
+    /** بعد نجاح الإيداع وقيد رأس المال (أو إن فشل القيد فقط بعد حفظ الصندوق) */
+    onDepositComplete?: () => void;
 }
 
-export const DepositModal: React.FC<DepositModalProps> = ({ isOpen, onClose, cashBox }) => {
+export const DepositModal: React.FC<DepositModalProps> = ({
+    isOpen,
+    onClose,
+    cashBox,
+    onDepositComplete,
+}) => {
     const [amount, setAmount] = useState<number | ''>('');
     const [description, setDescription] = useState('');
     const [reference, setReference] = useState('');
@@ -24,7 +32,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({ isOpen, onClose, cas
 
         setIsLoading(true);
         try {
-            await cashBoxTransactionsService.addTransaction({
+            const txId = await cashBoxTransactionsService.addTransaction({
                 cashBoxId: cashBox.id,
                 type: 'deposit',
                 amount: Number(amount),
@@ -34,6 +42,25 @@ export const DepositModal: React.FC<DepositModalProps> = ({ isOpen, onClose, cas
                 date,
                 createdBy: 'manager', // TODO: Get actual user ID
             });
+            try {
+                await accountingApi.postCashBoxDepositJournal({
+                    external_id: cashBox.id,
+                    amount: Number(amount),
+                    transaction_date: date,
+                    description: description.trim(),
+                    firestore_transaction_id: txId,
+                });
+            } catch (je) {
+                console.error(je);
+                const msg =
+                    je instanceof Error
+                        ? je.message
+                        : 'تعذّر إنشاء قيد المحاسبة (تحقق من ربط الصندوق وحساب رأس المال والفترة المالية).';
+                alert(
+                    `تم حفظ الإيداع في الصندوق، لكن فشل قيد رأس المال:\n${msg}\n\nيمكنك إنشاء القيد يدوياً أو إعادة المحاولة بعد إصلاح الإعدادات.`
+                );
+            }
+            onDepositComplete?.();
             onClose();
             // Reset form
             setAmount('');

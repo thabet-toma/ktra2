@@ -1,12 +1,33 @@
 
 import { DealStatus, DealStatusHistoryEntry, DealActivity } from './deal';
 
+/** سطر ضمن «بند الضرائب والرسوم» على فاتورة الشيكل */
+export interface TaxesAndFeesLine {
+    id: string;
+    label: string;
+    /** مبلغ بالشيكل، أو قيمة النسبة إن كان entryType = percentage */
+    amount: number;
+    /** قيمة ثابتة (₪) أو نسبة من أساس الضريبة (مجموع البضاعة − خصم ± شحن الفاتورة إن وُجد) */
+    entryType?: "amount" | "percentage";
+    /**
+     * عند entryType = percentage: أساس النسبة.
+     * goods (افتراضي): من أساس البضاعة الخاضع لض.ق.م.
+     * after_main_vat: من (الأساس + مبلغ ض.ق.م الفاتورة) — مثل رسوم كترا بعد الضريبة.
+     */
+    percentageBasis?: "goods" | "after_main_vat";
+}
+
 export interface LocalPayments {
     customsClearanceFees?: number;
     customsDuties?: number;
     portFees?: number;
+    /** قديم: شحن محلي؛ يُفضَّل تسجيل الشحن من شاشة التخليص الجمركي */
     internalShippingFees?: number;
     palestinianTaxCustoms?: number;
+    /** قديم: مبلغ واحد؛ يُستبدل بـ taxesAndFeesLines عند التحرير من الواجهة */
+    extraTaxesFees?: number;
+    /** بنود متعددة «بند الضرائب والرسوم» (ILS) — تُجمع وتُوزَّع مع ض.ق.م على الأسطر */
+    taxesAndFeesLines?: TaxesAndFeesLine[];
     lumpSumAmount?: number;
     includedInPrice?: boolean;
     calculationMethod?: 'detailed' | 'lump_sum';
@@ -38,6 +59,20 @@ export interface InvoiceItem {
     modelNumber?: string;
     factoryImageUrl?: string;
     notes?: string;
+    /** تكلفة الوحدة النهائية بالشيقل (بضاعة + حصة شحن/تخليص موزّعة) */
+    landedUnitPriceIls?: number;
+    /** إجمالي السطر بالشيقل شامل التوزيع */
+    landedLineTotalIls?: number;
+}
+
+/** مصدر استيراد الفاتورة من تخليص + شحنة (نفس منطق ربط الصفقات بالشحنة) */
+export interface InvoiceImportLogistics {
+    shipmentId: string;
+    shipmentNumber?: string;
+    shipmentName?: string | null;
+    clearanceId: number;
+    clearanceDeclaration?: string | null;
+    brokerName?: string | null;
 }
 
 export interface DealInvoiceInfo {
@@ -116,6 +151,8 @@ export interface Invoice {
     taxAmount?: number;
     taxType?: 'percentage' | 'amount';
     grandTotal?: number;
+    /** يُعبأ عند الاستيراد من تخليص جمركي — يربط الفاتورة بالشحنة والتخليص */
+    importLogistics?: InvoiceImportLogistics;
     conversionMetadata?: {
         dealEffectiveRate: number;
         shipmentEffectiveRate: number;
@@ -124,6 +161,47 @@ export interface Invoice {
         extraCostsUsd: number;
         totalUsd: number;
         remainingBalanceRate: number;
+        dealPaidIls?: number;
+        dealUnpaidUsd?: number;
+        dealTotalIls?: number;
+        shipmentPaidIls?: number;
+        shipmentUnpaidUsd?: number;
+        shipmentTotalIls?: number;
+        /** 0–1: حصة صفقة من مجموع totalAmount لصفقات الشحنة — تخليص ونقل من التخليص */
+        dealShareByDealsValue?: number;
+        /** 0–1: حصة الصفقة من حجم/وزن صفقات الشحنة — شحن دولي فقط */
+        dealShareByVolume?: number;
+        /** مجموع totalAmount (USD) لصفقات الشحنة عند التوزيع */
+        shipmentDealsTotalUsd?: number;
+        /** totalAmount لهذه الصفقة كما دخل في حساب النسبة */
+        dealThisTotalUsdForShare?: number;
+        dealShareOfShipment?: number;
+        dealShipmentAllocatedIls?: number;
+        /** @deprecated استخدم dealShareByDealsValue — يُعبأ بنفس النسبة للتوافق */
+        dealShareOfClearanceVolume?: number;
+        dealClearanceAllocatedIls?: number;
+        clearancePaymentsTotalIls?: number;
+        /** حوض التخليص بالشيقل الذي ضُرب في النسبة (قد يساوي دفعات أو بنود حسب المصدر) */
+        clearancePoolIls?: number;
+        /** من الخادم: cost_lines | payments */
+        clearanceCostBasis?: string;
+        /** مجموع بنود التخليص بالشيقل (للمقارنة عند اختلافها عن الدفعات) */
+        costLinesTotalIls?: number;
+        /** حصة الصفقة من شحن على التخليص خارج حصة الجمارك: «شحن محلي» و/أو «دفعة الشحن (الناقل)» في cost_lines */
+        dealLocalShippingFromClearanceIls?: number;
+        /** مجموع أسطر الشحن المحلي في التخليص قبل ضرب نسبة الصفقة */
+        clearanceLocalShippingLinesTotalIls?: number;
+        allocationMethod?: string;
+        /** من الخادم: شحن دولي بالحجم ووزن التخليص بالقيمة — غيابه = فاتورة قبل فصل النسب */
+        dualShareAllocations?: boolean;
+        /** مجموع عمولات/تكاليف تحويل الدفعات المنفّذة بالشيكل (من transfer_cost × usd_to_ils) */
+        dealTransferCommissionsIls?: number;
+        /** جزء من دفعات الصفقة فقط */
+        dealTransferCommissionsFromDealPaymentsIls?: number;
+        /** مجموع عمولات دفعات شحن الشحنة (قبل التوزيع على الصفقات) */
+        shipmentTransferCommissionsTotalIls?: number;
+        /** حصة هذه الصفقة من عمولات دفعات الشحنة (× نسبة الحجم/الوزن مثل الشحن الدولي) */
+        dealTransferCommissionsFromShipmentShareIls?: number;
     };
     currency?: 'USD' | 'ILS';
     imageUrls?: string[];
@@ -152,4 +230,12 @@ export interface Invoice {
     updatedAt: string;
     createdBy: string;
     supplierLogoUrl?: string;
+    /** معرف قيد استلام المخزون في SQL بعد الترحيل التلقائي */
+    glPurchaseReceiptJournalId?: number;
+    /** FK شحنة SQL */
+    shipment?: string;
+    /** FK تخليص SQL */
+    clearanceId?: string;
+    /** فاتورة شراء SQL مرحّلة إلى المحاسبة — لا يُعاد حساب التكلفة الأرضية تلقائياً */
+    isPosted?: boolean;
 }

@@ -33,6 +33,16 @@ async function asList(res: Response): Promise<any[]> {
   return Array.isArray(data) ? data : (data.results ?? []);
 }
 
+/** ربط صندوق (معرّف Firestore) بحساب في شجرة المحاسبة */
+export type CashBoxLedgerLink = {
+  id: number;
+  external_id: string;
+  name: string;
+  currency_code: string;
+  account_id: number;
+  account_code: string;
+};
+
 export const accountingApi = {
   getAccounts: () =>
     fetch(`${ACC}/accounts/`, { headers: headers() }).then(asList),
@@ -65,8 +75,13 @@ export const accountingApi = {
     await handle(res, "deleteAccount");
   },
 
-  getJournals: () =>
-    fetch(`${ACC}/journals/`, { headers: headers() }).then(asList),
+  getJournals: (params?: Record<string, string>) => {
+    const q =
+      params && Object.keys(params).length
+        ? `?${new URLSearchParams(params)}`
+        : "";
+    return fetch(`${ACC}/journals/${q}`, { headers: headers() }).then(asList);
+  },
 
   getJournal: async (id: number) => {
     const res = await fetch(`${ACC}/journals/${id}/`, { headers: headers() });
@@ -165,4 +180,187 @@ export const accountingApi = {
     await handle(res, "trialBalance");
     return res.json();
   },
+
+  /** صندوق Firestore = نفس المعرف external_id؛ يُنشأ له حساب أصول في الشجرة بنفس الاسم */
+  registerCashBoxLedger: async (body: {
+    external_id: string;
+    name: string;
+    currency_code?: string;
+  }) => {
+    const res = await fetch(`${ACC}/cash-box-accounts/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "registerCashBoxLedger");
+    return res.json();
+  },
+
+  getCashBoxLedgers: async (): Promise<CashBoxLedgerLink[]> => {
+    const res = await fetch(`${ACC}/cash-box-accounts/`, { headers: headers() });
+    await handle(res, "cashBoxLedgers");
+    const data = await res.json();
+    const arr = Array.isArray(data) ? data : (data.results ?? []);
+    return arr as CashBoxLedgerLink[];
+  },
+
+  /** قيد إيداع: مدين صندوق GL | دائن رأس مال — بعد حفظ حركة Firestore */
+  postCashBoxDepositJournal: async (body: {
+    external_id: string;
+    amount: number;
+    transaction_date: string;
+    description: string;
+    firestore_transaction_id?: string;
+  }) => {
+    const res = await fetch(`${ACC}/cash-box-accounts/deposit-journal/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "postCashBoxDepositJournal");
+    return res.json() as Promise<{ journal_id: number }>;
+  },
+
+  postPurchaseReceipt: async (body: Record<string, unknown>) => {
+    const res = await fetch(`${ACC}/purchase-receipts/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "postPurchaseReceipt");
+    return res.json();
+  },
+
+  reverseJournal: async (id: number, transaction_date?: string) => {
+    const res = await fetch(`${ACC}/journals/${id}/reverse/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(transaction_date ? { transaction_date } : {}),
+    });
+    await handle(res, "reverseJournal");
+    return res.json();
+  },
+
+  // ─── Exchange Rates ───
+
+  getExchangeRates: (params?: Record<string, string>) => {
+    const q = params && Object.keys(params).length ? `?${new URLSearchParams(params)}` : "";
+    return fetch(`${ACC}/exchange-rates/${q}`, { headers: headers() }).then(asList);
+  },
+
+  createExchangeRate: async (body: Record<string, unknown>) => {
+    const res = await fetch(`${ACC}/exchange-rates/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "createExchangeRate");
+    return res.json();
+  },
+
+  updateExchangeRate: async (id: number, body: Record<string, unknown>) => {
+    const res = await fetch(`${ACC}/exchange-rates/${id}/`, {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "updateExchangeRate");
+    return res.json();
+  },
+
+  deleteExchangeRate: async (id: number) => {
+    const res = await fetch(`${ACC}/exchange-rates/${id}/`, {
+      method: "DELETE",
+      headers: headers(),
+    });
+    await handle(res, "deleteExchangeRate");
+  },
+
+  getExchangeRate: async (params: { from_currency: string; to_currency: string; date: string }) => {
+    const q = new URLSearchParams(params);
+    const res = await fetch(`${ACC}/exchange-rates/get-rate/?${q}`, { headers: headers() });
+    await handle(res, "getExchangeRate");
+    return res.json();
+  },
+
+  // ─── Fiscal Periods ───
+
+  getFiscalPeriods: () =>
+    fetch(`${ACC}/fiscal-periods/`, { headers: headers() }).then(asList),
+
+  createFiscalPeriod: async (body: Record<string, unknown>) => {
+    const res = await fetch(`${ACC}/fiscal-periods/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "createFiscalPeriod");
+    return res.json();
+  },
+
+  createFiscalYear: async (year: number) => {
+    const res = await fetch(`${ACC}/fiscal-periods/create-year/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ year }),
+    });
+    await handle(res, "createFiscalYear");
+    return res.json();
+  },
+
+  closeFiscalPeriod: async (id: number) => {
+    const res = await fetch(`${ACC}/fiscal-periods/${id}/close/`, {
+      method: "POST",
+      headers: headers(),
+    });
+    await handle(res, "closeFiscalPeriod");
+    return res.json();
+  },
+
+  reopenFiscalPeriod: async (id: number) => {
+    const res = await fetch(`${ACC}/fiscal-periods/${id}/reopen/`, {
+      method: "POST",
+      headers: headers(),
+    });
+    await handle(res, "reopenFiscalPeriod");
+    return res.json();
+  },
+
+  // ─── Tax Rates ───
+
+  getTaxRates: () =>
+    fetch(`${ACC}/tax-rates/`, { headers: headers() }).then(asList),
+
+  createTaxRate: async (body: Record<string, unknown>) => {
+    const res = await fetch(`${ACC}/tax-rates/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "createTaxRate");
+    return res.json();
+  },
+
+  updateTaxRate: async (id: number, body: Record<string, unknown>) => {
+    const res = await fetch(`${ACC}/tax-rates/${id}/`, {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "updateTaxRate");
+    return res.json();
+  },
+
+  deleteTaxRate: async (id: number) => {
+    const res = await fetch(`${ACC}/tax-rates/${id}/`, {
+      method: "DELETE",
+      headers: headers(),
+    });
+    await handle(res, "deleteTaxRate");
+  },
+
+  // ─── Currencies ───
+
+  getCurrencies: () =>
+    fetch(`${ACC}/currencies/`, { headers: headers() }).then(asList),
 };

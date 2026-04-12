@@ -1,32 +1,64 @@
 import React, { useState } from 'react';
-import { Deal, DealInstallment, User } from '@/types';
+import { Deal, DealInstallment, DealPayment, User } from '@/types';
 import {
     Lock, Unlock, DollarSign, CheckCircle2, Clock,
     ArrowRight, RefreshCw, Calendar, Download,
     Eye, ImageIcon, FileText, AlertCircle,
-    X, Wallet, Banknote
+    X, Wallet, Banknote, BookOpen, Trash2,
 } from 'lucide-react';
 import { PaymentRegistration } from '@/components/forms/deal-parts/PaymentRegistration';
+import {
+    findPaymentForInstallmentId,
+    pickBestDealPayment,
+} from '@/utils/dealPaymentMatch';
+import { isAwaitingSupplierConfirmation } from '@/utils/dealPaymentFlow';
+
+function parseSqlJournalId(p: DealPayment | undefined): number | null {
+    if (p == null) return null;
+    const raw = p.journalId as number | string | undefined;
+    if (raw === undefined || raw === null || raw === '') return null;
+    const n = typeof raw === 'string' ? parseInt(String(raw).trim(), 10) : Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+}
 
 interface PaymentProgressProps {
     installments: DealInstallment[];
     deal: Partial<Deal>;
+    /** شحنة: عناوين «دفعات الشحنة» بدل صفقة الشراء */
+    variant?: 'deal' | 'shipment';
     currentUser: User;
     onPaymentOperation: (
-        operation: "claim" | "swift" | "add" | "confirm" | "cancel",
+        operation:
+            | "claim"
+            | "swift"
+            | "add"
+            | "confirm"
+            | "cancel"
+            | "unpost"
+            | "linkJournal",
         paymentType: string,
         data: any,
         paymentId?: string
     ) => void;
     onConfirmSupplier: (data: any) => void;
+    /** فتح شاشة قيد اليومية (نفس مسار /accounting/journals/{id}) */
+    onOpenAccountingJournal?: (
+        journalId: number | null,
+        dealRef?: { dealId: string; dealNumber: string; displayName: string }
+    ) => void;
+    /** إخفاء حذف الدفعة (مثلاً شحنة مسلّمة) */
+    readOnly?: boolean;
 }
 
 export const PaymentProgress: React.FC<PaymentProgressProps> = ({
     installments,
     deal,
+    variant = 'deal',
     currentUser,
     onPaymentOperation,
-    onConfirmSupplier
+    onConfirmSupplier,
+    onOpenAccountingJournal,
+    readOnly = false,
 }) => {
     const [selectedInstallment, setSelectedInstallment] = useState<DealInstallment | null>(null);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -37,17 +69,53 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
         window.open(imageUrl, '_blank', 'width=800,height=600');
     };
 
-    const downloadImage = (imageUrl: string, filename: string) => {
-        const link = document.createElement('a');
-        link.href = imageUrl;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+    const downloadImage = async (imageUrl: string, filename: string) => {
+        try {
+            const res = await fetch(imageUrl);
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        } catch {
+            window.open(imageUrl, '_blank', 'noopener,noreferrer');
+        }
     };
 
+    /** نفس منطق البطاقات العلوية في DealForm: مجموع مبالغ كل صفوف الدفع */
+    const paidAmountFromPayments =
+        deal.payments?.reduce((s, p) => s + Number(p.amount || 0), 0) || 0;
+
     const getPaymentForInstallment = (installmentId: string) => {
-        return deal.payments?.find(p => p.installmentId === installmentId);
+        const found = findPaymentForInstallmentId(deal, installmentId);
+        if (found) return found;
+        if (
+            installments.length === 1 &&
+            (deal.payments?.length || 0) > 0
+        ) {
+            return pickBestDealPayment(deal.payments!);
+        }
+        return undefined;
+    };
+
+    /** يتوافق مع البطاقات العلوية: أي دفعة مسجّلة بمبلغ تُحسب مدفوعة للقسط */
+    const countsAsPaidForProgress = (
+        inst: DealInstallment,
+        payment: ReturnType<typeof getPaymentForInstallment>
+    ): boolean => {
+        if (inst.status === 'paid') return true;
+        if (!payment) return false;
+        if (Number(payment.amount || 0) > 0) return true;
+        if (payment.confirmedBySupplier) return true;
+        if (payment.bankSwiftImage && String(payment.bankSwiftImage).trim()) return true;
+        if (payment.isPosted) return true;
+        if (payment.cashBoxWithdrawalAt && String(payment.cashBoxWithdrawalAt).trim())
+            return true;
+        return false;
     };
 
     const isInstallmentUnlocked = (installmentNumber: number): boolean => {
@@ -55,19 +123,17 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
         const previousInstallment = installments.find(i => i.installmentNumber === installmentNumber - 1);
         if (previousInstallment) {
             const previousPayment = getPaymentForInstallment(previousInstallment.id);
-            return !!previousPayment?.bankSwiftImage || previousInstallment.status === 'paid';
+            return countsAsPaidForProgress(previousInstallment, previousPayment);
         }
         return false;
     };
 
-    const totalPaid = installments.reduce((sum, inst) => {
-        const payment = getPaymentForInstallment(inst.id);
-        if (inst.status === 'paid' || payment?.bankSwiftImage) return sum + inst.amount;
-        return sum;
-    }, 0);
-
     const grandTotal = deal.totalAmount || 0;
-    const progressPercentage = grandTotal > 0 ? (totalPaid / grandTotal) * 100 : 0;
+    /** إجمالي المعروض = مجموع payments (مثل البطاقات الخضراء/الصفراء)، لا يعتمد على ربط القسط فقط */
+    const totalPaid = paidAmountFromPayments;
+    const progressPercentage =
+        grandTotal > 0 ? (totalPaid / grandTotal) * 100 : 0;
+    const progressRingPercent = Math.min(100, progressPercentage);
 
     const handleStartPayment = (installment: DealInstallment) => {
         const unlocked = isInstallmentUnlocked(installment.installmentNumber);
@@ -100,18 +166,47 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
     };
 
     const handleSavePayment = (data: any) => {
-        const payment = getPaymentForInstallment(selectedInstallment?.id || '');
-        if (payment?.id) {
-            onPaymentOperation("swift", `دفعة_${selectedInstallment?.installmentNumber}`, data, payment.id);
+        const inst = selectedInstallment;
+        if (!inst) return;
+        let payment = getPaymentForInstallment(inst.id);
+        if (
+            payment &&
+            payment.installmentNumber != null &&
+            Number(payment.installmentNumber) !== Number(inst.installmentNumber)
+        ) {
+            payment = undefined;
         }
+        onPaymentOperation(
+            "swift",
+            `دفعة_${inst.installmentNumber}`,
+            {
+                ...data,
+                installmentId: inst.id,
+                installmentNumber: inst.installmentNumber,
+            },
+            payment?.id
+        );
         setShowPaymentModal(false);
         setRefreshKey(prev => prev + 1);
     };
 
     const handleConfirmSupplier = (data: any) => {
-        const payment = getPaymentForInstallment(selectedInstallment?.id || '');
+        const inst = selectedInstallment;
+        if (!inst) return;
+        let payment = getPaymentForInstallment(inst.id);
+        if (
+            payment &&
+            payment.installmentNumber != null &&
+            Number(payment.installmentNumber) !== Number(inst.installmentNumber)
+        ) {
+            payment = undefined;
+        }
         if (payment?.id) {
             onConfirmSupplier({ ...data, paymentId: payment.id });
+        } else {
+            alert(
+                "❌ لم يُعثر على دفعة تطابق هذا القسط. حدّث الصفحة (F5) ثم جرّب من سطر الدفعة الصحيحة."
+            );
         }
         setShowPaymentModal(false);
         setRefreshKey(prev => prev + 1);
@@ -119,10 +214,50 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
 
     const handleRefresh = () => setRefreshKey(prev => prev + 1);
 
+    const openJournalForPayment = (payment: DealPayment | undefined) => {
+        const jid = parseSqlJournalId(payment);
+        if (jid == null) {
+            alert(
+                "لا يوجد قيد يومية مرتبط بهذه الدفعة.\n\nيظهر رقم القيد بعد الترحيل المحاسبي للدفعة."
+            );
+            return;
+        }
+        const dealRef =
+            variant === 'deal' && deal.id
+                ? {
+                      dealId: String(deal.id),
+                      dealNumber: (deal.dealNumber || '').trim(),
+                      displayName: [
+                          deal.dealNumber,
+                          (deal.dealDescription || deal.originalOfferNumber || '').trim(),
+                      ]
+                          .filter(Boolean)
+                          .join(' — '),
+                  }
+                : undefined;
+        if (onOpenAccountingJournal) {
+            onOpenAccountingJournal(jid, dealRef);
+        } else {
+            const path = `/accounting/journals/${jid}`;
+            window.open(path, '_blank', 'noopener,noreferrer');
+        }
+    };
+
     const getInstallmentStatusText = (installment: DealInstallment) => {
         const payment = getPaymentForInstallment(installment.id);
         if (payment?.confirmedBySupplier) return 'مكتملة';
-        if (installment.status === 'paid' || payment?.bankSwiftImage) return 'بانتظار التأكيد';
+        if (countsAsPaidForProgress(installment, payment) && !payment?.confirmedBySupplier) {
+            if (payment?.bankSwiftImage && String(payment.bankSwiftImage).trim())
+                return 'بانتظار التأكيد';
+            if (payment?.isPosted) return 'مدفوعة (مرحّل)';
+            if (
+                payment?.cashBoxWithdrawalAt &&
+                String(payment.cashBoxWithdrawalAt).trim()
+            )
+                return 'مدفوعة (صندوق)';
+            if (installment.status === 'paid') return 'بانتظار التأكيد';
+            if (Number(payment?.amount || 0) > 0) return 'مدفوعة (مسجّلة)';
+        }
         if (payment?.alibabaClaimImage) return 'تم رفع المطالبة';
         return 'غير مدفوعة';
     };
@@ -175,12 +310,25 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                             </div>
                         )}
 
-                        <button
-                            onClick={() => { setShowDetailsModal(false); setSelectedInstallment(null); }}
-                            className="p-1.5 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 rounded-lg text-gray-400 transition-colors"
-                        >
-                            <X className="w-5 h-5" />
-                        </button>
+                        <div className="flex items-center gap-2 shrink-0">
+                            {payment && parseSqlJournalId(payment) != null && (
+                                <button
+                                    type="button"
+                                    onClick={() => openJournalForPayment(payment)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-200 bg-white text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                                >
+                                    <BookOpen className="w-4 h-4" />
+                                    فتح القيد
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => { setShowDetailsModal(false); setSelectedInstallment(null); }}
+                                className="p-1.5 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 rounded-lg text-gray-400 transition-colors"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
                     </div>
 
                     {/* Content: Grid Layout to reduce height */}
@@ -204,7 +352,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                             </div>
                                             <div className="flex justify-between items-center p-2 bg-white dark:bg-black/20 rounded-lg border border-gray-100 dark:border-gray-800">
                                                 <span className="text-xs text-gray-500 dark:text-gray-400">تكلفة الحوالة</span>
-                                                <span className="font-bold text-amber-600 dark:text-amber-500">${payment.transferCost?.toLocaleString() || '0'}</span>
+                                                <span className="font-bold text-slate-700 dark:text-slate-300">${payment.transferCost?.toLocaleString() || '0'}</span>
                                             </div>
                                             <div className="flex justify-between items-center p-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-100 dark:border-emerald-800">
                                                 <span className="text-xs text-emerald-700 dark:text-emerald-400 font-bold">الإجمالي الكلي</span>
@@ -253,7 +401,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                         {/* Claim Image */}
                                         <div className="relative group border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-gray-50 dark:bg-black/20 flex flex-col">
                                             <div className="absolute top-2 right-2 left-2 z-10 flex justify-between items-start opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <span className="bg-amber-100/90 text-amber-700 text-[10px] px-2 py-0.5 rounded backdrop-blur-sm font-bold shadow-sm">المطالبة (Claim)</span>
+                                                <span className="bg-slate-200/90 text-slate-800 text-[10px] px-2 py-0.5 rounded backdrop-blur-sm font-bold shadow-sm dark:bg-slate-700/90 dark:text-slate-100">المطالبة (Claim)</span>
                                                 <div className="flex gap-1">
                                                     <button onClick={() => downloadImage(payment.alibabaClaimImage || '', 'claim.jpg')} className="p-1.5 bg-white/90 text-gray-700 rounded hover:text-blue-600 shadow-sm"><Download className="w-3 h-3" /></button>
                                                     <button onClick={() => openImageInPopup(payment.alibabaClaimImage || '')} className="p-1.5 bg-white/90 text-gray-700 rounded hover:text-blue-600 shadow-sm"><Eye className="w-3 h-3" /></button>
@@ -326,7 +474,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                         <div>
                             <div className="flex items-center gap-2">
                                 <h3 className="font-bold text-gray-900 dark:text-white text-lg">
-                                    دفعات الشحنة
+                                    {variant === 'shipment' ? 'دفعات الشحنة' : 'دفعات الصفقة'}
                                 </h3>
                                 <button
                                     onClick={handleRefresh}
@@ -353,7 +501,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                         <div className="w-16 h-16 relative flex items-center justify-center">
                             <svg className="w-full h-full transform -rotate-90">
                                 <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="4" fill="transparent" className="text-gray-100 dark:text-gray-700" />
-                                <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="4" fill="transparent" strokeDasharray={175.9} strokeDashoffset={175.9 - (progressPercentage / 100) * 175.9} className="text-blue-500 transition-all duration-1000 ease-out" />
+                                <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="4" fill="transparent" strokeDasharray={175.9} strokeDashoffset={175.9 - (progressRingPercent / 100) * 175.9} className="text-blue-500 transition-all duration-1000 ease-out" />
                             </svg>
                         </div>
                     </div>
@@ -365,9 +513,19 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                 {installments.map((installment) => {
                     const unlocked = isInstallmentUnlocked(installment.installmentNumber);
                     const payment = getPaymentForInstallment(installment.id);
-                    const hasSwift = !!payment?.bankSwiftImage || installment.status === 'paid';
+                    const hasPaidProgress = countsAsPaidForProgress(installment, payment);
+                    const awaitingSupplier = isAwaitingSupplierConfirmation(payment);
                     const isFullyFinished = !!payment?.confirmedBySupplier;
-                    const hasAnyData = hasSwift || !!payment?.alibabaClaimImage || isFullyFinished;
+                    const hasAnyData = hasPaidProgress || !!payment?.alibabaClaimImage || isFullyFinished;
+                    const paymentSqlId =
+                        payment && /^\d+$/.test(String(payment.id).trim())
+                            ? String(payment.id).trim()
+                            : "";
+                    const canDeleteFromRecord =
+                        !readOnly &&
+                        paymentSqlId &&
+                        payment &&
+                        !payment.isPosted;
 
                     return (
                         <div
@@ -376,7 +534,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 group relative p-4 rounded-xl border transition-all duration-200 
                                 ${isFullyFinished
                                     ? 'bg-green-50/40 dark:bg-green-900/10 border-green-200 dark:border-green-800/30'
-                                    : hasSwift
+                                    : hasPaidProgress
                                         ? 'bg-blue-50/40 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800/30'
                                         : unlocked
                                             ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-blue-300'
@@ -389,12 +547,12 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                     <div className={`
                                         w-10 h-10 rounded-full flex items-center justify-center border shadow-sm
                                         ${isFullyFinished ? 'bg-green-100 border-green-200 text-green-600 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400' :
-                                            hasSwift ? 'bg-blue-100 border-blue-200 text-blue-600 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-400' :
+                                            hasPaidProgress ? 'bg-blue-100 border-blue-200 text-blue-600 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-400' :
                                                 unlocked ? 'bg-white border-gray-200 text-gray-500 dark:bg-gray-800 dark:border-gray-600' :
                                                     'bg-gray-100 border-gray-200 text-gray-400 dark:bg-gray-800 dark:border-gray-700'}
                                     `}>
                                         {isFullyFinished ? <CheckCircle2 className="w-5 h-5" /> :
-                                            hasSwift ? <DollarSign className="w-5 h-5" /> :
+                                            hasPaidProgress ? <DollarSign className="w-5 h-5" /> :
                                                 unlocked ? <span className="font-bold text-sm">{installment.installmentNumber}</span> :
                                                     <Lock className="w-4 h-4" />}
                                     </div>
@@ -411,20 +569,98 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                         <div className="flex items-center gap-3 mt-1 text-sm">
                                             <span className="font-bold text-gray-800 dark:text-gray-200">${installment.amount.toLocaleString()}</span>
                                             <span className="text-gray-300 dark:text-gray-600">|</span>
-                                            <span className={`text-xs ${isFullyFinished ? 'text-green-600' : hasSwift ? 'text-blue-600' : 'text-gray-500'}`}>
+                                            <span className={`text-xs ${isFullyFinished ? 'text-green-600' : hasPaidProgress ? 'text-blue-600' : 'text-gray-500'}`}>
                                                 {getInstallmentStatusText(installment)}
                                             </span>
                                         </div>
                                     </div>
                                 </div>
 
-                                <div className="flex items-center gap-2 pl-2">
+                                <div className="flex items-center gap-2 pl-2 flex-wrap sm:flex-nowrap justify-end">
+                                    {parseSqlJournalId(payment) != null && (
+                                        <button
+                                            type="button"
+                                            title="فتح القيد في المحاسبة"
+                                            onClick={() => openJournalForPayment(payment)}
+                                            className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                        >
+                                            <BookOpen className="w-5 h-5" />
+                                        </button>
+                                    )}
+                                    {payment &&
+                                        parseSqlJournalId(payment) == null &&
+                                        !payment.isPosted &&
+                                        /^\d+$/.test(String(payment.id).trim()) &&
+                                        (hasPaidProgress ||
+                                            isFullyFinished ||
+                                            payment.confirmedBySupplier) && (
+                                        <button
+                                            type="button"
+                                            title="إن أنشأت القيد يدوياً في المحاسبة ولم يظهر رابط الدفتر — أدخل رقم القيد"
+                                            onClick={() => {
+                                                const raw = window.prompt(
+                                                    "رقم قيد اليومية المرحّل (Journal ID) من شاشة المحاسبة:",
+                                                    ""
+                                                );
+                                                if (raw == null || String(raw).trim() === "") return;
+                                                const n = parseInt(String(raw).trim(), 10);
+                                                if (!Number.isFinite(n) || n <= 0) {
+                                                    alert("رقم غير صالح.");
+                                                    return;
+                                                }
+                                                onPaymentOperation(
+                                                    "linkJournal",
+                                                    `دفعة_${installment.installmentNumber}`,
+                                                    { journalId: n },
+                                                    String(payment.id)
+                                                );
+                                                setRefreshKey((k) => k + 1);
+                                            }}
+                                            className="shrink-0 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                                        >
+                                            ربط قيد
+                                        </button>
+                                    )}
                                     {hasAnyData && (
                                         <button
+                                            type="button"
+                                            title="تفاصيل الدفعة والمستندات"
                                             onClick={() => { setSelectedInstallment(installment); setShowDetailsModal(true); }}
                                             className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                                         >
                                             <Eye className="w-5 h-5" />
+                                        </button>
+                                    )}
+
+                                    {canDeleteFromRecord && (
+                                        <button
+                                            type="button"
+                                            title={
+                                                variant === "shipment"
+                                                    ? "حذف الدفعة من سجل الشحنة (غير مسموح إن وُجد قيد مرحّل)"
+                                                    : "حذف الدفعة من السجل (غير مسموح إن وُجد قيد مرحّل)"
+                                            }
+                                            onClick={() => {
+                                                if (
+                                                    !window.confirm(
+                                                        `حذف «الدفعة ${installment.installmentNumber}» بمبلغ $${Number(
+                                                            payment?.amount || 0
+                                                        ).toLocaleString()} من السجل؟`
+                                                    )
+                                                ) {
+                                                    return;
+                                                }
+                                                onPaymentOperation(
+                                                    "cancel",
+                                                    `دفعة_${installment.installmentNumber}`,
+                                                    {},
+                                                    paymentSqlId
+                                                );
+                                                setRefreshKey((k) => k + 1);
+                                            }}
+                                            className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
+                                        >
+                                            <Trash2 className="w-5 h-5" />
                                         </button>
                                     )}
 
@@ -435,14 +671,14 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                             px-4 py-2 rounded-lg text-sm font-bold transition-all flex items-center gap-2
                                             ${isFullyFinished
                                                 ? 'bg-transparent text-green-600 cursor-default'
-                                                : hasSwift
+                                                : awaitingSupplier
                                                     ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-500/30'
                                                     : unlocked
                                                         ? 'bg-gray-900 text-white hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-gray-200'
                                                         : 'bg-gray-100 text-gray-400 cursor-not-allowed dark:bg-gray-800 dark:text-gray-600'}
                                         `}
                                     >
-                                        {isFullyFinished ? 'تمت بنجاح' : hasSwift ? 'تأكيد المورد' : 'إجراء الدفع'}
+                                        {isFullyFinished ? 'تمت بنجاح' : awaitingSupplier ? 'تأكيد المورد' : 'إجراء الدفع'}
                                         {!isFullyFinished && unlocked && <ArrowRight className="w-3.5 h-3.5" />}
                                     </button>
                                 </div>
@@ -453,12 +689,19 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
             </div>
 
             {/* Payment Forms Modal (No changes to logic, just wrapper) */}
-            {showPaymentModal && selectedInstallment && (
+            {showPaymentModal && selectedInstallment && (() => {
+                const modalPayment = getPaymentForInstallment(selectedInstallment.id);
+                const confirmOnlyModal = isAwaitingSupplierConfirmation(modalPayment);
+                return (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
                     <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-gray-700">
                         <div className="p-6">
                             <div className="flex justify-between items-center mb-6">
-                                <h3 className="font-bold text-xl text-gray-900 dark:text-white">تسجيل الدفعة {selectedInstallment.installmentNumber}</h3>
+                                <h3 className="font-bold text-xl text-gray-900 dark:text-white">
+                                    {confirmOnlyModal
+                                        ? `تأكيد المورد — الدفعة ${selectedInstallment.installmentNumber}`
+                                        : `تسجيل الدفعة ${selectedInstallment.installmentNumber}`}
+                                </h3>
                                 <button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-500">✕</button>
                             </div>
                             <PaymentRegistration
@@ -478,7 +721,8 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                         </div>
                     </div>
                 </div>
-            )}
+                );
+            })()}
 
             {renderDetailsModal()}
         </div>

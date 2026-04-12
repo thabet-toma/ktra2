@@ -16,7 +16,7 @@ import {
 interface DashboardProps {
     tasks: Task[];
     users: User[];
-    onNavigate: (view: AppView) => void;
+    onNavigate: (view: AppView, targetId?: string) => void;
     currentUser: User;
 }
 

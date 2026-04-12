@@ -1,33 +1,42 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   ArrowLeft,
   ArrowDownLeft,
   ArrowUpRight,
   Ban,
-} from 'lucide-react';
-import { CashBox, CashBoxTransaction } from '../../types';
-import { cashBoxTransactionsService } from '../../services/firestoreService';
-import { DepositModal } from './modals/DepositModal';
+  BookMarked,
+  Wallet,
+} from "lucide-react";
+import { CashBox, CashBoxTransaction } from "../../types";
+import { cashBoxTransactionsService } from "../../services/firestoreService";
+import { accountingApi } from "../../services/accountingApi";
+import { DepositModal } from "./modals/DepositModal";
 
 interface CashBoxStatementProps {
   cashBox: CashBox;
   onBack: () => void;
 }
 
-/* =========================
-   Helpers
-========================= */
+type GlRow = {
+  id: number;
+  date: string;
+  journal_id: number;
+  description: string;
+  ref_type?: string | null;
+  ref_id?: string | null;
+  debit: number;
+  credit: number;
+  balance: number;
+};
 
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
-
-  const dayName = date.toLocaleDateString('ar-EG', { weekday: 'long' });
-  const datePart = date.toLocaleDateString('en-GB');
-  const timePart = date.toLocaleTimeString('en-GB', {
-    hour: '2-digit',
-    minute: '2-digit',
+  const dayName = date.toLocaleDateString("ar-EG", { weekday: "long" });
+  const datePart = date.toLocaleDateString("en-GB");
+  const timePart = date.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
   });
-
   return { dayName, datePart, timePart };
 };
 
@@ -39,6 +48,61 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
   const [loading, setLoading] = useState(true);
   const [isDepositModalOpen, setIsDepositModalOpen] = useState(false);
 
+  const [glAccountId, setGlAccountId] = useState<number | null>(null);
+  const [glLoading, setGlLoading] = useState(false);
+  const [glError, setGlError] = useState<string | null>(null);
+  const [glRows, setGlRows] = useState<GlRow[]>([]);
+  const [glMeta, setGlMeta] = useState<{
+    account_name?: string;
+    account_code?: string;
+    opening_balance?: number;
+    closing_balance?: number;
+  }>({});
+
+  const resolveLedgerAccount = useCallback(async () => {
+    try {
+      const rows = await accountingApi.getCashBoxLedgers();
+      const link = rows.find((r) => String(r.external_id) === String(cashBox.id));
+      setGlAccountId(link?.account_id ?? null);
+    } catch {
+      setGlAccountId(null);
+    }
+  }, [cashBox.id]);
+
+  const loadGl = useCallback(async () => {
+    if (!glAccountId) {
+      setGlRows([]);
+      setGlError(null);
+      return;
+    }
+    setGlLoading(true);
+    setGlError(null);
+    try {
+      const end = new Date();
+      end.setFullYear(end.getFullYear() + 1);
+      const start = new Date();
+      start.setFullYear(start.getFullYear() - 5);
+      const data = await accountingApi.getGeneralLedger({
+        account_id: String(glAccountId),
+        start_date: start.toISOString().slice(0, 10),
+        end_date: end.toISOString().slice(0, 10),
+        include_unposted: "true",
+      });
+      setGlMeta({
+        account_name: data.account_name,
+        account_code: data.account_code,
+        opening_balance: Number(data.opening_balance ?? 0),
+        closing_balance: Number(data.closing_balance ?? 0),
+      });
+      setGlRows(Array.isArray(data.transactions) ? data.transactions : []);
+    } catch (e) {
+      setGlError(e instanceof Error ? e.message : "تعذر تحميل دفتر الأستاذ");
+      setGlRows([]);
+    } finally {
+      setGlLoading(false);
+    }
+  }, [glAccountId]);
+
   useEffect(() => {
     const unsubscribe =
       cashBoxTransactionsService.subscribeToTransactions(
@@ -48,15 +112,45 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
           setLoading(false);
         }
       );
-
     return () => unsubscribe();
   }, [cashBox.id]);
 
+  useEffect(() => {
+    setGlRows([]);
+    setGlError(null);
+    setGlMeta({});
+    setGlAccountId(null);
+    void resolveLedgerAccount();
+  }, [cashBox.id, resolveLedgerAccount]);
+
+  useEffect(() => {
+    if (glAccountId) void loadGl();
+  }, [glAccountId, loadGl]);
+
+  type MergedRow =
+    | { kind: "cash"; sort: number; tx: CashBoxTransaction }
+    | { kind: "gl"; sort: number; row: GlRow };
+
+  const mergedRows = useMemo(() => {
+    const out: MergedRow[] = [];
+    const cashAsc = [...transactions].reverse();
+    for (const tx of cashAsc) {
+      const t = new Date(tx.date).getTime();
+      out.push({ kind: "cash", sort: Number.isNaN(t) ? 0 : t, tx });
+    }
+    for (const row of glRows) {
+      const t = new Date(`${row.date}T12:00:00`).getTime() + (row.journal_id % 1000) * 0.001;
+      out.push({ kind: "gl", sort: t, row });
+    }
+    out.sort((a, b) => a.sort - b.sort);
+    return out;
+  }, [transactions, glRows]);
+
   const getTransactionIcon = (type: string) => {
     switch (type) {
-      case 'deposit':
+      case "deposit":
         return <ArrowDownLeft className="w-5 h-5 text-green-600" />;
-      case 'withdrawal':
+      case "withdrawal":
         return <ArrowUpRight className="w-5 h-5 text-red-600" />;
       default:
         return <Ban className="w-5 h-5 text-gray-500" />;
@@ -65,12 +159,12 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
 
   const getTransactionLabel = (type: string) => {
     switch (type) {
-      case 'deposit':
-        return 'إيداع';
-      case 'withdrawal':
-        return 'سحب';
-      case 'adjustment':
-        return 'تسوية';
+      case "deposit":
+        return "إيداع";
+      case "withdrawal":
+        return "سحب";
+      case "adjustment":
+        return "تسوية";
       default:
         return type;
     }
@@ -78,7 +172,6 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
 
   return (
     <div className="p-6 space-y-6">
-      {/* ================= Header ================= */}
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center">
           <button
@@ -87,26 +180,20 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
           >
             <ArrowLeft className="w-6 h-6 dark:text-white" />
           </button>
-
           <div>
-            <h1 className="text-2xl font-bold dark:text-white">
-              {cashBox.name}
-            </h1>
-            <p className="text-sm text-gray-500">كشف حساب الصندوق</p>
+            <h1 className="text-2xl font-bold dark:text-white">{cashBox.name}</h1>
+            <p className="text-sm text-gray-500">كشف الصندوق + دفتر الأستاذ العام</p>
           </div>
         </div>
 
         <div className="flex items-center gap-4">
           <div className="text-left">
-            <p className="text-xs text-gray-500">الرصيد الحالي</p>
+            <p className="text-xs text-gray-500">الرصيد الحالي (الصندوق)</p>
             <p className="text-2xl font-bold text-blue-600">
               {cashBox.currentBalance.toLocaleString()}
-              <span className="text-sm mr-1">
-                {cashBox.currency}
-              </span>
+              <span className="text-sm mr-1">{cashBox.currency}</span>
             </p>
           </div>
-
           <button
             onClick={() => setIsDepositModalOpen(true)}
             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center"
@@ -117,142 +204,183 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
         </div>
       </div>
 
-      {/* ================= Table ================= */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-right text-sm">
-            <thead className="bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-400 text-xs uppercase">
-              <tr>
-                <th className="px-4 py-3">التاريخ</th>
-                <th className="px-4 py-3">النوع</th>
-                <th className="px-6 py-3">الوصف</th>
-                <th className="px-4 py-3">المرجع</th>
-                <th className="px-4 py-3">دائن / مدين</th>
-                <th className="px-4 py-3">الرصيد</th>
-                <th className="px-4 py-3">بواسطة</th>
-              </tr>
-            </thead>
-
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-              {loading ? (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-6 py-10 text-center text-gray-500"
-                  >
-                    جاري التحميل...
-                  </td>
-                </tr>
-              ) : transactions.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-6 py-10 text-center text-gray-500"
-                  >
-                    لا توجد حركات حتى الآن
-                  </td>
-                </tr>
-              ) : (
-                transactions.map((tx) => {
-                  const { dayName, datePart, timePart } =
-                    formatDate(tx.date);
-
-                  return (
-                    <tr
-                      key={tx.id}
-                      className="hover:bg-blue-50 dark:hover:bg-gray-700/40 transition"
-                    >
-                      {/* Date */}
-                      <td className="px-4 py-3 text-gray-700 dark:text-gray-300">
-                        <div className="flex flex-col leading-tight">
-                          <span className="font-semibold">
-                            {dayName}
-                          </span>
-                          <span className="text-xs">
-                            {datePart}
-                          </span>
-                          <span className="text-xs text-gray-400">
-                            {timePart}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Type */}
-                      <td className="px-4 py-3">
-                        <div className="flex items-center">
-                          <div
-                            className={`p-1.5 rounded-full ml-2
-                              ${
-                                tx.type === 'deposit'
-                                  ? 'bg-green-100'
-                                  : tx.type === 'withdrawal'
-                                  ? 'bg-red-100'
-                                  : 'bg-gray-100'
-                              }`}
-                          >
-                            {getTransactionIcon(tx.type)}
-                          </div>
-                          <span className="font-medium">
-                            {getTransactionLabel(tx.type)}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Description */}
-                      <td
-                        className="px-6 py-3 max-w-[300px] truncate"
-                        title={tx.description}
-                      >
-                        {tx.description}
-                      </td>
-
-                      {/* Reference */}
-                      <td
-                        className="px-4 py-3 text-xs text-gray-500 font-mono truncate max-w-[140px]"
-                        title={tx.reference}
-                      >
-                        {tx.reference || '-'}
-                      </td>
-
-                      {/* Amount */}
-                      <td
-                        className={`px-4 py-3 font-bold
-                          ${
-                            tx.type === 'deposit'
-                              ? 'text-green-600'
-                              : 'text-red-600'
-                          }`}
-                      >
-                        {tx.type === 'deposit' ? '+' : '-'}
-                        {tx.amount.toLocaleString()}
-                      </td>
-
-                      {/* Balance */}
-                      <td className="px-4 py-3 font-bold dark:text-white">
-                        {tx.balanceAfter?.toLocaleString() ?? '-'}
-                      </td>
-
-                      {/* Created By */}
-                      <td
-                        className="px-4 py-3 text-xs text-gray-400 truncate max-w-[120px]"
-                        title={tx.createdBy}
-                      >
-                        {tx.createdBy}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+      <div className="space-y-2">
+        <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+          <Wallet className="w-5 h-5 text-blue-600" />
+          حركات الصندوق والقيود
+        </h2>
+        <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+          دمج سجل الصندوق (Firestore) مع أسطر دفتر الأستاذ لحساب النقدية المربوط بالصندوق — ترتيب زمني واحد.
+          إيداع جديد يُنشئ حركة صندوق وقيداً (مدين الصندوق، دائن رأس المال) عند توفر الربط المحاسبي والفترة
+          المفتوحة.
+        </p>
       </div>
 
-      {/* ================= Deposit Modal ================= */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
+        {!glAccountId ? (
+          <div className="px-4 py-2 border-b border-amber-100 dark:border-amber-900/40 bg-amber-50/80 dark:bg-amber-950/20 text-xs text-amber-900 dark:text-amber-100">
+            لا يوجد حساب GL مربوط — تظهر حركات الصندوق فقط. اربط الصندوق من قائمة الصناديق لعرض القيود
+            وإنشاء قيد الإيداع تلقائياً.
+          </div>
+        ) : (
+          <div className="px-4 py-3 flex flex-wrap gap-4 text-sm border-b border-gray-100 dark:border-gray-700 bg-slate-50/80 dark:bg-slate-900/40">
+            <div className="flex items-center gap-1">
+              <BookMarked className="w-4 h-4 text-indigo-600 shrink-0" />
+              <span className="text-gray-500">الحساب: </span>
+              <span className="font-mono font-bold">{glMeta.account_code || "—"}</span>{" "}
+              <span className="font-semibold">{glMeta.account_name || ""}</span>
+            </div>
+            <div>
+              <span className="text-gray-500">رصيد افتتاحي (GL): </span>
+              <span className="font-bold tabular-nums">
+                {(glMeta.opening_balance ?? 0).toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </span>
+            </div>
+            <div>
+              <span className="text-gray-500">رصيد ختامي (GL): </span>
+              <span className="font-bold tabular-nums text-indigo-700 dark:text-indigo-300">
+                {(glMeta.closing_balance ?? 0).toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+              </span>
+            </div>
+          </div>
+        )}
+        {glAccountId && glLoading ? (
+          <div className="p-10 text-center text-gray-500">جاري تحميل دفتر الأستاذ...</div>
+        ) : glAccountId && glError ? (
+          <div className="p-8 text-center text-red-600 text-sm">{glError}</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-sm">
+              <thead className="bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-400 text-xs uppercase">
+                <tr>
+                  <th className="px-3 py-2">التاريخ</th>
+                  <th className="px-3 py-2">المصدر</th>
+                  <th className="px-3 py-2">البيان</th>
+                  <th className="px-3 py-2">مرجع</th>
+                  <th className="px-3 py-2">مدين</th>
+                  <th className="px-3 py-2">دائن</th>
+                  <th className="px-3 py-2">رصيد</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                {loading ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-10 text-center text-gray-500">
+                      جاري التحميل...
+                    </td>
+                  </tr>
+                ) : mergedRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-6 py-10 text-center text-gray-500">
+                      لا توجد حركات في الجدول الموحّد
+                    </td>
+                  </tr>
+                ) : (
+                  mergedRows.map((item) => {
+                    if (item.kind === "cash") {
+                      const tx = item.tx;
+                      const { dayName, datePart, timePart } = formatDate(tx.date);
+                      const isDep = tx.type === "deposit";
+                      const isWith = tx.type === "withdrawal";
+                      const adjPos = tx.type === "adjustment" && tx.amount >= 0;
+                      const adjNeg = tx.type === "adjustment" && tx.amount < 0;
+                      return (
+                        <tr
+                          key={`c-${tx.id}`}
+                          className="hover:bg-blue-50/50 dark:hover:bg-gray-700/40 bg-blue-50/20 dark:bg-blue-950/10"
+                        >
+                          <td className="px-3 py-2 text-gray-700 dark:text-gray-300">
+                            <div className="flex flex-col leading-tight text-xs">
+                              <span className="font-semibold">{dayName}</span>
+                              <span>{datePart}</span>
+                              <span className="text-gray-400">{timePart}</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1">
+                              {getTransactionIcon(tx.type)}
+                              <span className="text-xs font-semibold">
+                                صندوق — {getTransactionLabel(tx.type)}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 max-w-[260px] truncate" title={tx.description}>
+                            {tx.description}
+                          </td>
+                          <td
+                            className="px-3 py-2 text-xs text-gray-500 font-mono truncate max-w-[120px]"
+                            title={tx.reference}
+                          >
+                            {tx.reference || "—"}
+                          </td>
+                          <td className="px-3 py-2 tabular-nums text-green-700 dark:text-green-400 font-semibold">
+                            {isDep || adjPos
+                              ? Math.abs(tx.amount).toLocaleString(undefined, { maximumFractionDigits: 2 })
+                              : "—"}
+                          </td>
+                          <td className="px-3 py-2 tabular-nums text-red-700 dark:text-red-400 font-semibold">
+                            {isWith || adjNeg
+                              ? Math.abs(tx.amount).toLocaleString(undefined, { maximumFractionDigits: 2 })
+                              : "—"}
+                          </td>
+                          <td className="px-3 py-2 font-bold tabular-nums text-xs text-gray-700 dark:text-gray-200">
+                            {tx.balanceAfter != null ? tx.balanceAfter.toLocaleString() : "—"}
+                            <span className="block font-normal text-[10px] text-gray-400">رصيد صندوق</span>
+                          </td>
+                        </tr>
+                      );
+                    }
+                    const row = item.row;
+                    return (
+                      <tr key={`g-${row.id}`} className="hover:bg-indigo-50/40 dark:hover:bg-gray-700/40">
+                        <td className="px-3 py-2 whitespace-nowrap font-mono text-xs">{row.date}</td>
+                        <td className="px-3 py-2 text-xs font-semibold text-indigo-800 dark:text-indigo-200">
+                          قيد #{row.journal_id}
+                        </td>
+                        <td className="px-3 py-2 max-w-[280px] truncate" title={row.description}>
+                          {row.description}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-500 truncate max-w-[120px]">
+                          {[row.ref_type, row.ref_id].filter(Boolean).join(" ") || "—"}
+                        </td>
+                        <td className="px-3 py-2 tabular-nums text-green-700 dark:text-green-400">
+                          {Number(row.debit) > 0
+                            ? Number(row.debit).toLocaleString(undefined, { maximumFractionDigits: 2 })
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2 tabular-nums text-red-700 dark:text-red-400">
+                          {Number(row.credit) > 0
+                            ? Number(row.credit).toLocaleString(undefined, { maximumFractionDigits: 2 })
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2 font-bold tabular-nums dark:text-white text-xs">
+                          {Number(row.balance).toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}
+                          <span className="block font-normal text-[10px] text-gray-400">رصيد GL</span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       <DepositModal
         isOpen={isDepositModalOpen}
         onClose={() => setIsDepositModalOpen(false)}
         cashBox={cashBox}
+        onDepositComplete={() => void loadGl()}
       />
     </div>
   );

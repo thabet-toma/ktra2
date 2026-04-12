@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { cashBoxesService } from '../../../services/firestoreService';
+import { accountingApi } from '../../../services/accountingApi';
 import { Currency } from '../../../types';
 
 interface CreateCashBoxModalProps {
@@ -21,11 +22,29 @@ export const CreateCashBoxModal: React.FC<CreateCashBoxModalProps> = ({ isOpen, 
 
         setIsLoading(true);
         try {
-            await cashBoxesService.createCashBox({
+            const boxId = await cashBoxesService.createCashBox({
                 name,
                 currency,
                 createdBy: 'manager', // TODO: Get actual user ID
             });
+            try {
+                await accountingApi.registerCashBoxLedger({
+                    external_id: boxId,
+                    name,
+                    currency_code: currency,
+                });
+                alert(
+                    "✅ تم إنشاء الصندوق.\n\nفي المحاسبة: وُلد له تلقائياً حساب في شجرة الحسابات بنفس اسم الصندوق (تحت مجموعة النقدية)، ويُستخدم في قيود الدفع."
+                );
+            } catch (glErr) {
+                console.warn("Cash box GL link failed:", glErr);
+                const m = glErr instanceof Error ? glErr.message : String(glErr);
+                alert(
+                    "تم إنشاء الصندوق فقط.\n\nلم يُنشأ حسابه في الشجرة بعد:\n" +
+                        m +
+                        "\n\nافتح «تعديل» على هذا الصندوق واضغط «إنشاء حساب في الشجرة»، أو تأكد من وجود حساب أب للصناديق (مثل 1110) وتسجيل الدخول للـ API."
+                );
+            }
             onClose();
             setName('');
             setCurrency('USD');
@@ -41,7 +60,12 @@ export const CreateCashBoxModal: React.FC<CreateCashBoxModalProps> = ({ isOpen, 
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
             <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
                 <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-xl font-bold dark:text-white">إنشاء صندوق كاش جديد</h2>
+                    <div>
+                        <h2 className="text-xl font-bold dark:text-white">إنشاء صندوق كاش جديد</h2>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            يُنشأ الصندوق هنا، ويُنشأ له تلقائياً حساب في شجرة المحاسبة بنفس الاسم (حساب نقدية).
+                        </p>
+                    </div>
                     <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:text-gray-400">
                         <X className="w-6 h-6" />
                     </button>

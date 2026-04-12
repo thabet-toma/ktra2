@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import { Invoice, Item, Supplier } from "@/types";
+import { formatInvoiceImportLogisticsLine } from "@/utils/invoiceConversionUtils";
 import {
   Plus,
   Search,
@@ -218,8 +219,19 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         const matchesItems = invoice.items?.some((item) =>
           item.name?.toLowerCase().includes(term)
         );
+        const matchesDeal = invoice.dealNumber?.toLowerCase().includes(term);
+        const matchesLogistics =
+          invoice.importLogistics &&
+          formatInvoiceImportLogisticsLine(invoice.importLogistics).toLowerCase().includes(term);
 
-        if (!matchesNumber && !matchesSupplier && !matchesName && !matchesItems) {
+        if (
+          !matchesNumber &&
+          !matchesSupplier &&
+          !matchesName &&
+          !matchesItems &&
+          !matchesDeal &&
+          !matchesLogistics
+        ) {
           return false;
         }
       }
@@ -533,6 +545,21 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                         </span>
                       )}
                     </div>
+                    {invoice.importLogistics ? (
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-indigo-700 dark:text-indigo-300">
+                        <Truck className="w-3.5 h-3.5 shrink-0" />
+                        <span>{formatInvoiceImportLogisticsLine(invoice.importLogistics)}</span>
+                        {invoice.dealNumber ? (
+                          <span className="text-slate-500 dark:text-slate-400 font-mono">
+                            · {invoice.dealNumber}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : invoice.dealNumber ? (
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 font-mono">
+                        صفقة {invoice.dealNumber}
+                      </div>
+                    ) : null}
 
                     <div className="flex flex-wrap items-center gap-3">
                       <div className="flex items-center gap-2">
@@ -564,7 +591,12 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
                     {/* New Tab Button */}
                     <button
-                      onClick={() => window.open(`${window.location.origin}?view=purchase-invoices&id=${invoice.id}`, '_blank')}
+                      onClick={() =>
+                        window.open(
+                          `${window.location.origin}/purchase-invoices/${encodeURIComponent(invoice.id)}`,
+                          "_blank"
+                        )
+                      }
                       className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
                       title="فتح في نافذة جديدة"
                     >

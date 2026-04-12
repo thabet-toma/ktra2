@@ -1,9 +1,17 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import type { AccountingAccount, GeneralLedgerResponse } from "../../types/accounting";
 import { BookOpen, Search } from "lucide-react";
 
-export const AccountingGeneralLedgerPage: React.FC = () => {
+export interface AccountingGeneralLedgerPageProps {
+  initialAccountId?: number | null;
+  onInitialAccountConsumed?: () => void;
+}
+
+export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPageProps> = ({
+  initialAccountId,
+  onInitialAccountConsumed,
+}) => {
   const [accounts, setAccounts] = useState<AccountingAccount[]>([]);
   const [accountId, setAccountId] = useState("");
   const today = new Date();
@@ -14,6 +22,8 @@ export const AccountingGeneralLedgerPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const appliedInitial = useRef<number | null>(null);
+
   useEffect(() => {
     accountingApi
       .getAccounts()
@@ -22,6 +32,37 @@ export const AccountingGeneralLedgerPage: React.FC = () => {
       )
       .catch(() => setAccounts([]));
   }, []);
+
+  useEffect(() => {
+    if (initialAccountId == null) {
+      appliedInitial.current = null;
+      return;
+    }
+    if (appliedInitial.current === initialAccountId) return;
+    appliedInitial.current = initialAccountId;
+    setAccountId(String(initialAccountId));
+    onInitialAccountConsumed?.();
+    // تشغيل التقرير تلقائياً عند الانتقال من شجرة الحسابات
+    void (async () => {
+      setLoading(true);
+      setErr(null);
+      try {
+        const params: Record<string, string> = {
+          account_id: String(initialAccountId),
+          start_date: `${new Date().getFullYear()}-01-01`,
+          end_date: new Date().toISOString().split("T")[0],
+        };
+        const res = await accountingApi.getGeneralLedger(params);
+        setData(res as GeneralLedgerResponse);
+      } catch (e: unknown) {
+        setErr(e instanceof Error ? e.message : "فشل التقرير");
+        setData(null);
+      } finally {
+        setLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialAccountId]);
 
   const run = useCallback(async () => {
     if (!accountId) {

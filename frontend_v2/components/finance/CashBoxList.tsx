@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Wallet, ArrowRightLeft } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Plus, Wallet, ArrowRightLeft, Pencil } from 'lucide-react';
 import { CashBox } from '../../types';
 import { cashBoxesService } from '../../services/firestoreService';
+import { accountingApi, type CashBoxLedgerLink } from '../../services/accountingApi';
 import { CreateCashBoxModal } from './modals/CreateCashBoxModal';
+import { EditCashBoxModal } from './modals/EditCashBoxModal';
 
 interface CashBoxListProps {
     onSelectCashBox: (cashBox: CashBox) => void;
@@ -11,7 +13,28 @@ interface CashBoxListProps {
 export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => {
     const [cashBoxes, setCashBoxes] = useState<CashBox[]>([]);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+    const [editBox, setEditBox] = useState<CashBox | null>(null);
     const [loading, setLoading] = useState(true);
+    const [ledgerByExt, setLedgerByExt] = useState<Record<string, CashBoxLedgerLink>>({});
+
+    const refreshLedgers = useCallback(async () => {
+        try {
+            const rows = await accountingApi.getCashBoxLedgers();
+            const m: Record<string, CashBoxLedgerLink> = {};
+            for (const r of rows) {
+                if (r.external_id != null && r.external_id !== '') {
+                    m[String(r.external_id)] = r;
+                }
+            }
+            setLedgerByExt(m);
+        } catch {
+            setLedgerByExt({});
+        }
+    }, []);
+
+    useEffect(() => {
+        void refreshLedgers();
+    }, [refreshLedgers]);
 
     useEffect(() => {
         const unsubscribe = cashBoxesService.subscribeToCashBoxes((data) => {
@@ -30,7 +53,9 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h1 className="text-2xl font-bold dark:text-white">صناديق الكاش</h1>
-                    <p className="text-gray-500 dark:text-gray-400">إدارة الصناديق وحركة الأموال</p>
+                    <p className="text-gray-500 dark:text-gray-400">
+                        كل صندوق له حساب نقدية في شجرة المحاسبة بنفس الاسم — يُستخدم في قيود الدفع.
+                    </p>
                 </div>
                 <button
                     onClick={() => setIsCreateModalOpen(true)}
@@ -52,14 +77,43 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                             <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                                 <Wallet className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                             </div>
-                            <span className={`px-2 py-1 text-xs font-semibold rounded-full 
-                ${box.currency === 'USD' ? 'bg-green-100 text-green-800' :
-                                    box.currency === 'ILS' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'}`}>
-                                {box.currency}
-                            </span>
+                            <div className="flex flex-col items-end gap-1">
+                                <button
+                                    type="button"
+                                    title="تعديل الصندوق"
+                                    className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setEditBox(box);
+                                    }}
+                                >
+                                    <Pencil className="w-4 h-4" />
+                                </button>
+                                <span
+                                    className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                                        box.currency === "USD"
+                                            ? "bg-green-100 text-green-800"
+                                            : box.currency === "ILS"
+                                              ? "bg-blue-100 text-blue-800"
+                                              : "bg-purple-100 text-purple-800"
+                                    }`}
+                                >
+                                    {box.currency}
+                                </span>
+                            </div>
                         </div>
 
                         <h3 className="text-lg font-bold dark:text-white mb-1">{box.name}</h3>
+                        {ledgerByExt[box.id] ? (
+                            <p className="text-xs text-green-700 dark:text-green-400 mb-1 font-medium">
+                                حساب الشجرة:{' '}
+                                <span className="font-mono">{ledgerByExt[box.id].account_code}</span>
+                            </p>
+                        ) : (
+                            <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">
+                                بلا حساب في الشجرة
+                            </p>
+                        )}
                         <p className="text-sm text-gray-500 mb-4">تم الإنشاء: {new Date(box.createdAt).toLocaleDateString('ar-EG')}</p>
 
                         <div className="flex justify-between items-end border-t border-gray-100 dark:border-gray-700 pt-4">
@@ -92,7 +146,19 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
 
             <CreateCashBoxModal
                 isOpen={isCreateModalOpen}
-                onClose={() => setIsCreateModalOpen(false)}
+                onClose={() => {
+                    setIsCreateModalOpen(false);
+                    void refreshLedgers();
+                }}
+            />
+            <EditCashBoxModal
+                isOpen={editBox !== null}
+                cashBox={editBox}
+                onClose={() => {
+                    setEditBox(null);
+                    void refreshLedgers();
+                }}
+                onLedgersMaybeChanged={() => void refreshLedgers()}
             />
         </div>
     );

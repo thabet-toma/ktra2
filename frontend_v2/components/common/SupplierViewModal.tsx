@@ -19,8 +19,11 @@ interface SupplierViewModalProps {
 
 const getTypeInfo = (type?: string) => {
     switch (type) {
-        case 'factory': return { icon: <Factory className="w-4 h-4" />, text: 'مصنع', color: 'text-purple-600 bg-purple-50 border-purple-200' };
+        case 'factory': return { icon: <Factory className="w-4 h-4" />, text: 'مورد', color: 'text-purple-600 bg-purple-50 border-purple-200' };
         case 'shipping_agent': return { icon: <Ship className="w-4 h-4" />, text: 'وكيل شحن', color: 'text-blue-600 bg-blue-50 border-blue-200' };
+        case 'service_provider': return { icon: <FileText className="w-4 h-4" />, text: 'مخلّص جمركي', color: 'text-amber-700 bg-amber-50 border-amber-200' };
+        case 'local_company': return { icon: <Building className="w-4 h-4" />, text: 'ناقل محلي', color: 'text-green-700 bg-green-50 border-green-200' };
+        case 'international_trader': return { icon: <Globe className="w-4 h-4" />, text: 'مورد دولي', color: 'text-indigo-700 bg-indigo-50 border-indigo-200' };
         default: return { icon: <Building className="w-4 h-4" />, text: 'مورد تجاري', color: 'text-gray-600 bg-gray-50 border-gray-200' };
     }
 };

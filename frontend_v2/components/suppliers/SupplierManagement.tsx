@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { Supplier, Invoice } from "../../types";
 import {
   suppliersService,
@@ -25,7 +25,16 @@ import {
 } from "lucide-react";
 import { getSupplierTypeLabel } from "../../constants/supplierConstants";
 
-export const SupplierManagement: React.FC = () => {
+export interface SupplierManagementProps {
+  /** فتح مورد محدد (مثلاً من شجرة الحسابات) */
+  initialPartnerId?: number | null;
+  onInitialPartnerConsumed?: () => void;
+}
+
+export const SupplierManagement: React.FC<SupplierManagementProps> = ({
+  initialPartnerId,
+  onInitialPartnerConsumed,
+}) => {
   // Data State
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -55,6 +64,24 @@ export const SupplierManagement: React.FC = () => {
       unsubInvoices();
     };
   }, []);
+
+  const consumedPartnerFocus = useRef<number | null>(null);
+  useEffect(() => {
+    if (initialPartnerId == null) {
+      consumedPartnerFocus.current = null;
+      return;
+    }
+    if (!suppliers.length) return;
+    if (consumedPartnerFocus.current === initialPartnerId) return;
+    const match = suppliers.find((s) => Number(s.id) === Number(initialPartnerId));
+    if (match) {
+      setSelectedSupplierForView(match);
+      setViewMode("list");
+      consumedPartnerFocus.current = initialPartnerId;
+      onInitialPartnerConsumed?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPartnerId, suppliers]);
 
   // --- Actions ---
 

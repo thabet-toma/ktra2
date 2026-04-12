@@ -7,11 +7,11 @@ export interface SupplierTypeOption {
 }
 
 export const SUPPLIER_TYPES: SupplierTypeOption[] = [
-    { value: 'factory', label: 'مصنع' },
-    { value: 'shipping_agent', label: 'وكيل شحن' },
-    { value: 'international_trader', label: 'تاجر عالمي' },
-    { value: 'local_company', label: 'شركة محلية' },
-    { value: 'service_provider', label: 'مقدم خدمة' },
+    { value: 'factory', label: 'مورد (Supplier)' },
+    { value: 'shipping_agent', label: 'وكيل شحن (FreightForwarder)' },
+    { value: 'service_provider', label: 'مخلّص جمركي (CustomsBroker)' },
+    { value: 'local_company', label: 'ناقل محلي (LocalTransporter)' },
+    { value: 'international_trader', label: 'مورد دولي (Supplier)' },
 ];
 
 export const getSupplierTypeLabel = (value?: SupplierType): string => {

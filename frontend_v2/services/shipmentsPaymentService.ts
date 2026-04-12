@@ -213,10 +213,6 @@ export const shipmentsPaymentService = {
                 const transferCost = updates.transferCost || payment.transferCost || 0;
                 const totalToWithdraw = paymentAmount + transferCost;
 
-                if (cashBox.currentBalance < totalToWithdraw) {
-                    throw new Error(`الرصيد غير كافي في ${cashBox.name}! الرصيد المتاح: ${cashBox.currentBalance} ${cashBox.currency}، المطلوب: ${totalToWithdraw} ${cashBox.currency}`);
-                }
-
                 const newBalance = cashBox.currentBalance - totalToWithdraw;
                 const now = new Date().toISOString();
 

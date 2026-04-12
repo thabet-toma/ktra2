@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Optional
+
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.db import transaction
@@ -120,6 +124,25 @@ def manage_partner_account(sender, instance, created, **kwargs):
         
         if not exists:
             create_opening_balance_entry(instance)
+
+def ensure_partner_linked_account(partner: Optional[Partner]) -> Optional[Partner]:
+    """
+    يضمن وجود حساب محاسبي مربوط بالشريك (مورد / وكيل شحن / …) عبر نفس منطق post_save.
+    يُستدعى قبل ترحيل دفعات لوجستيات حتى لا يضطر المستخدم لربط الحساب يدوياً.
+    """
+    if partner is None or partner.pk is None:
+        return partner
+    if partner.linked_account_id:
+        return partner
+    try:
+        partner.save()
+        partner.refresh_from_db()
+    except Exception:
+        logger.exception(
+            "ensure_partner_linked_account failed for partner id=%s", partner.pk
+        )
+    return partner
+
 
 def create_opening_balance_entry(partner):
     try:

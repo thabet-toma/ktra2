@@ -1,5 +1,6 @@
 from django.db import models
 from tenants.models import Tenant
+from partners.models import Partner
 
 class UnitOfMeasure(models.Model):
     id = models.AutoField(primary_key=True, db_column='UOMID')
@@ -49,6 +50,14 @@ class Product(models.Model):
     online_price = models.DecimalField(max_digits=18, decimal_places=2, blank=True, null=True, db_column='OnlinePrice')
     online_description = models.TextField(blank=True, null=True, db_column='OnlineDescription')
 
+    quantity_on_hand = models.DecimalField(
+        max_digits=18, decimal_places=4, default=0, db_column='QuantityOnHand',
+    )
+    avg_cost = models.DecimalField(
+        max_digits=18, decimal_places=4, default=0, db_column='AvgCost',
+        help_text='Weighted average cost per unit (base currency)',
+    )
+
     class Meta:
         db_table = 'products'
         managed = True
@@ -58,4 +67,50 @@ class Product(models.Model):
 
     def __str__(self):
         return self.name_ar or self.name_en or self.sku
+
+
+class StockMovement(models.Model):
+    MOVEMENT_TYPES = [
+        ('IN', 'استلام بضاعة'),
+        ('OUT', 'صرف / بيع'),
+        ('ADJUST_IN', 'تسوية إضافة'),
+        ('ADJUST_OUT', 'تسوية نقص'),
+        ('RETURN_IN', 'مرتجع داخل'),
+        ('RETURN_OUT', 'مرتجع خارج'),
+    ]
+
+    REFERENCE_TYPES = [
+        ('SHIPMENT', 'شحنة'),
+        ('DEAL', 'صفقة'),
+        ('CLEARANCE', 'تخليص جمركي'),
+        ('MANUAL', 'يدوي'),
+        ('SALE', 'بيع'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='MovementID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, db_column='ProductID', related_name='stock_movements')
+    movement_type = models.CharField(max_length=20, choices=MOVEMENT_TYPES, db_column='MovementType')
+    quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')
+    unit_cost = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='UnitCost')
+    total_cost = models.DecimalField(max_digits=18, decimal_places=2, default=0, db_column='TotalCost')
+    reference_type = models.CharField(max_length=20, choices=REFERENCE_TYPES, default='MANUAL', db_column='ReferenceType')
+    reference_id = models.IntegerField(null=True, blank=True, db_column='ReferenceID')
+    partner = models.ForeignKey(Partner, on_delete=models.SET_NULL, null=True, blank=True, db_column='PartnerID')
+    movement_date = models.DateField(db_column='MovementDate')
+    notes = models.CharField(max_length=500, null=True, blank=True, db_column='Notes')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    quantity_before = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='QuantityBefore')
+    quantity_after = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='QuantityAfter')
+    avg_cost_before = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='AvgCostBefore')
+    avg_cost_after = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='AvgCostAfter')
+
+    class Meta:
+        db_table = 'stock_movements'
+        managed = True
+        ordering = ['-movement_date', '-id']
+
+    def __str__(self):
+        return f"{self.get_movement_type_display()} | {self.product} | {self.quantity}"
 

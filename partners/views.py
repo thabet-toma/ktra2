@@ -6,6 +6,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from core.api_defaults import ApiAuthAndUser
+from core.tenant_utils import get_tenant
 from tenants.models import Tenant
 from .models import Partner, PartnerBankAccount
 from .serializers import PartnerSerializer
@@ -19,8 +20,7 @@ class PartnerViewSet(viewsets.ModelViewSet):
     search_fields = ['name', 'legal_name', 'email', 'phone', 'tax_number']
 
     def _get_tenant(self):
-        # For now, get first tenant. Later use real tenant middleware.
-        return Tenant.objects.first()
+        return get_tenant(self.request)
 
     def _handle_bank_accounts(self, partner, bank_accounts_data, tenant):
         """

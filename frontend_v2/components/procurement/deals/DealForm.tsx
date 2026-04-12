@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import {
   Deal,
+  DealPayment,
   PriceOffer,
   User,
   DealItem,
@@ -9,6 +10,7 @@ import {
   DealStatus,
   DealActivity,
   DealInstallment,
+  ShippingWorkflowStatus,
 } from "../../../types";
 import {
   itemsService,
@@ -78,6 +80,8 @@ import { InstallmentManager } from "./InstallmentManager";
 import { PaymentProgress } from "./PaymentProgress";
 import { SupplierViewModal } from "@/components/common/SupplierViewModal";
 import { DealPrintView } from "./DealPrintView";
+import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
+import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
 
 // تعريف أنواع الحالات
 type OperationalStatus =
@@ -103,6 +107,60 @@ interface DealFormProps {
   onCancel: () => void;
   onSave?: () => void;
   compactMode?: boolean;
+  /** null = قيد يومية جديد (بعد تأكيد المورد — ترحيل يدوي) */
+  onOpenAccountingJournal?: (
+    journalId: number | null,
+    dealRef?: { dealId: string; dealNumber: string; displayName: string }
+  ) => void;
+}
+
+/** بعد رفع المطالبة: ترقية حالة الصفقة إلى «بانتظار الدفع» عندما تكون الحالة الحالية منطقية */
+function suggestStatusAfterClaim(deal: Partial<Deal>, installmentNumber?: number): DealStatus | null {
+  const n = installmentNumber ?? 1;
+  const st = deal.status as DealStatus | undefined;
+  if (!st) return null;
+  if (n === 1) {
+    if (st === "initial" || st === "manufacturing_started") return "first_payment_pending";
+  }
+  if (n === 2) {
+    if (st === "production_completed" || st === "first_payment_confirmed") return "second_payment_pending";
+  }
+  return null;
+}
+
+function formatSupplierConfirmAlertText(args: {
+  posted: boolean;
+  journalId?: number;
+  openManualJournal?: boolean;
+  meta?: {
+    message?: string;
+    postingBlockers?: string[];
+    openManualJournal?: boolean;
+  };
+}): string {
+  const { posted, journalId, openManualJournal, meta } = args;
+  if (posted || journalId) {
+    const jLine = journalId
+      ? `رقم قيد اليومية: ${journalId}`
+      : posted
+        ? "تم ترحيل القيد محاسبياً."
+        : meta?.message || "";
+    return `✅ تم تأكيد المورد وحفظ التاريخ.\n${jLine}`;
+  }
+  const manual = openManualJournal ?? meta?.openManualJournal;
+  if (manual) {
+    return `✅ ${meta?.message || "تم حفظ تأكيد المورد. انتقل إلى قيد اليومية لإكمال الترحيل يدوياً."}`;
+  }
+  const bullets =
+    meta?.postingBlockers && meta.postingBlockers.length > 0
+      ? meta.postingBlockers.map((b, i) => `${i + 1}. ${b}`).join("\n")
+      : "— لم يُسترجَع تشخيص تفصيلي (تحقق من تشغيل الخادم ومسار واجهة التشخيص).";
+  return (
+    `✅ تم حفظ تأكيد المورد.\n\n` +
+    `⚠️ لم يُنشأ قيد أو لم يظهر بعد. ما يمنع الترحيل التلقائي (حسب الخادم):\n\n${bullets}` +
+    (meta?.message ? `\n\n(${meta.message})` : "") +
+    `\n\nبعد المعالجة أعد فتح الصفقة أو اضغط «شرح عدم الترحيل» في سجل المدفوعات.`
+  );
 }
 
 export const DealForm: React.FC<DealFormProps> = ({
@@ -112,6 +170,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   onCancel,
   onSave,
   compactMode = false,
+  onOpenAccountingJournal,
 }) => {
   // --- State Management ---
   const [formData, setFormData] = useState<Partial<Deal>>(deal || {});
@@ -353,7 +412,14 @@ export const DealForm: React.FC<DealFormProps> = ({
 
   // Payment Handlers
   const handlePaymentOperation = async (
-    operation: "claim" | "swift" | "add" | "confirm" | "cancel",
+    operation:
+      | "claim"
+      | "swift"
+      | "add"
+      | "confirm"
+      | "cancel"
+      | "unpost"
+      | "linkJournal",
     paymentType: string,
     data: any,
     paymentId?: string
@@ -366,30 +432,34 @@ export const DealForm: React.FC<DealFormProps> = ({
     try {
       setLoading(true);
 
-      try {
-        const updateData: Partial<Deal> = {
-          items,
-          installments: installmentPlanEnabled ? installments : [],
-          installmentPlanEnabled,
-          totalAmount: formData.totalAmount,
-          subtotal: formData.subtotal,
-          taxAmount: formData.taxAmount,
-          discountAmount: formData.discountAmount,
-          shippingCost: formData.shippingCost,
-          shippingIncluded: formData.shippingIncluded,
-        };
+      /* إلغاء الترحيل لا يحتاج PATCH للصفقة أولاً؛ الحفظ اليدوي كان يسبب تعليقاً أو فشلاً
+         (مثلاً تحقق الخادم أو شبكة) قبل وصول طلب unpost */
+      if (operation !== "unpost" && operation !== "linkJournal") {
+        try {
+          const updateData: Partial<Deal> = {
+            items,
+            installments: installmentPlanEnabled ? installments : [],
+            installmentPlanEnabled,
+            totalAmount: formData.totalAmount,
+            subtotal: formData.subtotal,
+            taxAmount: formData.taxAmount,
+            discountAmount: formData.discountAmount,
+            shippingCost: formData.shippingCost,
+            shippingIncluded: formData.shippingIncluded,
+          };
 
-        await dealsService.updateDeal(
-          formData.id,
-          updateData,
-          currentUser.id,
-          currentUser.name,
-          currentUser.role || "user",
-          "",
-          ""
-        );
-      } catch (err) {
-        console.error("Auto-save failed:", err);
+          await dealsService.updateDeal(
+            formData.id,
+            updateData,
+            currentUser.id,
+            currentUser.name,
+            currentUser.role || "user",
+            "",
+            ""
+          );
+        } catch (err) {
+          console.error("Auto-save failed:", err);
+        }
       }
 
       const cleanData = (data: any): any => {
@@ -398,8 +468,36 @@ export const DealForm: React.FC<DealFormProps> = ({
         );
       };
 
+      let confirmAccountingMeta:
+        | {
+            journalId?: number;
+            message: string;
+            openManualJournal?: boolean;
+            postingBlockers?: string[];
+          }
+        | undefined;
+      let lastConfirmPaymentId: string | undefined;
+      let unpostAccountingMeta:
+        | {
+            reversal_journal_id?: number;
+            voided_journal_id?: number;
+            accounting_note?: string;
+          }
+        | undefined;
+      /** بعد تنفيذ السليب: ترحيل تلقائي عبر API → فتح القيد */
+      let swiftAutoPostJournalId: number | undefined;
+
       switch (operation) {
-        case "add":
+        case "add": {
+          const addAmt = Number(data?.amount ?? 0);
+          const capAdd = maxPaymentPrincipalForDeal(formData);
+          if (addAmt > capAdd + 1e-6) {
+            alert(
+              `لا يُسمح بدفع يتجاوز قيمة الصفقة. الأقصى المتاح: $${capAdd.toLocaleString()}`
+            );
+            setLoading(false);
+            return;
+          }
           await dealsService.addPayment(
             formData.id,
             {
@@ -414,8 +512,18 @@ export const DealForm: React.FC<DealFormProps> = ({
             currentUser.role || "user"
           );
           break;
+        }
 
-        case "claim":
+        case "claim": {
+          const claimAmt = Number(data?.amount ?? 0);
+          const capClaim = maxPaymentPrincipalForDeal(formData);
+          if (claimAmt > capClaim + 1e-6) {
+            alert(
+              `لا يُسمح بدفع يتجاوز قيمة الصفقة. الأقصى المتاح لتسجيل مطالبة: $${capClaim.toLocaleString()}`
+            );
+            setLoading(false);
+            return;
+          }
           await dealsService.addPayment(
             formData.id,
             {
@@ -429,26 +537,123 @@ export const DealForm: React.FC<DealFormProps> = ({
             currentUser.name,
             currentUser.role || "user"
           );
+          {
+            const nextSt = suggestStatusAfterClaim(formData, data.installmentNumber);
+            if (nextSt) {
+              try {
+                await dealsService.updateDealStatus(
+                  formData.id,
+                  nextSt,
+                  currentUser.id,
+                  currentUser.name,
+                  currentUser.role || "user",
+                  "رفع مطالبة — جاهز لمسار الدفع"
+                );
+              } catch (e) {
+                console.warn("updateDealStatus after claim:", e);
+              }
+            }
+          }
           break;
+        }
 
-        case "swift":
-          const payment = formData.payments?.find(
-            (p) => p.type === paymentType
+        case "swift": {
+          const instNumRaw = data?.installmentNumber;
+          const instNum =
+            instNumRaw != null && Number.isFinite(Number(instNumRaw))
+              ? Number(instNumRaw)
+              : undefined;
+
+          const resolved = resolvePaymentForSwiftInstallment(
+            formData.payments,
+            paymentType,
+            instNum,
+            paymentId ?? null
           );
-          if (payment) {
-            paymentId = payment.id;
-          } else {
-            alert("لا توجد دفعة لهذا النوع");
+          if (resolved.rejectReason) {
+            alert(`❌ ${resolved.rejectReason}`);
+            setLoading(false);
+            return;
+          }
+
+          let payment = resolved.payment;
+          let swiftPaymentId =
+            payment?.id != null ? String(payment.id) : undefined;
+
+          if (!swiftPaymentId) {
+            if (!payment) {
+              const swiftAmt = Number(data.amount ?? 0);
+              const capSwift = maxPaymentPrincipalForDeal(formData);
+              if (swiftAmt > capSwift + 1e-6) {
+                alert(
+                  `لا يُسمح بدفع يتجاوز قيمة الصفقة. الأقصى المتاح: $${capSwift.toLocaleString()}`
+                );
+                setLoading(false);
+                return;
+              }
+              await dealsService.addPayment(
+                formData.id,
+                {
+                  type: paymentType,
+                  amount: swiftAmt,
+                  paymentDate: data.paymentDate || new Date().toISOString(),
+                  usdToIls: Number(data.usdToIls ?? 0),
+                  transferCost: Number(data.transferCost ?? data.transferFee ?? 0),
+                  notes: data.notes || "",
+                  installmentId: data.installmentId,
+                  installmentNumber: data.installmentNumber,
+                  confirmedBySupplier: false,
+                  alibabaClaimImage: undefined,
+                } as Omit<DealPayment, "id">,
+                currentUser.id,
+                currentUser.name,
+                currentUser.role || "user"
+              );
+              const fresh = await dealsService.getDeal(formData.id);
+              const again = resolvePaymentForSwiftInstallment(
+                fresh.payments,
+                paymentType,
+                instNum,
+                null
+              );
+              if (again.rejectReason) {
+                alert(`❌ ${again.rejectReason}`);
+                setLoading(false);
+                return;
+              }
+              payment = again.payment;
+              swiftPaymentId =
+                payment?.id != null ? String(payment.id) : undefined;
+            } else {
+              swiftPaymentId = String(payment.id);
+            }
+          }
+
+          if (!swiftPaymentId) {
+            alert("تعذر إنشاء أو العثور على سجل الدفعة");
+            setLoading(false);
             return;
           }
 
           if (!data.cashBoxId) {
             alert("يجب اختيار صندوق مالي لتنفيذ عملية الدفع");
+            setLoading(false);
             return;
           }
 
           if (!data.bankSwiftImage) {
             alert("يجب رفع صورة السليب أولاً");
+            setLoading(false);
+            return;
+          }
+
+          const swiftPrincipal = Number(data.amount ?? 0);
+          const capSwiftEdit = maxPaymentPrincipalForDeal(formData, swiftPaymentId);
+          if (swiftPrincipal > capSwiftEdit + 1e-6) {
+            alert(
+              `لا يُسمح بمبلغ يتجاوز قيمة الصفقة. الأقصى المسموح لهذه العملية: $${capSwiftEdit.toLocaleString()}`
+            );
+            setLoading(false);
             return;
           }
 
@@ -463,7 +668,7 @@ export const DealForm: React.FC<DealFormProps> = ({
           try {
             await dealsService.updatePaymentWithSwift(
               formData.id,
-              paymentId!,
+              swiftPaymentId,
               cleanData({
                 ...data,
                 dealNumber: formData.dealNumber
@@ -473,6 +678,18 @@ export const DealForm: React.FC<DealFormProps> = ({
               currentUser.role || "user",
               data.cashBoxId
             );
+            const postTry = await dealsService.tryAutoPostDealPaymentAccounting(
+              formData.id,
+              swiftPaymentId,
+              {
+                cashBoxExternalId: data.cashBoxId
+                  ? String(data.cashBoxId).trim()
+                  : undefined,
+              }
+            );
+            if (postTry.posted && postTry.journalId != null) {
+              swiftAutoPostJournalId = postTry.journalId;
+            }
           } catch (error: any) {
             if (error.message.includes('الرصيد غير كافي')) {
               alert(`❌ ${error.message}`);
@@ -481,9 +698,11 @@ export const DealForm: React.FC<DealFormProps> = ({
             throw error;
           }
           break;
+        }
 
         case "confirm":
           if (paymentId) {
+            lastConfirmPaymentId = paymentId;
             const paymentToConfirm = formData.payments?.find(p => p.id === paymentId);
 
             if (paymentToConfirm) {
@@ -500,7 +719,7 @@ export const DealForm: React.FC<DealFormProps> = ({
               }
             }
 
-            await dealsService.confirmPayment(
+            confirmAccountingMeta = await dealsService.confirmPayment(
               formData.id,
               paymentId,
               currentUser.id,
@@ -514,20 +733,24 @@ export const DealForm: React.FC<DealFormProps> = ({
           }
           break;
 
+        case "unpost":
+          if (String(currentUser.role || "").toLowerCase() !== "manager") {
+            alert("هذا الإجراء متاح للمدير فقط من الواجهة.");
+            setLoading(false);
+            return;
+          }
+          if (!paymentId || !formData.id) {
+            setLoading(false);
+            return;
+          }
+          unpostAccountingMeta = await dealsService.unpostDealPayment(
+            formData.id,
+            paymentId
+          );
+          break;
+
         case "cancel":
           if (paymentId) {
-            const paymentToCancel = formData.payments?.find(p => p.id === paymentId);
-
-            if (paymentToCancel?.cashBoxWithdrawalAt) {
-              const confirmCancel = window.confirm(
-                "⚠️ هذه الدفعة تم خصمها بالفعل من الصندوق. هل تريد حقاً إلغاءها؟"
-              );
-              if (!confirmCancel) {
-                setLoading(false);
-                return;
-              }
-            }
-
             await dealsService.cancelPayment(
               formData.id,
               paymentId,
@@ -537,18 +760,123 @@ export const DealForm: React.FC<DealFormProps> = ({
             );
           }
           break;
+
+        case "linkJournal": {
+          if (!paymentId) {
+            setLoading(false);
+            return;
+          }
+          const jid = Number(data?.journalId);
+          if (!Number.isFinite(jid) || jid <= 0) {
+            alert("رقم القيد غير صالح.");
+            setLoading(false);
+            return;
+          }
+          await dealsService.linkDealPaymentJournal(
+            String(formData.id),
+            String(paymentId),
+            jid
+          );
+          break;
+        }
       }
 
-      const updatedDeal = await dealsService.getDeal(formData.id);
-      setFormData(updatedDeal);
+      const loadedAfterPay = await loadAndSetDealData(formData.id);
       await loadActivities();
 
       switch (operation) {
-        case "swift":
-          alert("✅ تم رفع السليب بنجاح");
+        case "swift": {
+          if (swiftAutoPostJournalId != null) {
+            alert(
+              "✅ تم تنفيذ الدفع ورفع السليب، وتم إنشاء قيد المحاسبة وربطه بالدفعة."
+            );
+            onOpenAccountingJournal?.(swiftAutoPostJournalId, {
+              dealId: formData.id!,
+              dealNumber: formData.dealNumber || "",
+              displayName: [
+                formData.dealNumber,
+                formData.dealDescription ||
+                  formData.originalOfferNumber ||
+                  formData.factoryName ||
+                  "",
+              ]
+                .filter(Boolean)
+                .join(" — "),
+            });
+          } else {
+            alert("✅ تم تنفيذ الدفع ورفع السليب بنجاح");
+          }
           break;
-        case "confirm":
-          alert("✅ تم تأكيد الدفعة من المورد بنجاح");
+        }
+        case "claim":
+          alert("✅ تم رفع المطالبة. يمكنك الآن تسجيل الدفع من تبويب «تسجيل الدفع» في أي وقت.");
+          break;
+        case "confirm": {
+          const pid = lastConfirmPaymentId;
+          const row = pid
+            ? loadedAfterPay?.payments?.find((x) => String(x.id) === String(pid))
+            : undefined;
+          const jid = confirmAccountingMeta?.journalId ?? row?.journalId;
+          const posted = Boolean(row?.isPosted);
+          alert(
+            formatSupplierConfirmAlertText({
+              posted,
+              journalId: jid,
+              openManualJournal: confirmAccountingMeta?.openManualJournal,
+              meta: confirmAccountingMeta ?? undefined,
+            })
+          );
+          if (confirmAccountingMeta?.openManualJournal) {
+            const dealDesc =
+              formData.dealDescription ||
+              formData.originalOfferNumber ||
+              formData.factoryName ||
+              selectedSupplier?.tradeName ||
+              "";
+            onOpenAccountingJournal?.(null, {
+              dealId: formData.id!,
+              dealNumber: formData.dealNumber || '',
+              displayName: [formData.dealNumber, dealDesc].filter(Boolean).join(' — '),
+            });
+          } else if (
+            confirmAccountingMeta?.journalId != null &&
+            Number(confirmAccountingMeta.journalId) > 0
+          ) {
+            const j = Number(confirmAccountingMeta.journalId);
+            const dealDesc =
+              formData.dealDescription ||
+              formData.originalOfferNumber ||
+              formData.factoryName ||
+              selectedSupplier?.tradeName ||
+              "";
+            onOpenAccountingJournal?.(j, {
+              dealId: formData.id!,
+              dealNumber: formData.dealNumber || "",
+              displayName: [formData.dealNumber, dealDesc].filter(Boolean).join(" — "),
+            });
+          }
+          break;
+        }
+        case "cancel":
+          alert("✅ تم إلغاء الدفعة من سجل الصفقة");
+          break;
+        case "unpost": {
+          const rj = unpostAccountingMeta?.reversal_journal_id;
+          const vj = unpostAccountingMeta?.voided_journal_id;
+          const note = unpostAccountingMeta?.accounting_note || "";
+          alert(
+            `تم إلغاء ترحيل الدفعة محاسبياً.\n\n` +
+              `• قيد عكسي مرحّل: ${rj != null ? `#${rj}` : "—"}\n` +
+              `• القيد الأصلي أصبح غير مرحّل: ${vj != null ? `#${vj}` : "—"}\n\n` +
+              `الدفعة أصبحت قابلة للحذف من «حذف من السجل».\n` +
+              (note ? `\n${note}` : "")
+          );
+          break;
+        }
+        case "linkJournal":
+          alert(
+            "✅ تم ربط الدفعة بالقيد. سيظهر «فتح في المحاسبة» في سجل المدفوعات بعد التحديث."
+          );
           break;
         default:
           alert("تم حفظ العملية بنجاح");
@@ -566,7 +894,7 @@ export const DealForm: React.FC<DealFormProps> = ({
     if (!formData.id || !confirmationData.paymentId) return;
     try {
       setLoading(true);
-      await dealsService.confirmPayment(
+      const acc = await dealsService.confirmPayment(
         formData.id,
         confirmationData.paymentId,
         currentUser.id,
@@ -577,13 +905,68 @@ export const DealForm: React.FC<DealFormProps> = ({
         confirmationData.paymentConfirmationDate,
         confirmationData.cashBoxId
       );
-      const updatedDeal = await dealsService.getDeal(formData.id);
-      setFormData(updatedDeal);
+      const loaded = await loadAndSetDealData(formData.id);
       await loadActivities();
-      alert("تم تأكيد الدفعة من المورد بنجاح");
-    } catch (error) {
+      const row = loaded?.payments?.find(
+        (x) => String(x.id) === String(confirmationData.paymentId)
+      );
+      const jid = acc.journalId ?? row?.journalId;
+      const posted = Boolean(row?.isPosted);
+      alert(
+        formatSupplierConfirmAlertText({
+          posted,
+          journalId: jid,
+          openManualJournal: acc.openManualJournal,
+          meta: acc,
+        })
+      );
+      if (acc.openManualJournal) {
+        const dealDesc =
+          formData.dealDescription ||
+          formData.originalOfferNumber ||
+          formData.factoryName ||
+          selectedSupplier?.tradeName ||
+          "";
+        onOpenAccountingJournal?.(null, {
+          dealId: formData.id!,
+          dealNumber: formData.dealNumber || '',
+          displayName: [formData.dealNumber, dealDesc].filter(Boolean).join(' — '),
+        });
+      } else if (acc.journalId != null && Number(acc.journalId) > 0) {
+        const j = Number(acc.journalId);
+        const dealDesc =
+          formData.dealDescription ||
+          formData.originalOfferNumber ||
+          formData.factoryName ||
+          selectedSupplier?.tradeName ||
+          "";
+        onOpenAccountingJournal?.(j, {
+          dealId: formData.id!,
+          dealNumber: formData.dealNumber || "",
+          displayName: [formData.dealNumber, dealDesc].filter(Boolean).join(" — "),
+        });
+      }
+    } catch (error: any) {
       console.error("Error confirming payment:", error);
-      alert("حدث خطأ في تأكيد الدفعة");
+      let diag = "";
+      try {
+        if (formData.id && confirmationData.paymentId) {
+          const d = await dealsService.getPaymentPostingDiagnostics(
+            formData.id,
+            String(confirmationData.paymentId)
+          );
+          if (d.blockers?.length) {
+            diag =
+              "\n\n— تشخيص من الخادم —\n" +
+              d.blockers.map((b, i) => `${i + 1}. ${b}`).join("\n");
+          }
+        }
+      } catch {
+        /* ignore */
+      }
+      alert(
+        `حدث خطأ في تأكيد الدفعة${error?.message ? `:\n${error.message}` : ""}${diag}`
+      );
     } finally {
       setLoading(false);
     }
@@ -602,13 +985,28 @@ export const DealForm: React.FC<DealFormProps> = ({
         currentUser.role || "user",
         notes
       );
-      const updatedDeal = await dealsService.getDeal(formData.id);
-      setFormData(updatedDeal);
+      await loadAndSetDealData(formData.id);
       await loadActivities();
       alert(`تم تغيير حالة الصفقة إلى: ${newStatus}`);
     } catch (error) {
       console.error("Error changing status:", error);
       alert("حدث خطأ في تغيير الحالة");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleShippingWorkflowChange = async (code: ShippingWorkflowStatus) => {
+    if (!formData.id) return;
+    try {
+      setLoading(true);
+      await dealsService.patchShippingWorkflow(formData.id, code);
+      await loadAndSetDealData(formData.id);
+      await loadActivities();
+      alert("تم حفظ مرحلة الشحن والتصنيع");
+    } catch (error) {
+      console.error("shipping workflow:", error);
+      alert("تعذر حفظ مرحلة الشحن");
     } finally {
       setLoading(false);
     }
@@ -710,11 +1108,18 @@ export const DealForm: React.FC<DealFormProps> = ({
 
       if (isExistingDeal) {
         const dealId = deal?.id || formData.id!;
+        /**
+         * لا نرسل payments مع «حفظ الصفقة» — دمج formData القديم مع الخادم كان يعيد صفوفاً
+         * محذوفة أو يُنشئ تكراراً (حذف دفعة ثم حفظ يعيد السطر من الذاكرة).
+         * سجل الدفعات يُحدَّث فقط عبر مسارات الدفع / الحذف / التأكيد (dealsService).
+         */
+        const { payments: _paymentsOmitted, ...dealUpdateWithoutPayments } =
+          finalFormData;
 
         await handleUpdateDeal(
-          finalFormData,
+          dealUpdateWithoutPayments,
           "تحديث بيانات الصفقة",
-          "تم تحديث بيانات الصفقة والدفعات"
+          "تم تحديث بيانات الصفقة (البنود والحقول؛ سجل الدفعات دون تغيير من هذا الزر)"
         );
 
         const updatedDeal = await dealsService.getDeal(dealId);
@@ -752,6 +1157,7 @@ export const DealForm: React.FC<DealFormProps> = ({
 
         const optionalFields = [
           "priceOfferId",
+          "dealDescription",
           "originalOfferNumber",
           "alibabaOrderLink",
           "internalNotes",
@@ -851,16 +1257,18 @@ export const DealForm: React.FC<DealFormProps> = ({
     const subtotal = calculateSubtotal();
     const discountAmount = formData.discountAmount || 0;
     const netAfterDiscount = Math.max(0, subtotal - discountAmount);
+    const shipping = formData.shippingIncluded ? 0 : (formData.shippingCost || 0);
+    // الوعاء الضريبي = صافي البضاعة بعد الخصم + الشحن (متسق مع recalculateTotals)
+    const taxableBase = netAfterDiscount + shipping;
 
     let taxAmount = 0;
     if (formData.taxType === 'amount') {
       taxAmount = formData.taxAmount || 0;
     } else {
-      taxAmount = netAfterDiscount * ((formData.taxRate || 0) / 100);
+      taxAmount = taxableBase * ((formData.taxRate || 0) / 100);
     }
 
-    const shipping = formData.shippingIncluded ? 0 : (formData.shippingCost || 0);
-    return netAfterDiscount + taxAmount + shipping;
+    return taxableBase + taxAmount;
   };
 
   const validateForm = (): boolean => {
@@ -1182,9 +1590,9 @@ export const DealForm: React.FC<DealFormProps> = ({
             <p className="text-xs text-green-600 dark:text-green-400 font-medium">المدفوع</p>
             <p className="text-lg font-bold text-green-900 dark:text-green-300">${dealStats.paidAmount.toLocaleString()}</p>
           </div>
-          <div className="bg-amber-50 dark:bg-amber-900/20 p-3 rounded-lg border border-amber-100 dark:border-amber-800/30">
-            <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">المتبقي</p>
-            <p className="text-lg font-bold text-amber-900 dark:text-amber-300">${dealStats.remainingAmount.toLocaleString()}</p>
+          <div className="bg-slate-50 dark:bg-slate-900/40 p-3 rounded-lg border border-slate-200 dark:border-slate-700">
+            <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">المتبقي</p>
+            <p className="text-lg font-bold text-slate-900 dark:text-slate-100">${dealStats.remainingAmount.toLocaleString()}</p>
           </div>
           <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-lg border border-purple-100 dark:border-purple-800/30">
             <p className="text-xs text-purple-600 dark:text-purple-400 font-medium">نسبة الدفع</p>
@@ -1325,20 +1733,38 @@ export const DealForm: React.FC<DealFormProps> = ({
                 />
 
                 <PaymentProgress
-                  installments={installments}
+                  installments={
+                    formData.installments && formData.installments.length > 0
+                      ? formData.installments
+                      : installments
+                  }
                   deal={formData}
                   currentUser={currentUser}
                   onPaymentOperation={handlePaymentOperation}
                   onConfirmSupplier={handlePaymentConfirmation}
+                  onOpenAccountingJournal={onOpenAccountingJournal}
+                  readOnly={
+                    formData.status === "shipped" || formData.status === "cancelled"
+                  }
                 // compact={compactMode}
                 />
+
+                {formData.id ? (
+                  <DealPaymentList
+                    deal={formData}
+                    currentUser={currentUser}
+                    onPaymentOperation={handlePaymentOperation}
+                    onConfirmSupplier={handlePaymentConfirmation}
+                    onOpenAccountingJournal={onOpenAccountingJournal}
+                  />
+                ) : null}
 
                 <DealStageControl
                   data={formData}
                   setData={setFormData}
                   currentUser={currentUser}
                   onStatusChange={handleStatusChange}
-                // compact={compactMode}
+                  onShippingWorkflowChange={handleShippingWorkflowChange}
                 />
               </div>
             </CollapsibleSection>

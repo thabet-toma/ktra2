@@ -46,6 +46,7 @@ import {
   Currency
 } from "../types";
 import { apiDelete, apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "./restApi";
+import { tryPostPurchaseReceiptFromInvoice } from "./invoiceAccountingBridge";
 
 // --- Helper: Sanitize Data ---
 export const removeUndefined = <T>(obj: T): T => {
@@ -858,11 +859,13 @@ export const cashBoxesService = {
     });
   },
 
-  // Create a new cash box
-  createCashBox: async (cashBoxData: Omit<CashBox, "id" | "currentBalance" | "createdAt" | "updatedAt">): Promise<void> => {
+  // Create a new cash box — يعيد معرف المستند لربطه بحساب GL
+  createCashBox: async (
+    cashBoxData: Omit<CashBox, "id" | "currentBalance" | "createdAt" | "updatedAt">
+  ): Promise<string> => {
     const newCashBoxRef = doc(collection(db, "cashBoxes"));
     const now = new Date().toISOString();
-    
+
     const newCashBox: CashBox = {
       id: newCashBoxRef.id,
       ...cashBoxData,
@@ -870,14 +873,28 @@ export const cashBoxesService = {
       createdAt: now,
       updatedAt: now,
     };
-    
+
     await setDoc(newCashBoxRef, newCashBox);
+    return newCashBoxRef.id;
   },
   
   // Delete a cash box (only if empty/manager - validation logic should be in UI or Security Rules)
   deleteCashBox: async (id: string): Promise<void> => {
     await deleteDoc(doc(db, "cashBoxes", id));
-  }
+  },
+
+  updateCashBox: async (
+    id: string,
+    data: Partial<Pick<CashBox, "name" | "currency">>
+  ): Promise<void> => {
+    const ref = doc(db, "cashBoxes", id);
+    const payload: Record<string, unknown> = {
+      updatedAt: new Date().toISOString(),
+    };
+    if (data.name != null) payload.name = data.name.trim();
+    if (data.currency != null) payload.currency = data.currency;
+    await updateDoc(ref, payload);
+  },
 };
 
 // Cash Box Transactions Service
@@ -922,10 +939,12 @@ export const cashBoxTransactionsService = {
   },
 
   // Add a new transaction and update cash box balance atomically
-  addTransaction: async (transactionData: Omit<CashBoxTransaction, "id" | "createdAt" | "balanceAfter">): Promise<void> => {
+  addTransaction: async (
+    transactionData: Omit<CashBoxTransaction, "id" | "createdAt" | "balanceAfter">
+  ): Promise<string> => {
     const cashBoxRef = doc(db, "cashBoxes", transactionData.cashBoxId);
     const transactionRef = doc(collection(db, "cashBoxTransactions"));
-    
+
     await runTransaction(db, async (transaction) => {
       const cashBoxDoc = await transaction.get(cashBoxRef);
       if (!cashBoxDoc.exists()) {
@@ -967,7 +986,8 @@ export const cashBoxTransactionsService = {
       // Create Transaction
       transaction.set(transactionRef, newTransaction);
     });
-  }
+    return transactionRef.id;
+  },
 };
 
 
@@ -1287,7 +1307,13 @@ export const categoriesService = {
   subscribeToCategories: (callback: (categories: Category[]) => void) => {
     const q = query(collection(db, "categories"));
     return onSnapshot(q, (snapshot) => {
-      const categories = snapshot.docs.map(doc => doc.data() as Category);
+      const categories = snapshot.docs.map(
+        (docSnap) =>
+          ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          }) as Category
+      );
       callback(categories);
     });
   },
@@ -1373,6 +1399,15 @@ export const invoicesService = {
     const removeUndefined = (obj: any) => JSON.parse(JSON.stringify(obj));
 
     await setDoc(invoiceRef, removeUndefined(newInvoice));
+
+    try {
+      const jid = await tryPostPurchaseReceiptFromInvoice(newInvoice as Invoice);
+      if (jid != null) {
+        await updateDoc(invoiceRef, { glPurchaseReceiptJournalId: jid });
+      }
+    } catch (e) {
+      console.error("post purchase receipt after new invoice:", e);
+    }
   },
 
   updateInvoiceInDb: async (invoice: Invoice) => {
@@ -1386,6 +1421,15 @@ export const invoicesService = {
     // دالة مساعدة لحذف الـ undefined
     const removeUndefined = (obj: any) => JSON.parse(JSON.stringify(obj));
     await updateDoc(invoiceRef, removeUndefined(invoice) as Record<string, any>);
+
+    try {
+      const jid = await tryPostPurchaseReceiptFromInvoice(invoice);
+      if (jid != null) {
+        await updateDoc(invoiceRef, { glPurchaseReceiptJournalId: jid });
+      }
+    } catch (e) {
+      console.error("post purchase receipt after invoice update:", e);
+    }
   },
 
   deleteInvoiceFromDb: async (invoiceId: string) => {
@@ -1396,6 +1440,15 @@ export const invoicesService = {
 
 // Suppliers Service
 export const suppliersService = {
+  _mapSupplierTypeToPartnerType: (supplierType?: string): string => {
+    const t = String(supplierType || "").toLowerCase();
+    if (t === "shipping_agent") return "FreightForwarder";
+    if (t === "service_provider") return "CustomsBroker";
+    if (t === "local_company") return "LocalTransporter";
+    if (t === "international_trader") return "Supplier";
+    if (t === "factory") return "Supplier";
+    return "Supplier";
+  },
   _mapPartnerTypeToSupplierType: (partnerType?: string): any => {
     const t = String(partnerType || "").toLowerCase();
     if (t === "supplier") return "factory";
@@ -1582,7 +1635,7 @@ export const suppliersService = {
       mobile: supplier.mobile || "",
       address: supplier.street || "",
       notes: supplier.notes || "",
-      partner_type: supplier.type || "factory",
+      partner_type: suppliersService._mapSupplierTypeToPartnerType(supplier.type),
       is_active: true,
     };
     const created = await apiPostObject<any>("partners/", payload, { tenantId: 1 });
@@ -1598,7 +1651,7 @@ export const suppliersService = {
       mobile: supplier.mobile || "",
       address: supplier.street || "",
       notes: supplier.notes || "",
-      partner_type: supplier.type || "factory",
+      partner_type: suppliersService._mapSupplierTypeToPartnerType(supplier.type),
     }, { tenantId: 1 });
   },
 

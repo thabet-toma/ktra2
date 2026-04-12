@@ -23,6 +23,7 @@ import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { NoSqlMigrationBanner } from "./components/NoSqlMigrationBanner";
 import { Dashboard } from "./components/Dashboard";
+import { TradeDashboard } from "./components/dashboard/TradeDashboard";
 import { TaskManagement } from "./components/TaskManagement";
 import { UserManagement } from "./components/UserManagement";
 import { Reports } from "./components/Reports";
@@ -71,19 +72,27 @@ import { AccountingJournalEntryPage } from "./components/accounting/AccountingJo
 import { AccountingChequesPage } from "./components/accounting/AccountingChequesPage";
 import { AccountingGeneralLedgerPage } from "./components/accounting/AccountingGeneralLedgerPage";
 import { AccountingTrialBalancePage } from "./components/accounting/AccountingTrialBalancePage";
+import { FiscalPeriodsPage } from "./components/accounting/FiscalPeriodsPage";
+import { ExchangeRatesPage } from "./components/accounting/ExchangeRatesPage";
 import { SqlProductsPage } from "./components/sql/SqlProductsPage";
 import { SqlPartnersPage } from "./components/sql/SqlPartnersPage";
 import { SqlDealsPage } from "./components/sql/SqlDealsPage";
 import { SqlShipmentsPage } from "./components/sql/SqlShipmentsPage";
-
-
+import { SmartAssistantPage } from "./components/SmartAssistantPage";
+import { CustomsClearanceManagement } from "./components/procurement/clearance/CustomsClearanceManagement";
+import { StockMovementsPage } from "./components/inventory/StockMovementsPage";
+import { StockLevelsPage } from "./components/inventory/StockLevelsPage";
+import { useLocation, useNavigate } from "react-router-dom";
 
 type SourcingView = "search" | "loading" | "results";
 type AuthView = "login" | "signup";
 
 const App: React.FC = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
 
   const { currentUser, loading: authLoading, logout, updateUser } = useAuth();
+
   const [authView, setAuthView] = useState<AuthView>("login");
   const [users, setUsers] = useState<User[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -93,6 +102,41 @@ const App: React.FC = () => {
   const [userTaskTime, setUserTaskTime] = useState(0);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [appView, setAppView] = useState<AppView>("dashboard");
+  /** مزامنة المسار مع الـ URL لكل شاشة مدعومة */
+  const setViewAndSyncPath = useCallback(
+    (view: AppView, targetId?: string) => {
+      if (view === "deals-management") {
+        navigate(targetId ? `/deals/${encodeURIComponent(targetId)}` : "/deals", { replace: false });
+      } else if (view === "shipments-management") {
+        navigate(
+          targetId ? `/shipments/${encodeURIComponent(targetId)}` : "/shipments",
+          { replace: false }
+        );
+      } else if (view === "accounting-journals") {
+        navigate("/accounting/journals", { replace: false });
+      } else if (view === "accounting-journal-entry") {
+        if (targetId && targetId !== "new") {
+          navigate(`/accounting/journals/${targetId}`, { replace: false });
+        } else {
+          navigate("/accounting/journals/new", { replace: false });
+        }
+      } else if (view === "smart-assistant") {
+        navigate("/assistant", { replace: false });
+      } else if (view === "customs-clearance") {
+        navigate("/clearance", { replace: false });
+      } else if (view === "purchase-invoices") {
+        if (targetId && targetId !== "list") {
+          navigate(`/purchase-invoices/${encodeURIComponent(targetId)}`, { replace: false });
+        } else {
+          navigate("/purchase-invoices", { replace: false });
+        }
+      } else {
+        navigate("/", { replace: false });
+      }
+      setAppView(view);
+    },
+    [navigate]
+  );
   const [sourcingView, setSourcingView] = useState<SourcingView>("search");
   const [products, setProducts] = useState<Product[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -103,6 +147,22 @@ const App: React.FC = () => {
   const [selectedCashBox, setSelectedCashBox] = useState<CashBox | null>(null);
   /** null = قيد جديد؛ رقم = تعديل — يُستخدم مع appView === accounting-journal-entry */
   const [accountingJournalId, setAccountingJournalId] = useState<number | null>(null);
+  /** معلومات الصفقة المرتبطة بالقيد المفتوح (لعرض رابط الصفقة داخل القيد) */
+  const [accountingJournalDealRef, setAccountingJournalDealRef] = useState<{
+    dealId: string;
+    dealNumber: string;
+    displayName: string;
+  } | null>(null);
+  /** شاشة الرجوع من قيد اليومية (صفقات أو قائمة القيود) */
+  const [accountingJournalBackView, setAccountingJournalBackView] =
+    useState<AppView>("accounting-journals");
+  /** الصفقة مقابل الشحنة — لعرض الرابط الصحيح من شاشة القيد */
+  const [accountingJournalRelatedKind, setAccountingJournalRelatedKind] = useState<
+    "deal" | "shipment" | null
+  >(null);
+  /** تنقّل من شجرة الحسابات: أستاذ عام / مورد */
+  const [accountingGlAccountId, setAccountingGlAccountId] = useState<number | null>(null);
+  const [accountingSupplierPartnerId, setAccountingSupplierPartnerId] = useState<number | null>(null);
   const [rejectingTask, setRejectingTask] = useState<Task | null>(null);
   const [theme, setTheme] = useState<Theme>("light");
 
@@ -181,33 +241,77 @@ const App: React.FC = () => {
     });
   }, [currentUser, tasks, activeTask]);
 
-  // Deep Linking Logic triggered when user loads
+  // مسارات الصفقات + ?view= القديم؛ لا نفرض شاشة الدور عند كل زيارة لـ /
   useEffect(() => {
-    if (currentUser && currentUser.isApproved) {
-      // Check for Query Params for Direct Navigation (Deep Linking)
-      const params = new URLSearchParams(window.location.search);
-      const viewParam = params.get('view') as AppView;
-
-      let defaultView: AppView = "dashboard";
-
-      if (viewParam) {
-        defaultView = viewParam;
-      } else {
-        // Default logic
-        switch (currentUser.role) {
-          case "employee":
-          case "procurement":
-            defaultView = "tasks";
-            break;
-          case "manager":
-            defaultView = "dashboard";
-            break;
-          default:
-            defaultView = "tasks";
-        }
-      }
-      setAppView(defaultView);
+    if (!currentUser?.isApproved) return;
+    const params = new URLSearchParams(location.search);
+    const idLegacy = params.get("id");
+    const viewParam = params.get("view") as AppView | null;
+    if (viewParam === "deals-management" && idLegacy) {
+      navigate(`/deals/${encodeURIComponent(idLegacy)}`, { replace: true });
+      return;
     }
+    const path = (location.pathname || "/").replace(/\/$/, "") || "/";
+    /** روابط قديمة على الرئيسية: ?view=purchase-invoices&id= → مسار مخصص */
+    if (path === "/" && viewParam === "purchase-invoices") {
+      if (idLegacy) {
+        navigate(`/purchase-invoices/${encodeURIComponent(idLegacy)}`, { replace: true });
+      } else {
+        navigate("/purchase-invoices", { replace: true });
+      }
+      return;
+    }
+    if (path === "/deals" || path.startsWith("/deals/")) {
+      setAppView("deals-management");
+      return;
+    }
+    if (path === "/shipments" || path.startsWith("/shipments/")) {
+      setAppView("shipments-management");
+      return;
+    }
+    if (path === "/accounting/journals") {
+      setAppView("accounting-journals");
+      return;
+    }
+    if (path === "/assistant") {
+      setAppView("smart-assistant");
+      return;
+    }
+    if (path === "/clearance") {
+      setAppView("customs-clearance");
+      return;
+    }
+    if (path === "/purchase-invoices" || path.startsWith("/purchase-invoices/")) {
+      setAppView("purchase-invoices");
+      return;
+    }
+    const journalMatch = path.match(/^\/accounting\/journals\/(.+)$/);
+    if (journalMatch) {
+      const seg = journalMatch[1];
+      if (seg === "new") {
+        setAccountingJournalId(null);
+        setAccountingJournalDealRef(null);
+      } else {
+        const jid = parseInt(seg, 10);
+        if (!isNaN(jid)) setAccountingJournalId(jid);
+      }
+      setAppView("accounting-journal-entry");
+      return;
+    }
+    if (viewParam) {
+      setAppView(viewParam);
+    }
+  }, [currentUser, location.pathname, location.search, navigate]);
+
+  useEffect(() => {
+    if (!currentUser?.isApproved) return;
+    const path = (location.pathname || "/").replace(/\/$/, "") || "/";
+    if (path !== "/") return;
+    const params = new URLSearchParams(location.search);
+    if (params.get("view")) return;
+    const roleDefault: AppView =
+      currentUser.role === "manager" ? "dashboard" : "tasks";
+    setAppView(roleDefault);
   }, [currentUser]);
 
   // Data Subscription
@@ -225,6 +329,20 @@ const App: React.FC = () => {
       unsubscribeTasks();
     };
   }, [currentUser]);
+
+  /** تذكيرات وصول الشحنات (≤ 3 أيام) — إشعار Firestore، تكرار محكوم بـ localStorage */
+  useEffect(() => {
+    if (!currentUser?.isApproved) return;
+    if (currentUser.role !== "manager" && currentUser.role !== "procurement") return;
+    const run = () => {
+      void import("./services/shipmentArrivalReminders").then((m) =>
+        m.runShipmentArrivalReminders(currentUser.id)
+      );
+    };
+    run();
+    const t = window.setInterval(run, 6 * 60 * 60 * 1000);
+    return () => window.clearInterval(t);
+  }, [currentUser?.id, currentUser?.isApproved, currentUser?.role]);
 
   // Sync Active Task
   useEffect(() => {
@@ -862,7 +980,10 @@ const App: React.FC = () => {
 
     switch (appView) {
       case "dashboard":
-        return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+        if (currentUser!.role === "manager" || currentUser!.role === "procurement") {
+          return <TradeDashboard userName={currentUser!.name} onNavigate={setViewAndSyncPath} />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "tasks":
         return (
@@ -888,12 +1009,12 @@ const App: React.FC = () => {
             />
           );
         } else {
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
 
       case "users":
         if (currentUser!.role !== "manager")
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         return (
           <UserManagement
             users={users}
@@ -904,12 +1025,12 @@ const App: React.FC = () => {
 
       case "reports":
         if (currentUser!.role !== "manager")
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         return <Reports tasks={tasks} users={users} />;
 
       case "employee-notes":
         if (currentUser!.role !== "manager")
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         return <EmployeeNotes users={users} onSaveNotes={handleSaveNotes} />;
 
       case "points-history":
@@ -917,7 +1038,7 @@ const App: React.FC = () => {
 
       case "points-management":
         if (currentUser!.role !== "manager")
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         return <EmployeePointsManagement users={users} />;
 
       case "settings":
@@ -934,9 +1055,9 @@ const App: React.FC = () => {
           currentUser!.role === "procurement" ||
           currentUser!.role === "manager"
         ) {
-          return <PurchaseInvoice />;
+          return <PurchaseInvoice currentUser={currentUser!} />;
         }
-        return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       // ---------- New Case Added Here ----------
       case "old-invoices":
@@ -946,7 +1067,7 @@ const App: React.FC = () => {
         ) {
           return <OldPurchaseInvoice />;
         }
-        return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "price-offers":
         if (
@@ -955,16 +1076,31 @@ const App: React.FC = () => {
         ) {
           return <PriceOfferManagement />;
         }
-        return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "deals-management":
         if (
           currentUser!.role === "procurement" ||
           currentUser!.role === "manager"
         ) {
-          return <DealManagement currentUser={currentUser!} />;
+          return (
+            <DealManagement
+              currentUser={currentUser!}
+              onOpenAccountingJournal={(journalId, dealRef) => {
+                setAccountingJournalRelatedKind("deal");
+                setAccountingJournalId(journalId);
+                setAccountingJournalDealRef(dealRef ?? null);
+                setAccountingJournalBackView("deals-management");
+                if (journalId != null) {
+                  setViewAndSyncPath("accounting-journal-entry", String(journalId));
+                } else {
+                  setViewAndSyncPath("accounting-journal-entry");
+                }
+              }}
+            />
+          );
         }
-        return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
       // -----------------------------------------
 
       case "items-management":
@@ -974,25 +1110,54 @@ const App: React.FC = () => {
         ) {
           return <ItemsManagement user={currentUser!} />;
         }
-        return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "supplier-management":
         if (
           currentUser!.role === "procurement" ||
           currentUser!.role === "manager"
         ) {
-          return <SupplierManagement />;
+          return (
+            <SupplierManagement
+              initialPartnerId={accountingSupplierPartnerId}
+              onInitialPartnerConsumed={() => setAccountingSupplierPartnerId(null)}
+            />
+          );
         }
-        return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "shipments-management":
         if (
           currentUser!.role === "procurement" ||
           currentUser!.role === "manager"
         ) {
-          return <ShipmentManagement currentUser={currentUser!} />;
+          return (
+            <ShipmentManagement
+              currentUser={currentUser!}
+              onOpenAccountingJournal={(journalId, dealRef) => {
+                setAccountingJournalRelatedKind("shipment");
+                setAccountingJournalId(journalId);
+                setAccountingJournalDealRef(dealRef ?? null);
+                setAccountingJournalBackView("shipments-management");
+                if (journalId != null) {
+                  setViewAndSyncPath("accounting-journal-entry", String(journalId));
+                } else {
+                  setViewAndSyncPath("accounting-journal-entry");
+                }
+              }}
+            />
+          );
         }
-        return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
+      case "customs-clearance":
+        if (
+          currentUser!.role === "procurement" ||
+          currentUser!.role === "manager"
+        ) {
+          return <CustomsClearanceManagement currentUser={currentUser!} />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "cash-boxes":
         if (currentUser!.role === "manager") {
@@ -1005,7 +1170,7 @@ const App: React.FC = () => {
             />
           );
         }
-        return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "cash-box-details":
         if (currentUser!.role === "manager" && selectedCashBox) {
@@ -1016,89 +1181,174 @@ const App: React.FC = () => {
             />
           );
         }
-        return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "gallery":
         return <PublicGallery />;
 
       case "accounting-coa":
         if (currentUser!.role !== "manager") {
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
-        return <AccountingCoaPage />;
+        return (
+          <AccountingCoaPage
+            onOpenGeneralLedger={(id) => {
+              setAccountingGlAccountId(id);
+              setAppView("accounting-general-ledger");
+            }}
+            onOpenSupplier={(partnerId) => {
+              setAccountingSupplierPartnerId(partnerId);
+              setAppView("supplier-management");
+            }}
+          />
+        );
 
       case "accounting-journals":
         if (currentUser!.role !== "manager") {
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return (
           <AccountingJournalListPage
             onNew={() => {
+              setAccountingJournalRelatedKind(null);
+              setAccountingJournalBackView("accounting-journals");
               setAccountingJournalId(null);
-              setAppView("accounting-journal-entry");
+              setAccountingJournalDealRef(null);
+              setViewAndSyncPath("accounting-journal-entry");
             }}
-            onOpen={(id) => {
+            onOpen={(id, dealRefNumber, referenceSummary) => {
+              setAccountingJournalRelatedKind(null);
+              setAccountingJournalBackView("accounting-journals");
               setAccountingJournalId(id);
-              setAppView("accounting-journal-entry");
+              if (dealRefNumber) {
+                setAccountingJournalDealRef({
+                  dealId: "",
+                  dealNumber: dealRefNumber,
+                  displayName: referenceSummary || dealRefNumber,
+                });
+              } else {
+                setAccountingJournalDealRef(null);
+              }
+              setViewAndSyncPath("accounting-journal-entry", String(id));
+            }}
+            onNavigateToDeal={(dealRefNumber) => {
+              navigate(`/deals?ref=${encodeURIComponent(dealRefNumber)}`);
+              setAppView("deals-management");
             }}
           />
         );
 
       case "accounting-journal-entry":
-        if (currentUser!.role !== "manager") {
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+        if (currentUser!.role !== "manager" && currentUser!.role !== "procurement") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return (
           <AccountingJournalEntryPage
             journalId={accountingJournalId}
-            onBack={() => setAppView("accounting-journals")}
+            dealRef={accountingJournalDealRef}
+            relatedKind={accountingJournalRelatedKind}
+            onNavigateToShipment={(shipmentId) => {
+              setAccountingJournalDealRef(null);
+              setAccountingJournalRelatedKind(null);
+              setAccountingJournalId(null);
+              navigate(`/shipments/${encodeURIComponent(shipmentId)}`);
+              setAppView("shipments-management");
+            }}
+            onNavigateToDeal={(dealIdOrRef) => {
+              setAccountingJournalDealRef(null);
+              setAccountingJournalRelatedKind(null);
+              setAccountingJournalId(null);
+              if (dealIdOrRef && dealIdOrRef.startsWith("D-")) {
+                navigate(`/deals?ref=${encodeURIComponent(dealIdOrRef)}`);
+                setAppView("deals-management");
+              } else {
+                setViewAndSyncPath("deals-management", dealIdOrRef);
+              }
+            }}
+            onBack={() => {
+              setAccountingJournalDealRef(null);
+              setAccountingJournalRelatedKind(null);
+              const backPath = accountingJournalBackView === "deals-management"
+                ? "/deals"
+                : accountingJournalBackView === "shipments-management"
+                  ? "/shipments"
+                : "/accounting/journals";
+              navigate(backPath);
+              setAppView(accountingJournalBackView);
+            }}
           />
         );
 
       case "accounting-cheques":
         if (currentUser!.role !== "manager") {
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <AccountingChequesPage />;
 
       case "accounting-general-ledger":
         if (currentUser!.role !== "manager") {
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
-        return <AccountingGeneralLedgerPage />;
+        return (
+          <AccountingGeneralLedgerPage
+            initialAccountId={accountingGlAccountId}
+            onInitialAccountConsumed={() => setAccountingGlAccountId(null)}
+          />
+        );
 
       case "accounting-trial-balance":
         if (currentUser!.role !== "manager") {
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <AccountingTrialBalancePage />;
 
+      case "accounting-fiscal-periods":
+        if (currentUser!.role !== "manager") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <FiscalPeriodsPage />;
+
+      case "accounting-exchange-rates":
+        if (currentUser!.role !== "manager") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <ExchangeRatesPage />;
+
+      case "stock-levels":
+        return <StockLevelsPage />;
+
+      case "stock-movements":
+        return <StockMovementsPage />;
+
       case "sql-products":
         if (currentUser!.role !== "manager" && currentUser!.role !== "procurement") {
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <SqlProductsPage />;
 
       case "sql-partners":
         if (currentUser!.role !== "manager" && currentUser!.role !== "procurement") {
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <SqlPartnersPage />;
 
       case "sql-deals":
         if (currentUser!.role !== "manager" && currentUser!.role !== "procurement") {
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <SqlDealsPage />;
 
       case "sql-shipments":
         if (currentUser!.role !== "manager" && currentUser!.role !== "procurement") {
-          return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <SqlShipmentsPage />;
 
+      case "smart-assistant":
+        return <SmartAssistantPage />;
+
       default:
-        return <Dashboard tasks={tasks} users={users} onNavigate={setAppView} currentUser={currentUser!} />;
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
     }
   };
 
@@ -1160,7 +1410,7 @@ const App: React.FC = () => {
       dir="rtl"
       className="min-h-screen bg-gray-100 dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-200 flex flex-col md:flex-row"
     >
-      <Sidebar user={currentUser} activeView={appView} setView={setAppView} />
+      <Sidebar user={currentUser} activeView={appView} setView={setViewAndSyncPath} />
 
       <div className="flex-1 flex flex-col h-screen overflow-hidden mb-16 md:mb-0">
         <Header
@@ -1172,7 +1422,7 @@ const App: React.FC = () => {
           toggleTheme={toggleTheme}
           showReturnButton={showReturnButton}
           onReturnToTask={() => setAppView("sourcing")}
-          onNavigate={(view) => setAppView(view)}
+          onNavigate={setViewAndSyncPath}
         />
 
         <NoSqlMigrationBanner isManager={currentUser?.role === "manager"} />

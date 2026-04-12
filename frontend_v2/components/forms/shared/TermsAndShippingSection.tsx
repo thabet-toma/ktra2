@@ -23,9 +23,9 @@ export const TermsAndShippingSection: React.FC<TermsProps> = ({
     <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden h-fit">
 
       {/* Header */}
-      <div className="p-3 bg-gradient-to-r from-orange-50 to-amber-50 dark:from-orange-900/20 dark:to-amber-900/20 border-b border-gray-200 dark:border-gray-700">
+      <div className="p-3 bg-slate-50 dark:bg-slate-900/50 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 bg-orange-500 rounded-md">
+          <div className="p-1.5 bg-slate-600 dark:bg-slate-500 rounded-md">
             <Truck className="w-4 h-4 text-white" />
           </div>
           <h3 className="font-bold text-sm text-gray-900 dark:text-white">الشروط والشحن</h3>

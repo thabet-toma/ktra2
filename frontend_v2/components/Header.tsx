@@ -203,7 +203,12 @@ export const Header: React.FC<HeaderProps> = ({
   const isButtonDisabled = timeRemaining > 2 || isCheckingIn;
 
   return (
-    <header className="flex flex-col sm:flex-row items-center justify-between p-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-40 shadow-sm gap-4 sm:gap-0">
+    <header className="relative flex flex-col sm:flex-row items-center justify-between pt-4 pb-4 pr-4 pl-14 sm:pl-16 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-50 shadow-sm gap-4 sm:gap-0">
+
+      {/* جرس الإشعارات — أعلى يسار الشاشة (يسار مطلق) */}
+      <div className="absolute left-3 top-1/2 z-[60] -translate-y-1/2">
+        <NotificationCenter currentUserId={user.id} onNavigate={onNavigate} />
+      </div>
 
       {/* عنصر الصوت المخفي */}
       <audio
@@ -309,8 +314,6 @@ export const Header: React.FC<HeaderProps> = ({
             title={isActive ? "نشط" : "غير نشط"}
           />
         )}
-
-        <NotificationCenter currentUserId={user.id} onNavigate={onNavigate} />
 
         <div className="text-left hidden sm:block">
           <p className="font-semibold text-gray-700 dark:text-gray-200 text-sm">

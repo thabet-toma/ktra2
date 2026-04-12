@@ -1,5 +1,14 @@
 
 
+/** مراحل الشحن والتصنيع (مخزّنة في SQL shipping_workflow_status) */
+export type ShippingWorkflowStatus =
+    | 'sw_mfg_start'
+    | 'sw_wait_agent_ship'
+    | 'sw_wait_intl_ship'
+    | 'sw_wait_arrival'
+    | 'sw_wait_clearance'
+    | 'sw_released';
+
 export type DealStatus =
     | 'initial'
     | 'first_payment_pending'
@@ -49,6 +58,10 @@ export interface DealPayment {
     confirmedBy?: string;
     supplierConfirmationImage?: string;
     supplierNotes?: string;
+    /** من SQL: مرحّل للمحاسبة */
+    isPosted?: boolean;
+    /** معرّف قيد اليومية بعد الترحيل */
+    journalId?: number;
     cashBoxId?: string;
     cashBoxName?: string;
     cashBoxWithdrawalAt?: string;
@@ -129,6 +142,8 @@ export interface Deal {
     supplierId: string;
     factoryName: string;
     supplierInvoiceNumber?: string;
+    /** عنوان / وصف قصير للصفقة (عادة عربي) — عمود description في SQL */
+    dealDescription?: string;
     quoteImages?: string[];
     quotePdfs?: {
         name: string;
@@ -137,6 +152,8 @@ export interface Deal {
         type: string;
     }[];
     status: DealStatus;
+    /** مرحلة الشحن (يدوي/تلقائي) — مصدر الحقيقة في قاعدة البيانات */
+    shippingWorkflowStatus?: ShippingWorkflowStatus | null;
     installments: DealInstallment[];
     installmentPlanEnabled: boolean;
     currentInstallmentNumber?: number;
@@ -175,7 +192,10 @@ export interface Deal {
     updatedBy: string;
     supplierSnapshot?: {
         tradeName?: string;
+        /** اسم محلي / مستعار — غالباً من اسم الشريك في النظام */
         alias?: string;
+        /** الاسم القانوني / الإنجليزي عند الحاجة */
+        legalName?: string;
         address?: string;
         salesRepName?: string;
         salesRepPhone?: string;

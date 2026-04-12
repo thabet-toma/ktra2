@@ -1,7 +1,11 @@
 
 import { AppView } from './common';
 
-export type NotificationType = 'shipment_created' | 'shipment_updated' | 'general';
+export type NotificationType =
+    | 'shipment_created'
+    | 'shipment_updated'
+    | 'shipment_arrival_soon'
+    | 'general';
 
 export interface AppNotification {
     id: string;

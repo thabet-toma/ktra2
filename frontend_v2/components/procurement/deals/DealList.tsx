@@ -1,5 +1,12 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { Deal, DealStatus, Supplier } from "../../../types";
+import { Deal, Supplier } from "../../../types";
+import type { ShippingWorkflowStatus } from "../../../types/deal";
+import {
+  getShippingWorkflowBadgeClass,
+  getShippingWorkflowLabel,
+  SHIPPING_WORKFLOW_LABELS,
+} from "@/utils/shippingWorkflowLabels";
+import { getDealGrandTotalUsd } from "@/utils/dealGrandTotalUsd";
 import { SupplierViewModal } from "@/components/common/SupplierViewModal";
 // 🟢 1. استيراد مودال التعديل
 import { SupplierModal } from "@/components/common/SupplierModal";
@@ -16,17 +23,16 @@ import {
   Search,
   SortAsc,
   SortDesc,
-  Eye,
   Truck,
   Clock,
   CheckCircle,
-  XCircle,
   AlertTriangle,
   Printer,
   Calendar,
   X,
   Edit,
-  ArrowUpRight
+  ArrowUpRight,
+  Ship,
 } from "lucide-react";
 
 interface DealListProps {
@@ -34,7 +40,6 @@ interface DealListProps {
   onEdit: (deal: Deal) => void;
   onPrint: (deal: Deal) => void;
   onDelete: (dealId: string) => void;
-  allDbItems?: any[];
   allSuppliers?: Supplier[];
   compactMode?: boolean;
 }
@@ -44,11 +49,9 @@ export const DealList: React.FC<DealListProps> = ({
   onEdit,
   onPrint,
   onDelete,
-  allDbItems,
   allSuppliers,
   compactMode = true,
 }) => {
-  const [selectedDealForActivity, setSelectedDealForActivity] = useState<string | null>(null);
   const [expandedDeals, setExpandedDeals] = useState<Set<string>>(new Set());
   const [hoveredImage, setHoveredImage] = useState<{ dealId: string, index: number } | null>(null);
 
@@ -60,7 +63,7 @@ export const DealList: React.FC<DealListProps> = ({
   const [supplierToEdit, setSupplierToEdit] = useState<Supplier | null>(null);
 
   // States for Filters & Sorting
-  const [selectedOperationalStatus, setSelectedOperationalStatus] = useState<string>("all");
+  const [selectedShippingWorkflow, setSelectedShippingWorkflow] = useState<string>("all");
   const [selectedPaymentStatus, setSelectedPaymentStatus] = useState<string>("all");
   const [searchTerm, setSearchTerm] = useState<string>("");
   const [sortField, setSortField] = useState<"date" | "amount" | "status">("date");
@@ -82,32 +85,7 @@ export const DealList: React.FC<DealListProps> = ({
 
   // --- Helper Functions ---
   const calculateDealFinancials = (deal: Deal) => {
-    const items = deal.items || [];
-    let calculatedSubtotal = 0;
-    if (items.length > 0) {
-      calculatedSubtotal = items.reduce((sum, item) => {
-        const qty = parseFloat(item.quantity as any) || 0;
-        const price = parseFloat(item.unitPrice as any) || 0;
-        return sum + (qty * price);
-      }, 0);
-    } else {
-      calculatedSubtotal = parseFloat(deal.subtotal as any) || 0;
-    }
-
-    const discountAmount = parseFloat(deal.discountAmount as any) || 0;
-    const shippingCost = deal.shippingIncluded ? 0 : (parseFloat(deal.shippingCost as any) || 0);
-    const netAfterDiscount = Math.max(0, calculatedSubtotal - discountAmount);
-    const taxableBase = netAfterDiscount + shippingCost;
-
-    let taxAmount = 0;
-    if (deal.taxType === 'amount') {
-      taxAmount = parseFloat(deal.taxAmount as any) || 0;
-    } else {
-      const taxRate = parseFloat(deal.taxRate as any) || 0;
-      taxAmount = taxableBase * (taxRate / 100);
-    }
-
-    const grandTotal = taxableBase + taxAmount;
+    const grandTotal = getDealGrandTotalUsd(deal);
     const paidAmount = deal.payments?.reduce((sum, p) => sum + (parseFloat(p.amount as any) || 0), 0) || 0;
     const remainingAmount = grandTotal - paidAmount;
 
@@ -117,16 +95,7 @@ export const DealList: React.FC<DealListProps> = ({
   // ... (باقي دوال الحالة والفلترة كما هي للحفاظ على نظافة الكود) ...
   // (getOperationalStatus, getPaymentStatusFromPayments, getSupplierDisplayName, etc.)
 
-  // سأقوم بإدراج الدوال الأساسية فقط لتشغيل الكود
-  type OperationalStatus = "initial" | "manufacturing_started" | "production_completed" | "shipping_preparation" | "shipping_in_progress" | "shipped" | "cancelled";
   type PaymentStatus = "not_paid" | "claim_raised" | "payment_pending_confirmation" | "partially_paid" | "paid";
-
-  const getOperationalStatus = (status: DealStatus): OperationalStatus => {
-    if (["manufacturing_started", "production_completed", "shipping_preparation", "shipping_in_progress", "shipped", "cancelled"].includes(status)) {
-      return status as OperationalStatus;
-    }
-    return "initial";
-  };
 
   const getPaymentStatusFromPayments = (deal: Deal): PaymentStatus => {
     const { grandTotal, paidAmount } = calculateDealFinancials(deal);
@@ -138,12 +107,22 @@ export const DealList: React.FC<DealListProps> = ({
     return "not_paid";
   };
 
-  const getOpStyles = (status: OperationalStatus) => { const styles: any = { initial: "bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700", manufacturing_started: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800", production_completed: "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-300 dark:border-purple-800", shipping_preparation: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800", shipping_in_progress: "bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/20 dark:text-teal-300 dark:border-teal-800", shipped: "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800", cancelled: "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800", }; return styles[status] || styles["initial"]; };
   const getPayStyles = (status: PaymentStatus) => { const styles: any = { not_paid: "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300", claim_raised: "bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-300", payment_pending_confirmation: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300", partially_paid: "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300", paid: "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300", }; return styles[status] || styles["not_paid"]; };
-  const getOpText = (status: OperationalStatus) => { const map: any = { initial: "أولية", manufacturing_started: "تصنيع", production_completed: "تم التصنيع", shipping_preparation: "تجهيز شحن", shipping_in_progress: "جاري الشحن", shipped: "مكتملة", cancelled: "ملغاة" }; return map[status] || status; };
   const getPayText = (status: PaymentStatus) => { const map: any = { not_paid: "غير مدفوعة", claim_raised: "رفع مطالبة", payment_pending_confirmation: "بانتظار تأكيد", partially_paid: "مدفوعة جزئياً", paid: "مدفوعة كلياً" }; return map[status] || status; };
-  const getOpIcon = (status: OperationalStatus) => { const icons: any = { initial: <FileText className="w-3 h-3" />, manufacturing_started: <Factory className="w-3 h-3" />, production_completed: <CheckCircle2 className="w-3 h-3" />, shipping_preparation: <Package className="w-3 h-3" />, shipping_in_progress: <Truck className="w-3 h-3" />, shipped: <CheckCircle2 className="w-3 h-3" />, cancelled: <XCircle className="w-3 h-3" />, }; return icons[status]; };
   const getPayIcon = (status: PaymentStatus) => { const icons: any = { not_paid: <AlertCircle className="w-3 h-3" />, claim_raised: <AlertTriangle className="w-3 h-3" />, payment_pending_confirmation: <Clock className="w-3 h-3" />, partially_paid: <DollarSign className="w-3 h-3" />, paid: <CheckCircle className="w-3 h-3" />, }; return icons[status]; };
+
+  const getShippingWorkflowIcon = (code: ShippingWorkflowStatus | null | undefined) => {
+    if (!code) return <Package className="w-3 h-3" />;
+    const icons: Record<ShippingWorkflowStatus, React.ReactNode> = {
+      sw_mfg_start: <Factory className="w-3 h-3" />,
+      sw_wait_agent_ship: <Package className="w-3 h-3" />,
+      sw_wait_intl_ship: <Truck className="w-3 h-3" />,
+      sw_wait_arrival: <Ship className="w-3 h-3" />,
+      sw_wait_clearance: <FileText className="w-3 h-3" />,
+      sw_released: <CheckCircle2 className="w-3 h-3" />,
+    };
+    return icons[code] ?? <Package className="w-3 h-3" />;
+  };
 
   const getSupplierDisplayName = (deal: Deal): string => {
     if (!allSuppliers || !deal.supplierId) return deal.factoryName || "مورد غير محدد";
@@ -167,7 +146,7 @@ export const DealList: React.FC<DealListProps> = ({
   };
 
   const resetAllFilters = () => {
-    setSelectedOperationalStatus("all");
+    setSelectedShippingWorkflow("all");
     setSelectedPaymentStatus("all");
     setSearchTerm("");
     setDateFrom("");
@@ -178,8 +157,12 @@ export const DealList: React.FC<DealListProps> = ({
 
   const filteredDeals = useMemo(() => {
     return deals.filter((deal) => {
-      const operationalStatus = getOperationalStatus(deal.status);
-      if (selectedOperationalStatus !== "all" && operationalStatus !== selectedOperationalStatus) return false;
+      const wf = deal.shippingWorkflowStatus ?? null;
+      if (selectedShippingWorkflow !== "all") {
+        if (selectedShippingWorkflow === "unset") {
+          if (wf) return false;
+        } else if (wf !== selectedShippingWorkflow) return false;
+      }
       const paymentStatus = getPaymentStatusFromPayments(deal);
       if (selectedPaymentStatus !== "all" && paymentStatus !== selectedPaymentStatus) return false;
       if (searchTerm) {
@@ -199,7 +182,7 @@ export const DealList: React.FC<DealListProps> = ({
       }
       return true;
     });
-  }, [deals, selectedOperationalStatus, selectedPaymentStatus, searchTerm, allSuppliers, dateFrom, dateTo]);
+  }, [deals, selectedShippingWorkflow, selectedPaymentStatus, searchTerm, allSuppliers, dateFrom, dateTo]);
 
   const sortedDeals = useMemo(() => {
     return [...filteredDeals].sort((a, b) => {
@@ -219,7 +202,7 @@ export const DealList: React.FC<DealListProps> = ({
     return sortedDeals.slice(startIndex, startIndex + itemsPerPage);
   }, [sortedDeals, currentPage]);
 
-  useEffect(() => setCurrentPage(1), [selectedOperationalStatus, selectedPaymentStatus, searchTerm, dateFrom, dateTo]);
+  useEffect(() => setCurrentPage(1), [selectedShippingWorkflow, selectedPaymentStatus, searchTerm, dateFrom, dateTo]);
   const goToPage = (page: number) => { if (page >= 1 && page <= totalPages) { setCurrentPage(page); window.scrollTo({ top: 0, behavior: 'smooth' }); } };
   const toggleDealExpand = (dealId: string) => { setExpandedDeals((prev) => { const newSet = new Set(prev); if (newSet.has(dealId)) newSet.delete(dealId); else newSet.add(dealId); return newSet; }); };
 
@@ -268,14 +251,14 @@ export const DealList: React.FC<DealListProps> = ({
             <Search className="absolute right-2 top-1/2 transform -translate-y-1/2 w-3 h-3 text-gray-400" />
             <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ابحث (رقم الصفقة، الفاتورة، المورد)..." className="w-full p-1.5 pr-7 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400" />
           </div>
-          <select value={selectedOperationalStatus} onChange={(e) => setSelectedOperationalStatus(e.target.value)} className="p-1.5 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-900 dark:text-white">
-            <option value="all">كل الحالات</option>
-            <option value="initial">أولية</option>
-            <option value="manufacturing_started">تصنيع</option>
-            <option value="production_completed">تم تصنيع</option>
-            <option value="shipping_preparation">تجهيز شحن</option>
-            <option value="shipped">مكتملة</option>
-            <option value="cancelled">ملغاة</option>
+          <select value={selectedShippingWorkflow} onChange={(e) => setSelectedShippingWorkflow(e.target.value)} className="p-1.5 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-900 dark:text-white">
+            <option value="all">كل أوضاع الشحنة</option>
+            <option value="unset">لم يُحدد وضع الشحنة</option>
+            {(Object.keys(SHIPPING_WORKFLOW_LABELS) as ShippingWorkflowStatus[]).map((code) => (
+              <option key={code} value={code}>
+                {SHIPPING_WORKFLOW_LABELS[code]}
+              </option>
+            ))}
           </select>
           <select value={selectedPaymentStatus} onChange={(e) => setSelectedPaymentStatus(e.target.value)} className="p-1.5 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-900 dark:text-white">
             <option value="all">كل الدفعات</option>
@@ -329,7 +312,7 @@ export const DealList: React.FC<DealListProps> = ({
         {paginatedDeals.map((deal) => {
           // ... (حسابات الصفقة) ...
           const { grandTotal, paidAmount, remainingAmount } = calculateDealFinancials(deal);
-          const operationalStatus = getOperationalStatus(deal.status);
+          const shippingWf = deal.shippingWorkflowStatus ?? null;
           const paymentStatus = getPaymentStatusFromPayments(deal);
           const supplierDisplayName = getSupplierDisplayName(deal);
           const images = getDealImages(deal);
@@ -404,9 +387,12 @@ export const DealList: React.FC<DealListProps> = ({
 
                 {/* Middle & Right ... (نفس الكود) */}
                 <div className="hidden sm:flex items-center gap-2 mx-4">
-                  <div className={`px-2 py-1 rounded-md text-xs border flex items-center gap-1.5 font-medium ${getOpStyles(operationalStatus)}`}>
-                    {getOpIcon(operationalStatus)}
-                    <span className="hidden lg:inline">{getOpText(operationalStatus)}</span>
+                  <div
+                    className={`px-2 py-1 rounded-md text-xs border flex items-center gap-1.5 font-medium ${getShippingWorkflowBadgeClass(shippingWf)}`}
+                    title="وضع الشحنة"
+                  >
+                    {getShippingWorkflowIcon(shippingWf)}
+                    <span className="hidden lg:inline">{getShippingWorkflowLabel(shippingWf)}</span>
                   </div>
                   <div className={`px-2 py-1 rounded-md text-xs border flex items-center gap-1.5 font-medium ${getPayStyles(paymentStatus)}`}>
                     {getPayIcon(paymentStatus)}
@@ -424,7 +410,7 @@ export const DealList: React.FC<DealListProps> = ({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        window.open(`${window.location.origin}?view=deals-management&id=${deal.id}`, '_blank');
+                        window.open(`${window.location.origin}/deals/${encodeURIComponent(deal.id)}`, '_blank', 'noopener,noreferrer');
                       }}
                       className="p-1.5 hover:bg-white dark:hover:bg-gray-700 rounded-full text-gray-400 hover:text-blue-600 transition-colors"
                       title="فتح في نافذة جديدة"
@@ -459,7 +445,9 @@ export const DealList: React.FC<DealListProps> = ({
                       </div>
                       {/* ... باقي التفاصيل ... */}
                       <div className="sm:hidden flex flex-wrap gap-2 mt-2">
-                        <span className={`px-2 py-1 rounded text-xs ${getOpStyles(operationalStatus)}`}>{getOpText(operationalStatus)}</span>
+                        <span className={`px-2 py-1 rounded text-xs border ${getShippingWorkflowBadgeClass(shippingWf)}`}>
+                          {getShippingWorkflowLabel(shippingWf)}
+                        </span>
                         <span className={`px-2 py-1 rounded text-xs ${getPayStyles(paymentStatus)}`}>{getPayText(paymentStatus)}</span>
                       </div>
                     </div>
@@ -494,7 +482,7 @@ export const DealList: React.FC<DealListProps> = ({
                       </div>
                     </div>
                     <div className="md:col-span-2 lg:col-span-3 flex justify-end gap-2 pt-2 mt-2 border-t border-gray-200 dark:border-gray-700">
-                      <button onClick={() => setSelectedDealForActivity(deal.id)} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded text-xs hover:bg-gray-50 transition-colors">سجل النشاطات</button>
+                      <button onClick={() => onEdit(deal)} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded text-xs hover:bg-gray-50 transition-colors">سجل النشاطات</button>
                       <button onClick={() => { if (confirm('حذف؟')) onDelete(deal.id) }} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 rounded text-xs hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">حذف</button>
                       <button onClick={() => onEdit(deal)} className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium shadow-sm transition-colors">إدارة الصفقة الكاملة</button>
                     </div>

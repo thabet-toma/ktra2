@@ -1,124 +1,456 @@
-import React from 'react';
-import { Calculator, TrendingUp, DollarSign, Globe, ArrowRightLeft, Info, HelpCircle } from 'lucide-react';
+import React from "react";
+import { Calculator, Ship } from "lucide-react";
+import type { Invoice, InvoiceImportLogistics } from "@/types";
+import { formatInvoiceImportLogisticsLine } from "@/utils/invoiceConversionUtils";
 
-interface ConversionMetadata {
-    dealEffectiveRate: number;
-    shipmentEffectiveRate: number;
-    internalShippingUsd: number;
-    globalShippingUsd: number;
-    extraCostsUsd: number;
-    totalUsd: number;
-    remainingBalanceRate: number;
+type ConversionMetadata = NonNullable<Invoice["conversionMetadata"]>;
+
+/** قيم JSON من الـ API قد تكون snake_case أو camelCase — نمنع undefined قبل .toFixed() */
+function num(v: unknown, fallback = 0): number {
+    if (v === null || v === undefined || v === "") return fallback;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : fallback;
+}
+
+function optionalNum(v: unknown): number | undefined {
+    if (v === null || v === undefined || v === "") return undefined;
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) ? n : undefined;
+}
+
+/** يدمج بيانات الاستيراد من الخادم (server_pro_rata) مع الشكل القديم للواجهة */
+function normalizeConversionMetadata(meta: ConversionMetadata): ConversionMetadata {
+    const r = meta as Record<string, unknown>;
+    const lineMeta =
+        r.line_meta && typeof r.line_meta === "object" && !Array.isArray(r.line_meta)
+            ? (r.line_meta as Record<string, unknown>)
+            : {};
+
+    return {
+        ...meta,
+        dealEffectiveRate: num(r.dealEffectiveRate ?? r.deal_effective_rate),
+        shipmentEffectiveRate: num(r.shipmentEffectiveRate ?? r.shipment_effective_rate),
+        internalShippingUsd: num(r.internalShippingUsd ?? r.internal_shipping_usd),
+        globalShippingUsd: num(r.globalShippingUsd ?? r.global_shipping_usd),
+        extraCostsUsd: num(r.extraCostsUsd ?? r.extra_costs_usd),
+        totalUsd: num(r.totalUsd ?? r.total_usd),
+        remainingBalanceRate: num(
+            r.remainingBalanceRate ??
+                r.remaining_balance_rate_deal ??
+                r.remaining_balance_rate_shipment,
+            3.6
+        ),
+        dealPaidIls: optionalNum(r.dealPaidIls ?? r.deal_paid_ils),
+        dealUnpaidUsd: optionalNum(r.dealUnpaidUsd ?? r.deal_unpaid_usd),
+        dealTotalIls: optionalNum(r.dealTotalIls ?? r.deal_total_ils),
+        shipmentPaidIls: optionalNum(r.shipmentPaidIls ?? r.ship_paid_ils),
+        shipmentUnpaidUsd: optionalNum(r.shipmentUnpaidUsd ?? r.ship_unpaid_usd),
+        shipmentTotalIls: optionalNum(r.shipmentTotalIls ?? r.shipment_total_ils),
+        dealShareByDealsValue: optionalNum(r.dealShareByDealsValue ?? r.deal_share_by_value),
+        dealShareByVolume: optionalNum(r.dealShareByVolume ?? r.deal_share_by_volume),
+        shipmentDealsTotalUsd: optionalNum(r.shipmentDealsTotalUsd ?? r.shipment_deals_total_usd),
+        dealThisTotalUsdForShare: optionalNum(r.dealThisTotalUsdForShare ?? r.deal_this_total_usd_for_share),
+        dealShareOfShipment: optionalNum(r.dealShareOfShipment ?? r.deal_share_of_shipment),
+        dealShipmentAllocatedIls: optionalNum(
+            r.dealShipmentAllocatedIls ??
+                r.deal_shipment_allocated_ils ??
+                lineMeta.deal_ship_allocated_ils
+        ),
+        dealShareOfClearanceVolume: optionalNum(
+            r.dealShareOfClearanceVolume ?? r.deal_share_of_clearance_volume
+        ),
+        dealClearanceAllocatedIls: optionalNum(
+            r.dealClearanceAllocatedIls ??
+                r.deal_clearance_allocated_ils ??
+                lineMeta.deal_clearance_allocated_ils
+        ),
+        clearancePaymentsTotalIls: optionalNum(
+            r.clearancePaymentsTotalIls ?? r.clearance_payments_total_ils
+        ),
+        clearancePoolIls: optionalNum(r.clearancePoolIls ?? r.clearance_pool_ils),
+        clearanceCostBasis: String(r.clearanceCostBasis ?? r.clearance_cost_basis ?? "").trim(),
+        costLinesTotalIls: optionalNum(r.costLinesTotalIls ?? r.cost_lines_total_ils),
+        dealLocalShippingFromClearanceIls: optionalNum(
+            r.dealLocalShippingFromClearanceIls ??
+                r.deal_local_shipping_from_clearance_ils ??
+                lineMeta.local_shipping_from_clearance_ils
+        ),
+        clearanceLocalShippingLinesTotalIls: optionalNum(
+            r.clearanceLocalShippingLinesTotalIls ?? r.clearance_local_shipping_lines_total_ils
+        ),
+        dealTransferCommissionsIls: optionalNum(
+            r.dealTransferCommissionsIls ??
+                r.deal_transfer_commissions_ils ??
+                lineMeta.deal_transfer_commissions_ils
+        ),
+        dealTransferCommissionsFromDealPaymentsIls: optionalNum(
+            r.dealTransferCommissionsFromDealPaymentsIls ??
+                r.deal_transfer_commissions_from_deal_payments_ils ??
+                lineMeta.deal_transfer_commissions_from_deal_payments_ils
+        ),
+        shipmentTransferCommissionsTotalIls: optionalNum(
+            r.shipmentTransferCommissionsTotalIls ??
+                r.shipment_transfer_commissions_total_ils ??
+                lineMeta.shipment_transfer_commissions_total_ils
+        ),
+        dealTransferCommissionsFromShipmentShareIls: optionalNum(
+            r.dealTransferCommissionsFromShipmentShareIls ??
+                r.deal_transfer_commissions_from_shipment_share_ils ??
+                lineMeta.deal_transfer_commissions_from_shipment_share_ils
+        ),
+        allocationMethod: String(r.allocationMethod ?? r.allocation_method ?? ""),
+    };
 }
 
 interface ConversionDetailsSectionProps {
     metadata?: ConversionMetadata;
+    importLogistics?: InvoiceImportLogistics | null;
+    /** من الفاتورة: الشحن المحلي مضمّن بسعر البضاعة — لا يُعرض كمبلغ منفصل في التوزيع */
+    shippingIncluded?: boolean;
+    /** حقل شحن الفاتورة بالشيكل — يُستخدم لعرض حصة النقل من التخليص إن كانت metadata قديمة */
+    invoiceShippingCostIls?: number;
+    /** ربط الفاتورة بالتخليص — لعرض رسالة قصيرة عند غياب حصة النقل في metadata */
+    invoiceClearanceId?: string | number | null;
 }
 
-export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> = ({ metadata }) => {
-    if (!metadata) return null;
+/** نسبة تقدير الشحن الداخلي (USD) من إجمالي قيمة الصفقة بالدولار — تُقارَب بما يُحوَّل لشيكل للصفقة */
+function internalShippingPctOfDealUsd(internalShippingUsd: number, dealTotalUsd: number): number | undefined {
+    if (dealTotalUsd <= 0 || internalShippingUsd <= 0) return undefined;
+    return (internalShippingUsd / dealTotalUsd) * 100;
+}
 
-    const {
-        dealEffectiveRate,
-        shipmentEffectiveRate,
-        internalShippingUsd,
-        globalShippingUsd,
-        extraCostsUsd,
-        totalUsd,
-        remainingBalanceRate,
-    } = metadata;
+export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> = ({
+    metadata,
+    importLogistics,
+    shippingIncluded = false,
+    invoiceShippingCostIls,
+    invoiceClearanceId,
+}) => {
+    if (!metadata && !importLogistics) return null;
 
-    return (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-blue-100 dark:border-blue-900/30 overflow-hidden shadow-sm">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-700 p-4">
-                <div className="flex items-center gap-3">
-                    <div className="p-2 bg-white/20 rounded-lg">
-                        <ArrowRightLeft className="w-5 h-5 text-white" />
-                    </div>
+    if (!metadata) {
+        return (
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 overflow-hidden shadow-sm p-4">
+                <div className="flex items-start gap-3 text-sm text-indigo-900 dark:text-indigo-100">
+                    <Ship className="w-5 h-5 shrink-0 text-indigo-600" />
                     <div>
-                        <h3 className="text-lg font-bold text-white">تفاصيل عملية التحويل (USD ➔ ILS)</h3>
-                        <p className="text-blue-100 text-xs">شرح كيف تم حساب القيم من الدولار إلى الشيقل</p>
-                    </div>
-                </div>
-            </div>
-
-            <div className="p-6 space-y-8">
-                {/* أسعار الصرف الأساسية */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="p-4 rounded-xl bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30">
-                        <div className="flex items-center gap-2 mb-3">
-                            <TrendingUp className="w-4 h-4 text-blue-600" />
-                            <span className="text-sm font-bold text-blue-900 dark:text-blue-100">سعر صرف البنود (المرجح)</span>
-                        </div>
-                        <div className="flex items-baseline gap-2">
-                            <span className="text-3xl font-black text-blue-700 dark:text-blue-400">{dealEffectiveRate.toFixed(4)}</span>
-                            <span className="text-xs text-blue-500 font-medium">₪ للدولار الواحد</span>
-                        </div>
-                        <p className="mt-2 text-[10px] text-gray-500 flex items-center gap-1">
-                            <Info className="w-3 h-3" />
-                            يشمل المبالغ المدفوعة والمتبقية (بسعر {remainingBalanceRate})
-                        </p>
-                    </div>
-
-                    <div className="p-4 rounded-xl bg-indigo-50/50 dark:bg-indigo-900/10 border border-indigo-100 dark:border-indigo-800/30">
-                        <div className="flex items-center gap-2 mb-3">
-                            <Globe className="w-4 h-4 text-indigo-600" />
-                            <span className="text-sm font-bold text-indigo-900 dark:text-indigo-100">سعر صرف الشحن الدولي</span>
-                        </div>
-                        <div className="flex items-baseline gap-2">
-                            <span className="text-3xl font-black text-indigo-700 dark:text-indigo-400">{shipmentEffectiveRate.toFixed(4)}</span>
-                            <span className="text-xs text-indigo-500 font-medium">₪ للدولار الواحد</span>
-                        </div>
-                        <p className="mt-2 text-[10px] text-gray-500 flex items-center gap-1">
-                            <Info className="w-3 h-3" />
-                            يستخدم لحساب تكاليف الشحن الدولي والمصاريف الإضافية
+                        <p className="font-bold">مصدر الاستيراد</p>
+                        <p className="text-indigo-800/90 dark:text-indigo-200/90 mt-1">
+                            {formatInvoiceImportLogisticsLine(importLogistics!)}
                         </p>
                     </div>
                 </div>
-
-                {/* تفاصيل الشحن */}
-                <div className="space-y-4">
-                    <h4 className="flex items-center gap-2 text-sm font-bold text-gray-700 dark:text-gray-300">
-                        <Calculator className="w-4 h-4 text-gray-400" />
-                        تحليل تكاليف الشحن (Shipping Breakdown)
-                    </h4>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div className="p-3 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg">
-                            <span className="text-[10px] text-gray-500 block mb-1">شحن داخلي (بالصين)</span>
-                            <div className="flex justify-between items-center text-sm font-bold">
-                                <span className="text-gray-400">${internalShippingUsd}</span>
-                                <span className="text-blue-600">₪{(internalShippingUsd * dealEffectiveRate).toLocaleString()}</span>
-                            </div>
-                        </div>
-
-                        <div className="p-3 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg">
-                            <span className="text-[10px] text-gray-500 block mb-1">شحن دولي (موزع)</span>
-                            <div className="flex justify-between items-center text-sm font-bold">
-                                <span className="text-gray-400">${globalShippingUsd}</span>
-                                <span className="text-indigo-600">₪{(globalShippingUsd * shipmentEffectiveRate).toLocaleString()}</span>
-                            </div>
-                        </div>
-
-                        <div className="p-3 bg-gray-50 dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-lg">
-                            <span className="text-[10px] text-gray-500 block mb-1">مصاريف شحنة إضافية</span>
-                            <div className="flex justify-between items-center text-sm font-bold">
-                                <span className="text-gray-400">${extraCostsUsd}</span>
-                                <span className="text-indigo-600">₪{(extraCostsUsd * shipmentEffectiveRate).toLocaleString()}</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* تنويه */}
-                <div className="p-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 rounded-lg flex gap-3">
-                    <HelpCircle className="w-5 h-5 text-amber-500 shrink-0" />
-                    <p className="text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed">
-                        تم حساب هذه الفاتورة بناءً على صفقات سابقة بالدولار. جميع الأسعار الظاهرة في الجداول الداخلية (سعر الوحدة، الإجمالي)
-                        هي قيم محولة إلى الشيقل لضمان دقة قيود المديونية ومصروفات العمل.
-                    </p>
-                </div>
             </div>
-        </div>
+        );
+    }
+
+    const meta = normalizeConversionMetadata(metadata);
+    const {
+        internalShippingUsd,
+        totalUsd,
+        dealShareByDealsValue,
+        dealShareByVolume,
+        dealShareOfShipment,
+        dealShareOfClearanceVolume,
+        dealShipmentAllocatedIls,
+        dealClearanceAllocatedIls,
+        dealLocalShippingFromClearanceIls,
+        dealTransferCommissionsIls,
+        dealTransferCommissionsFromDealPaymentsIls,
+        shipmentTransferCommissionsTotalIls,
+        dealTransferCommissionsFromShipmentShareIls,
+        allocationMethod,
+    } = meta;
+
+    const rawMeta = metadata as Record<string, unknown>;
+    const dualShareAllocations = Boolean(
+        rawMeta.dual_share_allocations ?? rawMeta.dualShareAllocations
     );
+    const lineMetaRaw = rawMeta.line_meta;
+    const lineMeta =
+        lineMetaRaw && typeof lineMetaRaw === "object" && !Array.isArray(lineMetaRaw)
+            ? (lineMetaRaw as Record<string, unknown>)
+            : {};
+    const internalShippingIls = optionalNum(lineMeta.internal_shipping_ils);
+    const subtotalMerchIls = optionalNum(lineMeta.subtotal_merch_ils);
+
+    const clearanceIdRaw =
+        rawMeta.clearance_id ??
+        rawMeta.clearanceId ??
+        importLogistics?.clearanceId ??
+        invoiceClearanceId;
+    const clearanceLinked =
+        clearanceIdRaw != null &&
+        clearanceIdRaw !== "" &&
+        Number.isFinite(Number(clearanceIdRaw)) &&
+        Number(clearanceIdRaw) > 0;
+
+    /** إن لم تُحدَّث metadata بعد، نُظهر حصة النقل من التخليص من فرق «شحن الفاتورة» − دولي − تقدير الصفقة */
+    const metaLocalClr = dealLocalShippingFromClearanceIls ?? 0;
+    const shipField = optionalNum(invoiceShippingCostIls);
+    const intlPart = dealShipmentAllocatedIls ?? 0;
+    const intDealPart = shippingIncluded ? 0 : internalShippingIls ?? 0;
+    const impliedLocalFromClearanceIls =
+        metaLocalClr > 0.005 || shipField == null || !Number.isFinite(shipField)
+            ? 0
+            : Math.max(0, Number((shipField - intlPart - intDealPart).toFixed(2)));
+    const effectiveLocalFromClearanceIls =
+        metaLocalClr > 0.005 ? metaLocalClr : impliedLocalFromClearanceIls;
+    const localFromInvoiceImplied = metaLocalClr <= 0.005 && impliedLocalFromClearanceIls > 0.005;
+
+    const serverProRata = allocationMethod === "server_pro_rata";
+    /** نسبة قيمة الصفقة من صفقات الشحنة — تخليص ونقل من التخليص */
+    const clearanceValueSharePct = (dealShareByDealsValue ?? dealShareOfClearanceVolume ?? 0) * 100;
+    /** نسبة حجم/وزن الصفقة من الشحنة — شحن دولي (بعد dual_share_allocations) */
+    const freightVolumeSharePct = dualShareAllocations
+        ? (dealShareByVolume ?? dealShareOfShipment ?? 0) * 100
+        : clearanceValueSharePct;
+
+    const hasIlsLogisticsBreakdown =
+        serverProRata &&
+        ((subtotalMerchIls ?? 0) > 0 ||
+            (internalShippingIls ?? 0) > 0 ||
+            effectiveLocalFromClearanceIls > 0 ||
+            (dealShipmentAllocatedIls ?? 0) > 0 ||
+            (dealClearanceAllocatedIls ?? 0) > 0 ||
+            (dealTransferCommissionsIls ?? 0) > 0);
+
+    const fmtIls = (v: number | undefined) =>
+        v != null && Number.isFinite(v) && v > 0
+            ? `₪${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            : "—";
+
+    const fmtIlsZero = (v: number | undefined) => {
+        if (v == null || !Number.isFinite(v)) return "—";
+        return `₪${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
+
+    const internalShippingMoney = () => {
+        const ils = internalShippingIls ?? 0;
+        const localClr = effectiveLocalFromClearanceIls;
+        const totalLocal = ils + localClr;
+
+        if (shippingIncluded) {
+            return (
+                <div className="space-y-1">
+                    {localClr > 0 ? (
+                        <div>
+                            <div className="text-sm font-black text-blue-700 dark:text-blue-300">
+                                {fmtIlsZero(localClr)}
+                            </div>
+                            {localFromInvoiceImplied ? (
+                                <span className="text-[9px] text-gray-500 dark:text-gray-400 block">
+                                    مُستنتج من إجمالي شحن الفاتورة — يُفضَّل «إعادة حساب التكلفة» لمزامنة البيانات
+                                </span>
+                            ) : (
+                                <span className="text-[9px] text-gray-500 dark:text-gray-400 block">
+                                    من بنود التخليص (نقل / شحن محلي أو دفعة الناقل)
+                                </span>
+                            )}
+                        </div>
+                    ) : null}
+                    {ils > 0 ? (
+                        <div>
+                            <div className="text-sm font-black text-blue-700 dark:text-blue-300">
+                                {fmtIlsZero(ils)}
+                            </div>
+                            <span className="text-[10px] text-gray-600 dark:text-gray-400">
+                                تقدير من الصفقة — مضمّن بسعر البضاعة
+                            </span>
+                        </div>
+                    ) : null}
+                    {totalLocal === 0 ? (
+                        <span className="text-xs text-gray-500 dark:text-gray-400">
+                            {clearanceLinked
+                                ? "لا مبلغ نقل من التخليص في البيانات المحفوظة — «إعادة حساب التكلفة»."
+                                : "—"}
+                        </span>
+                    ) : null}
+                </div>
+            );
+        }
+        if (totalLocal > 0) {
+            return (
+                <div className="space-y-0.5">
+                    <span className="text-sm font-black text-blue-700 dark:text-blue-300">
+                        {fmtIlsZero(totalLocal)}
+                    </span>
+                    {localClr > 0 && ils > 0 ? (
+                        <span className="text-[9px] text-gray-600 dark:text-gray-400 block">
+                            من الصفقة {fmtIlsZero(ils)} + من التخليص {fmtIlsZero(localClr)}
+                        </span>
+                    ) : localClr > 0 ? (
+                        <span className="text-[9px] text-gray-600 dark:text-gray-400 block">
+                            {localFromInvoiceImplied
+                                ? "من التخليص (مُستنتج من شحن الفاتورة — يُفضَّل إعادة الحساب)"
+                                : "من التخليص (نقل / شحن محلي أو دفعة الناقل)"}
+                        </span>
+                    ) : null}
+                </div>
+            );
+        }
+        if (internalShippingUsd > 0) {
+            return (
+                <span className="text-xs text-gray-600 dark:text-gray-400">
+                    {fmtIlsZero(ils)} — تقدير الشحن المحلي من الصفقة
+                </span>
+            );
+        }
+        return (
+            <span className="text-xs text-gray-500 dark:text-gray-400">
+                {clearanceLinked
+                    ? "لا مبلغ نقل من التخليص في البيانات المحفوظة — «إعادة حساب التكلفة»."
+                    : "—"}
+            </span>
+        );
+    };
+
+    const localClrForFooter = effectiveLocalFromClearanceIls;
+    const totalFreightIlsForInvoice =
+        (shippingIncluded ? 0 : (internalShippingIls ?? 0)) +
+        (dealShipmentAllocatedIls ?? 0) +
+        localClrForFooter;
+
+    const internalPctOfDeal = internalShippingPctOfDealUsd(internalShippingUsd, totalUsd);
+
+    const sharePctLabel = (pct: number, suffix: string) =>
+        pct > 0 ? (
+            <span className="block text-[9px] font-semibold text-gray-600 dark:text-gray-400 mt-0.5 tabular-nums">
+                {pct.toFixed(2)}% {suffix}
+            </span>
+        ) : (
+            <span className="block text-[9px] text-gray-400 dark:text-gray-500 mt-0.5">—</span>
+        );
+
+    const internalPctLabel = () => {
+        if (internalPctOfDeal != null && internalPctOfDeal > 0) {
+            return (
+                <span className="block text-[9px] font-semibold text-gray-600 dark:text-gray-400 mt-0.5 tabular-nums">
+                    {internalPctOfDeal.toFixed(2)}% من إجمالي الصفقة ($)
+                </span>
+            );
+        }
+        if ((internalShippingIls ?? 0) > 0) {
+            return (
+                <span className="block text-[9px] text-gray-500 dark:text-gray-400 mt-0.5">
+                    تقدير بالشيكل (بدون نسبة $)
+                </span>
+            );
+        }
+        return <span className="block text-[9px] text-gray-400 dark:text-gray-500 mt-0.5">—</span>;
+    };
+
+    if (hasIlsLogisticsBreakdown) {
+        return (
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm p-3 space-y-3">
+                <h4 className="flex items-center gap-2 text-sm font-bold text-gray-800 dark:text-gray-100">
+                    <Calculator className="w-4 h-4 text-gray-500 shrink-0" />
+                    توزيع التكلفة (شيكل) — أساس أعمدة التكلفة النهائية
+                </h4>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+                    <div className="p-3 bg-gray-50 dark:bg-gray-800/80 border border-gray-100 dark:border-gray-700 rounded-lg">
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">
+                            بضاعة (أساس الجدول)
+                        </span>
+                        <div className="text-sm font-black text-gray-900 dark:text-white">
+                            {fmtIls(subtotalMerchIls)}
+                        </div>
+                    </div>
+                    <div className="p-3 bg-gray-50 dark:bg-gray-800/80 border border-gray-100 dark:border-gray-700 rounded-lg">
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">
+                            حصة شحن دولي للصفقة
+                        </span>
+                        {sharePctLabel(
+                            freightVolumeSharePct,
+                            dualShareAllocations
+                                ? "من حجم/وزن الصفقة على الشحنة"
+                                : "من تكلفة الشحنة (شيكل)"
+                        )}
+                        <div className="text-sm font-black text-indigo-700 dark:text-indigo-300 mt-0.5">
+                            {fmtIls(dealShipmentAllocatedIls)}
+                        </div>
+                    </div>
+                    <div className="p-3 bg-gray-50 dark:bg-gray-800/80 border border-gray-100 dark:border-gray-700 rounded-lg">
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">
+                            نقل من التخليص (حصة الصفقة)
+                        </span>
+                        {internalPctLabel()}
+                        <div className="mt-0.5">{internalShippingMoney()}</div>
+                    </div>
+                    <div className="p-3 bg-gray-50 dark:bg-gray-800/80 border border-gray-100 dark:border-gray-700 rounded-lg">
+                        <span className="text-[10px] text-gray-500 dark:text-gray-400 block mb-1">
+                            حصة تخليص للصفقة
+                        </span>
+                        {sharePctLabel(
+                            clearanceValueSharePct,
+                            "من إجمالي الصفقات (بنود+ضريبة…) / مجموع صفقات الشحنة — مطابق لقائمة الصفقات"
+                        )}
+                        <div className="text-sm font-black text-emerald-700 dark:text-emerald-300 mt-0.5">
+                            {fmtIls(dealClearanceAllocatedIls)}
+                        </div>
+                    </div>
+                    <div className="p-3 bg-amber-50/80 dark:bg-amber-950/20 border border-amber-200/80 dark:border-amber-800/50 rounded-lg">
+                        <span className="text-[10px] text-amber-900/90 dark:text-amber-200/90 block mb-1">
+                            عمولات تحويل (إجمالي للصفقة)
+                        </span>
+                        <span className="block text-[9px] text-amber-800/85 dark:text-amber-300/85 mb-0.5 leading-snug">
+                            دفعات الصفقة + حصة من عمولات دفعات شحن الشحنة (بنفس نسبة الشحن الدولي)
+                        </span>
+                        <div className="text-sm font-black text-amber-900 dark:text-amber-200 mt-0.5">
+                            {fmtIlsZero(dealTransferCommissionsIls)}
+                        </div>
+                        {(dealTransferCommissionsFromDealPaymentsIls ?? 0) > 0.005 ||
+                        (dealTransferCommissionsFromShipmentShareIls ?? 0) > 0.005 ? (
+                            <div className="mt-1.5 space-y-0.5 text-[9px] text-amber-900/80 dark:text-amber-200/80 tabular-nums">
+                                {(dealTransferCommissionsFromDealPaymentsIls ?? 0) > 0.005 ? (
+                                    <div>
+                                        من دفعات الصفقة: {fmtIlsZero(dealTransferCommissionsFromDealPaymentsIls)}
+                                    </div>
+                                ) : null}
+                                {(shipmentTransferCommissionsTotalIls ?? 0) > 0.005 ? (
+                                    <div className="text-amber-800/75 dark:text-amber-300/75">
+                                        إجمالي شحن الشحنة: {fmtIlsZero(shipmentTransferCommissionsTotalIls)} → حصة
+                                        الصفقة: {fmtIlsZero(dealTransferCommissionsFromShipmentShareIls)}
+                                    </div>
+                                ) : (dealTransferCommissionsFromShipmentShareIls ?? 0) > 0.005 ? (
+                                    <div>
+                                        حصة من شحن الشحنة: {fmtIlsZero(dealTransferCommissionsFromShipmentShareIls)}
+                                    </div>
+                                ) : null}
+                            </div>
+                        ) : null}
+                    </div>
+                </div>
+
+                {totalFreightIlsForInvoice > 0 ? (
+                    <div className="text-[11px] text-slate-600 dark:text-slate-400 rounded-lg border border-slate-200 dark:border-slate-600 bg-slate-50/80 dark:bg-slate-900/40 px-3 py-2">
+                        <span className="font-bold text-slate-800 dark:text-slate-200">
+                            إجمالي شحن الفاتورة (تقريباً):
+                        </span>{" "}
+                        <span className="font-mono font-bold">
+                            ₪
+                            {totalFreightIlsForInvoice.toLocaleString(undefined, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                            })}
+                        </span>
+                    </div>
+                ) : null}
+            </div>
+        );
+    }
+
+    if (importLogistics) {
+        return (
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-indigo-100 dark:border-indigo-900/30 shadow-sm p-3">
+                <div className="flex items-start gap-2 text-xs text-indigo-900 dark:text-indigo-100">
+                    <Ship className="w-4 h-4 shrink-0 text-indigo-600 mt-0.5" />
+                    <p className="leading-relaxed">{formatInvoiceImportLogisticsLine(importLogistics)}</p>
+                </div>
+            </div>
+        );
+    }
+
+    return null;
 };

@@ -1,8 +1,319 @@
+import re
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+
 from rest_framework import serializers
+
+_DEAL_TITLE_AR = re.compile(r"[\u0600-\u06FF]")
+
+
+def _english_payment_boilerplate(s: str) -> bool:
+    t = (s or "").strip()
+    if not t or _DEAL_TITLE_AR.search(t):
+        return False
+    low = t.lower()
+    if "terms of payment" in low:
+        return True
+    if "bank charges" in low and len(t) > 20:
+        return True
+    if re.search(r"\b\d{1,2}\s*%", low) and "deposit" in low and "delivery" in low:
+        return True
+    if "deposit" in low and ("rest" in low or "balance" in low) and "payment" in low and len(t) > 30:
+        return True
+    if "letter of credit" in low and len(t) > 25:
+        return True
+    return False
+
+
+def _deal_title_for_list_preview(deal):
+    """وصف قصير أو أول سطر عربي في الملاحظات أو رقم العرض أو رقم الصفقة."""
+    d = (getattr(deal, "description", None) or "").strip()
+    notes = (getattr(deal, "notes", None) or "").strip()
+    if d and _DEAL_TITLE_AR.search(d):
+        return d[:72]
+    if notes:
+        for line in notes.splitlines():
+            line = line.strip()
+            if line and _DEAL_TITLE_AR.search(line):
+                return line[:72]
+    if d and not _english_payment_boilerplate(d):
+        return d[:72]
+    ref = (getattr(deal, "ref_number", None) or "").strip()
+    offer = (getattr(deal, "original_offer_number", None) or "").strip()
+    if offer and offer.lower() != ref.lower():
+        if not re.match(r"^d-\d+$", offer, re.I):
+            return offer[:72]
+    return ref[:72] if ref else ""
+
+
+def _to_decimal(x, default="0"):
+    if x is None:
+        return Decimal(default)
+    if isinstance(x, Decimal):
+        return x
+    try:
+        return Decimal(str(x))
+    except (InvalidOperation, ValueError, TypeError):
+        return Decimal(default)
+
+
+def _quantize_decimal_10_3(value) -> Decimal:
+    """
+    يطابق LogisticsShipment.total_volume / total_weight_kg (max_digits=10, decimal_places=3).
+    يمنع رفض الطلب أو خطأ MySQL عند أرقام عشرية طويلة من الجمع أو JSON.
+    """
+    d = _to_decimal(value)
+    d = d.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+    vmax = Decimal("9999999.999")
+    if d > vmax:
+        d = vmax
+    if d < 0:
+        d = Decimal("0")
+    return d
+
+
+def _apply_lines_subtotal_and_grand_total(instance, lines_subtotal):
+    """
+    يطابق frontend DealForm.recalculateTotals: مجمّع البنود → خصم → شحن (إن لم يُضمّن) → ضريبة → total_amount.
+    بدون هذا، كان total_amount يُستبدل بمجموع البنود فقط فيُرفض الحفظ إن وُجدت دفعات مبنية على الإجمالي الكامل.
+    """
+    instance.subtotal = _to_decimal(lines_subtotal)
+    discount = _to_decimal(getattr(instance, "discount_amount", None))
+    shipping = (
+        Decimal("0")
+        if getattr(instance, "is_shipping_included", False)
+        else _to_decimal(getattr(instance, "shipping_cost_estimate", None))
+    )
+    after_discount = instance.subtotal - discount
+    if after_discount < 0:
+        after_discount = Decimal("0")
+    taxable_base = after_discount + shipping
+    tax_type = str(getattr(instance, "tax_type", None) or "percentage").lower()
+    if tax_type == "amount":
+        tax_amt = _to_decimal(getattr(instance, "tax_amount", None))
+    else:
+        rate = _to_decimal(getattr(instance, "tax_rate", None))
+        tax_amt = (taxable_base * rate / Decimal("100")).quantize(Decimal("0.01"))
+        instance.tax_amount = tax_amt
+    instance.total_amount = (taxable_base + tax_amt).quantize(Decimal("0.01"))
+
+
+def _payments_total_exceeds_deal(payments_data, deal_total) -> bool:
+    if not payments_data:
+        return False
+    try:
+        total = float(deal_total or 0)
+        s = sum(float(p.get("amount") or 0) for p in payments_data)
+    except (TypeError, ValueError):
+        return True
+    eps = max(0.01, abs(total) * 1e-9)
+    return s > total + eps
+
+
+def _coerce_logistics_payment_pk(pay_id_raw):
+    """يقبل معرف SQL فقط؛ يتجاهل tmp- و p-0 وغيرها."""
+    if pay_id_raw is None or pay_id_raw == "":
+        return None
+    try:
+        return int(pay_id_raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _payment_amounts_unchanged_for_deal(deal_instance, payments_data) -> bool:
+    """
+    نفس الدفعات (لم يُعدّل المستخدم المبالغ) — يُسمح بالحفظ رغم أن إجمالي الصفقة أصبح أقل من مجموع الدفعات
+    (تعديل لوجستي فقط، أو بيانات قديمة). يدعم: معرّفات SQL، أو طلب بلا id رقمي (واجهة مؤقتة) عبر مقارنة مجموعة المبالغ.
+    """
+    if not payments_data:
+        try:
+            return not deal_instance.payments.exists()
+        except Exception:
+            return False
+    try:
+        existing_list = list(deal_instance.payments.all())
+    except Exception:
+        return False
+    if len(existing_list) != len(payments_data):
+        return False
+
+    def amount_key(x):
+        try:
+            return round(float(x or 0) * 100)
+        except (TypeError, ValueError):
+            return 0
+
+    existing_by_id = {p.id: float(p.amount or 0) for p in existing_list}
+    all_ids_valid = True
+    for row in payments_data:
+        pid = _coerce_logistics_payment_pk(row.get("id"))
+        if pid is None:
+            all_ids_valid = False
+            break
+        if pid not in existing_by_id:
+            all_ids_valid = False
+            break
+        try:
+            new_amt = float(row.get("amount") or 0)
+        except (TypeError, ValueError):
+            return False
+        if abs(existing_by_id[pid] - new_amt) > 0.05:
+            return False
+    if all_ids_valid:
+        return True
+
+    from collections import Counter
+
+    c_exist = Counter(amount_key(p.amount) for p in existing_list)
+    c_pay = Counter(amount_key(row.get("amount")) for row in payments_data)
+    return c_exist == c_pay
+
+
+def _payments_total_exceeds_shipment(payments_data, shipment_cost) -> bool:
+    if not payments_data:
+        return False
+    try:
+        total = float(shipment_cost or 0)
+        s = sum(float(p.get("amount") or 0) for p in payments_data)
+    except (TypeError, ValueError):
+        return True
+    eps = max(0.01, abs(total) * 1e-9)
+    return s > total + eps
+
+
+def _payment_amounts_unchanged_for_shipment(shipment_instance, payments_data) -> bool:
+    if not payments_data:
+        try:
+            return not shipment_instance.agent_payments.exists()
+        except Exception:
+            return False
+    try:
+        existing_list = list(shipment_instance.agent_payments.all())
+    except Exception:
+        return False
+    if len(existing_list) != len(payments_data):
+        return False
+
+    def amount_key(x):
+        try:
+            return round(float(x or 0) * 100)
+        except (TypeError, ValueError):
+            return 0
+
+    existing_by_id = {p.id: float(p.amount or 0) for p in existing_list}
+    all_ids_valid = True
+    for row in payments_data:
+        pid = _coerce_logistics_payment_pk(row.get("id"))
+        if pid is None:
+            all_ids_valid = False
+            break
+        if pid not in existing_by_id:
+            all_ids_valid = False
+            break
+        try:
+            new_amt = float(row.get("amount") or 0)
+        except (TypeError, ValueError):
+            return False
+        if abs(existing_by_id[pid] - new_amt) > 0.05:
+            return False
+    if all_ids_valid:
+        return True
+
+    from collections import Counter
+
+    c_exist = Counter(amount_key(p.amount) for p in existing_list)
+    c_pay = Counter(amount_key(row.get("amount")) for row in payments_data)
+    return c_exist == c_pay
+
+
+def _sync_shipment_agent_payments(shipment, payments_data):
+    """مزامنة دفعات وكيل الشحن (بدون صفقة شراء) مع حد إجمالي total_shipping_cost_usd."""
+    cap = float(shipment.total_shipping_cost_usd or 0)
+    if _payments_total_exceeds_shipment(payments_data, cap):
+        if not _payment_amounts_unchanged_for_shipment(shipment, payments_data):
+            raise serializers.ValidationError(
+                {
+                    "payments": "مجموع دفعات الشحن يتجاوز تكلفة الشحن الأساسية. خفّض المبلغ أو راجع الإجمالي."
+                }
+            )
+    keep_payments = []
+    matched_pks = set()
+
+    for payment_data in payments_data:
+        pay_pk = _coerce_logistics_payment_pk(payment_data.get("id"))
+        pay_instance = None
+        if pay_pk is not None:
+            pay_instance = LogisticsPayment.objects.filter(
+                id=pay_pk, shipment=shipment
+            ).first()
+
+        if pay_instance is None:
+            pn = payment_data.get("payment_number")
+            try:
+                pn_int = int(pn) if pn is not None else None
+            except (TypeError, ValueError):
+                pn_int = None
+            if pn_int is not None:
+                candidates = (
+                    LogisticsPayment.objects.filter(
+                        shipment=shipment, payment_number=pn_int
+                    )
+                    .exclude(pk__in=matched_pks)
+                    .order_by("id")
+                )
+                pay_instance = candidates.first()
+
+        if pay_instance:
+            matched_pks.add(pay_instance.pk)
+            for attr, value in payment_data.items():
+                if attr in ("id", "deal", "shipment"):
+                    continue
+                if not pay_instance.is_posted or attr == "notes":
+                    setattr(pay_instance, attr, value)
+            pay_instance.shipment = shipment
+            pay_instance.deal = None
+            pay_instance.save()
+            keep_payments.append(pay_instance.id)
+        else:
+            create_data = {
+                k: v
+                for k, v in payment_data.items()
+                if k not in ("id", "deal", "shipment")
+            }
+            pn_c = create_data.get("payment_number")
+            if pn_c is not None:
+                if LogisticsPayment.objects.filter(
+                    shipment=shipment, payment_number=pn_c
+                ).exists():
+                    raise serializers.ValidationError(
+                        {
+                            "payments": (
+                                f"يوجد بالفعل دفعة شحن بنفس رقم القسط ({pn_c}). "
+                                "حدّث الصفحة (F5) وتجنّب حفظاً مكرراً."
+                            )
+                        }
+                    )
+            new_pay = LogisticsPayment.objects.create(
+                shipment=shipment, deal=None, **create_data
+            )
+            keep_payments.append(new_pay.id)
+
+    shipment.agent_payments.filter(is_posted=False).exclude(
+        id__in=keep_payments
+    ).delete()
+
+
 from .models import (
-    LogisticsDeal, LogisticsDealItem, LogisticsShipment, 
-    LogisticsClearance, LogisticsExpense, LogisticsShipmentDeal,
-    LogisticsPayment
+    LogisticsDeal,
+    LogisticsDealItem,
+    LogisticsShipment,
+    LogisticsClearance,
+    LogisticsExpense,
+    LogisticsShipmentDeal,
+    LogisticsPayment,
+    LogisticsClearancePayment,
+    PurchaseInvoice,
+    PurchaseInvoiceItem,
+    default_clearance_cost_lines,
 )
 from partners.serializers import PartnerSerializer
 from inventory.models import Product
@@ -51,6 +362,9 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
     items = LogisticsDealItemSerializer(many=True)
     payments = LogisticsPaymentSerializer(many=True, required=False)
     partner_name = serializers.CharField(source='partner.name', read_only=True)
+    partner_legal_name = serializers.CharField(
+        source='partner.legal_name', read_only=True, allow_null=True, default=None
+    )
     quote_images = serializers.SerializerMethodField()
     quote_pdfs = serializers.SerializerMethodField()
 
@@ -113,17 +427,29 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
         items_data = validated_data.pop('items', [])
         payments_data = validated_data.pop('payments', [])
         deal = LogisticsDeal.objects.create(**validated_data)
-        
-        total = 0
+
+        lines_subtotal = Decimal("0")
         for item_data in items_data:
             LogisticsDealItem.objects.create(deal=deal, **item_data)
-            total += item_data['quantity'] * item_data['unit_price']
-        
-        for payment_data in payments_data:
-            LogisticsPayment.objects.create(deal=deal, **payment_data)
-        
-        deal.total_amount = total
+            lines_subtotal += _to_decimal(item_data.get("quantity")) * _to_decimal(
+                item_data.get("unit_price")
+            )
+
+        _apply_lines_subtotal_and_grand_total(deal, lines_subtotal)
         deal.save()
+
+        if _payments_total_exceeds_deal(payments_data, float(deal.total_amount or 0)):
+            raise serializers.ValidationError(
+                {
+                    "payments": "مجموع الدفعات يتجاوز قيمة الصفقة (مجموع البنود). احذف دفعة زائدة أو خفّض المبالغ."
+                }
+            )
+
+        for payment_data in payments_data:
+            LogisticsPayment.objects.create(
+                deal=deal, shipment=None, **payment_data
+            )
+
         return deal
 
     def update(self, instance, validated_data):
@@ -138,7 +464,7 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
         if items_data is not None:
             # Smart update for items
             keep_items = []
-            total = 0
+            lines_subtotal = Decimal("0")
             for item_data in items_data:
                 item_id = item_data.get('id')
                 if item_id:
@@ -147,64 +473,260 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
                     keep_items.append(item_id)
                     # Fetch for total calculation to ensure we have latest decimals
                     updated_item = LogisticsDealItem.objects.get(id=item_id)
-                    total += updated_item.quantity * updated_item.unit_price
+                    lines_subtotal += updated_item.quantity * updated_item.unit_price
                 else:
                     # Create new item
                     new_item = LogisticsDealItem.objects.create(deal=instance, **item_data)
                     keep_items.append(new_item.id)
-                    total += new_item.quantity * new_item.unit_price
-            
+                    lines_subtotal += new_item.quantity * new_item.unit_price
+
             # Delete items not in the list
             instance.items.exclude(id__in=keep_items).delete()
-            
-            instance.total_amount = total
+
+            _apply_lines_subtotal_and_grand_total(instance, lines_subtotal)
             instance.save()
             
         if payments_data is not None:
-            # Smart update for payments to preserve IDs and Journal links
+            deal_total = float(instance.total_amount or 0)
+            if _payments_total_exceeds_deal(payments_data, deal_total):
+                if not _payment_amounts_unchanged_for_deal(instance, payments_data):
+                    raise serializers.ValidationError(
+                        {
+                            "payments": "مجموع الدفعات يتجاوز قيمة الصفقة. احذف دفعة زائدة أو خفّض المبالغ."
+                        }
+                    )
+
             keep_payments = []
+            matched_pks = set()
+
             for payment_data in payments_data:
-                # Retrieve ID from initial_data since it might be read_only in validated_data
-                # But here we assume payment_data comes from the list of dicts passed to the serializer
-                pay_id = payment_data.get('id')
-                
-                if pay_id:
-                    # Update existing (only if not posted, or allow notes update)
-                    pay_instance = LogisticsPayment.objects.filter(id=pay_id, deal=instance).first()
-                    if pay_instance:
-                        for attr, value in payment_data.items():
-                            if attr == 'id': continue
-                            # If posted, maybe restrict what can be updated (e.g. only notes)
-                            if not pay_instance.is_posted or attr == 'notes':
-                                setattr(pay_instance, attr, value)
-                        pay_instance.save()
-                        keep_payments.append(pay_id)
+                pay_pk = _coerce_logistics_payment_pk(payment_data.get("id"))
+                pay_instance = None
+
+                # 1) مطابقة بمعرّف SQL صريح
+                if pay_pk is not None:
+                    pay_instance = LogisticsPayment.objects.filter(
+                        id=pay_pk, deal=instance
+                    ).first()
+
+                # 2) مطابقة بـ payment_number فقط (بغض النظر عن is_posted أو amount)
+                if pay_instance is None:
+                    pn = payment_data.get("payment_number")
+                    try:
+                        pn_int = int(pn) if pn is not None else None
+                    except (TypeError, ValueError):
+                        pn_int = None
+                    if pn_int is not None:
+                        candidates = (
+                            LogisticsPayment.objects.filter(
+                                deal=instance, payment_number=pn_int
+                            )
+                            .exclude(pk__in=matched_pks)
+                            .order_by("id")
+                        )
+                        pay_instance = candidates.first()
+
+                if pay_instance:
+                    matched_pks.add(pay_instance.pk)
+                    for attr, value in payment_data.items():
+                        if attr in ("id", "deal", "shipment"):
+                            continue
+                        if not pay_instance.is_posted or attr == "notes":
+                            setattr(pay_instance, attr, value)
+                    pay_instance.deal = instance
+                    pay_instance.shipment = None
+                    pay_instance.save()
+                    keep_payments.append(pay_instance.id)
                 else:
-                    # Create new
-                    new_pay = LogisticsPayment.objects.create(deal=instance, **payment_data)
+                    create_data = {
+                        k: v
+                        for k, v in payment_data.items()
+                        if k not in ("id", "deal", "shipment")
+                    }
+                    pn_c = create_data.get("payment_number")
+                    if pn_c is not None:
+                        if LogisticsPayment.objects.filter(
+                            deal=instance, payment_number=pn_c
+                        ).exists():
+                            raise serializers.ValidationError(
+                                {
+                                    "payments": (
+                                        f"يوجد بالفعل دفعة بنفس رقم القسط ({pn_c}). "
+                                        "حدّث الصفحة (F5) وتجنّب حفظاً مكرراً."
+                                    )
+                                }
+                            )
+                    new_pay = LogisticsPayment.objects.create(
+                        deal=instance, shipment=None, **create_data
+                    )
                     keep_payments.append(new_pay.id)
-            
-            # Delete payments not in the list (only if not posted!)
-            instance.payments.exclude(id__in=keep_payments, is_posted=False).delete()
+
+            instance.payments.filter(is_posted=False).exclude(
+                id__in=keep_payments
+            ).delete()
 
         return instance
+
+class LogisticsShipmentDealAllocationSerializer(serializers.ModelSerializer):
+    """أوزان تكلفة الشحن الدولي المحفوظة لكل صفقة على الشحنة."""
+
+    class Meta:
+        model = LogisticsShipmentDeal
+        fields = ["id", "deal", "allocated_shipping_cost", "extra_costs"]
+        read_only_fields = ["id", "deal"]
+
 
 class LogisticsShipmentSerializer(serializers.ModelSerializer):
     agent_name = serializers.CharField(source='shipping_agent.name', read_only=True)
     deals = LogisticsDealSerializer(many=True, read_only=True)
+    shipment_deal_allocations = LogisticsShipmentDealAllocationSerializer(
+        source="logisticsshipmentdeal_set", many=True, read_only=True
+    )
+    deal_allocations = serializers.ListField(
+        child=serializers.DictField(), required=False, write_only=True
+    )
+    # نموذج الشحنة يستخدم related_name=agent_payments (وليس payments)
+    payments = LogisticsPaymentSerializer(
+        many=True, required=False, source="agent_payments"
+    )
 
     class Meta:
         model = LogisticsShipment
-        fields = '__all__'
-        read_only_fields = ['id', 'tenant']
+        fields = [f.name for f in LogisticsShipment._meta.concrete_fields] + [
+            "agent_name",
+            "deals",
+            "shipment_deal_allocations",
+            "deal_allocations",
+            "payments",
+        ]
+        read_only_fields = ["id", "tenant"]
+
+    def validate_total_volume(self, value):
+        return _quantize_decimal_10_3(value)
+
+    def validate_total_weight_kg(self, value):
+        return _quantize_decimal_10_3(value)
+
+    def _apply_deal_allocations(self, instance, rows):
+        if not rows:
+            return
+        for row in rows:
+            try:
+                did = int(row.get("deal_id"))
+            except (TypeError, ValueError):
+                continue
+            alloc = _to_decimal(row.get("allocated_shipping_cost", 0))
+            extra = _to_decimal(row.get("extra_costs", 0))
+            LogisticsShipmentDeal.objects.filter(shipment=instance, deal_id=did).update(
+                allocated_shipping_cost=alloc,
+                extra_costs=extra,
+            )
+
+    def create(self, validated_data):
+        # الحقل اسمه payments لكن source="agent_payments" → المفتاح في validated_data هو agent_payments
+        payments_data = validated_data.pop(
+            "agent_payments", validated_data.pop("payments", None)
+        )
+        deal_alloc = validated_data.pop("deal_allocations", None)
+        instance = LogisticsShipment.objects.create(**validated_data)
+        if payments_data:
+            _sync_shipment_agent_payments(instance, payments_data)
+        if deal_alloc:
+            self._apply_deal_allocations(instance, deal_alloc)
+        return instance
+
+    def update(self, instance, validated_data):
+        payments_data = validated_data.pop(
+            "agent_payments", validated_data.pop("payments", None)
+        )
+        deal_alloc = validated_data.pop("deal_allocations", None)
+        instance = super().update(instance, validated_data)
+        if payments_data is not None:
+            _sync_shipment_agent_payments(instance, payments_data)
+        if deal_alloc is not None:
+            self._apply_deal_allocations(instance, deal_alloc)
+        return instance
 
 class LogisticsClearanceSerializer(serializers.ModelSerializer):
-    broker_name = serializers.CharField(source='customs_broker.name', read_only=True)
+    broker_name = serializers.CharField(source="customs_broker.name", read_only=True)
+    shipment_number = serializers.CharField(
+        source="shipment.shipment_number", read_only=True
+    )
+    shipment_name = serializers.CharField(
+        source="shipment.shipment_name", read_only=True, allow_null=True
+    )
+    deals_count = serializers.SerializerMethodField()
+    deals_preview = serializers.SerializerMethodField()
 
     class Meta:
         model = LogisticsClearance
-        fields = '__all__'
-        read_only_fields = ['id', 'tenant']
+        fields = "__all__"
+        read_only_fields = ["id", "tenant"]
+
+    def get_deals_count(self, obj):
+        try:
+            sh = obj.shipment
+            if sh is None:
+                return 0
+            cache = getattr(sh, "_prefetched_objects_cache", None)
+            if cache and "deals" in cache:
+                return len(cache["deals"])
+            return sh.deals.count()
+        except Exception:
+            return 0
+
+    def get_deals_preview(self, obj):
+        """عناوين قصيرة من حقل description (عربي) أو رقم الصفقة — لقوائم الاستيراد."""
+        try:
+            sh = obj.shipment
+            if sh is None:
+                return None
+            deals = list(sh.deals.all()[:5])
+            parts = []
+            for d in deals:
+                t = _deal_title_for_list_preview(d)
+                if t:
+                    parts.append(t)
+            if not parts:
+                return None
+            tail = " …" if len(deals) >= 5 else ""
+            return " · ".join(parts[:4]) + tail
+        except Exception:
+            return None
+
+    def validate_cost_lines(self, value):
+        if value is None:
+            return default_clearance_cost_lines()
+        if not isinstance(value, list):
+            raise serializers.ValidationError("cost_lines يجب أن تكون قائمة")
+        out = []
+        for row in value:
+            if not isinstance(row, dict):
+                continue
+            label = str(row.get("label") or "").strip()
+            if not label:
+                continue
+            try:
+                amt = float(row.get("amount", 0) or 0)
+            except (TypeError, ValueError):
+                amt = 0.0
+            out.append({"label": label[:220], "amount": round(amt, 2)})
+        return out if out else default_clearance_cost_lines()
+
+    def validate(self, attrs):
+        request = self.context.get("request")
+        if request and request.method == "POST":
+            sh = attrs.get("shipment")
+            if sh is not None and LogisticsClearance.objects.filter(shipment=sh).exists():
+                raise serializers.ValidationError(
+                    {"shipment": "يوجد بالفعل تخليص جمركي لهذه الشحنة."}
+                )
+        return attrs
+
+    def create(self, validated_data):
+        if not validated_data.get("cost_lines"):
+            validated_data["cost_lines"] = default_clearance_cost_lines()
+        return super().create(validated_data)
 
 class LogisticsExpenseSerializer(serializers.ModelSerializer):
     expense_account_name = serializers.CharField(source='expense_account.name', read_only=True)
@@ -214,3 +736,175 @@ class LogisticsExpenseSerializer(serializers.ModelSerializer):
         model = LogisticsExpense
         fields = '__all__'
         read_only_fields = ['id', 'tenant', 'is_posted', 'journal']
+
+
+class LogisticsClearancePaymentSerializer(serializers.ModelSerializer):
+    broker_name = serializers.CharField(source="customs_broker.name", read_only=True)
+    journal_id_display = serializers.IntegerField(source="journal.id", read_only=True)
+    currency_code = serializers.CharField(
+        source="currency.Code", read_only=True, allow_null=True, default=None
+    )
+
+    class Meta:
+        model = LogisticsClearancePayment
+        fields = "__all__"
+        read_only_fields = [
+            "id",
+            "tenant",
+            "customs_broker",
+            "is_posted",
+            "journal",
+            "created_at",
+        ]
+
+
+# ─── Purchase Invoice Serializers ──────────────────────────────────────────────
+
+class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
+    product_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PurchaseInvoiceItem
+        fields = [
+            'id', 'product', 'product_name', 'name',
+            'quantity', 'unit_price', 'total_price',
+            'notes', 'hs_code',
+            'landed_unit_price_ils', 'landed_line_total_ils',
+        ]
+        read_only_fields = ['id']
+
+    def get_product_name(self, obj):
+        if obj.product:
+            return obj.product.name_ar or obj.product.name_en or obj.product.sku
+        return obj.name
+
+
+class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
+    partner_name = serializers.CharField(source='partner.name', read_only=True)
+    deal_ref = serializers.CharField(source='deal.ref_number', read_only=True, default=None)
+    currency_code = serializers.CharField(source='currency.Code', read_only=True, default=None)
+    items_count = serializers.SerializerMethodField()
+    journal_id_display = serializers.IntegerField(source='journal.id', read_only=True, default=None)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = PurchaseInvoice
+        fields = [
+            'id', 'invoice_number', 'invoice_name', 'invoice_date',
+            'partner', 'partner_name',
+            'deal', 'deal_ref',
+            'shipment', 'clearance',
+            'currency', 'currency_code', 'exchange_rate',
+            'subtotal', 'discount_amount', 'tax_rate', 'tax_amount',
+            'grand_total', 'status', 'status_display',
+            'is_posted', 'journal_id_display',
+            'items_count',
+            'created_at', 'updated_at',
+        ]
+
+    def get_items_count(self, obj):
+        return obj.items.count()
+
+
+class PurchaseInvoiceSerializer(serializers.ModelSerializer):
+    items = PurchaseInvoiceItemSerializer(many=True, required=False)
+    partner_name = serializers.CharField(source='partner.name', read_only=True)
+    deal_ref = serializers.CharField(source='deal.ref_number', read_only=True, default=None)
+    currency_code = serializers.CharField(source='currency.Code', read_only=True, default=None)
+    journal_id_display = serializers.IntegerField(source='journal.id', read_only=True, default=None)
+    status_display = serializers.CharField(source='get_status_display', read_only=True)
+
+    class Meta:
+        model = PurchaseInvoice
+        fields = [
+            'id', 'invoice_number', 'invoice_name', 'invoice_date',
+            'partner', 'partner_name',
+            'deal', 'deal_ref',
+            'shipment',
+            'clearance',
+            'currency', 'currency_code', 'exchange_rate',
+            'subtotal', 'discount_amount',
+            'tax_rate', 'tax_amount', 'tax_type',
+            'shipping_cost', 'shipping_included',
+            'grand_total',
+            'local_payments_json', 'conversion_metadata_json',
+            'status', 'status_display', 'notes',
+            'supplier_invoice_number', 'factory_name',
+            'is_posted', 'journal', 'journal_id_display',
+            'firestore_id',
+            'items',
+            'created_at', 'updated_at', 'created_by',
+        ]
+        read_only_fields = ['id', 'is_posted', 'journal', 'created_at', 'updated_at']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if getattr(instance, 'is_posted', False):
+            return data
+        try:
+            from logistics.landed_cost import (
+                compute_live_purchase_invoice_read_payload,
+                _json_friendly_value,
+            )
+        except Exception:
+            return data
+        live = compute_live_purchase_invoice_read_payload(instance)
+        if not live:
+            return data
+        conv = live.get('conversion_metadata_json')
+        if isinstance(conv, dict):
+            data['conversion_metadata_json'] = _json_friendly_value(conv)
+        # لا نستبدل خصم/ضريبة/إجمالي الفاتورة من «live» — live يبنيها من صفقة الشحن (deal.tax_*)
+        # وقد تختلف عن ض.ق.م الفاتورة المحفوظة؛ الاستبدال كان يصفّر الضريبة بعد التحديث رغم بقاء tax_rate.
+        for k in ('subtotal', 'shipping_cost'):
+            if k in live and live[k] is not None:
+                data[k] = _json_friendly_value(live[k])
+        live_lp = live.get('local_payments_json')
+        stored_lp = data.get('local_payments_json')
+        if isinstance(live_lp, dict):
+            # live يعيد فقط ما يبنيه landed cost (رسوم تخليص مخصصة…) — لا يمسّ بنود الضرائب/الرسوم الإضافية
+            # التي يحررها المستخدم؛ استبدال كامل كان يمحو taxesAndFeesLines بعد كل GET.
+            base = dict(stored_lp) if isinstance(stored_lp, dict) else {}
+            merged = {**base}
+            for k, v in live_lp.items():
+                if k in ('taxesAndFeesLines', 'taxes_and_fees_lines'):
+                    continue
+                merged[k] = v
+            data['local_payments_json'] = _json_friendly_value(merged)
+        if live.get('shipping_included') is not None:
+            data['shipping_included'] = bool(live['shipping_included'])
+        live_items = live.get('items') or []
+        by_key = {}
+        for row in live_items:
+            key = (str(row.get('product') or ''), str(row.get('name') or '').strip())
+            by_key[key] = row
+        for it in data.get('items') or []:
+            key = (str(it.get('product') or ''), str(it.get('name') or '').strip())
+            row = by_key.get(key)
+            if not row:
+                continue
+            if row.get('landed_unit_price_ils') is not None:
+                it['landed_unit_price_ils'] = _json_friendly_value(row['landed_unit_price_ils'])
+            if row.get('landed_line_total_ils') is not None:
+                it['landed_line_total_ils'] = _json_friendly_value(row['landed_line_total_ils'])
+        return data
+
+    def create(self, validated_data):
+        items_data = validated_data.pop('items', [])
+        invoice = PurchaseInvoice.objects.create(**validated_data)
+        for item_data in items_data:
+            PurchaseInvoiceItem.objects.create(invoice=invoice, **item_data)
+        return invoice
+
+    def update(self, instance, validated_data):
+        items_data = validated_data.pop('items', None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if items_data is not None:
+            instance.items.all().delete()
+            for item_data in items_data:
+                PurchaseInvoiceItem.objects.create(invoice=instance, **item_data)
+
+        return instance

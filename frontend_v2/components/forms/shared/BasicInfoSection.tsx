@@ -178,7 +178,7 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
           </div>
         </div>
 
-        {/* 2. وصف الصفقة */}
+        {/* 2. وصف الصفقة → يُحفظ في SQL description (مصدر العنوان في الشحنة والتخليص والفواتير) */}
         <div className="md:col-span-4 space-y-1">
           <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
             <Tag className="w-3 h-3 text-purple-500" />
@@ -186,8 +186,10 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
           </label>
           <input
             type="text"
-            value={data.originalOfferNumber || ''}
-            onChange={e => setData((prev: any) => ({ ...prev, originalOfferNumber: e.target.value }))}
+            value={data.dealDescription ?? ''}
+            onChange={e =>
+              setData((prev: any) => ({ ...prev, dealDescription: e.target.value }))
+            }
             disabled={readOnly}
             className="w-full h-10 px-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-1 focus:ring-purple-500 placeholder-gray-400"
             placeholder="مثال: طلبية أجهزة كهربائية..."
@@ -244,6 +246,26 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
                 </div>
               </div>
             </div>
+
+            {/* رقم عرض السعر (مرجعي) — ليس وصف الصفقة */}
+            {isDeal ? (
+              <div className="space-y-1">
+                <label className="text-xs text-gray-500 block">رقم عرض السعر (مرجعي)</label>
+                <div className="relative">
+                  <FileText className="absolute right-3 top-2.5 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="مثال: OF-2024-001"
+                    value={data.originalOfferNumber || ''}
+                    onChange={e =>
+                      setData((prev: any) => ({ ...prev, originalOfferNumber: e.target.value }))
+                    }
+                    disabled={readOnly}
+                    className="w-full h-9 pr-9 pl-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm focus:ring-1 focus:ring-purple-500 font-mono"
+                  />
+                </div>
+              </div>
+            ) : null}
 
             {/* رقم فاتورة المورد */}
             <div className="space-y-1">

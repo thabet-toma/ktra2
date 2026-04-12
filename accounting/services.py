@@ -1,60 +1,78 @@
+import datetime
+import logging
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from .models import Account, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod, CostCenter
 from decimal import Decimal
 from partners.models import Partner
 
+logger = logging.getLogger(__name__)
+
+
 def validate_fiscal_period(tenant_id, transaction_date):
     """
-    Checks if the transaction date falls within an open fiscal period.
+    Ensures transaction_date falls within an open fiscal period.
+    Raises ValidationError if no open period covers the date.
     """
     if tenant_id == 0 or tenant_id is None:
-        return # Skip for system/fallback tenant
-    
-    # Ensure date object
-    import datetime
+        return
+
     if isinstance(transaction_date, str):
         try:
             transaction_date = datetime.datetime.strptime(transaction_date, '%Y-%m-%d').date()
-        except:
-             pass 
+        except (ValueError, TypeError):
+            return
 
     period = FiscalPeriod.objects.filter(
         tenant_id=tenant_id,
         start_date__lte=transaction_date,
         end_date__gte=transaction_date,
-        status='Open'
+        status='Open',
+        is_closed=False,
     ).first()
-    
-    if not period:
-        # SELF HEAL: Automatically create the fiscal year if it's missing to unblock the user.
-        try:
-             year = transaction_date.year
-             start = datetime.date(year, 1, 1)
-             end = datetime.date(year, 12, 31)
-             
-             # Check if period exists but is closed
-             existing = FiscalPeriod.objects.filter(tenant_id=tenant_id, start_date=start, end_date=end).first()
-             if existing:
-                 if existing.status != 'Open':
-                    existing.status = 'Open' # Re-open strictly for this action
-                    existing.save()
-                 return existing
-             
-             new_period = FiscalPeriod.objects.create(
-                 tenant_id=tenant_id,
-                 name=f"FY {year}",
-                 start_date=start,
-                 end_date=end,
-                 status='Open'
-             )
-             return new_period
-        except Exception as e:
-             print(f"Fiscal Period Auto-Create Failed: {e}")
-             # Fallback: Allow if we failed to create (Don't block user)
-             return None 
-             
-        # raise ValidationError(f"Transaction date {transaction_date} is not within any OPEN fiscal period for tenant {tenant_id}.")
+
+    if period:
+        return period
+
+    existing_closed = FiscalPeriod.objects.filter(
+        tenant_id=tenant_id,
+        start_date__lte=transaction_date,
+        end_date__gte=transaction_date,
+    ).first()
+
+    if existing_closed:
+        raise ValidationError(
+            f"الفترة المالية «{existing_closed.name}» مغلقة. "
+            f"افتحها من إدارة الفترات المالية قبل ترحيل قيود بتاريخ {transaction_date}."
+        )
+
+    raise ValidationError(
+        f"لا توجد فترة مالية مفتوحة تغطي التاريخ {transaction_date}. "
+        f"أنشئ فترة مالية من صفحة إدارة الفترات المالية."
+    )
+
+
+def create_fiscal_year(tenant, year):
+    """
+    Creates a calendar-year fiscal period (Jan 1 – Dec 31) if it doesn't exist.
+    Returns the existing or newly created FiscalPeriod.
+    """
+    start = datetime.date(year, 1, 1)
+    end = datetime.date(year, 12, 31)
+    existing = FiscalPeriod.objects.filter(
+        tenant=tenant, start_date=start, end_date=end,
+    ).first()
+    if existing:
+        return existing
+    return FiscalPeriod.objects.create(
+        tenant=tenant,
+        name=f"FY {year}",
+        start_date=start,
+        end_date=end,
+        status='Open',
+        is_closed=False,
+    )
 
 def validate_journal_entry(header, lines_data):
     """
@@ -151,24 +169,25 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
                 change_details=change_details
             )
     except Exception as e:
-        print(f"Failed to create accounting audit log: {e}")
+        import logging as _log
+        _log.getLogger(__name__).warning("Failed to create accounting audit log: %s", e)
 
-# @transaction.atomic  <-- Removed for debugging consistency
 def post_journal_entry(journal_id, user=None):
+    import logging as _log
+    _logger = _log.getLogger(__name__)
     try:
         header = JournalHeader.objects.get(id=journal_id)
         if header.is_posted:
-             print(f"DEBUG: Journal {journal_id} already posted.")
-             raise ValidationError("Journal entry is already posted.")
-            
-        # Optional: Re-validate fiscal period on post in case date changed or period closed
+            _logger.warning("Journal %s already posted.", journal_id)
+            raise ValidationError("Journal entry is already posted.")
+
         header_tenant_id = header.tenant_id if header.tenant_id is not None else 0
         if header.transaction_date:
             validate_fiscal_period(header_tenant_id, header.transaction_date)
-        
+
         header.is_posted = True
-        header.save(force_update=True) # Check if this enforces it
-        print(f"DEBUG: Journal {journal_id} set to POSTED and saved.")
+        header.save(force_update=True)
+        _logger.info("Journal %s set to POSTED.", journal_id)
         
         create_audit_log(
             tenant=header.tenant,

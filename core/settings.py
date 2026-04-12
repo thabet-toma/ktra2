@@ -34,13 +34,14 @@ SECRET_KEY = os.environ.get(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get("DJANGO_DEBUG", "True").lower() in ("1", "true", "yes")
+DEBUG = True
 
-_allowed = os.environ.get("DJANGO_ALLOWED_HOSTS", "").strip()
-if _allowed:
-    ALLOWED_HOSTS = [h.strip() for h in _allowed.split(",") if h.strip()]
-else:
-    ALLOWED_HOSTS = ["*"] if DEBUG else ["localhost", "127.0.0.1"]
+ALLOWED_HOSTS = [
+    'smart.ktragroup.com',
+    'api.smart.ktragroup.com',
+    'localhost',
+    '127.0.0.1'
+]
 
 
 # Application definition
@@ -114,15 +115,14 @@ _mysql_password = (
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",
-        "NAME": os.environ.get("MYSQL_DATABASE", "global_erp_pro"),
-        "USER": os.environ.get("MYSQL_USER", "root"),
-        "PASSWORD": _mysql_password,
-        "HOST": os.environ.get("MYSQL_HOST", "localhost"),
-        "PORT": os.environ.get("MYSQL_PORT", "3306"),
+        "NAME": "smartktra_smart-ktra",
+        "USER": "smartktra_smartktra",
+        "PASSWORD": "smart@102030", 
+        "HOST": "localhost",
+        "PORT": "3306",
         "OPTIONS": {
             "charset": "utf8mb4",
-            "use_unicode": True,
-            "init_command": "SET sql_mode='STRICT_TRANS_TABLES', innodb_strict_mode=1; SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;",
+            "init_command": "SET foreign_key_checks = 0; SET sql_mode='STRICT_TRANS_TABLES', innodb_strict_mode=1;",
         },
     }
 }
@@ -163,6 +163,11 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+
+# هذا السطر هو اللي ناقصك ومسبب المشكلة
+STATIC_ROOT = BASE_DIR / 'staticfiles' 
+
+
 # Media files (User uploads)
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
@@ -173,6 +178,7 @@ _DEFAULT_ORIGINS = [
     "http://127.0.0.1:3000",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://smart.ktragroup.com",
 ]
 _origins_env = os.environ.get("DJANGO_CORS_ALLOWED_ORIGINS", "").strip()
 if _origins_env:
@@ -208,7 +214,16 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-tenant-id",
 ]
 
-CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
+CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS) + ['https://api.smart.ktragroup.com']
+
+# المساعد الذكي (n8n Webhook) — يُمرَّر عبر الخادم فقط؛ استخدم رابط Production بدون /test/
+N8N_ASSISTANT_WEBHOOK_URL = os.environ.get(
+    "N8N_ASSISTANT_WEBHOOK_URL",
+    "http://72.60.181.210:5678/webhook/3858dd71-20ef-4b96-a73c-78a5c504c04d",
+).strip()
+N8N_ASSISTANT_WEBHOOK_TIMEOUT = int(
+    os.environ.get("N8N_ASSISTANT_WEBHOOK_TIMEOUT", "600") or "600"
+)
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
@@ -230,3 +245,29 @@ CLOUDINARY_STORAGE = {
 }
 
 # DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'
+
+# محاسبة لوجستيات: عطّل الترحيل التلقائي لدفعات الصفقة فقط (قيد شراء من الصفقة معطّل دائماً في الكود).
+# في .env: LOGISTICS_DISABLE_AUTO_ACCOUNTING=1
+LOGISTICS_DISABLE_AUTO_ACCOUNTING = os.environ.get(
+    "LOGISTICS_DISABLE_AUTO_ACCOUNTING", ""
+).strip().lower() in ("1", "true", "yes", "on")
+
+# بعد تأكيد المورد + حالة Paid/Confirmed: إنشاء قيد تلقائياً من إشارة logistics.signals (مدين مورد / دائن صندوق).
+# ضع 1 في .env إذا أردت إيقاف القيد التلقائي والاكتفاء بقيد يدوي أو بـ POST .../post_payment/.
+LOGISTICS_PAYMENT_SKIP_AUTO_JOURNAL = os.environ.get(
+    "LOGISTICS_PAYMENT_SKIP_AUTO_JOURNAL", ""
+).strip().lower() in ("1", "true", "yes", "on")
+
+# حساب الأب تحت الأصول لإنشاء حسابات الصناديق (مثلاً 1110 نقدية بالصندوق)
+CASH_BOX_PARENT_ACCOUNT_CODE = os.environ.get("CASH_BOX_PARENT_ACCOUNT_CODE", "1110").strip() or "1110"
+# قيد إيداع الصندوق: دائن — حساب رأس ملك / مساهمات (Equity). إن لم يُوجد الكود يُستخدم أول Equity.
+CASH_BOX_CAPITAL_ACCOUNT_CODE = os.environ.get("CASH_BOX_CAPITAL_ACCOUNT_CODE", "").strip()
+# معرّف Firestore للصندوق الافتراضي عند ترحيل دفعة دون تمرير cash_box_external_id (مثل صندوق الدولار).
+DEFAULT_CASH_BOX_EXTERNAL_ID = os.environ.get("DEFAULT_CASH_BOX_EXTERNAL_ID", "").strip()
+
+# مفتاح API للـ AI Agent — يُرسل في هيدر X-Agent-Key لحماية نقطة الاستعلام
+# غيّر القيمة في .env إلى مفتاح قوي وسري في الإنتاج
+AGENT_DB_API_KEY = os.environ.get(
+    "AGENT_DB_API_KEY",
+    "ktra-agent-2025-secret-key",
+).strip()

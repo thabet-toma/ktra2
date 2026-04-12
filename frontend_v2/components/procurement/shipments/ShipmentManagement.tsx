@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { Shipment, User, Supplier, Deal } from '../../../types';
 import { shipmentsService } from '../../../services/shipmentsService';
 import { suppliersService } from '../../../services/firestoreService';
@@ -13,9 +14,31 @@ import { ShipmentDetailView } from './ShipmentDetailView';
 
 interface ShipmentManagementProps {
     currentUser: User;
+    onOpenAccountingJournal?: (
+        journalId: number | null,
+        dealRef?: { dealId: string; dealNumber: string; displayName: string }
+    ) => void;
 }
 
-export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({ currentUser }) => {
+export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
+    currentUser,
+    onOpenAccountingJournal,
+}) => {
+    const navigate = useNavigate();
+    const location = useLocation();
+    const newFormInitRef = useRef(false);
+
+    const shipmentsPathMatch = useMemo(() => {
+        const path = (location.pathname || '/').replace(/\/$/, '') || '/';
+        if (path !== '/shipments' && !path.startsWith('/shipments/')) return null;
+        if (path === '/shipments') return { mode: 'list' as const };
+        const m = path.match(/^\/shipments\/(.+)$/);
+        const seg = m ? decodeURIComponent(m[1]) : '';
+        if (seg === 'new') return { mode: 'new' as const };
+        if (!seg) return { mode: 'list' as const };
+        return { mode: 'shipment' as const, id: seg };
+    }, [location.pathname]);
+
     const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
     const [shipments, setShipments] = useState<Shipment[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -29,6 +52,14 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({ currentU
     const [paymentFilter, setPaymentFilter] = useState<string>('all');
     const [filteredShipments, setFilteredShipments] = useState<Shipment[]>([]);
     const [viewingShipment, setViewingShipment] = useState<Shipment | null>(null);
+
+    useEffect(() => {
+        const path = (location.pathname || '/').replace(/\/$/, '') || '/';
+        const onShipmentsRoute = path === '/shipments' || path.startsWith('/shipments/');
+        if (!onShipmentsRoute) {
+            navigate('/shipments', { replace: true });
+        }
+    }, [location.pathname, navigate]);
 
     useEffect(() => {
         const unsubShipments = shipmentsService.subscribeToShipments(setShipments);
@@ -81,21 +112,55 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({ currentU
         setFilteredShipments(result);
     }, [shipments, searchTerm, statusFilter, typeFilter, detailedStatusFilter, paymentFilter]);
 
-    const handleCreateNew = async () => {
-        const shipmentNumber = await shipmentsService.getNextShipmentNumber();
-        setCurrentShipment({
-            shipmentNumber,
-            status: 'draft',
-            deals: [],
-            totalShippingCostUsd: 0,
-            totalVolume: 0
-        });
-        setViewMode('form');
+    /** مزامنة قائمة/نموذج الشحنة مع الراوت `/shipments` و `/shipments/:id` و `/shipments/new` */
+    useEffect(() => {
+        if (!shipmentsPathMatch) return;
+        if (shipmentsPathMatch.mode === 'list') {
+            newFormInitRef.current = false;
+            setViewMode('list');
+            setCurrentShipment(null);
+            return;
+        }
+        if (shipmentsPathMatch.mode === 'shipment') {
+            const id = shipmentsPathMatch.id;
+            if (shipments.length === 0) return;
+            const target = shipments.find((s) => String(s.id) === String(id));
+            if (target) {
+                setCurrentShipment({ ...target });
+                setViewMode('form');
+            } else {
+                navigate('/shipments', { replace: true });
+            }
+            return;
+        }
+        if (newFormInitRef.current) return;
+        newFormInitRef.current = true;
+        void (async () => {
+            try {
+                const shipmentNumber = await shipmentsService.getNextShipmentNumber();
+                setCurrentShipment({
+                    shipmentNumber,
+                    status: 'draft',
+                    deals: [],
+                    totalShippingCostUsd: 0,
+                    totalVolume: 0,
+                });
+                setViewMode('form');
+            } catch (e) {
+                console.error(e);
+                newFormInitRef.current = false;
+                navigate('/shipments', { replace: true });
+            }
+        })();
+    }, [shipmentsPathMatch, shipments, navigate]);
+
+    const handleCreateNew = () => {
+        newFormInitRef.current = false;
+        navigate('/shipments/new');
     };
 
     const handleEdit = (shipment: Shipment) => {
-        setCurrentShipment({ ...shipment });
-        setViewMode('form');
+        navigate(`/shipments/${encodeURIComponent(String(shipment.id))}`);
     };
 
     const handleView = (shipment: Shipment) => {
@@ -106,6 +171,12 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({ currentU
         if (window.confirm('هل أنت متأكد من حذف هذه الشحنة؟')) {
             try {
                 await shipmentsService.deleteShipment(shipmentId);
+                const path = (location.pathname || '/').replace(/\/$/, '') || '/';
+                const m = path.match(/^\/shipments\/(.+)$/);
+                const seg = m ? decodeURIComponent(m[1]) : '';
+                if (seg && seg !== 'new' && String(seg) === String(shipmentId)) {
+                    navigate('/shipments', { replace: true });
+                }
             } catch (error) {
                 console.error("Error deleting shipment:", error);
                 alert("حدث خطأ أثناء حذف الشحنة");
@@ -253,9 +324,18 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({ currentU
                 ) : (
                     <ShipmentForm
                         shipment={currentShipment}
-                        onCancel={() => setViewMode('list')}
-                        onSave={() => setViewMode('list')}
+                        onCancel={() => {
+                            setViewMode('list');
+                            setCurrentShipment(null);
+                            navigate('/shipments');
+                        }}
+                        onSave={(shipmentId) => {
+                            navigate(`/shipments/${encodeURIComponent(shipmentId)}`, {
+                                replace: true,
+                            });
+                        }}
                         currentUser={currentUser}
+                        onOpenAccountingJournal={onOpenAccountingJournal}
                     />
                 )}
             </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   DollarSign,
   Upload,
@@ -15,7 +15,42 @@ import {
 } from "lucide-react";
 import { cloudinaryService } from "@/services/cloudinaryService";
 import { cashBoxesService } from "@/services/firestoreService";
+import { accountingApi } from "@/services/accountingApi";
+import type { TrialBalanceRow } from "@/types/accounting";
 import { Deal, DealPayment, DealStatus } from "@/types";
+import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
+import { isAwaitingSupplierConfirmation } from "@/utils/dealPaymentFlow";
+
+/** ربط صندوق (external_id = معرف Firestore) برصيد حسابه في ميزان المراجعة */
+async function fetchSqlBalanceByCashBoxExternalId(): Promise<Record<string, number>> {
+  try {
+    const today = new Date().toISOString().split("T")[0];
+    const yearStart = `${new Date().getFullYear()}-01-01`;
+    const [ledgers, tb] = await Promise.all([
+      accountingApi.getCashBoxLedgers(),
+      accountingApi.getTrialBalance({
+        start_date: yearStart,
+        end_date: today,
+        include_unposted: "true",
+      }),
+    ]);
+    const rows: TrialBalanceRow[] = Array.isArray(tb) ? tb : [];
+    const byAcct = new Map<number, number>();
+    for (const r of rows) {
+      byAcct.set(r.id, Number(r.balance));
+    }
+    const out: Record<string, number> = {};
+    for (const L of ledgers) {
+      const ext = String(L.external_id || "").trim();
+      if (!ext) continue;
+      const bal = byAcct.get(L.account_id);
+      if (bal != null && Number.isFinite(bal)) out[ext] = bal;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 interface PaymentProps {
   title: string;
@@ -50,7 +85,9 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
   installmentNumber,
   installmentAmount,
 }) => {
-  const [mode, setMode] = useState<"claim" | "swift" | "verify" | "confirmed">("claim");
+  const [mode, setMode] = useState<"claim" | "swift" | "verify" | "confirmed">("swift");
+  /** direct = دفع فوري بدون مطالبة | claim_first = رفع مطالبة ثم دفع لاحقاً */
+  const [paymentPath, setPaymentPath] = useState<"direct" | "claim_first">("direct");
 
   // الحقول الأساسية
   const [claimImage, setClaimImage] = useState("");
@@ -59,13 +96,14 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
   const [supplierNotes, setSupplierNotes] = useState("");
   const [isUploading, setIsUploading] = useState<string | null>(null);
   const [cashBoxes, setCashBoxes] = useState<any[]>([]);
+  const [sqlBalanceByCashBoxId, setSqlBalanceByCashBoxId] = useState<Record<string, number>>({});
+  const sqlBalanceRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [selectedCashBoxId, setSelectedCashBoxId] = useState<string>("");
   const [notes, setNotes] = useState("");
 
   // ⭐ الحقول الجديدة للتواريخ
   const [claimDate, setClaimDate] = useState(new Date().toISOString().split('T')[0]);
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
-  const [transferDate, setTransferDate] = useState(new Date().toISOString().split('T')[0]);
   const [confirmationDate, setConfirmationDate] = useState(new Date().toISOString().split('T')[0]);
 
   const [usdToIls, setUsdToIls] = useState(3.78);
@@ -81,22 +119,27 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
   const calculatedInstallmentAmount = actualInstallment?.amount || installmentAmount || 0;
   const amountPaid = actualInstallment?.paymentData?.amountPaid || 0;
   const remainingAmount = Math.max(0, calculatedInstallmentAmount - amountPaid);
+  const dealPrincipalCap = maxPaymentPrincipalForDeal(deal, paymentData?.id);
+  const maxPrincipal =
+    calculatedInstallmentAmount > 0
+      ? Math.min(remainingAmount, dealPrincipalCap)
+      : dealPrincipalCap;
 
   // ⭐ المبلغ الافتراضي
   const [amount, setAmount] = useState(
     paymentData?.amount || remainingAmount || calculatedInstallmentAmount
   );
 
-  // ⭐ تحديد الوضع بناءً على البيانات
+  // تحديد الوضع: إن وُجد تنفيذ دفع (سليب/صندوق/ترحيل) ولم يُؤكَّد المورد → وضع التأكيد فقط، لا نموذج الدفع الكامل
   useEffect(() => {
     if (paymentData?.confirmedBySupplier) {
       setMode("confirmed");
-    } else if (paymentData?.bankSwiftImage) {
+    } else if (isAwaitingSupplierConfirmation(paymentData)) {
       setMode("verify");
     } else if (paymentData?.alibabaClaimImage) {
       setMode("swift");
     } else {
-      setMode("claim");
+      setMode(paymentPath === "claim_first" ? "claim" : "swift");
     }
 
     if (paymentData) {
@@ -107,9 +150,6 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       // ⭐ تحميل التواريخ
       if (paymentData.paymentDate) {
         setPaymentDate(paymentData.paymentDate.split('T')[0]);
-      }
-      if (paymentData.paymentDate) {
-        setTransferDate(paymentData.paymentDate.split('T')[0]);
       }
       if (paymentData.confirmedAt) {
         setConfirmationDate(paymentData.confirmedAt.split('T')[0]);
@@ -122,12 +162,27 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       setNotes(paymentData.notes || "");
       setSupplierNotes(paymentData.supplierNotes || "");
     }
-  }, [paymentData, remainingAmount, calculatedInstallmentAmount]);
+  }, [paymentData, paymentPath, remainingAmount, calculatedInstallmentAmount]);
 
-  // تحميل الصناديق المالية
-  useEffect(() => {
-    cashBoxesService.getCashBoxes().then(setCashBoxes);
+  const scheduleSqlBalanceRefresh = useCallback(() => {
+    if (sqlBalanceRefreshTimerRef.current) clearTimeout(sqlBalanceRefreshTimerRef.current);
+    sqlBalanceRefreshTimerRef.current = setTimeout(async () => {
+      sqlBalanceRefreshTimerRef.current = null;
+      setSqlBalanceByCashBoxId(await fetchSqlBalanceByCashBoxExternalId());
+    }, 350);
   }, []);
+
+  useEffect(() => {
+    const unsub = cashBoxesService.subscribeToCashBoxes((boxes) => {
+      setCashBoxes(boxes);
+      scheduleSqlBalanceRefresh();
+    });
+    scheduleSqlBalanceRefresh();
+    return () => {
+      unsub();
+      if (sqlBalanceRefreshTimerRef.current) clearTimeout(sqlBalanceRefreshTimerRef.current);
+    };
+  }, [scheduleSqlBalanceRefresh]);
 
   const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>, setter: (url: string) => void) => {
     const file = e.target.files?.[0];
@@ -151,8 +206,10 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       return;
     }
 
-    if (amount > calculatedInstallmentAmount) {
-      alert(`❌ المبلغ ($${amount.toLocaleString()}) يتجاوز مبلغ الدفعة ($${calculatedInstallmentAmount.toLocaleString()})`);
+    if (amount > maxPrincipal) {
+      alert(
+        `❌ المبلغ ($${amount.toLocaleString()}) يتجاوز الحد المسموح ($${maxPrincipal.toLocaleString()}) — لا يجوز تجاوز إجمالي الصفقة`
+      );
       return;
     }
 
@@ -204,13 +261,10 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       return;
     }
 
-    if (totalAmount > selectedCashBox.currentBalance) {
-      alert(`❌ الرصيد غير كافي في الصندوق المحدد.\nالمطلوب: $${totalAmount.toLocaleString()}\nالمتاح: $${selectedCashBox.currentBalance.toLocaleString()}`);
-      return;
-    }
-
-    if (amount > calculatedInstallmentAmount) {
-      alert(`❌ المبلغ ($${amount.toLocaleString()}) يتجاوز مبلغ الدفعة ($${calculatedInstallmentAmount.toLocaleString()})`);
+    if (amount > maxPrincipal) {
+      alert(
+        `❌ المبلغ ($${amount.toLocaleString()}) يتجاوز الحد المسموح ($${maxPrincipal.toLocaleString()}) — لا يجوز تجاوز إجمالي الصفقة`
+      );
       return;
     }
 
@@ -219,9 +273,8 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       usdToIls: usdToIls,
       transferCost: transferFee,
       transferFee: transferFee,
-      // ⭐ تواريخ الدفع والتحويل
       paymentDate: new Date(paymentDate + 'T00:00:00').toISOString(),
-      transferDate: new Date(transferDate + 'T00:00:00').toISOString(),
+      transferDate: new Date(paymentDate + 'T00:00:00').toISOString(),
       cashBoxId: selectedCashBoxId,
       amount: amount,
       totalDeductedAmount: totalAmount,
@@ -232,7 +285,10 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       // ⭐ معلومات إضافية للصندوق
       cashBoxName: selectedCashBox.name,
       cashBoxCurrency: selectedCashBox.currency,
-      cashBoxBalanceBefore: selectedCashBox.currentBalance,
+      cashBoxBalanceBefore:
+        Object.prototype.hasOwnProperty.call(sqlBalanceByCashBoxId, selectedCashBox.id)
+          ? sqlBalanceByCashBoxId[selectedCashBox.id]
+          : selectedCashBox.currentBalance,
       // ⭐ تفاصيل الخصم
       deductionDetails: {
         principalAmount: amount,
@@ -258,6 +314,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
 
   // ⭐ دالة محسنة لتأكيد المورد مع التاريخ
   const handleConfirmSupplier = () => {
+    const confirmationIso = new Date(confirmationDate + "T12:00:00").toISOString();
     const data = {
       paymentId: paymentData?.id,
       supplierConfirmationImage: supplierImage,
@@ -265,9 +322,8 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       cashBoxId: selectedCashBoxId,
       amount: amount,
       transferFee: transferFee,
-      // ⭐ تاريخ تأكيد المورد
-      paymentConfirmationDate: new Date().toISOString(),
-      confirmationDate: new Date(confirmationDate + 'T00:00:00').toISOString(),
+      paymentConfirmationDate: confirmationIso,
+      confirmationDate: confirmationIso,
       notes: notes,
     };
 
@@ -320,10 +376,60 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
     );
   }
 
+  const showPathPicker =
+    !paymentData?.confirmedBySupplier &&
+    !paymentData?.bankSwiftImage &&
+    !paymentData?.alibabaClaimImage;
+
   return (
     <div className="space-y-6">
-      {/* ⭐ معلومات الدفعة */}
-      {(actualInstallment || installmentNumber) && (
+      {showPathPicker && (
+        <div className="rounded-xl border border-gray-200 dark:border-gray-600 bg-slate-50 dark:bg-slate-900/40 p-1 flex gap-1">
+          <button
+            type="button"
+            onClick={() => {
+              setPaymentPath("direct");
+              setMode("swift");
+            }}
+            className={`flex-1 py-2.5 px-3 rounded-lg text-sm font-semibold transition-colors ${
+              paymentPath === "direct"
+                ? "bg-emerald-600 text-white shadow"
+                : "text-gray-600 dark:text-gray-400 hover:bg-white/80 dark:hover:bg-slate-800"
+            }`}
+          >
+            تسجيل الدفع مباشرة
+            <span className="block text-[10px] font-normal opacity-90 mt-0.5">
+              سليب، صندوق، سعر صرف — دون مطالبة
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPaymentPath("claim_first");
+              setMode("claim");
+            }}
+            className={`flex-1 py-2.5 px-3 rounded-lg text-sm font-semibold transition-colors ${
+              paymentPath === "claim_first"
+                ? "bg-amber-600 text-white shadow"
+                : "text-gray-600 dark:text-gray-400 hover:bg-white/80 dark:hover:bg-slate-800"
+            }`}
+          >
+            رفع مطالبة أولاً
+            <span className="block text-[10px] font-normal opacity-90 mt-0.5">
+              يحدّث حالة الصفقة لمسار «جاهز للدفع» ثم تدفع لاحقاً
+            </span>
+          </button>
+        </div>
+      )}
+
+      {paymentData?.alibabaClaimImage && !paymentData?.bankSwiftImage && !paymentData?.confirmedBySupplier && (
+        <p className="text-xs text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2">
+          تم رفع المطالبة. يمكنك إكمال تسجيل الدفع أدناه عند الجاهزية.
+        </p>
+      )}
+
+      {/* ⭐ معلومات الدفعة — مخفاة في وضع تأكيد المورد لتبقى الشاشة بسيطة */}
+      {(actualInstallment || installmentNumber) && mode !== "verify" && (
         <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 border border-blue-200 dark:border-blue-800 rounded-lg">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3">
@@ -381,14 +487,14 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       {mode === "claim" || mode === "swift" ? (
         <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border">
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            المبلغ المدبوغ ($)
+            المبلغ المدفوع ($)
           </label>
           <div className="relative">
             <input
               type="number"
               min="0.01"
               step="0.01"
-              max={calculatedInstallmentAmount}
+              max={maxPrincipal > 0 ? maxPrincipal : undefined}
               value={amount}
               onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
               className="w-full p-3 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-right text-lg font-medium"
@@ -397,16 +503,16 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
           </div>
 
           <div className="mt-2 flex justify-between text-sm">
-            <span className="text-gray-500">المتاح:</span>
+            <span className="text-gray-500">الحد الأقصى لهذه العملية:</span>
             <span className="font-medium text-blue-600 dark:text-blue-400">
-              ${remainingAmount.toLocaleString()}
+              ${maxPrincipal.toLocaleString()}
             </span>
           </div>
 
-          {amount > remainingAmount && (
+          {amount > maxPrincipal && (
             <div className="mt-2 flex items-center gap-2 text-red-600 dark:text-red-400 text-sm">
               <AlertCircle className="w-4 h-4" />
-              <span>المبلغ يتجاوز المتاح ({remainingAmount.toLocaleString()}$)</span>
+              <span>المبلغ يتجاوز المتاح ({maxPrincipal.toLocaleString()}$)</span>
             </div>
           )}
         </div>
@@ -498,7 +604,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
 
           <button
             onClick={handleSaveClaim}
-            disabled={!claimImage || amount > remainingAmount || amount <= 0}
+            disabled={!claimImage || amount > maxPrincipal || amount <= 0}
             className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {!claimImage ? (
@@ -509,7 +615,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
             ) : (
               <>
                 <CheckCircle className="w-5 h-5" />
-                حفظ المطالبة
+                حفظ المطالبة (جاهز للدفع)
               </>
             )}
           </button>
@@ -533,25 +639,6 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                   type="date"
                   value={paymentDate}
                   onChange={(e) => setPaymentDate(e.target.value)}
-                  className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
-                <Calendar className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
-              </div>
-            </div>
-
-            {/* ⭐ تاريخ التحويل */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-green-600" />
-                  تاريخ التحويل البنكي
-                </div>
-              </label>
-              <div className="relative">
-                <input
-                  type="date"
-                  value={transferDate}
-                  onChange={(e) => setTransferDate(e.target.value)}
                   className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
                 <Calendar className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
@@ -599,26 +686,26 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
 
           {/* ⭐ بطاقة عرض التكلفة الإجمالية */}
           {transferFee > 0 && (
-            <div className="p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-lg">
+            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-600 rounded-lg">
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-amber-100 dark:bg-amber-900/20 rounded-lg">
-                    <CreditCard className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+                  <div className="p-2 bg-slate-200/80 dark:bg-slate-700 rounded-lg">
+                    <CreditCard className="w-5 h-5 text-slate-600 dark:text-slate-300" />
                   </div>
                   <div>
-                    <p className="font-medium text-amber-800 dark:text-amber-300">
-                      التكلفة الإجمالية التي ستخصم من الصندوق
+                    <p className="font-medium text-slate-800 dark:text-slate-200">
+                      الإجمالي المخصوم من الصندوق
                     </p>
-                    <p className="text-xs text-amber-700 dark:text-amber-400">
-                      تشمل: المبلغ الأساسي + تكلفة الحوالة
+                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                      المبلغ + تكلفة الحوالة
                     </p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-xl font-bold text-amber-800 dark:text-amber-300">
+                  <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
                     ${(amount + transferFee).toLocaleString()}
                   </div>
-                  <div className="text-sm text-amber-700 dark:text-amber-400">
+                  <div className="text-sm text-slate-600 dark:text-slate-400">
                     ${amount.toLocaleString()} + ${transferFee.toLocaleString()}
                   </div>
                 </div>
@@ -636,14 +723,20 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
               className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             >
               <option value="">-- اختر صندوقاً مالياً --</option>
-              {cashBoxes.map(cb => (
-                <option key={cb.id} value={cb.id} className="py-2">
-                  {cb.name} - رصيد: {cb.currentBalance.toLocaleString()} {cb.currency}
-                </option>
-              ))}
+              {cashBoxes.map((cb) => {
+                const fromSql = Object.prototype.hasOwnProperty.call(sqlBalanceByCashBoxId, cb.id);
+                const displayBal = fromSql ? sqlBalanceByCashBoxId[cb.id] : Number(cb.currentBalance ?? 0);
+                return (
+                  <option key={cb.id} value={cb.id} className="py-2">
+                    {cb.name} — رصيد: {displayBal.toLocaleString(undefined, { maximumFractionDigits: 2 })}{" "}
+                    {cb.currency}
+                    {fromSql ? " (محاسبة)" : ""}
+                  </option>
+                );
+              })}
             </select>
             <p className="text-xs text-gray-500 mt-2">
-              ⚠️ سيتم خصم المبلغ من الصندوق المحدد فوراً
+              ⚠️ خصم فوري. الرصيد من المحاسبة عند وجود ربط للصندوق، وإلا من Firestore. يُسمح بالرصيد السالب.
             </p>
           </div>
 
@@ -717,7 +810,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
 
           <button
             onClick={handleSaveSwift}
-            disabled={!swiftImage || !selectedCashBoxId || amount > remainingAmount}
+            disabled={!swiftImage || !selectedCashBoxId || amount > maxPrincipal}
             className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {!swiftImage ? (
@@ -734,13 +827,9 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
               <>
                 <DollarSign className="w-5 h-5" />
                 {transferFee > 0 ? (
-                  <>
-                    تأكيد الدفع (${amount.toLocaleString()} + ${transferFee.toLocaleString()})
-                  </>
+                  <>تنفيذ التحويل وخصم ${amount.toLocaleString()} + ${transferFee.toLocaleString()}</>
                 ) : (
-                  <>
-                    تأكيد الدفع وخصم ${amount.toLocaleString()}
-                  </>
+                  <>تنفيذ التحويل وخصم ${amount.toLocaleString()} من الصندوق</>
                 )}
               </>
             )}
@@ -751,6 +840,20 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       {/* حالة تأكيد المورد */}
       {mode === "verify" && (
         <div className="space-y-6">
+          <div className="p-4 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50/80 dark:bg-purple-900/20">
+            <p className="text-sm font-semibold text-purple-900 dark:text-purple-100">
+              تأكيد المورد
+            </p>
+            <p className="text-xs text-purple-800/90 dark:text-purple-200/90 mt-1 leading-relaxed">
+              التاريخ أدناه = يوم تأكيد المورد أن الدفعة وصلته. عند الحفظ يُنشأ{" "}
+              بعد التأكيد تنتقل ل<strong>قيد اليومية</strong> لتسجيل القيد يدوياً (مدين مورد / دائن صندوق) ثم الترحيل من هناك.
+            </p>
+            {paymentData?.amount != null && (
+              <p className="text-sm font-bold text-purple-950 dark:text-purple-50 mt-2">
+                المبلغ: ${Number(paymentData.amount).toLocaleString()}
+              </p>
+            )}
+          </div>
           {/* ⭐ تاريخ تأكيد المورد */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -827,7 +930,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                   جاهز للتأكيد النهائي
                 </p>
                 <p className="text-sm text-green-700 dark:text-green-400">
-                  بعد التأكيد، ستتحول الدفعة إلى حالة "مدفوعة" ويمكن الانتقال للدفعة التالية.
+                  يُحفظ تاريخ التأكيد ثم يُفتح لك قيد يومية جديد — أكمل السطور واضغط ترحيل من شاشة المحاسبة (لا ترحيل تلقائي من الصفقة).
                 </p>
                 {transferFee > 0 && (
                   <p className="text-xs text-green-600 dark:text-green-500 mt-1">

@@ -18,7 +18,10 @@ export const subCategoriesService = {
     subscribeToSubCategories: (callback: (subCategories: SubCategory[]) => void) => {
         const q = query(collection(db, "subCategories"), orderBy("createdAt", "desc"));
         return onSnapshot(q, (snapshot: any) => {
-            const data = snapshot.docs.map((d: any) => d.data() as SubCategory);
+            const data = snapshot.docs.map((d: any) => ({
+                id: d.id,
+                ...d.data(),
+            }) as SubCategory);
             callback(data);
         });
     },
@@ -78,7 +81,9 @@ export const subCategoriesService = {
                 where("categoryId", "==", categoryId)
             );
             const snapshot = await getDocs(q);
-            return snapshot.docs.map(doc => doc.data() as SubCategory);
+            return snapshot.docs.map(
+                (d) => ({ id: d.id, ...d.data() }) as SubCategory
+            );
         } catch (error) {
             console.error("Error fetching sub-categories by parent:", error);
             return [];

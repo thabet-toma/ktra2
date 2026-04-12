@@ -1,22 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate, useLocation, matchPath } from 'react-router-dom';
 import {
-  Plus, FileText, Loader2
+  Plus, FileText, Loader2, ScrollText
 } from 'lucide-react';
 import { Invoice, Item, Supplier, User } from '@/types';
-import { invoicesService, itemsService, suppliersService } from '@/services/firestoreService';
+import { itemsService, suppliersService } from '@/services/firestoreService';
+import { purchaseInvoiceApi } from '@/services/purchaseInvoiceApi';
+import type { PurchaseInvoiceDto, PurchaseInvoiceListDto } from '@/types/purchaseInvoice';
+import { mapPurchaseInvoiceDtoToInvoice } from '@/utils/mapPurchaseInvoiceDto';
+import { roundSqlMoney2, roundSqlMoney4 } from '@/utils/sqlMoneyRound';
 import { InvoiceForm } from './invoices/InvoiceForm';
 import { dealsService } from '@/services/dealsService';
 import { InvoiceList } from './invoices/InvoiceList';
-import { ShipmentImportModal } from './invoices/ShipmentImportModal';
-import { Truck } from 'lucide-react';
+import { ClearanceImportModal, ShipmentImportContext } from './invoices/ClearanceImportModal';
+import { shipmentsService, advanceShipmentRouteAtLeast } from '@/services/shipmentsService';
 import { InvoicePrintView } from './invoices/InvoicePrintView';
 
 interface PurchaseInvoiceProps {
-  // Basic props if any, might receive user from parent
-  currentUser?: User; // Depending on how App.tsx passes it, often we use context or pass it down
+  currentUser?: User;
 }
 
-// Mock user if not provided (Safety)
 const DEFAULT_USER: User = {
   id: 'unknown_user',
   name: 'User',
@@ -27,87 +30,232 @@ const DEFAULT_USER: User = {
   isEmailVerified: true
 };
 
+/** Map SQL list DTO → frontend Invoice shape for InvoiceList compatibility */
+function sqlListToInvoice(row: PurchaseInvoiceListDto): Invoice {
+  return {
+    id: String(row.id),
+    serialNumber: row.invoice_number.replace('INV-', ''),
+    invoiceNumber: row.invoice_number,
+    invoiceName: row.invoice_name || '',
+    supplierId: String(row.partner),
+    items: [],
+    status: row.status as Invoice['status'],
+    subtotal: row.subtotal,
+    discountAmount: row.discount_amount,
+    taxRate: row.tax_rate,
+    taxAmount: row.tax_amount,
+    grandTotal: row.grand_total,
+    currency: row.currency_code === 'ILS' ? 'ILS' : 'USD',
+    invoiceDate: row.invoice_date || undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    createdBy: '',
+    glPurchaseReceiptJournalId: row.journal_id_display || undefined,
+    dealId: row.deal ? String(row.deal) : undefined,
+    dealNumber: row.deal_ref || undefined,
+    supplierSnapshot: { tradeName: row.partner_name },
+  };
+}
+
+/** Map frontend Invoice → SQL create/update payload */
+/** وضع النموذج/القائمة قبل أول رسم لتفادي وميض القائمة عند فتح /purchase-invoices/:id */
+function initialPurchaseInvoiceViewMode(): "list" | "form" {
+  if (typeof window === "undefined") return "list";
+  const path = (window.location.pathname.replace(/\/$/, "") || "/");
+  const d = matchPath<{ invoiceId: string }>(
+    { path: "/purchase-invoices/:invoiceId", end: true },
+    path
+  );
+  return d?.params.invoiceId ? "form" : "list";
+}
+
+function initialInvoiceRouteLoading(): boolean {
+  if (typeof window === "undefined") return false;
+  const path = (window.location.pathname.replace(/\/$/, "") || "/");
+  const d = matchPath<{ invoiceId: string }>(
+    { path: "/purchase-invoices/:invoiceId", end: true },
+    path
+  );
+  const id = d?.params.invoiceId;
+  return !!id && id !== "new" && Number(id) > 0;
+}
+
+function invoiceToSqlPayload(inv: Partial<Invoice>): Partial<PurchaseInvoiceDto> {
+  const partnerId = Number(String(inv.supplierId || '').trim());
+  return {
+    invoice_number: inv.invoiceNumber || undefined,
+    invoice_name: inv.invoiceName || null,
+    invoice_date: inv.invoiceDate || null,
+    partner: Number.isFinite(partnerId) && partnerId > 0 ? partnerId : undefined as any,
+    deal: inv.dealId ? Number(inv.dealId) : null,
+    shipment: inv.shipment ? Number(inv.shipment) : null,
+    clearance: inv.clearanceId ? Number(inv.clearanceId) : null,
+    subtotal: roundSqlMoney2(inv.subtotal ?? 0),
+    discount_amount: roundSqlMoney2(inv.discountAmount ?? 0),
+    tax_rate: roundSqlMoney4(inv.taxRate ?? 0),
+    tax_amount: roundSqlMoney2(inv.taxAmount ?? 0),
+    tax_type: inv.taxType || 'percentage',
+    shipping_cost: roundSqlMoney2(inv.shippingCost ?? 0),
+    shipping_included: inv.shippingIncluded || false,
+    grand_total: roundSqlMoney2(inv.grandTotal ?? 0),
+    local_payments_json: inv.localPayments as any || null,
+    conversion_metadata_json: inv.conversionMetadata as any || null,
+    status: inv.status || 'draft',
+    notes: inv.notes || null,
+    supplier_invoice_number: inv.supplierInvoiceNumber || null,
+    factory_name: inv.factoryName || null,
+    items: (inv.items || []).map(item => ({
+      product: item.itemId ? Number(item.itemId) || null : null,
+      name: item.name,
+      quantity: roundSqlMoney4(item.quantity ?? 0),
+      unit_price: roundSqlMoney4(item.unitPrice ?? 0),
+      total_price: roundSqlMoney2(item.totalPrice ?? 0),
+      notes: item.notes || null,
+      hs_code: item.hsCodePrimary || null,
+      landed_unit_price_ils:
+        item.landedUnitPriceIls != null && item.landedUnitPriceIls !== ''
+          ? roundSqlMoney4(item.landedUnitPriceIls)
+          : null,
+      landed_line_total_ils:
+        item.landedLineTotalIls != null && item.landedLineTotalIls !== ''
+          ? roundSqlMoney2(item.landedLineTotalIls)
+          : null,
+    })),
+  };
+}
+
 
 export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: propUser }) => {
-  const currentUser = propUser || DEFAULT_USER; // Should come from AuthContext in real app
+  const currentUser = propUser || DEFAULT_USER;
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
+  const [viewMode, setViewMode] = useState<"list" | "form">(initialPurchaseInvoiceViewMode);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
   const [isReadOnly, setIsReadOnly] = useState(false);
 
-
   const [currentInvoice, setCurrentInvoice] = useState<Partial<Invoice> | null>(null);
   const [loading, setLoading] = useState(true);
+  /** جاري جلب فاتورة من المسار (رقم) */
+  const [invoiceRouteLoading, setInvoiceRouteLoading] = useState(initialInvoiceRouteLoading);
   const [showImportModal, setShowImportModal] = useState(false);
   const [importing, setImporting] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
   const [printInvoice, setPrintInvoice] = useState<Invoice | null>(null);
 
-  // --- Data Subscription ---
-  useEffect(() => {
-    const unsubInvoices = invoicesService.subscribeToInvoices((data) => {
-      setInvoices(data);
-
-      // Auto-open invoice if ID is in URL
-      const params = new URLSearchParams(window.location.search);
-      const targetId = params.get('id');
-      if (targetId && data.length > 0) {
-        const targetInvoice = data.find(inv => inv.id === targetId);
-        if (targetInvoice) {
-          setCurrentInvoice(targetInvoice);
-          setViewMode('form');
-          // Default to view mode (read only) if just opening via link, or edit? 
-          // Usually view is safer.
-          setIsReadOnly(true);
-        }
-      }
-
+  const loadInvoices = useCallback(async () => {
+    try {
+      const rows = await purchaseInvoiceApi.list();
+      const mapped = rows.map(sqlListToInvoice);
+      setInvoices(mapped);
+    } catch (e) {
+      console.error("Failed to load invoices from SQL:", e);
+    } finally {
       setLoading(false);
-    });
+    }
+  }, []);
+
+  /** مزامنة قائمة/نموذج الفاتورة مع المسار: /purchase-invoices و /purchase-invoices/:id */
+  const applyLocationToView = useCallback(async () => {
+    const path = location.pathname.replace(/\/$/, "") || "/";
+    const listOnly = matchPath({ path: "/purchase-invoices", end: true }, path);
+    const detail = matchPath<{ invoiceId: string }>(
+      { path: "/purchase-invoices/:invoiceId", end: true },
+      path
+    );
+
+    if (listOnly) {
+      setInvoiceRouteLoading(false);
+      setViewMode("list");
+      setCurrentInvoice(null);
+      setIsReadOnly(false);
+      return;
+    }
+
+    if (detail?.params.invoiceId) {
+      const raw = detail.params.invoiceId;
+      if (raw === "new") {
+        setInvoiceRouteLoading(false);
+        setCurrentInvoice(null);
+        setIsReadOnly(false);
+        setViewMode("form");
+        return;
+      }
+      const numId = Number(raw);
+      if (!Number.isFinite(numId) || numId <= 0) {
+        setInvoiceRouteLoading(false);
+        navigate("/purchase-invoices", { replace: true });
+        return;
+      }
+      const sp = new URLSearchParams(location.search);
+      const readOnly = sp.get("mode") === "view";
+      if (String(numId) === String(currentInvoice?.id)) {
+        setIsReadOnly(readOnly);
+        setViewMode("form");
+        setInvoiceRouteLoading(false);
+        return;
+      }
+      setInvoiceRouteLoading(true);
+      try {
+        const full = await purchaseInvoiceApi.get(numId);
+        setCurrentInvoice(mapPurchaseInvoiceDtoToInvoice(full));
+        setIsReadOnly(readOnly);
+        setViewMode("form");
+      } catch (e) {
+        console.error(e);
+        navigate("/purchase-invoices", { replace: true });
+      } finally {
+        setInvoiceRouteLoading(false);
+      }
+    }
+  }, [location.pathname, location.search, navigate, currentInvoice?.id]);
+
+  useEffect(() => {
+    void loadInvoices();
     const unsubItems = itemsService.subscribeToItems(setItems);
     const unsubSuppliers = suppliersService.subscribeToSuppliers(setSuppliers);
-
     return () => {
-      unsubInvoices();
       unsubItems();
       unsubSuppliers();
     };
-  }, []);
+  }, [loadInvoices]);
+
+  useEffect(() => {
+    void applyLocationToView();
+  }, [applyLocationToView]);
 
   // --- Handlers ---
   const handleCreateNew = () => {
-    setCurrentInvoice(null);
-    setIsReadOnly(false); // تعديل متاح
-    setViewMode('form');
+    navigate("/purchase-invoices/new");
   };
 
+  /** قائمة الفواتير لا تتضمن البنود — نجلب التفاصيل من الـ API عند الفتح */
   const handleEdit = (invoice: Invoice) => {
-    setCurrentInvoice(invoice);
-    setIsReadOnly(false); // تعديل متاح
-    setViewMode('form');
+    navigate(`/purchase-invoices/${invoice.id}`);
   };
 
-  // 3. 🟢 عرض فاتورة (للقراءة فقط)
   const handleView = (invoice: Invoice) => {
-    setCurrentInvoice(invoice);
-    setIsReadOnly(true); // قراءة فقط
-    setViewMode('form');
+    navigate(`/purchase-invoices/${invoice.id}?mode=view`);
   };
 
-  const handlePrint = (invoice: Invoice) => {
-    setPrintInvoice(invoice);
-    setShowPrintView(true);
+  const handlePrint = async (invoice: Invoice) => {
+    try {
+      const full = await purchaseInvoiceApi.get(Number(invoice.id));
+      setPrintInvoice(mapPurchaseInvoiceDtoToInvoice(full));
+      setShowPrintView(true);
+    } catch (e) {
+      console.error(e);
+      alert('تعذّر تحميل الفاتورة للطباعة.');
+    }
   };
 
   const handleDelete = async (id: string) => {
-    // التنبيه (Alert) يظهر في InvoiceList قبل الوصول لهنا
-    // هنا نقوم بالتنفيذ الفعلي
     try {
-      await invoicesService.deleteInvoiceFromDb(id);
-      // لا داعي لإظهار رسالة نجاح لأن القائمة ستتحدث تلقائياً عبر الاشتراك (Subscription)
+      await purchaseInvoiceApi.delete(Number(id));
+      await loadInvoices();
     } catch (error) {
       console.error("Failed to delete invoice:", error);
       alert("حدث خطأ أثناء محاولة حذف الفاتورة.");
@@ -127,22 +275,27 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
     if (!isConfirmed) return;
 
     try {
+      let inv = invoice;
+      if (!inv.items?.length) {
+        inv = mapPurchaseInvoiceDtoToInvoice(await purchaseInvoiceApi.get(Number(invoice.id)));
+      }
+
       // 🟢 تم حذف منطق تجميع الصور والملفات (collectedImages / collectedPdfs)
 
       // 1. تجهيز بيانات الصفقة
       const dealData: any = {
         // --- البيانات الأساسية ---
-        supplierId: invoice.supplierId,
-        factoryName: invoice.factoryName || (suppliers.find(s => s.id === invoice.supplierId)?.tradeName || "مورد غير محدد"),
+        supplierId: inv.supplierId,
+        factoryName: inv.factoryName || (suppliers.find(s => s.id === inv.supplierId)?.tradeName || "مورد غير محدد"),
 
         // معلومات الفاتورة
-        originalOfferNumber: invoice.invoiceName || "",
-        supplierInvoiceNumber: invoice.supplierInvoiceNumber || "",
-        internalNotes: invoice.notes || "",
-        alibabaOrderLink: invoice.alibabaOrderLink || invoice.dealInfo?.alibabaOrderLink || "",
+        originalOfferNumber: inv.invoiceName || "",
+        supplierInvoiceNumber: inv.supplierInvoiceNumber || "",
+        internalNotes: inv.notes || "",
+        alibabaOrderLink: inv.alibabaOrderLink || inv.dealInfo?.alibabaOrderLink || "",
 
         // التاريخ
-        dealDate: invoice.invoiceDate || new Date().toISOString().split('T')[0],
+        dealDate: inv.invoiceDate || new Date().toISOString().split('T')[0],
 
         // إلغاء خطة الدفع
         installments: [],
@@ -151,7 +304,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
         // 🟢 تم حذف حقول الصور والمرفقات من هنا (quoteImages, quotePdfs...)
 
         // المنتجات
-        items: invoice.items.map(item => ({
+        items: inv.items.map(item => ({
           id: crypto.randomUUID(),
           itemId: item.itemId,
           name: item.name,
@@ -168,27 +321,27 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
           unitPrice: item.unitPrice,
           totalPrice: item.totalPrice,
           factoryImageUrl: item.imageUrls?.[0],
-          notes: `نُقلت من الفاتورة رقم: ${invoice.invoiceNumber}`
+          notes: `نُقلت من الفاتورة رقم: ${inv.invoiceNumber}`
         })),
 
         // المالية
-        totalAmount: invoice.grandTotal || 0,
-        subtotal: invoice.subtotal || 0,
-        discountAmount: invoice.discountAmount || 0,
-        taxRate: invoice.taxRate || 0,
-        taxAmount: invoice.taxAmount || 0,
-        taxType: invoice.taxType || 'percentage',
-        shippingCost: invoice.shippingCost || 0,
-        shippingIncluded: invoice.shippingIncluded || false,
+        totalAmount: inv.grandTotal || 0,
+        subtotal: inv.subtotal || 0,
+        discountAmount: inv.discountAmount || 0,
+        taxRate: inv.taxRate || 0,
+        taxAmount: inv.taxAmount || 0,
+        taxType: inv.taxType || 'percentage',
+        shippingCost: inv.shippingCost || 0,
+        shippingIncluded: inv.shippingIncluded || false,
 
         // الشحن
-        shippingMethod: invoice.dealInfo?.shippingMethod || '',
-        totalWeight: invoice.totalWeight || 0,
-        totalVolume: invoice.totalVolume || 0,
+        shippingMethod: inv.dealInfo?.shippingMethod || '',
+        totalWeight: inv.totalWeight || 0,
+        totalVolume: inv.totalVolume || 0,
 
         // الحالة
         status: 'initial',
-        invoiceId: invoice.id,
+        invoiceId: inv.id,
         hasHistoricalInvoice: true,
       };
 
@@ -214,29 +367,50 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
     }
   };
 
-  const handleImportShipmentInvoices = async (newInvoices: Partial<Invoice>[]) => {
-    if (newInvoices.length === 0) return;
-
+  const handleImportFromClearance = async (
+    ctx: ShipmentImportContext,
+    meta?: { createdCount: number }
+  ) => {
     setImporting(true);
     try {
-      const now = new Date().toISOString();
+      const minRoute =
+        ctx.shippingType === "air" ? "arrived_airport" : "arrived_port";
+      const nextRoute = advanceShipmentRouteAtLeast(
+        ctx.currentRouteStatus,
+        minRoute,
+        ctx.shippingType
+      );
+      try {
+        await shipmentsService.patchShipmentRoute(
+          ctx.shipmentId,
+          nextRoute,
+          ctx.shippingType
+        );
+      } catch (e) {
+        console.warn("تعذّر تحديث مسار الشحنة في SQL:", e);
+      }
 
-      const savePromises = newInvoices.map(inv => {
-        const fullInvoice = {
-          ...inv,
-          id: crypto.randomUUID(),
-          createdBy: currentUser.id,
-          createdAt: now,
-          updatedAt: now,
-        } as Invoice;
+      await Promise.all(
+        ctx.dealIds.map(async (did) => {
+          try {
+            const d = await dealsService.getDeal(did);
+            if (d.shippingWorkflowStatus === "sw_released") return;
+            await dealsService.patchShippingWorkflow(did, "sw_wait_clearance");
+          } catch (e) {
+            console.warn("تعذّر تحديث مرحلة الشحن للصفقة", did, e);
+          }
+        })
+      );
 
-        return invoicesService.addInvoiceToDb(fullInvoice);
-      });
-
-      await Promise.all(savePromises);
-      alert(`✅ تم استيراد وتحويل ${newInvoices.length} فواتير بنجاح!`);
+      await loadInvoices();
+      const n = meta?.createdCount ?? 0;
+      alert(
+        n > 0
+          ? `✅ تم استيراد وتحويل ${n} فاتورة بنجاح!`
+          : "✅ تم تحديث المسارات بعد الاستيراد."
+      );
     } catch (error) {
-      console.error("Error importing shipment invoices:", error);
+      console.error("Error importing clearance invoices:", error);
       alert("حدث خطأ أثناء استيراد الفواتير");
     } finally {
       setImporting(false);
@@ -244,16 +418,16 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
   };
 
   const handleExitForm = () => {
-    setViewMode('list');
-    setCurrentInvoice(null);
-    setIsReadOnly(false);
+    navigate("/purchase-invoices");
   };
 
-  if (loading) {
+  if (loading || invoiceRouteLoading) {
     return (
       <div className="flex items-center justify-center min-h-[500px]">
         <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-        <span className="mr-3 text-gray-500">جاري تحميل الفواتير...</span>
+        <span className="mr-3 text-gray-500">
+          {invoiceRouteLoading ? "جاري تحميل الفاتورة..." : "جاري تحميل الفواتير..."}
+        </span>
       </div>
     );
   }
@@ -272,7 +446,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-white">فواتير المشتريات</h1>
                 <p className="text-sm text-gray-500 dark:text-gray-400">
-                  إدارة الفواتير الواردة من الموردين ({invoices.length})
+                  إدارة فواتير الشراء ({invoices.length})
                 </p>
               </div>
             </div>
@@ -283,8 +457,8 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
                 disabled={importing}
                 className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-800/60 px-5 py-2.5 rounded-xl font-medium transition-all border border-indigo-200 dark:border-indigo-700 disabled:opacity-50"
               >
-                {importing ? <Loader2 className="w-5 h-5 animate-spin" /> : <Truck className="w-5 h-5" />}
-                <span>استيراد من شحنة</span>
+                {importing ? <Loader2 className="w-5 h-5 animate-spin" /> : <ScrollText className="w-5 h-5" />}
+                <span>استيراد من تخليص جمركي</span>
               </button>
               <button
                 onClick={handleCreateNew}
@@ -316,13 +490,12 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
             invoice={currentInvoice}
             currentUser={currentUser}
             onCancel={handleExitForm}
-            // تمرير خاصية للقراءة فقط (يجب استقبالها داخل InvoiceForm)
-            // ملاحظة: تأكدنا أن المكونات الفرعية داخل InvoiceForm تستقبل readOnly
-            // لذا سنحتاج لتعديل بسيط في InvoiceForm لاستقبال هذا الـ Prop وتمريره
             readOnly={isReadOnly}
-            onSave={() => {
-              // إذا كنا في وضع التعديل، نبقى في الصفحة
-              // إذا كنا في وضع العرض، هذا الزر أصلاً لن يظهر أو سيكون معطلاً
+            onSave={({ id }) => {
+              void loadInvoices();
+              if (location.pathname.endsWith("/new")) {
+                navigate(`/purchase-invoices/${id}`, { replace: true });
+              }
             }}
             allDbItems={items}
           />
@@ -330,10 +503,10 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
       </div>
 
       {showImportModal && (
-        <ShipmentImportModal
+        <ClearanceImportModal
           isOpen={showImportModal}
           onClose={() => setShowImportModal(false)}
-          onImport={handleImportShipmentInvoices}
+          onImport={handleImportFromClearance}
           currentUser={currentUser}
         />
       )}

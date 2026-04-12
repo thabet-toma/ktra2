@@ -36,18 +36,24 @@ export const ItemsList: React.FC<ItemsListProps> = ({
 
     // 🟢 فلترة القائمة المنسدلة للفرعي
     const availableSubCategories = subCategories.filter(
-        sub => selectedCategory === 'all' || sub.categoryId === selectedCategory
+        sub =>
+            selectedCategory === "all" ||
+            String(sub.categoryId ?? "") === String(selectedCategory)
     );
 
-    // 🟢 فلترة البيانات في الجدول
+    // 🟢 فلترة البيانات في الجدول (مقارنة معرفات كنص لتفادي اختلاف string vs number بين Firestore والواجهة)
     const filteredItems = items.filter(item => {
         const matchesSearch =
             item.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
             item.modelNumber?.toLowerCase().includes(searchTerm.toLowerCase()) ||
             item.specifications.toLowerCase().includes(searchTerm.toLowerCase());
 
-        const matchesCategory = selectedCategory === 'all' || item.categoryId === selectedCategory;
-        const matchesSubCategory = selectedSubCategory === 'all' || item.subCategoryId === selectedSubCategory;
+        const catId = item.categoryId != null && item.categoryId !== '' ? String(item.categoryId) : '';
+        const subId = item.subCategoryId != null && item.subCategoryId !== '' ? String(item.subCategoryId) : '';
+        const matchesCategory =
+            selectedCategory === 'all' || catId === String(selectedCategory);
+        const matchesSubCategory =
+            selectedSubCategory === 'all' || subId === String(selectedSubCategory);
 
         return matchesSearch && matchesCategory && matchesSubCategory;
     });

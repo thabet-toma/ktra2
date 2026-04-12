@@ -16,10 +16,12 @@ export const ShipmentBasicInfo: React.FC<ShipmentBasicInfoProps> = ({
     formData, setFormData, allSuppliers, totals, handleTotalChange, handleUnitPriceChange, onOpenSupplier
 }) => {
 
-    // 🟢 ميزة: إعادة حساب السعر تلقائياً عند تغيير نوع الوحدة من القائمة
+    // إعادة حساب عند تغيير نوع الوحدة أو أسلوب التسعير — «إجمالي» يعيد توزيع المبلغ الحالي على الصفقات
     useEffect(() => {
         if (formData.pricingMethod === 'unit' && formData.pricePerUnit > 0) {
             handleUnitPriceChange(formData.pricePerUnit, formData.unitType);
+        } else if (formData.pricingMethod === 'total') {
+            handleTotalChange(Number(formData.totalShippingCostUsd) || 0);
         }
     }, [formData.unitType, formData.pricingMethod]);
 
