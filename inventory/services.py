@@ -56,6 +56,9 @@ def record_stock_movement(
         avg_before = Decimal(str(prod.avg_cost))
 
         if movement_type in INBOUND_TYPES:
+            # Sales return (RETURN_IN): preserve WAC by using current avg_cost
+            if movement_type == 'RETURN_IN' and unit_cost == 0:
+                unit_cost = avg_before
             new_qty = qty_before + quantity
             total_cost = quantity * unit_cost
             if new_qty > 0:
@@ -65,6 +68,21 @@ def record_stock_movement(
             else:
                 new_avg = unit_cost
         else:
+            # ── Negative stock prevention (يتجاوزها allow_negative_stock على المنتج) ──
+            if qty_before < quantity:
+                allow_negative = bool(getattr(prod, "allow_negative_stock", False))
+                if not allow_negative:
+                    raise ValidationError(
+                        f"لا يمكن صرف {quantity} من الصنف «{prod.sku}» — "
+                        f"الرصيد المتاح: {qty_before}. "
+                        f"تأكد من استلام البضاعة أولاً أو قم بتسوية المخزون."
+                    )
+                else:
+                    logger.warning(
+                        "NEGATIVE STOCK ALLOWED: product=%s sku=%s qty_before=%s outbound=%s",
+                        prod.pk, prod.sku, qty_before, quantity,
+                    )
+
             new_qty = qty_before - quantity
             total_cost = quantity * avg_before
             unit_cost = avg_before
@@ -109,10 +127,19 @@ def receive_shipment_stock(shipment, movement_date=None):
     """
     Create IN movements for all deal items in a cleared shipment.
     Called when shipment status changes to Cleared.
-    Returns list of created StockMovement objects.
+
+    تكلفة الاستلام (unit_cost) تُحدَّد بترتيب الأولوية:
+      1) landed_unit_price_ils من PurchaseInvoiceItem للصفقة/الشحنة (إن وُجد فاتورة شراء
+         مُستَوردة من التخليص الجمركي) — هذه هي التكلفة الحقيقية النازلة.
+      2) unit_price من LogisticsDealItem (سعر الصفقة الأصلي) — احتياطي إن لم تتم الفوترة بعد.
+
+    ملاحظة محاسبية: هذه الدالة تُحدّث WAC (متوسط التكلفة) في المخزون الفرعي (Subledger) فقط.
+    القيد المحاسبي في GL (Dr Inventory / Cr AP) يُنشأ من PurchaseInvoice.post_to_accounting.
+    لذا ينبغي استيراد فاتورة الشراء قبل إكمال "Cleared" للحصول على landed cost.
     """
     import datetime
-    from logistics.models import LogisticsShipmentDeal
+    from decimal import Decimal
+    from logistics.models import LogisticsShipmentDeal, PurchaseInvoice, PurchaseInvoiceItem
 
     if movement_date is None:
         movement_date = shipment.arrival_date or datetime.date.today()
@@ -124,28 +151,110 @@ def receive_shipment_stock(shipment, movement_date=None):
     created = []
     for link in links:
         deal = link.deal
+
+        # محاولة إيجاد فاتورة شراء لهذه الصفقة/الشحنة — تحتوي على landed_unit_price_ils
+        pi_items_by_product: dict[int, PurchaseInvoiceItem] = {}
+        pi = (
+            PurchaseInvoice.objects
+            .filter(tenant=deal.tenant, shipment=shipment, deal=deal)
+            .prefetch_related('items')
+            .first()
+        )
+        if pi:
+            for pi_item in pi.items.all():
+                if pi_item.product_id:
+                    pi_items_by_product[pi_item.product_id] = pi_item
+
         items = deal.items.select_related('product').filter(is_deleted=False)
         for item in items:
+            # Idempotency key includes deal to handle same product across multiple deals
             existing = StockMovement.objects.filter(
                 reference_type='SHIPMENT',
                 reference_id=shipment.pk,
                 product=item.product,
+                notes__contains=f"صفقة {deal.ref_number}",
             ).exists()
             if existing:
                 continue
+
+            # تحديد تكلفة الوحدة — أفضلية لـ landed cost
+            pi_item = pi_items_by_product.get(item.product_id) if item.product_id else None
+            landed = None
+            if pi_item and pi_item.landed_unit_price_ils is not None:
+                try:
+                    landed = Decimal(str(pi_item.landed_unit_price_ils))
+                    if landed <= 0:
+                        landed = None
+                except Exception:
+                    landed = None
+
+            unit_cost = landed if landed else Decimal(str(item.unit_price or 0))
+            cost_source = "landed" if landed else "deal_unit_price"
 
             mv = record_stock_movement(
                 product=item.product,
                 movement_type='IN',
                 quantity=item.quantity,
-                unit_cost=item.unit_price,
+                unit_cost=unit_cost,
                 reference_type='SHIPMENT',
                 reference_id=shipment.pk,
                 partner=deal.partner,
                 movement_date=movement_date,
-                notes=f"شحنة {shipment.shipment_number} | صفقة {deal.ref_number}",
+                notes=(
+                    f"شحنة {shipment.shipment_number} | صفقة {deal.ref_number} "
+                    f"| تكلفة: {cost_source}"
+                ),
                 tenant=deal.tenant,
             )
             created.append(mv)
 
     return created
+
+
+def warn_landed_cost_mismatch(purchase_invoice):
+    """تحذير فقط (لا تسويات تلقائية خطيرة): إن كانت فاتورة الشراء وُرِّدت بعد أن سُلِّمت
+    الشحنة (stock IN سُجِّل بسعر الصفقة بدل landed)، نُسجّل تحذيراً في السجلات ليقوم
+    المستخدم بمراجعة متوسط التكلفة يدوياً.
+
+    يمكن استدعاؤها من PurchaseInvoice.post_to_accounting لتنبيه المحاسب.
+    """
+    from decimal import Decimal
+
+    if not purchase_invoice or not purchase_invoice.shipment_id:
+        return []
+
+    warnings = []
+    for pi_item in purchase_invoice.items.select_related('product').all():
+        if not pi_item.product_id or pi_item.landed_unit_price_ils is None:
+            continue
+        try:
+            landed = Decimal(str(pi_item.landed_unit_price_ils))
+        except Exception:
+            continue
+        if landed <= 0:
+            continue
+        mv = StockMovement.objects.filter(
+            reference_type='SHIPMENT',
+            reference_id=purchase_invoice.shipment_id,
+            product_id=pi_item.product_id,
+            movement_type='IN',
+        ).order_by('-id').first()
+        if not mv:
+            continue
+        current_cost = Decimal(str(mv.unit_cost or 0))
+        diff = (landed - current_cost).quantize(Decimal('0.0001'))
+        if abs(diff) < Decimal('0.01'):
+            continue
+        logger.warning(
+            "Landed cost mismatch for product %s (shipment=%s): "
+            "landed=%s vs recorded=%s. المخزون سُجِّل قبل استيراد فاتورة الشراء؛ "
+            "راجع حركة المخزون لتصحيح متوسط التكلفة.",
+            pi_item.product_id, purchase_invoice.shipment_id, landed, current_cost,
+        )
+        warnings.append({
+            'product_id': pi_item.product_id,
+            'shipment_id': purchase_invoice.shipment_id,
+            'landed': str(landed),
+            'recorded': str(current_cost),
+        })
+    return warnings

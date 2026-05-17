@@ -181,6 +181,25 @@ export const accountingApi = {
     return res.json();
   },
 
+  getVatReport: async (params: Record<string, string>) => {
+    const q = new URLSearchParams(params);
+    const res = await fetch(`${ACC}/vat-report/?${q}`, {
+      headers: headers(),
+    });
+    await handle(res, "vatReport");
+    return res.json();
+  },
+
+  getLandedCostReport: async (params: Record<string, string> = {}) => {
+    const q = new URLSearchParams(params);
+    const LOG = `${API_BASE}/logistics`;
+    const res = await fetch(`${LOG}/reports/landed-cost/?${q}`, {
+      headers: headers(),
+    });
+    await handle(res, "landedCostReport");
+    return res.json();
+  },
+
   /** صندوق Firestore = نفس المعرف external_id؛ يُنشأ له حساب أصول في الشجرة بنفس الاسم */
   registerCashBoxLedger: async (body: {
     external_id: string;

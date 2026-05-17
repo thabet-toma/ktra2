@@ -1,11 +1,26 @@
-const API_BASE = (import.meta.env.VITE_API_URL || "http://localhost:8000/api").replace(
-  /\/+$/,
-  ""
-);
+/**
+ * عنوان الـ API هنا = خادم Django فقط (VITE_API_URL → …/api).
+ * المساعد الذكي: المتصفح يطلب /api/assistant/chat/ على Django؛ Django يتصل بـ OpenClaw (72.60…:18789) من السيرفر.
+ * لا تضع عنوان OpenClaw في الواجهة — التوكن والبروكسي على Django.
+ */
+/** إذا وُضع عنوان الخادم بدون مسار (مثل http://localhost:8000) يُضاف /api تلقائياً. */
+function resolveApiBase(raw: string): string {
+  const trimmed = raw.replace(/\/+$/, "");
+  try {
+    const u = new URL(trimmed);
+    const path = u.pathname.replace(/\/+$/, "") || "/";
+    if (path === "/") return `${trimmed}/api`;
+    return trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
+const API_BASE = resolveApiBase(import.meta.env.VITE_API_URL || "http://localhost:8000/api");
 
 const NETWORK_HINT =
-  "تعذر الاتصال بالخادم (شبكة/CORS). تحقق: (1) تشغيل Django (2) VITE_API_URL ينتهي بـ /api " +
-  `(الحالي: ${API_BASE}) (3) سجّل الدخول ليُرسل التوكن`;
+  "تعذر الاتصال بالخادم (شبكة/CORS). تحقق: (1) تشغيل Django (2) VITE_API_URL يشير إلى جذر الخادم أو ينتهي بـ /api " +
+  `(المُحلّى: ${API_BASE}) (3) سجّل الدخول ليُرسل التوكن`;
 
 const FETCH_TIMEOUT_MS = 120_000;
 
@@ -63,6 +78,24 @@ function toList<T = any>(payload: any): T[] {
   return [];
 }
 
+/** يسطح أخطاء DRF المتداخلة (مثل {lines: [{product: ["..."]}]} أو {customer: ["..."]}) إلى نص واحد. */
+function flattenDrfError(data: any): string {
+  if (!data) return "";
+  if (typeof data === "string") return data;
+  if (data.detail) return typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
+  if (data.error) return typeof data.error === "string" ? data.error : JSON.stringify(data.error);
+  const parts: string[] = [];
+  function walk(obj: any, prefix: string) {
+    if (typeof obj === "string") { parts.push(obj); return; }
+    if (Array.isArray(obj)) { obj.forEach(v => parts.push(typeof v === "string" ? v : JSON.stringify(v))); return; }
+    if (typeof obj === "object" && obj !== null) {
+      Object.entries(obj).forEach(([k, v]) => walk(v, prefix ? `${prefix}.${k}` : k));
+    }
+  }
+  walk(data, "");
+  return parts.join("; ") || JSON.stringify(data);
+}
+
 export async function apiGetList<T = any>(
   path: string,
   opts?: { tenantId?: number; query?: Record<string, string | number | boolean | undefined> }
@@ -85,10 +118,8 @@ export async function apiGetList<T = any>(
 
   if (!res.ok) {
     const data = await parseJsonSafe(res);
-    const msg =
-      (data && (data.detail || data.error)) ||
-      `API error: ${res.status} (${path})`;
-    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    const msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
+    throw new Error(msg);
   }
 
   return toList<T>(await res.json());
@@ -108,10 +139,8 @@ export async function apiGetObject<T = any>(
 
   if (!res.ok) {
     const data = await parseJsonSafe(res);
-    const msg =
-      (data && (data.detail || data.error)) ||
-      `API error: ${res.status} (${path})`;
-    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    const msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
+    throw new Error(msg);
   }
 
   return (await res.json()) as T;
@@ -134,10 +163,34 @@ export async function apiPostObject<T = any>(
 
   if (!res.ok) {
     const data = await parseJsonSafe(res);
-    const msg =
-      (data && (data.detail || data.error || data)) ||
-      `API error: ${res.status} (${path})`;
-    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    const msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
+    throw new Error(msg);
+  }
+
+  return (await res.json()) as T;
+}
+
+/** POST multipart (لا تضف Content-Type يدوياً — المتصفح يضيف boundary) */
+export async function apiPostFormData<T = any>(
+  path: string,
+  form: FormData,
+  opts?: { tenantId?: number }
+): Promise<T> {
+  const url = `${API_BASE}/${path.replace(/^\/+/, "")}`;
+  const token = localStorage.getItem("token");
+  const res = await apiFetch(url, {
+    method: "POST",
+    headers: {
+      ...(token ? { Authorization: `Token ${token}` } : {}),
+      ...(opts?.tenantId ? { "X-Tenant-Id": String(opts.tenantId) } : {}),
+    },
+    body: form,
+  });
+
+  if (!res.ok) {
+    const data = await parseJsonSafe(res);
+    const msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
+    throw new Error(msg);
   }
 
   return (await res.json()) as T;
@@ -159,8 +212,8 @@ export async function apiPatchObject<T = any>(
   });
   if (!res.ok) {
     const data = await parseJsonSafe(res);
-    const msg = (data && (data.detail || data.error || data)) || `API error: ${res.status} (${path})`;
-    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    const msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
+    throw new Error(msg);
   }
   return (await res.json()) as T;
 }
@@ -176,8 +229,8 @@ export async function apiDelete(path: string, opts?: { tenantId?: number }): Pro
   });
   if (!res.ok) {
     const data = await parseJsonSafe(res);
-    const msg = (data && (data.detail || data.error || data)) || `API error: ${res.status} (${path})`;
-    throw new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+    const msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
+    throw new Error(msg);
   }
 }
 

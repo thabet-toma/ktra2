@@ -22,6 +22,30 @@ class ProductCategory(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     name = models.CharField(max_length=100, blank=True, null=True, db_column='Name')
     parent = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='children', db_column='ParentID')
+    revenue_account = models.ForeignKey(
+        'accounting.Account',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='RevenueAccountID',
+        related_name='product_categories_revenue',
+    )
+    cogs_account = models.ForeignKey(
+        'accounting.Account',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='CogsAccountID',
+        related_name='product_categories_cogs',
+    )
+    inventory_account = models.ForeignKey(
+        'accounting.Account',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column='InventoryAccountID',
+        related_name='product_categories_inventory',
+    )
 
     class Meta:
         db_table = 'product_categories'
@@ -45,7 +69,17 @@ class Product(models.Model):
     volume_cbm = models.DecimalField(max_digits=12, decimal_places=6, blank=True, null=True, db_column='Volume_CBM')
     hs_code = models.CharField(max_length=20, blank=True, null=True, db_column='HS_Code')
     min_stock_level = models.IntegerField(blank=True, null=True, db_column='MinStockLevel')
+    allow_negative_stock = models.BooleanField(
+        default=False,
+        db_column='AllowNegativeStock',
+        help_text='إن عُطّل، يُرفض الصرف إذا تجاوزت الكمية المتاحة (الافتراضي: مرفوض)',
+    )
     is_serialized = models.BooleanField(default=False, db_column='IsSerialized')
+    is_service = models.BooleanField(
+        default=False,
+        db_column='IsService',
+        help_text='إذا مفعّل: يُعامل الصنف كخدمة — لا يُخصم من المخزون ويُرحّل لحساب مبيعات الخدمات',
+    )
     is_for_sale_online = models.BooleanField(default=False, db_column='IsForSaleOnline')
     online_price = models.DecimalField(max_digits=18, decimal_places=2, blank=True, null=True, db_column='OnlinePrice')
     online_description = models.TextField(blank=True, null=True, db_column='OnlineDescription')

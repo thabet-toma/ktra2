@@ -3,26 +3,142 @@ import logging
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from .models import Account, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod, CostCenter
+from .models import Account, ExchangeRate, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod, CostCenter
 from decimal import Decimal
 from partners.models import Partner
+from tenants.models import Currency
 
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────
+#  Currency Conversion Utilities
+# ─────────────────────────────────────────────────────────
+
+def get_exchange_rate(
+    tenant_id: int,
+    from_currency_id: int,
+    to_currency_id: int,
+    effective_date=None,
+) -> Decimal:
+    """
+    يجلب سعر الصرف من جدول exchange_rates.
+    يبحث عن أحدث سعر صرف بتاريخ <= effective_date.
+    إذا لم يجد يبحث بالعكس (to→from) ويقلبه.
+    يرمي ValidationError إذا لم يجد أي سعر.
+    """
+    if from_currency_id == to_currency_id:
+        return Decimal("1")
+
+    if effective_date is None:
+        effective_date = datetime.date.today()
+    if isinstance(effective_date, str):
+        effective_date = datetime.datetime.strptime(effective_date, "%Y-%m-%d").date()
+
+    # بحث مباشر: from → to
+    direct = (
+        ExchangeRate.objects.filter(
+            tenant_id=tenant_id,
+            from_currency_id=from_currency_id,
+            to_currency_id=to_currency_id,
+            effective_date__lte=effective_date,
+        )
+        .order_by("-effective_date")
+        .values_list("rate", flat=True)
+        .first()
+    )
+    if direct is not None:
+        return Decimal(str(direct))
+
+    # بحث عكسي: to → from ثم القلب
+    inverse = (
+        ExchangeRate.objects.filter(
+            tenant_id=tenant_id,
+            from_currency_id=to_currency_id,
+            to_currency_id=from_currency_id,
+            effective_date__lte=effective_date,
+        )
+        .order_by("-effective_date")
+        .values_list("rate", flat=True)
+        .first()
+    )
+    if inverse is not None and Decimal(str(inverse)) != 0:
+        return (Decimal("1") / Decimal(str(inverse))).quantize(Decimal("0.000001"))
+
+    raise ValidationError(
+        f"لا يوجد سعر صرف مسجّل للتحويل من العملة {from_currency_id} "
+        f"إلى العملة {to_currency_id} بتاريخ {effective_date} أو قبله. "
+        f"سجّل سعر الصرف في جدول أسعار الصرف أولاً."
+    )
+
+
+def convert_amount(
+    amount: Decimal,
+    from_currency_id: int,
+    to_currency_id: int,
+    tenant_id: int,
+    effective_date=None,
+    explicit_rate: Decimal | None = None,
+) -> tuple[Decimal, Decimal]:
+    """
+    يحوّل مبلغاً من عملة إلى عملة أخرى.
+    
+    Parameters:
+        amount: المبلغ بالعملة المصدر
+        from_currency_id: عملة المصدر
+        to_currency_id: عملة الهدف
+        tenant_id: الشركة
+        effective_date: تاريخ السعر
+        explicit_rate: سعر صرف صريح (لو المستخدم حدده)
+        
+    Returns:
+        (converted_amount, rate_used)
+    """
+    if from_currency_id == to_currency_id:
+        return amount, Decimal("1")
+
+    if explicit_rate is not None and explicit_rate > 0:
+        rate = Decimal(str(explicit_rate))
+    else:
+        rate = get_exchange_rate(tenant_id, from_currency_id, to_currency_id, effective_date)
+
+    converted = (Decimal(str(amount)) * rate).quantize(Decimal("0.01"))
+    return converted, rate
+
+
+def resolve_forex_account(tenant_id: int) -> Account | None:
+    """
+    يبحث عن حساب فروقات العملة (Forex Gain/Loss).
+    يبحث عن حساب باسم يحتوي 'فرق عمل' أو 'forex' أو 'exchange' ضمن Expense أو Revenue.
+    """
+    keywords = ["فرق عمل", "فروق عمل", "forex", "exchange diff", "exchange gain"]
+    for kw in keywords:
+        acc = Account.objects.filter(
+            tenant_id=tenant_id,
+            is_active=True,
+            name__icontains=kw,
+        ).first()
+        if acc:
+            return acc
+    return None
 
 
 def validate_fiscal_period(tenant_id, transaction_date):
     """
     Ensures transaction_date falls within an open fiscal period.
-    Raises ValidationError if no open period covers the date.
+    Raises ValidationError if tenant is missing, date is invalid, or period is closed.
     """
-    if tenant_id == 0 or tenant_id is None:
-        return
+    if tenant_id in (0, None):
+        raise ValidationError("لا يمكن التحقق من الفترة المالية: معرف الشركة (tenant_id) غير صالح.")
 
     if isinstance(transaction_date, str):
         try:
             transaction_date = datetime.datetime.strptime(transaction_date, '%Y-%m-%d').date()
         except (ValueError, TypeError):
-            return
+            raise ValidationError(f"تاريخ غير صالح: {transaction_date}. يجب أن يكون بصيغة YYYY-MM-DD.")
+
+    if not isinstance(transaction_date, datetime.date):
+        raise ValidationError("تاريخ المعاملة غير صالح.")
 
     period = FiscalPeriod.objects.filter(
         tenant_id=tenant_id,
@@ -140,9 +256,11 @@ def validate_journal_entry(header, lines_data):
         total_debit += Decimal(str(debit))
         total_credit += Decimal(str(credit))
     
-    # 2. Strict Double Entry check
-    if abs(total_debit - total_credit) > Decimal('0.01'): 
-        raise ValidationError(f"Unbalanced entry: Total Debit ({total_debit}) != Total Credit ({total_credit}). Diff: {total_debit - total_credit}")
+    # 2. Strict Double Entry check — exact zero after quantize
+    total_debit_q = total_debit.quantize(Decimal('0.01'))
+    total_credit_q = total_credit.quantize(Decimal('0.01'))
+    if total_debit_q != total_credit_q:
+        raise ValidationError(f"Unbalanced entry: Total Debit ({total_debit_q}) != Total Credit ({total_credit_q}). Diff: {total_debit_q - total_credit_q}")
     
     if total_debit == 0:
         raise ValidationError("Journal entry cannot be empty (zero amount).")
@@ -176,19 +294,25 @@ def post_journal_entry(journal_id, user=None):
     import logging as _log
     _logger = _log.getLogger(__name__)
     try:
-        header = JournalHeader.objects.get(id=journal_id)
-        if header.is_posted:
-            _logger.warning("Journal %s already posted.", journal_id)
-            raise ValidationError("Journal entry is already posted.")
+        with transaction.atomic():
+            header = JournalHeader.objects.select_for_update().get(id=journal_id)
+            if header.is_posted:
+                _logger.warning("Journal %s already posted.", journal_id)
+                raise ValidationError("Journal entry is already posted.")
 
-        header_tenant_id = header.tenant_id if header.tenant_id is not None else 0
-        if header.transaction_date:
-            validate_fiscal_period(header_tenant_id, header.transaction_date)
+            header_tenant_id = header.tenant_id if header.tenant_id is not None else 0
+            if header.transaction_date:
+                validate_fiscal_period(header_tenant_id, header.transaction_date)
 
-        header.is_posted = True
-        header.save(force_update=True)
-        _logger.info("Journal %s set to POSTED.", journal_id)
-        
+            # Re-verify balance on actual saved lines before posting
+            lines = list(header.lines.all())
+            if lines:
+                validate_journal_entry(header, lines)
+
+            header.is_posted = True
+            header.save(force_update=True)
+            _logger.info("Journal %s set to POSTED.", journal_id)
+
         create_audit_log(
             tenant=header.tenant,
             user=user,

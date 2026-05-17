@@ -68,6 +68,8 @@ INSTALLED_APPS = [
     'hr',
     'bridge',
     'core',
+    'realestate',
+    'sales',
 ]
 
 MIDDLEWARE = [
@@ -216,14 +218,43 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
 
 CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS) + ['https://api.smart.ktragroup.com']
 
-# المساعد الذكي (n8n Webhook) — يُمرَّر عبر الخادم فقط؛ استخدم رابط Production بدون /test/
-N8N_ASSISTANT_WEBHOOK_URL = os.environ.get(
-    "N8N_ASSISTANT_WEBHOOK_URL",
-    "http://72.60.181.210:5678/webhook/3858dd71-20ef-4b96-a73c-78a5c504c04d",
+# المساعد الذكي (OpenClaw على سيرفر منفصل — ليس نفس خادم Django).
+# Django يتصل به عبر HTTP (صادر من هذا السيرفر)؛ على سيرفر OpenClaw يجب أن يكون المنفذ (مثل 18789)
+# مفتوحاً للوارد (Inbound) من الإنترنت إن أردت الوصول من خارج الشبكة الداخلية.
+# تشخيص: (1) OpenClaw مباشرة: من المتصفح افتح http://72.60...:18789/v1/status (هذا عنوان OpenClaw فقط).
+# (2) من خادم **Django** (أي كان عنوانه: إنتاج أو محلي): GET …/api/assistant/openclaw-status/
+#     هذا المسار ليس على OpenClaw — هو على تطبيقك؛ Django من داخله يطلب 72.60.../v1/status.
+#     لا تخلط: 127.0.0.1:8000 مثال لعنوان Django أثناء التطوير، وليس سيرفر OpenClaw.
+# إن نجح (1) وفشل المساعد: راجع OPENCLAW_BEARER_TOKEN وصيغة الطلب في الكود.
+# الطلبات والتوكن يمرّان عبر Django فقط (لا يُعرَّض التوكن للمتصفح).
+# ملاحظة: إن وُجد المفتاح في البيئة بقيمة فارغة (مثل OPENCLAW_BEARER_TOKEN=) فـ get تعيد ""
+# وليس الافتراضي؛ لذلك نستخدم (or الافتراضي) حتى يعمل التوكن المضمّن بدون .env.
+_DEFAULT_OPENCLAW_MESSAGES_URL = "http://72.60.181.210:18789/v1/messages"
+_DEFAULT_OPENCLAW_FILES_URL = "http://72.60.181.210:18789/v1/files"
+_DEFAULT_OPENCLAW_STATUS_URL = "http://72.60.181.210:18789/v1/status"
+_DEFAULT_OPENCLAW_BEARER_TOKEN = "8c453853d17f13975d1d4d93849b114e76923b9b7776845c"
+OPENCLAW_MESSAGES_URL = (
+    os.environ.get("OPENCLAW_MESSAGES_URL") or _DEFAULT_OPENCLAW_MESSAGES_URL
 ).strip()
-N8N_ASSISTANT_WEBHOOK_TIMEOUT = int(
-    os.environ.get("N8N_ASSISTANT_WEBHOOK_TIMEOUT", "600") or "600"
+OPENCLAW_FILES_URL = (
+    os.environ.get("OPENCLAW_FILES_URL") or _DEFAULT_OPENCLAW_FILES_URL
+).strip()
+OPENCLAW_STATUS_URL = (
+    os.environ.get("OPENCLAW_STATUS_URL") or _DEFAULT_OPENCLAW_STATUS_URL
+).strip()
+# يُستخدم في Django فقط كـ: Authorization: Bearer <القيمة> على كل طلب لـ /v1/messages و /v1/files
+OPENCLAW_BEARER_TOKEN = (
+    os.environ.get("OPENCLAW_BEARER_TOKEN") or _DEFAULT_OPENCLAW_BEARER_TOKEN
+).strip()
+OPENCLAW_ASSISTANT_TIMEOUT = int(
+    os.environ.get("OPENCLAW_ASSISTANT_TIMEOUT", "600") or "600"
 )
+# WebSocket لـ /v1/messages (اختياري): إن وُضع فارغاً يُشتق من OPENCLAW_MESSAGES_URL → ws://…/v1/messages?token=…
+# بروتوكول OpenClaw يفرض مصافحة connect (challenge + device/signature) قبل الدردشة؛ للـ BFF الأنسب HTTP POST + Bearer.
+OPENCLAW_WS_MESSAGES_URL = (os.environ.get("OPENCLAW_WS_MESSAGES_URL") or "").strip()
+# 0 = HTTP فقط (افتراضي). 1 = جرّب WS ثم تراجع لـ HTTP — WS لا يكفي لإكمال الجلسة بدون connect كامل.
+_oc_ws = (os.environ.get("OPENCLAW_USE_WEBSOCKET", "0") or "0").strip().lower()
+OPENCLAW_USE_WEBSOCKET = _oc_ws in ("1", "true", "yes", "on")
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

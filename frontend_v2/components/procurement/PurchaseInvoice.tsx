@@ -15,6 +15,7 @@ import { InvoiceList } from './invoices/InvoiceList';
 import { ClearanceImportModal, ShipmentImportContext } from './invoices/ClearanceImportModal';
 import { shipmentsService, advanceShipmentRouteAtLeast } from '@/services/shipmentsService';
 import { InvoicePrintView } from './invoices/InvoicePrintView';
+import { PurchaseInvoiceAccountingPanel } from './invoices/PurchaseInvoiceAccountingPanel';
 
 interface PurchaseInvoiceProps {
   currentUser?: User;
@@ -486,19 +487,32 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
             onConvertToDeal={handleConvertToDeal}
           />
         ) : (
-          <InvoiceForm
-            invoice={currentInvoice}
-            currentUser={currentUser}
-            onCancel={handleExitForm}
-            readOnly={isReadOnly}
-            onSave={({ id }) => {
-              void loadInvoices();
-              if (location.pathname.endsWith("/new")) {
-                navigate(`/purchase-invoices/${id}`, { replace: true });
-              }
-            }}
-            allDbItems={items}
-          />
+          <>
+            <InvoiceForm
+              invoice={currentInvoice}
+              currentUser={currentUser}
+              onCancel={handleExitForm}
+              readOnly={isReadOnly}
+              onSave={({ id }) => {
+                void loadInvoices();
+                if (location.pathname.endsWith("/new")) {
+                  navigate(`/purchase-invoices/${id}`, { replace: true });
+                }
+              }}
+              allDbItems={items}
+            />
+            {/* لوحة المحاسبة تظهر بعد حفظ الفاتورة مرة واحدة (لديها id) */}
+            {currentInvoice?.id && Number(currentInvoice.id) > 0 && (
+              <div className="max-w-7xl mx-auto px-4 mt-2">
+                <PurchaseInvoiceAccountingPanel
+                  invoiceId={Number(currentInvoice.id)}
+                  onPosted={() => {
+                    void loadInvoices();
+                  }}
+                />
+              </div>
+            )}
+          </>
         )}
       </div>
 

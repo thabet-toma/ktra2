@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Account, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod
+from .models import Account, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod, TaxRate
 
 class JournalLineInline(admin.TabularInline):
     model = JournalLine
@@ -33,3 +33,11 @@ class FiscalPeriodAdmin(admin.ModelAdmin):
     list_display = ('name', 'start_date', 'end_date', 'status', 'tenant')
     list_filter = ('status', 'tenant')
     search_fields = ('name',)
+
+
+@admin.register(TaxRate)
+class TaxRateAdmin(admin.ModelAdmin):
+    list_display = ('name', 'code', 'rate', 'tax_account', 'tenant', 'is_active')
+    list_filter = ('tenant', 'is_active')
+    search_fields = ('name', 'code')
+    raw_id_fields = ('tax_account',)

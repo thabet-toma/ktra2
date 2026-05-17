@@ -46,3 +46,12 @@ def user_can_unpost_logistics_deal_payment(user: AbstractUser | None) -> bool:
     if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False):
         return True
     return django_user_app_role(user) == "manager"
+
+
+def user_is_admin(user: AbstractUser | None) -> bool:
+    """صلاحية مدير: superuser أو staff أو دور manager."""
+    if not user or not user.is_authenticated:
+        return False
+    if getattr(user, "is_superuser", False) or getattr(user, "is_staff", False):
+        return True
+    return django_user_app_role(user) in ("manager", "admin")

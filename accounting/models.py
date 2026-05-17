@@ -62,6 +62,10 @@ class JournalHeader(models.Model):
     class Meta:
         db_table = 'journal_headers'
         managed = True
+        # m3-03 ملغى عمداً: قيد فريد على (tenant, reference_type, reference_id)
+        # غير ممكن هنا — MySQL لا يدعم الفهارس الجزئية (partial unique) فيُتجاهَل
+        # بصمت، كما أن المجال نفسه غير فريد فعلياً (69 صفقة لكلٍّ قيدان مشروعان
+        # بنوع LOGISTICS_DEAL). idempotency مفروض تطبيقياً في C1-13/C1-17/C1-04.
 
     def __str__(self):
         return f"Journal {self.id} - {self.transaction_date}"
@@ -70,10 +74,22 @@ class JournalLine(models.Model):
     id = models.AutoField(primary_key=True, db_column='JLineID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
     journal = models.ForeignKey(JournalHeader, on_delete=models.CASCADE, db_column='JournalID', related_name='lines', default=1)
-    account = models.ForeignKey(Account, on_delete=models.CASCADE, db_column='AccountID', default=1)
+    account = models.ForeignKey(Account, on_delete=models.PROTECT, db_column='AccountID', default=1)
     debit = models.DecimalField(max_digits=18, decimal_places=2, default=0.00, db_column='Debit')
     credit = models.DecimalField(max_digits=18, decimal_places=2, default=0.00, db_column='Credit')
-    
+
+    # ── Base Currency Equivalents (auto-calculated on save) ──
+    # Always stores the amount in the tenant's base currency.
+    # Formula: base_debit = debit × exchange_rate (from JournalHeader)
+    base_debit = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0.00, db_column='BaseDebit',
+        help_text='مبلغ المدين بالعملة الأساسية = debit × سعر الصرف',
+    )
+    base_credit = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0.00, db_column='BaseCredit',
+        help_text='مبلغ الدائن بالعملة الأساسية = credit × سعر الصرف',
+    )
+
     # Updated to Strict Foreign Keys
     partner = models.ForeignKey(Partner, on_delete=models.SET_NULL, null=True, blank=True, db_column='PartnerID')
     cost_center = models.ForeignKey(CostCenter, on_delete=models.SET_NULL, null=True, blank=True, db_column='CostCenterID')
@@ -83,6 +99,52 @@ class JournalLine(models.Model):
     class Meta:
         db_table = 'journal_lines'
         managed = True
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(debit__gte=0),
+                name='journal_line_debit_non_negative',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(credit__gte=0),
+                name='journal_line_credit_non_negative',
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        """Auto-calculate base currency amounts from JournalHeader exchange_rate.
+
+        The base amounts feed every base-currency report and the trial balance,
+        so an unresolved/invalid rate must fail loudly rather than silently
+        defaulting to 1 (which would store base == nominal for foreign-currency
+        lines and corrupt all base-currency reporting).
+        """
+        from decimal import Decimal
+
+        from django.core.exceptions import ValidationError
+
+        if self.journal_id:
+            if self._state.adding or not self._meta.get_field("journal").is_cached(self):
+                jr = JournalHeader.objects.filter(pk=self.journal_id).values_list(
+                    "exchange_rate", flat=True
+                ).first()
+            else:
+                jr = self.journal.exchange_rate
+            if jr is None:
+                raise ValidationError(
+                    f"تعذّر تحديد سعر صرف القيد للسطر (journal_id={self.journal_id}); "
+                    "لا يمكن حساب المبلغ بالعملة الأساسية."
+                )
+            rate = Decimal(str(jr))
+            if rate <= 0:
+                raise ValidationError(
+                    f"سعر صرف القيد غير صالح ({rate}) للقيد journal_id={self.journal_id}."
+                )
+        else:
+            rate = Decimal("1")
+
+        self.base_debit = (Decimal(str(self.debit or 0)) * rate).quantize(Decimal("0.01"))
+        self.base_credit = (Decimal(str(self.credit or 0)) * rate).quantize(Decimal("0.01"))
+        super().save(*args, **kwargs)
 
 class Cheque(models.Model):
     DIRECTION_CHOICES = [
@@ -216,6 +278,18 @@ class ExchangeRate(models.Model):
 
 
 class TaxRate(models.Model):
+    """نسبة ضريبية (VAT). اتجاه الضريبة يُحدّد الحساب المناسب:
+    - sales  → يُستخدم مع فواتير المبيعات (ضريبة مخرجات Output VAT — خصم)
+    - purchase → يُستخدم مع فواتير الشراء (ضريبة مدخلات Input VAT — أصل)
+    - both   → يُستخدم للطرفين (غير مُستحسن محاسبياً لأن الحسابَين مختلفان)
+    """
+
+    DIRECTION_CHOICES = [
+        ('sales', 'Sales / Output'),
+        ('purchase', 'Purchase / Input'),
+        ('both', 'Both'),
+    ]
+
     id = models.AutoField(primary_key=True, db_column='TaxRateID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
     name = models.CharField(max_length=100, db_column='Name')
@@ -225,6 +299,11 @@ class TaxRate(models.Model):
         Account, on_delete=models.PROTECT, db_column='TaxAccountID',
         related_name='tax_rates',
     )
+    direction = models.CharField(
+        max_length=10, choices=DIRECTION_CHOICES, default='both',
+        db_column='Direction',
+        help_text='اتجاه الضريبة: sales (مخرجات) / purchase (مدخلات) / both',
+    )
     is_active = models.BooleanField(default=True, db_column='IsActive')
 
     class Meta:
@@ -233,4 +312,4 @@ class TaxRate(models.Model):
         unique_together = [['tenant', 'code']]
 
     def __str__(self):
-        return f"{self.name} ({self.rate}%)"
+        return f"{self.name} ({self.rate}%) [{self.direction}]"

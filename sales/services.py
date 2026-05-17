@@ -19,7 +19,7 @@ from accounting.services import (
     validate_fiscal_period,
     validate_journal_entry,
 )
-from inventory.models import Product
+from inventory.models import Product, StockMovement
 from inventory.services import record_stock_movement
 from partners.models import Partner, PartnerGroup
 
@@ -98,7 +98,7 @@ def get_or_create_sales_settings(tenant) -> SalesSettings:
             Currency.objects.filter(IsBaseCurrency=True).order_by("CurrencyID").first()
             or Currency.objects.order_by("CurrencyID").first()
         )
-    except Exception:
+    except (Currency.DoesNotExist, Currency.MultipleObjectsReturned):
         default_currency = None
 
     # محاولة استنتاج حساب إيرادات افتراضي
@@ -121,7 +121,7 @@ def get_or_create_sales_settings(tenant) -> SalesSettings:
             .first()
             or TaxRate.objects.filter(tenant_id=tenant_id, is_active=True).order_by("id").first()
         )
-    except Exception:
+    except (TaxRate.DoesNotExist, TaxRate.MultipleObjectsReturned):
         default_vat = None
 
     settings_obj = SalesSettings.objects.create(
@@ -321,19 +321,19 @@ def _build_cogs_journal_line_dicts(
 
 
 def _partner_open_balance_excluding_invoice(partner: Partner, exclude_invoice_id: int | None) -> Decimal:
+    """يجمع المتبقي على الفواتير بالعملة الأساسية (exchange_rate) لتجنّب خلط عملات مختلفة."""
     qs = SalesInvoice.objects.filter(
         customer=partner,
         status=SalesInvoice.STATUS_POSTED,
     )
     if exclude_invoice_id:
         qs = qs.exclude(pk=exclude_invoice_id)
-    agg = qs.aggregate(
-        inv=Sum("grand_total"),
-        paid=Sum("amount_paid"),
-    )
-    inv = Decimal(str(agg["inv"] or 0))
-    paid = Decimal(str(agg["paid"] or 0))
-    return (inv - paid).quantize(DEC)
+    total = Decimal("0")
+    for inv in qs:
+        rate = Decimal(str(getattr(inv, "exchange_rate", 1) or 1))
+        due = (Decimal(str(inv.grand_total or 0)) - Decimal(str(inv.amount_paid or 0))) * rate
+        total += due.quantize(DEC)
+    return total.quantize(DEC)
 
 
 def _build_tax_buckets(lines: list[SalesInvoiceLine]) -> dict[int, Decimal]:
@@ -508,12 +508,12 @@ def post_sales_invoice(
         tenant_name = ""
         try:
             tenant_name = (invoice.tenant.CompanyName or "").strip()
-        except Exception:
+        except AttributeError:
             tenant_name = ""
         cust_name = ""
         try:
             cust_name = (invoice.customer.name or "").strip()
-        except Exception:
+        except AttributeError:
             cust_name = ""
         desc_parts = []
         if tenant_name:
@@ -571,6 +571,11 @@ def _post_stock_out_for_invoice(
     *,
     user=None,
 ) -> None:
+    # Idempotency: skip if stock movement already exists for this invoice
+    if StockMovement.objects.filter(
+        reference_type="SALE", reference_id=invoice.id
+    ).exists():
+        return
     for line in lines:
         if getattr(line.product, "is_service", False):
             continue
@@ -615,33 +620,37 @@ def deliver_delivery_order(delivery: DeliveryOrder, *, user=None) -> DeliveryOrd
 
         if not inv.stock_on_post:
             _post_stock_out_for_invoice(inv, lines, user=user)
-            cogs_rows = _build_cogs_journal_line_dicts(inv, lines, products_by_id)
-            if cogs_rows:
-                hdr2 = JournalHeader(
-                    tenant_id=inv.tenant_id,
-                    transaction_date=inv.invoice_date,
-                )
-                validate_journal_entry(hdr2, cogs_rows)
-                jh_cogs = JournalHeader.objects.create(
-                    tenant_id=inv.tenant_id,
-                    transaction_date=inv.invoice_date,
-                    reference_type="SALES_DELIVERY_COGS",
-                    reference_id=inv.id,
-                    description=(f"تكلفة مبيعات عند التسليم — {inv.invoice_number}")[:500],
-                    is_posted=True,
-                    currency=inv.currency,
-                    exchange_rate=inv.exchange_rate,
-                )
-                for row in cogs_rows:
-                    JournalLine.objects.create(
+            # Idempotency: skip if COGS journal already exists
+            if not JournalHeader.objects.filter(
+                reference_type="SALES_DELIVERY_COGS", reference_id=inv.id
+            ).exists():
+                cogs_rows = _build_cogs_journal_line_dicts(inv, lines, products_by_id)
+                if cogs_rows:
+                    hdr2 = JournalHeader(
                         tenant_id=inv.tenant_id,
-                        journal=jh_cogs,
-                        account_id=row["account"],
-                        debit=row["debit"],
-                        credit=row["credit"],
-                        partner_id=row.get("partner"),
-                        description=(row.get("description") or "")[:500],
+                        transaction_date=inv.invoice_date,
                     )
+                    validate_journal_entry(hdr2, cogs_rows)
+                    jh_cogs = JournalHeader.objects.create(
+                        tenant_id=inv.tenant_id,
+                        transaction_date=inv.invoice_date,
+                        reference_type="SALES_DELIVERY_COGS",
+                        reference_id=inv.id,
+                        description=(f"تكلفة مبيعات عند التسليم — {inv.invoice_number}")[:500],
+                        is_posted=True,
+                        currency=inv.currency,
+                        exchange_rate=inv.exchange_rate,
+                    )
+                    for row in cogs_rows:
+                        JournalLine.objects.create(
+                            tenant_id=inv.tenant_id,
+                            journal=jh_cogs,
+                            account_id=row["account"],
+                            debit=row["debit"],
+                            credit=row["credit"],
+                            partner_id=row.get("partner"),
+                            description=(row.get("description") or "")[:500],
+                        )
 
         delivery.status = DeliveryOrder.STATUS_DELIVERED
         from django.utils import timezone
@@ -666,6 +675,10 @@ def _resolve_ar_account_for_partner(partner: Partner) -> Account:
             return g.account_receivable
     if partner.linked_account_id:
         return partner.linked_account
+    # Fallback to sales settings (matches _resolve_ar_account)
+    ss = SalesSettings.objects.filter(tenant_id=partner.tenant_id).first()
+    if ss and ss.default_ar_account_id:
+        return ss.default_ar_account
     raise ValidationError("لا يوجد حساب ذمم للعميل.")
 
 
@@ -719,13 +732,8 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
                 effective_date=payment.payment_date,
             )
 
-        remaining = inv.grand_total - Decimal(str(inv.amount_paid))
-        if amount_in_inv_curr > remaining + DEC:
-            raise ValidationError(
-                f"مبلغ التوزيع المحوّل ({amount_in_inv_curr} بعملة الفاتورة) "
-                f"يتجاوز المتبقي على الفاتورة #{inv.invoice_number} ({remaining})."
-            )
-
+        # ملاحظة: التحقق من تجاوز المتبقي يتم لاحقاً تحت قفل select_for_update
+        # داخل transaction.atomic() لمنع سباق lost-update / الدفع الزائد.
         alloc_conversions.append((alloc, amount_in_inv_curr, conv_rate))
 
     ar = _resolve_ar_account_for_partner(payment.partner)
@@ -755,6 +763,33 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
     validate_journal_entry(hdr, lines_data)
 
     with transaction.atomic():
+        # قفل الفواتير (select_for_update) ومادّتها فعلياً في dict لمنع
+        # سباق lost-update على amount_paid. لا بد من تقييم الـ queryset
+        # (التكرار) حتى يصدر SELECT ... FOR UPDATE فعلياً.
+        inv_ids = sorted({alloc.invoice_id for alloc, _amt, _rate in alloc_conversions})
+        locked_invoices = {
+            inv.pk: inv
+            for inv in SalesInvoice.objects.select_for_update().filter(pk__in=inv_ids)
+        }
+
+        # إجمالي الزيادة لكل فاتورة (قد تتعدّد التوزيعات على نفس الفاتورة)
+        increment_by_invoice: dict[int, Decimal] = {}
+        for alloc, amount_in_inv_curr, _conv in alloc_conversions:
+            increment_by_invoice[alloc.invoice_id] = (
+                increment_by_invoice.get(alloc.invoice_id, Decimal("0"))
+                + amount_in_inv_curr
+            )
+
+        # إعادة التحقق من تجاوز المتبقي على الصفوف المقفلة (القراءة الحديثة)
+        for inv_id, total_increment in increment_by_invoice.items():
+            inv = locked_invoices[inv_id]
+            remaining = inv.grand_total - Decimal(str(inv.amount_paid))
+            if total_increment > remaining + DEC:
+                raise ValidationError(
+                    f"مبلغ التوزيع المحوّل ({total_increment} بعملة الفاتورة) "
+                    f"يتجاوز المتبقي على الفاتورة #{inv.invoice_number} ({remaining})."
+                )
+
         jh = JournalHeader.objects.create(
             tenant_id=payment.tenant_id,
             transaction_date=payment.payment_date,
@@ -788,24 +823,22 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
         payment.is_posted = True
         payment.save(update_fields=["journal", "is_posted"])
 
-        # ── تحديث amount_paid بالمبلغ المحوّل لعملة الفاتورة ──
+        # ── حفظ مبلغ/سعر تحويل كل توزيع للمرجعية ──
         for alloc, amount_in_inv_curr, conv_rate in alloc_conversions:
-            inv = alloc.invoice
-
-            # حفظ مبلغ التحويل وسعر الصرف في التوزيع للمرجعية
             alloc.amount_in_invoice_currency = amount_in_inv_curr
             alloc.conversion_rate = conv_rate
             alloc.save(update_fields=["amount_in_invoice_currency", "conversion_rate"])
-
-            # تحديث المبلغ المدفوع بعملة الفاتورة (وليس بعملة الدفعة)
-            inv.amount_paid = Decimal(str(inv.amount_paid)) + amount_in_inv_curr
-            inv.save(update_fields=["amount_paid"])
-
             logger.info(
                 "Payment %s alloc → invoice %s: %s (pay currency) → %s (inv currency) @ rate %s",
-                payment.id, inv.invoice_number,
+                payment.id, locked_invoices[alloc.invoice_id].invoice_number,
                 alloc.amount, amount_in_inv_curr, conv_rate,
             )
+
+        # ── تحديث amount_paid على الصفوف المقفلة (مرّة واحدة لكل فاتورة) ──
+        for inv_id, total_increment in increment_by_invoice.items():
+            inv = locked_invoices[inv_id]
+            inv.amount_paid = Decimal(str(inv.amount_paid)) + total_increment
+            inv.save(update_fields=["amount_paid"])
 
         create_audit_log(
             tenant=payment.tenant,
@@ -885,17 +918,26 @@ def suggest_fifo_allocations(
 
 
 def next_invoice_number(tenant_id: int) -> str:
+    """يقفل آخر فاتورة (select_for_update) لتقليل تصادم الأرقام تحت حمل متزامن.
+
+    ملاحظة: الإدراج الفعلي للفاتورة يتم في السيريالايزر، لذا القفل هنا
+    يقلّل التصادم عند استدعائه ضمن معاملة المنشئ ولا يلغيه تماماً؛ الضمان
+    القاطع يحتاج تسلسل DB أو قيد فريد + إعادة محاولة (مرحلة 4 / I4-01).
+    """
     prefix = f"SI-{tenant_id}-"
-    last = (
-        SalesInvoice.objects.filter(tenant_id=tenant_id, invoice_number__startswith=prefix)
-        .order_by("-id")
-        .first()
-    )
-    if not last:
-        return f"{prefix}1"
-    try:
-        n = int(last.invoice_number.replace(prefix, ""))
-    except ValueError:
-        n = last.id
-    return f"{prefix}{n + 1}"
+    with transaction.atomic():
+        last = (
+            SalesInvoice.objects
+            .filter(tenant_id=tenant_id, invoice_number__startswith=prefix)
+            .select_for_update()
+            .order_by("-id")
+            .first()
+        )
+        if not last:
+            return f"{prefix}1"
+        try:
+            n = int(last.invoice_number.replace(prefix, ""))
+        except ValueError:
+            n = last.id
+        return f"{prefix}{n + 1}"
 

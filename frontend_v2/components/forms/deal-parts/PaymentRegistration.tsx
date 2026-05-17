@@ -34,10 +34,15 @@ async function fetchSqlBalanceByCashBoxExternalId(): Promise<Record<string, numb
         include_unposted: "true",
       }),
     ]);
-    const rows: TrialBalanceRow[] = Array.isArray(tb) ? tb : [];
+    const rows: TrialBalanceRow[] = Array.isArray(tb)
+      ? tb
+      : Array.isArray((tb as { rows?: TrialBalanceRow[] })?.rows)
+        ? (tb as { rows: TrialBalanceRow[] }).rows
+        : [];
     const byAcct = new Map<number, number>();
     for (const r of rows) {
-      byAcct.set(r.id, Number(r.balance));
+      const bal = r.closing_balance ?? r.balance ?? 0;
+      byAcct.set(r.id, Number(bal));
     }
     const out: Record<string, number> = {};
     for (const L of ledgers) {

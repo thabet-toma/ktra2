@@ -56,7 +56,7 @@ class JournalLineSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = JournalLine
-        fields = ['id', 'account', 'debit', 'credit', 'partner', 'cost_center', 'description', 'project_id']
+        fields = ['id', 'account', 'debit', 'credit', 'base_debit', 'base_credit', 'partner', 'cost_center', 'description', 'project_id']
 
 
 def _resolve_logistics_payment(rid, pay_map=None):
@@ -133,6 +133,34 @@ def build_journal_reference_summary(obj, pay_map=None):
     if rt == "LOGISTICS_SHIPMENT":
         return f"تكلفة شحن · شحنة #{rid or '—'}"
 
+    if rt == "SALES_INVOICE" and rid:
+        try:
+            from sales.models import SalesInvoice
+            inv = SalesInvoice.objects.select_related("customer").filter(pk=rid).first()
+            if inv:
+                cust = getattr(inv.customer, "name", "") or ""
+                return f"فاتورة مبيعات {inv.invoice_number}" + (f" — {cust}" if cust else "")
+        except Exception:
+            pass
+        return f"فاتورة مبيعات · #{rid}"
+
+    if rt == "SALES_DELIVERY_COGS" and rid:
+        return f"تكلفة بضاعة مباعة عند التسليم · فاتورة #{rid}"
+
+    if rt == "CUSTOMER_PAYMENT" and rid:
+        try:
+            from sales.models import CustomerPayment
+            pay = CustomerPayment.objects.select_related("partner").filter(pk=rid).first()
+            if pay:
+                name = getattr(pay.partner, "name", "") or ""
+                return f"تحصيل عميل · دفعة #{pay.pk}" + (f" — {name}" if name else "")
+        except Exception:
+            pass
+        return f"تحصيل عميل · دفعة #{rid}"
+
+    if rt == "PURCHASE_INVOICE" and rid:
+        return f"فاتورة شراء · #{rid}"
+
     if rt and rid:
         return f"{rt} · #{rid}"
     return ""
@@ -149,12 +177,40 @@ def get_deal_ref_number(obj, pay_map=None):
     return None
 
 
+SOURCE_LABEL_MAP = {
+    "SALES_INVOICE": "فاتورة مبيعات",
+    "SALES_DELIVERY_COGS": "تكلفة بضاعة مباعة",
+    "CUSTOMER_PAYMENT": "تحصيل عميل",
+    "PURCHASE_INVOICE": "فاتورة شراء",
+    "PURCHASE_RECEIPT": "استلام مخزون",
+    "LOGISTICS_PAYMENT": "دفعة لوجستية",
+    "LOGISTICS_EXPENSE": "مصروف لوجستي",
+    "LOGISTICS_SHIPMENT": "شحنة دولية",
+    "LOGISTICS_CLEARANCE_PAYMENT": "دفعة تخليص",
+    "JOURNAL_REVERSAL": "عكس قيد",
+    "MANUAL": "قيد يدوي",
+}
+
+
+def _get_source_label(rt: str) -> str:
+    return SOURCE_LABEL_MAP.get((rt or "").strip(), rt or "")
+
+
+def _get_tenant_name(obj) -> str:
+    try:
+        return (obj.tenant.CompanyName or "").strip()
+    except Exception:
+        return ""
+
+
 class JournalHeaderListSerializer(serializers.ModelSerializer):
     """قائمة خفيفة بلا أسطر تفصيلية."""
 
     reference_summary = serializers.SerializerMethodField(read_only=True)
     deal_ref_number = serializers.SerializerMethodField(read_only=True)
     currency_code = serializers.SerializerMethodField(read_only=True)
+    tenant_name = serializers.SerializerMethodField(read_only=True)
+    source_label = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = JournalHeader
@@ -170,6 +226,8 @@ class JournalHeaderListSerializer(serializers.ModelSerializer):
             "currency",
             "exchange_rate",
             "currency_code",
+            "tenant_name",
+            "source_label",
         ]
 
     def get_currency_code(self, obj):
@@ -181,12 +239,20 @@ class JournalHeaderListSerializer(serializers.ModelSerializer):
     def get_deal_ref_number(self, obj):
         return get_deal_ref_number(obj, self.context.get("logistics_payments"))
 
+    def get_tenant_name(self, obj):
+        return _get_tenant_name(obj)
+
+    def get_source_label(self, obj):
+        return _get_source_label(obj.reference_type)
+
 
 class JournalHeaderSerializer(serializers.ModelSerializer):
     lines = JournalLineSerializer(many=True)
     reference_summary = serializers.SerializerMethodField(read_only=True)
     deal_ref_number = serializers.SerializerMethodField(read_only=True)
     currency_code = serializers.SerializerMethodField(read_only=True)
+    tenant_name = serializers.SerializerMethodField(read_only=True)
+    source_label = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = JournalHeader
@@ -202,6 +268,8 @@ class JournalHeaderSerializer(serializers.ModelSerializer):
             'currency',
             'exchange_rate',
             'currency_code',
+            'tenant_name',
+            'source_label',
             'lines',
         ]
 
@@ -213,6 +281,12 @@ class JournalHeaderSerializer(serializers.ModelSerializer):
 
     def get_deal_ref_number(self, obj):
         return get_deal_ref_number(obj, self.context.get("logistics_payments"))
+
+    def get_tenant_name(self, obj):
+        return _get_tenant_name(obj)
+
+    def get_source_label(self, obj):
+        return _get_source_label(obj.reference_type)
 
     def create(self, validated_data):
         lines_data = validated_data.pop('lines')
@@ -231,6 +305,11 @@ class JournalHeaderSerializer(serializers.ModelSerializer):
         return journal
 
     def update(self, instance, validated_data):
+        if instance.is_posted:
+            raise serializers.ValidationError(
+                {"non_field_errors": "لا يمكن تعديل قيد مرحّل. استخدم القيد العكسي بدلاً من ذلك."}
+            )
+
         lines_data = validated_data.pop('lines', None)
         
         for attr, value in validated_data.items():
@@ -306,8 +385,32 @@ class FiscalPeriodSerializer(serializers.ModelSerializer):
 
 class TaxRateSerializer(serializers.ModelSerializer):
     tax_account_name = serializers.CharField(source='tax_account.name', read_only=True)
+    tax_account_code = serializers.CharField(source='tax_account.code', read_only=True)
+    tax_account_type = serializers.CharField(source='tax_account.account_type', read_only=True)
 
     class Meta:
         model = TaxRate
-        fields = ['id', 'name', 'code', 'rate', 'tax_account', 'tax_account_name', 'is_active']
+        fields = [
+            'id', 'name', 'code', 'rate',
+            'tax_account', 'tax_account_name', 'tax_account_code', 'tax_account_type',
+            'direction', 'is_active',
+        ]
+
+    def validate(self, attrs):
+        """تحقّق من أن اتجاه الضريبة يطابق نوع الحساب.
+        - sales → الحساب يجب أن يكون Liability (التزام ضريبي للدولة).
+        - purchase → الحساب يجب أن يكون Asset (ضريبة قابلة للاسترداد).
+        """
+        direction = attrs.get('direction') or (self.instance.direction if self.instance else 'both')
+        tax_account = attrs.get('tax_account') or (self.instance.tax_account if self.instance else None)
+        if tax_account and direction in ('sales', 'purchase'):
+            required = 'Liability' if direction == 'sales' else 'Asset'
+            if tax_account.account_type != required:
+                raise serializers.ValidationError({
+                    'tax_account': (
+                        f"نوع الحساب لا يطابق الاتجاه: {direction} يتطلب {required}، "
+                        f"لكن الحساب المختار {tax_account.account_type}."
+                    ),
+                })
+        return attrs
 

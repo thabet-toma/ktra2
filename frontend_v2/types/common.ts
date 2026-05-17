@@ -20,6 +20,8 @@ export type AppView =
     | "points-management"
     | "attendance"
     | "purchase-invoices"
+    | "sales-invoices"
+    | "sales-customers"
     | "old-invoices"
     | "items-management"
     | "supplier-management"
@@ -37,6 +39,11 @@ export type AppView =
     | "accounting-cheques"
     | "accounting-general-ledger"
     | "accounting-trial-balance"
+    | "accounting-vat-report"
+    | "accounting-landed-cost"
+    | "sales-customer-payments"
+    | "sales-settings"
+    | "local-shipping"
     | "sql-products"
     | "sql-partners"
     | "sql-deals"
@@ -45,7 +52,8 @@ export type AppView =
     | "accounting-fiscal-periods"
     | "accounting-exchange-rates"
     | "stock-levels"
-    | "stock-movements";
+    | "stock-movements"
+    | "property-rental";
 
 export interface Attachment {
     id: string;

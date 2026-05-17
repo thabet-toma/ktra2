@@ -4,6 +4,7 @@ from .views import (
     LogisticsDealViewSet, LogisticsShipmentViewSet,
     LogisticsClearanceViewSet, LogisticsExpenseViewSet,
     LogisticsPaymentViewSet, PurchaseInvoiceViewSet,
+    LandedCostReportViewSet, LocalShipmentViewSet,
 )
 
 router = DefaultRouter()
@@ -13,6 +14,8 @@ router.register(r'clearances', LogisticsClearanceViewSet)
 router.register(r'expenses', LogisticsExpenseViewSet)
 router.register(r'payments', LogisticsPaymentViewSet)
 router.register(r'purchase-invoices', PurchaseInvoiceViewSet, basename='purchase-invoices')
+router.register(r'local-shipments', LocalShipmentViewSet, basename='local-shipments')
+router.register(r'reports/landed-cost', LandedCostReportViewSet, basename='landed-cost-report')
 
 urlpatterns = [
     path('', include(router.urls)),

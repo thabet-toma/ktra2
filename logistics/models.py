@@ -255,16 +255,22 @@ class LogisticsShipment(SoftDeleteMixin, models.Model):
         managed = True
 
     def save(self, *args, **kwargs):
-        if not self.shipment_number or self.shipment_number in ('', 'NEW'):
+        if self.shipment_number and self.shipment_number not in ('', 'NEW'):
+            return super().save(*args, **kwargs)
+        from django.db import transaction
+        # القفل يجب أن يبقى مُمسَكاً حتى بعد INSERT، لذا super().save() داخل atomic.
+        with transaction.atomic():
             last = (
                 LogisticsShipment.objects
+                .select_for_update()
+                .filter(tenant_id=self.tenant_id)
                 .order_by('-id')
                 .values_list('id', flat=True)
                 .first()
             )
             next_id = (last or 0) + 1
             self.shipment_number = f"SH-{next_id:04d}"
-        super().save(*args, **kwargs)
+            return super().save(*args, **kwargs)
 
     def __str__(self):
         return self.shipment_number
@@ -403,6 +409,186 @@ class LogisticsExpense(models.Model):
             models.Index(fields=['related_type', 'related_id']),
         ]
 
+
+class LocalShipment(models.Model):
+    """شحن محلي (ناقل داخلي) — المرحلة بين التخليص الجمركي وفاتورة المشتريات.
+
+    يمثّل حركة البضاعة من مخزن التخليص إلى مستودع الشركة/وجهة العميل
+    عبر ناقل محلي (شاحنة، نقل داخلي).
+
+    الربط المحاسبي:
+      - على الترحيل: Dr حساب الشحن المحلي (مصروف/أصل Landed)
+                    Cr حساب الناقل (AP) أو الصندوق (لو نقدي)
+      - إذا اخترنا capitalize_to_inventory=True → تُرسمل التكلفة على Landed Cost
+    """
+
+    STATUS_CHOICES = [
+        ('pending', 'قيد الانتظار'),
+        ('in_transit', 'قيد النقل'),
+        ('delivered', 'تم التسليم'),
+        ('cancelled', 'ملغية'),
+    ]
+
+    PAYMENT_TYPE_CHOICES = [
+        ('credit', 'آجل'),
+        ('cash', 'نقدي'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='LocalShipmentID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+
+    shipment_number = models.CharField(
+        max_length=50, db_column='ShipmentNumber', default='',
+        help_text='يولَّد تلقائياً LS-XXXX',
+    )
+
+    # ربط بالتخليص الجمركي أو الشحنة الدولية (اختياري)
+    clearance = models.ForeignKey(
+        LogisticsClearance,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column='ClearanceID',
+        related_name='local_shipments',
+        help_text='التخليص الجمركي المصدر — اختياري إن كانت البضاعة خارج دورة الاستيراد',
+    )
+    shipment = models.ForeignKey(
+        LogisticsShipment,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column='InternationalShipmentID',
+        related_name='local_shipments',
+        help_text='الشحنة الدولية المرتبطة — يُملأ من التخليص تلقائياً',
+    )
+
+    # الناقل المحلي (Partner من نوع وكيل شحن أو مورّد خدمات)
+    carrier = models.ForeignKey(
+        Partner,
+        on_delete=models.PROTECT,
+        db_column='CarrierID',
+        related_name='local_shipments',
+        help_text='الناقل المحلي (شركة النقل أو السائق)',
+    )
+    driver_name = models.CharField(
+        max_length=150, null=True, blank=True, db_column='DriverName',
+        help_text='اسم السائق (اختياري)',
+    )
+    vehicle_number = models.CharField(
+        max_length=50, null=True, blank=True, db_column='VehicleNumber',
+        help_text='رقم المركبة / الشاحنة',
+    )
+
+    origin = models.CharField(
+        max_length=255, null=True, blank=True, db_column='Origin',
+        help_text='نقطة الانطلاق (مخزن التخليص، الميناء، ...)',
+    )
+    destination = models.CharField(
+        max_length=255, null=True, blank=True, db_column='Destination',
+        help_text='الوجهة (المستودع، عنوان العميل)',
+    )
+
+    pickup_date = models.DateField(null=True, blank=True, db_column='PickupDate')
+    delivery_date = models.DateField(null=True, blank=True, db_column='DeliveryDate')
+
+    # المبلغ المتفق عليه
+    amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='Amount',
+        help_text='قيمة الشحن المتفق عليها',
+    )
+    currency = models.ForeignKey(
+        Currency,
+        on_delete=models.PROTECT,
+        default=1,
+        db_column='CurrencyID',
+        related_name='local_shipments',
+    )
+    exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, default=1, db_column='ExchangeRate',
+    )
+
+    # طريقة الدفع والحسابات المحاسبية
+    payment_type = models.CharField(
+        max_length=10, choices=PAYMENT_TYPE_CHOICES, default='credit',
+        db_column='PaymentType',
+    )
+    expense_account = models.ForeignKey(
+        Account,
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        db_column='ExpenseAccountID',
+        related_name='local_shipment_expenses',
+        help_text='حساب مصروف الشحن (مثلاً 5301 أو 5310 شحن محلي)',
+    )
+    cash_or_bank_account = models.ForeignKey(
+        Account,
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        db_column='CashOrBankAccountID',
+        related_name='local_shipment_cash_payments',
+        help_text='الصندوق أو البنك (في الدفع النقدي)',
+    )
+
+    capitalize_to_inventory = models.BooleanField(
+        default=True, db_column='CapitalizeToInventory',
+        help_text='إن True يُضاف لتكلفة Landed Cost بدل أن يُسجَّل كمصروف فترة',
+    )
+
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='pending',
+        db_column='Status',
+    )
+    notes = models.TextField(null=True, blank=True, db_column='Notes')
+
+    # ربط محاسبي
+    is_posted = models.BooleanField(default=False, db_column='IsPosted')
+    journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='JournalID', related_name='local_shipments',
+    )
+
+    # ربط بفاتورة مشتريات (عند الاستيراد منها)
+    purchase_invoice = models.ForeignKey(
+        'PurchaseInvoice',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column='PurchaseInvoiceID',
+        related_name='local_shipments',
+        help_text='الفاتورة التي نُقلت تكلفتها إليها (عند الاستيراد)',
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+
+    class Meta:
+        db_table = 'logistics_local_shipments'
+        managed = True
+        indexes = [
+            models.Index(fields=['tenant', 'status']),
+            models.Index(fields=['carrier']),
+            models.Index(fields=['clearance']),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.shipment_number and self.shipment_number not in ('', 'NEW'):
+            return super().save(*args, **kwargs)
+        from django.db import transaction
+        # M2-08: ترقيم ذرّي per-tenant — القفل مُمسَك حتى بعد INSERT.
+        with transaction.atomic():
+            last = (
+                LocalShipment.objects
+                .select_for_update()
+                .filter(tenant_id=self.tenant_id)
+                .order_by('-id')
+                .values_list('id', flat=True)
+                .first()
+            )
+            next_id = (last or 0) + 1
+            self.shipment_number = f"LS-{next_id:04d}"
+            return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.shipment_number} — {self.carrier.name if self.carrier_id else '—'}"
+
+
 class PurchaseInvoice(models.Model):
     STATUS_CHOICES = [
         ('draft', 'مسودة'),
@@ -475,6 +661,26 @@ class PurchaseInvoice(models.Model):
         db_column='JournalID', related_name='purchase_invoices',
     )
 
+    # نوع الدفع: credit → تُقيّد على ذمم المورد (AP)، cash → تُقيّد على صندوق/بنك
+    PAYMENT_TYPE_CREDIT = 'credit'
+    PAYMENT_TYPE_CASH = 'cash'
+    PAYMENT_TYPE_CHOICES = [
+        (PAYMENT_TYPE_CREDIT, 'آجل (ذمم مورد)'),
+        (PAYMENT_TYPE_CASH, 'نقدي (صندوق/بنك)'),
+    ]
+    payment_type = models.CharField(
+        max_length=10, choices=PAYMENT_TYPE_CHOICES, default=PAYMENT_TYPE_CREDIT,
+        db_column='PaymentType',
+        help_text='credit: دائنة على ذمم المورد | cash: يُخصم من صندوق/بنك مباشرة',
+    )
+    cash_or_bank_account = models.ForeignKey(
+        Account, on_delete=models.PROTECT,
+        null=True, blank=True,
+        db_column='CashBankAccountID',
+        related_name='purchase_invoices_paid_from',
+        help_text='حساب الصندوق/البنك — مطلوب عند payment_type=cash',
+    )
+
     firestore_id = models.CharField(
         max_length=100, null=True, blank=True, db_column='FirestoreID',
         help_text='Legacy link to Firestore document id',
@@ -533,6 +739,54 @@ class PurchaseInvoiceItem(models.Model):
 
     def __str__(self):
         return f"{self.name} x{self.quantity}"
+
+
+class PurchaseInvoiceFee(models.Model):
+    """رسوم إضافية على فاتورة الشراء (شحن، تخليص، رسوم جمركية، تأمين، ...).
+
+    كل رسم:
+    - يُسجَّل مدين في حساب المصروف (account من نوع Expense أو Asset لـ Inventory/landed).
+    - يُضاف دائن (مع صافي المخزون + VAT) في حساب المورد (Trade Payables) بحيث
+      يبقى القيد متوازناً.
+    - اختيارياً يمكن رسملته (capitalize_to_inventory=True) ليُضاف لتكلفة المخزون
+      المستوردة بدل المصروف المباشر — تُستخدم لاحقاً في Landed Cost.
+    """
+
+    id = models.AutoField(primary_key=True, db_column='FeeID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    invoice = models.ForeignKey(
+        PurchaseInvoice, on_delete=models.CASCADE,
+        db_column='PurchaseInvoiceID', related_name='fees',
+    )
+    # الحساب المحاسبي المختار (مصروف عادة: 5301 شحن، 5302 تخليص، 5303 رسوم جمركية، ...)
+    expense_account = models.ForeignKey(
+        Account, on_delete=models.PROTECT,
+        db_column='ExpenseAccountID', related_name='purchase_invoice_fees',
+        help_text='الحساب المدين للرسم — عادةً حساب مصروف (5xxx) أو جزء من تكلفة المخزون',
+    )
+    description = models.CharField(
+        max_length=255, db_column='Description',
+        help_text='وصف الرسم (مثال: رسوم جمركية، شحن دولي، تخليص)',
+    )
+    amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='Amount',
+    )
+    capitalize_to_inventory = models.BooleanField(
+        default=False, db_column='CapitalizeToInventory',
+        help_text='إذا True يُرسمل على المخزون (landed cost) بدل تسجيله كمصروف في الفترة',
+    )
+    is_taxable = models.BooleanField(
+        default=False, db_column='IsTaxable',
+        help_text='إذا True يُحتسب ضريبة VAT على هذا الرسم ضمن فاتورة الشراء',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'purchase_invoice_fees'
+        managed = True
+
+    def __str__(self):
+        return f"{self.description}: {self.amount}"
 
 
 # Automatically connect signals for the logistics app

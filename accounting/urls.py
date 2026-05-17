@@ -7,6 +7,7 @@ from .views import (
     CostCenterViewSet,
     GeneralLedgerView,
     TrialBalanceView,
+    VatReportView,
     CashBoxLedgerViewSet,
     PurchaseReceiptViewSet,
     ExchangeRateViewSet,
@@ -16,12 +17,13 @@ from .views import (
 )
 
 router = DefaultRouter()
-router.register(r'accounts', AccountViewSet)
+router.register(r'accounts', AccountViewSet, basename='accounts')
 router.register(r'journals', JournalViewSet)
 router.register(r'cheques', ChequeViewSet)
 router.register(r'cost-centers', CostCenterViewSet)
 router.register(r'general-ledger', GeneralLedgerView, basename='general-ledger')
 router.register(r'trial-balance', TrialBalanceView, basename='trial-balance')
+router.register(r'vat-report', VatReportView, basename='vat-report')
 router.register(r'cash-box-accounts', CashBoxLedgerViewSet, basename='cash-box-accounts')
 router.register(r'purchase-receipts', PurchaseReceiptViewSet, basename='purchase-receipts')
 router.register(r'exchange-rates', ExchangeRateViewSet, basename='exchange-rates')

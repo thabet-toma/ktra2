@@ -18,6 +18,21 @@ from .models import (
 from .services import next_invoice_number, recalculate_invoice_amounts
 
 
+def _as_product(value):
+    """Normalize a line's ``product`` to a Product instance.
+
+    DRF's PrimaryKeyRelatedField already resolves the FK to a Product
+    instance during validation, so re-querying with ``pk=<instance>``
+    raises TypeError on Django 6. Accept either a resolved instance or a
+    raw pk (defensive for non-DRF callers); return None if not found.
+    """
+    if value is None:
+        return None
+    if isinstance(value, Product):
+        return value
+    return Product.objects.filter(pk=value).first()
+
+
 def _validate_stock_lines(tenant, lines_data, stock_on_post: bool) -> None:
     """يمنع بيع كمية أكبر من الرصيد عند تفعيل خصم المخزون عند الترحيل."""
     if not stock_on_post or not lines_data:
@@ -32,14 +47,16 @@ def _validate_stock_lines(tenant, lines_data, stock_on_post: bool) -> None:
             )
         if not pid:
             raise serializers.ValidationError({"lines": "يجب اختيار صنف لكل سطر."})
-        try:
-            prod = Product.objects.get(pk=pid)
-        except Product.DoesNotExist:
+        prod = _as_product(pid)
+        if prod is None:
             raise serializers.ValidationError({"lines": f"صنف غير موجود: {pid}"})
         if prod.tenant_id != tenant.TenantID:
             raise serializers.ValidationError(
                 {"lines": f"الصنف {prod.sku} لا يتبع نفس الشركة."}
             )
+        # M2-14: allow_negative_stock يتجاوز فحص الرصيد (الخدمة هي المرجع الوحيد)
+        if getattr(prod, "allow_negative_stock", False):
+            continue
         if qty > prod.quantity_on_hand + Decimal("0.0001"):
             raise serializers.ValidationError(
                 {
@@ -175,11 +192,11 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
         if not lines_data:
             raise serializers.ValidationError({"lines": "يجب إضافة بند واحد على الأقل."})
         for row in lines_data:
-            pid = row["product"]
-            try:
-                prod = Product.objects.get(pk=pid)
-            except Product.DoesNotExist:
-                raise serializers.ValidationError({"lines": f"صنف غير موجود: {pid}"})
+            prod = _as_product(row.get("product"))
+            if prod is None:
+                raise serializers.ValidationError(
+                    {"lines": f"صنف غير موجود: {row.get('product')}"}
+                )
             if prod.tenant_id != tenant.TenantID:
                 raise serializers.ValidationError(
                     {"lines": f"الصنف {prod.sku} لا يتبع نفس الشركة."}
@@ -219,10 +236,11 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"lines": "يجب إضافة بند واحد على الأقل."})
             for row in lines_data:
                 raw = dict(row)
-                pid = raw.get("product")
-                prod = Product.objects.filter(pk=pid).first()
-                if not prod:
-                    raise serializers.ValidationError({"lines": f"صنف غير موجود: {pid}"})
+                prod = _as_product(raw.get("product"))
+                if prod is None:
+                    raise serializers.ValidationError(
+                        {"lines": f"صنف غير موجود: {raw.get('product')}"}
+                    )
                 if prod.tenant_id != tenant.TenantID:
                     raise serializers.ValidationError(
                         {"lines": f"الصنف {prod.sku} لا يتبع نفس الشركة."}

@@ -22,15 +22,24 @@ export interface JournalListItem {
   is_posted: boolean;
   currency_code?: string | null;
   exchange_rate?: string | number;
+  tenant_name?: string | null;
+  source_label?: string | null;
 }
 
 function refTypeLabel(rt: string | null | undefined): string {
   const t = (rt || "").trim();
   const map: Record<string, string> = {
-    LOGISTICS_PAYMENT: "دفعة صفقة",
+    LOGISTICS_PAYMENT: "دفعة لوجستية",
     PURCHASE_RECEIPT: "استلام مخزون",
     JOURNAL_REVERSAL: "عكس قيد",
     LOGISTICS_EXPENSE: "مصروف لوجستي",
+    LOGISTICS_SHIPMENT: "شحنة دولية",
+    LOGISTICS_CLEARANCE_PAYMENT: "دفعة تخليص",
+    SALES_INVOICE: "فاتورة مبيعات",
+    SALES_DELIVERY_COGS: "تكلفة بضاعة مباعة",
+    CUSTOMER_PAYMENT: "تحصيل عميل",
+    PURCHASE_INVOICE: "فاتورة شراء",
+    MANUAL: "قيد يدوي",
   };
   return map[t] || (t ? t : "عام / يدوي");
 }
@@ -282,7 +291,16 @@ export const AccountingJournalListPage: React.FC<Props> = ({
                     )}
                   </td>
                   <td className="p-3 text-xs">
-                    {refTypeLabel(j.reference_type)}
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-medium text-slate-700 dark:text-slate-200">
+                        {j.source_label || refTypeLabel(j.reference_type)}
+                      </span>
+                      {j.tenant_name && (
+                        <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                          {j.tenant_name}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="p-3 text-xs max-w-xs">
                     {j.deal_ref_number && onNavigateToDeal ? (

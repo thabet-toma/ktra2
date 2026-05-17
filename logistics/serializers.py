@@ -101,11 +101,11 @@ def _payments_total_exceeds_deal(payments_data, deal_total) -> bool:
     if not payments_data:
         return False
     try:
-        total = float(deal_total or 0)
-        s = sum(float(p.get("amount") or 0) for p in payments_data)
+        total = _to_decimal(deal_total)
+        s = sum((_to_decimal(p.get("amount") or 0) for p in payments_data), Decimal("0"))
     except (TypeError, ValueError):
         return True
-    eps = max(0.01, abs(total) * 1e-9)
+    eps = Decimal("0.01")
     return s > total + eps
 
 
@@ -313,6 +313,8 @@ from .models import (
     LogisticsClearancePayment,
     PurchaseInvoice,
     PurchaseInvoiceItem,
+    PurchaseInvoiceFee,
+    LocalShipment,
     default_clearance_cost_lines,
 )
 from partners.serializers import PartnerSerializer
@@ -779,6 +781,36 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
         return obj.name
 
 
+class PurchaseInvoiceFeeSerializer(serializers.ModelSerializer):
+    """رسم على فاتورة شراء — مدين بحساب مصروف (أو مُرسمل للمخزون)."""
+    expense_account_code = serializers.CharField(source='expense_account.code', read_only=True)
+    expense_account_name = serializers.CharField(source='expense_account.name', read_only=True)
+    expense_account_type = serializers.CharField(source='expense_account.account_type', read_only=True)
+
+    class Meta:
+        model = PurchaseInvoiceFee
+        fields = [
+            'id', 'description', 'amount',
+            'expense_account', 'expense_account_code', 'expense_account_name', 'expense_account_type',
+            'capitalize_to_inventory', 'is_taxable',
+        ]
+        read_only_fields = ['id']
+
+    def validate_amount(self, value):
+        if value is None or value < 0:
+            raise serializers.ValidationError('مبلغ الرسم يجب أن يكون ≥ 0.')
+        return value
+
+    def validate_expense_account(self, value):
+        # نقبل Expense (الحالة العادية) أو Asset (مثال: المخزون عند الرسملة)
+        if value.account_type not in ('Expense', 'Asset'):
+            raise serializers.ValidationError(
+                f'حساب الرسم يجب أن يكون Expense أو Asset، '
+                f'لكن الحساب المختار من نوع {value.account_type}.'
+            )
+        return value
+
+
 class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source='partner.name', read_only=True)
     deal_ref = serializers.CharField(source='deal.ref_number', read_only=True, default=None)
@@ -808,11 +840,18 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
 
 class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     items = PurchaseInvoiceItemSerializer(many=True, required=False)
+    fees = PurchaseInvoiceFeeSerializer(many=True, required=False)
     partner_name = serializers.CharField(source='partner.name', read_only=True)
     deal_ref = serializers.CharField(source='deal.ref_number', read_only=True, default=None)
     currency_code = serializers.CharField(source='currency.Code', read_only=True, default=None)
     journal_id_display = serializers.IntegerField(source='journal.id', read_only=True, default=None)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    cash_or_bank_account_name = serializers.CharField(
+        source='cash_or_bank_account.name', read_only=True, default=None,
+    )
+    cash_or_bank_account_code = serializers.CharField(
+        source='cash_or_bank_account.code', read_only=True, default=None,
+    )
 
     class Meta:
         model = PurchaseInvoice
@@ -827,15 +866,31 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'tax_rate', 'tax_amount', 'tax_type',
             'shipping_cost', 'shipping_included',
             'grand_total',
+            'payment_type',
+            'cash_or_bank_account', 'cash_or_bank_account_name', 'cash_or_bank_account_code',
             'local_payments_json', 'conversion_metadata_json',
             'status', 'status_display', 'notes',
             'supplier_invoice_number', 'factory_name',
             'is_posted', 'journal', 'journal_id_display',
             'firestore_id',
-            'items',
+            'items', 'fees',
             'created_at', 'updated_at', 'created_by',
         ]
         read_only_fields = ['id', 'is_posted', 'journal', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        payment_type = attrs.get('payment_type') or (
+            self.instance.payment_type if self.instance else 'credit'
+        )
+        cash_acc = attrs.get(
+            'cash_or_bank_account',
+            self.instance.cash_or_bank_account if self.instance else None,
+        )
+        if payment_type == 'cash' and not cash_acc:
+            raise serializers.ValidationError({
+                'cash_or_bank_account': 'الدفع النقدي يتطلب اختيار حساب صندوق/بنك.'
+            })
+        return attrs
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -891,13 +946,19 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
+        fees_data = validated_data.pop('fees', [])
         invoice = PurchaseInvoice.objects.create(**validated_data)
         for item_data in items_data:
             PurchaseInvoiceItem.objects.create(invoice=invoice, **item_data)
+        for fee_data in fees_data:
+            PurchaseInvoiceFee.objects.create(
+                invoice=invoice, tenant=invoice.tenant, **fee_data,
+            )
         return invoice
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
+        fees_data = validated_data.pop('fees', None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -907,4 +968,85 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             for item_data in items_data:
                 PurchaseInvoiceItem.objects.create(invoice=instance, **item_data)
 
+        if fees_data is not None:
+            instance.fees.all().delete()
+            for fee_data in fees_data:
+                PurchaseInvoiceFee.objects.create(
+                    invoice=instance, tenant=instance.tenant, **fee_data,
+                )
+
         return instance
+
+
+class LocalShipmentSerializer(serializers.ModelSerializer):
+    """شحن محلي — بين التخليص الجمركي وفاتورة المشتريات."""
+
+    carrier_name = serializers.CharField(source='carrier.name', read_only=True)
+    clearance_number = serializers.CharField(
+        source='clearance.declaration_number', read_only=True,
+    )
+    shipment_number_source = serializers.CharField(
+        source='shipment.shipment_number', read_only=True,
+    )
+    expense_account_code = serializers.CharField(
+        source='expense_account.code', read_only=True, allow_null=True,
+    )
+    expense_account_name = serializers.CharField(
+        source='expense_account.name', read_only=True, allow_null=True,
+    )
+    currency_code = serializers.CharField(
+        source='currency.Code', read_only=True, allow_null=True,
+    )
+    purchase_invoice_number = serializers.CharField(
+        source='purchase_invoice.invoice_number', read_only=True, allow_null=True,
+    )
+
+    class Meta:
+        model = LocalShipment
+        fields = [
+            'id',
+            'shipment_number',
+            'clearance', 'clearance_number',
+            'shipment', 'shipment_number_source',
+            'carrier', 'carrier_name',
+            'driver_name', 'vehicle_number',
+            'origin', 'destination',
+            'pickup_date', 'delivery_date',
+            'amount',
+            'currency', 'currency_code', 'exchange_rate',
+            'payment_type',
+            'expense_account', 'expense_account_code', 'expense_account_name',
+            'cash_or_bank_account',
+            'capitalize_to_inventory',
+            'status',
+            'notes',
+            'is_posted', 'journal',
+            'purchase_invoice', 'purchase_invoice_number',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = [
+            'id', 'shipment_number', 'is_posted', 'journal',
+            'created_at', 'updated_at',
+        ]
+
+    def validate(self, attrs):
+        instance = getattr(self, 'instance', None)
+        payment_type = attrs.get(
+            'payment_type', getattr(instance, 'payment_type', 'credit'),
+        )
+        cash_acc = attrs.get(
+            'cash_or_bank_account', getattr(instance, 'cash_or_bank_account', None),
+        )
+        if payment_type == 'cash' and not cash_acc:
+            raise serializers.ValidationError({
+                'cash_or_bank_account': 'الصندوق/البنك مطلوب في الدفع النقدي.',
+            })
+        amount = attrs.get('amount', getattr(instance, 'amount', 0))
+        try:
+            if Decimal(str(amount or 0)) <= 0:
+                raise serializers.ValidationError({
+                    'amount': 'المبلغ يجب أن يكون أكبر من صفر.',
+                })
+        except (InvalidOperation, TypeError):
+            raise serializers.ValidationError({'amount': 'قيمة غير صالحة.'})
+        return attrs

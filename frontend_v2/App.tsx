@@ -72,6 +72,8 @@ import { AccountingJournalEntryPage } from "./components/accounting/AccountingJo
 import { AccountingChequesPage } from "./components/accounting/AccountingChequesPage";
 import { AccountingGeneralLedgerPage } from "./components/accounting/AccountingGeneralLedgerPage";
 import { AccountingTrialBalancePage } from "./components/accounting/AccountingTrialBalancePage";
+import { AccountingVatReportPage } from "./components/accounting/AccountingVatReportPage";
+import { AccountingLandedCostPage } from "./components/accounting/AccountingLandedCostPage";
 import { FiscalPeriodsPage } from "./components/accounting/FiscalPeriodsPage";
 import { ExchangeRatesPage } from "./components/accounting/ExchangeRatesPage";
 import { SqlProductsPage } from "./components/sql/SqlProductsPage";
@@ -82,6 +84,12 @@ import { SmartAssistantPage } from "./components/SmartAssistantPage";
 import { CustomsClearanceManagement } from "./components/procurement/clearance/CustomsClearanceManagement";
 import { StockMovementsPage } from "./components/inventory/StockMovementsPage";
 import { StockLevelsPage } from "./components/inventory/StockLevelsPage";
+import { PropertyRentalPage } from "./components/realestate/PropertyRentalPage";
+import { SalesInvoicesPage } from "./components/sales/SalesInvoicesPage";
+import { SalesCustomersPage } from "./components/sales/SalesCustomersPage";
+import SalesCustomerPaymentsPage from "./components/sales/SalesCustomerPaymentsPage";
+import SalesSettingsPage from "./components/sales/SalesSettingsPage";
+import LocalShippingPage from "./components/logistics/LocalShippingPage";
 import { useLocation, useNavigate } from "react-router-dom";
 
 type SourcingView = "search" | "loading" | "results";
@@ -130,6 +138,12 @@ const App: React.FC = () => {
         } else {
           navigate("/purchase-invoices", { replace: false });
         }
+      } else if (view === "sales-invoices") {
+        navigate("/sales/invoices", { replace: false });
+      } else if (view === "sales-customers") {
+        navigate("/sales/customers", { replace: false });
+      } else if (view === "sales-settings") {
+        navigate("/sales/settings", { replace: false });
       } else {
         navigate("/", { replace: false });
       }
@@ -283,6 +297,18 @@ const App: React.FC = () => {
     }
     if (path === "/purchase-invoices" || path.startsWith("/purchase-invoices/")) {
       setAppView("purchase-invoices");
+      return;
+    }
+    if (path === "/sales/customers" || path.startsWith("/sales/customers")) {
+      setAppView("sales-customers");
+      return;
+    }
+    if (path === "/sales/invoices" || path.startsWith("/sales/invoices")) {
+      setAppView("sales-invoices");
+      return;
+    }
+    if (path === "/sales/settings" || path.startsWith("/sales/settings")) {
+      setAppView("sales-settings");
       return;
     }
     const journalMatch = path.match(/^\/accounting\/journals\/(.+)$/);
@@ -1050,6 +1076,42 @@ const App: React.FC = () => {
         }
         return <EmployeeAttendance currentUser={currentUser!} />;
 
+      case "sales-invoices":
+        if (
+          currentUser!.role === "procurement" ||
+          currentUser!.role === "manager"
+        ) {
+          return <SalesInvoicesPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
+      case "sales-customer-payments":
+        if (
+          currentUser!.role === "procurement" ||
+          currentUser!.role === "manager"
+        ) {
+          return <SalesCustomerPaymentsPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
+      case "sales-settings":
+        if (
+          currentUser!.role === "procurement" ||
+          currentUser!.role === "manager"
+        ) {
+          return <SalesSettingsPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
+      case "sales-customers":
+        if (
+          currentUser!.role === "procurement" ||
+          currentUser!.role === "manager"
+        ) {
+          return <SalesCustomersPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
       case "purchase-invoices":
         if (
           currentUser!.role === "procurement" ||
@@ -1156,6 +1218,15 @@ const App: React.FC = () => {
           currentUser!.role === "manager"
         ) {
           return <CustomsClearanceManagement currentUser={currentUser!} />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
+      case "local-shipping":
+        if (
+          currentUser!.role === "procurement" ||
+          currentUser!.role === "manager"
+        ) {
+          return <LocalShippingPage />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
@@ -1302,6 +1373,18 @@ const App: React.FC = () => {
         }
         return <AccountingTrialBalancePage />;
 
+      case "accounting-vat-report":
+        if (currentUser!.role !== "manager") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <AccountingVatReportPage />;
+
+      case "accounting-landed-cost":
+        if (currentUser!.role !== "manager") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <AccountingLandedCostPage />;
+
       case "accounting-fiscal-periods":
         if (currentUser!.role !== "manager") {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
@@ -1319,6 +1402,12 @@ const App: React.FC = () => {
 
       case "stock-movements":
         return <StockMovementsPage />;
+
+      case "property-rental":
+        if (currentUser!.role === "manager" || currentUser!.role === "procurement") {
+          return <PropertyRentalPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "sql-products":
         if (currentUser!.role !== "manager" && currentUser!.role !== "procurement") {

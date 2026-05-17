@@ -13,7 +13,8 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR("No tenant found. Please create a tenant first."))
             return
 
-        self.stdout.write(f"Seeding professional COA for tenant: {tenant.Name}")
+        tenant_label = getattr(tenant, "CompanyName", None) or getattr(tenant, "Name", None) or f"#{tenant.pk}"
+        self.stdout.write(f"Seeding professional COA for tenant: {tenant_label}")
 
         # Define Schema: (Code, Name, Type, ParentCode)
         # Type is only needed for Root nodes or if it changes (usually inherited)
@@ -31,6 +32,8 @@ class Command(BaseCommand):
             ('1102', 'البنوك (Banks)', 'Asset', '11'),
             ('1103', 'المدينون التجاريون (Trade Receivables)', 'Asset', '11'),
             ('1104', 'المخزون (Inventory)', 'Asset', '11'),
+            ('1105', 'ضريبة القيمة المضافة - مدخلات (VAT Input)', 'Asset', '11'),
+            ('1106', 'دفعات مقدمة للموردين (Supplier Advances)', 'Asset', '11'),
             ('12', 'الأصول الثابتة (Fixed Assets)', 'Asset', '1'),
             ('1201', 'الأراضي (Land)', 'Asset', '12'),
             ('1202', 'المباني (Buildings)', 'Asset', '12'),
@@ -42,6 +45,8 @@ class Command(BaseCommand):
             ('2101', 'الدائنون التجاريون (Trade Payables)', 'Liability', '21'),
             ('2102', 'قروض قصيرة الأجل (Short-term Loans)', 'Liability', '21'),
             ('2103', 'مصاريف مستحقة (Accrued Expenses)', 'Liability', '21'),
+            ('2104', 'ضريبة القيمة المضافة - مخرجات (VAT Output)', 'Liability', '21'),
+            ('2105', 'رسوم جمركية مستحقة (Customs Duties Payable)', 'Liability', '21'),
             ('22', 'الالتزامات غير المتداولة (Non-current Liabilities)', 'Liability', '2'),
             ('2201', 'قروض طويلة الأجل (Long-term Loans)', 'Liability', '22'),
 
@@ -64,6 +69,15 @@ class Command(BaseCommand):
             ('5203', 'المرافق - كهرباء ومياه (Utilities)', 'Expense', '52'),
             ('5204', 'التسويق والإعلان (Marketing)', 'Expense', '52'),
             ('5205', 'مصاريف السفر (Travel Expenses)', 'Expense', '52'),
+            # Direct / Import-related expenses (for import/export ERP)
+            ('53', 'مصاريف الاستيراد المباشرة (Direct Import Expenses)', 'Expense', '5'),
+            ('5301', 'مصاريف الشحن الدولي (International Shipping)', 'Expense', '53'),
+            ('5302', 'مصاريف التخليص الجمركي (Customs Clearance Fees)', 'Expense', '53'),
+            ('5303', 'الرسوم الجمركية (Customs Duties)', 'Expense', '53'),
+            ('5304', 'مصاريف التأمين على الشحنات (Shipment Insurance)', 'Expense', '53'),
+            ('5305', 'مصاريف الشحن المحلي (Local Shipping & Delivery)', 'Expense', '53'),
+            ('5306', 'رسوم موانئ / تخزين (Port & Storage Fees)', 'Expense', '53'),
+            ('5307', 'رسوم استيراد متنوعة (Misc. Import Fees)', 'Expense', '53'),
         ]
 
         with transaction.atomic():

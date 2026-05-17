@@ -55,6 +55,17 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             qs = qs.filter(customer_id=cid)
         return qs.order_by("-invoice_date", "-id")
 
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        instance = serializer.instance
+        headers = self.get_success_headers(serializer.data)
+        data = serializer.data
+        if hasattr(instance, "_auto_post_error") and instance._auto_post_error:
+            data["auto_post_error"] = instance._auto_post_error
+        return Response(data, status=status.HTTP_201_CREATED, headers=headers)
+
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
         if tenant is None:
@@ -82,9 +93,9 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         if should_auto and invoice and invoice.status == SalesInvoice.STATUS_DRAFT:
             try:
                 post_sales_invoice(invoice, user=self.request.user)
-            except Exception:  # noqa: BLE001
-                # نتجاهل — الفاتورة تبقى مسودة والمستخدم يرى الخطأ عند محاولة الترحيل اليدوي
-                pass
+            except Exception as e:  # noqa: BLE001
+                # Store error on invoice for later inspection
+                invoice._auto_post_error = str(e)
 
     def perform_update(self, serializer):
         serializer.save()

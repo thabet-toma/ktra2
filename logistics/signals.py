@@ -2,10 +2,11 @@ import datetime
 import logging
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 
-from django.db import transaction
+from django.db import transaction, IntegrityError
 from django.db.models import Sum
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
+from django.core.exceptions import ValidationError as DjangoValidationError
 
 from .models import (
     LogisticsDeal,
@@ -95,6 +96,7 @@ def automate_expense_accounting(sender, instance, created, **kwargs):
         try:
             from decimal import Decimal
             from tenants.models import Currency
+            from accounting.services import get_exchange_rate
 
             expense_currency = getattr(instance, 'currency', None)
             base_currency = Currency.objects.filter(IsBaseCurrency=True).first()
@@ -104,11 +106,19 @@ def automate_expense_accounting(sender, instance, created, **kwargs):
             )
 
             if is_foreign:
-                rate = Decimal('1')
-                local_amount = instance.amount
+                rate = get_exchange_rate(
+                    tenant_id=instance.tenant_id,
+                    from_currency_id=expense_currency.pk,
+                    to_currency_id=base_currency.pk,
+                    effective_date=instance.invoice_date or datetime.date.today(),
+                )
             else:
                 rate = Decimal('1')
-                local_amount = instance.amount
+
+            # الأسطر بعملة المعاملة؛ JournalLine.save يشتقّ المبلغ بالعملة
+            # الأساسية = amount × exchange_rate من الـ header (لا تحوّل هنا
+            # وإلا يُطبَّق سعر الصرف مرتين).
+            txn_amount = Decimal(str(instance.amount or 0))
 
             with transaction.atomic():
                 journal = JournalHeader.objects.create(
@@ -126,7 +136,7 @@ def automate_expense_accounting(sender, instance, created, **kwargs):
                     tenant=instance.tenant,
                     journal=journal,
                     account=instance.expense_account,
-                    debit=local_amount,
+                    debit=txn_amount,
                     credit=0,
                 )
 
@@ -135,11 +145,11 @@ def automate_expense_accounting(sender, instance, created, **kwargs):
                     journal=journal,
                     account=instance.payable_account,
                     debit=0,
-                    credit=local_amount,
+                    credit=txn_amount,
                 )
 
                 LogisticsExpense.objects.filter(id=instance.id).update(is_posted=True, journal=journal)
-        except Exception as e:
+        except (DjangoValidationError, IntegrityError) as e:
             logger.error("Error automating LogisticsExpense %s: %s", instance.id, e)
 
 

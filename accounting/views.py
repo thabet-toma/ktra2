@@ -3,11 +3,12 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction as db_transaction
+from django.db import IntegrityError, transaction as db_transaction
 from django.db.models import Q
 from rest_framework import serializers as drf_serializers, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from core.api_defaults import ApiAuthAndUser
 from partners.models import Partner
@@ -47,8 +48,13 @@ logger = logging.getLogger(__name__)
 class AccountViewSet(viewsets.ModelViewSet):
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
-    queryset = Account.objects.all()
     serializer_class = AccountSerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if tenant:
+            return Account.objects.filter(tenant=tenant)
+        return Account.objects.none()
 
     def _get_tenant_context(self):
         from tenants.models import Tenant
@@ -119,7 +125,9 @@ class JournalViewSet(viewsets.ModelViewSet):
         return JournalHeaderSerializer
 
     def get_queryset(self):
-        qs = JournalHeader.objects.all().order_by("-transaction_date", "-id")
+        tenant = get_tenant(self.request)
+        qs = JournalHeader.objects.all() if tenant is None else JournalHeader.objects.filter(tenant=tenant)
+        qs = qs.order_by("-transaction_date", "-id")
         params = getattr(self.request, "query_params", {})
         rt = (params.get("reference_type") or "").strip()
         if rt:
@@ -190,9 +198,12 @@ class JournalViewSet(viewsets.ModelViewSet):
             post_journal_entry(pk, user=request.user)
             logger.info("Journal %s posted by user %s", pk, request.user.pk)
             return Response({'status': 'Journal posted successfully'})
+        except (ValidationError, DjangoValidationError) as ve:
+            msg = ve.message if hasattr(ve, 'message') else str(ve)
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
-            logger.warning("Journal post failed id=%s: %s", pk, e)
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            logger.exception("Journal post failed id=%s", pk)
+            return Response({'error': 'حدث خطأ غير متوقع أثناء ترحيل القيد.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['post'], url_path='reverse')
     def reverse_entry(self, request, pk=None):
@@ -203,6 +214,13 @@ class JournalViewSet(viewsets.ModelViewSet):
         if not orig.is_posted:
             return Response(
                 {'error': 'لا يمكن عكس قيد غير مرحّل أو بلا أسطر مرحّلة.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Idempotency: reject if already reversed
+        if JournalHeader.objects.filter(reference_type='JOURNAL_REVERSAL', reference_id=orig.id).exists():
+            return Response(
+                {'error': 'تم عكس هذا القيد مسبقاً.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         raw_date = request.data.get('transaction_date')
@@ -256,9 +274,12 @@ class JournalViewSet(viewsets.ModelViewSet):
                 },
                 status=status.HTTP_201_CREATED,
             )
-        except Exception as e:
-            logger.exception("journal reverse failed")
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValidationError, DjangoValidationError, IntegrityError) as e:
+            msg = e.message if hasattr(e, 'message') else str(e)
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("journal reverse failed id=%s", pk)
+            return Response({'error': 'حدث خطأ غير متوقع أثناء عكس القيد.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def update(self, request, *args, **kwargs):
         tenant_obj, tenant_id = self._get_tenant_context()
@@ -294,17 +315,32 @@ class JournalViewSet(viewsets.ModelViewSet):
             
             response_serializer = JournalHeaderSerializer(header)
             return Response(response_serializer.data)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except IntegrityError as ie:
+            return Response({'error': f"Database Integrity Error: {ie}"}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValidationError, DjangoValidationError) as ve:
+            msg = ve.message if hasattr(ve, 'message') else str(ve)
+            return Response({'error': f"Validation Error: {msg}"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Unexpected error updating journal %s", instance.pk)
+            return Response(
+                {'error': 'حدث خطأ غير متوقع أثناء تحديث القيد.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
     def create(self, request, *args, **kwargs):
         tenant_obj, tenant_id = self._get_tenant_context()
         data = request.data
-        
+
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
-        
-        from django.db import IntegrityError
+
+        lines_data = data.get("lines", [])
+
+        # Validate BEFORE save — use a mock header with the correct tenant/date
+        mock_hdr = JournalHeader()
+        mock_hdr.tenant_id = tenant_obj.TenantID if tenant_obj else tenant_id
+        mock_hdr.transaction_date = data.get("transaction_date")
+        validate_journal_entry(mock_hdr, lines_data)
 
         try:
             with db_transaction.atomic():
@@ -312,10 +348,6 @@ class JournalViewSet(viewsets.ModelViewSet):
                     header = serializer.save(tenant=tenant_obj)
                 else:
                     header = serializer.save(tenant_id=tenant_id)
-                
-                # Validation logic (double-entry check, etc.)
-                lines_data = data.get('lines', [])
-                validate_journal_entry(header, lines_data)
             
             header.refresh_from_db()
             
@@ -338,8 +370,12 @@ class JournalViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as dve:
             msg = dve.message if hasattr(dve, 'message') else str(dve)
             return Response({'error': f"Validation Error (Logic): {msg}"}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({'error': f"Operation Failed: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("Unexpected error creating journal entry")
+            return Response(
+                {'error': 'حدث خطأ غير متوقع أثناء إنشاء القيد.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class GeneralLedgerView(viewsets.ViewSet):
@@ -358,28 +394,34 @@ class GeneralLedgerView(viewsets.ViewSet):
         if not all([account_id, start_date, end_date]):
             return Response({'error': 'Missing required parameters: account_id, start_date, end_date'}, status=status.HTTP_400_BAD_REQUEST)
 
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'لا يوجد مستأجر.'}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
-            account = Account.objects.get(pk=account_id)
+            account = Account.objects.get(pk=account_id, tenant=tenant)
         except Account.DoesNotExist:
             return Response({'error': 'Account not found'}, status=status.HTTP_404_NOT_FOUND)
 
         # Helper to get all sub-accounts (recursive + code based)
-        def get_all_child_accounts(acc):
-            # 1. Parent-Child Relationship
-            children = Account.objects.filter(parent=acc)
-            acc_list = {acc.id: acc} # Use dict to avoid duplicates
+        def get_all_child_accounts(acc, visited=None):
+            if visited is None:
+                visited = set()
+            if acc.id in visited:
+                return [acc]
+            visited.add(acc.id)
+            acc_list = {acc.id: acc}
+            children = Account.objects.filter(parent=acc, tenant=tenant)
             for child in children:
-                sub_children = get_all_child_accounts(child)
+                sub_children = get_all_child_accounts(child, visited)
                 for sub in sub_children:
                     acc_list[sub.id] = sub
-            
-            # 2. Code-based Relationship (Fallback for Al-Aseel style)
-            # If Assets is '1', find all '1%'
             if acc.code:
-                 code_children = Account.objects.filter(code__startswith=acc.code).exclude(id__in=acc_list.keys())
-                 for child in code_children:
-                     acc_list[child.id] = child
-
+                code_children = Account.objects.filter(
+                    tenant=tenant, code__startswith=acc.code,
+                ).exclude(id__in=acc_list.keys())
+                for child in code_children:
+                    acc_list[child.id] = child
             return list(acc_list.values())
 
         target_accounts = get_all_child_accounts(account)
@@ -387,14 +429,16 @@ class GeneralLedgerView(viewsets.ViewSet):
         # 1. Calculate Opening Balance
         # Sum of (Debit - Credit) for all Posted entries before start_date
         from django.db.models import Sum, F, Q
-        
+
+        tenant = get_tenant(request)
         opening_data = JournalLine.objects.filter(
             account__in=target_accounts,
             journal__is_posted=True,
-            journal__transaction_date__lt=start_date
+            journal__transaction_date__lt=start_date,
+            **({"tenant": tenant} if tenant else {}),
         ).aggregate(
-            total_debit=Sum('debit'),
-            total_credit=Sum('credit')
+            total_debit=Sum('base_debit'),
+            total_credit=Sum('base_credit')
         )
 
         op_debit = opening_data['total_debit'] or 0
@@ -403,12 +447,14 @@ class GeneralLedgerView(viewsets.ViewSet):
 
         # 2. Fetch Transactions within range
         include_unposted = request.query_params.get('include_unposted') == 'true'
-        
+
         query_filters = {
             'account__in': target_accounts,
-            'journal__transaction_date__range': [start_date, end_date]
+            'journal__transaction_date__range': [start_date, end_date],
         }
-        
+        if tenant:
+            query_filters['tenant'] = tenant
+
         if not include_unposted:
             query_filters['journal__is_posted'] = True
 
@@ -423,10 +469,11 @@ class GeneralLedgerView(viewsets.ViewSet):
         # If we want a "signed" balance where Dr is positive:
         
         for line in transactions:
-            line_debit = line.debit or 0
-            line_credit = line.credit or 0
+            # Use base currency amounts for the running balance
+            base_dr = line.base_debit or 0
+            base_cr = line.base_credit or 0
             
-            current_balance += (line_debit - line_credit)
+            current_balance += (base_dr - base_cr)
             
             results.append({
                 'id': line.id,
@@ -435,8 +482,12 @@ class GeneralLedgerView(viewsets.ViewSet):
                 'description': line.journal.description or line.account.name, # Fallback
                 'ref_type': line.journal.reference_type,
                 'ref_id': line.journal.reference_id,
-                'debit': line_debit,
-                'credit': line_credit,
+                'debit': base_dr,
+                'credit': base_cr,
+                'original_debit': line.debit or 0,
+                'original_credit': line.credit or 0,
+                'currency': line.journal.currency.Code if line.journal.currency_id else None,
+                'exchange_rate': float(line.journal.exchange_rate or 1),
                 'balance': current_balance
             })
 
@@ -449,6 +500,29 @@ class GeneralLedgerView(viewsets.ViewSet):
         })
 
 class TrialBalanceView(viewsets.ViewSet):
+    """ميزان مراجعة كامل: افتتاحي + حركة الفترة + ختامي لكل حساب.
+
+    المعاملات:
+      - start_date, end_date (YYYY-MM-DD) — اختيارية؛ افتراض: السنة الحالية.
+      - include_unposted (bool) — تضمين قيود غير مرحّلة (افتراض: false).
+      - show_all (bool) — إظهار حسابات بدون حركة (افتراض: true).
+
+    الاستجابة:
+      {
+        "start_date": "...", "end_date": "...",
+        "rows": [{id, code, name, account_type,
+                   opening_debit, opening_credit, opening_balance,
+                   period_debit, period_credit,
+                   closing_debit, closing_credit, closing_balance}],
+        "totals": {period_debit, period_credit,
+                   closing_debit, closing_credit,
+                   balanced: bool, difference}
+      }
+
+    ملاحظة: الرصيد الختامي = الرصيد الافتتاحي + حركة الفترة. يُعرض في عمودين
+    (مدين/دائن) بحسب الطبيعة — الموجب للمدينية والسالب للدائنية.
+    """
+
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
 
@@ -456,69 +530,275 @@ class TrialBalanceView(viewsets.ViewSet):
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
         include_unposted = request.query_params.get('include_unposted') == 'true'
+        show_all = request.query_params.get('show_all', 'true') == 'true'
 
         if not all([start_date, end_date]):
-            import datetime
             today = datetime.date.today()
             start_date = f"{today.year}-01-01"
             end_date = f"{today.year}-12-31"
 
         from django.db.models import Sum
-        
-        filters = {
-            'journal__transaction_date__range': [start_date, end_date]
-        }
-        if not include_unposted:
-            filters['journal__is_posted'] = True
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'لا يوجد مستأجر.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            from django.db.models import Value, DecimalField as DjDecimal
-            from django.db.models.functions import Coalesce
+            # --- 1) الرصيد الافتتاحي = مجموع الحركات قبل start_date
+            opening_filters = {
+                'tenant': tenant,
+                'journal__transaction_date__lt': start_date,
+            }
+            if not include_unposted:
+                opening_filters['journal__is_posted'] = True
 
-            tenant = get_tenant(request)
-            report_data = []
-
-            activity = {}
-            qs = JournalLine.objects.filter(**filters).values(
-                'account_id'
-            ).annotate(
-                total_debit=Sum('debit'),
-                total_credit=Sum('credit')
+            opening_qs = (
+                JournalLine.objects
+                .filter(**opening_filters)
+                .values('account_id')
+                .annotate(dr=Sum('base_debit'), cr=Sum('base_credit'))
             )
-            for entry in qs:
-                activity[entry['account_id']] = {
-                    'dr': float(entry['total_debit'] or 0),
-                    'cr': float(entry['total_credit'] or 0),
-                }
+            opening = {
+                r['account_id']: (
+                    float(r['dr'] or 0),
+                    float(r['cr'] or 0),
+                )
+                for r in opening_qs
+            }
 
-            all_accounts = Account.objects.filter(
-                tenant=tenant, is_active=True
-            ).order_by('code')
+            # --- 2) حركة الفترة
+            period_filters = {
+                'tenant': tenant,
+                'journal__transaction_date__range': [start_date, end_date],
+            }
+            if not include_unposted:
+                period_filters['journal__is_posted'] = True
 
-            show_all = request.query_params.get('show_all', 'true') == 'true'
+            period_qs = (
+                JournalLine.objects
+                .filter(**period_filters)
+                .values('account_id')
+                .annotate(dr=Sum('base_debit'), cr=Sum('base_credit'))
+            )
+            period = {
+                r['account_id']: (
+                    float(r['dr'] or 0),
+                    float(r['cr'] or 0),
+                )
+                for r in period_qs
+            }
 
-            for acct in all_accounts:
-                data = activity.get(acct.id, {'dr': 0, 'cr': 0})
-                dr = round(data['dr'], 2)
-                cr = round(data['cr'], 2)
-                balance = round(dr - cr, 2)
+            # --- 3) دمج مع كل الحسابات
+            accounts = (
+                Account.objects
+                .filter(tenant=tenant, is_active=True)
+                .order_by('code')
+            )
 
-                if not show_all and dr == 0 and cr == 0:
+            rows = []
+            tot_pd = 0.0
+            tot_pc = 0.0
+            tot_cd = 0.0
+            tot_cc = 0.0
+
+            for a in accounts:
+                op_dr, op_cr = opening.get(a.id, (0.0, 0.0))
+                pd, pc = period.get(a.id, (0.0, 0.0))
+
+                opening_balance = round(op_dr - op_cr, 2)
+                period_debit = round(pd, 2)
+                period_credit = round(pc, 2)
+                closing_net = round(opening_balance + period_debit - period_credit, 2)
+
+                # اعرض فقط العمود المناسب للطبيعة
+                opening_debit = opening_balance if opening_balance >= 0 else 0.0
+                opening_credit = -opening_balance if opening_balance < 0 else 0.0
+                closing_debit = closing_net if closing_net >= 0 else 0.0
+                closing_credit = -closing_net if closing_net < 0 else 0.0
+
+                has_activity = bool(op_dr or op_cr or pd or pc)
+                if not show_all and not has_activity:
                     continue
 
-                report_data.append({
-                    'id': acct.id,
-                    'code': acct.code,
-                    'name': acct.name,
-                    'total_debit': dr,
-                    'total_credit': cr,
-                    'balance': balance,
+                rows.append({
+                    'id': a.id,
+                    'code': a.code,
+                    'name': a.name,
+                    'account_type': a.account_type,
+                    'opening_debit': round(opening_debit, 2),
+                    'opening_credit': round(opening_credit, 2),
+                    'opening_balance': opening_balance,
+                    'period_debit': period_debit,
+                    'period_credit': period_credit,
+                    'closing_debit': round(closing_debit, 2),
+                    'closing_credit': round(closing_credit, 2),
+                    'closing_balance': closing_net,
                 })
 
-            return Response(report_data)
+                tot_pd += period_debit
+                tot_pc += period_credit
+                tot_cd += closing_debit
+                tot_cc += closing_credit
+
+            tot_pd = round(tot_pd, 2)
+            tot_pc = round(tot_pc, 2)
+            tot_cd = round(tot_cd, 2)
+            tot_cc = round(tot_cc, 2)
+
+            totals = {
+                'period_debit': tot_pd,
+                'period_credit': tot_pc,
+                'closing_debit': tot_cd,
+                'closing_credit': tot_cc,
+                'balanced': abs(tot_pd - tot_pc) < 0.02 and abs(tot_cd - tot_cc) < 0.02,
+                'period_difference': round(tot_pd - tot_pc, 2),
+                'closing_difference': round(tot_cd - tot_cc, 2),
+            }
+
+            return Response({
+                'start_date': start_date,
+                'end_date': end_date,
+                'rows': rows,
+                'totals': totals,
+            })
         except Exception as e:
             logger.exception("trial-balance report failed")
             return Response({'error': str(e)}, status=500)
+
+
+class VatReportView(viewsets.ViewSet):
+    """تقرير ضريبة القيمة المضافة: مدخلات مقابل مخرجات مع الصافي المستحق.
+
+    يبحث عن حسابات ضريبة:
+      - Input (مدخلات): code=1105 أو account_type=Asset واسم يحتوي "ضريبة"
+      - Output (مخرجات): code=2104 أو account_type=Liability واسم يحتوي "ضريبة"
+
+    ويجمع حركات JournalLine داخل الفترة لكل نوع.
+
+    الاستجابة:
+      {
+        "start_date", "end_date",
+        "input": {account_id, code, name, total_debit, total_credit, balance, lines_count},
+        "output": {...},
+        "net_payable": output_balance - input_balance,   // موجب = مستحق للحكومة
+        "input_lines": [{date, journal_id, description, debit, credit, partner}],
+        "output_lines": [...]
+      }
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    def list(self, request):
+        from django.db.models import Sum, Q as QQ
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'لا يوجد مستأجر.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        include_unposted = request.query_params.get('include_unposted') == 'true'
+        if not all([start_date, end_date]):
+            today = datetime.date.today()
+            start_date = f"{today.year}-01-01"
+            end_date = f"{today.year}-12-31"
+
+        def _find_accounts(code, acc_type, name_contains):
+            q = Account.objects.filter(tenant=tenant, is_active=True)
+            # 1) أولوية للكود
+            by_code = q.filter(code=code)
+            if by_code.exists():
+                return list(by_code)
+            # 2) fallback بالنوع والاسم
+            return list(q.filter(account_type=acc_type).filter(
+                QQ(name__icontains=name_contains) | QQ(name__icontains='VAT')
+            ))
+
+        input_accounts = _find_accounts('1105', 'Asset', 'ضريبة')
+        output_accounts = _find_accounts('2104', 'Liability', 'ضريبة')
+
+        line_filters = {
+            'tenant': tenant,
+            'journal__transaction_date__range': [start_date, end_date],
+        }
+        if not include_unposted:
+            line_filters['journal__is_posted'] = True
+
+        def _summarize(accounts):
+            if not accounts:
+                return {
+                    'accounts': [],
+                    'total_debit': 0.0,
+                    'total_credit': 0.0,
+                    'balance': 0.0,
+                    'lines_count': 0,
+                }
+            ids = [a.id for a in accounts]
+            agg = (
+                JournalLine.objects
+                .filter(account_id__in=ids, **line_filters)
+                .aggregate(dr=Sum('base_debit'), cr=Sum('base_credit'))
+            )
+            dr = float(agg['dr'] or 0)
+            cr = float(agg['cr'] or 0)
+            return {
+                'accounts': [
+                    {'id': a.id, 'code': a.code, 'name': a.name, 'type': a.account_type}
+                    for a in accounts
+                ],
+                'total_debit': round(dr, 2),
+                'total_credit': round(cr, 2),
+                'balance': round(dr - cr, 2),
+            }
+
+        def _lines(accounts):
+            if not accounts:
+                return []
+            ids = [a.id for a in accounts]
+            rows = (
+                JournalLine.objects
+                .filter(account_id__in=ids, **line_filters)
+                .select_related('journal', 'partner', 'account')
+                .order_by('journal__transaction_date', 'journal_id', 'id')
+            )
+            out = []
+            for r in rows:
+                out.append({
+                    'date': r.journal.transaction_date.isoformat() if r.journal and r.journal.transaction_date else None,
+                    'journal_id': r.journal_id,
+                    'reference_type': getattr(r.journal, 'reference_type', None),
+                    'reference_id': getattr(r.journal, 'reference_id', None),
+                    'account_code': r.account.code if r.account else None,
+                    'description': r.description or (getattr(r.journal, 'description', '') or ''),
+                    'debit': float(r.base_debit or 0),
+                    'credit': float(r.base_credit or 0),
+                    'partner': r.partner.name if r.partner else None,
+                })
+            return out
+
+        input_summary = _summarize(input_accounts)
+        output_summary = _summarize(output_accounts)
+
+        # Input VAT: طبيعتها مدينة — الرصيد = Debit - Credit (موجب)
+        # Output VAT: طبيعتها دائنة — الرصيد المستحق للدولة = Credit - Debit
+        input_balance = input_summary['balance']
+        output_balance_payable = round(-output_summary['balance'], 2)
+        # net = output المستحق - input (لأن المدخلات تُطرح من المخرجات)
+        net_payable = round(output_balance_payable - input_balance, 2)
+
+        return Response({
+            'start_date': start_date,
+            'end_date': end_date,
+            'input': input_summary,
+            'output': {
+                **output_summary,
+                'balance_payable': output_balance_payable,
+            },
+            'net_payable': net_payable,
+            'input_lines': _lines(input_accounts),
+            'output_lines': _lines(output_accounts),
+        })
 
 
 class CashBoxLedgerViewSet(viewsets.ModelViewSet):
@@ -584,9 +864,11 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
                     currency_code=currency,
                     account=acc,
                 )
-        except Exception as e:
+        except IntegrityError as ie:
+            return Response({"error": f"Database Integrity Error: {ie}"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
             logger.exception("cash box ledger create failed")
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "حدث خطأ غير متوقع أثناء إنشاء حساب الصندوق."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         create_audit_log(
             tenant=tenant,
@@ -662,6 +944,13 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
         line_cash = f"إيداع نقد — {cash_link.name}"
         line_cap = f"مساهمة / رأس مال — {desc}"[:500]
 
+        # Validate fiscal period before posting
+        try:
+            validate_fiscal_period(tenant.TenantID, td)
+        except DjangoValidationError as ve:
+            msg = ve.message if hasattr(ve, "message") else str(ve)
+            return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             with db_transaction.atomic():
                 j = JournalHeader.objects.create(
@@ -692,9 +981,11 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as ve:
             msg = ve.message if hasattr(ve, "message") else str(ve)
             return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
+        except IntegrityError as ie:
+            return Response({"error": f"Database Integrity Error: {ie}"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
             logger.exception("cash box deposit journal failed")
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "حدث خطأ غير متوقع أثناء إنشاء قيد الإيداع."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         create_audit_log(
             tenant=tenant,
@@ -709,7 +1000,20 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
 
 class PurchaseReceiptViewSet(viewsets.ViewSet):
     """
-    قيد استلام المخزون عند الفاتورة: مدين مخزون | دائن حساب المورد (ذمم).
+    قيد استلام البضاعة (نسخة بسيطة من ترحيل فاتورة شراء):
+        مدين: مخزون (1104)           = amount - tax_amount
+        مدين: ضريبة مدخلات (1105)   = tax_amount (اختياري)
+        دائن: ذمم المورد             = amount
+
+    جسم الطلب:
+        {
+            "partner_id": 123,
+            "amount": 1000,                # إجمالي (يشمل الضريبة إن وُجدت)
+            "tax_amount": 160,             # اختياري — ضريبة مدخلات (≥ 0)
+            "description": "...",
+            "invoice_reference": 45,       # اختياري
+            "transaction_date": "2026-04-19"
+        }
     """
 
     authentication_classes = ApiAuthAndUser["authentication_classes"]
@@ -729,8 +1033,17 @@ class PurchaseReceiptViewSet(viewsets.ViewSet):
         except (InvalidOperation, TypeError, ValueError):
             return Response({"error": "amount غير صالح"}, status=status.HTTP_400_BAD_REQUEST)
 
+        try:
+            tax_amount = Decimal(str(request.data.get("tax_amount") or 0))
+        except (InvalidOperation, TypeError, ValueError):
+            return Response({"error": "tax_amount غير صالح"}, status=status.HTTP_400_BAD_REQUEST)
+
         if amount <= 0:
             return Response({"error": "المبلغ يجب أن يكون موجباً"}, status=status.HTTP_400_BAD_REQUEST)
+        if tax_amount < 0:
+            return Response({"error": "ضريبة المدخلات لا يمكن أن تكون سالبة"}, status=status.HTTP_400_BAD_REQUEST)
+        if tax_amount > amount:
+            return Response({"error": "ضريبة المدخلات أكبر من الإجمالي"}, status=status.HTTP_400_BAD_REQUEST)
 
         description = (request.data.get("description") or "").strip() or "استلام بضاعة / مخزون"
         invoice_ref = request.data.get("invoice_reference")
@@ -746,17 +1059,37 @@ class PurchaseReceiptViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        purchase_account = (
-            Account.objects.filter(tenant=tenant, code__startswith="12").first()
-            or Account.objects.filter(tenant=tenant, code__startswith="5").first()
-            or Account.objects.filter(tenant=tenant, account_type="Asset", name__icontains="مخزون").first()
-            or Account.objects.filter(tenant=tenant, account_type="Asset").order_by("code").first()
+        # حساب المخزون — أولوية 1104 ثم مخزون بالاسم ثم مشتريات
+        inventory_account = (
+            Account.objects.filter(tenant=tenant, code="1104").first()
+            or Account.objects.filter(
+                tenant=tenant, account_type="Asset", name__icontains="مخزون",
+            ).first()
+            or Account.objects.filter(
+                tenant=tenant, account_type="Expense", name__icontains="مشتريات",
+            ).first()
         )
-        if not purchase_account:
+        if not inventory_account:
             return Response(
-                {"error": "لم يُعثر على حساب مخزون/مشتريات"},
+                {"error": "لم يُعثر على حساب المخزون (1104). شغّل seed_professional_coa أولاً."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # حساب ضريبة المدخلات — مطلوب إن كانت الضريبة > 0
+        vat_input_account = None
+        if tax_amount > 0:
+            vat_input_account = (
+                Account.objects.filter(tenant=tenant, code="1105").first()
+                or Account.objects.filter(
+                    tenant=tenant, account_type="Asset",
+                    name__icontains="ضريبة",
+                ).first()
+            )
+            if not vat_input_account or vat_input_account.account_type != 'Asset':
+                return Response(
+                    {"error": "ضريبة المدخلات > 0 تتطلب حساب '1105 VAT Input' من نوع Asset."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
         raw_td = request.data.get("transaction_date")
         if raw_td:
@@ -772,6 +1105,41 @@ class PurchaseReceiptViewSet(viewsets.ViewSet):
         if invoice_ref is not None and str(invoice_ref).strip().isdigit():
             ref_id = int(str(invoice_ref).strip())
 
+        net_amount = amount - tax_amount
+        lines_payload = [
+            {
+                'account': inventory_account.id,
+                'debit': net_amount,
+                'credit': Decimal('0'),
+                'partner': partner.id,
+            },
+        ]
+        if tax_amount > 0:
+            lines_payload.append({
+                'account': vat_input_account.id,
+                'debit': tax_amount,
+                'credit': Decimal('0'),
+                'partner': partner.id,
+            })
+        lines_payload.append({
+            'account': partner.linked_account.id,
+            'debit': Decimal('0'),
+            'credit': amount,
+            'partner': partner.id,
+        })
+
+        # تحقق توازن القيد قبل الحفظ + فترة مالية
+        try:
+            from accounting.services import validate_journal_entry
+            mock_header = JournalHeader(tenant=tenant, transaction_date=td)
+            validate_fiscal_period(tenant.TenantID, td)
+            validate_journal_entry(mock_header, lines_payload)
+        except DjangoValidationError as ve:
+            msg = ve.message if hasattr(ve, "message") else str(ve)
+            return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": f"قيد غير متوازن: {e}"}, status=status.HTTP_400_BAD_REQUEST)
+
         try:
             with db_transaction.atomic():
                 j = JournalHeader.objects.create(
@@ -783,24 +1151,29 @@ class PurchaseReceiptViewSet(viewsets.ViewSet):
                     is_posted=True,
                 )
                 JournalLine.objects.create(
-                    tenant=tenant,
-                    journal=j,
-                    account=purchase_account,
-                    debit=amount,
-                    credit=0,
+                    tenant=tenant, journal=j,
+                    account=inventory_account,
+                    debit=net_amount, credit=0,
                     partner=partner,
                 )
+                if tax_amount > 0 and vat_input_account:
+                    JournalLine.objects.create(
+                        tenant=tenant, journal=j,
+                        account=vat_input_account,
+                        debit=tax_amount, credit=0,
+                        partner=partner,
+                    )
                 JournalLine.objects.create(
-                    tenant=tenant,
-                    journal=j,
+                    tenant=tenant, journal=j,
                     account=partner.linked_account,
-                    debit=0,
-                    credit=amount,
+                    debit=0, credit=amount,
                     partner=partner,
                 )
-        except Exception as e:
+        except IntegrityError as ie:
+            return Response({"error": f"Database Integrity Error: {ie}"}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
             logger.exception("purchase receipt post failed")
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "حدث خطأ غير متوقع أثناء إنشاء قيد الاستلام."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         create_audit_log(
             tenant=tenant,
@@ -808,9 +1181,9 @@ class PurchaseReceiptViewSet(viewsets.ViewSet):
             action="CREATE",
             model_name="JournalHeader",
             object_id=j.id,
-            change_details=f"Purchase receipt partner={partner_id} amount={amount}",
+            change_details=f"Purchase receipt partner={partner_id} amount={amount} tax={tax_amount}",
         )
-        return Response({"journal_id": j.id}, status=status.HTTP_201_CREATED)
+        return Response({"journal_id": j.id, "net_amount": str(net_amount), "tax_amount": str(tax_amount)}, status=status.HTTP_201_CREATED)
 
 
 class ExchangeRateViewSet(viewsets.ModelViewSet):
@@ -853,12 +1226,15 @@ class ExchangeRateViewSet(viewsets.ModelViewSet):
                 {'error': 'from_currency, to_currency, date مطلوبة'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        tenant = get_tenant(request)
         rate_obj = (
             ExchangeRate.objects
             .filter(from_currency_id=fc, to_currency_id=tc, effective_date__lte=date)
-            .order_by('-effective_date')
-            .first()
-        )
+            if tenant is None
+            else ExchangeRate.objects.filter(
+                tenant=tenant, from_currency_id=fc, to_currency_id=tc, effective_date__lte=date,
+            )
+        ).order_by('-effective_date').first()
         if not rate_obj:
             return Response(
                 {'error': 'لا يوجد سعر صرف لهذا الزوج في هذا التاريخ أو قبله'},
@@ -900,10 +1276,28 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
         period = self.get_object()
         if period.is_closed:
             return Response({'error': 'الفترة مغلقة مسبقاً'}, status=status.HTTP_400_BAD_REQUEST)
+        # Warn about unposted journals in this period
+        unposted_count = JournalHeader.objects.filter(
+            tenant=period.tenant,
+            transaction_date__gte=period.start_date,
+            transaction_date__lte=period.end_date,
+            is_posted=False,
+        ).count()
         period.status = 'Closed'
         period.is_closed = True
         period.save(update_fields=['status', 'is_closed'])
-        return Response(FiscalPeriodSerializer(period).data)
+        create_audit_log(
+            tenant=period.tenant,
+            user=request.user,
+            action='POST',
+            model_name='FiscalPeriod',
+            object_id=period.id,
+            change_details=f"Period {period.name} closed (unposted journals: {unposted_count})",
+        )
+        resp = FiscalPeriodSerializer(period).data
+        if unposted_count > 0:
+            resp['warning'] = f"يوجد {unposted_count} قيد غير مرحّل في هذه الفترة."
+        return Response(resp)
 
     @action(detail=True, methods=['post'], url_path='reopen')
     def reopen_period(self, request, pk=None):
@@ -913,14 +1307,29 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
         period.status = 'Open'
         period.is_closed = False
         period.save(update_fields=['status', 'is_closed'])
+        create_audit_log(
+            tenant=period.tenant,
+            user=request.user,
+            action='UPDATE',
+            model_name='FiscalPeriod',
+            object_id=period.id,
+            change_details=f"Period {period.name} reopened",
+        )
         return Response(FiscalPeriodSerializer(period).data)
 
 
 class TaxRateViewSet(viewsets.ModelViewSet):
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
-    queryset = TaxRate.objects.all().select_related('tax_account')
+    queryset = TaxRate.objects.all().select_related("tax_account")
     serializer_class = TaxRateSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset().filter(is_active=True)
+        tenant = get_tenant(self.request)
+        if tenant:
+            qs = qs.filter(tenant_id=tenant.TenantID)
+        return qs.order_by("code", "id")
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
@@ -931,8 +1340,9 @@ class TaxRateViewSet(viewsets.ModelViewSet):
 
 
 class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):
+    """قراءة فقط — قائمة العملات للقوائم المنسدلة؛ لا تحتوي على أسرار."""
     authentication_classes = ApiAuthAndUser["authentication_classes"]
-    permission_classes = ApiAuthAndUser["permission_classes"]
+    permission_classes = [AllowAny]
     queryset = Currency.objects.all().order_by('-IsBaseCurrency', 'Code')
 
     class CurrencySerializer(drf_serializers.ModelSerializer):

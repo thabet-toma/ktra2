@@ -298,6 +298,23 @@ def clearance_payment_amount_ils(
     code = (getattr(cur, 'Code', None) or '').upper() if cur else ''
     if code == 'USD':
         return (amt * usd_to_ils).quantize(Q2, rounding=ROUND_HALF_UP)
+    if code == 'ILS':
+        return amt.quantize(Q2, rounding=ROUND_HALF_UP)
+    # For other currencies, try to find an exchange rate; fallback 1:1 with warning
+    try:
+        from accounting.models import ExchangeRate
+        ils_cur = get_ils_currency()
+        if ils_cur and cur:
+            er = (
+                ExchangeRate.objects
+                .filter(from_currency=cur, to_currency=ils_cur)
+                .order_by('-effective_date')
+                .first()
+            )
+            if er:
+                return (amt * Decimal(str(er.rate))).quantize(Q2, rounding=ROUND_HALF_UP)
+    except Exception:
+        pass
     return amt.quantize(Q2, rounding=ROUND_HALF_UP)
 
 
@@ -468,17 +485,33 @@ def compute_deal_invoice_lines(
     if deal_tot_usd > 0:
         internal_ils = (deal_val_ils * (internal_usd / deal_tot_usd)).quantize(Q2, rounding=ROUND_HALF_UP)
     else:
-        internal_ils = (internal_usd * Decimal('3.6')).quantize(Q2, rounding=ROUND_HALF_UP)  # fallback
+        # Try real USD→ILS rate; fallback 3.6 only if unavailable
+        try:
+            from tenants.models import Currency
+            usd_cur = Currency.objects.filter(Code__iexact='USD').first()
+            ils_cur = get_ils_currency()
+            if usd_cur and ils_cur:
+                er = (
+                    ExchangeRate.objects
+                    .filter(tenant_id=deal.tenant_id, from_currency=usd_cur, to_currency=ils_cur)
+                    .order_by('-effective_date')
+                    .first()
+                )
+                rate = Decimal(str(er.rate)) if er else Decimal('3.6')
+            else:
+                rate = Decimal('3.6')
+        except Exception:
+            rate = Decimal('3.6')
+        internal_ils = (internal_usd * rate).quantize(Q2, rounding=ROUND_HALF_UP)
 
     weights: List[Decimal] = []
     for it in items:
         line_usd = (it.quantity * it.unit_price).quantize(Q4, rounding=ROUND_HALF_UP)
         weights.append(line_usd if line_usd > 0 else Decimal('0'))
 
+    # Use deal_val_ils directly — do NOT rescale by weight/total ratio
+    # (deal.total_amount may include tax/shipping/discount not in item prices)
     merch_pool = deal_val_ils
-    if deal_tot_usd > 0 and sum(weights, Decimal('0')) > 0:
-        wsum = sum(weights, Decimal('0'))
-        merch_pool = (deal_val_ils * (wsum / deal_tot_usd)).quantize(Q2, rounding=ROUND_HALF_UP)
 
     deal_ship_ils = (ship_val_ils * share_freight).quantize(Q2, rounding=ROUND_HALF_UP)
     deal_clear_ils = (clearance_pool * share_clearance).quantize(Q2, rounding=ROUND_HALF_UP)

@@ -14,7 +14,8 @@ import {
   ChevronDown, ChevronUp, Package, FileText, History,
   Handshake, Users, Menu, X, ChevronRight, ChevronLeft, Info,
   Calculator, BookMarked, Scale, BookOpen, Banknote, Sparkles,
-  CalendarDays, ArrowLeftRight, Boxes, BarChart3,
+  CalendarDays, ArrowLeftRight, Boxes, BarChart3, Building2,
+  ShoppingCart, Receipt, Ship, Truck,
 } from 'lucide-react';
 
 
@@ -27,6 +28,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [salesExpanded, setSalesExpanded] = useState(false);
   const [procurementExpanded, setProcurementExpanded] = useState(false);
   const [accountingExpanded, setAccountingExpanded] = useState(false);
   const [userManagementExpanded, setUserManagementExpanded] = useState(false);
@@ -37,6 +39,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "accounting-cheques", label: "الشيكات", icon: <Banknote className="h-4 w-4" /> },
     { view: "accounting-general-ledger", label: "الأستاذ العام", icon: <BookOpen className="h-4 w-4" /> },
     { view: "accounting-trial-balance", label: "ميزان المراجعة", icon: <Scale className="h-4 w-4" /> },
+    { view: "accounting-vat-report", label: "تقرير ضريبة القيمة المضافة", icon: <Receipt className="h-4 w-4" /> },
+    { view: "accounting-landed-cost", label: "تقرير التكلفة المستوردة", icon: <Ship className="h-4 w-4" /> },
     { view: "accounting-fiscal-periods", label: "الفترات المالية", icon: <CalendarDays className="h-4 w-4" /> },
     { view: "accounting-exchange-rates", label: "أسعار الصرف", icon: <ArrowLeftRight className="h-4 w-4" /> },
   ];
@@ -45,12 +49,29 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     if (activeView.startsWith("accounting-")) setAccountingExpanded(true);
   }, [activeView]);
 
+  useEffect(() => {
+    if (
+      activeView === "sales-invoices" ||
+      activeView === "sales-customers" ||
+      activeView === "sales-customer-payments" ||
+      activeView === "sales-settings"
+    )
+      setSalesExpanded(true);
+  }, [activeView]);
+
   const userManagementLinks = [
     { view: "users" as AppView, label: "قائمة المستخدمين", icon: <UsersIcon className="h-5 w-5" />, roles: ['manager'] },
     { view: "attendance" as AppView, label: "الحضور والغياب", icon: <AttendanceIcon className="h-5 w-5" />, roles: ['manager', 'employee', 'procurement'] },
     { view: "employee-notes" as AppView, label: "ملاحظات الموظفين", icon: <NoteIcon className="h-5 w-5" />, roles: ['manager'] },
     { view: "points-management" as AppView, label: "إدارة النقاط", icon: <PointsIcon className="h-5 w-5" />, roles: ['manager'] },
     { view: "points-history" as AppView, label: "سجل نقاطي", icon: <PointsIcon className="h-5 w-5" />, roles: ['employee', 'procurement', 'manager'] },
+  ];
+
+  const salesLinks = [
+    { view: "sales-invoices" as AppView, label: "فواتير المبيعات", icon: <FileText className="h-5 w-5" /> },
+    { view: "sales-customer-payments" as AppView, label: "دفعات العملاء", icon: <Banknote className="h-5 w-5" /> },
+    { view: "sales-customers" as AppView, label: "العملاء", icon: <Users className="h-5 w-5" /> },
+    { view: "sales-settings" as AppView, label: "إعدادات المبيعات", icon: <SettingsIcon className="h-5 w-5" /> },
   ];
 
   const procurementLinks = [
@@ -62,8 +83,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "supplier-management" as AppView, label: "الموردين", icon: <UsersIcon className="h-5 w-5" /> },
     { view: "shipments-management" as AppView, label: "إدارة الشحنات", icon: <Package className="h-5 w-5" /> },
     { view: "customs-clearance" as AppView, label: "التخليص الجمركي", icon: <FileText className="h-5 w-5" /> },
+    { view: "local-shipping" as AppView, label: "الشحن المحلي", icon: <Truck className="h-5 w-5" /> },
     { view: "stock-levels" as AppView, label: "أرصدة المخزون", icon: <BarChart3 className="h-5 w-5" /> },
     { view: "stock-movements" as AppView, label: "حركات المخزون", icon: <Boxes className="h-5 w-5" /> },
+    { view: "property-rental" as AppView, label: "تأجير العقارات والعدادات", icon: <Building2 className="h-5 w-5" /> },
   ];
 
   const financeLinks = [
@@ -162,17 +185,48 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             )}
           </div>
 
-          {/* المشتريات */}
+          {/* المبيعات (منفصل عن المشتريات) */}
+          {(user.role === 'manager' || user.role === 'procurement') && (
+            <div className="space-y-1">
+              <button
+                onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); setSalesExpanded(!salesExpanded); }}
+                className={`flex items-center justify-between w-full p-3 rounded-lg ${salesExpanded ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
+                title="المبيعات"
+              >
+                <div className="flex items-center">
+                  <ShoppingCart className="h-6 w-6 flex-shrink-0" />
+                  {showText && <span className="mr-3">المبيعات</span>}
+                </div>
+                {showText && (salesExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
+              </button>
+              {salesExpanded && showText && (
+                <div className="mr-4 pr-4 border-r-2 border-emerald-100 dark:border-emerald-900/40 space-y-1 mt-1">
+                  {salesLinks.map((link) => (
+                    <button
+                      key={link.view}
+                      onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
+                      className={`flex items-center w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-emerald-700 font-bold bg-emerald-50 dark:bg-emerald-900/25" : "text-gray-500 hover:text-emerald-600"}`}
+                    >
+                      <span className="ml-2">{link.icon}</span>
+                      {link.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* المشتريات والتوريد */}
           {(user.role === 'manager' || user.role === 'procurement') && (
             <div className="space-y-1">
               <button
                 onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); setProcurementExpanded(!procurementExpanded); }}
                 className={`flex items-center justify-between w-full p-3 rounded-lg ${procurementExpanded ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
-                title="المشتريات"
+                title="المشتريات والتوريد"
               >
                 <div className="flex items-center">
                   <Package className="h-6 w-6 flex-shrink-0" />
-                  {showText && <span className="mr-3">المشتريات</span>}
+                  {showText && <span className="mr-3">المشتريات والتوريد</span>}
                 </div>
                 {showText && (procurementExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
               </button>

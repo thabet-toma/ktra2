@@ -12,6 +12,18 @@ export interface PurchaseInvoiceItemDto {
   landed_line_total_ils?: number | null;
 }
 
+export interface PurchaseInvoiceFeeDto {
+  id?: number;
+  description: string;
+  amount: number;
+  expense_account: number;
+  expense_account_code?: string | null;
+  expense_account_name?: string | null;
+  expense_account_type?: string | null;
+  capitalize_to_inventory?: boolean;
+  is_taxable?: boolean;
+}
+
 export interface PurchaseInvoiceListDto {
   id: number;
   invoice_number: string;
@@ -74,6 +86,11 @@ export interface PurchaseInvoiceDto {
   journal_id_display?: number | null;
   firestore_id?: string | null;
   items: PurchaseInvoiceItemDto[];
+  fees?: PurchaseInvoiceFeeDto[];
+  payment_type?: "credit" | "cash";
+  cash_or_bank_account?: number | null;
+  cash_or_bank_account_name?: string | null;
+  cash_or_bank_account_code?: string | null;
   created_at?: string;
   updated_at?: string;
   created_by?: number | null;

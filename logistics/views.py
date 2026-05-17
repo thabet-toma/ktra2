@@ -4,13 +4,16 @@ from decimal import Decimal
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from django.db import transaction
+from rest_framework.exceptions import ValidationError
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction, IntegrityError
 from django.db.models import Prefetch
 from .models import (
     LogisticsDeal, LogisticsDealItem, LogisticsShipment,
     LogisticsClearance, LogisticsExpense, LogisticsShipmentDeal,
     LogisticsPayment, LogisticsClearancePayment,
-    PurchaseInvoice, PurchaseInvoiceItem,
+    PurchaseInvoice, PurchaseInvoiceItem, PurchaseInvoiceFee,
+    LocalShipment,
 )
 from .serializers import (
     LogisticsDealSerializer, LogisticsDealItemSerializer,
@@ -18,6 +21,7 @@ from .serializers import (
     LogisticsExpenseSerializer, LogisticsPaymentSerializer,
     LogisticsClearancePaymentSerializer,
     PurchaseInvoiceSerializer, PurchaseInvoiceListSerializer,
+    LocalShipmentSerializer,
 )
 from accounting.models import Account, TaxRate
 from partners.models import Partner
@@ -327,8 +331,12 @@ class LogisticsDealViewSet(BaseTenantViewSet):
                 'payment_id': payment_locked.id
             }, status=status.HTTP_200_OK)
 
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValidationError, DjangoValidationError) as ve:
+            msg = ve.message if hasattr(ve, 'message') else str(ve)
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("deal post_payment failed pk=%s", pk)
+            return Response({'error': 'حدث خطأ غير متوقع أثناء ترحيل الدفعة.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['post'], url_path=r'link_payment_journal/(?P<payment_id>[^/.]+)')
     def link_payment_journal(self, request, pk=None, payment_id=None):
@@ -596,8 +604,12 @@ class LogisticsDealViewSet(BaseTenantViewSet):
                 {"error": "قيد اليومية المرتبط غير موجود"},
                 status=status.HTTP_404_NOT_FOUND,
             )
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValidationError, DjangoValidationError) as ve:
+            msg = ve.message if hasattr(ve, 'message') else str(ve)
+            return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("deal unpost_payment failed pk=%s", pk)
+            return Response({"error": "حدث خطأ غير متوقع أثناء إلغاء ترحيل الدفعة."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class LogisticsPaymentViewSet(BaseTenantViewSet):
@@ -660,6 +672,13 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
 
         try:
             deal = LogisticsDeal.objects.get(pk=deal_id)
+            # Prevent same deal on multiple active shipments
+            existing = LogisticsShipmentDeal.objects.filter(deal=deal).first()
+            if existing:
+                return Response(
+                    {'error': f'الصفقة مربوطة بالفعل بالشحنة #{existing.shipment_id}. لا يمكن ربطها بأكثر من شحنة.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
             LogisticsShipmentDeal.objects.create(shipment=shipment, deal=deal)
             # حالة الشحن تُحدَّد عبر shipping_workflow_status (إشارة sync_deal_workflow_on_shipment_link)
             return Response({'status': 'تم ربط الصفقة بالشحنة بنجاح'}, status=status.HTTP_200_OK)
@@ -880,8 +899,12 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 status=status.HTTP_200_OK,
             )
 
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValidationError, DjangoValidationError) as ve:
+            msg = ve.message if hasattr(ve, 'message') else str(ve)
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("shipment post_agent_payment failed pk=%s", pk)
+            return Response({'error': 'حدث خطأ غير متوقع أثناء ترحيل دفعة الوكيل.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(
         detail=True,
@@ -973,6 +996,14 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
         import datetime
 
         shipment = self.get_object()
+
+        # Idempotency: reject if already posted
+        if JournalHeader.objects.filter(reference_type='LOGISTICS_SHIPMENT', reference_id=shipment.id).exists():
+            return Response(
+                {'error': 'تم ترحيل قيد الشحن لهذه الشحنة مسبقاً.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         shipping_cost = float(request.data.get('shipping_cost', 0))
         if shipping_cost <= 0:
             return Response({'error': 'الرجاء إدخال تكلفة الشحن'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1028,8 +1059,12 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 'journal_id': journal.id
             }, status=status.HTTP_200_OK)
 
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValidationError, DjangoValidationError) as ve:
+            msg = ve.message if hasattr(ve, 'message') else str(ve)
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("shipment post_freight_cost failed pk=%s", pk)
+            return Response({'error': 'حدث خطأ غير متوقع أثناء ترحيل تكلفة الشحن.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class LogisticsClearanceViewSet(BaseTenantViewSet):
@@ -1170,13 +1205,13 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
 
         def _paid_clearance() -> Decimal:
             return sum(
-                (p.amount for p in existing_payments if not _notes_mean_shipping_payment(p.notes)),
+                (p.amount for p in existing_payments if not _notes_mean_shipping_payment(p.notes) and p.is_posted),
                 start=Decimal("0"),
             )
 
         def _paid_shipping() -> Decimal:
             return sum(
-                (p.amount for p in existing_payments if _notes_mean_shipping_payment(p.notes)),
+                (p.amount for p in existing_payments if _notes_mean_shipping_payment(p.notes) and p.is_posted),
                 start=Decimal("0"),
             )
 
@@ -1287,8 +1322,12 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                 },
                 status=status.HTTP_201_CREATED,
             )
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValidationError, DjangoValidationError) as ve:
+            msg = ve.message if hasattr(ve, 'message') else str(ve)
+            return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("clearance pay_from_cashbox failed")
+            return Response({"error": "حدث خطأ غير متوقع أثناء تسجيل الدفع."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class LogisticsExpenseViewSet(BaseTenantViewSet):
@@ -1358,10 +1397,7 @@ class LogisticsExpenseViewSet(BaseTenantViewSet):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
-    queryset = PurchaseInvoice.objects.all().select_related(
-        'partner', 'deal', 'shipment', 'clearance', 'currency', 'journal',
-    ).prefetch_related('items__product').order_by('-created_at')
+class PurchaseInvoiceViewSet(BaseTenantViewSet):
     serializer_class = PurchaseInvoiceSerializer
 
     def get_serializer_class(self):
@@ -1370,7 +1406,9 @@ class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
         return PurchaseInvoiceSerializer
 
     def get_queryset(self):
-        qs = super().get_queryset()
+        qs = PurchaseInvoice.objects.all().select_related(
+            'partner', 'deal', 'shipment', 'clearance', 'currency', 'journal',
+        ).prefetch_related('items__product').order_by('-created_at')
         tenant = self._get_tenant()
         if tenant:
             qs = qs.filter(tenant=tenant)
@@ -1484,6 +1522,13 @@ class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
             return Response({'error': 'سعر صرف غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
         use_cl = bool(request.data.get('use_cost_lines', False))
         allow_unpaid_freight = bool(request.data.get('allow_unpaid_freight'))
+        if allow_unpaid_freight:
+            from core.user_roles import user_is_admin
+            if not user_is_admin(request.user):
+                return Response(
+                    {'error': 'تجاوز شرط «الشحن مدفوع بالكامل» يتطلب صلاحية مدير.'},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
         preview = preview_landed_import(
             clearance=LogisticsClearance.objects.select_related('shipment').get(pk=cid, tenant=tenant),
@@ -1555,10 +1600,20 @@ class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], url_path='post-to-accounting')
     def post_to_accounting(self, request, pk=None):
         """
-        ترحيل فاتورة الشراء إلى GL مع فصل ضريبي:
-          مدين: مخزون/مشتريات (صافي)
-          مدين: ضريبة مدخلات     (ضريبة) — إن وجدت
-          دائن: ذمم المورد       (إجمالي)
+        ترحيل فاتورة الشراء إلى دفتر اليومية — قيد مزدوج كامل متوازن.
+
+        القيد المُنتَج:
+          مدين: مخزون/مشتريات (1104)   = صافي البضاعة (merchandise_net)
+          مدين: ضريبة مدخلات (1105)    = tax_amount                    (إن > 0)
+          مدين: حساب مصروف لكل رسم     = fee.amount                    (لكل PurchaseInvoiceFee)
+             └─ إن كان capitalize_to_inventory=True يُضاف للمخزون بدل المصروف
+          دائن: ذمم المورد (partner.linked_account) أو صندوق/بنك       = إجمالي + مجموع الرسوم
+
+        القواعد:
+          - يُستدعى validate_journal_entry قبل الحفظ — يرفض أي قيد غير متوازن.
+          - tax_amount > 0 يتطلب حساب VAT Input (1105) أو TaxRate بـ direction=purchase؛
+            وإلا يُرفض الترحيل بدل السكوت عن الفرق.
+          - payment_type='cash' يتطلب cash_or_bank_account ويَستبدل AP بالصندوق.
         """
         invoice = self.get_object()
         if invoice.is_posted:
@@ -1570,27 +1625,43 @@ class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
         tenant = invoice.tenant or self._get_tenant()
         partner = invoice.partner
 
-        if not partner.linked_account:
-            return Response(
-                {'error': 'المورد بلا حساب محاسبي مربوط'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        # ─── 1) تحديد الحساب الدائن (AP أو صندوق/بنك) ───────────────────────────
+        payment_type = getattr(invoice, 'payment_type', 'credit') or 'credit'
+        credit_account = None
+        if payment_type == 'cash':
+            credit_account = invoice.cash_or_bank_account
+            if not credit_account:
+                return Response(
+                    {'error': 'فاتورة شراء نقدية تتطلب اختيار حساب صندوق/بنك.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            credit_account = partner.linked_account
+            if not credit_account:
+                return Response(
+                    {'error': 'المورد بلا حساب محاسبي مربوط. اربط المورد بحساب ذمم (Trade Payables) أولاً.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-        purchase_account = (
-            Account.objects.filter(tenant=tenant, code__startswith="12").first()
-            or Account.objects.filter(tenant=tenant, code__startswith="5").first()
-            or Account.objects.filter(tenant=tenant, account_type="Asset", name__icontains="مخزون").first()
-            or Account.objects.filter(tenant=tenant, account_type="Asset").order_by("code").first()
+        # ─── 2) حساب المخزون/المشتريات — نعطي الأولوية لكود 1104 ───────────────
+        inventory_account = (
+            Account.objects.filter(tenant=tenant, code="1104").first()
+            or Account.objects.filter(
+                tenant=tenant, account_type="Asset", name__icontains="مخزون",
+            ).first()
+            or Account.objects.filter(
+                tenant=tenant, account_type="Expense", name__icontains="مشتريات",
+            ).first()
         )
-        if not purchase_account:
+        if not inventory_account:
             return Response(
-                {'error': 'لم يُعثر على حساب مخزون/مشتريات'},
+                {'error': 'لم يُعثر على حساب المخزون/المشتريات (1104). شغّل seed_professional_coa أولاً.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # ─── 3) حساب ضريبة المدخلات (VAT Input) ────────────────────────────────
         grand = Decimal(str(invoice.grand_total or 0))
         tax_amt = Decimal(str(invoice.tax_amount or 0))
-        net_amount = grand - tax_amt
 
         if grand <= 0:
             return Response(
@@ -1598,23 +1669,163 @@ class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        vat_input_account = None
+        if tax_amt > 0:
+            # الأفضلية: TaxRate بـ direction=purchase (ضريبة مدخلات)
+            purchase_tax = TaxRate.objects.filter(
+                tenant=tenant, is_active=True, direction__in=['purchase', 'both'],
+            ).select_related('tax_account').order_by('direction').first()
+            # ^ direction='both' قد يأتي أولاً لكن 'purchase' أولى مباشرةً — نرتّب لضمان الاختيار الصحيح
+            if purchase_tax and purchase_tax.tax_account and purchase_tax.tax_account.account_type == 'Asset':
+                vat_input_account = purchase_tax.tax_account
+            else:
+                vat_input_account = (
+                    Account.objects.filter(tenant=tenant, code="1105").first()
+                    or Account.objects.filter(
+                        tenant=tenant, account_type="Asset",
+                        name__icontains="ضريبة",
+                    ).first()
+                )
+
+            if not vat_input_account:
+                return Response(
+                    {
+                        'error': (
+                            'الفاتورة تحتوي ضريبة مدخلات قيمتها > 0 لكن لا يوجد حساب '
+                            '"ضريبة القيمة المضافة - مدخلات" (1105) في شجرة الحسابات. '
+                            'شغّل migration 0013 أو أنشئ الحساب يدوياً.'
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if vat_input_account.account_type != 'Asset':
+                return Response(
+                    {
+                        'error': (
+                            f'حساب ضريبة المدخلات يجب أن يكون من نوع Asset، '
+                            f'لكن الحساب المُعرَّف {vat_input_account.code} من نوع {vat_input_account.account_type}.'
+                        ),
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # ─── 4) تجهيز الرسوم (Fees) ─────────────────────────────────────────────
+        fees_qs = list(invoice.fees.select_related('expense_account').all())
+        fees_total = sum((Decimal(str(f.amount or 0)) for f in fees_qs), Decimal('0'))
+        # نفصل: الرسوم المرسملة (capitalize → تُضاف للمخزون) عن غير المرسملة (Expense)
+        capitalized_total = sum(
+            (Decimal(str(f.amount or 0)) for f in fees_qs if f.capitalize_to_inventory),
+            Decimal('0'),
+        )
+
+        # صافي المخزون = grand - tax - (الرسوم غير المرسملة)
+        # الرسوم المرسملة سنضيفها لبند المخزون مباشرةً (لذلك لا نخصمها من الصافي)
+        non_cap_fees_total = fees_total - capitalized_total
+        merchandise_net = grand - tax_amt - non_cap_fees_total
+        # يسمح هذا الترتيب بأن grand_total = merchandise_net + tax_amt + non_cap_fees
+        # (مع رسوم مرسملة مضمَّنة داخل grand إن وُجدت)
+        inventory_debit = merchandise_net + capitalized_total
+
+        # If invoice has landed-cost items, align GL with WAC by using landed totals
+        items_with_landed = list(invoice.items.all())
+        if items_with_landed and any(it.landed_line_total_ils for it in items_with_landed if it.landed_line_total_ils is not None):
+            landed_sum = sum(
+                (Decimal(str(it.landed_line_total_ils or 0)) for it in items_with_landed),
+                Decimal('0'),
+            )
+            if landed_sum > 0:
+                inventory_debit = landed_sum + capitalized_total
+
         td = invoice.invoice_date or datetime.date.today()
 
-        tax_account = None
-        if tax_amt > 0:
-            active_tax = TaxRate.objects.filter(
-                tenant=tenant, is_active=True,
-            ).select_related('tax_account').first()
-            if active_tax and active_tax.tax_account:
-                tax_account = active_tax.tax_account
-            else:
-                tax_account = Account.objects.filter(
-                    tenant=tenant, name__icontains="ضريبة مدخلات",
-                ).first() or Account.objects.filter(
-                    tenant=tenant, name__icontains="ضريبة",
-                    account_type="Asset",
-                ).first()
+        # ─── 5) بناء أسطر القيد ─────────────────────────────────────────────────
+        lines_payload: list[dict] = []
 
+        if inventory_debit > 0:
+            lines_payload.append({
+                'account': inventory_account,
+                'debit': inventory_debit.quantize(Decimal('0.01')),
+                'credit': Decimal('0'),
+                'partner': partner,
+                'description': f"بضاعة/مخزون — {invoice.invoice_number}",
+            })
+
+        if tax_amt > 0:
+            lines_payload.append({
+                'account': vat_input_account,
+                'debit': tax_amt.quantize(Decimal('0.01')),
+                'credit': Decimal('0'),
+                'partner': partner,
+                'description': f"ضريبة مدخلات — {invoice.invoice_number}",
+            })
+
+        for fee in fees_qs:
+            amt = Decimal(str(fee.amount or 0))
+            if amt <= 0 or fee.capitalize_to_inventory:
+                # المرسمل مُدمج في inventory_debit أعلاه
+                continue
+            lines_payload.append({
+                'account': fee.expense_account,
+                'debit': amt.quantize(Decimal('0.01')),
+                'credit': Decimal('0'),
+                'partner': partner,
+                'description': f"{fee.description} — {invoice.invoice_number}"[:500],
+            })
+
+        # السطر الدائن — الإجمالي
+        credit_total = (grand + non_cap_fees_total) if False else grand
+        # ملاحظة: في نموذج ERP هذا، grand_total يُفترض أنه يتضمن الضريبة لكن لا يتضمن
+        # الرسوم الإضافية (fees) — الرسوم "خارجية" على الفاتورة وتُضاف إلى الإلتزام الإجمالي.
+        # لذلك الدائن = grand + الرسوم غير المرسملة + الرسوم المرسملة = grand + fees_total.
+        credit_total = grand + fees_total
+
+        lines_payload.append({
+            'account': credit_account,
+            'debit': Decimal('0'),
+            'credit': credit_total.quantize(Decimal('0.01')),
+            'partner': partner,
+            'description': (
+                f"صندوق/بنك — {invoice.invoice_number}"
+                if payment_type == 'cash'
+                else f"ذمم مورد — {invoice.invoice_number}"
+            )[:500],
+        })
+
+        # ─── 6) التحقق من توازن القيد قبل الحفظ ─────────────────────────────────
+        # نستدعي validate_journal_entry — يرفع ValidationError إذا غير متوازن
+        try:
+            from accounting.services import validate_journal_entry
+        except ImportError:
+            validate_journal_entry = None  # type: ignore
+
+        # validate_journal_entry يحتاج header + lines بصيغة قاموس
+        validation_payload = [
+            {
+                'account': line['account'].id if hasattr(line['account'], 'id') else line['account'],
+                'debit': line['debit'],
+                'credit': line['credit'],
+                'partner': line['partner'].id if line['partner'] else None,
+                'description': line.get('description', ''),
+            }
+            for line in lines_payload
+        ]
+
+        if validate_journal_entry:
+            mock_header = JournalHeader(
+                tenant=tenant,
+                transaction_date=td,
+                currency=invoice.currency,
+                exchange_rate=invoice.exchange_rate,
+            )
+            try:
+                validate_journal_entry(mock_header, validation_payload)
+            except Exception as e:
+                return Response(
+                    {'error': f'قيد غير متوازن: {e}', 'lines': validation_payload},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        # ─── 7) الحفظ الذري ────────────────────────────────────────────────────
         try:
             with transaction.atomic():
                 journal = JournalHeader.objects.create(
@@ -1628,37 +1839,33 @@ class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
                     exchange_rate=invoice.exchange_rate,
                 )
 
-                JournalLine.objects.create(
-                    tenant=tenant, journal=journal,
-                    account=purchase_account,
-                    debit=net_amount, credit=0,
-                    partner=partner,
-                )
-
-                if tax_amt > 0 and tax_account:
+                for ln in lines_payload:
                     JournalLine.objects.create(
-                        tenant=tenant, journal=journal,
-                        account=tax_account,
-                        debit=tax_amt, credit=0,
-                        partner=partner,
+                        tenant=tenant,
+                        journal=journal,
+                        account=ln['account'],
+                        debit=ln['debit'],
+                        credit=ln['credit'],
+                        partner=ln['partner'],
+                        description=ln.get('description', ''),
                     )
-
-                JournalLine.objects.create(
-                    tenant=tenant, journal=journal,
-                    account=partner.linked_account,
-                    debit=0, credit=grand,
-                    partner=partner,
-                )
 
                 invoice.is_posted = True
                 invoice.journal = journal
                 invoice.save(update_fields=['is_posted', 'journal'])
 
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValidationError, DjangoValidationError, IntegrityError) as e:
+            msg = e.message if hasattr(e, 'message') else str(e)
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("purchase invoice post_to_accounting failed pk=%s", invoice.pk)
+            return Response({'error': 'حدث خطأ غير متوقع أثناء ترحيل فاتورة الشراء.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response({
             'journal_id': journal.id,
+            'lines_count': len(lines_payload),
+            'total_debit': str(sum((l['debit'] for l in lines_payload), Decimal('0'))),
+            'total_credit': str(sum((l['credit'] for l in lines_payload), Decimal('0'))),
             'message': 'تم الترحيل بنجاح',
         }, status=status.HTTP_201_CREATED)
 
@@ -1672,13 +1879,593 @@ class PurchaseInvoiceViewSet(viewsets.ModelViewSet):
             )
         try:
             with transaction.atomic():
-                j = invoice.journal
-                JournalLine.objects.filter(journal=j).delete()
-                j.delete()
+                orig = invoice.journal
+                # Create reversal journal instead of deleting
+                rev = JournalHeader.objects.create(
+                    tenant=orig.tenant,
+                    transaction_date=datetime.date.today(),
+                    description=(f"عكس فاتورة شراء {invoice.invoice_number}: {orig.description or ''}")[:500],
+                    reference_type='PURCHASE_INVOICE_REVERSAL',
+                    reference_id=orig.id,
+                    is_posted=True,
+                    currency=orig.currency,
+                    exchange_rate=orig.exchange_rate,
+                )
+                for line in orig.lines.all():
+                    JournalLine.objects.create(
+                        tenant=line.tenant,
+                        journal=rev,
+                        account=line.account,
+                        debit=line.credit,
+                        credit=line.debit,
+                        partner=line.partner,
+                        cost_center=line.cost_center,
+                        description=line.description,
+                    )
                 invoice.is_posted = False
                 invoice.journal = None
                 invoice.save(update_fields=['is_posted', 'journal'])
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({'message': 'تم إلغاء الترحيل'})
+        return Response({'message': 'تم إلغاء الترحيل بقيد عكسي', 'reversal_journal_id': rev.id})
+
+
+class LocalShipmentViewSet(BaseTenantViewSet):
+    """الشحن المحلي — مرحلة بين التخليص الجمركي وفاتورة المشتريات.
+
+    الدورة:
+      1) pending: طلب الشحن (ناقل، سعر، وجهة)
+      2) in_transit: غادر
+      3) delivered: تم التسليم → يمكن ترحيله محاسبياً
+      4) cancelled: ملغي
+
+    الحسابات:
+      - Dr حساب مصروف الشحن (افتراضي 5305) — أو إضافته كبند Landed Cost
+      - Cr AP الناقل (ائتمان) أو Cr صندوق/بنك (نقدي)
+
+    إجراءات مخصّصة:
+      - POST /{id}/post-to-accounting/  — ترحيل القيد المحاسبي
+      - POST /{id}/unpost/               — إلغاء الترحيل
+      - POST /{id}/import-to-invoice/    — نقل تكلفته إلى فاتورة مشتريات كرسم
+    """
+
+    queryset = LocalShipment.objects.all().select_related(
+        'carrier', 'clearance', 'shipment', 'currency',
+        'expense_account', 'cash_or_bank_account',
+        'journal', 'purchase_invoice',
+    )
+    serializer_class = LocalShipmentSerializer
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # فلاتر اختيارية عبر query params
+        clearance_id = self.request.query_params.get('clearance')
+        carrier_id = self.request.query_params.get('carrier')
+        status_f = self.request.query_params.get('status')
+        is_posted = self.request.query_params.get('is_posted')
+        if clearance_id:
+            qs = qs.filter(clearance_id=clearance_id)
+        if carrier_id:
+            qs = qs.filter(carrier_id=carrier_id)
+        if status_f:
+            qs = qs.filter(status=status_f)
+        if is_posted in ('true', 'false'):
+            qs = qs.filter(is_posted=(is_posted == 'true'))
+        return qs.order_by('-id')
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        payload = serializer.validated_data
+        # إن لم تحدَّد العملة نأخذ الافتراضي (ILS أو أول عملة)
+        if 'currency' not in payload or payload.get('currency') is None:
+            default_ccy = (
+                Currency.objects.filter(Code='ILS').first()
+                or Currency.objects.first()
+            )
+            if default_ccy:
+                payload['currency'] = default_ccy
+        # ربط تلقائي بالشحنة الدولية عند إعطاء clearance
+        clearance = payload.get('clearance')
+        if clearance and not payload.get('shipment'):
+            payload['shipment'] = clearance.shipment
+
+        # الحساب الافتراضي للمصروف — 5305 (الشحن المحلي)
+        if not payload.get('expense_account') and tenant:
+            default_exp = (
+                Account.objects.filter(tenant=tenant, code='5305', is_active=True).first()
+                or Account.objects.filter(tenant=tenant, code='5301', is_active=True).first()
+            )
+            if default_exp:
+                payload['expense_account'] = default_exp
+
+        # تأكّد من ensure partner account
+        carrier = payload.get('carrier')
+        if carrier:
+            try:
+                ensure_partner_linked_account(carrier)
+            except Exception:
+                pass
+
+        serializer.save(tenant=tenant)
+
+    @action(detail=True, methods=['post'], url_path='post-to-accounting')
+    def post_to_accounting(self, request, pk=None):
+        """ترحيل القيد المحاسبي للشحن المحلي.
+
+        الحالات المدعومة:
+          1) credit (آجل): Dr expense_account / Cr AP الناقل
+          2) cash (نقدي):  Dr expense_account / Cr cash_or_bank_account
+
+        بعد الترحيل لا يُسمح بالتعديل إلا بعد إلغاء الترحيل.
+        """
+        shipment = self.get_object()
+        tenant = shipment.tenant
+        if shipment.is_posted:
+            return Response(
+                {'error': 'الشحنة مُرحَّلة بالفعل.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if shipment.status == 'cancelled':
+            return Response(
+                {'error': 'لا يمكن ترحيل شحنة ملغاة.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        amt = Decimal(str(shipment.amount or 0))
+        if amt <= 0:
+            return Response(
+                {'error': 'مبلغ الشحنة يجب أن يكون أكبر من صفر.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # حساب المصروف (مدين)
+        expense_account = shipment.expense_account
+        if not expense_account:
+            expense_account = (
+                Account.objects.filter(tenant=tenant, code='5305', is_active=True).first()
+                or Account.objects.filter(tenant=tenant, code='5301', is_active=True).first()
+            )
+        if not expense_account:
+            return Response(
+                {'error': 'لا يوجد حساب مصروف للشحن المحلي (5305).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # حساب الدائن
+        if shipment.payment_type == 'cash':
+            credit_account = shipment.cash_or_bank_account
+            if not credit_account:
+                return Response(
+                    {'error': 'يجب اختيار حساب صندوق/بنك في الدفع النقدي.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            credit_partner = None
+        else:
+            # آجل — AP الناقل
+            try:
+                ensure_partner_linked_account(shipment.carrier)
+            except Exception:
+                pass
+            credit_account = getattr(shipment.carrier, 'linked_account', None)
+            if not credit_account:
+                return Response(
+                    {'error': 'الناقل لا يملك حساب محاسبي مرتبط.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            credit_partner = shipment.carrier
+
+        td = shipment.delivery_date or shipment.pickup_date or datetime.date.today()
+
+        # التحقق من الفترة المالية
+        try:
+            validate_fiscal_period(tenant, td)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        lines_payload = [
+            {
+                'account': expense_account,
+                'debit': amt,
+                'credit': Decimal('0'),
+                'partner': credit_partner,
+                'description': f"شحن محلي {shipment.shipment_number} — {shipment.carrier.name}",
+            },
+            {
+                'account': credit_account,
+                'debit': Decimal('0'),
+                'credit': amt,
+                'partner': credit_partner,
+                'description': f"شحن محلي {shipment.shipment_number}",
+            },
+        ]
+
+        try:
+            with transaction.atomic():
+                journal = JournalHeader.objects.create(
+                    tenant=tenant,
+                    transaction_date=td,
+                    description=(
+                        f"شحن محلي {shipment.shipment_number} | {shipment.carrier.name}"
+                    )[:500],
+                    reference_type='LOCAL_SHIPMENT',
+                    reference_id=shipment.pk,
+                    is_posted=True,
+                    currency=shipment.currency,
+                    exchange_rate=shipment.exchange_rate,
+                )
+                for ln in lines_payload:
+                    JournalLine.objects.create(
+                        tenant=tenant,
+                        journal=journal,
+                        account=ln['account'],
+                        partner=ln.get('partner'),
+                        description=ln.get('description', '')[:255],
+                        debit=ln['debit'],
+                        credit=ln['credit'],
+                        base_debit=ln['debit'],
+                        base_credit=ln['credit'],
+                        exchange_rate=shipment.exchange_rate,
+                    )
+                shipment.is_posted = True
+                shipment.journal = journal
+                shipment.save(update_fields=['is_posted', 'journal'])
+
+                create_audit_log(
+                    user=request.user,
+                    action='local_shipment_posted',
+                    target_type='LocalShipment',
+                    target_id=shipment.pk,
+                    description=(
+                        f"ترحيل شحن محلي {shipment.shipment_number} بمبلغ {amt}"
+                    ),
+                )
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(LocalShipmentSerializer(shipment).data)
+
+    @action(detail=True, methods=['post'], url_path='unpost')
+    def unpost(self, request, pk=None):
+        shipment = self.get_object()
+        if not shipment.is_posted or not shipment.journal:
+            return Response(
+                {'error': 'الشحنة غير مُرحّلة.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            with transaction.atomic():
+                j = shipment.journal
+                # Create reversal journal instead of deleting
+                rev = JournalHeader.objects.create(
+                    tenant=j.tenant,
+                    transaction_date=datetime.date.today(),
+                    description=(f"عكس شحن محلي {shipment.shipment_number}")[:500],
+                    reference_type='LOCAL_SHIPMENT_REVERSAL',
+                    reference_id=j.id,
+                    is_posted=True,
+                    currency=j.currency,
+                    exchange_rate=j.exchange_rate,
+                )
+                for line in j.lines.all():
+                    JournalLine.objects.create(
+                        tenant=line.tenant,
+                        journal=rev,
+                        account=line.account,
+                        debit=line.credit,
+                        credit=line.debit,
+                        partner=line.partner,
+                        description=line.description,
+                    )
+                shipment.is_posted = False
+                shipment.journal = None
+                shipment.save(update_fields=['is_posted', 'journal'])
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'message': 'تم إلغاء الترحيل بقيد عكسي', 'reversal_journal_id': rev.id})
+
+    @action(detail=True, methods=['post'], url_path='import-to-invoice')
+    def import_to_invoice(self, request, pk=None):
+        """نقل تكلفة الشحن المحلي إلى فاتورة مشتريات كرسم (Fee).
+
+        المدخلات:
+          - invoice_id: رقم فاتورة الشراء الهدف (يجب أن تكون لنفس tenant)
+
+        يُنشئ PurchaseInvoiceFee بمبلغ الشحنة ويربطها بفاتورة المشتريات.
+        إذا كانت capitalize_to_inventory=True سيتم رسملتها على Landed Cost
+        تلقائياً عند ترحيل الفاتورة.
+
+        ملاحظة: لا يُرحِّل الشحن محاسبياً — الفاتورة هي التي سترحّل.
+        """
+        shipment = self.get_object()
+        tenant = shipment.tenant
+        invoice_id = request.data.get('invoice_id')
+        if not invoice_id:
+            return Response(
+                {'error': 'invoice_id مطلوب.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            invoice = PurchaseInvoice.objects.get(pk=invoice_id, tenant=tenant)
+        except PurchaseInvoice.DoesNotExist:
+            return Response(
+                {'error': 'الفاتورة غير موجودة.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if invoice.is_posted:
+            return Response(
+                {'error': 'الفاتورة مرحّلة — لا يمكن إضافة رسوم.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if shipment.purchase_invoice_id:
+            return Response(
+                {'error': 'تم استيراد هذه الشحنة بالفعل.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if shipment.is_posted:
+            return Response(
+                {
+                    'error': (
+                        'لا يمكن استيراد شحن مُرحَّل محاسبياً — '
+                        'سيُسجَّل مرتين. ألغِ الترحيل أولاً.'
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # الحساب — افتراضياً الـexpense_account الخاص بالشحنة أو 5305
+        expense_account = shipment.expense_account
+        if not expense_account:
+            expense_account = (
+                Account.objects.filter(tenant=tenant, code='5305', is_active=True).first()
+                or Account.objects.filter(tenant=tenant, code='5301', is_active=True).first()
+            )
+        if not expense_account:
+            return Response(
+                {'error': 'لا يوجد حساب مصروف للشحن المحلي.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            with transaction.atomic():
+                PurchaseInvoiceFee.objects.create(
+                    tenant=tenant,
+                    invoice=invoice,
+                    expense_account=expense_account,
+                    description=(
+                        f"شحن محلي {shipment.shipment_number} — "
+                        f"{shipment.carrier.name}"
+                    )[:255],
+                    amount=shipment.amount,
+                    capitalize_to_inventory=shipment.capitalize_to_inventory,
+                    is_taxable=False,
+                )
+                shipment.purchase_invoice = invoice
+                shipment.save(update_fields=['purchase_invoice'])
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({
+            'message': 'تم استيراد الشحنة إلى الفاتورة كرسم',
+            'invoice_id': invoice.id,
+            'invoice_number': invoice.invoice_number,
+        })
+
+
+class LandedCostReportViewSet(viewsets.ViewSet):
+    """تقرير التكلفة المستوردة (Landed Cost) للشحنات.
+
+    يُجمّع بيانات الشحنة → الصفقات → فواتير الشراء → الرسوم → البنود،
+    ويُظهر تفصيل:
+      - تكلفة البضاعة (merchandise)
+      - الشحن الدولي المُخصَّص (allocated shipping)
+      - التخليص الجمركي (cost_lines + ClearancePayments)
+      - الرسوم الإضافية (PurchaseInvoiceFee)
+      - إجمالي التكلفة الحقيقية + تكلفة الوحدة لكل صنف (landed_unit_price_ils)
+
+    الاستدعاءات:
+      - GET /api/logistics/reports/landed-cost/                 → قائمة ملخّصة لكل الشحنات
+      - GET /api/logistics/reports/landed-cost/?shipment_id=X   → تفصيل شحنة واحدة
+    """
+
+    authentication_classes = [
+        *PurchaseInvoiceViewSet.authentication_classes,
+    ]
+    permission_classes = [
+        *PurchaseInvoiceViewSet.permission_classes,
+    ]
+
+    def list(self, request):
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'لا يوجد مستأجر.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        shipment_id = request.query_params.get('shipment_id')
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+
+        qs = LogisticsShipment.objects.filter(tenant=tenant, is_deleted=False)
+        if shipment_id:
+            qs = qs.filter(pk=shipment_id)
+        if start_date:
+            qs = qs.filter(arrival_date__gte=start_date)
+        if end_date:
+            qs = qs.filter(arrival_date__lte=end_date)
+
+        qs = qs.select_related('shipping_agent').prefetch_related(
+            'clearance',
+            'clearance__payments',
+            'deals',
+        ).order_by('-arrival_date', '-id')
+
+        out = []
+        for sh in qs[:200]:  # safety limit
+            out.append(_build_landed_cost_summary(sh, detailed=bool(shipment_id)))
+
+        return Response({
+            'shipments': out,
+            'count': len(out),
+            'summary_only': not bool(shipment_id),
+        })
+
+
+def _build_landed_cost_summary(shipment, *, detailed=False):
+    """يبني ملخّص Landed Cost لشحنة واحدة."""
+    from decimal import Decimal
+
+    tenant = shipment.tenant
+
+    # الصفقات المرتبطة
+    links = LogisticsShipmentDeal.objects.filter(shipment=shipment).select_related(
+        'deal', 'deal__partner', 'deal__currency',
+    )
+
+    deals_data = []
+    total_merchandise = Decimal('0')
+    total_allocated_shipping = Decimal('0')
+
+    for link in links:
+        deal = link.deal
+        items = deal.items.select_related('product').filter(is_deleted=False) if hasattr(deal, 'items') else []
+        deal_merch = sum(
+            (Decimal(str(i.quantity or 0)) * Decimal(str(i.unit_price or 0)) for i in items),
+            Decimal('0'),
+        )
+        total_merchandise += deal_merch
+        total_allocated_shipping += Decimal(str(link.allocated_shipping_cost or 0))
+
+        # فاتورة الشراء المرتبطة بهذه الصفقة + الشحنة
+        pi = PurchaseInvoice.objects.filter(
+            tenant=tenant, shipment=shipment, deal=deal,
+        ).prefetch_related('items', 'fees', 'fees__expense_account').first()
+
+        pi_items_rows = []
+        pi_fees_rows = []
+        pi_capitalized_total = Decimal('0')
+        pi_expensed_total = Decimal('0')
+
+        if pi:
+            for fee in pi.fees.all():
+                amt = Decimal(str(fee.amount or 0))
+                row = {
+                    'id': fee.id,
+                    'description': fee.description,
+                    'amount': float(amt),
+                    'account_code': fee.expense_account.code if fee.expense_account else None,
+                    'account_name': fee.expense_account.name if fee.expense_account else None,
+                    'capitalize_to_inventory': fee.capitalize_to_inventory,
+                }
+                pi_fees_rows.append(row)
+                if fee.capitalize_to_inventory:
+                    pi_capitalized_total += amt
+                else:
+                    pi_expensed_total += amt
+
+            for it in pi.items.all():
+                pi_items_rows.append({
+                    'id': it.id,
+                    'product_id': it.product_id,
+                    'name': it.name,
+                    'quantity': float(it.quantity or 0),
+                    'unit_price': float(it.unit_price or 0),
+                    'total_price': float(it.total_price or 0),
+                    'landed_unit_price_ils': float(it.landed_unit_price_ils or 0) if it.landed_unit_price_ils is not None else None,
+                    'landed_line_total_ils': float(it.landed_line_total_ils or 0) if it.landed_line_total_ils is not None else None,
+                })
+
+        deals_data.append({
+            'deal_id': deal.id,
+            'ref_number': deal.ref_number,
+            'partner_name': deal.partner.name if deal.partner else None,
+            'currency': deal.currency.Code if deal.currency else None,
+            'merchandise_total': float(deal_merch),
+            'allocated_shipping_cost_usd': float(link.allocated_shipping_cost or 0),
+            'extra_costs_usd': float(link.extra_costs or 0),
+            'purchase_invoice': {
+                'id': pi.id if pi else None,
+                'invoice_number': pi.invoice_number if pi else None,
+                'currency': pi.currency.Code if pi and pi.currency else None,
+                'exchange_rate': float(pi.exchange_rate) if pi and pi.exchange_rate else 1.0,
+                'is_posted': bool(pi.is_posted) if pi else False,
+                'capitalized_fees_total': float(pi_capitalized_total),
+                'expensed_fees_total': float(pi_expensed_total),
+                'items': pi_items_rows if detailed else [],
+                'fees': pi_fees_rows if detailed else [],
+                'items_count': len(pi_items_rows),
+                'fees_count': len(pi_fees_rows),
+            } if pi else None,
+            'items_count': len(items) if hasattr(items, '__len__') else items.count(),
+        })
+
+    # بيانات التخليص
+    clearance_data = None
+    clearance_total = Decimal('0')
+    try:
+        cl = shipment.clearance
+    except Exception:
+        cl = None
+    if cl:
+        cost_lines = []
+        if isinstance(cl.cost_lines, list):
+            for ln in cl.cost_lines:
+                if not isinstance(ln, dict):
+                    continue
+                try:
+                    amt = Decimal(str(ln.get('amount') or 0))
+                except Exception:
+                    amt = Decimal('0')
+                cost_lines.append({
+                    'label': ln.get('label') or '',
+                    'amount': float(amt),
+                })
+                clearance_total += amt
+
+        posted_payments_total = sum(
+            (Decimal(str(p.amount or 0)) for p in cl.payments.all() if p.is_posted),
+            Decimal('0'),
+        )
+
+        clearance_data = {
+            'id': cl.id,
+            'declaration_number': cl.declaration_number,
+            'clearance_date': cl.clearance_date.isoformat() if cl.clearance_date else None,
+            'status': cl.status,
+            'cost_lines': cost_lines,
+            'cost_lines_total': float(clearance_total),
+            'posted_payments_total': float(posted_payments_total),
+            'broker_name': cl.customs_broker.name if cl.customs_broker else None,
+        }
+
+    # إجمالي Landed Cost = بضاعة + شحن مُخصَّص + تخليص + رسوم مرسملة
+    cap_fees_total = sum(
+        (Decimal(str(d['purchase_invoice']['capitalized_fees_total'])) if d['purchase_invoice'] else Decimal('0'))
+        for d in deals_data
+    )
+    exp_fees_total = sum(
+        (Decimal(str(d['purchase_invoice']['expensed_fees_total'])) if d['purchase_invoice'] else Decimal('0'))
+        for d in deals_data
+    )
+
+    # محاولة حساب total shipping بـ USD — من total_shipping_cost_usd
+    total_shipping = Decimal(str(shipment.total_shipping_cost_usd or 0))
+
+    grand_landed = total_merchandise + total_shipping + clearance_total + cap_fees_total
+
+    return {
+        'shipment_id': shipment.id,
+        'shipment_number': shipment.shipment_number,
+        'status': shipment.status,
+        'arrival_date': shipment.arrival_date.isoformat() if shipment.arrival_date else None,
+        'shipping_agent': shipment.shipping_agent.name if shipment.shipping_agent else None,
+        'shipping_type': shipment.shipping_type,
+        'total_merchandise': float(total_merchandise),
+        'total_shipping_cost_usd': float(total_shipping),
+        'allocated_shipping_total_usd': float(total_allocated_shipping),
+        'clearance_total': float(clearance_total),
+        'capitalized_fees_total': float(cap_fees_total),
+        'expensed_fees_total': float(exp_fees_total),
+        'grand_landed_cost_approx': float(grand_landed),
+        'deals': deals_data,
+        'clearance': clearance_data,
+    }
