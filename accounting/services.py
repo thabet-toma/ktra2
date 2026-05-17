@@ -325,3 +325,237 @@ def post_journal_entry(journal_id, user=None):
     except JournalHeader.DoesNotExist:
         raise ValidationError(f"Journal with ID {journal_id} does not exist.")
 
+
+def post_journal(
+    *,
+    tenant_id: int,
+    transaction_date,
+    reference_type: str,
+    reference_id: int | None,
+    description: str,
+    lines_data: list[dict],
+    currency=None,
+    exchange_rate=Decimal("1"),
+    user=None,
+    idempotent: bool = True,
+) -> JournalHeader:
+    """دالة ترحيل مركزية ذرّية — المسار الوحيد لإنشاء + ترحيل أي قيد محاسبي.
+
+    تفرض:
+    - فترة مالية مفتوحة
+    - توازن دقيق (debit == credit بعد quantize)
+    - جميع الأسطر تابعة لنفس tenant
+    - idempotency عبر (reference_type, reference_id)
+    - select_for_update لمنع السباق
+
+    تُرجع JournalHeader مرحّل (is_posted=True) أو القيد الموجود سابقاً إن كان idempotent.
+    """
+    _logger = logging.getLogger(__name__)
+
+    # ── 1) Validate fiscal period + journal balance (pre-atomic — fast fail) ──
+    validate_fiscal_period(tenant_id, transaction_date)
+    mock_hdr = JournalHeader(tenant_id=tenant_id, transaction_date=transaction_date)
+    validate_journal_entry(mock_hdr, lines_data)
+
+    # ── 2) Atomic: idempotency (select_for_update) + create + post ──
+    with transaction.atomic():
+        # الـ select_for_update يقفل أي صف موجود بنفس المفتاح ويمنع السباق:
+        # إذا كانت معاملتان متزامنتان تصلان هنا بنفس (reference_type, reference_id)،
+        # فالأولى تخلق الصف والثانية ترجع الصف الموجود — لا تكرار.
+        if idempotent and reference_type and reference_id is not None:
+            existing = (
+                JournalHeader.objects.select_for_update()
+                .filter(
+                    tenant_id=tenant_id,
+                    reference_type=reference_type,
+                    reference_id=reference_id,
+                )
+                .first()
+            )
+            if existing:
+                _logger.info(
+                    "post_journal idempotent hit: type=%s ref_id=%s → journal %s",
+                    reference_type, reference_id, existing.id,
+                )
+                return existing
+
+        jh = JournalHeader.objects.create(
+            tenant_id=tenant_id,
+            transaction_date=transaction_date,
+            reference_type=reference_type,
+            reference_id=reference_id,
+            description=description[:500],
+            is_posted=True,
+            currency=currency,
+            exchange_rate=exchange_rate,
+        )
+
+        for row in lines_data:
+            JournalLine.objects.create(
+                tenant_id=tenant_id,
+                journal=jh,
+                account_id=row["account"],
+                debit=Decimal(str(row.get("debit", 0))),
+                credit=Decimal(str(row.get("credit", 0))),
+                partner_id=row.get("partner"),
+                cost_center_id=row.get("cost_center"),
+                description=(row.get("description") or "")[:500],
+            )
+
+        _logger.info(
+            "post_journal created+posted: type=%s ref_id=%s journal=%s lines=%d",
+            reference_type, reference_id, jh.id, len(lines_data),
+        )
+
+    create_audit_log(
+        tenant=_get_tenant_obj(tenant_id),
+        user=user,
+        action='POST',
+        model_name='JournalHeader',
+        object_id=jh.id,
+        change_details=f"Centralized post: {reference_type} ref={reference_id}",
+    )
+
+    return jh
+
+
+def _get_tenant_obj(tenant_id: int):
+    """Fetch Tenant model instance from ID, returning None on failure."""
+    try:
+        from tenants.models import Tenant
+        return Tenant.objects.filter(pk=tenant_id).first()
+    except Exception:
+        return None
+
+
+def year_end_close(*, tenant_id: int, fiscal_year: int, retained_earnings_account_id: int, user=None) -> dict:
+    """روتين إغلاق سنوي: يصفّر حسابات الإيراد والمصروف إلى أرباح محتجزة.
+
+    يُنشأ قيد إغلاق واحد (reference_type='YEAR_END_CLOSE') يرحّل:
+    - كل حسابات Revenue (Cr → Dr) بصافي رصيدها
+    - كل حسابات Expense (Dr → Cr) بصافي رصيدها
+    - الفرق (صافي الربح/الخسارة) إلى حساب retained_earnings
+
+    يُرجع dict يحتوي على journal_id و profit_or_loss و rows_count.
+    """
+    from django.db.models import Sum
+    from .models import Account
+
+    _logger = logging.getLogger(__name__)
+
+    # ── 1) Validate retained earnings account ──
+    try:
+        re_acc = Account.objects.get(pk=retained_earnings_account_id, tenant_id=tenant_id, is_active=True)
+    except Account.DoesNotExist:
+        raise ValidationError("حساب الأرباح المحتجزة غير موجود أو غير نشط.")
+
+    # ── 2) Check idempotency ──
+    existing = JournalHeader.objects.filter(
+        tenant_id=tenant_id,
+        reference_type='YEAR_END_CLOSE',
+        reference_id=fiscal_year,
+    ).first()
+    if existing:
+        _logger.info("year_end_close idempotent hit: year=%s → journal %s", fiscal_year, existing.id)
+        return {"journal_id": existing.id, "profit_or_loss": "0.00", "rows_count": 0, "already_closed": True}
+
+    # ── 3) Compute net balances for P&L accounts ──
+    start_date = datetime.date(fiscal_year, 1, 1)
+    end_date = datetime.date(fiscal_year, 12, 31)
+
+    lines_data = []
+    total_revenue = Decimal("0")
+    total_expense = Decimal("0")
+
+    for acc_type in ("Revenue", "Expense"):
+        qs = (
+            JournalLine.objects
+            .filter(
+                tenant_id=tenant_id,
+                account__account_type=acc_type,
+                account__tenant_id=tenant_id,
+                journal__is_posted=True,
+                journal__transaction_date__gte=start_date,
+                journal__transaction_date__lte=end_date,
+            )
+            .values("account_id", "account__name", "account__code")
+            .annotate(dr=Sum("base_debit"), cr=Sum("base_credit"))
+        )
+
+        for row in qs:
+            dr = Decimal(str(row["dr"] or 0))
+            cr = Decimal(str(row["cr"] or 0))
+            net = dr - cr  # موجب = مدين (مصروف)، سالب = دائن (إيراد)
+
+            if acc_type == "Revenue":
+                # Revenue has credit balance (net negative) → close by debiting
+                if cr > dr:
+                    close_amt = (cr - dr).quantize(Decimal("0.01"))
+                    if close_amt > 0:
+                        lines_data.append({
+                            "account": row["account_id"],
+                            "debit": close_amt,
+                            "credit": Decimal("0"),
+                            "description": f"إغلاق {acc_type} {row['account__code']} — {row['account__name']}",
+                        })
+                        total_revenue += close_amt
+            else:
+                # Expense has debit balance (net positive) → close by crediting
+                if dr > cr:
+                    close_amt = (dr - cr).quantize(Decimal("0.01"))
+                    if close_amt > 0:
+                        lines_data.append({
+                            "account": row["account_id"],
+                            "debit": Decimal("0"),
+                            "credit": close_amt,
+                            "description": f"إغلاق {acc_type} {row['account__code']} — {row['account__name']}",
+                        })
+                        total_expense += close_amt
+
+    if not lines_data:
+        raise ValidationError(f"لا توجد حركات P&L للسنة {fiscal_year} — لا حاجة للإغلاق.")
+
+    # ── 4) Net profit/loss to retained earnings ──
+    profit_or_loss = (total_revenue - total_expense).quantize(Decimal("0.01"))
+    if profit_or_loss > 0:
+        # Profit → credit retained earnings
+        lines_data.append({
+            "account": retained_earnings_account_id,
+            "debit": Decimal("0"),
+            "credit": profit_or_loss,
+            "description": f"صافي ربح {fiscal_year} → أرباح محتجزة",
+        })
+    elif profit_or_loss < 0:
+        # Loss → debit retained earnings
+        lines_data.append({
+            "account": retained_earnings_account_id,
+            "debit": abs(profit_or_loss),
+            "credit": Decimal("0"),
+            "description": f"صافي خسارة {fiscal_year} → أرباح محتجزة",
+        })
+
+    # ── 5) Post via centralized function ──
+    jh = post_journal(
+        tenant_id=tenant_id,
+        transaction_date=end_date,
+        reference_type="YEAR_END_CLOSE",
+        reference_id=fiscal_year,
+        description=f"إغلاق سنوي {fiscal_year} — صافي {'ربح' if profit_or_loss >= 0 else 'خسارة'} {abs(profit_or_loss)}",
+        lines_data=lines_data,
+        user=user,
+        idempotent=True,
+    )
+
+    _logger.info(
+        "year_end_close: year=%s journal=%s revenue=%s expense=%s pnl=%s",
+        fiscal_year, jh.id, total_revenue, total_expense, profit_or_loss,
+    )
+
+    return {
+        "journal_id": jh.id,
+        "profit_or_loss": str(profit_or_loss),
+        "total_revenue": str(total_revenue),
+        "total_expense": str(total_expense),
+        "rows_count": len(lines_data),
+    }
+

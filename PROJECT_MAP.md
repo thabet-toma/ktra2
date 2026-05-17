@@ -4,7 +4,8 @@
 > Last audited: 2026-05-17.
 > Phase 1 completed: 2026-05-17 — 18/18 catastrophic fixes applied.
 > Phase 2 completed: 2026-05-17 — 14/14 medium fixes applied.
-> Phase 3 completed: 2026-05-17 — 9/10 minor fixes applied (m3-10 deferred to Phase 4 — requires settings model change).
+> Phase 3 completed: 2026-05-17 — 9/10 minor fixes applied (m3-10 deferred to Phase 4).
+> Phase 4 completed: 2026-05-17 — 6/11 professional-grade improvements applied (I4-05 partial, I4-06/09/11 deferred).
 
 ## [TECH_STACK]
 
@@ -128,3 +129,17 @@ URL roots: `/api/accounting/ /api/inventory/ /api/logistics/ /api/sales/ /api/ (
 ### Logistics
 - **m3-08** `logistics/landed_cost.py:485-503`: Hardcoded `internal_usd * 3.6` fallback replaced with `ExchangeRate` lookup (USD→ILS), falling back to 3.6 only if no rate found.
 - **m3-09** `logistics/signals.py:86-112`: `automate_expense_accounting` dead `is_foreign` branch fixed — now calls `get_exchange_rate()` for foreign-currency expenses instead of 1:1.
+
+## [PHASE 4 FIXES — 2026-05-17]
+
+### Accounting — Centralized Posting
+- **I4-01** `accounting/services.py:330-423`: New `post_journal()` function — single atomic entry point for ALL journal creation+posting. Enforces: open fiscal period, exact balance, same-tenant lines, idempotency via `(reference_type, reference_id)`, `select_for_update` race prevention. **Migrated callers:** accounting/deposit_journal, accounting/purchase_receipt, sales/post_sales_invoice, sales/post_customer_payment, sales/deliver_delivery_order (COGS), logistics/post_payment (deal), logistics/post_agent_payment (shipment), logistics/post_to_accounting (shipment freight), logistics/post_to_accounting (purchase invoice), logistics/signals (expense).
+- **I4-02** `accounting/models.py:70-81`: `JournalHeader.save()` now raises ValidationError if attempting to modify a posted journal — model-level immutability enforcement.
+- **I4-03** `sales/services.py:760-797`: `post_customer_payment` now posts forex gain/loss lines when payment currency differs from invoice currency — uses `resolve_forex_account()` to find the forex account.
+- **I4-04** `accounting/services.py:436-558`: New `year_end_close()` routine — closes all Revenue/Expense accounts for a fiscal year to retained earnings via `YEAR_END_CLOSE` journal. Endpoint: `POST /api/accounting/fiscal-periods/year-end-close/`.
+
+### Logistics — State Machine
+- **I4-07** `logistics/models.py:113-136` (LogisticsDeal), `logistics/models.py:297-320` (LogisticsShipment): Added `clean()` methods with valid transition tables — prevents invalid state transitions (e.g., Pending → Cleared, sw_mfg_start → sw_released).
+
+### UI Cleanup
+- **I4-08** Deleted `frontend_v2/components/forms/deal-specific/PaymentRegistration.tsx` — 100% commented-out dead code. No imports found.

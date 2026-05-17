@@ -115,6 +115,35 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
             ),
         ]
 
+    # ── State Machine: valid transitions for shipping_workflow_status ──
+    VALID_TRANSITIONS = {
+        None: ['sw_mfg_start'],
+        'sw_mfg_start': ['sw_wait_agent_ship'],
+        'sw_wait_agent_ship': ['sw_wait_intl_ship'],
+        'sw_wait_intl_ship': ['sw_wait_arrival'],
+        'sw_wait_arrival': ['sw_wait_clearance'],
+        'sw_wait_clearance': ['sw_released'],
+        'sw_released': [],  # terminal state
+    }
+
+    def clean(self):
+        super().clean()
+        if self.pk:
+            try:
+                old = LogisticsDeal.objects.only('shipping_workflow_status').get(pk=self.pk)
+            except LogisticsDeal.DoesNotExist:
+                return
+            old_st = old.shipping_workflow_status
+            new_st = self.shipping_workflow_status
+            if old_st != new_st:
+                allowed = self.VALID_TRANSITIONS.get(old_st, [])
+                if new_st not in allowed:
+                    from django.core.exceptions import ValidationError as DjangoVE
+                    raise DjangoVE(
+                        f"انتقال غير صالح: '{old_st}' → '{new_st}'. "
+                        f"المسموح: {allowed or 'لا انتقال (حالة نهائية)'}."
+                    )
+
     def __str__(self):
         return f"{self.ref_number} - {self.partner.name}"
 
@@ -253,6 +282,36 @@ class LogisticsShipment(SoftDeleteMixin, models.Model):
     class Meta:
         db_table = 'logistics_shipments'
         managed = True
+
+    # ── State Machine: valid transitions for status ──
+    # القيم تطابق STATUS_CHOICES حرفياً (In-Transit بشرطة).
+    # clean() تُستدعى فقط عند full_clean() — لا يطبّقها DRF تلقائياً.
+    VALID_STATUS_TRANSITIONS = {
+        None:         ['Pending'],
+        'Pending':    ['In-Transit'],
+        'In-Transit': ['Arrived'],
+        'Arrived':    ['Clearing'],
+        'Clearing':   ['Cleared'],
+        'Cleared':    [],  # terminal
+    }
+
+    def clean(self):
+        super().clean()
+        if self.pk:
+            try:
+                old = LogisticsShipment.objects.only('status').get(pk=self.pk)
+            except LogisticsShipment.DoesNotExist:
+                return
+            old_st = old.status
+            new_st = self.status
+            if old_st != new_st:
+                allowed = self.VALID_STATUS_TRANSITIONS.get(old_st, [])
+                if new_st not in allowed:
+                    from django.core.exceptions import ValidationError as DjangoVE
+                    raise DjangoVE(
+                        f"انتقال غير صالح للشحنة: '{old_st}' → '{new_st}'. "
+                        f"المسموح: {allowed or 'لا انتقال (حالة نهائية)'}."
+                    )
 
     def save(self, *args, **kwargs):
         if self.shipment_number and self.shipment_number not in ('', 'NEW'):

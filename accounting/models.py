@@ -70,6 +70,18 @@ class JournalHeader(models.Model):
     def __str__(self):
         return f"Journal {self.id} - {self.transaction_date}"
 
+    def save(self, *args, **kwargs):
+        """منع تعديل أو حذف قيد مرحّل على مستوى الموديل."""
+        if self.pk:
+            try:
+                old = JournalHeader.objects.only('is_posted').get(pk=self.pk)
+                if old.is_posted:
+                    from django.core.exceptions import ValidationError as DjangoVE
+                    raise DjangoVE("لا يمكن تعديل قيد مرحّل. أنشئ قيداً عكسياً بدلاً من ذلك.")
+            except JournalHeader.DoesNotExist:
+                pass
+        super().save(*args, **kwargs)
+
 class JournalLine(models.Model):
     id = models.AutoField(primary_key=True, db_column='JLineID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)

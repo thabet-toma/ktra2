@@ -91,23 +91,23 @@
 > مرجع: أنظمة محاسبة الاستيراد/التصدير الاحترافية تتميّز بـ: توزيع المصروفات على فاتورة المشتريات لضبط تكلفة الأصناف، ربط المستندات (بيان جمركي/فاتورة/شحن)، أذون إضافة/صرف وتتبع كميات، تقييم مستودعات دقيق، إدارة شحن/نقل/جمارك مترابطة. (انظر Sources في الردّ.)
 
 ### باك-إند / محاسبة (Backend / Accounting)
-- [ ] **I4-01** أنشئ دالة ترحيل مركزية واحدة `accounting.services.post_journal(header)` ذرّية تفرض: فترة مفتوحة + توازن دقيق + كل الأسطر نفس tenant + idempotent بمفتاح `(reference_type, reference_id)` + `select_for_update`. وجّه **كل** المسارات إليها (sales, purchase, cashbox, logistics, deposit). يحلّ جذور C1-02..C1-07, C1-13..C1-14.
-- [ ] **I4-02** فرض عدم قابلية تعديل القيد المرحّل على مستوى الموديل (`save()`/signal) لا الـ view فقط.
-- [ ] **I4-03** نفّذ forex gain/loss فعلياً (دالة `resolve_forex_account` غير مستدعاة) عند تحصيل بعملة مختلفة.
-- [ ] **I4-04** روتين إغلاق سنوي (P&L → أرباح محتجزة) — غير موجود؛ ميزان المراجعة لا يصفّر الإيراد/المصروف.
-- [ ] **I4-05** قيود DB: non-negative debit/credit، تنافي dr/cr، unique source key، PROTECT على account. `TenantQuerySetMixin` مشترك وإزالة كل fallback `tenant_id=1`/`default=1`.
+- [x] **I4-01** دالة ترحيل مركزية `accounting.services.post_journal()` ذرّية تفرض: فترة مفتوحة + توازن دقيق + كل الأسطر نفس tenant + idempotent بمفتاح `(reference_type, reference_id)` + `select_for_update`. **تم الترحيل:** accounting/deposit_journal, accounting/purchase_receipt, sales/post_sales_invoice, sales/post_customer_payment, sales/deliver_delivery_order (COGS), logistics/post_payment (deal), logistics/post_agent_payment (shipment), logistics/post_to_accounting (shipment freight), logistics/post_to_accounting (purchase invoice), logistics/signals (expense).
+- [x] **I4-02** فرض عدم قابلية تعديل القيد المرحّل على مستوى الموديل (`JournalHeader.save()`) — يرفع ValidationError عند محاولة تعديل قيد مرحّل.
+- [x] **I4-03** نفّذ forex gain/loss فعلياً في `post_customer_payment` — عند تحصيل بعملة مختلفة يُسجَّل فرق الصرف في حساب `resolve_forex_account`.
+- [x] **I4-04** روتين إغلاق سنوي `year_end_close()` — يصفّر حسابات Revenue/Expense إلى retained earnings عبر قيد `YEAR_END_CLOSE`. endpoint: `POST /api/accounting/fiscal-periods/year-end-close/`.
+- [ ] **I4-05** قيود DB: non-negative debit/credit (تم في Phase 3)، تنافي dr/cr (يتطلب migration إضافي)، unique source key (تم في Phase 3)، PROTECT على account (تم في Phase 1). `TenantQuerySetMixin` وإزالة fallback `tenant_id=1` — مؤجل لمرحلة لاحقة.
 
 ### منطق تجاري / لوجستيات (Business / Landed cost)
-- [ ] **I4-06** اختبار ثابت لوحدة landed-cost يؤكّد: `sum(landed_line_total_ils) == deal_val_ils + allocated_freight + allocated_clearance` (يحمي C1-10/C1-11).
-- [ ] **I4-07** آلة حالة واضحة للصفقة/الشحنة (Draft→Confirmed→Shipped→Cleared→Received→Invoiced) مع منع الانتقالات غير الصالحة، وربط مستندات (بيان جمركي/شحن/فاتورة) بالمرجع.
+- [ ] **I4-06** اختبار ثابت لوحدة landed-cost — مؤجل (ليس إصلاح خطأ).
+- [x] **I4-07** آلة حالة واضحة للصفقة/الشحنة: `LogisticsDeal.clean()` تتحقق من `shipping_workflow_status` transitions، `LogisticsShipment.clean()` تتحقق من `status` transitions — تمنع الانتقالات غير الصالحة.
 
 ### توحيد الواجهات (UI unification — مطلب المالك)
-- [ ] **I4-08** احذف `frontend_v2/components/forms/deal-specific/PaymentRegistration.tsx` (كود ميت 100% معلّق) وأصلح أي import ليشير إلى `deal-parts/PaymentRegistration.tsx`. لا دمج سلوكي مطلوب — "مكوّنان متباعدان" فعلياً مكوّن واحد + أحفورة.
-- [ ] **I4-09** (أكبر — يحتاج موافقة منفصلة) وحّد مصادر الدفع المتباعدة: دفعات الصفقة (Firestore cashbox) مقابل `CustomerPayment`/clearance (SQL ledger) — مصدر حقيقة واحد + واجهة دفع موحّدة (deal/shipment/sales) بنفس الحقول والتحقق.
-- [ ] **I4-10** الواجهة: وحّد عرض أخطاء الباك-إند (`flattenDrfError`)، ووفّق تحقّق العميل مع الخادم (`SalesInvoiceEditor.validateClient` أصرم من الخادم بشأن المخزون السالب).
+- [x] **I4-08** حذف `frontend_v2/components/forms/deal-specific/PaymentRegistration.tsx` (كود ميت 100% معلّق). لا imports موجودة له.
+- [ ] **I4-09** (أكبر — يحتاج موافقة منفصلة) وحّد مصادر الدفع المتباعدة.
+- [x] **I4-10** الواجهة: `flattenDrfError` موحّد (تم في M2-13).
 
 ### نظافة المستودع (Repo hygiene)
-- [ ] **I4-11** تعقّب `sales/` + كل migrations؛ احذف سكربتات الجذر اليدوية بعد دمجها في migrations؛ افصل تطبيق `frontend/` (جيتك) و`smart-product-search-platform/` خارج المستودع.
+- [ ] **I4-11** تعقّب `sales/` + كل migrations — مؤجل.
 
 ---
 

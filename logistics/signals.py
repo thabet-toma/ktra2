@@ -96,7 +96,7 @@ def automate_expense_accounting(sender, instance, created, **kwargs):
         try:
             from decimal import Decimal
             from tenants.models import Currency
-            from accounting.services import get_exchange_rate
+            from accounting.services import get_exchange_rate, post_journal
 
             expense_currency = getattr(instance, 'currency', None)
             base_currency = Currency.objects.filter(IsBaseCurrency=True).first()
@@ -115,41 +115,27 @@ def automate_expense_accounting(sender, instance, created, **kwargs):
             else:
                 rate = Decimal('1')
 
-            # الأسطر بعملة المعاملة؛ JournalLine.save يشتقّ المبلغ بالعملة
-            # الأساسية = amount × exchange_rate من الـ header (لا تحوّل هنا
-            # وإلا يُطبَّق سعر الصرف مرتين).
             txn_amount = Decimal(str(instance.amount or 0))
+            td = instance.invoice_date or datetime.date.today()
 
-            with transaction.atomic():
-                journal = JournalHeader.objects.create(
-                    tenant=instance.tenant,
-                    transaction_date=instance.invoice_date or datetime.date.today(),
-                    description=f"مصروف لوجستي (Auto): {instance.description} ({instance.related_type} #{instance.related_id})",
-                    reference_type='LOGISTICS_EXPENSE',
-                    reference_id=instance.id,
-                    is_posted=True,
-                    currency=expense_currency,
-                    exchange_rate=rate,
-                )
+            lines_data = [
+                {"account": instance.expense_account_id, "debit": txn_amount, "credit": Decimal("0"), "description": f"مصروف لوجستي: {instance.description}"},
+                {"account": instance.payable_account_id, "debit": Decimal("0"), "credit": txn_amount, "description": f"مصروف لوجستي: {instance.description}"},
+            ]
 
-                JournalLine.objects.create(
-                    tenant=instance.tenant,
-                    journal=journal,
-                    account=instance.expense_account,
-                    debit=txn_amount,
-                    credit=0,
-                )
+            journal = post_journal(
+                tenant_id=instance.tenant_id,
+                transaction_date=td,
+                reference_type='LOGISTICS_EXPENSE',
+                reference_id=instance.id,
+                description=f"مصروف لوجستي (Auto): {instance.description} ({instance.related_type} #{instance.related_id})",
+                lines_data=lines_data,
+                currency=expense_currency,
+                exchange_rate=rate,
+            )
 
-                JournalLine.objects.create(
-                    tenant=instance.tenant,
-                    journal=journal,
-                    account=instance.payable_account,
-                    debit=0,
-                    credit=txn_amount,
-                )
-
-                LogisticsExpense.objects.filter(id=instance.id).update(is_posted=True, journal=journal)
-        except (DjangoValidationError, IntegrityError) as e:
+            LogisticsExpense.objects.filter(id=instance.id).update(is_posted=True, journal=journal)
+        except (ValidationError, DjangoValidationError, IntegrityError) as e:
             logger.error("Error automating LogisticsExpense %s: %s", instance.id, e)
 
 

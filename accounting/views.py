@@ -38,8 +38,10 @@ from .serializers import (
 from .services import (
     validate_journal_entry,
     post_journal_entry,
+    post_journal,
     create_audit_log,
     create_fiscal_year,
+    year_end_close,
 )
 
 logger = logging.getLogger(__name__)
@@ -944,40 +946,22 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
         line_cash = f"إيداع نقد — {cash_link.name}"
         line_cap = f"مساهمة / رأس مال — {desc}"[:500]
 
-        # Validate fiscal period before posting
-        try:
-            validate_fiscal_period(tenant.TenantID, td)
-        except DjangoValidationError as ve:
-            msg = ve.message if hasattr(ve, "message") else str(ve)
-            return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
+        lines_data = [
+            {"account": cash_link.account_id, "debit": amount, "credit": Decimal("0"), "description": line_cash[:500]},
+            {"account": capital.id, "debit": Decimal("0"), "credit": amount, "description": line_cap},
+        ]
 
         try:
-            with db_transaction.atomic():
-                j = JournalHeader.objects.create(
-                    tenant=tenant,
-                    transaction_date=td,
-                    description=jdesc,
-                    reference_type="CASHBOX_FIRESTORE_DEPOSIT",
-                    reference_id=None,
-                    is_posted=True,
-                )
-                JournalLine.objects.create(
-                    tenant=tenant,
-                    journal=j,
-                    account=cash_link.account,
-                    debit=amount,
-                    credit=0,
-                    description=line_cash[:500],
-                )
-                JournalLine.objects.create(
-                    tenant=tenant,
-                    journal=j,
-                    account=capital,
-                    debit=0,
-                    credit=amount,
-                    description=line_cap[:500],
-                )
-                validate_journal_entry(j, list(j.lines.all()))
+            j = post_journal(
+                tenant_id=tenant.TenantID,
+                transaction_date=td,
+                reference_type="CASHBOX_FIRESTORE_DEPOSIT",
+                reference_id=None,
+                description=jdesc,
+                lines_data=lines_data,
+                user=request.user,
+                idempotent=False,
+            )
         except DjangoValidationError as ve:
             msg = ve.message if hasattr(ve, "message") else str(ve)
             return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
@@ -1107,82 +1091,35 @@ class PurchaseReceiptViewSet(viewsets.ViewSet):
 
         net_amount = amount - tax_amount
         lines_payload = [
-            {
-                'account': inventory_account.id,
-                'debit': net_amount,
-                'credit': Decimal('0'),
-                'partner': partner.id,
-            },
+            {'account': inventory_account.id, 'debit': net_amount, 'credit': Decimal('0'), 'partner': partner.id},
         ]
         if tax_amount > 0:
             lines_payload.append({
-                'account': vat_input_account.id,
-                'debit': tax_amount,
-                'credit': Decimal('0'),
-                'partner': partner.id,
+                'account': vat_input_account.id, 'debit': tax_amount, 'credit': Decimal('0'), 'partner': partner.id,
             })
         lines_payload.append({
-            'account': partner.linked_account.id,
-            'debit': Decimal('0'),
-            'credit': amount,
-            'partner': partner.id,
+            'account': partner.linked_account.id, 'debit': Decimal('0'), 'credit': amount, 'partner': partner.id,
         })
 
-        # تحقق توازن القيد قبل الحفظ + فترة مالية
         try:
-            from accounting.services import validate_journal_entry
-            mock_header = JournalHeader(tenant=tenant, transaction_date=td)
-            validate_fiscal_period(tenant.TenantID, td)
-            validate_journal_entry(mock_header, lines_payload)
+            j = post_journal(
+                tenant_id=tenant.TenantID,
+                transaction_date=td,
+                reference_type="PURCHASE_RECEIPT",
+                reference_id=ref_id,
+                description=f"{description}{ref_note} | {partner.name}"[:500],
+                lines_data=lines_payload,
+                user=request.user,
+            )
         except DjangoValidationError as ve:
             msg = ve.message if hasattr(ve, "message") else str(ve)
             return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({"error": f"قيد غير متوازن: {e}"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            with db_transaction.atomic():
-                j = JournalHeader.objects.create(
-                    tenant=tenant,
-                    transaction_date=td,
-                    description=f"{description}{ref_note} | {partner.name}"[:500],
-                    reference_type="PURCHASE_RECEIPT",
-                    reference_id=ref_id,
-                    is_posted=True,
-                )
-                JournalLine.objects.create(
-                    tenant=tenant, journal=j,
-                    account=inventory_account,
-                    debit=net_amount, credit=0,
-                    partner=partner,
-                )
-                if tax_amount > 0 and vat_input_account:
-                    JournalLine.objects.create(
-                        tenant=tenant, journal=j,
-                        account=vat_input_account,
-                        debit=tax_amount, credit=0,
-                        partner=partner,
-                    )
-                JournalLine.objects.create(
-                    tenant=tenant, journal=j,
-                    account=partner.linked_account,
-                    debit=0, credit=amount,
-                    partner=partner,
-                )
         except IntegrityError as ie:
             return Response({"error": f"Database Integrity Error: {ie}"}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.exception("purchase receipt post failed")
             return Response({"error": "حدث خطأ غير متوقع أثناء إنشاء قيد الاستلام."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        create_audit_log(
-            tenant=tenant,
-            user=request.user,
-            action="CREATE",
-            model_name="JournalHeader",
-            object_id=j.id,
-            change_details=f"Purchase receipt partner={partner_id} amount={amount} tax={tax_amount}",
-        )
         return Response({"journal_id": j.id, "net_amount": str(net_amount), "tax_amount": str(tax_amount)}, status=status.HTTP_201_CREATED)
 
 
@@ -1316,6 +1253,41 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
             change_details=f"Period {period.name} reopened",
         )
         return Response(FiscalPeriodSerializer(period).data)
+
+    @action(detail=False, methods=['post'], url_path='year-end-close')
+    def year_end_close_action(self, request):
+        """إغلاق سنوي: ترحيل صافي P&L إلى أرباح محتجزة."""
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'لا يوجد مستأجر'}, status=status.HTTP_400_BAD_REQUEST)
+
+        year = request.data.get('year')
+        retained_earnings_account = request.data.get('retained_earnings_account_id')
+        if not year or not retained_earnings_account:
+            return Response(
+                {'error': 'year و retained_earnings_account_id مطلوبان'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            year = int(year)
+        except (TypeError, ValueError):
+            return Response({'error': 'year يجب أن يكون رقماً'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            result = year_end_close(
+                tenant_id=tenant.TenantID,
+                fiscal_year=year,
+                retained_earnings_account_id=int(retained_earnings_account),
+                user=request.user,
+            )
+        except DjangoValidationError as ve:
+            msg = ve.message if hasattr(ve, 'message') else str(ve)
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("year_end_close failed")
+            return Response({'error': 'حدث خطأ غير متوقع أثناء الإغلاق السنوي.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(result)
 
 
 class TaxRateViewSet(viewsets.ModelViewSet):

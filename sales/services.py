@@ -11,10 +11,11 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
 
-from accounting.models import Account, JournalHeader, JournalLine
+from accounting.models import Account
 from accounting.services import (
     convert_amount,
     create_audit_log,
+    post_journal,
     resolve_forex_account,
     validate_fiscal_period,
     validate_journal_entry,
@@ -499,12 +500,6 @@ def post_sales_invoice(
         if invoice.stock_on_post:
             journal_lines.extend(_build_cogs_journal_line_dicts(invoice, lines, products_by_id))
 
-        hdr = JournalHeader(
-            tenant_id=invoice.tenant_id,
-            transaction_date=invoice.invoice_date,
-        )
-        validate_journal_entry(hdr, journal_lines)
-
         tenant_name = ""
         try:
             tenant_name = (invoice.tenant.CompanyName or "").strip()
@@ -525,26 +520,17 @@ def post_sales_invoice(
             desc_parts.append(f"· {invoice.notes}")
         final_desc = " ".join(desc_parts)[:500]
 
-        jh = JournalHeader.objects.create(
+        jh = post_journal(
             tenant_id=invoice.tenant_id,
             transaction_date=invoice.invoice_date,
             reference_type="SALES_INVOICE",
             reference_id=invoice.id,
             description=final_desc,
-            is_posted=True,
+            lines_data=journal_lines,
             currency=invoice.currency,
             exchange_rate=invoice.exchange_rate,
+            user=user,
         )
-        for row in journal_lines:
-            JournalLine.objects.create(
-                tenant_id=invoice.tenant_id,
-                journal=jh,
-                account_id=row["account"],
-                debit=row["debit"],
-                credit=row["credit"],
-                partner_id=row.get("partner"),
-                description=(row.get("description") or "")[:500],
-            )
 
         invoice.journal = jh
         invoice.status = SalesInvoice.STATUS_POSTED
@@ -620,37 +606,19 @@ def deliver_delivery_order(delivery: DeliveryOrder, *, user=None) -> DeliveryOrd
 
         if not inv.stock_on_post:
             _post_stock_out_for_invoice(inv, lines, user=user)
-            # Idempotency: skip if COGS journal already exists
-            if not JournalHeader.objects.filter(
-                reference_type="SALES_DELIVERY_COGS", reference_id=inv.id
-            ).exists():
-                cogs_rows = _build_cogs_journal_line_dicts(inv, lines, products_by_id)
-                if cogs_rows:
-                    hdr2 = JournalHeader(
-                        tenant_id=inv.tenant_id,
-                        transaction_date=inv.invoice_date,
-                    )
-                    validate_journal_entry(hdr2, cogs_rows)
-                    jh_cogs = JournalHeader.objects.create(
-                        tenant_id=inv.tenant_id,
-                        transaction_date=inv.invoice_date,
-                        reference_type="SALES_DELIVERY_COGS",
-                        reference_id=inv.id,
-                        description=(f"تكلفة مبيعات عند التسليم — {inv.invoice_number}")[:500],
-                        is_posted=True,
-                        currency=inv.currency,
-                        exchange_rate=inv.exchange_rate,
-                    )
-                    for row in cogs_rows:
-                        JournalLine.objects.create(
-                            tenant_id=inv.tenant_id,
-                            journal=jh_cogs,
-                            account_id=row["account"],
-                            debit=row["debit"],
-                            credit=row["credit"],
-                            partner_id=row.get("partner"),
-                            description=(row.get("description") or "")[:500],
-                        )
+            cogs_rows = _build_cogs_journal_line_dicts(inv, lines, products_by_id)
+            if cogs_rows:
+                post_journal(
+                    tenant_id=inv.tenant_id,
+                    transaction_date=inv.invoice_date,
+                    reference_type="SALES_DELIVERY_COGS",
+                    reference_id=inv.id,
+                    description=(f"تكلفة مبيعات عند التسليم — {inv.invoice_number}")[:500],
+                    lines_data=cogs_rows,
+                    currency=inv.currency,
+                    exchange_rate=inv.exchange_rate,
+                    user=user,
+                )
 
         delivery.status = DeliveryOrder.STATUS_DELIVERED
         from django.utils import timezone
@@ -738,30 +706,6 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
 
     ar = _resolve_ar_account_for_partner(payment.partner)
 
-    # ── بناء أسطر القيد المحاسبي ──
-    lines_data = [
-        {
-            "account": payment.cash_or_bank_account_id,
-            "partner": payment.partner_id,
-            "debit": payment.amount,
-            "credit": Decimal("0"),
-            "description": f"تحصيل عميل — دفعة {payment.id}",
-        },
-        {
-            "account": ar.id,
-            "partner": payment.partner_id,
-            "debit": Decimal("0"),
-            "credit": payment.amount,
-            "description": f"تخفيض ذمم — دفعة {payment.id}",
-        },
-    ]
-
-    hdr = JournalHeader(
-        tenant_id=payment.tenant_id,
-        transaction_date=payment.payment_date,
-    )
-    validate_journal_entry(hdr, lines_data)
-
     with transaction.atomic():
         # قفل الفواتير (select_for_update) ومادّتها فعلياً في dict لمنع
         # سباق lost-update على amount_paid. لا بد من تقييم الـ queryset
@@ -790,33 +734,91 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
                     f"يتجاوز المتبقي على الفاتورة #{inv.invoice_number} ({remaining})."
                 )
 
-        jh = JournalHeader.objects.create(
+        # ── بناء أسطر القيد المحاسبي ──
+        # فرق العملة (I4-03): إذا اختلفت عملة الدفعة عن عملة الفاتورة نحسب
+        # المبلغ المعادل بعملة الدفعة ونضبط سطر الذمم + نضيف سطر فروقات عملة.
+        # هذا يضمن توازن القيد دائماً:
+        #   Dr صندوق/بنك  = payment.amount
+        #   Cr ذمم مدينة  = payment.amount - forex_diff  (إن كان ربح) أو payment.amount + abs(forex_diff) (إن كان خسارة)
+        #   Cr/Dr فروقات عملة = |forex_diff|
+        # المجموع: Dr = Cr = payment.amount (ربح) أو payment.amount + abs(loss) (خسارة)
+
+        total_alloc_in_inv_curr = sum(
+            (amt for _alloc, amt, _rate in alloc_conversions), Decimal("0")
+        )
+        forex_diff = Decimal("0")
+        forex_acc = None
+
+        if payment_currency_id and alloc_conversions:
+            first_inv_curr_id = alloc_conversions[0][0].invoice.currency_id
+            if payment_currency_id != first_inv_curr_id:
+                total_in_pay_curr, _ = convert_amount(
+                    amount=total_alloc_in_inv_curr,
+                    from_currency_id=first_inv_curr_id,
+                    to_currency_id=payment_currency_id,
+                    tenant_id=payment.tenant_id,
+                    effective_date=payment.payment_date,
+                )
+                forex_diff = (payment.amount - total_in_pay_curr).quantize(DEC)
+                if abs(forex_diff) > DEC:
+                    forex_acc = resolve_forex_account(payment.tenant_id)
+                    if not forex_acc:
+                        raise ValidationError(
+                            "فرق عملة مكتشف لكن لا يوجد حساب فروقات عملة. "
+                            "أنشئ حساباً باسم 'فرق عمل' من نوع Expense أو Revenue."
+                        )
+
+        # forex_diff > 0 → ربح (دفعنا أكثر من قيمة الفاتورة بالعملة المحوّلة)
+        # forex_diff < 0 → خسارة
+        ar_credit = (payment.amount - forex_diff).quantize(DEC)
+
+        lines_data: list[dict] = [
+            {
+                "account": payment.cash_or_bank_account_id,
+                "partner": payment.partner_id,
+                "debit": payment.amount,
+                "credit": Decimal("0"),
+                "description": f"تحصيل عميل — دفعة {payment.id}",
+            },
+            {
+                "account": ar.id,
+                "partner": payment.partner_id,
+                "debit": Decimal("0"),
+                "credit": ar_credit,
+                "description": f"تخفيض ذمم — دفعة {payment.id}",
+            },
+        ]
+
+        if forex_acc and abs(forex_diff) > DEC:
+            if forex_diff > 0:
+                # ربح صرف: دائن في حساب فروقات العملة يوازن فرق الذمم
+                lines_data.append({
+                    "account": forex_acc.id,
+                    "partner": None,
+                    "debit": Decimal("0"),
+                    "credit": forex_diff,
+                    "description": f"ربح فروق عملة — دفعة {payment.id}",
+                })
+            else:
+                # خسارة صرف: مدين في حساب فروقات العملة + الذمم دائن بأكثر
+                lines_data.append({
+                    "account": forex_acc.id,
+                    "partner": None,
+                    "debit": abs(forex_diff),
+                    "credit": Decimal("0"),
+                    "description": f"خسارة فروق عملة — دفعة {payment.id}",
+                })
+
+        jh = post_journal(
             tenant_id=payment.tenant_id,
             transaction_date=payment.payment_date,
             reference_type="CUSTOMER_PAYMENT",
             reference_id=payment.id,
             description=(payment.notes or f"تحصيل عميل {payment.partner.name}")[:500],
-            is_posted=True,
+            lines_data=lines_data,
             currency=payment.currency,
             exchange_rate=payment.exchange_rate,
-        )
-        JournalLine.objects.create(
-            tenant_id=payment.tenant_id,
-            journal=jh,
-            account_id=lines_data[0]["account"],
-            debit=payment.amount,
-            credit=Decimal("0"),
-            partner_id=payment.partner_id,
-            description=lines_data[0]["description"][:500],
-        )
-        JournalLine.objects.create(
-            tenant_id=payment.tenant_id,
-            journal=jh,
-            account_id=lines_data[1]["account"],
-            debit=Decimal("0"),
-            credit=payment.amount,
-            partner_id=payment.partner_id,
-            description=lines_data[1]["description"][:500],
+            user=user,
         )
 
         payment.journal = jh
