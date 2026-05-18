@@ -9,15 +9,26 @@ from rest_framework.response import Response
 
 from core.api_defaults import ApiAuthAndUser
 from core.tenant_utils import get_tenant
-from .models import CustomerPayment, DeliveryOrder, SalesInvoice, SalesInvoiceLine, SalesSettings
+from .models import (
+    CustomerPayment,
+    DeliveryOrder,
+    SalesInvoice,
+    SalesInvoiceLine,
+    SalesQuotation,
+    SalesQuotationLine,
+    SalesSettings,
+)
 from .serializers import (
     CustomerPaymentSerializer,
     DeliveryOrderSerializer,
     SalesInvoiceListSerializer,
     SalesInvoiceSerializer,
+    SalesQuotationListSerializer,
+    SalesQuotationSerializer,
     SalesSettingsSerializer,
 )
 from .services import (
+    convert_quotation_to_invoice,
     credit_preview_for_sale,
     deliver_delivery_order,
     get_or_create_sales_settings,
@@ -356,3 +367,40 @@ class SalesReportViewSet(viewsets.ViewSet):
                 }
             )
         return Response(rows)
+
+
+class SalesQuotationViewSet(viewsets.ModelViewSet):
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    queryset = SalesQuotation.objects.all().select_related(
+        "customer", "currency", "tenant",
+    ).prefetch_related("lines")
+    serializer_class = SalesQuotationSerializer
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        tenant = get_tenant(self.request)
+        if tenant:
+            qs = qs.filter(tenant_id=tenant.TenantID)
+        return qs.order_by("-quotation_date", "-id")
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            raise DRFValidationError({"tenant": "لا يوجد شركة محددة لهذا الطلب."})
+        serializer.save(tenant=tenant, created_by=self.request.user)
+
+    @action(detail=True, methods=["post"], url_path="convert")
+    def convert(self, request, pk=None):
+        quotation = self.get_object()
+        try:
+            invoice = convert_quotation_to_invoice(quotation, user=request.user)
+            return Response({
+                "status": "تم تحويل العرض إلى فاتورة.",
+                "invoice": SalesInvoiceSerializer(invoice).data,
+            })
+        except ValueError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

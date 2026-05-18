@@ -94,7 +94,7 @@
 
 - [x] **T3-02 — تم (Opus 2026-05-18):** توحيد رسائل نجاح/فشل ترحيل الدفع — لا تغيير مطلوب. التحقق: الأنواع الأربعة ترجع `{status, journal_id, payment_id}` عند النجاح و`{error}` عند الفشل — بالفعل متسقة. موثّق في PROJECT_MAP.
 
-- [x] **T3-03 — تم (Opus 2026-05-18):** `logistics/views.py:2035-2090` — `LocalShipmentViewSet.post_to_accounting` now derives `base_amt = amount × exchange_rate` for foreign-currency lines (نفس درس C1-05). Removed manual `base_debit/base_credit` assignment — auto-calc'd by `JournalLine.save()` from `journal.exchange_rate`.
+- [x] **T3-03 — تم + تصحيح مراجعة حرج (Opus 2026-05-18):** عمل النموذج الخارجي كان فيه **خطآن**: (1) **تحويل مزدوج**: ضبط `debit=base_amt=amt×rate` ثم ترك `JournalHeader.exchange_rate=rate` فـ`JournalLine.save()` يضرب ثانيةً → `base = amt×rate²` (نفس صنف m3-09). (2) **TypeError وقت التشغيل**: `JournalLine.objects.create(..., exchange_rate=shipment.exchange_rate)` و`JournalLine` لا يملك حقل `exchange_rate` (خطأ كامن قديم لم يُصلَح، لم يُكشف لعدم وجود LocalShipment مرحَّل). **التصحيح:** السطور تبقى **اسمية** (`debit=amt`)، حُذف حساب `base_amt`، حُذف kwarg `exchange_rate` غير الصالح؛ `JournalLine.save()` يشتق الأساس مرّة واحدة من `journal.exchange_rate` (نمط C1-05). تحقّق: 100@3.6 → base=360 (لا 1296). check+12/12 tests نظيف.
 
 ---
 
@@ -104,7 +104,7 @@
 
 ### كيان عرض السعر (Quotation) — نمط احترافي
 
-- [x] **T4-01 — تم (Opus 2026-05-18):** SalesQuotation + SalesQuotationLine + convert endpoint + serializers + viewset + URL + migration. انظر PROJECT_MAP.
+- [x] **T4-01 — تم + تصحيح مراجعة (Opus 2026-05-18):** SalesQuotation + SalesQuotationLine + convert endpoint + serializer + viewset + URL + migration `sales/0006` — البنية والـstate machine سليمة (الفرض في `save()` نمط I4-07). **خطأ صحّحته:** `SalesQuotation.save()` كان يرفع `ValueError` للانتقال غير الصالح → عبر PATCH القياسي (لا يلتقطه إلا أكشن `convert`) يتسرّب **500** بدل 400. غُيِّر إلى `DjangoValidationError` (DRF→400) + `.only('status')` بدل جلب الصف كاملاً. تحقّق: انتقال `draft→converted` يرفع DjangoValidationError، `draft→sent` يمرّ.
 
 ### توحيد الدفع الفعلي (wiring)
 
@@ -112,7 +112,7 @@
 
 ### حقول الاسم المختصر — جذر مشكلة العرض
 
-- [x] **T4-03 — تم (Opus 2026-05-18):** `short_name` مضاف لـ LogisticsDeal + migration. انظر PROJECT_MAP.
+- [x] **T4-03 — تم backend + إكمال مراجعة (Opus 2026-05-18):** النموذج الخارجي أضاف حقل `short_name` + migration `logistics/0023` فقط — **لم يعرضه في أي serializer/واجهة** (grep فارغ). **الإكمال:** `LogisticsDealSerializer` يعرضه عبر `__all__` (مؤكَّد)، و`_deal_title_for_list_preview` صار يعطي `short_name` **الأولوية القصوى** قبل الـheuristic (الحقل وُجد ليتجاوز التخمين). **حدّ موثّق:** أعمدة قائمة الصفقات في الواجهة = T4-08 (لم يُنفَّذ، خارج نطاق تنفيذ النموذج).
 
 ### توحيد النقل المحلي (UI + بيانات)
 

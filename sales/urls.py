@@ -5,12 +5,14 @@ from .views import (
     CustomerPaymentViewSet,
     DeliveryOrderViewSet,
     SalesInvoiceViewSet,
+    SalesQuotationViewSet,
     SalesReportViewSet,
     SalesSettingsViewSet,
 )
 
 router = DefaultRouter()
 router.register(r"invoices", SalesInvoiceViewSet, basename="sales-invoices")
+router.register(r"quotations", SalesQuotationViewSet, basename="sales-quotations")
 router.register(r"delivery-orders", DeliveryOrderViewSet, basename="sales-delivery-orders")
 router.register(r"payments", CustomerPaymentViewSet, basename="customer-payments")
 router.register(r"settings", SalesSettingsViewSet, basename="sales-settings")

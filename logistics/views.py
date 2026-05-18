@@ -2055,6 +2055,11 @@ class LocalShipmentViewSet(BaseTenantViewSet):
                 )
             credit_partner = shipment.carrier
 
+        # T3-03: keep line amounts NOMINAL (transaction currency). The base
+        # equivalent is derived once by JournalLine.save() from
+        # journal.exchange_rate (C1-05). Pre-multiplying here AND letting
+        # save() multiply again caused amount × rate² (m3-09 double-convert).
+
         td = shipment.delivery_date or shipment.pickup_date or datetime.date.today()
 
         # التحقق من الفترة المالية
@@ -2103,9 +2108,9 @@ class LocalShipmentViewSet(BaseTenantViewSet):
                         description=ln.get('description', '')[:255],
                         debit=ln['debit'],
                         credit=ln['credit'],
-                        base_debit=ln['debit'],
-                        base_credit=ln['credit'],
-                        exchange_rate=shipment.exchange_rate,
+                        # base_debit/base_credit auto-derived by JournalLine.save()
+                        # from journal.exchange_rate (C1-05). No exchange_rate
+                        # kwarg — JournalLine has no such field (was a TypeError).
                     )
                 shipment.is_posted = True
                 shipment.journal = journal

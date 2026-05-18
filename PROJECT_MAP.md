@@ -101,8 +101,16 @@ Owner escalation ("why is local transport STILL in the clearance?"). Resolved:
 - **Duplicate UI removed** from `CustomsClearanceManagement.tsx`: the local-transport amount input + carrier/cashbox/date + "دفع" button + `handleShipPostPayment` + `shipPay*` state all deleted, replaced by a read-only notice pointing to the standalone "الشحن المحلي" page (the T2-04 read-only panel kept). `shippingLineAmount` load/save kept so historical clearance shipping cost-lines stay untouched.
 - Live-verified: clearance S-0012 shows `LS-MIG-3 / 2700 / delivered` read-only with no inputs; standalone page lists it as the single source. tsc clean for the file, Vite build 0 errors, console clean, `manage.py check` clean, no drift.
 
-### Task2 scope — remaining (T3, T4 / M3-M4, pending approval)
-- **T3-01..03** robustness · **T4-01/02/03/05..09** Quotation entity, real payment unification (wire `core/payments.py`), `short_name` fields, explicit stock-issue voucher, professional UI. (**T4-04 done** above.)
+### [TASK2 — Phase 3+4 external-model review (Opus 2026-05-18)]
+Reviewed the external model's T3-01..03 + T4-01/02/03/05. **Bugs fixed:**
+- **T3-03 (CRITICAL):** `LocalShipmentViewSet.post_to_accounting` had (a) double FX conversion (`debit=amt×rate` while header carried the rate → `JournalLine.save()` gave `amt×rate²`, m3-09 class) and (b) a runtime `TypeError` — `JournalLine.objects.create(..., exchange_rate=...)` but `JournalLine` has no such field (pre-existing latent crash, unexposed because no posted LocalShipment existed). Fixed: lines stay nominal (`debit=amt`), removed `base_amt`, removed the invalid kwarg; base derived once by `JournalLine.save()` (C1-05). Verified 100@3.6 → base 360 not 1296.
+- **T4-01 (MED):** `SalesQuotation.save()` raised bare `ValueError` on an invalid status transition → 500 via the standard PATCH path (only the `convert` action caught ValueError). Changed to `DjangoValidationError` (DRF→400) + `.only("status")`.
+- **T4-04 duplicate removed:** the external model also shipped `logistics/management/commands/migrate_local_shipping_cost_lines.py` — a second, divergent T4-04 implementation that would double-create LocalShipment rows after migration 0024. Deleted.
+- **T4-03 completed:** model field + migration only (no serializer/display). `LogisticsDealSerializer` exposes it via `__all__`; `_deal_title_for_list_preview` now gives `short_name` top priority. Frontend deal-list columns remain T4-08.
+- **Verified sound:** T3-01 (documented partner-requirement decision), T3-02 (no-op, responses already uniform), T4-02 (`post_payment()` foundation, unwired by design), T4-05 (`issue_stock_from_invoice` idempotent on `STOCK_ISSUE`). `manage.py check` clean, no drift, 12/12 logistics tests.
+
+### Task2 scope — remaining (M3-M4 UI, pending)
+- **T4-06..09** (UI: linked-document tracker, unified PaymentPanel, deal/shipment list columns, missing sales screens) — not executed by the external model; still `[ ]`. T4-02 production wiring still deferred.
 
 ## [PHASE 1 FIXES — 2026-05-17]
 

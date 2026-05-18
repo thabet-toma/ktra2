@@ -30,6 +30,7 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
     # Professional Logistics Fields
     pi_number = models.CharField(max_length=50, null=True, blank=True, db_column='pi_number')
     description = models.CharField(max_length=255, null=True, blank=True, db_column='description')
+    short_name = models.CharField(max_length=120, blank=True, default='', db_column='short_name')
     shipping_method = models.CharField(max_length=50, default='Sea', db_column='shipping_method')
     incoterms = models.CharField(max_length=10, default='FOB', db_column='incoterms')
     payment_method = models.CharField(max_length=50, default='T/T', db_column='payment_method')

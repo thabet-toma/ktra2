@@ -10,7 +10,12 @@ from .text_utils import (
 
 
 def _deal_title_for_list_preview(deal):
-    """وصف قصير أو أول سطر عربي في الملاحظات أو رقم العرض أو رقم الصفقة."""
+    """اسم الصفقة المختصر إن وُجد (T4-03)، وإلا وصف قصير/أول سطر عربي/رقم العرض/رقم الصفقة."""
+    # T4-03: explicit short_name is authoritative — it exists precisely so
+    # the user can override the description heuristic with a clean name.
+    short = (getattr(deal, "short_name", None) or "").strip()
+    if short:
+        return short[:72]
     d = (getattr(deal, "description", None) or "").strip()
     notes = (getattr(deal, "notes", None) or "").strip()
     if d and _has_arabic(d):

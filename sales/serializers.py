@@ -13,6 +13,8 @@ from .models import (
     PaymentAllocation,
     SalesInvoice,
     SalesInvoiceLine,
+    SalesQuotation,
+    SalesQuotationLine,
     SalesSettings,
 )
 from .services import next_invoice_number, recalculate_invoice_amounts
@@ -427,3 +429,109 @@ class DeliveryOrderSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "tenant", "delivered_at", "created_at", "invoice_number"]
+
+
+class SalesQuotationLineSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(required=False)
+
+    class Meta:
+        model = SalesQuotationLine
+        fields = [
+            "id",
+            "product",
+            "quantity",
+            "unit_price",
+            "line_discount",
+            "tax_rate",
+            "line_total",
+        ]
+        read_only_fields = ["line_total"]
+
+
+class SalesQuotationSerializer(serializers.ModelSerializer):
+    lines = SalesQuotationLineSerializer(many=True)
+    customer_name = serializers.CharField(source="customer.name", read_only=True)
+    invoice_number = serializers.CharField(
+        source="invoice.invoice_number", read_only=True, allow_null=True,
+    )
+    customer = serializers.PrimaryKeyRelatedField(
+        queryset=Partner.objects.all(),
+    )
+    currency = serializers.PrimaryKeyRelatedField(
+        queryset=Currency.objects.all(),
+    )
+
+    class Meta:
+        model = SalesQuotation
+        fields = [
+            "id",
+            "quotation_number",
+            "customer",
+            "customer_name",
+            "quotation_date",
+            "valid_until",
+            "status",
+            "currency",
+            "exchange_rate",
+            "subtotal",
+            "discount_amount",
+            "tax_amount",
+            "grand_total",
+            "notes",
+            "invoice",
+            "invoice_number",
+            "lines",
+            "created_at",
+            "created_by",
+        ]
+        read_only_fields = [
+            "id",
+            "status",
+            "subtotal",
+            "tax_amount",
+            "grand_total",
+            "created_at",
+            "created_by",
+            "invoice",
+            "invoice_number",
+        ]
+
+    def create(self, validated_data):
+        lines_data = validated_data.pop("lines")
+        tenant = validated_data["tenant"]
+        subtotal = Decimal("0")
+        for ln in lines_data:
+            qty = Decimal(str(ln.get("quantity", 0)))
+            price = Decimal(str(ln.get("unit_price", 0)))
+            disc = Decimal(str(ln.get("line_discount", 0)))
+            ln_total = (qty * price * (1 - disc / 100)).quantize(Decimal("0.01"))
+            ln["line_total"] = ln_total
+            subtotal += ln_total
+        tax_amount = (subtotal * Decimal("0.17")).quantize(Decimal("0.01"))
+        grand_total = subtotal + tax_amount - Decimal(str(validated_data.get("discount_amount", 0)))
+        validated_data["subtotal"] = subtotal
+        validated_data["tax_amount"] = tax_amount
+        validated_data["grand_total"] = grand_total
+        quotation = SalesQuotation.objects.create(**validated_data)
+        for ln in lines_data:
+            SalesQuotationLine.objects.create(quotation=quotation, **ln)
+        return quotation
+
+
+class SalesQuotationListSerializer(serializers.ModelSerializer):
+    customer_name = serializers.CharField(source="customer.name", read_only=True)
+
+    class Meta:
+        model = SalesQuotation
+        fields = [
+            "id",
+            "quotation_number",
+            "customer",
+            "customer_name",
+            "quotation_date",
+            "valid_until",
+            "status",
+            "grand_total",
+            "currency",
+            "created_at",
+        ]

@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models
 
 from accounting.models import Account, JournalHeader, TaxRate
@@ -490,4 +491,170 @@ class PaymentAllocation(models.Model):
                 name="uniq_payment_invoice_allocation",
             ),
         ]
+
+
+class SalesQuotation(models.Model):
+    """عرض أسعار للمبيعات — يحاكي دورة LogisticsDeal/Offer + نمط Odoo/Daftra."""
+
+    STATUS_DRAFT = "draft"
+    STATUS_SENT = "sent"
+    STATUS_ACCEPTED = "accepted"
+    STATUS_CONVERTED = "converted"
+    STATUS_EXPIRED = "expired"
+    STATUS_REJECTED = "rejected"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "مسودة"),
+        (STATUS_SENT, "أُرسل"),
+        (STATUS_ACCEPTED, "مقبول"),
+        (STATUS_CONVERTED, "محوّل"),
+        (STATUS_EXPIRED, "منتهي الصلاحية"),
+        (STATUS_REJECTED, "مرفوض"),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column="SalesQuotationID")
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        db_column="TenantID",
+        to_field="TenantID",
+    )
+    quotation_number = models.CharField(max_length=50, db_column="QuotationNumber")
+    customer = models.ForeignKey(
+        Partner,
+        on_delete=models.PROTECT,
+        db_column="CustomerID",
+        related_name="sales_quotations",
+    )
+    quotation_date = models.DateField(db_column="QuotationDate")
+    valid_until = models.DateField(null=True, blank=True, db_column="ValidUntil")
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        default=STATUS_DRAFT,
+        db_column="Status",
+    )
+    currency = models.ForeignKey(
+        Currency,
+        on_delete=models.PROTECT,
+        db_column="CurrencyID",
+        to_field="CurrencyID",
+    )
+    exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, default=1.0, db_column="ExchangeRate",
+    )
+    subtotal = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="Subtotal",
+    )
+    discount_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="DiscountAmount",
+    )
+    tax_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="TaxAmount",
+    )
+    grand_total = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="GrandTotal",
+    )
+    notes = models.TextField(null=True, blank=True, db_column="Notes")
+    invoice = models.ForeignKey(
+        "SalesInvoice",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="InvoiceID",
+        related_name="quotation_backref",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
+    updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="CreatedBy_UserID",
+    )
+
+    class Meta:
+        db_table = "sales_module_quotations"
+        managed = True
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "quotation_number"],
+                name="uniq_sales_quotation_number_per_tenant",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "status", "quotation_date"]),
+            models.Index(fields=["customer"]),
+        ]
+
+    def __str__(self):
+        return f"{self.quotation_number} — {self.customer_id}"
+
+    def _assert_valid_workflow_transition(self, old, new):
+        allowed = {
+            self.STATUS_DRAFT: {self.STATUS_SENT, self.STATUS_EXPIRED},
+            self.STATUS_SENT: {self.STATUS_ACCEPTED, self.STATUS_REJECTED, self.STATUS_EXPIRED},
+            self.STATUS_ACCEPTED: {self.STATUS_CONVERTED, self.STATUS_EXPIRED},
+            self.STATUS_CONVERTED: set(),
+            self.STATUS_EXPIRED: set(),
+            self.STATUS_REJECTED: set(),
+        }
+        if new not in allowed.get(old, set()):
+            # DjangoValidationError → DRF returns a clean 400 (not a 500 like
+            # bare ValueError would on the standard PATCH/update path).
+            raise DjangoValidationError(
+                f"انتقال حالة غير مسموح: {old} → {new}. الحالات المسموحة: {allowed.get(old, set())}"
+            )
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            try:
+                old = SalesQuotation.objects.only("status").get(pk=self.pk)
+                if old.status != self.status:
+                    self._assert_valid_workflow_transition(old.status, self.status)
+            except self.DoesNotExist:
+                pass
+        super().save(*args, **kwargs)
+
+
+class SalesQuotationLine(models.Model):
+    id = models.AutoField(primary_key=True, db_column="SalesQuotationLineID")
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        db_column="TenantID",
+        to_field="TenantID",
+    )
+    quotation = models.ForeignKey(
+        SalesQuotation,
+        on_delete=models.CASCADE,
+        db_column="QuotationID",
+        related_name="lines",
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.PROTECT,
+        db_column="ProductID",
+        related_name="sales_quotation_lines",
+    )
+    quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column="Quantity")
+    unit_price = models.DecimalField(max_digits=18, decimal_places=4, db_column="UnitPrice")
+    line_discount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="LineDiscount",
+    )
+    tax_rate = models.ForeignKey(
+        TaxRate,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="TaxRateID",
+        related_name="sales_quotation_lines",
+    )
+    line_total = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="LineTotal",
+    )
+
+    class Meta:
+        db_table = "sales_module_quotation_lines"
+        managed = True
+
+    def __str__(self):
+        return f"Line {self.id} quote={self.quotation_id}"
 

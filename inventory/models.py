@@ -119,6 +119,7 @@ class StockMovement(models.Model):
         ('CLEARANCE', 'تخليص جمركي'),
         ('MANUAL', 'يدوي'),
         ('SALE', 'بيع'),
+        ('STOCK_ISSUE', 'إذن صرف'),
     ]
 
     id = models.AutoField(primary_key=True, db_column='MovementID')

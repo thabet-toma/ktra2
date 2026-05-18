@@ -583,6 +583,36 @@ def _post_stock_out_for_invoice(
             raise ValidationError(f"مخزون الصنف {line.product.sku}: {e}")
 
 
+def issue_stock_from_invoice(invoice: SalesInvoice, *, user=None):
+    """T4-05: إصدار إذن صرف صريح للمبيعات (STOCK_ISSUE).
+
+    Idempotent: إن وُجد StockMovement بـ STOCK_ISSUE لنفس الفاتورة يُرجع مبكراً.
+    يُستدعى من frontend_v2 بعد ترحيل الفاتورة وقبل التسليم.
+    """
+    if StockMovement.objects.filter(
+        reference_type="STOCK_ISSUE", reference_id=invoice.id
+    ).exists():
+        return
+    lines = list(invoice.lines.select_related("product"))
+    for line in lines:
+        if getattr(line.product, "is_service", False):
+            continue
+        try:
+            record_stock_movement(
+                product=line.product,
+                movement_type="OUT",
+                quantity=line.quantity,
+                reference_type="STOCK_ISSUE",
+                reference_id=invoice.id,
+                partner=invoice.customer,
+                movement_date=invoice.invoice_date,
+                notes=f"إذن صرف من فاتورة {invoice.invoice_number}",
+                tenant=invoice.tenant,
+            )
+        except Exception as e:
+            raise ValidationError(f"خطأ في إذن الصرف لصنف {line.product.sku}: {e}")
+
+
 def deliver_delivery_order(delivery: DeliveryOrder, *, user=None) -> DeliveryOrder:
     """تسليم أمر إخراج وخصم المخزون إذا كانت الفاتورة بدون خصم عند الترحيل + قيد COGS عندها فقط."""
     inv = delivery.invoice
@@ -942,4 +972,61 @@ def next_invoice_number(tenant_id: int) -> str:
         except ValueError:
             n = last.id
         return f"{prefix}{n + 1}"
+
+
+def convert_quotation_to_invoice(quotation, user=None):
+    """إنشاء SalesInvoice من SalesQuotation (T4-01).
+
+    idempotent: عرض بـ status='converted' و invoice != None يُرفض.
+    """
+    from .models import SalesInvoice, SalesInvoiceLine, SalesQuotation
+    from .serializers import SalesInvoiceSerializer
+
+    if quotation.status == SalesQuotation.STATUS_CONVERTED and quotation.invoice_id:
+        raise ValueError(
+            f"عرض السعر {quotation.quotation_number} محوّل بالفعل إلى فاتورة "
+            f"#{quotation.invoice.invoice_number}."
+        )
+
+    if quotation.status not in (SalesQuotation.STATUS_ACCEPTED, SalesQuotation.STATUS_DRAFT):
+        raise ValueError(
+            f"لا يمكن تحويل عرض بسالة '{quotation.status}' إلى فاتورة. "
+            f"الحالات المقبولة: مسودة أو مقبول."
+        )
+
+    tenant = quotation.tenant
+    invoice_number = next_invoice_number(tenant.TenantID)
+
+    lines_data = []
+    for ln in quotation.lines.all():
+        lines_data.append({
+            "product": ln.product_id,
+            "quantity": ln.quantity,
+            "unit_price": ln.unit_price,
+            "line_discount": ln.line_discount,
+            "tax_rate": ln.tax_rate_id,
+        })
+
+    inv_data = {
+        "tenant": tenant,
+        "invoice_number": invoice_number,
+        "customer": quotation.customer,
+        "invoice_date": quotation.quotation_date,
+        "currency": quotation.currency,
+        "exchange_rate": quotation.exchange_rate,
+        "invoice_type": "credit",
+        "lines": lines_data,
+    }
+
+    inv_ser = SalesInvoiceSerializer(data=inv_data)
+    if not inv_ser.is_valid():
+        raise ValueError(f"بيانات الفاتورة غير صالحة: {inv_ser.errors}")
+
+    with transaction.atomic():
+        invoice = inv_ser.save()
+        quotation.status = SalesQuotation.STATUS_CONVERTED
+        quotation.invoice = invoice
+        quotation.save(update_fields=["status", "invoice"])
+
+    return invoice
 
