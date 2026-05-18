@@ -32,24 +32,13 @@ from accounting.cashbox import resolve_default_cash_box_account
 from accounting.services import create_audit_log, validate_fiscal_period, post_journal
 from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
+from core.mixins import BaseTenantViewSet
 from .landed_cost import (
     import_invoices_from_clearance,
     preview_landed_import,
     recalculate_landed_for_shipment,
     redistribute_shipment_deal_allocations,
 )
-
-
-class BaseTenantViewSet(viewsets.ModelViewSet):
-    def get_queryset(self):
-        tenant = get_tenant(self.request)
-        if tenant:
-            return self.queryset.filter(tenant=tenant)
-        return self.queryset.none()
-
-    def perform_create(self, serializer):
-        tenant = get_tenant(self.request)
-        serializer.save(tenant=tenant)
 
 
 class LogisticsDealViewSet(BaseTenantViewSet):
@@ -1626,21 +1615,27 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
 
         vat_input_account = None
         if tax_amt > 0:
-            # الأفضلية: TaxRate بـ direction=purchase (ضريبة مدخلات)
-            purchase_tax = TaxRate.objects.filter(
-                tenant=tenant, is_active=True, direction__in=['purchase', 'both'],
-            ).select_related('tax_account').order_by('direction').first()
-            # ^ direction='both' قد يأتي أولاً لكن 'purchase' أولى مباشرةً — نرتّب لضمان الاختيار الصحيح
-            if purchase_tax and purchase_tax.tax_account and purchase_tax.tax_account.account_type == 'Asset':
-                vat_input_account = purchase_tax.tax_account
-            else:
-                vat_input_account = (
-                    Account.objects.filter(tenant=tenant, code="1105").first()
-                    or Account.objects.filter(
-                        tenant=tenant, account_type="Asset",
-                        name__icontains="ضريبة",
-                    ).first()
-                )
+            # Priority 1: explicit binding in company settings (SalesSettings.vat_input_account)
+            from sales.models import SalesSettings
+            ss = SalesSettings.objects.filter(tenant=tenant).first()
+            if ss and ss.vat_input_account_id:
+                vat_input_account = ss.vat_input_account
+
+            # Priority 2: TaxRate with direction=purchase (explicit accounting configuration)
+            if not vat_input_account:
+                purchase_tax = TaxRate.objects.filter(
+                    tenant=tenant, is_active=True, direction='purchase',
+                ).select_related('tax_account').first()
+                if (
+                    purchase_tax
+                    and purchase_tax.tax_account
+                    and purchase_tax.tax_account.account_type == 'Asset'
+                ):
+                    vat_input_account = purchase_tax.tax_account
+
+            # Priority 3: well-known account code 1105 (standard CoA seed)
+            if not vat_input_account:
+                vat_input_account = Account.objects.filter(tenant=tenant, code="1105").first()
 
             if not vat_input_account:
                 return Response(

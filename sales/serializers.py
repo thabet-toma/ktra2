@@ -362,6 +362,9 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
         decimal_places=3,
         read_only=True,
     )
+    vat_input_account_name = serializers.CharField(
+        source="vat_input_account.name", read_only=True, default=None
+    )
 
     class Meta:
         model = SalesSettings
@@ -385,6 +388,8 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "default_vat_rate",
             "default_vat_rate_code",
             "default_vat_rate_value",
+            "vat_input_account",
+            "vat_input_account_name",
             "prices_include_tax",
             "auto_post_invoices",
             "show_journal_preview",
@@ -402,6 +407,7 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "default_cash_account_name",
             "default_vat_rate_code",
             "default_vat_rate_value",
+            "vat_input_account_name",
         ]
 
 

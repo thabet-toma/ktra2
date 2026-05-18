@@ -1,18 +1,18 @@
 # PROJECT_MAP.md — KTRA Import/Trading ERP
 
 > الذاكرة الخارجية للمشروع. حدّث هذا الملف عند أي تغيير معماري.
-> Last audited: 2026-05-17.
+> Last audited: 2026-05-18.
 > Phase 1 completed: 2026-05-17 — 18/18 catastrophic fixes applied.
 > Phase 2 completed: 2026-05-17 — 14/14 medium fixes applied.
-> Phase 3 completed: 2026-05-17 — 9/10 minor fixes applied (m3-10 deferred to Phase 4).
-> Phase 4 completed: 2026-05-17 — 6/11 professional-grade improvements applied (I4-05 partial, I4-06/09/11 deferred).
+> Phase 3 completed: 2026-05-18 — 10/10 minor fixes applied (m3-10 done in Phase 4 pass).
+> Phase 4 completed: 2026-05-18 — 8/11 professional-grade improvements applied; I4-05 + m3-10 finished and I4-07 made enforceable in 2nd review (Opus). I4-06/09/11 deferred (non-bug / needs separate approval).
 
 ## [TECH_STACK]
 
 - **Backend:** Django 6.0.1 + Django REST Framework. Python 3.13.
 - **DB:** MySQL (`django.db.backends.mysql`, mysqlclient). DB name `smartktra_smart-ktra`. `foreign_key_checks=0` + `STRICT_TRANS_TABLES` in `init_command`.
 - **Auth:** DRF `TokenAuthentication` + `SessionAuthentication`, `IsAuthenticated` (see `core/api_defaults.py`).
-- **Multi-tenancy:** header `X-Tenant-Id` resolved by `core/tenant_utils.get_tenant()`. Single-tenant auto-resolve if exactly 1 tenant. **No hard tenant isolation enforced** (cross-tenant access only logged).
+- **Multi-tenancy:** header `X-Tenant-Id` resolved by `core/tenant_utils.get_tenant()`. Single-tenant auto-resolve if exactly 1 tenant. ViewSets scope via `core/mixins.py` (`TenantQuerySetMixin`/`TenantCreateMixin`/`BaseTenantViewSet`); accounting models no longer carry `default=1` tenant FK (a missing tenant now fails loudly with 400 instead of silently writing to tenant 1).
 - **Frontend (active):** `frontend_v2/` — React 19 + Vite 6 + TypeScript 5.8 + Tailwind (CDN) + import-map CDN (aistudiocdn). Port 3000.
 - **Integrations:** OpenClaw AI assistant (HTTP BFF via Django), Cloudinary storage, `bridge` app (SQL↔legacy mapper).
 - **ORPHAN:** `frontend/` is a **separate unrelated Next.js app** ("جيتك / توصيل سريع"). NOT part of this ERP. Also occupies port 3000 — source of the "wrong site" confusion. `smart-product-search-platform/` likewise unrelated.
@@ -61,9 +61,9 @@ URL roots: `/api/accounting/ /api/inventory/ /api/logistics/ /api/sales/ /api/ (
 
 - **Git hygiene:** `sales/` app + many migrations (`accounting/0008-0013`, `inventory/0002-0003`, `logistics/0020-0022`, `realestate/`) are **untracked**. Root contains ad-hoc DB-surgery scripts: `FIX_PAYMENT_CURRENCY.sql`, `_patch_services.py`, `_test_sales.py`, `backfill_base_amounts.py`. Schema drift risk — DB may not match models.
 - **Disjoint payment models:** deal payments (Firestore cashbox) vs SQL `CustomerPayment` ledger never reconcile. Unification is a Phase-4 item.
-- **Dead code:** `frontend_v2/components/forms/deal-specific/PaymentRegistration.tsx` is 100% commented out (fossil of `deal-parts/PaymentRegistration.tsx`).
-- **`resolve_forex_account()`** exists in `accounting/services.py` but is never called — forex gain/loss not actually posted.
-- **No year-end closing** routine (P&L → retained earnings) exists.
+- ~~Dead code: `frontend_v2/.../deal-specific/PaymentRegistration.tsx`~~ — **deleted (I4-08)**.
+- ~~`resolve_forex_account()` never called~~ — **now called by `post_customer_payment` (I4-03)**.
+- ~~No year-end closing routine~~ — **`year_end_close()` added (I4-04)**.
 - **`frontend/` Next.js app** unrelated to ERP; keep separate or move out of repo.
 - **The active 500 fix** (tenant-None guard in `sales/views.py perform_create`) converts an opaque crash to a clear 400; the underlying environment cause (likely no `Tenant(TenantID=1)` seeded in the fresh MySQL DB) still needs the user to seed a tenant.
 
@@ -138,8 +138,16 @@ URL roots: `/api/accounting/ /api/inventory/ /api/logistics/ /api/sales/ /api/ (
 - **I4-03** `sales/services.py:760-797`: `post_customer_payment` now posts forex gain/loss lines when payment currency differs from invoice currency — uses `resolve_forex_account()` to find the forex account.
 - **I4-04** `accounting/services.py:436-558`: New `year_end_close()` routine — closes all Revenue/Expense accounts for a fiscal year to retained earnings via `YEAR_END_CLOSE` journal. Endpoint: `POST /api/accounting/fiscal-periods/year-end-close/`.
 
-### Logistics — State Machine
-- **I4-07** `logistics/models.py:113-136` (LogisticsDeal), `logistics/models.py:297-320` (LogisticsShipment): Added `clean()` methods with valid transition tables — prevents invalid state transitions (e.g., Pending → Cleared, sw_mfg_start → sw_released).
+### Accounting — Tenant Isolation (I4-05)
+- **I4-05** New `core/mixins.py` — `TenantQuerySetMixin` (scopes `get_queryset()` to request tenant, returns `.none()` when unresolved), `TenantCreateMixin` (raises 400 instead of falling back to tenant 1), `BaseTenantViewSet`. Adopted by `logistics/views.py` and `hr/views.py` (local duplicate `BaseTenantViewSet` definitions removed) and the accounting ViewSets. Removed `default=1` from **all** accounting FK fields (`Account/CostCenter/JournalHeader/JournalLine/Cheque/AccountingAuditLog/CashBoxLedgerAccount/FiscalPeriod/ExchangeRate/TaxRate.tenant` + `JournalLine.journal/account`). Replaced every `serializer.save(tenant_id=1)` fallback in `accounting/views.py` (Account/CostCenter/Cheque/Journal create+update/ExchangeRate/FiscalPeriod/TaxRate) with explicit tenant + loud 400. Added missing tenant filters to `CostCenter/Cheque/FiscalPeriod` querysets and `ExchangeRate/TaxRate` (returned global rows when no tenant). Migration `accounting/0016`.
+
+### m3-10 — Explicit VAT Input Account
+- **m3-10** `sales/models.py` `SalesSettings.vat_input_account` FK added (+ serializer field, migration `sales/0005`). `logistics/views.py` purchase-invoice posting now resolves VAT input account by priority: (1) `SalesSettings.vat_input_account`, (2) `TaxRate(direction='purchase')`, (3) account code `1105`. Removed the fragile `name__icontains="ضريبة"` search.
+
+### Logistics — State Machine (I4-07, re-fixed in 2nd review)
+- **I4-07** `logistics/models.py` `LogisticsDeal` + `LogisticsShipment`: transition tables now **enforced in `save()`** (via `_assert_valid_workflow_transition` / `_assert_valid_status_transition`), not only `clean()`. **Why:** DRF never calls `full_clean()`, so the original `clean()`-only implementation was dead code — invalid transitions (e.g. Pending→Cleared) succeeded silently via the API. `clean()` retained for admin/`full_clean`. System-driven state advances in `logistics/signals.py` use bulk `.update()` and deliberately bypass the guard (same escape-hatch pattern as the I4-02 posted-journal guard). Verified: Pending→Cleared rejected, Pending→In-Transit allowed.
 
 ### UI Cleanup
 - **I4-08** Deleted `frontend_v2/components/forms/deal-specific/PaymentRegistration.tsx` — 100% commented-out dead code. No imports found.
+
+> **2nd Phase-4 review (Opus 2026-05-18):** I4-01/02/03/04 verified correct (post_journal idempotency inside atomic w/ `select_for_update`; immutability guard exempts create + bulk-update unpost; forex journal balances in gain/loss/equal cases; year-end-close debit/credit math proven balanced). **I4-07 was non-functional dead code → fixed** (moved to `save()`). I4-05 + m3-10 (left pending by the external model) completed. Known accepted limitation: `post_customer_payment` forex assumes a single invoice currency per payment; `resolve_forex_account()` still name-based (acceptable — I4-03 spec asked for it). `manage.py check` clean, no migration drift, end-to-end smoke test passed.

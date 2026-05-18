@@ -5,7 +5,7 @@ from partners.models import Partner
 
 class CostCenter(models.Model):
     id = models.AutoField(primary_key=True, db_column='CostCenterID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     name = models.CharField(max_length=150, db_column='Name')
     code = models.CharField(max_length=50, null=True, blank=True, db_column='Code')
     description = models.TextField(null=True, blank=True, db_column='Description')
@@ -28,7 +28,7 @@ class Account(models.Model):
     ]
 
     id = models.AutoField(primary_key=True, db_column='AccountID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     code = models.CharField(max_length=20, null=True, blank=True, db_column='Code')
     name = models.CharField(max_length=100, null=True, blank=True, db_column='Name')
     parent = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, db_column='ParentID', related_name='children')
@@ -45,7 +45,7 @@ class Account(models.Model):
 
 class JournalHeader(models.Model):
     id = models.AutoField(primary_key=True, db_column='JournalID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     transaction_date = models.DateField(null=True, blank=True, db_column='TransactionDate')
     reference_type = models.CharField(max_length=50, null=True, blank=True, db_column='ReferenceType')
     reference_id = models.IntegerField(null=True, blank=True, db_column='ReferenceID')
@@ -84,9 +84,9 @@ class JournalHeader(models.Model):
 
 class JournalLine(models.Model):
     id = models.AutoField(primary_key=True, db_column='JLineID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
-    journal = models.ForeignKey(JournalHeader, on_delete=models.CASCADE, db_column='JournalID', related_name='lines', default=1)
-    account = models.ForeignKey(Account, on_delete=models.PROTECT, db_column='AccountID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    journal = models.ForeignKey(JournalHeader, on_delete=models.CASCADE, db_column='JournalID', related_name='lines')
+    account = models.ForeignKey(Account, on_delete=models.PROTECT, db_column='AccountID')
     debit = models.DecimalField(max_digits=18, decimal_places=2, default=0.00, db_column='Debit')
     credit = models.DecimalField(max_digits=18, decimal_places=2, default=0.00, db_column='Credit')
 
@@ -172,7 +172,7 @@ class Cheque(models.Model):
     ]
 
     id = models.AutoField(primary_key=True, db_column='ChequeID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     cheque_number = models.CharField(max_length=50, db_column='ChequeNumber')
     bank_name = models.CharField(max_length=100, null=True, blank=True, db_column='BankName')
     amount = models.DecimalField(max_digits=18, decimal_places=2, db_column='Amount', default=0.00)
@@ -206,7 +206,7 @@ class AccountingAuditLog(models.Model):
     ]
 
     id = models.AutoField(primary_key=True, db_column='LogID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     user = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True, db_column='UserID')
     action = models.CharField(max_length=20, choices=ACTIONS, db_column='Action')
     model_name = models.CharField(max_length=100, db_column='ModelName')
@@ -224,7 +224,7 @@ class CashBoxLedgerAccount(models.Model):
     """
 
     id = models.AutoField(primary_key=True, db_column="CashBoxLedgerID")
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column="TenantID", default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column="TenantID")
     external_id = models.CharField(max_length=128, db_column="ExternalID")
     name = models.CharField(max_length=200, db_column="Name")
     currency_code = models.CharField(max_length=3, default="USD", db_column="CurrencyCode")
@@ -251,7 +251,7 @@ class FiscalPeriod(models.Model):
     ]
 
     id = models.AutoField(primary_key=True, db_column='PeriodID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     name = models.CharField(max_length=100, db_column='PeriodName')
     start_date = models.DateField(db_column='StartDate')
     end_date = models.DateField(db_column='EndDate')
@@ -268,7 +268,7 @@ class FiscalPeriod(models.Model):
 
 class ExchangeRate(models.Model):
     id = models.AutoField(primary_key=True, db_column='ExchangeRateID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     from_currency = models.ForeignKey(
         Currency, on_delete=models.PROTECT, related_name='rates_from',
         db_column='FromCurrencyID',
@@ -303,7 +303,7 @@ class TaxRate(models.Model):
     ]
 
     id = models.AutoField(primary_key=True, db_column='TaxRateID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     name = models.CharField(max_length=100, db_column='Name')
     code = models.CharField(max_length=20, db_column='Code')
     rate = models.DecimalField(max_digits=5, decimal_places=2, db_column='Rate')

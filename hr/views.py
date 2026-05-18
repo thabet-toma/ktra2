@@ -3,26 +3,17 @@ from rest_framework.response import Response
 from rest_framework.decorators import action
 from .models import Task, TaskSubmission, AttendanceRecord, PointsHistory
 from .serializers import TaskSerializer, TaskSubmissionSerializer, AttendanceRecordSerializer, PointsHistorySerializer
-from tenants.models import Tenant
+from core.mixins import BaseTenantViewSet
+from core.tenant_utils import get_tenant
 
-class BaseTenantViewSet(viewsets.ModelViewSet):
-    def get_queryset(self):
-        tenant = Tenant.objects.first()
-        if tenant:
-            return self.queryset.filter(tenant=tenant)
-        return self.queryset.none()
-
-    def perform_create(self, serializer):
-        tenant = Tenant.objects.first()
-        serializer.save(tenant=tenant)
 
 class TaskViewSet(BaseTenantViewSet):
     queryset = Task.objects.all().order_by('-created_at')
     serializer_class = TaskSerializer
 
     def perform_create(self, serializer):
-        tenant = Tenant.objects.first()
-        kwargs = {'tenant': tenant}
+        tenant = get_tenant(self.request)
+        kwargs = {'tenant': tenant} if tenant else {}
         if self.request.user.is_authenticated:
             kwargs['created_by'] = self.request.user
         serializer.save(**kwargs)

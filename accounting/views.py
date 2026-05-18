@@ -58,25 +58,13 @@ class AccountViewSet(viewsets.ModelViewSet):
             return Account.objects.filter(tenant=tenant)
         return Account.objects.none()
 
-    def _get_tenant_context(self):
-        from tenants.models import Tenant
-        # Force Single Tenant Mode as requested
-        tenant = get_tenant(self.request)
-        if tenant:
-            return tenant, tenant.TenantID
-        # Fallback to Tenant 1 if no tenant in DB (assuming one exists or will be created)
-        # Or return None, 1 to force ID 1.
-        return None, 1
-
     def perform_create(self, serializer):
-        tenant_obj, tenant_id = self._get_tenant_context()
-        if tenant_obj:
-            account = serializer.save(tenant=tenant_obj)
-        else:
-            account = serializer.save(tenant_id=tenant_id)
-        
+        tenant = get_tenant(self.request)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        account = serializer.save(tenant=tenant)
         create_audit_log(
-            tenant=account.tenant if account.tenant else tenant_obj,
+            tenant=account.tenant,
             user=self.request.user,
             action='CREATE',
             model_name='Account',
@@ -89,16 +77,18 @@ class CostCenterViewSet(viewsets.ModelViewSet):
     permission_classes = ApiAuthAndUser["permission_classes"]
     queryset = CostCenter.objects.all()
     serializer_class = CostCenterSerializer
-    
-    def perform_create(self, serializer):
-        # Auto assign tenant
-        # Reuse logic or abstract it
-        from tenants.models import Tenant
+
+    def get_queryset(self):
         tenant = get_tenant(self.request)
         if tenant:
-            serializer.save(tenant=tenant)
-        else:
-            serializer.save(tenant_id=1)
+            return CostCenter.objects.filter(tenant=tenant)
+        return CostCenter.objects.none()
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        serializer.save(tenant=tenant)
 
 class ChequeViewSet(viewsets.ModelViewSet):
     authentication_classes = ApiAuthAndUser["authentication_classes"]
@@ -106,14 +96,17 @@ class ChequeViewSet(viewsets.ModelViewSet):
     queryset = Cheque.objects.all()
     serializer_class = ChequeSerializer
 
-    def perform_create(self, serializer):
-        # Auto assign tenant
-        from tenants.models import Tenant
+    def get_queryset(self):
         tenant = get_tenant(self.request)
         if tenant:
-            serializer.save(tenant=tenant)
-        else:
-            serializer.save(tenant_id=1)
+            return Cheque.objects.filter(tenant=tenant)
+        return Cheque.objects.none()
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        serializer.save(tenant=tenant)
 
 class JournalViewSet(viewsets.ModelViewSet):
     authentication_classes = ApiAuthAndUser["authentication_classes"]
@@ -185,14 +178,6 @@ class JournalViewSet(viewsets.ModelViewSet):
             context={**self.get_serializer_context(), "logistics_payments": pay_map},
         )
         return Response(serializer.data)
-
-    def _get_tenant_context(self):
-        from tenants.models import Tenant
-        # Force Single Tenant Mode
-        tenant = get_tenant(self.request)
-        if tenant:
-            return tenant, tenant.TenantID
-        return None, 1
 
     @action(detail=True, methods=['post'], url_path='post')
     def post_entry(self, request, pk=None):
@@ -284,30 +269,28 @@ class JournalViewSet(viewsets.ModelViewSet):
             return Response({'error': 'حدث خطأ غير متوقع أثناء عكس القيد.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def update(self, request, *args, **kwargs):
-        tenant_obj, tenant_id = self._get_tenant_context()
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
-        
+
         if instance.is_posted:
-             return Response({'error': 'Cannot edit a posted journal entry.'}, status=status.HTTP_400_BAD_REQUEST)
+            return Response({'error': 'Cannot edit a posted journal entry.'}, status=status.HTTP_400_BAD_REQUEST)
 
         data = request.data
-        lines_data = data.get('lines')  # None if not provided (partial-safe)
-        
+        lines_data = data.get('lines')
+
         serializer = self.get_serializer(instance, data=data, partial=partial)
         serializer.is_valid(raise_exception=True)
-        
+
         try:
             with db_transaction.atomic():
                 header = serializer.save()
-                # التحقق من التوازن المحاسبي إذا أُرسلت أسطر
                 if lines_data is not None:
                     validate_journal_entry(header, lines_data)
-            
+
             header.refresh_from_db()
-            
+
             create_audit_log(
-                tenant=header.tenant if header.tenant else tenant_obj,
+                tenant=header.tenant,
                 user=self.request.user,
                 action='UPDATE',
                 model_name='JournalHeader',
@@ -330,38 +313,36 @@ class JournalViewSet(viewsets.ModelViewSet):
             )
 
     def create(self, request, *args, **kwargs):
-        tenant_obj, tenant_id = self._get_tenant_context()
-        data = request.data
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return Response({"error": "لا يوجد شركة محددة لهذا الطلب."}, status=status.HTTP_400_BAD_REQUEST)
 
+        data = request.data
         serializer = self.get_serializer(data=data)
         serializer.is_valid(raise_exception=True)
 
         lines_data = data.get("lines", [])
 
-        # Validate BEFORE save — use a mock header with the correct tenant/date
         mock_hdr = JournalHeader()
-        mock_hdr.tenant_id = tenant_obj.TenantID if tenant_obj else tenant_id
+        mock_hdr.tenant_id = tenant.TenantID
         mock_hdr.transaction_date = data.get("transaction_date")
         validate_journal_entry(mock_hdr, lines_data)
 
         try:
             with db_transaction.atomic():
-                if tenant_obj:
-                    header = serializer.save(tenant=tenant_obj)
-                else:
-                    header = serializer.save(tenant_id=tenant_id)
-            
+                header = serializer.save(tenant=tenant)
+
             header.refresh_from_db()
-            
+
             create_audit_log(
-                tenant=header.tenant if header.tenant else tenant_obj,
+                tenant=header.tenant,
                 user=self.request.user,
                 action='CREATE',
                 model_name='JournalHeader',
                 object_id=header.id,
                 change_details="Journal entry created."
             )
-            
+
             response_serializer = JournalHeaderSerializer(header)
             return Response(response_serializer.data, status=status.HTTP_201_CREATED)
 
@@ -1130,7 +1111,10 @@ class ExchangeRateViewSet(viewsets.ModelViewSet):
     serializer_class = ExchangeRateSerializer
 
     def get_queryset(self):
-        qs = super().get_queryset().order_by('-effective_date')
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return ExchangeRate.objects.none()
+        qs = super().get_queryset().filter(tenant=tenant).order_by('-effective_date')
         params = self.request.query_params
         fc = params.get('from_currency')
         tc = params.get('to_currency')
@@ -1148,10 +1132,9 @@ class ExchangeRateViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
-        if tenant:
-            serializer.save(tenant=tenant)
-        else:
-            serializer.save(tenant_id=1)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        serializer.save(tenant=tenant)
 
     @action(detail=False, methods=['get'], url_path='get-rate')
     def get_rate(self, request):
@@ -1186,12 +1169,17 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
     queryset = FiscalPeriod.objects.all().order_by('-start_date')
     serializer_class = FiscalPeriodSerializer
 
-    def perform_create(self, serializer):
+    def get_queryset(self):
         tenant = get_tenant(self.request)
         if tenant:
-            serializer.save(tenant=tenant)
-        else:
-            serializer.save(tenant_id=1)
+            return FiscalPeriod.objects.filter(tenant=tenant).order_by('-start_date')
+        return FiscalPeriod.objects.none()
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        serializer.save(tenant=tenant)
 
     @action(detail=False, methods=['post'], url_path='create-year')
     def create_year(self, request):
@@ -1297,18 +1285,20 @@ class TaxRateViewSet(viewsets.ModelViewSet):
     serializer_class = TaxRateSerializer
 
     def get_queryset(self):
-        qs = super().get_queryset().filter(is_active=True)
         tenant = get_tenant(self.request)
-        if tenant:
-            qs = qs.filter(tenant_id=tenant.TenantID)
-        return qs.order_by("code", "id")
+        if not tenant:
+            return TaxRate.objects.none()
+        return (
+            super().get_queryset()
+            .filter(tenant_id=tenant.TenantID, is_active=True)
+            .order_by("code", "id")
+        )
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
-        if tenant:
-            serializer.save(tenant=tenant)
-        else:
-            serializer.save(tenant_id=1)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        serializer.save(tenant=tenant)
 
 
 class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):

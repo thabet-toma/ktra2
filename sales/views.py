@@ -221,7 +221,11 @@ class DeliveryOrderViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "patch", "head", "options"]
 
     def perform_create(self, serializer):
-        serializer.save(tenant=get_tenant(self.request))
+        tenant = get_tenant(self.request)
+        if not tenant:
+            from rest_framework.exceptions import ValidationError as DRFValidationError
+            raise DRFValidationError({"tenant": "لا يوجد شركة محددة لهذا الطلب."})
+        serializer.save(tenant=tenant)
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -258,6 +262,9 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
+        if not tenant:
+            from rest_framework.exceptions import ValidationError as DRFValidationError
+            raise DRFValidationError({"tenant": "لا يوجد شركة محددة لهذا الطلب."})
         serializer.save(tenant=tenant)
 
     @action(detail=True, methods=["post"], url_path="post")

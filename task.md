@@ -81,7 +81,7 @@
 - [x] **m3-09** `logistics/signals.py:86` `automate_expense_accounting`: فرع `is_foreign` ميت. **تم + تصحيح bug تحويل مزدوج (Opus):** النموذج ضبط أسطر القيد على `local_amount = amount × rate` **و** `header.exchange_rate = rate` معاً؛ لكن `JournalLine.save` (C1-05) يحسب `base = debit × header.rate` → النتيجة `amount × rate²` (تحويل مزدوج للمصاريف الأجنبية). **التصحيح:** الأسطر الآن بعملة المعاملة (`instance.amount`) والـ header يحمل السعر، فالأساس يُشتق مرّة واحدة = `amount × rate` (وللمحلّي rate=1).
 
 > **ملاحظة مراجعة المرحلة 3 (Opus 2026-05-17):** أخطاء صحّحتها: **(1)** regression حرج m3-04 (NameError في 6 مواضع logistics/views.py + signals.py — كان سيتسرّب 500 من كل مسار لوجستي عند أي استثناء)؛ **(2)** m3-09 تحويل عملة مزدوج للمصاريف الأجنبية؛ **(3)** m3-03 قيد غير قابل للفرض على MySQL ودلالياً خاطئ — أُلغي؛ **(4)** m3-06 حلقة retry وهمية + كود ميت. سليمة: m3-01/m3-05/m3-08/m3-11. m3-02 الآن مفروض فعلياً على DB (تحقّق: debit سالب → IntegrityError). migrations 0014+0015 طُبّقت نظيفة. تحقّق end-to-end: إنشاء+ترحيل فاتورة ناجح (journal 286). m3-10 يبقى مؤجلاً لمرحلة 4.
-- [ ] **m3-10** `logistics/views.py:1636`: اختيار حساب VAT بـ `account_type=='Asset'` واسم يحوي "ضريبة" — هشّ. اربط الحساب صراحةً في الإعدادات. *(يتطلب إضافة حقل في SalesSettings/LogisticsSettings — مؤجل لمرحلة 4)*
+- [x] **m3-10** `logistics/views.py`: اختيار حساب VAT كان بـ اسم يحوي "ضريبة" — هشّ. **تم (Opus 2026-05-18):** أُضيف حقل صريح `SalesSettings.vat_input_account` (+ serializer + migration `sales/0005`). الترتيب الآن: (1) `SalesSettings.vat_input_account`، (2) `TaxRate(direction='purchase')`، (3) كود `1105`. أُزيل البحث الهشّ بالاسم.
 - [x] **m3-11** `accounting/views.py:444,723`: وصول لخصائص بعد `.first()`/FK بلا حارس None. **تم المراجعة:** الكود الحالي يحتوي حراسات كافية (select_related + guards على currency). لا تغيير مطلوب.
 
 ---
@@ -95,11 +95,11 @@
 - [x] **I4-02** فرض عدم قابلية تعديل القيد المرحّل على مستوى الموديل (`JournalHeader.save()`) — يرفع ValidationError عند محاولة تعديل قيد مرحّل.
 - [x] **I4-03** نفّذ forex gain/loss فعلياً في `post_customer_payment` — عند تحصيل بعملة مختلفة يُسجَّل فرق الصرف في حساب `resolve_forex_account`.
 - [x] **I4-04** روتين إغلاق سنوي `year_end_close()` — يصفّر حسابات Revenue/Expense إلى retained earnings عبر قيد `YEAR_END_CLOSE`. endpoint: `POST /api/accounting/fiscal-periods/year-end-close/`.
-- [ ] **I4-05** قيود DB: non-negative debit/credit (تم في Phase 3)، تنافي dr/cr (يتطلب migration إضافي)، unique source key (تم في Phase 3)، PROTECT على account (تم في Phase 1). `TenantQuerySetMixin` وإزالة fallback `tenant_id=1` — مؤجل لمرحلة لاحقة.
+- [x] **I4-05** **تم (Opus 2026-05-18):** `core/mixins.py` جديد فيه `TenantQuerySetMixin` + `TenantCreateMixin` + `BaseTenantViewSet`. أُزيل `default=1` من كل FK في `accounting/models.py` (tenant على 10 نماذج + `JournalLine.journal/account`) — أي tenant مفقود يفشل بـ 400 صريح بدل الكتابة الصامتة لـ tenant 1. استُبدِل كل `serializer.save(tenant_id=1)` في `accounting/views.py`. أُضيفت فلاتر tenant ناقصة (CostCenter/Cheque/FiscalPeriod/ExchangeRate/TaxRate كانت تُسرّب صفوفاً عند غياب tenant). `logistics/views.py` و`hr/views.py` يستوردان `BaseTenantViewSet` من core (حُذف التعريف المكرّر). Migration `accounting/0016`. non-negative debit/credit + unique source key + PROTECT account = أُنجزت سابقاً (Phase 1/3).
 
 ### منطق تجاري / لوجستيات (Business / Landed cost)
 - [ ] **I4-06** اختبار ثابت لوحدة landed-cost — مؤجل (ليس إصلاح خطأ).
-- [x] **I4-07** آلة حالة واضحة للصفقة/الشحنة: `LogisticsDeal.clean()` تتحقق من `shipping_workflow_status` transitions، `LogisticsShipment.clean()` تتحقق من `status` transitions — تمنع الانتقالات غير الصالحة.
+- [x] **I4-07** آلة حالة للصفقة/الشحنة. **صُحّح في المراجعة الثانية (Opus 2026-05-18):** النموذج الخارجي وضع المنطق في `clean()` فقط — لكن DRF لا يستدعي `full_clean()` إطلاقاً، فكان **كوداً ميتاً بلا فرض فعلي** (انتقال Pending→Cleared كان ينجح عبر الـ API). **التصحيح:** نُقل الفرض إلى `save()` (`_assert_valid_workflow_transition`/`_assert_valid_status_transition`) لـ `LogisticsDeal` و`LogisticsShipment`؛ `clean()` يبقى للـ admin. التقدّم النظامي في `signals.py` يستخدم `.update()` (bulk) فيتجاوز الحارس عمداً (نفس نمط I4-02). تحقّق فعلي: Pending→Cleared مرفوض، Pending→In-Transit مسموح.
 
 ### توحيد الواجهات (UI unification — مطلب المالك)
 - [x] **I4-08** حذف `frontend_v2/components/forms/deal-specific/PaymentRegistration.tsx` (كود ميت 100% معلّق). لا imports موجودة له.
@@ -108,6 +108,8 @@
 
 ### نظافة المستودع (Repo hygiene)
 - [ ] **I4-11** تعقّب `sales/` + كل migrations — مؤجل.
+
+> **ملاحظة مراجعة المرحلة 4 الثانية (Opus 2026-05-18):** راجعت كل تاسكات المرحلة 4 خطوة بخطوة. **خطأ جوهري صحّحته:** I4-07 كان آلة حالة ميتة (`clean()` لا يستدعيها DRF) — نُقل الفرض إلى `save()` فصار فعّالاً. **ناقص أكملته:** I4-05 (TenantQuerySetMixin + إزالة `default=1` + سدّ تسريبات tenant) و m3-10 (ربط حساب VAT صريح) — كانا متروكين «مؤجل» فأُنجزا. **سليمة بعد التحقق:** I4-01 (idempotency داخل atomic مع `select_for_update`)، I4-02 (الحارس يستثني الإنشاء والـ bulk-update)، I4-03 (القيد متوازن في الربح/الخسارة/التساوي)، I4-04 (رياضيات الإغلاق السنوي مُثبتة التوازن)، I4-08 (حُذف فعلاً بلا مراجع). قيود مقبولة موثّقة: forex يفترض عملة فاتورة واحدة لكل دفعة؛ `resolve_forex_account` بحث بالاسم (مطلب I4-03 نفسه). `manage.py check` نظيف، لا انجراف هجرات، اختبار end-to-end ناجح. مؤجّلة بحق: I4-06 (اختبار، ليس إصلاحاً)، I4-09 (تغيير معماري كبير يحتاج موافقة)، I4-11 (نظافة مستودع).
 
 ---
 

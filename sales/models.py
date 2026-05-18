@@ -124,6 +124,15 @@ class SalesSettings(models.Model):
         related_name="sales_settings_vat",
         help_text="نسبة ضريبة القيمة المضافة الافتراضية",
     )
+    vat_input_account = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column="VatInputAccountID",
+        related_name="sales_settings_vat_input",
+        help_text="حساب ضريبة المدخلات (VAT Input) المستخدم في فواتير الشراء — الربط الصريح يُغني عن البحث بالاسم",
+    )
     prices_include_tax = models.BooleanField(
         default=False,
         db_column="PricesIncludeTax",
