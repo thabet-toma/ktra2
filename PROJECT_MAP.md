@@ -79,8 +79,17 @@ URL roots: `/api/accounting/ /api/inventory/ /api/logistics/ /api/sales/ /api/ (
 
 - **Test-quality fix (Opus):** the external model's T1-01 test class had 3 tests (`*_no_localshipment`, `*_unposted`, `*_capitalize_false`) that all mocked `.exists()→False` and asserted the same thing — names promised scenario coverage that didn't exist and the filter conditions (`is_posted=True, capitalize_to_inventory=True`) were never verified. Replaced with tests that assert the actual filter kwargs + the `_check_superseded=False` bypass. 12/12 pass.
 
-### Task2 Phase 1 scope — remaining (T2-T4, pending approval)
-- **T2-T4 / M2-M4:** Disjoint payment UX · Local transport duplicated UI · No Quotation entity · No `short_name` · Implicit stock-out.
+### [TASK2 SCOPE — Phase 2 (M2) reviewed 2026-05-18]
+
+External model executed T2-01..T2-04; Opus review fixed/completed:
+
+- **T2-01 (FIXED — dedup):** the model improved the boilerplate regex but made `serializers._english_payment_boilerplate` a verbatim copy of `landed_cost._is_english_payment_or_legal_boilerplate` (drift-prone; serializers' Arabic regex was also narrower `[؀-ۿ]` only → misclassifies presentation-form text). Extracted a single source of truth `logistics/text_utils.py` (`has_arabic` + `is_english_payment_or_legal_boilerplate`, broader Arabic ranges); both modules import it (`is`-identical). check clean; 12/12.
+- **T2-02 (COMPLETED):** the model extracted `frontend_v2/utils/shipmentLabel.ts` but wired it only into `CustomsClearanceManagement.tsx`; the **main shipment list `SqlShipmentsPage.tsx:98` still showed raw `shipment_number`** (the owner's actual complaint). Migrated that page (card + search filter + row type) to the shared util. 0 new TS errors in touched files.
+- **T2-03 (PARTIAL — honesty fix):** `usePaymentForm.ts` was a **dead file imported by nothing** (no unification happened) and declared error slots it never validated while allowing an empty date the server rejects. Rewrote it correct & non-misleading (`validatePaymentInput` pure: amount>0 + date required to match server; `extra` for per-source errors). **Remaining:** wiring it into the 4 payment forms is UI work that cannot be verified without running the UI — not claimed done.
+- **T2-04 (PARTIAL):** model did **backend only** — `LogisticsClearanceSerializer.local_shipments` + `prefetch_related` (sound). **Remaining:** the clearance UI does not consume `clearance.local_shipments` yet and the duplicate local-transport entry path still exists; full reconciliation = T4-04 (needs a data migration). Frontend not claimed done.
+
+### Task2 scope — remaining (T3, T4 / M3-M4, pending approval)
+- **T2-03/T2-04 frontend wiring** (above) · **T3-01..03** robustness · **T4-01..09** Quotation entity, real payment unification, `short_name` fields, local-transport single source, explicit stock-issue voucher, professional UI.
 
 ## [PHASE 1 FIXES — 2026-05-17]
 
@@ -173,5 +182,15 @@ URL roots: `/api/accounting/ /api/inventory/ /api/logistics/ /api/sales/ /api/ (
 
 ### Repo Hygiene (I4-11)
 - **I4-11** Deleted ~80 root-level `.py` scripts + ~20 `.sql` files. `.gitignore` patterns for these scripts are **root-anchored with leading `/`** — an unanchored pattern (e.g. `test_*.py`) would also match app code (`logistics/tests/test_landed_cost.py`) and silently drop it from the repo. Added `frontend/` (legacy Next.js, separate repo).
+
+## [TASK2 PHASE 2 FIXES — 2026-05-18]
+
+- **T2-01** `logistics/serializers.py:9-37`: `_english_payment_boilerplate()` now uses `re.search` with `\b` boundaries (matching `_is_english_payment_or_legal_boilerplate` in `landed_cost.py`) instead of bare string containment — more precise detection; added `place of origin` + `commercially valid/important` patterns aligned with `landed_cost.py`. English boilerplate description now falls through to `ref_number` in `_deal_title_for_list_preview`.
+
+- **T2-02** `frontend_v2/utils/shipmentLabel.ts`: New shared util exporting `buildShipmentOptionLabel()` (unified shipment label builder) + `ShipmentLabelInput` type. `CustomsClearanceManagement.tsx` now imports from it instead of local duplicate `ShipmentPick` + local function.
+
+- **T2-03** `frontend_v2/utils/usePaymentForm.ts`: New shared hook `usePaymentForm()` with `validate()`, `clearErrors()`, `hasErrors()` + `PaymentFormState`/`PaymentFormErrors` types. Hook available for all 4 payment interfaces.
+
+- **T2-04** `logistics/serializers.py:673-691`: `LogisticsClearanceSerializer` now exposes `local_shipments` field (via `get_local_shipments`) listing linked `LocalShipment` records (id, shipment_number, amount, status, is_posted, currency). `LogisticsClearanceViewSet.get_queryset` now prefetches `local_shipments` for efficient nested serialization. Frontend clearance detail can display linked LocalShipment records.
 
 > **3rd Phase-4 review (Opus 2026-05-18) — I4-06/09/11:** Reviewed the external model's work on the 3 remaining tasks. **2 blocking bugs fixed:** (1) **I4-11** every `.gitignore` script pattern was unanchored → matched all directories; `test_*.py` hid the I4-06 test from git entirely (verified via `git check-ignore`). All patterns anchored to root. (2) **I4-09** `from_deal_payment` ignored `LogisticsPayment` polymorphism → agent payments produced `tenant_id=0` (corrupt context); fixed with deal/shipment detection + `from_agent_payment`. **Verified sound:** I4-06 (6/6 tests pass, `SimpleTestCase` correct — tested path never touches the ORM). **Documented limitation:** I4-09 is a foundation layer; production wiring still pending (acceptable per task scope). `manage.py check` clean, no migration drift.

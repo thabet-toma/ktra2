@@ -1023,7 +1023,10 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
             super()
             .get_queryset()
             .select_related("shipment", "customs_broker", "tenant")
-            .prefetch_related(Prefetch("shipment__deals", queryset=deal_mini))
+            .prefetch_related(
+                Prefetch("shipment__deals", queryset=deal_mini),
+                "local_shipments",
+            )
         )
 
     @action(detail=True, methods=["get"])

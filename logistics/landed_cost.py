@@ -23,6 +23,11 @@ from logistics.models import (
     PurchaseInvoice,
     PurchaseInvoiceItem,
 )
+# Single source of truth — shared with serializers.py (T2-01 dedup).
+from logistics.text_utils import (
+    has_arabic as _has_arabic,
+    is_english_payment_or_legal_boilerplate as _is_english_payment_or_legal_boilerplate,
+)
 
 
 Q2 = Decimal('0.01')
@@ -37,42 +42,6 @@ LOCAL_SHIPPING_CLEARANCE_LINE_LABELS = frozenset({
     'شحن داخلي',
 })
 
-_AR_RE = re.compile(
-    r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]'
-)
-
-
-def _has_arabic(s: str) -> bool:
-    return bool(s and _AR_RE.search(s))
-
-
-def _is_english_payment_or_legal_boilerplate(s: str) -> bool:
-    """Matches frontend dealTitleDisplay.isEnglishPaymentOrLegalBoilerplate (subset + place of origin)."""
-    t = (s or '').strip()
-    if not t or _has_arabic(t):
-        return False
-    lower = t.lower()
-    if re.search(r'\bterms\s+of\s+payment\b', lower):
-        return True
-    if re.search(r'\bplace\s+of\s+origin\b', lower) and len(t) > 40:
-        return True
-    if re.search(r'\bbank\s+charges?\b', lower) and len(t) > 20:
-        return True
-    if (
-        re.search(r'\b(?:\d{1,2}\s*%|percent)\s*(?:deposit|advance|down)\b', lower)
-        and re.search(r'\b(?:before\s+)?(?:delivery|shipment)\b', lower)
-    ):
-        return True
-    if (
-        re.search(r'\bdeposit\b', lower)
-        and re.search(r'\b(?:rest|balance|remaining)\b', lower)
-        and re.search(r'\bpayment\b', lower)
-        and len(t) > 30
-    ):
-        return True
-    if re.search(r'\bletter\s+of\s+credit\b', lower) and len(t) > 25:
-        return True
-    return False
 
 
 def _first_arabic_line_from_notes(notes: Optional[str]) -> Optional[str]:

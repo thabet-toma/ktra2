@@ -38,19 +38,27 @@
 
 ## المرحلة 2 — أخطاء متوسطة داخل النطاق
 
-- [ ] **T2-01** **منطق عرض اسم الصفقة هشّ وإجرائي.**
+- [x] **T2-01 — تم + تصحيح مراجعة (Opus 2026-05-18):** النموذج الخارجي حسّن regex الـboilerplate لكنه جعل `serializers._english_payment_boilerplate` نسخة طبق الأصل من `landed_cost._is_english_payment_or_legal_boilerplate` (منطق هشّ مكرّر يجب أن يبقى متزامناً يدوياً؛ ونسخة serializers استخدمت regex عربي أضيق `[U+0600-U+06FF]` فتُخطئ presentation-forms). **التصحيح:** وحدة مشتركة `logistics/text_utils.py` (مصدر حقيقة واحد، regex أوسع)؛ serializers.py و landed_cost.py يستوردان منها — تحقّق: نفس كائن الدالة (`is`). check نظيف، 12/12. **الوصف الأصلي للمهمة أدناه (مرجع).**
+
+- [ ] ~~**T2-01**~~ **منطق عرض اسم الصفقة هشّ وإجرائي.**
   `logistics/serializers.py:27-46` (`_deal_title_for_list_preview`) يبني العنوان من سلسلة أولويات (description→notes→original_offer→ref_number). لا حقل اسم مخصّص → الصفحة الرئيسية تُظهر `description` (نص حرّ/إنجليزي أحياناً) بدل اسم مختصر. (الحل الجذري حقل `short_name` = T4-03؛ هنا فقط: ثبّت السلوك المؤقت — إن كان `description` إنجليزياً boilerplate أظهِر `ref_number` بوضوح بدل نص مبهم).
   **التحقق:** صفقة وصفها "payment terms…" تُظهر `ref_number` لا النص الإنجليزي في قائمة الصفقات.
 
-- [ ] **T2-02** **عرض الشحنة برقم خام بدل اسم مختصر.**
+- [x] **T2-02 — تم + إكمال (Opus 2026-05-18):** النموذج الخارجي استخرج `buildShipmentOptionLabel` إلى `frontend_v2/utils/shipmentLabel.ts` وربطه بـ`CustomsClearanceManagement.tsx` فقط — لكن القائمة الرئيسية `SqlShipmentsPage.tsx:98` بقيت تعرض `shipment_number` خاماً (شكوى المالك نفسها). **الإكمال:** هاجرتُ `SqlShipmentsPage.tsx` (بطاقة القائمة + فلتر البحث + النوع) للـutil المشترك. typecheck: صفر خطأ في الملفات الممسوسة. **الوصف الأصلي أدناه (مرجع).**
+
+- [ ] ~~**T2-02**~~ **عرض الشحنة برقم خام بدل اسم مختصر.**
   `frontend_v2` قائمة الشحنات (تتبّع `shipment_number` في مكوّنات `components/logistics/` و`components/procurement/clearance/CustomsClearanceManagement.tsx:43-52` `buildShipmentOptionLabel`). الشحنات تُعرض بـ `SH-XXXX`. (الجذر = حقل `short_name` T4-03؛ هنا: وحّد دالة بناء التسمية في util مشترك واحد بدل تكرارها في كل مكوّن).
   **التحقق:** كل قوائم الشحنات تستخدم نفس util التسمية؛ تغيير منطق العرض في مكان واحد ينعكس كلياً.
 
-- [ ] **T2-03** **تباعد واجهات الدفع (deal/shipment/clearance/local) — UX غير موحّد.**
+- [~] **T2-03 — جزئي + تصحيح صدق (Opus 2026-05-18):** النموذج الخارجي أنشأ `usePaymentForm.ts` لكنه ملف ميت (لا مكوّن يستورده — التوحيد لم يحدث)، وأعلن حقول خطأ لا يتحقق منها ويسمح بتاريخ فارغ بينما الخادم يرفضه. **التصحيح:** أُعيدت كتابة الـhook صحيحاً وغير مُضلِّل (`validatePaymentInput` نقية: مبلغ>0 + تاريخ مطلوب مطابق للخادم + `extra` للأخطاء الخاصة). **متبقٍّ صراحةً:** ربطه بواجهات الدفع الأربع = عمل UI لا يُتحقَّق منه دون تشغيل الواجهة — لم يُدّعَ اكتماله. **الوصف الأصلي أدناه (مرجع).**
+
+- [ ] ~~**T2-03**~~ **تباعد واجهات الدفع (deal/shipment/clearance/local) — UX غير موحّد.**
   أربع واجهات دفع منفصلة: `frontend_v2/components/forms/deal-parts/PaymentRegistration.tsx` (صفقة)، قسم دفعات الشحنة، `components/procurement/clearance/CustomsClearanceManagement.tsx:70-112` (تخليص)، `LocalShippingPage.tsx` (نقل). حقول/تحقّق/عرض مختلف لكل واحدة. (التوحيد الفعلي backend = T4-02؛ هنا فقط: وحّد عرض أخطاء الدفع + تحقّق العميل المشترك في hook/util واحد `usePaymentForm`).
   **التحقق:** نفس رسائل الخطأ ونفس قواعد التحقّق (مبلغ>0، تاريخ، عملة) في الواجهات الأربع.
 
-- [ ] **T2-04** **النقل المحلي بواجهتين منفصلتين.**
+- [~] **T2-04 — جزئي (Opus 2026-05-18):** النموذج الخارجي أنجز الباك-إند فقط: `LogisticsClearanceSerializer.local_shipments` + `prefetch_related("local_shipments")` — سليم. **متبقٍّ صراحةً:** واجهة `CustomsClearanceManagement.tsx` لا تستهلك `clearance.local_shipments` بعد، ومسار الإدخال المكرّر للنقل المحلي ما زال قائماً → معيار التحقق غير محقّق. الإكمال = T4-04 (يحتاج migration بيانات). لم يُدّعَ اكتمال الواجهة. **الوصف الأصلي أدناه (مرجع).**
+
+- [ ] ~~**T2-04**~~ **النقل المحلي بواجهتين منفصلتين.**
   `LocalShipment` يظهر: (أ) صفحة مستقلة `frontend_v2/.../LocalShippingPage.tsx`؛ (ب) مضمَّن في `CustomsClearanceManagement.tsx` (سطور تكلفة ضمن التخليص). المستخدم لا يعرف أيّهما يُنشئ سجلاً رسمياً. (التوحيد الكامل = T4-04؛ هنا: في واجهة التخليص اجعل قسم النقل المحلي **يقرأ ويربط** سجلات `LocalShipment` لا يكرّر إدخال تكلفة منفصلة).
   **التحقق:** إدخال نقل محلي من واجهة التخليص يُنشئ/يربط `LocalShipment` واحداً ظاهراً أيضاً في الصفحة المستقلة (سجل واحد، عرضان).
 

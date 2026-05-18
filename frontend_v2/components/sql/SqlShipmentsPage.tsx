@@ -2,10 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 import { apiGetList, apiGetObject } from "../../services/restApi";
 import { SqlDataPageShell } from "./SqlDataPageShell";
 import { Truck, Plane, Ship, Eye } from "lucide-react";
+import { buildShipmentOptionLabel, ShipmentLabelInput } from "@/utils/shipmentLabel";
 
-type ShipmentRow = {
-  id: number;
-  shipment_number?: string;
+type ShipmentRow = ShipmentLabelInput & {
   status?: string;
   departure_date?: string | null;
   arrival_date?: string | null;
@@ -40,7 +39,7 @@ export function SqlShipmentsPage() {
     const s = q.trim().toLowerCase();
     if (!s) return rows;
     return rows.filter((r) => {
-      const txt = `${r.shipment_number || ""} ${r.status || ""} ${r.shipping_agent?.name || ""} ${r.bill_of_lading || ""} ${r.container_number || ""}`.toLowerCase();
+      const txt = `${buildShipmentOptionLabel(r)} ${r.status || ""} ${r.shipping_agent?.name || ""} ${r.bill_of_lading || ""} ${r.container_number || ""}`.toLowerCase();
       return txt.includes(s);
     });
   }, [rows, q]);
@@ -95,7 +94,7 @@ export function SqlShipmentsPage() {
                       {isAir ? <Plane className="w-4 h-4" /> : <Ship className="w-4 h-4" />}
                     </div>
                     <div className="min-w-0">
-                      <div className="font-bold text-sm">{r.shipment_number || "-"}</div>
+                      <div className="font-bold text-sm">{buildShipmentOptionLabel(r)}</div>
                       <div className="text-xs text-gray-500 mt-1">
                         <Truck className="w-3 h-3 inline ml-1" />
                         {r.shipping_agent?.name || "-"} • {r.status || "-"}

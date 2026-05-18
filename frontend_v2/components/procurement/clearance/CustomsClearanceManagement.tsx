@@ -28,29 +28,10 @@ import {
 import { apiGetList } from "@/services/restApi";
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
 import { resolveTenantId } from "@/utils/tenantContext";
+import { buildShipmentOptionLabel, ShipmentLabelInput } from "@/utils/shipmentLabel";
 
-type ShipmentPick = {
-  id: number;
-  shipment_number: string;
-  shipment_name?: string;
-  agent_shipment_number?: string;
-  israeli_side_name?: string;
-};
-
+type ShipmentPick = ShipmentLabelInput;
 type BrokerPick = { id: number; name: string; partner_type?: string };
-
-/** نص يظهر في القوائم: الاسم أولاً ثم الرقم والمرجع. */
-function buildShipmentOptionLabel(s: ShipmentPick): string {
-  const num = s.shipment_number || `S-${s.id}`;
-  const name = (s.shipment_name || "").trim();
-  const ref = (s.agent_shipment_number || "").trim();
-  const side = (s.israeli_side_name || "").trim();
-  if (name) {
-    const tail = [num, ref ? `مرجع: ${ref}` : "", side].filter(Boolean).join(" · ");
-    return tail && tail !== name ? `${name} — ${tail}` : name;
-  }
-  return [num, ref ? `مرجع: ${ref}` : "", side].filter(Boolean).join(" · ");
-}
 
 /** يُحفَظ ضمن `cost_lines` ويُعرض في قسم منفصل عن بنود التخليص */
 const SHIPPING_COST_LINE_LABEL = "دفعة الشحن (الناقل)";

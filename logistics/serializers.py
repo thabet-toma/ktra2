@@ -3,37 +3,22 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from rest_framework import serializers
 
-_DEAL_TITLE_AR = re.compile(r"[\u0600-\u06FF]")
-
-
-def _english_payment_boilerplate(s: str) -> bool:
-    t = (s or "").strip()
-    if not t or _DEAL_TITLE_AR.search(t):
-        return False
-    low = t.lower()
-    if "terms of payment" in low:
-        return True
-    if "bank charges" in low and len(t) > 20:
-        return True
-    if re.search(r"\b\d{1,2}\s*%", low) and "deposit" in low and "delivery" in low:
-        return True
-    if "deposit" in low and ("rest" in low or "balance" in low) and "payment" in low and len(t) > 30:
-        return True
-    if "letter of credit" in low and len(t) > 25:
-        return True
-    return False
+from .text_utils import has_arabic as _has_arabic
+from .text_utils import (
+    is_english_payment_or_legal_boilerplate as _english_payment_boilerplate,
+)
 
 
 def _deal_title_for_list_preview(deal):
     """وصف قصير أو أول سطر عربي في الملاحظات أو رقم العرض أو رقم الصفقة."""
     d = (getattr(deal, "description", None) or "").strip()
     notes = (getattr(deal, "notes", None) or "").strip()
-    if d and _DEAL_TITLE_AR.search(d):
+    if d and _has_arabic(d):
         return d[:72]
     if notes:
         for line in notes.splitlines():
             line = line.strip()
-            if line and _DEAL_TITLE_AR.search(line):
+            if line and _has_arabic(line):
                 return line[:72]
     if d and not _english_payment_boilerplate(d):
         return d[:72]
@@ -659,11 +644,29 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
     )
     deals_count = serializers.SerializerMethodField()
     deals_preview = serializers.SerializerMethodField()
+    local_shipments = serializers.SerializerMethodField()
 
     class Meta:
         model = LogisticsClearance
         fields = "__all__"
         read_only_fields = ["id", "tenant"]
+
+    def get_local_shipments(self, obj):
+        try:
+            rows = obj.local_shipments.all()
+            return [
+                {
+                    "id": r.id,
+                    "shipment_number": r.shipment_number,
+                    "amount": str(r.amount),
+                    "status": r.status,
+                    "is_posted": r.is_posted,
+                    "currency": r.currency_id,
+                }
+                for r in rows
+            ]
+        except Exception:
+            return []
 
     def get_deals_count(self, obj):
         try:
