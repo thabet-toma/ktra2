@@ -1,0 +1,341 @@
+/* D1-01/D1-02: KTRA Design System — Tailwind v4 CSS-first tokens
+   All visual values MUST come from these tokens. No raw hex/spacing/typography.
+*/
+@import "tailwindcss";
+
+@theme {
+  /* ── Colors (semantic) ── */
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-primary-foreground: #ffffff;
+
+  --color-surface: #ffffff;
+  --color-surface-2: #f8fafc;
+  --color-surface-3: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-muted: #f1f5f9;
+  --color-muted-foreground: #64748b;
+
+  --color-danger: #dc2626;
+  --color-danger-hover: #b91c1c;
+  --color-success: #16a34a;
+  --color-success-hover: #15803d;
+  --color-warning: #d97706;
+  --color-warning-hover: #b45309;
+
+  --color-text: #0f172a;
+  --color-text-muted: #64748b;
+  --color-text-inverted: #ffffff;
+
+  /* ── Spacing (compact ERP density) ── */
+  --spacing-xs: 0.125rem;
+  --spacing-sm: 0.25rem;
+  --spacing-1: 0.25rem;
+  --spacing-2: 0.5rem;
+  --spacing-3: 0.75rem;
+  --spacing-4: 1rem;
+  --spacing-5: 1.25rem;
+  --spacing-6: 1.5rem;
+  --spacing-1.5: 0.375rem;
+  --spacing-2.5: 0.625rem;
+  --spacing-0.5: 0.125rem;
+
+  /* ── Typography ── */
+  --font-family-base: 'IBM Plex Sans Arabic', 'Segoe UI', system-ui, sans-serif;
+  --font-size-xs: 0.6875rem;
+  --font-size-sm: 0.75rem;
+  --font-size-base: 0.8125rem;
+  --font-size-lg: 0.875rem;
+  --font-size-xl: 1rem;
+  --font-size-2xl: 1.125rem;
+
+  /* ── Border radius ── */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-full: 9999px;
+
+  /* ── Shadows ── */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
+  /* ── Transitions ── */
+  --transition-fast: 150ms ease;
+  --transition-base: 200ms ease;
+}
+
+/* Dark mode: apply dark token overrides when .dark class is on <html> */
+.dark {
+  --color-surface: #0f172a;
+  --color-surface-2: #1e293b;
+  --color-surface-3: #334155;
+  --color-border: #334155;
+  --color-muted: #1e293b;
+  --color-text: #f8fafc;
+  --color-text-muted: #94a3b8;
+}
+
+/* ── Base resets ── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-family-base);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* RTL + body defaults */
+body {
+  margin: 0;
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--font-size-base);
+}
+
+/* ── Global unification layer (D3-04) ──
+   Uses :where() = ZERO specificity, so any component's own Tailwind
+   classes always win. This pulls the ~171 legacy screens onto the
+   token theme automatically WITHOUT editing each file: native form
+   controls, focus ring, and interactive affordances become consistent
+   and professional app-wide. */
+@layer base {
+  :where(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="submit"]):not([type="button"]),
+    select,
+    textarea
+  ) {
+    background-color: var(--color-surface);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 0.3125rem 0.5rem;
+    font-size: var(--font-size-sm);
+    font-family: inherit;
+    line-height: 1.4;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+
+  :where(input, select, textarea):focus-visible,
+  :where(button, a, [role="button"], [tabindex]):focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 1px;
+  }
+
+  :where(input, select, textarea):focus {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+  }
+
+  :where(input, select, textarea):disabled {
+    background-color: var(--color-muted);
+    color: var(--color-text-muted);
+    cursor: not-allowed;
+  }
+
+  :where(input, select, textarea)::placeholder {
+    color: var(--color-text-muted);
+    opacity: 0.7;
+  }
+
+  :where(button):not(:disabled) {
+    cursor: pointer;
+  }
+
+  :where(h1, h2, h3, h4) {
+    color: var(--color-text);
+    font-weight: 700;
+    line-height: 1.3;
+  }
+
+  :where(a):not([class]) {
+    color: var(--color-primary);
+    text-decoration: none;
+  }
+  :where(a):not([class]):hover {
+    text-decoration: underline;
+  }
+}
+
+/* ── DataGrid base (compact ~32-36px rows) ── */
+[data-density="comfortable"] {
+  --row-height: 2.25rem;
+  --cell-padding: 0.5rem 0.75rem;
+  --header-height: 2rem;
+}
+
+[data-density="compact"] {
+  --row-height: 1.75rem;
+  --cell-padding: 0.25rem 0.5rem;
+  --header-height: 1.75rem;
+}
+
+/* ── App layout shell ── */
+.app-sidebar {
+  width: 16rem;
+  min-height: 100vh;
+  background: var(--color-surface-2);
+  border-inline-end: 1px solid var(--color-border);
+  transition: width var(--transition-base);
+}
+
+.app-sidebar.collapsed {
+  width: 3.5rem;
+}
+
+.app-header {
+  height: 2.75rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.app-content {
+  min-height: calc(100vh - 2.75rem);
+  background: var(--color-surface);
+}
+
+/* ── Sticky toolbar ── */
+.sticky-toolbar {
+  position: sticky;
+  top: 2.75rem;
+  z-index: 40;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* ── Table overrides (compact) ── */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--font-size-sm);
+}
+
+thead tr {
+  background: var(--color-surface-2);
+  border-bottom: 2px solid var(--color-border);
+  position: sticky;
+  top: 0;
+}
+
+thead th {
+  padding: var(--cell-padding, 0.375rem 0.75rem);
+  font-weight: 600;
+  text-align: start;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+tbody tr {
+  border-bottom: 1px solid var(--color-border);
+  transition: background-color var(--transition-fast);
+  height: var(--row-height, 2.25rem);
+}
+
+tbody tr:hover {
+  background: var(--color-muted);
+}
+
+tbody td {
+  padding: var(--cell-padding, 0.375rem 0.75rem);
+  vertical-align: middle;
+}
+
+/* ── Status badges ── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.125rem 0.5rem;
+  border-radius: var(--radius-full);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.badge-primary   { background: #dbeafe; color: #1e40af; }
+.badge-success   { background: #dcfce7; color: #166534; }
+.badge-danger    { background: #fee2e2; color: #991b1b; }
+.badge-warning   { background: #fef3c7; color: #92400e; }
+.badge-muted     { background: var(--color-muted); color: var(--color-text-muted); }
+.badge-neutral   { background: var(--color-surface-3); color: var(--color-text); }
+
+.dark .badge-primary   { background: #1e3a8a; color: #bfdbfe; }
+.dark .badge-success   { background: #14532d; color: #bbf7d0; }
+.dark .badge-danger    { background: #7f1d1d; color: #fecaca; }
+.dark .badge-warning   { background: #78350f; color: #fde68a; }
+.dark .badge-muted     { background: var(--color-surface-3); color: var(--color-text-muted); }
+.dark .badge-neutral   { background: var(--color-surface-2); color: var(--color-text); }
+
+/* ── Spinner ── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.spinner {
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+/* ── Empty state ── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1rem;
+  color: var(--color-text-muted);
+  text-align: center;
+  gap: 0.5rem;
+}
+
+.empty-state-icon {
+  width: 3rem;
+  height: 3rem;
+  opacity: 0.4;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--color-muted); }
+::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+
+/* ── Drawer (side panel for compact forms) ── */
+.drawer {
+  position: fixed;
+  inset-block: 0;
+  width: 28rem;
+  background: var(--color-surface);
+  border-inline-start: 1px solid var(--color-border);
+  box-shadow: var(--shadow-lg);
+  z-index: 60;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.drawer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-2);
+  position: sticky;
+  top: 0;
+}
+
+.drawer-body {
+  padding: 1rem;
+  flex: 1;
+  overflow-y: auto;
+}
