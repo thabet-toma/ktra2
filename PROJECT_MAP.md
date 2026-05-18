@@ -95,8 +95,14 @@ Ran Django:8000 + Vite:3000, logged in as manager, browsed deals/shipments/clear
 - **T2-FIX-03 (LOW/optional):** clearance `handlePostPayment`/`handleShipPostPayment` early-return on paid-closed before the validator (functionally fine; unverifiable here since all env clearances fully paid — data limit, not a bug).
 - **Verified sound:** T2-01 (Arabic deal title kept via shared `text_utils`), T2-04 backend (`local_shipments` key present, `[]` since 0 rows; panel hides correctly), console clean. Env reality: 0 `LocalShipment` rows; local transport still entered as clearance cost-lines (e.g. S-0012 ₪2700) — exactly what planned **T4-04** resolves.
 
+### [TASK2 — T4-04 local-transport unification DONE + live-verified (Opus 2026-05-18)]
+Owner escalation ("why is local transport STILL in the clearance?"). Resolved:
+- **Data migration** `logistics/0024_t4_04_migrate_local_transport.py` (idempotent, reversible): each shipping-tagged `LogisticsClearancePayment` → a `LocalShipment` linked to the same clearance, `capitalize_to_inventory=False`, **reusing the existing journal (no new posting)**. Zero financial impact verified: Clr#2 `landed_share`/`carrier_line` = 2700.00 before == after; journal 282 unchanged.
+- **Duplicate UI removed** from `CustomsClearanceManagement.tsx`: the local-transport amount input + carrier/cashbox/date + "دفع" button + `handleShipPostPayment` + `shipPay*` state all deleted, replaced by a read-only notice pointing to the standalone "الشحن المحلي" page (the T2-04 read-only panel kept). `shippingLineAmount` load/save kept so historical clearance shipping cost-lines stay untouched.
+- Live-verified: clearance S-0012 shows `LS-MIG-3 / 2700 / delivered` read-only with no inputs; standalone page lists it as the single source. tsc clean for the file, Vite build 0 errors, console clean, `manage.py check` clean, no drift.
+
 ### Task2 scope — remaining (T3, T4 / M3-M4, pending approval)
-- **T3-01..03** robustness · **T4-01..09** Quotation entity, real payment unification (wire `core/payments.py`), `short_name` fields, local-transport single source + data migration (T4-04), explicit stock-issue voucher, professional UI.
+- **T3-01..03** robustness · **T4-01/02/03/05..09** Quotation entity, real payment unification (wire `core/payments.py`), `short_name` fields, explicit stock-issue voucher, professional UI. (**T4-04 done** above.)
 
 ## [PHASE 1 FIXES — 2026-05-17]
 
@@ -201,3 +207,23 @@ Ran Django:8000 + Vite:3000, logged in as manager, browsed deals/shipments/clear
 - **T2-04** `logistics/serializers.py:673-691`: `LogisticsClearanceSerializer` now exposes `local_shipments` field (via `get_local_shipments`) listing linked `LocalShipment` records (id, shipment_number, amount, status, is_posted, currency). `LogisticsClearanceViewSet.get_queryset` now prefetches `local_shipments` for efficient nested serialization. Frontend clearance detail can display linked LocalShipment records.
 
 > **3rd Phase-4 review (Opus 2026-05-18) — I4-06/09/11:** Reviewed the external model's work on the 3 remaining tasks. **2 blocking bugs fixed:** (1) **I4-11** every `.gitignore` script pattern was unanchored → matched all directories; `test_*.py` hid the I4-06 test from git entirely (verified via `git check-ignore`). All patterns anchored to root. (2) **I4-09** `from_deal_payment` ignored `LogisticsPayment` polymorphism → agent payments produced `tenant_id=0` (corrupt context); fixed with deal/shipment detection + `from_agent_payment`. **Verified sound:** I4-06 (6/6 tests pass, `SimpleTestCase` correct — tested path never touches the ORM). **Documented limitation:** I4-09 is a foundation layer; production wiring still pending (acceptable per task scope). `manage.py check` clean, no migration drift.
+
+## [TASK2 PHASE 3 FIXES — 2026-05-18]
+
+- **T3-01** `core/payments.py:122-140`: `validate_payment()` now checks `ctx.payment_type in ('deal', 'customer')` before requiring `partner_id` — clearance payments (broker may be null) and shipment-agent payments (shipping_agent may be null) no longer incorrectly rejected. Decision documented in docstring.
+
+- **T3-02** All 4 payment posting actions already return consistent `{status, journal_id, payment_id}` on success and `{error}` on failure. Verified: deal payment `post_payment_to_accounting:304-308`, agent payment `post_agent_payment_to_accounting:859-865`, clearance payment `pay_from_cashbox:1262-1272`, customer payment `sales/views.py:271-277`. No changes needed — already consistent.
+
+- **T3-03** `logistics/views.py:2035-2090`: `LocalShipmentViewSet.post_to_accounting` now derives `base_amt = amount × exchange_rate` for foreign-currency lines (same fix as C1-05). Removed manual `base_debit/base_credit` assignment (auto-calc'd by `JournalLine.save()` from `journal.exchange_rate`). JournalHeader stores `exchange_rate=shipment.exchange_rate` for consistency.
+
+## [TASK2 PHASE 4 (M4) — 2026-05-18]
+
+- **T4-01** `sales/models.py:494-607`: New `SalesQuotation` + `SalesQuotationLine` models (migration `0006_salesquotation`). State machine enforced in `save()`. `sales/services.py`: New `convert_quotation_to_invoice()` (idempotent, draft→invoice, sets status='converted'). `sales/serializers.py`: `SalesQuotationSerializer` + line serializers. `sales/views.py`: `SalesQuotationViewSet` with `POST /api/sales/quotations/{id}/convert/`. `sales/urls.py`: registered at `quotations`. **check clean, migrations OK.**
+
+- **T4-02** `core/payments.py`: New `post_payment()` — unified posting entry point via `post_journal()`. Reference types: LOGISTICS_PAYMENT / CLEARANCE_PAYMENT / CUSTOMER_PAYMENT. **Foundation wired; actual route migration deferred by design (requires separate approval per T4-02 scope: توحيد سلوكي only).**
+
+- **T4-03** `logistics/models.py`: Added `short_name` to `LogisticsDeal` (migration `0023_add_short_name_to_deal`). **check clean, migration OK.**
+
+- **T4-04** `logistics/management/commands/migrate_local_shipping_cost_lines.py`: Data migration script — cost_lines local-shipping rows → `LocalShipment` records. Idempotent. **Run after T1-01 fix is deployed.**
+
+- **T4-05** `inventory/models.py`: Added `STOCK_ISSUE` to `StockMovement.REFERENCE_TYPES` (migration `0004`). `sales/services.py`: New `issue_stock_from_invoice()` — idempotent, creates one STOCK_ISSUE `StockMovement(OUT)` per invoice line. **check clean, migration OK.**

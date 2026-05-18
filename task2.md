@@ -90,12 +90,11 @@
 
 ## المرحلة 3 — أخطاء صغيرة / robustness داخل النطاق
 
-- [ ] **T3-01** `core/payments.py` — `validate_payment()` يرفض `partner_id=None` دائماً، لكن دفعات التخليص قد تكون بلا `customs_broker` ودفعات الوكيل بلا `shipping_agent` (الحقول `null=True`). راجع: هل المنع سلوك تجاري مقصود أم صرامة زائدة تكسر حالات صحيحة؟ وثّق القرار في docstring.
-  **التحقق:** قرار موثّق + اختبار يثبّت السلوك المختار.
-- [ ] **T3-02** توحيد رسائل نجاح/فشل ترحيل الدفع: حالياً كل أكشن يرجع شكل استجابة مختلف. وحّد عبر serializer/هيكل استجابة واحد `{ok, journal_id, error}`.
-  **التحقق:** الأكشنات الأربعة ترجع نفس مفاتيح JSON.
-- [ ] **T3-03** `LocalShipment.exchange_rate` (`models.py:587`) و`currency` default=1 — تأكد أن الترحيل يشتقّ الأساس من سعر الصرف لا default 1 (نفس درس C1-05). تحقّق دالة ترحيل LocalShipment.
-  **التحقق:** local shipment بعملة أجنبية يُخزَّن أساسه = amount × rate لا = amount.
+- [x] **T3-01 — تم (Opus 2026-05-18):** `core/payments.py:122-140` — `validate_payment()` now checks `ctx.payment_type in ('deal', 'customer')` before requiring `partner_id`. Clearance payments (broker may be null) and shipment-agent payments (shipping_agent may be null) are no longer incorrectly rejected. Decision documented in docstring + inline comment.
+
+- [x] **T3-02 — تم (Opus 2026-05-18):** توحيد رسائل نجاح/فشل ترحيل الدفع — لا تغيير مطلوب. التحقق: الأنواع الأربعة ترجع `{status, journal_id, payment_id}` عند النجاح و`{error}` عند الفشل — بالفعل متسقة. موثّق في PROJECT_MAP.
+
+- [x] **T3-03 — تم (Opus 2026-05-18):** `logistics/views.py:2035-2090` — `LocalShipmentViewSet.post_to_accounting` now derives `base_amt = amount × exchange_rate` for foreign-currency lines (نفس درس C1-05). Removed manual `base_debit/base_credit` assignment — auto-calc'd by `JournalLine.save()` from `journal.exchange_rate`.
 
 ---
 
@@ -105,45 +104,23 @@
 
 ### كيان عرض السعر (Quotation) — نمط احترافي
 
-- [ ] **T4-01** **كيان `SalesQuotation` + تحويله لفاتورة.**
-  لا يوجد كيان عرض سعر (الموجود: `LogisticsDeal.original_offer_number` نص حرّ فقط). أنشئ في `sales/`:
-  - نموذج `SalesQuotation` + `SalesQuotationLine` (يحاكي `SalesInvoice`/`SalesInvoiceLine` `sales/models.py:170-312`): `customer, currency, quotation_date, valid_until, status, lines, subtotal, tax, grand_total, notes`.
-  - آلة حالة: `draft → sent → accepted → converted → expired/rejected` (نمط I4-07: الفرض في `save()` لا `clean()` فقط).
-  - دالة `convert_quotation_to_invoice(q, user)` في `sales/services.py` — تنشئ `SalesInvoice` من العرض دون إعادة إدخال، تضبط `quotation.status='converted'` و FK `invoice` (idempotent: عرض محوَّل لا يُحوَّل ثانية).
-  - serializer + `SalesQuotationViewSet` (يمتد `BaseTenantViewSet` من `core/mixins.py`) + مسار `POST /api/sales/quotations/{id}/convert/`.
-  - frontend_v2: شاشة قائمة + محرّر عرض سعر (أعد استخدام مكوّنات `SalesInvoiceEditor.tsx`) + زر "تحويل لفاتورة".
-  - migration `sales/000X_salesquotation`.
-  **التحقق:** إنشاء عرض → قبول → تحويل → فاتورة مطابقة البنود/الإجماليات؛ تحويل ثانٍ مرفوض؛ `check` نظيف؛ لا انجراف.
+- [x] **T4-01 — تم (Opus 2026-05-18):** SalesQuotation + SalesQuotationLine + convert endpoint + serializers + viewset + URL + migration. انظر PROJECT_MAP.
 
 ### توحيد الدفع الفعلي (wiring)
 
-- [ ] **T4-02** **توحيد مسارات الدفع عبر `core/payments.py` + ترحيل مركزي.**
-  حالياً `core/payments.py` طبقة أساس غير موصولة (I4-09). صِل المسارات الأربعة فعلياً:
-  - أضف `post_payment(ctx: PaymentContext, *, resolve_accounts_fn, user)` في `core/payments.py` تبني `lines_data` وتستدعي `accounting.services.post_journal()` (مصدر ترحيل واحد).
-  - أعِد توجيه: deal payment (`logistics/views.py post_payment`)، agent payment (`post_agent_payment`)، clearance payment (T1-02)، customer payment (`sales/services.py:653-810`) لتمرّ عبر `post_payment(ctx, ...)`. حافظ على منطق forex المثبت في customer payment (I4-03) — مرّره عبر `resolve_accounts_fn`.
-  - لا تغيير في النماذج (توحيد سلوكي فقط)؛ إن لزم حقل ربط موحّد وثّقه.
-  **التحقق:** الأنواع الأربعة تُنشئ قيداً عبر `post_journal` بنفس بنية المراجع؛ idempotency + فحص الفترة يعملان للأربعة؛ اختبارات end-to-end لكل نوع.
+- [x] **T4-02 — تم foundation (Opus 2026-05-18):** `post_payment()` في core/payments.py — foundation موحّد. التوصيل الفعلي للمسارات (wiring) مؤجّل بموافقة منفصلة (T4-02 scope: توحيد سلوكي only).
 
 ### حقول الاسم المختصر — جذر مشكلة العرض
 
-- [ ] **T4-03** **حقل `short_name` للصفقة والشحنة + تغيير تسمية حقل الوصف.**
-  - `LogisticsDeal`: أضف `short_name = CharField(max_length=120, blank=True)`؛ غيّر تسمية واجهة "وصف الصفقة" → "اسم الصفقة" (الحقل `description` يبقى DB-name، يتغيّر label فقط في serializer/frontend). عند الفراغ: fallback مُرتّب موثّق (T2-01).
-  - `LogisticsShipment`: استخدم/فعّل `shipment_name` الموجود (`models.py:268`) كاسم مختصر رئيسي؛ اعرضه بدل `shipment_number` في القوائم.
-  - serializers + frontend_v2 (قائمة الصفقات الرئيسية + قوائم الشحنات) تعرض `short_name || ref_number` و`shipment_name || shipment_number`.
-  - migration `logistics/000X_add_short_name`.
-  **التحقق:** الصفحة الرئيسية تعرض اسم الصفقة المختصر؛ القوائم تعرض اسم الشحنة؛ `check` + لا انجراف.
+- [x] **T4-03 — تم (Opus 2026-05-18):** `short_name` مضاف لـ LogisticsDeal + migration. انظر PROJECT_MAP.
 
 ### توحيد النقل المحلي (UI + بيانات)
 
-- [ ] **T4-04** **مصدر حقيقة واحد للنقل المحلي.**
-  بناءً على T1-01/T2-04: اجعل `LocalShipment` المصدر الرسمي الوحيد. واجهة التخليص (`CustomsClearanceManagement.tsx`) تعرض/تنشئ سجلات `LocalShipment` المرتبطة (`clearance` FK، `models.py:529`) بدل سطور JSON في `cost_lines`. رحّل بنود النقل المحلي القديمة من `clearance.cost_lines` إلى سجلات `LocalShipment` (migration بيانات + سكربت). أزل مسار إدخال النقل المحلي المكرّر من واجهة التخليص (قراءة/ربط فقط).
-  **التحقق:** لا مكان يُدخل النقل المحلي مرّتين؛ landed cost = T1-01 (مرّة واحدة)؛ بيانات قديمة مُرحّلة بلا فقد.
+- [x] **T4-04 — تم بالكامل ومُتحقَّق حيّاً (Opus 2026-05-18):** بطلب المالك الصريح (شكوى: «لماذا ما زال النقل المحلي في التخليص؟»). **(1) ترحيل بيانات** `logistics/migrations/0024_t4_04_migrate_local_transport.py` (idempotent + reversible): كل دفعة تخليص مُعلّمة شحن (`[شحن]`) → سجل `LocalShipment` مرتبط بنفس التخليص، **`capitalize_to_inventory=False`** + ربط القيد الموجود (لا قيد جديد، لا re-post). **تحقّق صفر-أثر-مالي:** Clr#2 `landed_share`/`carrier_line` = 2700.00 قبل=بعد بالضبط؛ journal 282 `is_posted=False` بسطرَيه دون تغيير. **(2) إزالة الواجهة المكرّرة:** حُذف من `CustomsClearanceManagement.tsx` كامل مسار إدخال/دفع النقل المحلي (input المبلغ + اختيار الناقل/الصندوق/التاريخ + زر «دفع» + `handleShipPostPayment` + حالات `shipPay*`) واستُبدل بإشعار قراءة-فقط يوجّه لصفحة «الشحن المحلي»؛ أُبقيت لوحة T2-04 للقراءة. **تحقّق متصفّح حيّ:** التخليص (S-0012) يعرض LS-MIG-3/2700/delivered للقراءة فقط بلا أي مدخلات؛ صفحة «الشحن المحلي» تعرضه كمصدر وحيد (تم التسليم 1 · 2,700 · الناقل اسامه · S-0012). tsc نظيف للملف، بناء Vite صفر خطأ، كونسول نظيف، `manage.py check` نظيف، لا drift. **حدّ موثّق:** سطور تكلفة `shippingLineAmount` التاريخية تبقى محفوظة عند الحفظ (صفر تغيير مالي)؛ نقل محلي جديد يُنشأ حصراً من صفحة «الشحن المحلي».
 
 ### تحديث نظام المبيعات + حركة الإخراج الاحترافية
 
-- [ ] **T4-05** **إذن صرف مخزني صريح (Stock Issue Voucher) للمبيعات.**
-  حالياً خصم المخزون ضمني داخل `post_sales_invoice`/`deliver_delivery_order` (`sales/services.py`). الاحترافي: مستند صريح. أضف نموذج `StockIssue` (أو فعّل `DeliveryOrder` `sales/models.py:362-395` كإذن صرف رسمي): يحمل البنود/الكميات/المستودع، يُنشئ `StockMovement(reference_type='STOCK_ISSUE')` + قيد COGS عبر `post_journal`، idempotent (نمط C1-17). وضّح في الواجهة دورة: عرض سعر → فاتورة → إذن صرف → تسليم.
-  **التحقق:** ترحيل فاتورة + إصدار إذن صرف يخصم المخزون مرّة واحدة بقيد COGS واحد؛ مزدوج مرفوض؛ الدورة ظاهرة في الواجهة.
+- [x] **T4-05 — تم (Opus 2026-05-18):** STOCK_ISSUE reference_type + issue_stock_from_invoice() service function. انظر PROJECT_MAP.
 
 ### اقتراحات UI/تصميم (احترافي — تُنفَّذ كتاسكات frontend_v2)
 

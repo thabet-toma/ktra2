@@ -135,14 +135,10 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
   const [distributeInput, setDistributeInput] = useState("");
   /** إدخال سريع: المبلغ الكلي كبند واحد دون توزيع */
   const [quickLumpTotal, setQuickLumpTotal] = useState("");
+  // shippingLineAmount is still loaded/saved so existing clearance
+  // shipping cost-lines are preserved untouched (T4-04: no financial
+  // change). The shipPay* entry state was removed with the UI.
   const [shippingLineAmount, setShippingLineAmount] = useState(0);
-  const [shipPayAmount, setShipPayAmount] = useState("");
-  const [shipPayDate, setShipPayDate] = useState(() =>
-    new Date().toISOString().slice(0, 10)
-  );
-  const [shipPayCashBoxId, setShipPayCashBoxId] = useState("");
-  const [shipPayPartnerId, setShipPayPartnerId] = useState<number | "">("");
-  const [shipPayNotes, setShipPayNotes] = useState("");
 
   const [newOpen, setNewOpen] = useState(false);
   const [newShipmentId, setNewShipmentId] = useState<number | "">("");
@@ -301,11 +297,6 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
       setPayAmount(String(Math.max(0, Number((clearancePartTotal - paidClearance).toFixed(2)))));
       setPayCashBoxId((payRows[0]?.cash_box_external_id || ""));
       setPayNotes("");
-      setShipPayAmount("");
-      setShipPayDate(new Date().toISOString().slice(0, 10));
-      setShipPayCashBoxId(payRows[0]?.cash_box_external_id || "");
-      setShipPayNotes("");
-      setShipPayPartnerId("");
       setDistributeInput("");
       setQuickLumpTotal("");
     } catch (e) {
@@ -501,67 +492,9 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
     }
   };
 
-  const handleShipPostPayment = async () => {
-    if (!selected) return;
-    if (shippingPayClosed) {
-      alert("لا يوجد متبقي على النقل المحلي — السداد مكتمل لهذا الأصل.");
-      return;
-    }
-    if (shipPayPartnerId === "") {
-      alert("اختر السائق أو الناقل (شريك النقل) المستفيد من دفعة الشحن.");
-      return;
-    }
-    if (!shipPayCashBoxId) {
-      alert("اختر الصندوق.");
-      return;
-    }
-    const vErr = validatePaymentInput({ amount: shipPayAmount, date: shipPayDate });
-    if (vErr.amount || vErr.date) {
-      alert(vErr.amount || vErr.date);
-      return;
-    }
-    const amount = Number(shipPayAmount || 0);
-    setPaying(true);
-    setErr(null);
-    try {
-      const res = await payClearanceFromCashBox(selected.id, {
-        amount,
-        cash_box_external_id: shipPayCashBoxId,
-        payment_date: shipPayDate || undefined,
-        notes: shipPayNotes.trim(),
-        payment_kind: "shipping",
-        payee_partner_id: Number(shipPayPartnerId),
-      });
-      const rows = await listClearancePayments(selected.id);
-      setPayments(rows);
-      alert(
-        `✅ نقل: ${res.status}${res.journal_id ? ` (قيد #${res.journal_id})` : ""}`
-      );
-      setShipPayNotes("");
-      setShipPayAmount("");
-      const nextPaidClearance = rows.reduce(
-        (s, p) => s + (!notesMeanShippingPayment(p.notes) ? Number(p.amount) || 0 : 0),
-        0
-      );
-      const nextPaidShip = rows.reduce(
-        (s, p) => s + (notesMeanShippingPayment(p.notes) ? Number(p.amount) || 0 : 0),
-        0
-      );
-      const clearanceBudget = sumLines(formLines);
-      setPayAmount(
-        String(Math.max(0, Number((clearanceBudget - nextPaidClearance).toFixed(2))))
-      );
-      setShippingLineAmount((prev) =>
-        Number(prev) > 0 ? prev : nextPaidShip > 0 ? nextPaidShip : prev
-      );
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setErr(msg);
-      alert(msg);
-    } finally {
-      setPaying(false);
-    }
-  };
+  // T4-04: local-transport entry/payment was removed from the clearance
+  // screen (single source = the standalone "الشحن المحلي" page). The old
+  // handleShipPostPayment + shipPay* state were deleted with it.
 
   if (
     currentUser.role !== "manager" &&
@@ -1030,113 +963,13 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                     </div>
                   )}
 
-                  <label className="block text-xs space-y-1 text-gray-700 dark:text-gray-300">
-                    <span className="font-medium">مبلغ النقل المحلي ₪</span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={shippingLineAmount || ""}
-                      onChange={(e) => setShippingLineAmount(parseFloat(e.target.value) || 0)}
-                      className="w-full max-w-xs rounded-xl border border-amber-200 dark:border-amber-800 px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-semibold"
-                    />
-                  </label>
-                  <ClearancePaymentMiniTable rows={shippingPaymentRows} cashBoxDisplayName={cashBoxDisplayName} />
-
-                  <div className="space-y-3 border-t border-amber-200/80 dark:border-amber-900/50 pt-4">
-                    {shippingPayClosed ? (
-                      <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200 py-2">
-                        تم سداد النقل المحلي بالكامل — لا دفع إضافي ضمن هذا الأصل.
-                      </p>
-                    ) : (
-                      <>
-                        <span className="text-xs font-bold text-amber-950 dark:text-amber-100 block">
-                          تسجيل دفعة للناقل (صف واحد)
-                        </span>
-                        <label className="block text-xs space-y-1 text-gray-600 dark:text-gray-400">
-                          <span>السائق / الناقل</span>
-                          <select
-                            value={shipPayPartnerId === "" ? "" : String(shipPayPartnerId)}
-                            onChange={(e) =>
-                              setShipPayPartnerId(e.target.value === "" ? "" : Number(e.target.value))
-                            }
-                            className="w-full rounded-lg border border-gray-200 dark:border-gray-600 px-2 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
-                          >
-                            <option value="">اختر الشريك…</option>
-                            {transportPartners.map((p) => (
-                              <option key={p.id} value={p.id}>
-                                {p.name}
-                                {p.partner_type ? ` (${p.partner_type})` : ""}
-                              </option>
-                            ))}
-                          </select>
-                          {transportPartners.length === 0 ? (
-                            <span className="text-[10px] text-amber-800 dark:text-amber-300 mt-1 block">
-                              أضف شريكاً من نوع ناقل محلي أو وكيل شحن مع ربط حساب محاسبي.
-                            </span>
-                          ) : null}
-                        </label>
-                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-                          <label className="block text-xs space-y-1 sm:col-span-5 text-gray-600 dark:text-gray-400">
-                            <span>الصندوق</span>
-                            <select
-                              value={shipPayCashBoxId}
-                              onChange={(e) => setShipPayCashBoxId(e.target.value)}
-                              className="w-full rounded-lg border border-gray-200 dark:border-gray-600 px-2 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
-                            >
-                              <option value="">اختر…</option>
-                              {cashLedgers.map((l) => (
-                                <option key={l.id} value={l.external_id}>
-                                  {l.name} ({l.account_code})
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                          <label className="block text-xs space-y-1 sm:col-span-3 text-gray-600 dark:text-gray-400">
-                            <span>التاريخ</span>
-                            <input
-                              type="date"
-                              value={shipPayDate}
-                              onChange={(e) => setShipPayDate(e.target.value)}
-                              className="w-full rounded-lg border border-gray-200 dark:border-gray-600 px-2 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
-                            />
-                          </label>
-                          <label className="block text-xs space-y-1 sm:col-span-2 text-gray-600 dark:text-gray-400">
-                            <span>₪</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              value={shipPayAmount}
-                              onChange={(e) => setShipPayAmount(e.target.value)}
-                              className="w-full rounded-lg border border-gray-200 dark:border-gray-600 px-2 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm font-semibold"
-                            />
-                          </label>
-                          <div className="sm:col-span-2">
-                            <button
-                              type="button"
-                              onClick={() => void handleShipPostPayment()}
-                              disabled={paying}
-                              className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-amber-800 px-3 py-2.5 text-sm font-bold text-white hover:bg-amber-900 disabled:opacity-50 dark:bg-amber-700 dark:hover:bg-amber-800"
-                            >
-                              {paying ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                              دفع
-                            </button>
-                          </div>
-                        </div>
-                        <details className="text-xs">
-                          <summary className="cursor-pointer text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-                            ملاحظات (اختياري)
-                          </summary>
-                          <input
-                            value={shipPayNotes}
-                            onChange={(e) => setShipPayNotes(e.target.value)}
-                            className="mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-600 px-2 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
-                            placeholder="اختياري"
-                          />
-                        </details>
-                      </>
-                    )}
+                  <div className="rounded-xl border border-amber-300 dark:border-amber-800 bg-white/60 dark:bg-gray-900/40 p-3 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+                    <p className="font-bold">إدارة النقل المحلي انتقلت إلى صفحة «الشحن المحلي».</p>
+                    <p>
+                      لم يَعُد النقل المحلي يُدخَل أو يُدفَع من شاشة التخليص (إزالة الازدواج — T4-04).
+                      أنشئ/ادفع شحنات النقل المحلي من صفحة «الشحن المحلي» وستظهر هنا للقراءة فقط.
+                      السجلات التاريخية رُحِّلت تلقائياً دون أي تغيير على القيود أو landed cost.
+                    </p>
                   </div>
                 </div>
               </div>
