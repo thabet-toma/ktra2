@@ -5,6 +5,7 @@ sum(landed_line_total_ils) == deal_val_ils + allocated_freight + allocated_clear
 تشغيل: python manage.py test logistics.tests.test_landed_cost
 """
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.test import SimpleTestCase
 
@@ -12,6 +13,8 @@ from logistics.landed_cost import (
     Q2,
     compute_deal_invoice_lines,
     distribute_by_weights,
+    sum_local_shipping_from_clearance_cost_lines_ils,
+    clearance_local_transport_superseded_by_localshipment,
 )
 
 
@@ -206,3 +209,75 @@ class LandedCostInvariantTest(SimpleTestCase):
         drift = abs(total_landed - expected)
         self.assertLessEqual(drift, Decimal('0.01'),
             f"Shipping-included invariant broken: sum={total_landed} != expected={expected}. Drift={drift}")
+
+
+class T1_01_DoubleLocalTransportCapitalizationTest(SimpleTestCase):
+    """T1-01: LocalShipment.capitalize_to_inventory + cost_lines local-shipping
+    must NOT double-count the same transport cost in the landed pool."""
+
+    def _mock_clearance(self, cost_lines):
+        from types import SimpleNamespace
+        return SimpleNamespace(cost_lines=cost_lines)
+
+    def test_not_superseded_counts_cost_lines(self):
+        """لا LocalShipment مُرسمِل مرحّل → cost_lines تُحسب كما هي."""
+        clr = self._mock_clearance([
+            {'label': 'شحن محلي', 'amount': '1000.00', 'currency': 'ILS'},
+        ])
+        with patch('logistics.models.LocalShipment.objects') as mock_qs:
+            mock_qs.filter.return_value.exists.return_value = False
+            result = sum_local_shipping_from_clearance_cost_lines_ils(clr)
+        self.assertEqual(result, Decimal('1000.00'))
+
+    def test_superseded_returns_zero(self):
+        """LocalShipment مُرسمِل مرحّل موجود → cost_lines تُستبعد (لا ازدواج)."""
+        clr = self._mock_clearance([
+            {'label': 'شحن محلي', 'amount': '1000.00', 'currency': 'ILS'},
+        ])
+        with patch('logistics.models.LocalShipment.objects') as mock_qs:
+            mock_qs.filter.return_value.exists.return_value = True
+            result = sum_local_shipping_from_clearance_cost_lines_ils(clr)
+        self.assertEqual(result, Decimal('0'))
+
+    def test_check_superseded_false_bypasses_guard(self):
+        """تمرير _check_superseded=False يتجاوز الحارس حتى لو وُجد LocalShipment."""
+        clr = self._mock_clearance([
+            {'label': 'شحن محلي', 'amount': '1000.00', 'currency': 'ILS'},
+        ])
+        with patch('logistics.models.LocalShipment.objects') as mock_qs:
+            mock_qs.filter.return_value.exists.return_value = True
+            result = sum_local_shipping_from_clearance_cost_lines_ils(
+                clr, _check_superseded=False,
+            )
+        self.assertEqual(result, Decimal('1000.00'))
+
+    def test_helper_filters_on_posted_and_capitalized(self):
+        """جوهر الحارس: الاستعلام يقيّد فعلاً بـ is_posted=True
+        و capitalize_to_inventory=True (وإلا لا يمنع الازدواج فعلياً)."""
+        from types import SimpleNamespace
+        mock_clearance = SimpleNamespace(id=5)
+        with patch('logistics.models.LocalShipment.objects') as mock_qs:
+            mock_qs.filter.return_value.exists.return_value = True
+            clearance_local_transport_superseded_by_localshipment(mock_clearance)
+        _, kwargs = mock_qs.filter.call_args
+        self.assertEqual(kwargs.get('clearance'), mock_clearance)
+        self.assertIs(kwargs.get('is_posted'), True)
+        self.assertIs(kwargs.get('capitalize_to_inventory'), True)
+
+    def test_helper_superseded_true(self):
+        """helper يسترجع True عند وجود LocalShipment مرحّل ومُرسمِل."""
+        from types import SimpleNamespace
+        mock_clearance = SimpleNamespace(id=5)
+        with patch('logistics.models.LocalShipment.objects') as mock_qs:
+            mock_qs.filter.return_value.exists.return_value = True
+            result = clearance_local_transport_superseded_by_localshipment(mock_clearance)
+        self.assertTrue(result)
+
+    def test_helper_superseded_false_no_localshipment(self):
+        """helper يسترجع False عند عدم وجود LocalShipment."""
+        from types import SimpleNamespace
+        mock_clearance = SimpleNamespace(id=5)
+        with patch('logistics.models.LocalShipment.objects') as mock_qs:
+            mock_qs.filter.return_value.exists.return_value = False
+            result = clearance_local_transport_superseded_by_localshipment(mock_clearance)
+        self.assertFalse(result)

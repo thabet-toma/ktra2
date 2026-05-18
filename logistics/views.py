@@ -29,7 +29,7 @@ from partners.signals import ensure_partner_linked_account
 from tenants.models import Tenant, Currency
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
 from accounting.cashbox import resolve_default_cash_box_account
-from accounting.services import create_audit_log, validate_fiscal_period, post_journal
+from accounting.services import create_audit_log, validate_fiscal_period, post_journal, get_exchange_rate
 from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
 from core.mixins import BaseTenantViewSet
@@ -1194,6 +1194,26 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
 
         try:
             with transaction.atomic():
+                pay_currency = None
+                cur_raw = request.data.get('currency_id')
+                if cur_raw is not None:
+                    try:
+                        pay_currency = Currency.objects.get(pk=int(cur_raw))
+                    except Exception:
+                        pay_currency = None
+                if pay_currency is None:
+                    pay_currency = Currency.objects.filter(Code__iexact='ILS').first()
+
+                # سعر الصرف الفعلي إلى العملة الأساسية — لا نُثبّت 1 (يطابق درس C1-05:
+                # تثبيت 1 لعملة أجنبية يخزّن أساساً = المبلغ الاسمي فيُفسد ميزان المراجعة).
+                base_cur = Currency.objects.filter(IsBaseCurrency=True).first()
+                if pay_currency and base_cur and pay_currency.pk != base_cur.pk:
+                    pay_rate = get_exchange_rate(
+                        clearance.tenant_id, pay_currency.pk, base_cur.pk, payment_date,
+                    )
+                else:
+                    pay_rate = Decimal("1")
+
                 if kind == "shipping":
                     jdesc = (
                         f"[دفع شحن] شحنة {clearance.shipment.shipment_number} — "
@@ -1207,44 +1227,6 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                     )[:500]
                     line_desc = f"دفع تخليص جمركي — {clearance.shipment.shipment_number}"
 
-                journal = JournalHeader.objects.create(
-                    tenant=clearance.tenant,
-                    transaction_date=payment_date,
-                    description=jdesc,
-                    reference_type="LOGISTICS_CLEARANCE_PAYMENT",
-                    reference_id=clearance.id,
-                    is_posted=False,
-                )
-
-                JournalLine.objects.create(
-                    tenant=clearance.tenant,
-                    journal=journal,
-                    account=payee.linked_account,
-                    debit=amount,
-                    credit=0,
-                    partner=payee,
-                    description=line_desc,
-                )
-                JournalLine.objects.create(
-                    tenant=clearance.tenant,
-                    journal=journal,
-                    account=cash_link.account,
-                    debit=0,
-                    credit=amount,
-                    partner=payee,
-                    description=f"صرف من الصندوق {cash_link.name}",
-                )
-
-                pay_currency = None
-                cur_raw = request.data.get('currency_id')
-                if cur_raw is not None:
-                    try:
-                        pay_currency = Currency.objects.get(pk=int(cur_raw))
-                    except Exception:
-                        pay_currency = None
-                if pay_currency is None:
-                    pay_currency = Currency.objects.filter(Code__iexact='ILS').first()
-
                 pay = LogisticsClearancePayment.objects.create(
                     tenant=clearance.tenant,
                     clearance=clearance,
@@ -1255,13 +1237,46 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                     cash_box_external_id=ext[:128],
                     notes=final_notes,
                     is_posted=False,
-                    journal=journal,
                 )
+
+                lines_data = [
+                    {
+                        "account": payee.linked_account_id,
+                        "partner": payee.pk,
+                        "debit": amount,
+                        "credit": Decimal("0"),
+                        "description": line_desc,
+                    },
+                    {
+                        "account": cash_link.account_id,
+                        "partner": payee.pk,
+                        "debit": Decimal("0"),
+                        "credit": amount,
+                        "description": f"صرف من الصندوق {cash_link.name}",
+                    },
+                ]
+
+                jh = post_journal(
+                    tenant_id=clearance.tenant_id,
+                    transaction_date=payment_date,
+                    reference_type="CLEARANCE_PAYMENT",
+                    reference_id=pay.id,
+                    description=jdesc,
+                    lines_data=lines_data,
+                    currency=pay_currency,
+                    exchange_rate=pay_rate,
+                    user=request.user if hasattr(request, 'user') else None,
+                )
+
+                pay.journal = jh
+                pay.is_posted = True
+                pay.save(update_fields=["journal", "is_posted"])
+
             ser = LogisticsClearancePaymentSerializer(pay)
             return Response(
                 {
-                    "status": "تم تسجيل الدفع وإنشاء قيد غير مرحّل. رحّل القيد من صفحة القيود.",
-                    "journal_id": journal.id,
+                    "status": "تم ترحيل الدفع بنجاح.",
+                    "journal_id": jh.id,
                     "payment": ser.data,
                 },
                 status=status.HTTP_201_CREATED,
@@ -1272,6 +1287,91 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
         except Exception:
             logger.exception("clearance pay_from_cashbox failed")
             return Response({"error": "حدث خطأ غير متوقع أثناء تسجيل الدفع."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'], url_path='unpost-payment')
+    def unpost_payment(self, request, pk=None):
+        """إلغاء ترحيل دفعة تخليص جمركي — قيد عكسي."""
+        from accounting.services import validate_fiscal_period
+
+        clearance = self.get_object()
+        payment_id = request.data.get('payment_id')
+        if not payment_id:
+            return Response({"error": "payment_id مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            payment_id_int = int(payment_id)
+        except (TypeError, ValueError):
+            return Response({"error": "payment_id غير صالح."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            payment = LogisticsClearancePayment.objects.select_related('journal').get(
+                pk=payment_id_int, clearance=clearance,
+            )
+        except LogisticsClearancePayment.DoesNotExist:
+            return Response({"error": "الدفعة غير موجودة."}, status=status.HTTP_404_NOT_FOUND)
+
+        if not payment.is_posted or not payment.journal:
+            return Response({"error": "الدفعة غير مرحّلة."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                orig = payment.journal
+                rev_date_raw = request.data.get('reversal_date')
+                try:
+                    rev_date = (
+                        datetime.datetime.strptime(str(rev_date_raw)[:10], "%Y-%m-%d").date()
+                        if rev_date_raw
+                        else datetime.date.today()
+                    )
+                except ValueError:
+                    rev_date = datetime.date.today()
+
+                validate_fiscal_period(orig.tenant_id, rev_date)
+
+                rev = JournalHeader.objects.create(
+                    tenant=orig.tenant,
+                    transaction_date=rev_date,
+                    description=(
+                        f"[إلغاء ترحيل] دفع تخليص #{payment.id} — "
+                        f"عكس القيد #{orig.id}"
+                    )[:500],
+                    reference_type="CLEARANCE_PAYMENT_UNPOST",
+                    reference_id=payment.id,
+                    is_posted=True,
+                    currency=orig.currency,
+                    exchange_rate=orig.exchange_rate,
+                )
+                for line in orig.lines.all():
+                    JournalLine.objects.create(
+                        tenant=line.tenant,
+                        journal=rev,
+                        account=line.account,
+                        debit=line.credit or Decimal('0'),
+                        credit=line.debit or Decimal('0'),
+                        partner=line.partner,
+                        cost_center=line.cost_center,
+                        description=(f"عكس #{orig.id}: {line.description or ''}")[:500],
+                    )
+                # نُبقي رابط القيد الأصلي للتدقيق (أيّ قيد رحّل هذه الدفعة)؛
+                # حارس إعادة الدخول يعتمد is_posted=False لمنع إلغاء ترحيل مزدوج.
+                payment.is_posted = False
+                payment.save(update_fields=['is_posted'])
+        except (ValidationError, DjangoValidationError) as ve:
+            msg = ve.message if hasattr(ve, 'message') else str(ve)
+            return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
+        except IntegrityError as ie:
+            return Response({"error": str(ie)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("clearance unpost_payment failed")
+            return Response(
+                {"error": "حدث خطأ غير متوقع أثناء إلغاء ترحيل دفعة التخليص."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response({
+            "message": "تم إلغاء الترحيل بقيد عكسي.",
+            "reversal_journal_id": rev.id,
+        })
 
 
 class LogisticsExpenseViewSet(BaseTenantViewSet):

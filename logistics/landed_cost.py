@@ -229,8 +229,31 @@ def sum_cost_lines_all_ils(clearance: LogisticsClearance) -> Decimal:
     return s.quantize(Q2, rounding=ROUND_HALF_UP)
 
 
-def sum_local_shipping_from_clearance_cost_lines_ils(clearance: LogisticsClearance) -> Decimal:
-    """مجموع أسطر «شحن محلي» داخل cost_lines (قبل ضرب نسبة الصفقة)."""
+def clearance_local_transport_superseded_by_localshipment(clearance) -> bool:
+    """Return True when a posted LocalShipment linked to this clearance
+    has capitalize_to_inventory=True — meaning local-transport cost is
+    already being capitalized via its own journal entry, so the matching
+    cost_lines rows must NOT be counted again in the landed-cost pool."""
+    from logistics.models import LocalShipment
+    return LocalShipment.objects.filter(
+        clearance=clearance,
+        capitalize_to_inventory=True,
+        is_posted=True,
+    ).exists()
+
+
+def sum_local_shipping_from_clearance_cost_lines_ils(
+    clearance: LogisticsClearance,
+    _check_superseded: bool = True,
+) -> Decimal:
+    """مجموع أسطر «شحن محلي» داخل cost_lines (قبل ضرب نسبة الصفقة).
+
+    When _check_superseded is True and a posted LocalShipment with
+    capitalize_to_inventory=True exists for this clearance, returns 0
+    to avoid double-counting the same transport cost in the landed pool.
+    """
+    if _check_superseded and clearance_local_transport_superseded_by_localshipment(clearance):
+        return Decimal('0')
     s = Decimal('0')
     for row in clearance.cost_lines or []:
         if not isinstance(row, dict):

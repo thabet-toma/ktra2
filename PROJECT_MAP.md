@@ -67,6 +67,21 @@ URL roots: `/api/accounting/ /api/inventory/ /api/logistics/ /api/sales/ /api/ (
 - **`frontend/` Next.js app** unrelated to ERP; keep separate or move out of repo.
 - **The active 500 fix** (tenant-None guard in `sales/views.py perform_create`) converts an opaque crash to a clear 400; the underlying environment cause (likely no `Tenant(TenantID=1)` seeded in the fresh MySQL DB) still needs the user to seed a tenant.
 
+### [TASK2 SCOPE — Phase 1 (M1) completed 2026-05-18]
+
+### Task2 Phase 1 — Catastrophic fixes (M1)
+
+- **T1-01 (FIXED):** local-transport cost double-capitalized into landed cost. Added `clearance_local_transport_superseded_by_localshipment(clearance)` helper in `logistics/landed_cost.py:232-270` — returns True when a posted `LocalShipment` with `capitalize_to_inventory=True` exists for this clearance. `sum_local_shipping_from_clearance_cost_lines_ils()` now returns 0 in this case to prevent double-counting. 6 unit tests in `logistics/tests/test_landed_cost.py` pass.
+
+- **T1-02 (FIXED + review correction):** clearance payment path bypassed `post_journal()`. `LogisticsClearanceViewSet.pay_from_cashbox` now creates `LogisticsClearancePayment` first (unposted), then calls `post_journal(reference_type='CLEARANCE_PAYMENT', reference_id=<pay.id>, ...)`. **Review fix (Opus): the external model hardcoded `exchange_rate=Decimal("1")` although `LogisticsClearancePayment.currency` supports foreign currency → would store base==nominal for non-base payments and corrupt the trial balance (same bug class as C1-05/m3-09).** Now resolves the real rate via `get_exchange_rate(tenant, pay_currency, base_currency, payment_date)`; falls back to 1 only when paying in the base currency; a missing rate raises and returns a clean 400 (never silently 1).
+
+- **T1-03 (FIXED + review correction):** all payment unpost paths use a reversal journal. Added `LogisticsClearanceViewSet.unpost_payment` action (CLEARANCE_PAYMENT_UNPOST). **Review fixes (Opus): (1) it set `payment.journal = None`, destroying the audit link to the journal that originally posted the payment — now keeps the link; the `is_posted=False` re-entry guard already prevents double-unpost. (2) the bare `except Exception → 400 str(e)` leaked internals and misclassified server errors — now ValidationError/IntegrityError → 400, unexpected → 500 + `logger.exception` (matches m3-04 convention).** Verified other unpost paths (deal/PI/local-shipment) already use the reversal pattern.
+
+- **Test-quality fix (Opus):** the external model's T1-01 test class had 3 tests (`*_no_localshipment`, `*_unposted`, `*_capitalize_false`) that all mocked `.exists()→False` and asserted the same thing — names promised scenario coverage that didn't exist and the filter conditions (`is_posted=True, capitalize_to_inventory=True`) were never verified. Replaced with tests that assert the actual filter kwargs + the `_check_superseded=False` bypass. 12/12 pass.
+
+### Task2 Phase 1 scope — remaining (T2-T4, pending approval)
+- **T2-T4 / M2-M4:** Disjoint payment UX · Local transport duplicated UI · No Quotation entity · No `short_name` · Implicit stock-out.
+
 ## [PHASE 1 FIXES — 2026-05-17]
 
 ### Accounting
