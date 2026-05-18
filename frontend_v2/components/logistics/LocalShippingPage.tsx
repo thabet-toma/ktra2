@@ -529,9 +529,11 @@ const LocalShipmentFormModal: React.FC<{
   const update = <K extends keyof LocalShipmentCreate>(k: K, v: LocalShipmentCreate[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
+  // amount>0 is enforced by validatePaymentInput inside submit() so the
+  // unified message actually shows; keeping it here would disable the
+  // button and the validator would never run (T2-FIX-02).
   const canSubmit =
     form.carrier &&
-    Number(form.amount || 0) > 0 &&
     (form.payment_type !== "cash" || form.cash_or_bank_account);
 
   const submit = async () => {

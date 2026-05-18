@@ -7,6 +7,7 @@ import {
     FileText, User, Layers, TrendingUp, MapPin, Eye
 } from 'lucide-react';
 import { SupplierViewModal } from '@/components/common/SupplierViewModal';
+import { buildShipmentOptionLabelCamel } from '@/utils/shipmentLabel';
 
 interface ShipmentListProps {
     shipments: Shipment[];
@@ -228,8 +229,8 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                                 {/* اسم الشحنة - الجزء الرئيسي */}
                                                 <div className="font-bold text-gray-900 dark:text-white mb-1 flex items-center gap-2">
                                                     <Truck className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                                                    <span className="truncate" title={shipment.shipmentName || shipment.agentShipmentNumber || shipment.shipmentNumber}>
-                                                        {shipment.shipmentName || shipment.agentShipmentNumber || shipment.shipmentNumber}
+                                                    <span className="truncate" title={buildShipmentOptionLabelCamel(shipment)}>
+                                                        {buildShipmentOptionLabelCamel(shipment)}
                                                     </span>
                                                 </div>
 

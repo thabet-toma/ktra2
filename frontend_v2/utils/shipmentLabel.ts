@@ -28,3 +28,25 @@ export function buildShipmentOptionLabel(s: ShipmentLabelInput): string {
   }
   return [num, ref ? `مرجع: ${ref}` : "", side].filter(Boolean).join(" · ");
 }
+
+/**
+ * camelCase shape used by the Firestore-style `Shipment` type
+ * (ShipmentList / ShipmentManagement). Adapter keeps ONE label logic.
+ */
+export type ShipmentLabelCamel = {
+  id: number;
+  shipmentNumber?: string | null;
+  shipmentName?: string | null;
+  agentShipmentNumber?: string | null;
+  israeliSideName?: string | null;
+};
+
+export function buildShipmentOptionLabelCamel(s: ShipmentLabelCamel): string {
+  return buildShipmentOptionLabel({
+    id: s.id,
+    shipment_number: s.shipmentNumber ?? null,
+    shipment_name: s.shipmentName ?? null,
+    agent_shipment_number: s.agentShipmentNumber ?? null,
+    israeli_side_name: s.israeliSideName ?? null,
+  });
+}
