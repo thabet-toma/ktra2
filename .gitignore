@@ -26,6 +26,9 @@ dist-ssr/
 .DS_Store
 Thumbs.db
 
+# Claude Code working state (worktrees, local agent state)
+.claude/
+
 # Logs & misc
 *.log
 .cache/
@@ -37,3 +40,43 @@ Thumbs.db
 # Duplicate / nested legacy frontend copy (keep out of this repo)
 smart-product-search-platform/
 frontend_v2/smart-product-search-platform/
+
+# Legacy Next.js frontend (unrelated to ERP — separate repo)
+frontend/
+
+# Root-level DB surgery / diagnostic scripts (not part of the app).
+# NOTE: every pattern is anchored with a leading "/" so it matches ONLY at
+# the repo root. An unanchored pattern like "test_*.py" would also match
+# app code such as logistics/tests/test_landed_cost.py and silently drop it.
+/apply_*.py
+/apply_*.sql
+/audit_*.py
+/backfill_*.py
+/check_*.py
+/convert.py
+/copy_*.py
+/create_index.py
+/db_*.py
+/debug_*.py
+/DELETE_*.py
+/diagnose_*.py
+/extract_*.py
+/final_*.py
+/fix_*.py
+/FORCE_*.py
+/force_*.py
+/index_*.py
+/inspect_*.py
+/minimal_*.py
+/quick_*.py
+/raw_*.py
+/seed_*.py
+/simple_*.py
+/SYNC_*.py
+/sync_*.py
+/TEST_*.py
+/test_*.py
+/verify_*.py
+/_patch_services.py
+/_test_sales.py
+/*.sql

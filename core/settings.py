@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 import os
+import sys
 from pathlib import Path
 from corsheaders.defaults import default_headers
 
@@ -302,3 +303,10 @@ AGENT_DB_API_KEY = os.environ.get(
     "AGENT_DB_API_KEY",
     "ktra-agent-2025-secret-key",
 ).strip()
+
+# ── Test database: SQLite in-memory (MySQL user lacks CREATE DATABASE) ──
+if 'test' in sys.argv:
+    DATABASES['default'] = {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': ':memory:',
+    }

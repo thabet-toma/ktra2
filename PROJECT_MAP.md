@@ -5,7 +5,7 @@
 > Phase 1 completed: 2026-05-17 — 18/18 catastrophic fixes applied.
 > Phase 2 completed: 2026-05-17 — 14/14 medium fixes applied.
 > Phase 3 completed: 2026-05-18 — 10/10 minor fixes applied (m3-10 done in Phase 4 pass).
-> Phase 4 completed: 2026-05-18 — 8/11 professional-grade improvements applied; I4-05 + m3-10 finished and I4-07 made enforceable in 2nd review (Opus). I4-06/09/11 deferred (non-bug / needs separate approval).
+> Phase 4 completed: 2026-05-18 — 11/11 professional-grade improvements applied (I4-09 = foundation layer only; full production wiring deferred by design — needs separate approval). 3rd review fixed 2 blocking bugs: unanchored .gitignore patterns (hid the I4-06 test) + LogisticsPayment polymorphism gap in core/payments.py.
 
 ## [TECH_STACK]
 
@@ -150,4 +150,13 @@ URL roots: `/api/accounting/ /api/inventory/ /api/logistics/ /api/sales/ /api/ (
 ### UI Cleanup
 - **I4-08** Deleted `frontend_v2/components/forms/deal-specific/PaymentRegistration.tsx` — 100% commented-out dead code. No imports found.
 
-> **2nd Phase-4 review (Opus 2026-05-18):** I4-01/02/03/04 verified correct (post_journal idempotency inside atomic w/ `select_for_update`; immutability guard exempts create + bulk-update unpost; forex journal balances in gain/loss/equal cases; year-end-close debit/credit math proven balanced). **I4-07 was non-functional dead code → fixed** (moved to `save()`). I4-05 + m3-10 (left pending by the external model) completed. Known accepted limitation: `post_customer_payment` forex assumes a single invoice currency per payment; `resolve_forex_account()` still name-based (acceptable — I4-03 spec asked for it). `manage.py check` clean, no migration drift, end-to-end smoke test passed.
+### Landed-Cost Invariant Tests (I4-06)
+- **I4-06** `logistics/tests/test_landed_cost.py` — 6 `SimpleTestCase` tests (no DB required): synthetic line invariant, multi-line invariant, single-item no-drift, `distribute_by_weights` balance, zero-weight equal share, shipping-included excludes internal freight. All verify `sum(landed_line_total_ils) == deal_val_ils + allocated_freight + allocated_clearance` within 1-penny tolerance.
+
+### Unified Payment Abstraction (I4-09)
+- **I4-09** `core/payments.py` — `PaymentContext` dataclass + `validate_payment()` + `get_payment_summary()`. Factories: `from_deal_payment()` (handles `LogisticsPayment` polymorphism: deal **or** shipment-agent), `from_agent_payment` (explicit alias), `from_customer_payment()`, `from_clearance_payment()`. **Foundation layer only — NOT wired into production payment flows.** Full unification of the divergent deal/customer/clearance posting paths is deferred by design (the task itself flagged it as a major change needing separate approval). No model migration; current behaviour unchanged.
+
+### Repo Hygiene (I4-11)
+- **I4-11** Deleted ~80 root-level `.py` scripts + ~20 `.sql` files. `.gitignore` patterns for these scripts are **root-anchored with leading `/`** — an unanchored pattern (e.g. `test_*.py`) would also match app code (`logistics/tests/test_landed_cost.py`) and silently drop it from the repo. Added `frontend/` (legacy Next.js, separate repo).
+
+> **3rd Phase-4 review (Opus 2026-05-18) — I4-06/09/11:** Reviewed the external model's work on the 3 remaining tasks. **2 blocking bugs fixed:** (1) **I4-11** every `.gitignore` script pattern was unanchored → matched all directories; `test_*.py` hid the I4-06 test from git entirely (verified via `git check-ignore`). All patterns anchored to root. (2) **I4-09** `from_deal_payment` ignored `LogisticsPayment` polymorphism → agent payments produced `tenant_id=0` (corrupt context); fixed with deal/shipment detection + `from_agent_payment`. **Verified sound:** I4-06 (6/6 tests pass, `SimpleTestCase` correct — tested path never touches the ORM). **Documented limitation:** I4-09 is a foundation layer; production wiring still pending (acceptable per task scope). `manage.py check` clean, no migration drift.
