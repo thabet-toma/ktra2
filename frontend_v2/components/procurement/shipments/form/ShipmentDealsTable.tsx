@@ -26,7 +26,7 @@ export const ShipmentDealsTable: React.FC<ShipmentDealsTableProps> = ({
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h3 className="text-lg font-bold dark:text-white flex items-center gap-2">
-                        <Package className="w-5 h-5 text-purple-500" /> الصفقات وتوزيع التكلفة
+                        <Package className="w-5 h-5 text-[var(--color-primary)]" /> الصفقات وتوزيع التكلفة
                     </h3>
                     <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 max-w-3xl leading-relaxed">
                         عمود «حصة الشحن + إضافي» يعرض فقط نصيب الصفقة من تكلفة الشحن الدولي للشحنة (بالدولار)، وليس

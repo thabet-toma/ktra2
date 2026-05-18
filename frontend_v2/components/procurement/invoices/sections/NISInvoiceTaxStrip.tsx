@@ -327,7 +327,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                         />
                                     </td>
                                     <td
-                                        className="py-0.5 px-1 text-center font-bold text-violet-900 dark:text-violet-100 tabular-nums"
+                                        className="py-0.5 px-1 text-center font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] tabular-nums"
                                         title={basisTitle}
                                     >
                                         {lineIls.toLocaleString(undefined, {
@@ -353,7 +353,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
 
                         {/* صف إدخال جديد — يُضاف للقائمة بزر واحد */}
                         {!readOnly && (
-                            <tr className="align-middle bg-violet-50/40 dark:bg-violet-950/20 border-t border-dashed border-violet-200 dark:border-violet-800">
+                            <tr className="align-middle bg-[var(--color-surface-2)]/40 dark:bg-[var(--color-surface-2)]/20 border-t border-dashed border-[var(--color-border)] dark:border-[var(--color-border)]">
                                 <td className="py-0.5 px-1">
                                     <input
                                         type="text"
@@ -368,7 +368,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                             }
                                         }}
                                         placeholder="اسم الرسم / الضريبة"
-                                        className={cellIn + " border-violet-200 dark:border-violet-700"}
+                                        className={cellIn + " border-[var(--color-border)] dark:border-[var(--color-border)]"}
                                     />
                                 </td>
                                 <td className="py-0.5 px-1">
@@ -387,7 +387,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                                         : "goods",
                                             }))
                                         }
-                                        className={cellIn + " text-center border-violet-200 dark:border-violet-700"}
+                                        className={cellIn + " text-center border-[var(--color-border)] dark:border-[var(--color-border)]"}
                                     >
                                         <option value="amount">₪</option>
                                         <option value="percentage">%</option>
@@ -406,7 +406,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                                             : "goods",
                                                 }))
                                             }
-                                            className={cellIn + " text-center text-[10px] border-violet-200 dark:border-violet-700"}
+                                            className={cellIn + " text-center text-[10px] border-[var(--color-border)] dark:border-[var(--color-border)]"}
                                         >
                                             <option value="goods">البضاعة</option>
                                             <option value="after_main_vat">بعد ض.ق.م</option>
@@ -434,11 +434,11 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                             }
                                         }}
                                         placeholder="0"
-                                        className={cellIn + " text-center tabular-nums border-violet-200 dark:border-violet-700"}
+                                        className={cellIn + " text-center tabular-nums border-[var(--color-border)] dark:border-[var(--color-border)]"}
                                     />
                                 </td>
                                 <td
-                                    className="py-0.5 px-1 text-center text-[10px] font-semibold tabular-nums text-violet-800 dark:text-violet-200"
+                                    className="py-0.5 px-1 text-center text-[10px] font-semibold tabular-nums text-[var(--color-primary)] dark:text-[var(--color-primary)]"
                                     title="معاينة قبل الإضافة"
                                 >
                                     {draftPreview.toLocaleString(undefined, {
@@ -451,7 +451,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                         type="button"
                                         disabled={!canCommitDraft}
                                         onClick={commitDraft}
-                                        className="inline-flex items-center gap-0.5 rounded border border-violet-600 dark:border-violet-500 bg-violet-600 dark:bg-violet-600 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm disabled:opacity-40 disabled:pointer-events-none hover:bg-violet-700 dark:hover:bg-violet-500"
+                                        className="inline-flex items-center gap-0.5 rounded border border-[var(--color-border)] dark:border-[var(--color-border)] bg-[var(--color-primary)] dark:bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm disabled:opacity-40 disabled:pointer-events-none hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]"
                                         title="يضيف السطر أعلاه ويفرغ الخانات"
                                     >
                                         <Plus className="w-3 h-3 shrink-0" />
@@ -465,16 +465,16 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                         <tr className="border-t border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/60">
                             <td
                                 colSpan={4}
-                                className="py-1 px-1 text-[10px] font-bold text-violet-900 dark:text-violet-100 text-right"
+                                className="py-1 px-1 text-[10px] font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] text-right"
                             >
                                 مجموع الرسوم والضرائب الإضافية (بدون ض.ق.م)
                                 {hasAfterMainVatPercentageLines(lp) ? (
-                                    <span className="block font-normal text-violet-700/90 dark:text-violet-300/90 mt-0.5">
+                                    <span className="block font-normal text-[var(--color-primary)]/90 dark:text-[var(--color-primary)]/90 mt-0.5">
                                         يشمل سطراً بنسبة من (مجموع قبل ض.ق.م + ض.ق.م الفاتورة).
                                     </span>
                                 ) : null}
                             </td>
-                            <td className="py-1 px-1 text-center font-black text-violet-900 dark:text-violet-100 tabular-nums">
+                            <td className="py-1 px-1 text-center font-black text-[var(--color-primary)] dark:text-[var(--color-primary)] tabular-nums">
                                 ₪
                                 {extrasSum.toLocaleString(undefined, {
                                     minimumFractionDigits: 2,

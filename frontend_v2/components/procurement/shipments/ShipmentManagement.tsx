@@ -310,7 +310,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                                             const dealsCount = row.deals?.length || 0;
                                             return (
                                                 <div className="flex items-center gap-2 py-1">
-                                                    <div className={`p-1 rounded ${shippingType === 'sea' ? 'bg-[var(--color-primary)]/10' : 'bg-purple-500/10'}`}>
+                                                    <div className={`p-1 rounded ${shippingType === 'sea' ? 'bg-[var(--color-primary)]/10' : 'bg-[var(--color-primary)]/10'}`}>
                                                         <span className="text-[var(--font-size-xs)]">{shippingType === 'sea' ? '🚢' : '✈️'}</span>
                                                     </div>
                                                     <div className="flex flex-col">

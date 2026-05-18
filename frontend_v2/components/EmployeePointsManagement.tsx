@@ -357,7 +357,7 @@ export const EmployeePointsManagement: React.FC<
           </div>
           <button
             onClick={() => setShowGlobalSettingsModal(true)}
-            className="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-3 rounded-lg font-semibold transition-colors disabled:opacity-50"
+            className="bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white px-6 py-3 rounded-lg font-semibold transition-colors disabled:opacity-50"
           >
             تعديل الإعدادات العامة
           </button>
@@ -572,7 +572,7 @@ export const EmployeePointsManagement: React.FC<
                       <span className="text-gray-600 dark:text-gray-400">
                         نقاط المهام:
                       </span>
-                      <span className="text-lg font-semibold text-purple-600 dark:text-purple-400">
+                      <span className="text-lg font-semibold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                         {getTotalStats(selectedUser.id).totalTaskPoints}
                       </span>
                     </div>
@@ -670,7 +670,7 @@ export const EmployeePointsManagement: React.FC<
                             <td className="p-4 text-gray-600 dark:text-gray-300">
                               {day.checkinClicks}
                             </td>
-                            <td className="p-4 text-purple-600 dark:text-purple-400 font-bold">
+                            <td className="p-4 text-[var(--color-primary)] dark:text-[var(--color-primary)] font-bold">
                               {day.taskPoints}
                             </td>
                             <td className="p-4 text-gray-600 dark:text-gray-300">
@@ -770,7 +770,7 @@ export const EmployeePointsManagement: React.FC<
                       <td className="p-4 text-gray-600 dark:text-gray-300">
                         {userData.dailyPoints?.checkinClicks || 0}
                       </td>
-                      <td className="p-4 text-purple-600 dark:text-purple-400 font-bold">
+                      <td className="p-4 text-[var(--color-primary)] dark:text-[var(--color-primary)] font-bold">
                         {userData.dailyPoints?.taskPoints || 0}
                       </td>
                       <td className="p-4 text-gray-600 dark:text-gray-300">
@@ -891,7 +891,7 @@ export const EmployeePointsManagement: React.FC<
                       isEnabled: e.target.checked,
                     }))
                   }
-                  className="h-5 w-5 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 dark:bg-gray-600 dark:border-gray-500"
+                  className="h-5 w-5 text-[var(--color-primary)] rounded border-gray-300 focus:ring-[var(--color-primary)] dark:bg-gray-600 dark:border-gray-500"
                 />
               </div>
 
@@ -951,7 +951,7 @@ export const EmployeePointsManagement: React.FC<
                     globalDailyDisableSettings.startTime === "00:00" &&
                     globalDailyDisableSettings.endTime === "00:00")
                 }
-                className="flex-1 bg-indigo-500 hover:bg-indigo-600 text-white py-2 px-4 rounded-lg font-semibold transition-colors disabled:opacity-50"
+                className="flex-1 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white py-2 px-4 rounded-lg font-semibold transition-colors disabled:opacity-50"
               >
                 {loading ? "جاري الحفظ..." : "حفظ الإعدادات"}
               </button>

@@ -503,7 +503,7 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                 {/* عمود المنتجات الرئيسية */}
                                 <th className="px-6 py-4 font-semibold border-b dark:border-gray-700">
                                     <div className="flex items-center gap-2">
-                                        <Package className="w-4 h-4 text-purple-500" />
+                                        <Package className="w-4 h-4 text-[var(--color-primary)]" />
                                         المنتجات الرئيسية
                                     </div>
                                 </th>
@@ -705,9 +705,9 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                         if (onConvertToMain) onConvertToMain(selectedInvoice);
                                         closeContextMenu();
                                     }}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 hover:text-purple-600 dark:hover:text-purple-400 rounded-lg transition-colors"
+                                    className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/20 hover:text-[var(--color-primary-hover)] dark:hover:text-[var(--color-primary-hover)] rounded-lg transition-colors"
                                 >
-                                    <ArrowRight className="w-4 h-4 text-purple-500" />
+                                    <ArrowRight className="w-4 h-4 text-[var(--color-primary)]" />
                                     <span className="font-medium">تحويل إلى فاتورة رئيسية</span>
                                 </button>
 

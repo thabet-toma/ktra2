@@ -167,7 +167,7 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
                   type="button"
                   disabled={linkLoading}
                   onClick={handleCreateGlAccount}
-                  className="inline-flex items-center gap-2 rounded-md bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                  className="inline-flex items-center gap-2 rounded-md bg-[var(--color-primary)] px-3 py-2 text-xs font-medium text-white hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
                 >
                   <Link2 className="h-3.5 w-3.5" />
                   {linkLoading ? "جاري الإنشاء…" : "إنشاء حساب في الشجرة بنفس الاسم"}

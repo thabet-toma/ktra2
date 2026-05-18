@@ -38,11 +38,11 @@
 //         'first_payment_pending': { label: 'بانتظار الدفعة الأولى', icon: Clock, color: 'text-yellow-500 bg-yellow-100' },
 //         'first_payment_completed': { label: 'تم دفع العربون', icon: DollarSign, color: 'text-green-500 bg-green-100' },
 //         'in_production': { label: 'قيد التصنيع', icon: Factory, color: 'text-blue-500 bg-blue-100' },
-//         'ready_stock': { label: 'مخزون جاهز', icon: Package, color: 'text-purple-500 bg-purple-100' },
-//         'production_completed': { label: 'انتهى التصنيع', icon: CheckCircle, color: 'text-indigo-500 bg-indigo-100' },
+//         'ready_stock': { label: 'مخزون جاهز', icon: Package, color: 'text-[var(--color-primary)] bg-[var(--color-surface-2)]' },
+//         'production_completed': { label: 'انتهى التصنيع', icon: CheckCircle, color: 'text-[var(--color-primary)] bg-[var(--color-surface-2)]' },
 //         'shipping_preparation': { label: 'تجهيز الشحن', icon: Package, color: 'text-orange-500 bg-orange-100' },
-//         'ready_for_shipping': { label: 'جاهز للشحن', icon: Truck, color: 'text-teal-500 bg-teal-100' },
-//         'shipped': { label: 'تم الشحن', icon: Truck, color: 'text-cyan-500 bg-cyan-100' },
+//         'ready_for_shipping': { label: 'جاهز للشحن', icon: Truck, color: 'text-[var(--color-primary)] bg-[var(--color-surface-2)]' },
+//         'shipped': { label: 'تم الشحن', icon: Truck, color: 'text-[var(--color-primary)] bg-[var(--color-surface-2)]' },
 //         'completed': { label: 'مكتملة', icon: CheckSquare, color: 'text-emerald-500 bg-emerald-100' },
 //         'cancelled': { label: 'ملغاة', icon: Ban, color: 'text-red-500 bg-red-100' }
 //     };

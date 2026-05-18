@@ -55,7 +55,7 @@ const paymentPhaseCopy: Record<
     title: "بانتظار تأكيد المورد",
     description: "تم الدفع. بعد التأكيد، حدّث مرحلة الشحن من القائمة.",
     icon: <DollarSign className="w-6 h-6" />,
-    color: "bg-indigo-100 text-indigo-800 border-indigo-300",
+    color: "bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]",
   },
   first_payment_confirmed: {
     title: "تم تأكيد المورد",

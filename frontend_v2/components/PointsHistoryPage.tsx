@@ -170,7 +170,7 @@ export const PointsHistoryPage: React.FC<PointsHistoryPageProps> = ({ user }) =>
                     <div className="text-sm text-gray-600 dark:text-gray-400">نقاط النشاط</div>
                 </div>
                 <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-md border border-gray-200 dark:border-gray-700 text-center">
-                    <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">{totalStats.totalTaskPoints}</div>
+                    <div className="text-2xl font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">{totalStats.totalTaskPoints}</div>
                     <div className="text-sm text-gray-600 dark:text-gray-400">نقاط المهام</div>
                 </div>
                 {/* جديد: نقاط الحضور */}
@@ -183,12 +183,12 @@ export const PointsHistoryPage: React.FC<PointsHistoryPageProps> = ({ user }) =>
                     <div className="text-sm text-gray-600 dark:text-gray-400">ضغطات النشاط</div>
                 </div>
                 <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-md border border-gray-200 dark:border-gray-700 text-center">
-                    <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{totalStats.totalTasks}</div>
+                    <div className="text-2xl font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">{totalStats.totalTasks}</div>
                     <div className="text-sm text-gray-600 dark:text-gray-400">مهام مكتملة</div>
                 </div>
                 {/* جديد: أيام الحضور */}
                 <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-md border border-gray-200 dark:border-gray-700 text-center">
-                    <div className="text-2xl font-bold text-teal-600 dark:text-teal-400">{totalStats.attendanceDays}</div>
+                    <div className="text-2xl font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">{totalStats.attendanceDays}</div>
                     <div className="text-sm text-gray-600 dark:text-gray-400">أيام حضور</div>
                 </div>
             </div>
@@ -234,7 +234,7 @@ export const PointsHistoryPage: React.FC<PointsHistoryPageProps> = ({ user }) =>
                                         </td>
                                         <td className="p-4">
                                             <div className="flex items-center gap-2">
-                                                <span className="text-purple-600 dark:text-purple-400 font-bold">
+                                                <span className="text-[var(--color-primary)] dark:text-[var(--color-primary)] font-bold">
                                                     {day.taskPoints}
                                                 </span>
                                                 <span className="text-xs text-gray-500">نقطة</span>

@@ -66,11 +66,11 @@ export const AccountingLandedCostPage: React.FC = () => {
 
   return (
     <div className="space-y-4" dir="rtl">
-      <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l from-cyan-900 to-slate-900 text-white rounded-xl">
-        <Ship className="w-8 h-8 text-cyan-300" />
+      <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l from-[var(--color-primary)] to-slate-900 text-white rounded-xl">
+        <Ship className="w-8 h-8 text-[var(--color-primary)]" />
         <div>
           <h1 className="text-lg font-bold">تقرير التكلفة المستوردة (Landed Cost)</h1>
-          <p className="text-xs text-cyan-200">
+          <p className="text-xs text-[var(--color-primary)]">
             بضاعة + شحن دولي + تخليص + رسوم مرسملة — لكل شحنة
           </p>
         </div>
@@ -98,7 +98,7 @@ export const AccountingLandedCostPage: React.FC = () => {
         <button
           type="button"
           onClick={fetch}
-          className="flex items-center gap-2 px-4 py-2 bg-cyan-600 text-white rounded-lg text-sm"
+          className="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] text-white rounded-lg text-sm"
         >
           <Search className="w-4 h-4" />
           تحديث
@@ -137,14 +137,14 @@ export const AccountingLandedCostPage: React.FC = () => {
                   <tr
                     className={`border-t border-gray-100 dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900/40 ${
                       expanded === sh.shipment_id
-                        ? "bg-cyan-50/50 dark:bg-cyan-900/10"
+                        ? "bg-[var(--color-surface-2)]/50 dark:bg-[var(--color-surface-2)]/10"
                         : ""
                     }`}
                     onClick={() => openDetail(sh.shipment_id)}
                   >
                     <td className="text-center">
                       {expanded === sh.shipment_id ? (
-                        <ChevronDown className="w-4 h-4 inline text-cyan-600" />
+                        <ChevronDown className="w-4 h-4 inline text-[var(--color-primary)]" />
                       ) : (
                         <ChevronRight className="w-4 h-4 inline text-gray-400" />
                       )}
@@ -165,7 +165,7 @@ export const AccountingLandedCostPage: React.FC = () => {
                     <td className="p-2 text-right">
                       {fmt(sh.capitalized_fees_total)}
                     </td>
-                    <td className="p-2 text-right font-bold text-cyan-700 dark:text-cyan-300">
+                    <td className="p-2 text-right font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                       {fmt(sh.grand_landed_cost_approx)}
                     </td>
                   </tr>
@@ -205,7 +205,7 @@ const ShipmentDetail: React.FC<{
         className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3"
       >
         <div className="flex flex-wrap items-center gap-3 mb-2">
-          <Package className="w-4 h-4 text-indigo-500" />
+          <Package className="w-4 h-4 text-[var(--color-primary)]" />
           <span className="font-semibold">
             صفقة {d.ref_number || `#${d.deal_id}`}
           </span>
@@ -290,7 +290,7 @@ const ShipmentDetail: React.FC<{
                         <td className="p-1.5">{it.name}</td>
                         <td className="p-1.5 text-right">{fmt(it.quantity)}</td>
                         <td className="p-1.5 text-right">{fmt(it.unit_price)}</td>
-                        <td className="p-1.5 text-right font-semibold text-cyan-700 dark:text-cyan-300">
+                        <td className="p-1.5 text-right font-semibold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                           {it.landed_unit_price_ils != null
                             ? fmt(it.landed_unit_price_ils)
                             : "—"}

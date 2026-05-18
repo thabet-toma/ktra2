@@ -88,11 +88,11 @@ export const AccountingTrialBalancePage: React.FC = () => {
 
   return (
     <div className="space-y-4" dir="rtl">
-      <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l from-indigo-900 to-slate-900 text-white rounded-xl">
-        <Scale className="w-8 h-8 text-indigo-300" />
+      <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l from-[var(--color-primary)] to-slate-900 text-white rounded-xl">
+        <Scale className="w-8 h-8 text-[var(--color-primary)]" />
         <div className="flex-1">
           <h1 className="text-lg font-bold">ميزان المراجعة</h1>
-          <p className="text-xs text-indigo-200">
+          <p className="text-xs text-[var(--color-primary)]">
             افتتاحي + حركة الفترة + ختامي — مع التحقق من التوازن
           </p>
         </div>
@@ -177,7 +177,7 @@ export const AccountingTrialBalancePage: React.FC = () => {
         <button
           type="button"
           onClick={fetchData}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm"
+          className="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] text-white rounded-lg text-sm"
         >
           <Search className="w-4 h-4" />
           تحديث

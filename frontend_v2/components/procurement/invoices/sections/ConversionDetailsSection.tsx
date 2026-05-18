@@ -130,12 +130,12 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
 
     if (!metadata) {
         return (
-            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 overflow-hidden shadow-sm p-4">
-                <div className="flex items-start gap-3 text-sm text-indigo-900 dark:text-indigo-100">
-                    <Ship className="w-5 h-5 shrink-0 text-indigo-600" />
+            <div className="bg-white dark:bg-gray-800 rounded-2xl border border-[var(--color-border)] dark:border-[var(--color-border)]/30 overflow-hidden shadow-sm p-4">
+                <div className="flex items-start gap-3 text-sm text-[var(--color-primary)] dark:text-[var(--color-primary)]">
+                    <Ship className="w-5 h-5 shrink-0 text-[var(--color-primary)]" />
                     <div>
                         <p className="font-bold">مصدر الاستيراد</p>
-                        <p className="text-indigo-800/90 dark:text-indigo-200/90 mt-1">
+                        <p className="text-[var(--color-primary)]/90 dark:text-[var(--color-primary)]/90 mt-1">
                             {formatInvoiceImportLogisticsLine(importLogistics!)}
                         </p>
                     </div>
@@ -367,7 +367,7 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
                                 ? "من حجم/وزن الصفقة على الشحنة"
                                 : "من تكلفة الشحنة (شيكل)"
                         )}
-                        <div className="text-sm font-black text-indigo-700 dark:text-indigo-300 mt-0.5">
+                        <div className="text-sm font-black text-[var(--color-primary)] dark:text-[var(--color-primary)] mt-0.5">
                             {fmtIls(dealShipmentAllocatedIls)}
                         </div>
                     </div>
@@ -443,9 +443,9 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
 
     if (importLogistics) {
         return (
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-indigo-100 dark:border-indigo-900/30 shadow-sm p-3">
-                <div className="flex items-start gap-2 text-xs text-indigo-900 dark:text-indigo-100">
-                    <Ship className="w-4 h-4 shrink-0 text-indigo-600 mt-0.5" />
+            <div className="bg-white dark:bg-gray-800 rounded-xl border border-[var(--color-border)] dark:border-[var(--color-border)]/30 shadow-sm p-3">
+                <div className="flex items-start gap-2 text-xs text-[var(--color-primary)] dark:text-[var(--color-primary)]">
+                    <Ship className="w-4 h-4 shrink-0 text-[var(--color-primary)] mt-0.5" />
                     <p className="leading-relaxed">{formatInvoiceImportLogisticsLine(importLogistics)}</p>
                 </div>
             </div>

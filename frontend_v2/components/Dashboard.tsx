@@ -87,7 +87,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tasks, users, onNavigate, 
                     <TasksDistributionChart tasks={tasks} />
 
                     {/* Company Info Box */}
-                    <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-2xl p-6 text-white shadow-lg overflow-hidden relative">
+                    <div className="bg-gradient-to-r from-blue-600 to-[var(--color-primary)] rounded-2xl p-6 text-white shadow-lg overflow-hidden relative">
                         <div className="relative z-10 flex justify-between items-center">
                             <div>
                                 <h3 className="text-xl font-bold mb-2">شركة النور للتجارة العالمية</h3>

@@ -279,12 +279,12 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   return (
     <div
       dir="rtl"
-      className="mt-6 rounded-2xl border-2 border-indigo-200 dark:border-indigo-900 bg-white dark:bg-gray-900 shadow-sm overflow-hidden"
+      className="mt-6 rounded-2xl border-2 border-[var(--color-border)] dark:border-[var(--color-border)] bg-white dark:bg-gray-900 shadow-sm overflow-hidden"
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-indigo-100 dark:border-indigo-900/60 bg-gradient-to-l from-indigo-50 to-white dark:from-indigo-900/30 dark:to-gray-900">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-[var(--color-border)] dark:border-[var(--color-border)]/60 bg-gradient-to-l from-[var(--color-primary)] to-white dark:from-[var(--color-primary)]/30 dark:to-gray-900">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-indigo-600 text-white rounded-xl">
+          <div className="p-2 bg-[var(--color-primary)] text-white rounded-xl">
             <Calculator className="w-5 h-5" />
           </div>
           <div>
@@ -384,7 +384,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
             {!disableEdit && (
               <button
                 onClick={addFee}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white rounded-lg"
               >
                 <Plus className="w-4 h-4" />
                 إضافة رسم

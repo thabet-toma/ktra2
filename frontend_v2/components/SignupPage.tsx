@@ -153,13 +153,13 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
   };
 
   return (
-    <div dir="rtl" className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-gray-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex flex-col items-center justify-center p-4 font-sans overflow-y-auto relative">
+    <div dir="rtl" className="min-h-screen bg-gradient-to-br from-[var(--color-primary)] via-blue-50 to-gray-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex flex-col items-center justify-center p-4 font-sans overflow-y-auto relative">
 
       {/* خلفية زخرفية */}
       <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-60 -right-60 w-[500px] h-[500px] bg-purple-200 dark:bg-purple-900/20 rounded-full blur-3xl opacity-40"></div>
+        <div className="absolute -top-60 -right-60 w-[500px] h-[500px] bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20 rounded-full blur-3xl opacity-40"></div>
         <div className="absolute -bottom-60 -left-60 w-[500px] h-[500px] bg-blue-200 dark:bg-blue-900/20 rounded-full blur-3xl opacity-40"></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-gradient-to-r from-blue-300 to-purple-300 dark:from-blue-800/30 dark:to-purple-800/30 rounded-full blur-3xl opacity-20"></div>
+        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-gradient-to-r from-blue-300 to-[var(--color-primary)] dark:from-blue-800/30 dark:to-[var(--color-primary)]/30 rounded-full blur-3xl opacity-20"></div>
       </div>
 
       {/* زر العودة للرئيسية */}
@@ -174,14 +174,14 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
       {/* زر "من نحن" */}
       <button
         onClick={handleNavigateToAbout}
-        className="absolute top-6 right-6 md:top-8 md:right-8 group flex items-center gap-3 px-6 py-2.5 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl hover:from-purple-700 hover:to-blue-700 hover:shadow-2xl hover:scale-105 transition-all duration-300 z-10 overflow-hidden"
+        className="absolute top-6 right-6 md:top-8 md:right-8 group flex items-center gap-3 px-6 py-2.5 bg-gradient-to-r from-[var(--color-primary)] to-blue-600 text-white rounded-xl hover:from-[var(--color-primary)] hover:to-blue-700 hover:shadow-2xl hover:scale-105 transition-all duration-300 z-10 overflow-hidden"
       >
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-500 opacity-0 group-hover:opacity-20 transition-opacity duration-300"></div>
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-[var(--color-primary)] opacity-0 group-hover:opacity-20 transition-opacity duration-300"></div>
         <div className="relative z-10 flex items-center gap-2">
           <Building2 className="w-5 h-5" />
           <span className="font-semibold">من نحن</span>
         </div>
-        <div className="absolute -inset-1 bg-gradient-to-r from-blue-400/30 to-purple-400/30 rounded-xl blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+        <div className="absolute -inset-1 bg-gradient-to-r from-blue-400/30 to-[var(--color-primary)]/30 rounded-xl blur-md opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
       </button>
 
       {/* المحتوى الرئيسي */}
@@ -189,13 +189,13 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
         {/* الشعار والمقدمة */}
         <div className="flex flex-col items-center justify-center mb-8 animate-fade-in">
           <div className="relative mb-4">
-            <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full blur-xl opacity-30 animate-pulse"></div>
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-[var(--color-primary)] rounded-full blur-xl opacity-30 animate-pulse"></div>
             <div className="relative p-4 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl shadow-2xl border border-white/20 dark:border-gray-700/50">
               <LogoIcon className="h-16 w-16 text-blue-600 dark:text-blue-400" />
             </div>
           </div>
 
-          <h1 className="mt-2 text-4xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600 bg-clip-text text-transparent">
+          <h1 className="mt-2 text-4xl font-bold bg-gradient-to-r from-blue-600 via-[var(--color-primary)] to-blue-600 bg-clip-text text-transparent">
             انضم إلى فريق K.T.R.A
           </h1>
           <p className="mt-3 text-lg text-gray-600 dark:text-gray-400 max-w-2xl text-center">
@@ -208,7 +208,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
               <Award className="w-4 h-4" />
               <span>أكثر من 20 سنة خبرة</span>
             </div>
-            <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-50 to-purple-100 dark:from-purple-900/30 dark:to-purple-800/30 text-purple-700 dark:text-purple-300 rounded-full text-sm font-medium backdrop-blur-sm">
+            <div className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary)] dark:from-[var(--color-primary)]/30 dark:to-[var(--color-primary)]/30 text-[var(--color-primary)] dark:text-[var(--color-primary)] rounded-full text-sm font-medium backdrop-blur-sm">
               <Globe className="w-4 h-4" />
               <span>تجارة عالمية</span>
             </div>
@@ -221,7 +221,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
 
         {/* بطاقة التسجيل */}
         <div className="relative group mb-12">
-          <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 rounded-3xl blur opacity-30 group-hover:opacity-50 transition duration-700 animate-gradient-x"></div>
+          <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 via-[var(--color-primary)] to-pink-600 rounded-3xl blur opacity-30 group-hover:opacity-50 transition duration-700 animate-gradient-x"></div>
 
           <div className="relative w-full p-8 space-y-8 bg-white/95 dark:bg-gray-800/95 backdrop-blur-lg rounded-3xl shadow-2xl border border-white/20 dark:border-gray-700/30">
             {/* مؤشر تقدم */}
@@ -314,7 +314,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
                 </div>
 
                 {/* العنوان */}
-                <div className="bg-gradient-to-r from-blue-50/50 to-purple-50/50 dark:from-gray-800/30 dark:to-gray-700/30 p-5 rounded-2xl border border-blue-100/50 dark:border-gray-600">
+                <div className="bg-gradient-to-r from-blue-50/50 to-[var(--color-primary)]/50 dark:from-gray-800/30 dark:to-gray-700/30 p-5 rounded-2xl border border-blue-100/50 dark:border-gray-600">
                   <label className="block text-sm font-bold text-gray-700 dark:text-gray-300 mb-4 flex items-center gap-2">
                     <MapPin className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                     العنوان التفصيلي
@@ -360,8 +360,8 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
               {/* المعلومات المهنية */}
               <div className="space-y-6 pt-6 border-t border-gray-200 dark:border-gray-700">
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg">
-                    <Briefcase className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+                  <div className="p-2 bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/30 rounded-lg">
+                    <Briefcase className="w-5 h-5 text-[var(--color-primary)] dark:text-[var(--color-primary)]" />
                   </div>
                   <h2 className="text-xl font-bold text-gray-800 dark:text-gray-100">المعلومات المهنية</h2>
                 </div>
@@ -399,12 +399,12 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
                         type="file"
                         accept=".pdf,.doc,.docx"
                         onChange={handleFileChange}
-                        className="w-full p-3.5 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl bg-gray-50/50 dark:bg-gray-700/50 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gradient-to-r file:from-blue-500 file:to-purple-500 file:text-white hover:file:from-blue-600 hover:file:to-purple-600 transition duration-300 backdrop-blur-sm"
+                        className="w-full p-3.5 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl bg-gray-50/50 dark:bg-gray-700/50 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-gradient-to-r file:from-blue-500 file:to-[var(--color-primary)] file:text-white hover:file:from-blue-600 hover:file:to-[var(--color-primary)] transition duration-300 backdrop-blur-sm"
                       />
                       {uploadProgress > 0 && uploadProgress < 100 && (
                         <div className="absolute bottom-0 left-0 right-0 h-1 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                           <div
-                            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300"
+                            className="h-full bg-gradient-to-r from-blue-500 to-[var(--color-primary)] transition-all duration-300"
                             style={{ width: `${uploadProgress}%` }}
                           ></div>
                         </div>
@@ -535,9 +535,9 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
                 <button
                   type="submit"
                   disabled={isLoading || !acceptedTerms}
-                  className={`w-full relative overflow-hidden group bg-gradient-to-r from-blue-600 to-purple-600 text-white font-bold py-4 px-4 rounded-xl text-lg transition-all duration-500 ${isLoading || !acceptedTerms
+                  className={`w-full relative overflow-hidden group bg-gradient-to-r from-blue-600 to-[var(--color-primary)] text-white font-bold py-4 px-4 rounded-xl text-lg transition-all duration-500 ${isLoading || !acceptedTerms
                     ? 'opacity-70 cursor-not-allowed'
-                    : 'hover:from-blue-700 hover:to-purple-700 hover:shadow-2xl hover:shadow-purple-500/30 hover:scale-[1.02]'
+                    : 'hover:from-blue-700 hover:to-[var(--color-primary)] hover:shadow-2xl hover:shadow-purple-500/30 hover:scale-[1.02]'
                     }`}
                 >
                   {isLoading ? (
@@ -553,7 +553,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
                   )}
 
                   {/* تأثير خلفي */}
-                  <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-500 opacity-0 group-hover:opacity-10 transition-opacity duration-500"></div>
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-[var(--color-primary)] opacity-0 group-hover:opacity-10 transition-opacity duration-500"></div>
                 </button>
 
                 <div className="flex items-center justify-center gap-4 pt-4 border-t border-gray-200 dark:border-gray-700">

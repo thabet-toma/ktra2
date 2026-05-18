@@ -555,7 +555,7 @@ const NewPaymentModal: React.FC<{
                 type="button"
                 onClick={suggestFifo}
                 disabled={!partnerId || amtNum <= 0}
-                className="flex items-center gap-1 text-xs px-3 py-1.5 bg-indigo-600 text-white rounded-lg disabled:opacity-40"
+                className="flex items-center gap-1 text-xs px-3 py-1.5 bg-[var(--color-primary)] text-white rounded-lg disabled:opacity-40"
               >
                 <Sparkles className="w-3 h-3" />
                 اقتراح FIFO

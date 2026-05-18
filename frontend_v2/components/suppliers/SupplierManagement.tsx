@@ -256,7 +256,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${supplier.type === 'factory' || !supplier.type ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                        supplier.type === 'shipping_agent' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400' :
+                        supplier.type === 'shipping_agent' ? 'bg-[var(--color-surface-2)] text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/30 dark:text-[var(--color-primary)]' :
                           supplier.type === 'international_trader' ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400' :
                             supplier.type === 'local_company' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
                               'bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400'
@@ -324,7 +324,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
                 onClick={() => handleViewInvoices(actionModalSupplier)}
                 className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg text-gray-700 dark:text-gray-300 transition-colors"
               >
-                <div className="p-2 bg-purple-100 dark:bg-purple-900/30 rounded-lg text-purple-600 dark:text-purple-400">
+                <div className="p-2 bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/30 rounded-lg text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                   <FileText className="w-5 h-5" />
                 </div>
                 <div className="text-right">

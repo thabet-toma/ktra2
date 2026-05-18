@@ -80,8 +80,8 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
             case 'payment_pending': return 'bg-yellow-100 text-yellow-700';
             case 'partially_paid': return 'bg-blue-100 text-blue-700';
             case 'paid': return 'bg-green-100 text-green-700';
-            case 'shipped': return 'bg-indigo-100 text-indigo-700';
-            case 'delivered': return 'bg-teal-100 text-teal-700';
+            case 'shipped': return 'bg-[var(--color-surface-2)] text-[var(--color-primary)]';
+            case 'delivered': return 'bg-[var(--color-surface-2)] text-[var(--color-primary)]';
             case 'cancelled': return 'bg-red-100 text-red-700';
             default: return 'bg-gray-100 text-gray-700';
         }
@@ -181,7 +181,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700 print:hidden">
                     <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-xl ${isSea ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' : 'bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400'}`}>
+                        <div className={`p-2 rounded-xl ${isSea ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' : 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/30 text-[var(--color-primary)] dark:text-[var(--color-primary)]'}`}>
                             {isSea ? <Ship className="w-6 h-6" /> : <Plane className="w-6 h-6" />}
                         </div>
                         <div>
@@ -244,7 +244,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                     </div>
                                     <div className="flex items-center justify-between">
                                         <span className="text-gray-600 dark:text-gray-400">نوع الشحن:</span>
-                                        <span className={`flex items-center gap-1 px-2 py-1 rounded ${isSea ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                                        <span className={`flex items-center gap-1 px-2 py-1 rounded ${isSea ? 'bg-blue-100 text-blue-700' : 'bg-[var(--color-surface-2)] text-[var(--color-primary)]'}`}>
                                             {isSea ? <Ship className="w-3 h-3" /> : <Plane className="w-3 h-3" />}
                                             {isSea ? 'بحري' : 'جوي'}
                                         </span>
@@ -604,7 +604,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                                             href={`https://www.track-trace.com/aircargo/item/${shippingInfo.airwayBillNumber}`}
                                                             target="_blank"
                                                             rel="noopener noreferrer"
-                                                            className="inline-flex items-center gap-1 px-3 py-1 bg-purple-100 text-purple-700 rounded-lg text-sm hover:bg-purple-200 transition-colors"
+                                                            className="inline-flex items-center gap-1 px-3 py-1 bg-[var(--color-surface-2)] text-[var(--color-primary)] rounded-lg text-sm hover:bg-[var(--color-primary-hover)] transition-colors"
                                                         >
                                                             <Plane className="w-3 h-3" />
                                                             تتبع الشحن الجوي

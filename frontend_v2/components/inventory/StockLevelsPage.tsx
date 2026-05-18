@@ -78,7 +78,7 @@ export const StockLevelsPage: React.FC = () => {
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6" dir="rtl">
       <div className="flex items-center gap-3">
-        <BarChart3 className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
+        <BarChart3 className="w-7 h-7 text-[var(--color-primary)] dark:text-[var(--color-primary)]" />
         <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
           أرصدة المخزون
         </h1>
@@ -114,7 +114,7 @@ export const StockLevelsPage: React.FC = () => {
             <div className="text-sm text-slate-500 dark:text-slate-400 mb-1">
               قيمة المخزون الكلية
             </div>
-            <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
+            <p className="text-2xl font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
               {fmt(summary.total_inventory_value)} ₪
             </p>
           </div>
@@ -145,7 +145,7 @@ export const StockLevelsPage: React.FC = () => {
       {/* Table */}
       {loading ? (
         <div className="flex justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+          <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
         </div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-12 text-slate-500 dark:text-slate-400">
@@ -223,7 +223,7 @@ export const StockLevelsPage: React.FC = () => {
                       <td className="px-4 py-3 text-center font-mono text-slate-600 dark:text-slate-300">
                         {fmt(avg)}
                       </td>
-                      <td className="px-4 py-3 text-center font-mono font-semibold text-indigo-600 dark:text-indigo-400">
+                      <td className="px-4 py-3 text-center font-mono font-semibold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                         {fmt(val)}
                       </td>
                     </tr>

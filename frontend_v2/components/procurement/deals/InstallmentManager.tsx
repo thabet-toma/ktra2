@@ -277,12 +277,12 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
         <div
             className={`rounded-2xl border shadow-sm overflow-hidden ${
                 isShipmentFinance
-                    ? 'bg-gradient-to-br from-slate-50 via-white to-indigo-50/40 dark:from-gray-900 dark:via-gray-900 dark:to-indigo-950/30 border-indigo-200/60 dark:border-indigo-900/50'
+                    ? 'bg-gradient-to-br from-slate-50 via-white to-[var(--color-primary)]/40 dark:from-gray-900 dark:via-gray-900 dark:to-[var(--color-primary)]/30 border-[var(--color-border)]/60 dark:border-[var(--color-border)]/50'
                     : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
             }`}
         >
             {isShipmentFinance && (
-                <div className="px-4 py-2.5 bg-indigo-600/95 dark:bg-indigo-900/90 text-white text-xs flex items-center gap-2">
+                <div className="px-4 py-2.5 bg-[var(--color-primary)]/95 dark:bg-[var(--color-surface-2)]/90 text-white text-xs flex items-center gap-2">
                     <Sparkles className="w-3.5 h-3.5 shrink-0 opacity-90" />
                     <span>
                         خطة الدفع تُهيَّأ تلقائياً من إجمالي الشحنة — انتقل مباشرة إلى «دفعات الشحنة» أدناه لتسجيل السليب والصندوق.
@@ -293,7 +293,7 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
             {/* --- Header (Compact) --- */}
             <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100 dark:border-gray-700">
                 <div className="flex items-center gap-3">
-                    <div className={`p-2 rounded-lg ${isLocked ? 'bg-orange-50 text-orange-600' : isShipmentFinance ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300' : 'bg-blue-50 text-blue-600'} dark:bg-opacity-10`}>
+                    <div className={`p-2 rounded-lg ${isLocked ? 'bg-orange-50 text-orange-600' : isShipmentFinance ? 'bg-[var(--color-surface-2)] text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/40 dark:text-[var(--color-primary)]' : 'bg-blue-50 text-blue-600'} dark:bg-opacity-10`}>
                         {isLocked ? <Lock className="w-5 h-5" /> : isShipmentFinance ? <Sparkles className="w-5 h-5" /> : <Calculator className="w-5 h-5" />}
                     </div>
                     <div>
@@ -425,7 +425,7 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
                                             title={isLastAuto ? 'يُحسب تلقائياً كباقي 100%' : undefined}
                                             className={`w-full pl-6 pr-1 py-1 text-xs font-semibold text-center rounded border focus:ring-1 transition-colors ${
                                                 isLastAuto
-                                                    ? 'border-dashed border-indigo-200 bg-indigo-50/50 text-indigo-800 dark:bg-indigo-950/30 dark:border-indigo-800 dark:text-indigo-200'
+                                                    ? 'border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)]/50 text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/30 dark:border-[var(--color-border)] dark:text-[var(--color-primary)]'
                                                     : 'border-gray-200 focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-900 dark:border-gray-600 dark:text-white'
                                             } disabled:bg-gray-50 disabled:text-gray-500`}
                                         />
@@ -445,7 +445,7 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
                                             className={`w-full pl-5 pr-1 py-1 text-xs font-bold text-center rounded border focus:ring-1 transition-colors
                                                 ${isPaid ? 'text-green-700 border-green-200 bg-white dark:bg-gray-900 dark:text-green-400 dark:border-green-900'
                                                     : isLastAuto
-                                                      ? 'border-dashed border-indigo-200 bg-indigo-50/50 text-indigo-900 dark:bg-indigo-950/30 dark:border-indigo-800 dark:text-indigo-100'
+                                                      ? 'border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)]/50 text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/30 dark:border-[var(--color-border)] dark:text-[var(--color-primary)]'
                                                     : 'text-gray-900 border-gray-200 focus:border-blue-500 focus:ring-blue-500 bg-white dark:bg-gray-900 dark:border-gray-600 dark:text-white disabled:bg-gray-50 disabled:text-gray-500'}`}
                                         />
                                         <DollarSign className={`w-3 h-3 absolute left-1.5 pointer-events-none ${isPaid ? 'text-green-500' : 'text-gray-400'}`} />

@@ -109,8 +109,8 @@ export const PriceOfferSelectionModal: React.FC<PriceOfferSelectionModalProps> =
                                 <p className="text-xs text-green-600 dark:text-green-400">العروض</p>
                                 <p className="text-sm font-bold">{offers.length}</p>
                             </div>
-                            <div className="text-center p-1.5 bg-purple-50 dark:bg-purple-900/20 rounded border border-purple-100 dark:border-purple-800/30">
-                                <p className="text-xs text-purple-600 dark:text-purple-400">المنتجات</p>
+                            <div className="text-center p-1.5 bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20 rounded border border-[var(--color-border)] dark:border-[var(--color-border)]/30">
+                                <p className="text-xs text-[var(--color-primary)] dark:text-[var(--color-primary)]">المنتجات</p>
                                 <p className="text-sm font-bold">{offers.reduce((sum, o) => sum + (o.items?.length || 0), 0)}</p>
                             </div>
                             <div className="text-center p-1.5 bg-amber-50 dark:bg-amber-900/20 rounded border border-amber-100 dark:border-amber-800/30">

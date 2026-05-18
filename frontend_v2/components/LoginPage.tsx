@@ -87,13 +87,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToSignup, onGoTo
   );
 
   return (
-    <div dir="rtl" className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden">
+    <div dir="rtl" className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-[var(--color-primary)] dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 flex flex-col items-center justify-center p-4 font-sans relative overflow-hidden">
       <PublicNavbar />
 
       {/* خلفية زخرفية */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-200 dark:bg-blue-900/20 rounded-full blur-3xl opacity-50"></div>
-        <div className="absolute bottom-20 -left-40 w-96 h-96 bg-purple-200 dark:bg-purple-900/20 rounded-full blur-3xl opacity-50"></div>
+        <div className="absolute bottom-20 -left-40 w-96 h-96 bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20 rounded-full blur-3xl opacity-50"></div>
       </div>
 
       {/* المحتوى الرئيسي (أضفنا padding-top عشان الناف بار ما يغطي المحتوى) */}
@@ -102,13 +102,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToSignup, onGoTo
         {/* الشعار الكبير مع تأثير */}
         <div className="flex flex-col items-center justify-center mb-10 animate-fade-in">
           <div className="relative group">
-            <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-purple-400 rounded-full blur-lg opacity-30 animate-pulse group-hover:opacity-50 transition-opacity"></div>
+            <div className="absolute inset-0 bg-gradient-to-r from-blue-400 to-[var(--color-primary)] rounded-full blur-lg opacity-30 animate-pulse group-hover:opacity-50 transition-opacity"></div>
             <div className="relative p-4 bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700">
               <LogoIcon className="h-14 w-14 text-blue-600 dark:text-blue-400" />
             </div>
           </div>
 
-          <h1 className="mt-6 text-4xl font-bold bg-gradient-to-r from-blue-600 via-purple-600 to-blue-600 bg-clip-text text-transparent text-center">
+          <h1 className="mt-6 text-4xl font-bold bg-gradient-to-r from-blue-600 via-[var(--color-primary)] to-blue-600 bg-clip-text text-transparent text-center">
             منصة البحث الذكي
           </h1>
           <p className="mt-2 text-gray-600 dark:text-gray-400 text-lg text-center">
@@ -121,7 +121,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToSignup, onGoTo
               <Globe className="w-4 h-4" />
               <span>K.T.R.A العالمية</span>
             </div>
-            <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full text-sm">
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/30 text-[var(--color-primary)] dark:text-[var(--color-primary)] rounded-full text-sm">
               <Shield className="w-4 h-4" />
               <span>أكثر من 20 سنة خبرة</span>
             </div>
@@ -131,7 +131,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToSignup, onGoTo
         {/* بطاقة تسجيل الدخول */}
         <div className="relative group">
           {/* تأثير الظل */}
-          <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-purple-600 rounded-3xl blur opacity-30 group-hover:opacity-50 transition duration-500"></div>
+          <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-[var(--color-primary)] rounded-3xl blur opacity-30 group-hover:opacity-50 transition duration-500"></div>
 
           <div className="relative w-full p-8 space-y-8 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm rounded-3xl shadow-2xl border border-gray-100/50 dark:border-gray-700/50 text-center">
             <div className="space-y-2">
@@ -199,11 +199,11 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToSignup, onGoTo
               <button
                 type="submit"
                 disabled={isLoading}
-                className={`w-full relative overflow-hidden bg-gradient-to-r from-blue-600 to-purple-600 text-white font-bold py-5 px-4 rounded-xl text-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-300 ${isLoading ? 'opacity-90 cursor-not-allowed' : 'hover:shadow-xl hover:shadow-blue-500/25'}`}
+                className={`w-full relative overflow-hidden bg-gradient-to-r from-blue-600 to-[var(--color-primary)] text-white font-bold py-5 px-4 rounded-xl text-lg hover:from-blue-700 hover:to-[var(--color-primary)] transition-all duration-300 ${isLoading ? 'opacity-90 cursor-not-allowed' : 'hover:shadow-xl hover:shadow-blue-500/25'}`}
               >
                 {/* تأثير تحميل */}
                 {isLoading && (
-                  <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-500 animate-pulse"></div>
+                  <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-[var(--color-primary)] animate-pulse"></div>
                 )}
 
                 <div className="relative flex items-center justify-center gap-2">

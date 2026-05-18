@@ -665,7 +665,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                         ) : null}
                       </span>
                     ) : null}
-                    <span className="block mt-1 text-indigo-700 dark:text-indigo-300 font-medium">
+                    <span className="block mt-1 text-[var(--color-primary)] dark:text-[var(--color-primary)] font-medium">
                       {formatInvoiceImportLogisticsLine(formData.importLogistics)}
                     </span>
                   </>

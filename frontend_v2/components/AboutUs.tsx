@@ -33,7 +33,7 @@ const getPlatformColor = (type: string, theme: 'light' | 'dark') => {
     facebook: { light: "bg-blue-50/80 border-blue-200 text-blue-700", dark: "bg-blue-900/30 border-blue-700/50 text-blue-300" },
     instagram: {
       light: "bg-gradient-to-br from-pink-50/80 to-orange-50/80 border-pink-200/80 text-pink-700",
-      dark: "bg-gradient-to-br from-pink-900/30 to-purple-900/30 border-pink-700/50 text-pink-300"
+      dark: "bg-gradient-to-br from-pink-900/30 to-[var(--color-primary)]/30 border-pink-700/50 text-pink-300"
     },
     youtube: { light: "bg-red-50/80 border-red-200 text-red-700", dark: "bg-red-900/30 border-red-700/50 text-red-300" },
     tiktok: {
@@ -41,12 +41,12 @@ const getPlatformColor = (type: string, theme: 'light' | 'dark') => {
       dark: "bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700 text-gray-100"
     },
     website: {
-      light: "bg-gradient-to-br from-indigo-50/80 to-blue-50/80 border-indigo-200/80 text-indigo-700",
-      dark: "bg-gradient-to-br from-indigo-900/30 to-blue-900/30 border-indigo-700/50 text-indigo-300"
+      light: "bg-gradient-to-br from-[var(--color-primary)]/80 to-blue-50/80 border-[var(--color-border)]/80 text-[var(--color-primary)]",
+      dark: "bg-gradient-to-br from-[var(--color-primary)]/30 to-blue-900/30 border-[var(--color-border)]/50 text-[var(--color-primary)]"
     },
     email: { light: "bg-amber-50/80 border-amber-200 text-amber-700", dark: "bg-amber-900/30 border-amber-700/50 text-amber-300" },
     phone: { light: "bg-emerald-50/80 border-emerald-200 text-emerald-700", dark: "bg-emerald-900/30 border-emerald-700/50 text-emerald-300" },
-    location: { light: "bg-purple-50/80 border-purple-200 text-purple-700", dark: "bg-purple-900/30 border-purple-700/50 text-purple-300" }
+    location: { light: "bg-[var(--color-surface-2)]/80 border-[var(--color-border)] text-[var(--color-primary)]", dark: "bg-[var(--color-primary)]/30 border-[var(--color-border)]/50 text-[var(--color-primary)]" }
   };
 
   return colors[type as keyof typeof colors]?.[theme] || colors.website[theme];
@@ -126,7 +126,7 @@ export const AboutUs: React.FC = () => {
                 <Building2 className={`w-8 h-8 ${theme === 'dark' ? 'text-blue-400' : 'text-blue-600'}`} />
               </div>
               <div>
-                <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-[var(--color-primary)] bg-clip-text text-transparent">
                   شركة كترا KTRA للتجارة العالمية
                 </h1>
                 <p className={`text-lg mt-1 ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>
@@ -193,7 +193,7 @@ export const AboutUs: React.FC = () => {
               <div className="text-center mb-10">
                 <h2 className="text-3xl font-bold mb-4 flex items-center justify-center gap-3">
                   <MessageCircle className={`w-8 h-8 ${theme === 'dark' ? 'text-blue-400' : 'text-blue-600'}`} />
-                  <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                  <span className="bg-gradient-to-r from-blue-600 to-[var(--color-primary)] bg-clip-text text-transparent">
                     تواصل معنا
                   </span>
                 </h2>

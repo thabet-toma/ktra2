@@ -13,7 +13,7 @@ const DepartmentCard: React.FC<DepartmentCardProps> = ({ department }) => {
       to={`/contact/${department.id}`}
       className="group bg-white dark:bg-slate-800 rounded-xl p-8 shadow-sm hover:shadow-lg transition-all duration-300 border border-slate-100 dark:border-slate-700 flex flex-col items-center text-center cursor-pointer"
     >
-      <div className="text-cyan-600 dark:text-cyan-400 mb-6 group-hover:scale-110 transition-transform duration-300">
+      <div className="text-[var(--color-primary)] dark:text-[var(--color-primary)] mb-6 group-hover:scale-110 transition-transform duration-300">
         <DepartmentIcon type={department.iconType} className="w-16 h-16" />
       </div>
     

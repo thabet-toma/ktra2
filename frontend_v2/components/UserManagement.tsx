@@ -451,7 +451,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     </td>
                     <td className="p-4 text-gray-600 dark:text-gray-300">
                       {user.role === "manager" ? (
-                        <span className="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">
+                        <span className="bg-[var(--color-surface-2)] text-[var(--color-primary)] px-2 py-1 rounded text-xs">
                           مدير
                         </span>
                       ) : user.role === "procurement" ? (

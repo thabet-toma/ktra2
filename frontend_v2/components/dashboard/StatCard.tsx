@@ -17,10 +17,10 @@ interface StatCardProps {
 const colorStyles = {
     blue: { bg: 'bg-blue-50 dark:bg-blue-900/20', text: 'text-blue-600 dark:text-blue-400', border: 'border-blue-100 dark:border-blue-800' },
     green: { bg: 'bg-green-50 dark:bg-green-900/20', text: 'text-green-600 dark:text-green-400', border: 'border-green-100 dark:border-green-800' },
-    purple: { bg: 'bg-purple-50 dark:bg-purple-900/20', text: 'text-purple-600 dark:text-purple-400', border: 'border-purple-100 dark:border-purple-800' },
+    purple: { bg: 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20', text: 'text-[var(--color-primary)] dark:text-[var(--color-primary)]', border: 'border-[var(--color-border)] dark:border-[var(--color-border)]' },
     orange: { bg: 'bg-orange-50 dark:bg-orange-900/20', text: 'text-orange-600 dark:text-orange-400', border: 'border-orange-100 dark:border-orange-800' },
     red: { bg: 'bg-red-50 dark:bg-red-900/20', text: 'text-red-600 dark:text-red-400', border: 'border-red-100 dark:border-red-800' },
-    indigo: { bg: 'bg-indigo-50 dark:bg-indigo-900/20', text: 'text-indigo-600 dark:text-indigo-400', border: 'border-indigo-100 dark:border-indigo-800' },
+    indigo: { bg: 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20', text: 'text-[var(--color-primary)] dark:text-[var(--color-primary)]', border: 'border-[var(--color-border)] dark:border-[var(--color-border)]' },
 };
 
 export const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, trend, color, description }) => {

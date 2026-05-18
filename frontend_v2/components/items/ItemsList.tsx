@@ -213,7 +213,7 @@ export const ItemsList: React.FC<ItemsListProps> = ({
                                 <div><div className="font-bold dark:text-white">الفواتير</div></div>
                             </button>
                             <button onClick={() => { onViewSuppliers(actionModalItem); setActionModalItem(null); }} className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg text-right">
-                                <div className="p-2 bg-purple-100 text-purple-600 rounded-lg"><Users className="w-5 h-5" /></div>
+                                <div className="p-2 bg-[var(--color-surface-2)] text-[var(--color-primary)] rounded-lg"><Users className="w-5 h-5" /></div>
                                 <div><div className="font-bold dark:text-white">الموردين</div></div>
                             </button>
                             <div className="h-px bg-gray-100 dark:bg-gray-700 my-2" />
@@ -222,7 +222,7 @@ export const ItemsList: React.FC<ItemsListProps> = ({
                                 <div className="font-bold dark:text-white">تعديل</div>
                             </button>
                             <button onClick={() => { onDuplicate(actionModalItem); setActionModalItem(null); }} className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg text-right">
-                                <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg"><Copy className="w-5 h-5" /></div>
+                                <div className="p-2 bg-[var(--color-surface-2)] text-[var(--color-primary)] rounded-lg"><Copy className="w-5 h-5" /></div>
                                 <div className="font-bold dark:text-white">نسخ</div>
                             </button>
                             <button onClick={() => { onDelete(actionModalItem.id); setActionModalItem(null); }} className="w-full flex items-center gap-3 p-3 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg text-right text-red-600">

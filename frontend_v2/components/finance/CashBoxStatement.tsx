@@ -225,7 +225,7 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
         ) : (
           <div className="px-4 py-3 flex flex-wrap gap-4 text-sm border-b border-gray-100 dark:border-gray-700 bg-slate-50/80 dark:bg-slate-900/40">
             <div className="flex items-center gap-1">
-              <BookMarked className="w-4 h-4 text-indigo-600 shrink-0" />
+              <BookMarked className="w-4 h-4 text-[var(--color-primary)] shrink-0" />
               <span className="text-gray-500">الحساب: </span>
               <span className="font-mono font-bold">{glMeta.account_code || "—"}</span>{" "}
               <span className="font-semibold">{glMeta.account_name || ""}</span>
@@ -241,7 +241,7 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
             </div>
             <div>
               <span className="text-gray-500">رصيد ختامي (GL): </span>
-              <span className="font-bold tabular-nums text-indigo-700 dark:text-indigo-300">
+              <span className="font-bold tabular-nums text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                 {(glMeta.closing_balance ?? 0).toLocaleString(undefined, {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
@@ -338,9 +338,9 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
                     }
                     const row = item.row;
                     return (
-                      <tr key={`g-${row.id}`} className="hover:bg-indigo-50/40 dark:hover:bg-gray-700/40">
+                      <tr key={`g-${row.id}`} className="hover:bg-[var(--color-primary-hover)]/40 dark:hover:bg-gray-700/40">
                         <td className="px-3 py-2 whitespace-nowrap font-mono text-xs">{row.date}</td>
-                        <td className="px-3 py-2 text-xs font-semibold text-indigo-800 dark:text-indigo-200">
+                        <td className="px-3 py-2 text-xs font-semibold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                           قيد #{row.journal_id}
                         </td>
                         <td className="px-3 py-2 max-w-[280px] truncate" title={row.description}>

@@ -345,7 +345,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                 className="bg-white dark:bg-gray-900 sm:rounded-3xl w-full max-w-5xl min-h-0 flex flex-col shadow-2xl overflow-hidden border-0 sm:border border-gray-100 dark:border-gray-800 my-0 sm:my-auto
                 h-[100dvh] max-h-[100dvh] sm:h-[min(92vh,900px)] sm:max-h-[min(92vh,900px)]"
             >
-                <div className="px-4 sm:px-8 py-4 sm:py-5 bg-gradient-to-r from-indigo-600 to-blue-700 text-white flex justify-between items-start gap-3 shrink-0">
+                <div className="px-4 sm:px-8 py-4 sm:py-5 bg-gradient-to-r from-[var(--color-primary)] to-blue-700 text-white flex justify-between items-start gap-3 shrink-0">
                     <div className="min-w-0">
                         <h2 className="text-lg sm:text-2xl font-bold flex items-center gap-2 sm:gap-3">
                             <ScrollText className="w-6 h-6 sm:w-7 sm:h-7 shrink-0" />
@@ -373,7 +373,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                 <input
                                     type="text"
                                     placeholder="بحث: اسم الشحنة، رقم الشحنة، بيان، صفقات..."
-                                    className="w-full pr-10 pl-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 transition-all outline-none"
+                                    className="w-full pr-10 pl-4 py-2.5 bg-white dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-sm focus:ring-2 focus:ring-[var(--color-primary)] transition-all outline-none"
                                     value={searchTerm}
                                     onChange={(e) => setSearchTerm(e.target.value)}
                                 />
@@ -396,8 +396,8 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                         onClick={() => handleSelectClearance(c)}
                                         className={`w-full text-right p-4 rounded-2xl border transition-all duration-200 group ${
                                             selectedClearance?.id === c.id
-                                                ? "bg-indigo-600 border-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-none"
-                                                : "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 hover:border-indigo-400 dark:hover:border-indigo-500 hover:shadow-md"
+                                                ? "bg-[var(--color-primary)] border-[var(--color-border)] text-white shadow-lg shadow-indigo-200 dark:shadow-none"
+                                                : "bg-white dark:bg-gray-800 border-gray-100 dark:border-gray-700 hover:border-[var(--color-border)] dark:hover:border-[var(--color-border)] hover:shadow-md"
                                         }`}
                                     >
                                         <div className="flex justify-between items-start mb-2">
@@ -431,7 +431,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                             <div
                                                 className={`mt-2 text-xs leading-relaxed line-clamp-3 text-right ${
                                                     selectedClearance?.id === c.id
-                                                        ? "text-indigo-100"
+                                                        ? "text-[var(--color-primary)]"
                                                         : "text-gray-600 dark:text-gray-400"
                                                 }`}
                                                 title={c.deals_preview || undefined}
@@ -448,7 +448,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                         <div
                                             className={`mt-2 text-xs ${
                                                 selectedClearance?.id === c.id
-                                                    ? "text-indigo-100"
+                                                    ? "text-[var(--color-primary)]"
                                                     : "text-gray-500 dark:text-gray-400"
                                             }`}
                                         >
@@ -464,7 +464,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                         {selectedClearance ? (
                             shipmentLoading ? (
                                 <div className="flex-1 flex flex-col items-center justify-center p-20 gap-4">
-                                    <Loader2 className="w-10 h-10 text-indigo-500 animate-spin" />
+                                    <Loader2 className="w-10 h-10 text-[var(--color-primary)] animate-spin" />
                                     <p className="text-gray-500">جاري تحميل بيانات الشحنة...</p>
                                     <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 text-center max-w-md">
                                         {formatClearanceShipmentLine(selectedClearance)}
@@ -480,10 +480,10 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                 <div className="flex flex-col flex-1 min-h-0 min-w-0">
                                     {/* منطقة تمرير واحدة: تفاصيل الشحنة + المعاينة + الصفقات — حتى لا تُضغط قائمة الصفقات */}
                                     <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain">
-                                    <div className="p-4 sm:p-8 border-b border-gray-100 dark:border-gray-800 bg-indigo-50/30 dark:bg-indigo-900/10">
+                                    <div className="p-4 sm:p-8 border-b border-gray-100 dark:border-gray-800 bg-[var(--color-surface-2)]/30 dark:bg-[var(--color-surface-2)]/10">
                                         <div className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-2 text-xs text-gray-700 dark:text-gray-300">
-                                            <span className="inline-flex items-center gap-1 rounded-full bg-white/90 dark:bg-gray-800/90 px-3 py-1 font-bold border border-indigo-200 dark:border-indigo-800">
-                                                <span className="text-indigo-600 dark:text-indigo-400">١</span>
+                                            <span className="inline-flex items-center gap-1 rounded-full bg-white/90 dark:bg-gray-800/90 px-3 py-1 font-bold border border-[var(--color-border)] dark:border-[var(--color-border)]">
+                                                <span className="text-[var(--color-primary)] dark:text-[var(--color-primary)]">١</span>
                                                 التخليص
                                             </span>
                                             <span className="text-gray-400 px-0.5" aria-hidden>
@@ -492,24 +492,24 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                             <span
                                                 className={`inline-flex items-center gap-1 rounded-full px-3 py-1 font-bold border ${
                                                     selectedDeals.length > 0
-                                                        ? "bg-white/90 dark:bg-gray-800/90 border-indigo-200 dark:border-indigo-800"
+                                                        ? "bg-white/90 dark:bg-gray-800/90 border-[var(--color-border)] dark:border-[var(--color-border)]"
                                                         : "bg-slate-100 dark:bg-slate-800/90 border-slate-300 dark:border-slate-600 text-slate-800 dark:text-slate-100"
                                                 }`}
                                             >
-                                                <span className="text-indigo-600 dark:text-indigo-400">٢</span>
+                                                <span className="text-[var(--color-primary)] dark:text-[var(--color-primary)]">٢</span>
                                                 اختر صفقة أو أكثر
                                             </span>
                                             <span className="text-gray-400 px-0.5" aria-hidden>
                                                 ·
                                             </span>
                                             <span className="inline-flex items-center gap-1 rounded-full bg-white/90 dark:bg-gray-800/90 px-3 py-1 font-bold border border-gray-200 dark:border-gray-700">
-                                                <span className="text-indigo-600 dark:text-indigo-400">٣</span>
+                                                <span className="text-[var(--color-primary)] dark:text-[var(--color-primary)]">٣</span>
                                                 «استيراد الفواتير» في الأسفل
                                             </span>
                                         </div>
                                         <div className="flex justify-between items-end flex-wrap gap-4">
                                             <div className="space-y-1 min-w-0">
-                                                <p className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">
+                                                <p className="text-[10px] font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] uppercase tracking-wider">
                                                     اسم الشحنة (عربي / تعريفي)
                                                 </p>
                                                 <h3 className="text-xl font-bold text-gray-900 dark:text-white truncate">
@@ -543,11 +543,11 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                         سعر صرف المتبقي (الصفقات)
                                                     </label>
                                                     <div className="relative">
-                                                        <TrendingUp className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-500" />
+                                                        <TrendingUp className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-primary)]" />
                                                         <input
                                                             type="number"
                                                             step="0.001"
-                                                            className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl pr-10 pl-4 py-2 w-32 font-bold text-indigo-600 outline-none focus:ring-2 focus:ring-indigo-500"
+                                                            className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl pr-10 pl-4 py-2 w-32 font-bold text-[var(--color-primary)] outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
                                                             value={dealRemainingRate}
                                                             onChange={(e) =>
                                                                 setDealRemainingRate(
@@ -584,7 +584,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                         <label className="flex items-center gap-2 text-sm font-semibold text-gray-800 dark:text-gray-200 cursor-pointer">
                                             <input
                                                 type="checkbox"
-                                                className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                                                className="rounded border-gray-300 text-[var(--color-primary)] focus:ring-[var(--color-primary)]"
                                                 checked={useCostLines}
                                                 onChange={(e) => setUseCostLines(e.target.checked)}
                                             />
@@ -629,11 +629,11 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                             ₪
                                                         </div>
                                                     </div>
-                                                    <div className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/40 px-3 py-2.5 sm:col-span-2">
-                                                        <div className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 mb-1">
+                                                    <div className="rounded-xl border border-[var(--color-border)] dark:border-[var(--color-border)] bg-[var(--color-surface-2)]/50 dark:bg-[var(--color-surface-2)]/40 px-3 py-2.5 sm:col-span-2">
+                                                        <div className="text-[11px] font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] mb-1">
                                                             حوض التخليص المستخدم في التوزيع
                                                         </div>
-                                                        <div className="font-mono font-bold text-base text-indigo-900 dark:text-indigo-100 tabular-nums">
+                                                        <div className="font-mono font-bold text-base text-[var(--color-primary)] dark:text-[var(--color-primary)] tabular-nums">
                                                             {Number(preview.clearance_pool_ils ?? 0).toLocaleString()} ₪
                                                             <span className="text-sm font-semibold ms-2 opacity-90">
                                                                 ({String(preview.clearance_source ?? "")})
@@ -818,7 +818,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                     }}
                                                     className={`p-4 sm:p-5 rounded-2xl border-2 cursor-pointer transition-all duration-300 flex justify-between items-start gap-3 sm:gap-4 group ${
                                                         isSelected
-                                                            ? "border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/20 shadow-lg shadow-indigo-100/50 dark:shadow-none"
+                                                            ? "border-[var(--color-border)] bg-[var(--color-surface-2)]/50 dark:bg-[var(--color-surface-2)]/20 shadow-lg shadow-indigo-100/50 dark:shadow-none"
                                                             : "border-gray-100 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700"
                                                     }`}
                                                 >
@@ -829,14 +829,14 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                             /* selection toggled by clicking the card */
                                                         }}
                                                         tabIndex={-1}
-                                                        className="mt-1.5 h-5 w-5 shrink-0 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 pointer-events-none"
+                                                        className="mt-1.5 h-5 w-5 shrink-0 rounded border-gray-300 text-[var(--color-primary)] focus:ring-[var(--color-primary)] pointer-events-none"
                                                         aria-hidden
                                                     />
                                                     <div className="flex items-start gap-3 sm:gap-5 min-w-0 flex-1">
                                                         <div
                                                             className={`w-12 h-12 shrink-0 rounded-xl flex items-center justify-center transition-colors ${
                                                                 isSelected
-                                                                    ? "bg-indigo-500 text-white shadow-md"
+                                                                    ? "bg-[var(--color-primary)] text-white shadow-md"
                                                                     : "bg-gray-100 dark:bg-gray-800 text-gray-400 group-hover:bg-gray-200"
                                                             }`}
                                                         >
@@ -889,7 +889,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                                 <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wide block mb-0.5">
                                                                     المورد — الاسم المستعار / المحلي
                                                                 </span>
-                                                                <div className="text-sm font-semibold text-indigo-800 dark:text-indigo-200 break-words">
+                                                                <div className="text-sm font-semibold text-[var(--color-primary)] dark:text-[var(--color-primary)] break-words">
                                                                     {localSupplier}
                                                                 </div>
                                                                 {formalSupplier ? (
@@ -912,7 +912,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                         <div
                                                             className={`p-2 rounded-lg transition-colors ${
                                                                 isSelected
-                                                                    ? "bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600"
+                                                                    ? "bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/40 text-[var(--color-primary)]"
                                                                     : "text-gray-300"
                                                             }`}
                                                         >
@@ -965,7 +965,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                             type="button"
                                             onClick={() => void handleImportClick()}
                                                 disabled={importButtonDisabled}
-                                                className="w-full sm:w-auto min-h-[52px] px-8 sm:px-10 py-3.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-400 text-white rounded-2xl font-bold shadow-lg shadow-indigo-200/80 dark:shadow-none transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
+                                                className="w-full sm:w-auto min-h-[52px] px-8 sm:px-10 py-3.5 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] disabled:bg-gray-300 disabled:text-gray-600 dark:disabled:bg-gray-700 dark:disabled:text-gray-400 text-white rounded-2xl font-bold shadow-lg shadow-indigo-200/80 dark:shadow-none transition-all flex items-center justify-center gap-3 active:scale-[0.98]"
                                         >
                                             {importBusy ? (
                                                 <Loader2 className="w-5 h-5 animate-spin" />
@@ -980,8 +980,8 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                             )
                         ) : (
                             <div className="flex-1 flex flex-col items-center justify-center p-20 text-center space-y-6">
-                                <div className="w-24 h-24 bg-indigo-50 dark:bg-indigo-900/20 rounded-full flex items-center justify-center">
-                                    <ScrollText className="w-10 h-10 text-indigo-500" />
+                                <div className="w-24 h-24 bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20 rounded-full flex items-center justify-center">
+                                    <ScrollText className="w-10 h-10 text-[var(--color-primary)]" />
                                 </div>
                                 <div>
                                     <h3 className="text-xl font-bold text-gray-900 dark:text-white">

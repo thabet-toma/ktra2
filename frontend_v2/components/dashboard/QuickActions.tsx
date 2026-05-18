@@ -27,9 +27,9 @@ export const QuickActions: React.FC<QuickActionsProps> = ({ onNavigate, userRole
                     <>
                         <button
                             onClick={() => onNavigate('purchase-invoices')}
-                            className="flex flex-col items-center justify-center p-4 rounded-xl bg-gray-50 dark:bg-gray-900/50 hover:bg-purple-50 dark:hover:bg-purple-900/20 border border-gray-200 dark:border-gray-700 transition-all group"
+                            className="flex flex-col items-center justify-center p-4 rounded-xl bg-gray-50 dark:bg-gray-900/50 hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/20 border border-gray-200 dark:border-gray-700 transition-all group"
                         >
-                            <div className="p-3 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 mb-3 group-hover:scale-110 transition-transform">
+                            <div className="p-3 rounded-full bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/30 text-[var(--color-primary)] dark:text-[var(--color-primary)] mb-3 group-hover:scale-110 transition-transform">
                                 <FileText className="w-6 h-6" />
                             </div>
                             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">فاتورة شراء</span>

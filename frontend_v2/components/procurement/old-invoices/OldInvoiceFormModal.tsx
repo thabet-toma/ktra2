@@ -651,7 +651,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                         <button
                             onClick={handleSubmit}
                             disabled={isSaving}
-                            className="w-full mt-6 flex items-center justify-center gap-2 px-6 py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:shadow-lg disabled:opacity-50 transition-all font-bold"
+                            className="w-full mt-6 flex items-center justify-center gap-2 px-6 py-4 bg-gradient-to-r from-blue-600 to-[var(--color-primary)] text-white rounded-xl hover:shadow-lg disabled:opacity-50 transition-all font-bold"
                         >
                             {isSaving ? <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" /> : <Save className="w-5 h-5" />}
                             {initialData ? 'حفظ التعديلات' : 'أرشفة الفاتورة'}

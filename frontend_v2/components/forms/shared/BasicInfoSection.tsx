@@ -181,7 +181,7 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
         {/* 2. وصف الصفقة → يُحفظ في SQL description (مصدر العنوان في الشحنة والتخليص والفواتير) */}
         <div className="md:col-span-4 space-y-1">
           <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
-            <Tag className="w-3 h-3 text-purple-500" />
+            <Tag className="w-3 h-3 text-[var(--color-primary)]" />
             وصف الصفقة
           </label>
           <input
@@ -191,7 +191,7 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
               setData((prev: any) => ({ ...prev, dealDescription: e.target.value }))
             }
             disabled={readOnly}
-            className="w-full h-10 px-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-1 focus:ring-purple-500 placeholder-gray-400"
+            className="w-full h-10 px-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-1 focus:ring-[var(--color-primary)] placeholder-gray-400"
             placeholder="مثال: طلبية أجهزة كهربائية..."
           />
         </div>
@@ -261,7 +261,7 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
                       setData((prev: any) => ({ ...prev, originalOfferNumber: e.target.value }))
                     }
                     disabled={readOnly}
-                    className="w-full h-9 pr-9 pl-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm focus:ring-1 focus:ring-purple-500 font-mono"
+                    className="w-full h-9 pr-9 pl-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm focus:ring-1 focus:ring-[var(--color-primary)] font-mono"
                   />
                 </div>
               </div>

@@ -546,7 +546,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                       )}
                     </div>
                     {invoice.importLogistics ? (
-                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-indigo-700 dark:text-indigo-300">
+                      <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                         <Truck className="w-3.5 h-3.5 shrink-0" />
                         <span>{formatInvoiceImportLogisticsLine(invoice.importLogistics)}</span>
                         {invoice.dealNumber ? (
@@ -615,7 +615,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
                     <button
                       onClick={() => onView(invoice)}
-                      className="p-2 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 dark:text-slate-400 dark:hover:text-indigo-400 dark:hover:bg-indigo-900/30 rounded-lg transition-colors"
+                      className="p-2 text-slate-500 hover:text-[var(--color-primary-hover)] hover:bg-[var(--color-primary-hover)] dark:text-slate-400 dark:hover:text-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/30 rounded-lg transition-colors"
                       title="عرض التفاصيل"
                     >
                       <Eye className="w-5 h-5" />

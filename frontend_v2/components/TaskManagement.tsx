@@ -499,12 +499,12 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
                                                 {onUpdateSubmissionStatus && (
                                                     <button
                                                         onClick={(e) => handleOpenSubmissionsView(task, e)}
-                                                        className="flex items-center gap-1 px-3 py-1.5 bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors text-sm"
+                                                        className="flex items-center gap-1 px-3 py-1.5 bg-[var(--color-surface-2)] text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/30 dark:text-[var(--color-primary)] rounded-lg hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/50 transition-colors text-sm"
                                                         title="عرض جميع التسليمات"
                                                     >
                                                         <List className="w-3 h-3" />
                                                         <span className="hidden md:inline">التسليمات</span>
-                                                        <span className="bg-white dark:bg-purple-800 text-purple-700 dark:text-purple-300 text-xs px-1.5 py-0.5 rounded-full">
+                                                        <span className="bg-white dark:bg-[var(--color-surface-2)] text-[var(--color-primary)] dark:text-[var(--color-primary)] text-xs px-1.5 py-0.5 rounded-full">
                                                             {Array.isArray(task.assignedTo) ? task.assignedTo.length : 1}
                                                         </span>
                                                     </button>

@@ -295,7 +295,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="text-xs text-gray-500 dark:text-gray-400">
                   المهام
                 </div>
-                <div className="text-sm font-semibold text-purple-600 dark:text-purple-400">
+                <div className="text-sm font-semibold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                   {dailyPoints.taskPoints}
                 </div>
               </div>

@@ -176,7 +176,7 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
     >
       <div className="space-y-5">
         {/* Header: Toggle & Quick Summary */}
-        <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 border border-blue-100 dark:border-blue-800/30">
+        <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-gradient-to-r from-blue-50 to-[var(--color-primary)] dark:from-blue-900/10 dark:to-[var(--color-primary)]/10 border border-blue-100 dark:border-blue-800/30">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 flex items-center justify-center rounded-xl bg-white dark:bg-gray-800 shadow-sm border border-blue-200 dark:border-blue-700">
               <CreditCard className="w-6 h-6 text-blue-600 dark:text-blue-400" />
@@ -440,7 +440,7 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
                 </div>
                 <div className="h-2.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden shadow-inner">
                   <div
-                    className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-700 ease-out"
+                    className="h-full bg-gradient-to-r from-blue-500 to-[var(--color-primary)] transition-all duration-700 ease-out"
                     style={{ width: `${Math.min(100, progressPercentage)}%` }}
                   />
                 </div>

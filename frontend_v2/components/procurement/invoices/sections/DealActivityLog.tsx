@@ -17,7 +17,7 @@ export const DealActivityLog: React.FC<DealActivityLogProps> = ({ activities }) 
       case 'note':
         return <FileText className="w-4 h-4 text-gray-500" />;
       case 'attachment':
-        return <FileText className="w-4 h-4 text-purple-500" />;
+        return <FileText className="w-4 h-4 text-[var(--color-primary)]" />;
       default:
         return <Clock className="w-4 h-4 text-gray-500" />;
     }
@@ -32,7 +32,7 @@ export const DealActivityLog: React.FC<DealActivityLogProps> = ({ activities }) 
       case 'note':
         return 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/10';
       case 'attachment':
-        return 'border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-900/10';
+        return 'border-[var(--color-border)] dark:border-[var(--color-border)] bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/10';
       default:
         return 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/10';
     }

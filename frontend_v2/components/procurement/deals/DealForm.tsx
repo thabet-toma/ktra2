@@ -1312,9 +1312,9 @@ export const DealForm: React.FC<DealFormProps> = ({
     const styles: Record<OperationalStatus, string> = {
       initial: "bg-gray-100 text-gray-700 border-gray-200",
       manufacturing_started: "bg-blue-50 text-blue-700 border-blue-200",
-      production_completed: "bg-purple-50 text-purple-700 border-purple-200",
+      production_completed: "bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]",
       shipping_preparation: "bg-amber-50 text-amber-700 border-amber-200",
-      shipping_in_progress: "bg-teal-50 text-teal-700 border-teal-200",
+      shipping_in_progress: "bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]",
       shipped: "bg-green-50 text-green-700 border-green-200",
       cancelled: "bg-red-50 text-red-700 border-red-200",
     };
@@ -1449,7 +1449,7 @@ export const DealForm: React.FC<DealFormProps> = ({
                 </h1>
                 {/* عرض رقم العرض بشكل أنيق */}
                 {formData.originalOfferNumber && (
-                  <span className="bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-sm px-2 py-0.5 rounded-full font-medium border border-purple-200 dark:border-purple-800 flex items-center gap-1">
+                  <span className="bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/30 text-[var(--color-primary)] dark:text-[var(--color-primary)] text-sm px-2 py-0.5 rounded-full font-medium border border-[var(--color-border)] dark:border-[var(--color-border)] flex items-center gap-1">
                     <FileText className="w-3 h-3" />
                     عرض #{formData.originalOfferNumber}
                   </span>
@@ -1594,10 +1594,10 @@ export const DealForm: React.FC<DealFormProps> = ({
             <p className="text-xs text-slate-600 dark:text-slate-400 font-medium">المتبقي</p>
             <p className="text-lg font-bold text-slate-900 dark:text-slate-100">${dealStats.remainingAmount.toLocaleString()}</p>
           </div>
-          <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded-lg border border-purple-100 dark:border-purple-800/30">
-            <p className="text-xs text-purple-600 dark:text-purple-400 font-medium">نسبة الدفع</p>
+          <div className="bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20 p-3 rounded-lg border border-[var(--color-border)] dark:border-[var(--color-border)]/30">
+            <p className="text-xs text-[var(--color-primary)] dark:text-[var(--color-primary)] font-medium">نسبة الدفع</p>
             <div className="flex items-center justify-between">
-              <p className="text-lg font-bold text-purple-900 dark:text-purple-300">{dealStats.paymentPercentage.toFixed(1)}%</p>
+              <p className="text-lg font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">{dealStats.paymentPercentage.toFixed(1)}%</p>
               <div className="w-16 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-emerald-500 transition-all duration-300"

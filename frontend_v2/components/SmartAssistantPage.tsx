@@ -76,7 +76,7 @@ export const SmartAssistantPage: React.FC = () => {
   return (
     <div className="min-h-[calc(100vh-4rem)] flex flex-col max-w-3xl mx-auto w-full px-4 pb-8 pt-2 md:pt-6">
       <div className="mb-6 flex items-start gap-4">
-        <div className="p-3 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white shadow-lg shadow-indigo-500/25">
+        <div className="p-3 rounded-2xl bg-gradient-to-br from-[var(--color-primary)] to-[var(--color-primary)] text-white shadow-lg shadow-indigo-500/25">
           <Sparkles className="w-8 h-8" />
         </div>
         <div>
@@ -109,7 +109,7 @@ export const SmartAssistantPage: React.FC = () => {
                 className={`flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center ${
                   msg.role === "user"
                     ? "bg-blue-600 text-white"
-                    : "bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-300"
+                    : "bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/50 text-[var(--color-primary)] dark:text-[var(--color-primary)]"
                 }`}
               >
                 {msg.role === "user" ? (
@@ -136,8 +136,8 @@ export const SmartAssistantPage: React.FC = () => {
           ))}
           {sending && (
             <div className="flex gap-3 items-center text-gray-500 dark:text-gray-400 text-sm">
-              <div className="w-9 h-9 rounded-xl bg-violet-100 dark:bg-violet-900/50 flex items-center justify-center">
-                <Loader2 className="w-4 h-4 animate-spin text-violet-600" />
+              <div className="w-9 h-9 rounded-xl bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/50 flex items-center justify-center">
+                <Loader2 className="w-4 h-4 animate-spin text-[var(--color-primary)]" />
               </div>
               <span>جارٍ الإرسال…</span>
             </div>
@@ -148,7 +148,7 @@ export const SmartAssistantPage: React.FC = () => {
         <div className="p-4 border-t border-gray-100 dark:border-gray-800 bg-gray-50/80 dark:bg-gray-900/50">
           {pendingFile && (
             <div className="mb-2 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-800 rounded-lg px-3 py-2 border border-gray-200 dark:border-gray-600">
-              <Paperclip className="w-4 h-4 shrink-0 text-indigo-600" />
+              <Paperclip className="w-4 h-4 shrink-0 text-[var(--color-primary)]" />
               <span className="truncate flex-1">{pendingFile.name}</span>
               <button
                 type="button"
@@ -195,7 +195,7 @@ export const SmartAssistantPage: React.FC = () => {
               placeholder="اكتب رسالتك… (Enter للإرسال، Shift+Enter سطر جديد)"
               rows={2}
               disabled={sending}
-              className="flex-1 resize-none rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-3 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 disabled:opacity-60"
+              className="flex-1 resize-none rounded-xl border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 px-4 py-3 text-sm text-gray-900 dark:text-white placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/40 disabled:opacity-60"
             />
             <button
               type="button"
@@ -203,7 +203,7 @@ export const SmartAssistantPage: React.FC = () => {
               disabled={
                 sending || (!input.trim() && !pendingFile)
               }
-              className="h-12 w-12 shrink-0 rounded-xl bg-indigo-600 text-white flex items-center justify-center hover:bg-indigo-700 disabled:opacity-50 disabled:pointer-events-none transition-colors shadow-md shadow-indigo-600/20"
+              className="h-12 w-12 shrink-0 rounded-xl bg-[var(--color-primary)] text-white flex items-center justify-center hover:bg-[var(--color-primary-hover)] disabled:opacity-50 disabled:pointer-events-none transition-colors shadow-md shadow-indigo-600/20"
               title="إرسال"
             >
               <Send className="w-5 h-5" />

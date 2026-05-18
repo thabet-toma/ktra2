@@ -193,7 +193,7 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                 </th>
                                 <th className="py-3 px-4 text-sm font-semibold text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
                                     <div className="flex items-center gap-2">
-                                        <Package className="w-4 h-4 text-purple-500" />
+                                        <Package className="w-4 h-4 text-[var(--color-primary)]" />
                                         المنتجات الرئيسية
                                     </div>
                                 </th>

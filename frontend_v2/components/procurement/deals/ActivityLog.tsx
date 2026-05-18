@@ -24,7 +24,7 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ activities }) => {
     switch (type) {
       case 'status_change': return 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400';
       case 'payment': return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
-      case 'item_update': return 'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400';
+      case 'item_update': return 'bg-[var(--color-surface-2)] text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/30 dark:text-[var(--color-primary)]';
       case 'note': return 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400';
       default: return 'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400';
     }

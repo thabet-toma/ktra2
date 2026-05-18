@@ -58,7 +58,7 @@ const FieldLabel: React.FC<{ label: string; children: React.ReactNode }> = ({
 );
 
 const input =
-  "w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500/50";
+  "w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50";
 
 export const SalesSettingsPage: React.FC = () => {
   const [settings, setSettings] = useState<SalesSettings | null>(null);
@@ -186,7 +186,7 @@ export const SalesSettingsPage: React.FC = () => {
     <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-5" dir="rtl">
       <header className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Settings2 className="w-6 h-6 text-sky-600" />
+          <Settings2 className="w-6 h-6 text-[var(--color-primary)]" />
           <div>
             <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">
               إعدادات فواتير المبيعات
@@ -197,7 +197,7 @@ export const SalesSettingsPage: React.FC = () => {
           </div>
         </div>
         <button
-          className="inline-flex items-center gap-2 rounded-md bg-sky-600 px-4 py-2 text-white text-sm font-semibold hover:bg-sky-700 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-md bg-[var(--color-primary)] px-4 py-2 text-white text-sm font-semibold hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
           disabled={saving}
           onClick={handleSave}
         >

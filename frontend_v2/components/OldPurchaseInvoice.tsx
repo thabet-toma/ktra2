@@ -478,12 +478,12 @@ export const OldPurchaseInvoice: React.FC = () => {
                                 </span>
                             )}
                             {dateRange.start && (
-                                <span className="text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 px-2 py-1 rounded">
+                                <span className="text-xs bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/30 text-[var(--color-primary)] dark:text-[var(--color-primary)] px-2 py-1 rounded">
                                     من: {dateRange.start}
                                 </span>
                             )}
                             {dateRange.end && (
-                                <span className="text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 px-2 py-1 rounded">
+                                <span className="text-xs bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/30 text-[var(--color-primary)] dark:text-[var(--color-primary)] px-2 py-1 rounded">
                                     إلى: {dateRange.end}
                                 </span>
                             )}

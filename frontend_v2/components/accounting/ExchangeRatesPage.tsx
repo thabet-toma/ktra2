@@ -95,7 +95,7 @@ export const ExchangeRatesPage: React.FC = () => {
   return (
     <div className="p-6 max-w-5xl mx-auto" dir="rtl">
       <div className="flex items-center gap-3 mb-6">
-        <ArrowLeftRight className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
+        <ArrowLeftRight className="w-7 h-7 text-[var(--color-primary)] dark:text-[var(--color-primary)]" />
         <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
           أسعار الصرف
         </h1>
@@ -174,7 +174,7 @@ export const ExchangeRatesPage: React.FC = () => {
           <button
             onClick={addRate}
             disabled={busy || !fromCur || !toCur || !rate}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg disabled:opacity-50 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white rounded-lg disabled:opacity-50 transition-colors"
           >
             {busy ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -188,7 +188,7 @@ export const ExchangeRatesPage: React.FC = () => {
 
       {loading ? (
         <div className="flex justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+          <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
         </div>
       ) : rates.length === 0 ? (
         <div className="text-center py-12 text-slate-500 dark:text-slate-400">

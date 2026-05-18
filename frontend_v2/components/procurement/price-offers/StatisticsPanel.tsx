@@ -46,7 +46,7 @@ export const StatisticsPanel: React.FC<{ offers: PriceOffer[]; suppliers: Suppli
                 </div>
             </div>
 
-            <div className="bg-gradient-to-r from-purple-500 to-purple-600 rounded-xl p-5 text-white">
+            <div className="bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary)] rounded-xl p-5 text-white">
                 <div className="flex items-center justify-between">
                     <div>
                         <p className="text-sm opacity-90">عدد الموردين</p>

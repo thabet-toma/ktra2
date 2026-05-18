@@ -23,7 +23,7 @@ const MOVEMENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
   OUT: { label: "صرف", color: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300" },
   ADJUST_IN: { label: "تسوية +", color: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300" },
   ADJUST_OUT: { label: "تسوية −", color: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" },
-  RETURN_IN: { label: "مرتجع ←", color: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/40 dark:text-cyan-300" },
+  RETURN_IN: { label: "مرتجع ←", color: "bg-[var(--color-surface-2)] text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/40 dark:text-[var(--color-primary)]" },
   RETURN_OUT: { label: "مرتجع →", color: "bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300" },
 };
 
@@ -127,7 +127,7 @@ export const StockMovementsPage: React.FC = () => {
     <div className="p-6 max-w-6xl mx-auto space-y-6" dir="rtl">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Package className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
+        <Package className="w-7 h-7 text-[var(--color-primary)] dark:text-[var(--color-primary)]" />
         <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
           حركات المخزون
         </h1>
@@ -242,7 +242,7 @@ export const StockMovementsPage: React.FC = () => {
           <div className="flex-1" />
           <button
             onClick={() => setShowForm(!showForm)}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white rounded-lg text-sm transition-colors"
           >
             <Plus className="w-4 h-4" />
             حركة يدوية
@@ -252,7 +252,7 @@ export const StockMovementsPage: React.FC = () => {
 
       {/* Manual Movement Form */}
       {showForm && (
-        <div className="bg-white dark:bg-slate-800 rounded-xl border border-indigo-200 dark:border-indigo-800 p-5 space-y-4">
+        <div className="bg-white dark:bg-slate-800 rounded-xl border border-[var(--color-border)] dark:border-[var(--color-border)] p-5 space-y-4">
           <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
             تسجيل حركة مخزون يدوية
           </h3>
@@ -338,7 +338,7 @@ export const StockMovementsPage: React.FC = () => {
             <button
               onClick={handleCreate}
               disabled={busy || !form.product || !form.quantity}
-              className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm disabled:opacity-50"
+              className="flex items-center gap-2 px-5 py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white rounded-lg text-sm disabled:opacity-50"
             >
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
               تسجيل
@@ -350,7 +350,7 @@ export const StockMovementsPage: React.FC = () => {
       {/* Movements Table */}
       {loading ? (
         <div className="flex justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+          <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
         </div>
       ) : movements.length === 0 ? (
         <div className="text-center py-12 text-slate-500 dark:text-slate-400">

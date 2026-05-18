@@ -95,7 +95,7 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                                             ? "bg-green-100 text-green-800"
                                             : box.currency === "ILS"
                                               ? "bg-blue-100 text-blue-800"
-                                              : "bg-purple-100 text-purple-800"
+                                              : "bg-[var(--color-surface-2)] text-[var(--color-primary)]"
                                     }`}
                                 >
                                     {box.currency}

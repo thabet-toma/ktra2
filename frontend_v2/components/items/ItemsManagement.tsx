@@ -321,7 +321,7 @@ export const ItemsManagement: React.FC<ItemsManagementProps> = ({ user }) => {
                                     </button>
                                     <button
                                         onClick={() => handleDuplicateItem(selectedItem)}
-                                        className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium rounded flex items-center gap-1"
+                                        className="px-3 py-1.5 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white text-xs font-medium rounded flex items-center gap-1"
                                     >
                                         <Copy className="w-3 h-3" /> نسخ
                                     </button>
@@ -397,7 +397,7 @@ export const ItemsManagement: React.FC<ItemsManagementProps> = ({ user }) => {
                                             <button
                                                 onClick={() => setActiveTab('store')}
                                                 className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-2 border-b-2 transition-colors ${activeTab === 'store'
-                                                    ? 'border-purple-600 text-purple-600 bg-purple-50/50 dark:bg-purple-900/10'
+                                                    ? 'border-[var(--color-border)] text-[var(--color-primary)] bg-[var(--color-surface-2)]/50 dark:bg-[var(--color-surface-2)]/10'
                                                     : 'border-transparent text-gray-500 hover:text-gray-700'
                                                     }`}
                                             >
@@ -445,15 +445,15 @@ export const ItemsManagement: React.FC<ItemsManagementProps> = ({ user }) => {
                                             {activeTab === 'store' && (
                                                 <div className="space-y-4">
                                                     {/* Store Summary Card */}
-                                                    <div className="bg-gradient-to-r from-purple-50 to-white dark:from-purple-900/20 dark:to-gray-800 border border-purple-100 dark:border-purple-900/30 rounded-lg p-4">
+                                                    <div className="bg-gradient-to-r from-[var(--color-primary)] to-white dark:from-[var(--color-primary)]/20 dark:to-gray-800 border border-[var(--color-border)] dark:border-[var(--color-border)]/30 rounded-lg p-4">
                                                         <div className="flex items-start justify-between">
                                                             <div>
-                                                                <p className="text-xs text-purple-600 dark:text-purple-400 font-medium mb-1">اسم العرض في المتجر</p>
+                                                                <p className="text-xs text-[var(--color-primary)] dark:text-[var(--color-primary)] font-medium mb-1">اسم العرض في المتجر</p>
                                                                 <h3 className="text-xl font-bold text-gray-900 dark:text-white">
                                                                     {selectedItem.storeName || selectedItem.name}
                                                                 </h3>
                                                             </div>
-                                                            <div className="text-left bg-white dark:bg-gray-800 px-4 py-2 rounded-lg border border-purple-100 dark:border-purple-900/30 shadow-sm">
+                                                            <div className="text-left bg-white dark:bg-gray-800 px-4 py-2 rounded-lg border border-[var(--color-border)] dark:border-[var(--color-border)]/30 shadow-sm">
                                                                 <p className="text-xs text-gray-500 mb-1">سعر البيع</p>
                                                                 <p className="text-lg font-bold text-green-600 dark:text-green-400 flex items-center gap-1">
                                                                     {selectedItem.salePrice ? selectedItem.salePrice.toLocaleString() : '0'}
@@ -472,7 +472,7 @@ export const ItemsManagement: React.FC<ItemsManagementProps> = ({ user }) => {
                                                         <h4 className="text-xs font-bold text-gray-500 uppercase mb-2 flex items-center gap-1">
                                                             <Type className="w-3 h-3" /> وصف المتجر (الوصف التسويقي)
                                                         </h4>
-                                                        <div className="bg-purple-50/50 dark:bg-purple-900/10 p-3 rounded text-sm text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-wrap border border-purple-100 dark:border-purple-900/20 min-h-[100px]">
+                                                        <div className="bg-[var(--color-surface-2)]/50 dark:bg-[var(--color-surface-2)]/10 p-3 rounded text-sm text-gray-800 dark:text-gray-200 leading-relaxed whitespace-pre-wrap border border-[var(--color-border)] dark:border-[var(--color-border)]/20 min-h-[100px]">
                                                             {selectedItem.storeDescription || 'لا يوجد وصف مخصص للمتجر. سيتم استخدام المواصفات الافتراضية.'}
                                                         </div>
                                                     </div>

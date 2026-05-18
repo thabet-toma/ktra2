@@ -125,7 +125,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({
                     <button
                         onClick={() => setActiveTab('store')}
                         className={`px-4 py-1.5 rounded-md flex items-center gap-2 transition-all ${activeTab === 'store'
-                            ? 'bg-white dark:bg-gray-700 shadow text-purple-600 dark:text-purple-400 font-medium'
+                            ? 'bg-white dark:bg-gray-700 shadow text-[var(--color-primary)] dark:text-[var(--color-primary)] font-medium'
                             : 'text-gray-500 hover:text-gray-700 dark:text-gray-400'
                             }`}
                     >
@@ -292,8 +292,8 @@ export const ItemForm: React.FC<ItemFormProps> = ({
                         {/* Tab 2: Store & Sales Info */}
                         {activeTab === 'store' && (
                             <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                                <div className="bg-purple-50 dark:bg-purple-900/10 p-4 rounded-lg border border-purple-100 dark:border-purple-900/20">
-                                    <div className="flex items-center gap-2 mb-4 text-purple-700 dark:text-purple-400">
+                                <div className="bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/10 p-4 rounded-lg border border-[var(--color-border)] dark:border-[var(--color-border)]/20">
+                                    <div className="flex items-center gap-2 mb-4 text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                                         <StoreIcon className="w-5 h-5" />
                                         <h3 className="font-bold">بيانات العرض في المتجر</h3>
                                     </div>
@@ -314,7 +314,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({
                                                 type="text"
                                                 value={currentItem.storeName || ''}
                                                 onChange={(e) => setCurrentItem({ ...currentItem, storeName: e.target.value })}
-                                                className="w-full px-3 py-2 text-sm rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:border-purple-500"
+                                                className="w-full px-3 py-2 text-sm rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white focus:border-[var(--color-border)]"
                                                 placeholder="الاسم الذي سيظهر للعميل..."
                                             />
                                         </div>
@@ -342,7 +342,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({
                                                         type="checkbox"
                                                         checked={currentItem.isActive || false}
                                                         onChange={(e) => setCurrentItem({ ...currentItem, isActive: e.target.checked })}
-                                                        className="w-4 h-4 text-purple-600 rounded"
+                                                        className="w-4 h-4 text-[var(--color-primary)] rounded"
                                                     />
                                                     <span className="text-sm dark:text-gray-300">مفعل (يظهر للعملاء)</span>
                                                 </label>

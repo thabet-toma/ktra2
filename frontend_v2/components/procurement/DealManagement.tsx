@@ -67,17 +67,17 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     const getStatusColor = (status: DealStatus): string => {
         const colors: Record<string, string> = {
             'initial':                   'bg-gray-100 text-gray-700 border-gray-200',
-            'manufacturing_started':     'bg-sky-50 text-sky-700 border-sky-200',
+            'manufacturing_started':     'bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]',
             'first_payment_pending':     'bg-orange-50 text-orange-700 border-orange-200',
             'first_payment_done':        'bg-blue-50 text-blue-700 border-blue-200',
             'first_payment_confirmed':   'bg-green-50 text-green-700 border-green-200',
-            'production_completed':      'bg-purple-50 text-purple-700 border-purple-200',
+            'production_completed':      'bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]',
             'second_payment_pending':    'bg-orange-50 text-orange-700 border-orange-200',
             'second_payment_done':       'bg-blue-50 text-blue-700 border-blue-200',
             'second_payment_confirmed':  'bg-green-50 text-green-700 border-green-200',
             'shipping_preparation':      'bg-amber-50 text-amber-700 border-amber-200',
-            'shipping_in_progress':      'bg-teal-50 text-teal-700 border-teal-200',
-            'shipped':                   'bg-teal-100 text-teal-800 border-teal-300',
+            'shipping_in_progress':      'bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]',
+            'shipped':                   'bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]',
             'completed':                 'bg-emerald-100 text-emerald-800 border-emerald-200',
             'cancelled':                 'bg-red-50 text-red-700 border-red-200',
         };
@@ -350,12 +350,12 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         { value: 'first_payment_pending', label: 'دفعة أولى', color: 'bg-orange-500' },
         { value: 'first_payment_done', label: 'دفعت أولى', color: 'bg-blue-500' },
         { value: 'first_payment_confirmed', label: 'أكيد أول', color: 'bg-green-500' },
-        { value: 'production_completed', label: 'تم تصنيع', color: 'bg-purple-500' },
+        { value: 'production_completed', label: 'تم تصنيع', color: 'bg-[var(--color-primary)]' },
         { value: 'second_payment_pending', label: 'دفعة ثانية', color: 'bg-orange-500' },
         { value: 'second_payment_done', label: 'دفعت ثانية', color: 'bg-blue-500' },
         { value: 'second_payment_confirmed', label: 'أكيد ثاني', color: 'bg-green-500' },
         { value: 'shipping_preparation', label: 'تجهيز شحن', color: 'bg-amber-500' },
-        { value: 'shipped', label: 'تم شحن', color: 'bg-teal-500' },
+        { value: 'shipped', label: 'تم شحن', color: 'bg-[var(--color-primary)]' },
         { value: 'completed', label: 'مكتمل', color: 'bg-emerald-500' },
         { value: 'cancelled', label: 'ملغى', color: 'bg-red-500' }
     ];
@@ -782,7 +782,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                                     {currentDeal?.originalOfferNumber && (
                                         <span
                                             title={currentDeal.originalOfferNumber}
-                                            className="px-2 py-1 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded text-sm max-w-[260px] truncate"
+                                            className="px-2 py-1 bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/30 text-[var(--color-primary)] dark:text-[var(--color-primary)] rounded text-sm max-w-[260px] truncate"
                                         >
                                             {currentDeal.originalOfferNumber}
                                         </span>

@@ -115,18 +115,18 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
 
             case 'item_update':
                 return {
-                    bg: 'bg-purple-50 dark:bg-purple-900/20',
-                    text: 'text-purple-700 dark:text-purple-300',
-                    border: 'border-purple-200 dark:border-purple-800',
-                    icon: 'text-purple-600 dark:text-purple-400'
+                    bg: 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20',
+                    text: 'text-[var(--color-primary)] dark:text-[var(--color-primary)]',
+                    border: 'border-[var(--color-border)] dark:border-[var(--color-border)]',
+                    icon: 'text-[var(--color-primary)] dark:text-[var(--color-primary)]'
                 };
 
             case 'attachment':
                 return {
-                    bg: 'bg-cyan-50 dark:bg-cyan-900/20',
-                    text: 'text-cyan-700 dark:text-cyan-300',
-                    border: 'border-cyan-200 dark:border-cyan-800',
-                    icon: 'text-cyan-600 dark:text-cyan-400'
+                    bg: 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20',
+                    text: 'text-[var(--color-primary)] dark:text-[var(--color-primary)]',
+                    border: 'border-[var(--color-border)] dark:border-[var(--color-border)]',
+                    icon: 'text-[var(--color-primary)] dark:text-[var(--color-primary)]'
                 };
 
             default:
@@ -378,7 +378,7 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
                                     </div>
                                     <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
                                         <div className="text-sm text-gray-500 dark:text-gray-400">آخر 7 أيام</div>
-                                        <div className="text-xl font-bold text-purple-600 dark:text-purple-400">
+                                        <div className="text-xl font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                                             {activities.filter(a => {
                                                 const activityDate = new Date(a.timestamp);
                                                 const weekAgo = new Date();

@@ -393,7 +393,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 {/* Left Column: Documents (70% width) */}
                                 <div className="lg:col-span-8 flex flex-col h-full">
                                     <h4 className="text-gray-900 dark:text-gray-200 font-bold text-sm mb-3 flex items-center gap-2">
-                                        <ImageIcon className="w-4 h-4 text-purple-500" />
+                                        <ImageIcon className="w-4 h-4 text-[var(--color-primary)]" />
                                         المستندات المرفقة
                                     </h4>
 
@@ -582,7 +582,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                             type="button"
                                             title="فتح القيد في المحاسبة"
                                             onClick={() => openJournalForPayment(payment)}
-                                            className="p-2 text-gray-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                            className="p-2 text-gray-500 hover:text-[var(--color-primary-hover)] hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/20 rounded-lg transition-colors"
                                         >
                                             <BookOpen className="w-5 h-5" />
                                         </button>

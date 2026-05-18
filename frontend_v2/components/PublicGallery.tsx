@@ -405,7 +405,7 @@ const PublicGallery: React.FC = () => {
         <section className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 overflow-hidden min-h-[500px]">
            <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 flex flex-col sm:flex-row justify-between items-center gap-4">
             <h3 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center gap-2">
-                <ImageIcon className="w-6 h-6 text-purple-500" />
+                <ImageIcon className="w-6 h-6 text-[var(--color-primary)]" />
                 الصور المرفوعة
                 <span className="text-sm font-normal text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded-full">
                     {totalItemsCount} صورة

@@ -364,7 +364,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                   </div>
                 )}
                 {paymentData.confirmedAt && (
-                  <div className="flex items-center gap-1 text-purple-600">
+                  <div className="flex items-center gap-1 text-[var(--color-primary)]">
                     <Calendar className="w-3 h-3" />
                     <span>التأكيد: {new Date(paymentData.confirmedAt).toLocaleDateString('en-US')}</span>
                   </div>
@@ -442,7 +442,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
 
       {/* ⭐ معلومات الدفعة — مخفاة في وضع تأكيد المورد لتبقى الشاشة بسيطة */}
       {(actualInstallment || installmentNumber) && mode !== "verify" && (
-        <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 border border-blue-200 dark:border-blue-800 rounded-lg">
+        <div className="p-4 bg-gradient-to-r from-blue-50 to-[var(--color-primary)] dark:from-blue-900/10 dark:to-[var(--color-primary)]/10 border border-blue-200 dark:border-blue-800 rounded-lg">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-blue-100 dark:bg-blue-900/20 rounded-lg">
@@ -852,16 +852,16 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       {/* حالة تأكيد المورد */}
       {mode === "verify" && (
         <div className="space-y-6">
-          <div className="p-4 rounded-xl border border-purple-200 dark:border-purple-800 bg-purple-50/80 dark:bg-purple-900/20">
-            <p className="text-sm font-semibold text-purple-900 dark:text-purple-100">
+          <div className="p-4 rounded-xl border border-[var(--color-border)] dark:border-[var(--color-border)] bg-[var(--color-surface-2)]/80 dark:bg-[var(--color-surface-2)]/20">
+            <p className="text-sm font-semibold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
               تأكيد المورد
             </p>
-            <p className="text-xs text-purple-800/90 dark:text-purple-200/90 mt-1 leading-relaxed">
+            <p className="text-xs text-[var(--color-primary)]/90 dark:text-[var(--color-primary)]/90 mt-1 leading-relaxed">
               التاريخ أدناه = يوم تأكيد المورد أن الدفعة وصلته. عند الحفظ يُنشأ{" "}
               بعد التأكيد تنتقل ل<strong>قيد اليومية</strong> لتسجيل القيد يدوياً (مدين مورد / دائن صندوق) ثم الترحيل من هناك.
             </p>
             {paymentData?.amount != null && (
-              <p className="text-sm font-bold text-purple-950 dark:text-purple-50 mt-2">
+              <p className="text-sm font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] mt-2">
                 المبلغ: ${Number(paymentData.amount).toLocaleString()}
               </p>
             )}
@@ -870,7 +870,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
               <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-purple-600" />
+                <Calendar className="w-4 h-4 text-[var(--color-primary)]" />
                 تاريخ تأكيد المورد
               </div>
             </label>

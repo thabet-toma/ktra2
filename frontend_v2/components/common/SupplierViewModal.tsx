@@ -19,11 +19,11 @@ interface SupplierViewModalProps {
 
 const getTypeInfo = (type?: string) => {
     switch (type) {
-        case 'factory': return { icon: <Factory className="w-4 h-4" />, text: 'مورد', color: 'text-purple-600 bg-purple-50 border-purple-200' };
+        case 'factory': return { icon: <Factory className="w-4 h-4" />, text: 'مورد', color: 'text-[var(--color-primary)] bg-[var(--color-surface-2)] border-[var(--color-border)]' };
         case 'shipping_agent': return { icon: <Ship className="w-4 h-4" />, text: 'وكيل شحن', color: 'text-blue-600 bg-blue-50 border-blue-200' };
         case 'service_provider': return { icon: <FileText className="w-4 h-4" />, text: 'مخلّص جمركي', color: 'text-amber-700 bg-amber-50 border-amber-200' };
         case 'local_company': return { icon: <Building className="w-4 h-4" />, text: 'ناقل محلي', color: 'text-green-700 bg-green-50 border-green-200' };
-        case 'international_trader': return { icon: <Globe className="w-4 h-4" />, text: 'مورد دولي', color: 'text-indigo-700 bg-indigo-50 border-indigo-200' };
+        case 'international_trader': return { icon: <Globe className="w-4 h-4" />, text: 'مورد دولي', color: 'text-[var(--color-primary)] bg-[var(--color-surface-2)] border-[var(--color-border)]' };
         default: return { icon: <Building className="w-4 h-4" />, text: 'مورد تجاري', color: 'text-gray-600 bg-gray-50 border-gray-200' };
     }
 };
@@ -194,7 +194,7 @@ export const SupplierViewModal: React.FC<SupplierViewModalProps> = ({
                                         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
                                             <UserCircle2 className="w-3 h-3" /> مندوب المبيعات
                                         </h3>
-                                        <div className="bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-lg p-3 border border-blue-100 dark:border-blue-800/50">
+                                        <div className="bg-gradient-to-br from-blue-50 to-[var(--color-primary)] dark:from-blue-900/20 dark:to-[var(--color-primary)]/20 rounded-lg p-3 border border-blue-100 dark:border-blue-800/50">
                                             <div className="flex items-center gap-3 mb-2">
                                                 <div className="w-8 h-8 rounded-full bg-blue-200 dark:bg-blue-700 flex items-center justify-center text-blue-700 dark:text-blue-200 font-bold text-xs">
                                                     {supplier.salesRepName?.charAt(0)}

@@ -42,7 +42,7 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
             key: 'customsDuties',
             label: 'رسوم الجمارك',
             icon: <Shield className="w-4 h-4" />,
-            color: 'bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800/30 text-purple-700 dark:text-purple-300',
+            color: 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20 border-[var(--color-border)] dark:border-[var(--color-border)]/30 text-[var(--color-primary)] dark:text-[var(--color-primary)]',
             description: 'الضرائب والرسوم الجمركية الرسمية'
         },
         {

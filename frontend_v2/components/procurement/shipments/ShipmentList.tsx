@@ -41,8 +41,8 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
             case 'payment_pending': return `${baseClass} bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-300 dark:border-yellow-800`;
             case 'partially_paid': return `${baseClass} bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800`;
             case 'paid': return `${baseClass} bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800`;
-            case 'shipped': return `${baseClass} bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-300 dark:border-indigo-800`;
-            case 'delivered': return `${baseClass} bg-teal-50 text-teal-700 border-teal-200 dark:bg-teal-900/20 dark:text-teal-300 dark:border-teal-800`;
+            case 'shipped': return `${baseClass} bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)] dark:bg-[var(--color-surface-2)]/20 dark:text-[var(--color-primary)] dark:border-[var(--color-border)]`;
+            case 'delivered': return `${baseClass} bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)] dark:bg-[var(--color-surface-2)]/20 dark:text-[var(--color-primary)] dark:border-[var(--color-border)]`;
             case 'cancelled': return `${baseClass} bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800`;
             default: return `${baseClass} bg-gray-50 text-gray-600`;
         }
@@ -219,7 +219,7 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                     {/* اسم الشحنة */}
                                     <td className="px-3 py-3">
                                         <div className="flex items-start gap-3">
-                                            <div className={`p-2 rounded-lg mt-1 ${shippingType === 'sea' ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' : 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400'}`}>
+                                            <div className={`p-2 rounded-lg mt-1 ${shippingType === 'sea' ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' : 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20 text-[var(--color-primary)] dark:text-[var(--color-primary)]'}`}>
                                                 {shippingType === 'sea' ?
                                                     <Ship className="w-4 h-4" /> :
                                                     <Plane className="w-4 h-4" />
@@ -323,7 +323,7 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                                 <span className="text-[10px] text-gray-400">م³</span>
                                             </div>
                                             <div className="flex items-center gap-1" title="الوزن">
-                                                <Scale className="w-3 h-3 text-purple-500" />
+                                                <Scale className="w-3 h-3 text-[var(--color-primary)]" />
                                                 <span className="font-mono font-bold text-sm text-gray-700 dark:text-gray-200">
                                                     {(shipment.deals && shipment.deals.length > 0
                                                         ? shipment.deals.reduce((sum, d) => sum + (Number(d.totalWeightKg) || 0), 0)
@@ -353,7 +353,7 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                     {/* حالة الشحنة */}
                                     <td className="px-2 py-3">
                                         <div className="flex items-center gap-2">
-                                            <div className={`p-1.5 rounded-lg ${shippingType === 'sea' ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-purple-50 dark:bg-purple-900/20'}`}>
+                                            <div className={`p-1.5 rounded-lg ${shippingType === 'sea' ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20'}`}>
                                                 {getShipmentStatusIcon(shipment)}
                                             </div>
                                             <div className="flex-1 min-w-0">

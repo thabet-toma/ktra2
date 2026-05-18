@@ -149,7 +149,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
           <button
             onClick={() => { setView("smart-assistant"); if (isMobile) setIsMobileMenuOpen(false); }}
-            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("smart-assistant") ? "bg-violet-600 text-white shadow-md" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
+            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("smart-assistant") ? "bg-[var(--color-primary)] text-white shadow-md" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
             title="المساعد الذكي"
           >
             <Sparkles className="h-6 w-6 flex-shrink-0" />
@@ -252,7 +252,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             <div className="space-y-1">
               <button
                 onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); setAccountingExpanded(!accountingExpanded); }}
-                className={`flex items-center justify-between w-full p-3 rounded-lg ${accountingExpanded ? "bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
+                className={`flex items-center justify-between w-full p-3 rounded-lg ${accountingExpanded ? "bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20 text-[var(--color-primary)] dark:text-[var(--color-primary)]" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
                 title="المحاسبة"
               >
                 <div className="flex items-center">
@@ -267,7 +267,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                     <button
                       key={link.view}
                       onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
-                      className={`flex items-center w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) || (link.view === "accounting-journals" && activeView === "accounting-journal-entry") ? "text-indigo-600 font-bold bg-indigo-50 dark:bg-indigo-900/20" : "text-gray-500 hover:text-indigo-600"}`}
+                      className={`flex items-center w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) || (link.view === "accounting-journals" && activeView === "accounting-journal-entry") ? "text-[var(--color-primary)] font-bold bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20" : "text-gray-500 hover:text-[var(--color-primary-hover)]"}`}
                     >
                       <span className="ml-2">{link.icon}</span>
                       {link.label}

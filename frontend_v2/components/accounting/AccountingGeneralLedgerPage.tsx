@@ -96,11 +96,11 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l from-teal-900 to-slate-900 text-white rounded-xl">
-        <BookOpen className="w-8 h-8 text-teal-300" />
+      <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l from-[var(--color-primary)] to-slate-900 text-white rounded-xl">
+        <BookOpen className="w-8 h-8 text-[var(--color-primary)]" />
         <div>
           <h1 className="text-lg font-bold">الأستاذ العام</h1>
-          <p className="text-xs text-teal-200">حركة حساب مع الرصيد الجاري</p>
+          <p className="text-xs text-[var(--color-primary)]">حركة حساب مع الرصيد الجاري</p>
         </div>
       </div>
 
@@ -149,7 +149,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
         <button
           type="button"
           onClick={run}
-          className="flex items-center gap-2 px-4 py-2 bg-teal-600 text-white rounded-lg text-sm"
+          className="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] text-white rounded-lg text-sm"
         >
           <Search className="w-4 h-4" />
           عرض

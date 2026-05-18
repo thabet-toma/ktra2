@@ -126,13 +126,13 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                             )}
                             {showAllocColumns ? (
                                 <>
-                                    <th className="px-2 py-2 text-xs font-bold text-violet-900 dark:text-violet-100 bg-violet-50/90 dark:bg-violet-950/40 border-s border-violet-100 dark:border-violet-900/50">
+                                    <th className="px-2 py-2 text-xs font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] bg-[var(--color-surface-2)]/90 dark:bg-[var(--color-surface-2)]/40 border-s border-[var(--color-border)] dark:border-[var(--color-border)]/50">
                                         <span className="inline-flex items-center gap-1">
                                             <Receipt className="w-3 h-3" />
                                             ض.ق.م + رسوم
                                         </span>
                                     </th>
-                                    <th className="px-2 py-2 text-xs font-bold text-teal-900 dark:text-teal-100 bg-teal-50/90 dark:bg-teal-950/40 border-s border-teal-100 dark:border-teal-900/50">
+                                    <th className="px-2 py-2 text-xs font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] bg-[var(--color-surface-2)]/90 dark:bg-[var(--color-surface-2)]/40 border-s border-[var(--color-border)] dark:border-[var(--color-border)]/50">
                                         <div className="leading-tight">تكلفة الوحدة</div>
                                         <div className="text-[9px] font-normal opacity-90">بعد الضريبة والرسوم</div>
                                     </th>
@@ -252,14 +252,14 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                     )}
                                     {showAllocColumns && alloc ? (
                                         <>
-                                            <td className="px-2 py-2 text-xs font-bold text-violet-900 dark:text-violet-100 bg-violet-50/30 dark:bg-violet-950/20 border-s border-violet-100/80 dark:border-violet-900/40 tabular-nums">
+                                            <td className="px-2 py-2 text-xs font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] bg-[var(--color-surface-2)]/30 dark:bg-[var(--color-surface-2)]/20 border-s border-[var(--color-border)]/80 dark:border-[var(--color-border)]/40 tabular-nums">
                                                 {alloc.taxFeesAlloc > 0 ? fmtIls(alloc.taxFeesAlloc) : "—"}
                                             </td>
-                                            <td className="px-2 py-2 bg-teal-50/40 dark:bg-teal-950/20 border-s border-teal-100/80 dark:border-teal-900/40">
-                                                <div className="text-base font-black text-teal-900 dark:text-teal-50 tabular-nums leading-tight">
+                                            <td className="px-2 py-2 bg-[var(--color-surface-2)]/40 dark:bg-[var(--color-surface-2)]/20 border-s border-[var(--color-border)]/80 dark:border-[var(--color-border)]/40">
+                                                <div className="text-base font-black text-[var(--color-primary)] dark:text-[var(--color-primary)] tabular-nums leading-tight">
                                                     {fmtIls(alloc.afterUnit)}
                                                 </div>
-                                                <div className="text-[9px] text-teal-800/90 dark:text-teal-200/90 mt-0.5 tabular-nums">
+                                                <div className="text-[9px] text-[var(--color-primary)]/90 dark:text-[var(--color-primary)]/90 mt-0.5 tabular-nums">
                                                     سطر {fmtIls(alloc.afterLine)}
                                                 </div>
                                             </td>
@@ -289,10 +289,10 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                 ) : null}
                                 {showAllocColumns ? (
                                     <>
-                                        <td className="px-2 py-2 text-xs font-black text-violet-900 dark:text-violet-100 bg-violet-50/50 dark:bg-violet-950/30 tabular-nums">
+                                        <td className="px-2 py-2 text-xs font-black text-[var(--color-primary)] dark:text-[var(--color-primary)] bg-[var(--color-surface-2)]/50 dark:bg-[var(--color-surface-2)]/30 tabular-nums">
                                             {taxFeesPool > 0 ? fmtIls(sumTaxFeesAlloc) : "—"}
                                         </td>
-                                        <td className="px-2 py-2 text-teal-900 dark:text-teal-100 bg-teal-50/50 dark:bg-teal-950/30 tabular-nums">
+                                        <td className="px-2 py-2 text-[var(--color-primary)] dark:text-[var(--color-primary)] bg-[var(--color-surface-2)]/50 dark:bg-[var(--color-surface-2)]/30 tabular-nums">
                                             <div className="text-sm font-black leading-tight">
                                                 {fmtIls(avgUnitAfterAll)}
                                             </div>

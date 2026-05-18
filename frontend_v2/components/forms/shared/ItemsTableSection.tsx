@@ -16,7 +16,7 @@ const TermsAndShippingCard: React.FC<TermsProps> = ({ data, onUpdate, readOnly }
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden h-full">
       {/* Header */}
-      <div className="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-b">
+      <div className="p-3 bg-gradient-to-r from-blue-50 to-[var(--color-primary)] dark:from-blue-900/20 dark:to-[var(--color-primary)]/20 border-b">
         <div className="flex items-center gap-2">
           <div className="p-1.5 bg-blue-500 rounded-lg">
             <Truck className="w-4 h-4 text-white" />
@@ -207,10 +207,10 @@ const LocalPaymentsCard: React.FC<LocalPaymentsCardProps> = ({
 
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden h-full">
-      <div className="p-3 bg-gradient-to-r from-indigo-50 to-purple-50 dark:from-indigo-900/20 dark:to-purple-900/20 border-b">
+      <div className="p-3 bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary)] dark:from-[var(--color-primary)]/20 dark:to-[var(--color-primary)]/20 border-b">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <div className="p-1.5 bg-indigo-500 rounded-lg">
+            <div className="p-1.5 bg-[var(--color-primary)] rounded-lg">
               <CreditCard className="w-4 h-4 text-white" />
             </div>
             <h3 className="font-semibold text-gray-900 dark:text-white text-sm">المدفوعات المحلية</h3>
@@ -236,7 +236,7 @@ const LocalPaymentsCard: React.FC<LocalPaymentsCardProps> = ({
                 onClick={() => handleUpdate('calculationMethod', 'detailed')}
                 disabled={readOnly}
                 className={`flex-1 py-1.5 text-xs rounded transition-colors ${data.calculationMethod === 'detailed'
-                  ? 'bg-white dark:bg-gray-600 text-indigo-600 dark:text-indigo-300 font-medium'
+                  ? 'bg-white dark:bg-gray-600 text-[var(--color-primary)] dark:text-[var(--color-primary)] font-medium'
                   : 'text-gray-600 dark:text-gray-400'
                   }`}
               >
@@ -246,7 +246,7 @@ const LocalPaymentsCard: React.FC<LocalPaymentsCardProps> = ({
                 onClick={() => handleUpdate('calculationMethod', 'lump_sum')}
                 disabled={readOnly}
                 className={`flex-1 py-1.5 text-xs rounded transition-colors ${data.calculationMethod === 'lump_sum'
-                  ? 'bg-white dark:bg-gray-600 text-indigo-600 dark:text-indigo-300 font-medium'
+                  ? 'bg-white dark:bg-gray-600 text-[var(--color-primary)] dark:text-[var(--color-primary)] font-medium'
                   : 'text-gray-600 dark:text-gray-400'
                   }`}
               >
@@ -324,7 +324,7 @@ const LocalPaymentsCard: React.FC<LocalPaymentsCardProps> = ({
 
         <div className="pt-2 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
           <span className="text-sm font-medium text-gray-700 dark:text-gray-300">الإجمالي:</span>
-          <span className="font-bold text-indigo-600 dark:text-indigo-400 text-lg">
+          <span className="font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] text-lg">
             ${totalLocalPayments.toLocaleString()}
           </span>
         </div>
