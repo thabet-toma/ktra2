@@ -29,6 +29,7 @@ import { apiGetList } from "@/services/restApi";
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
 import { resolveTenantId } from "@/utils/tenantContext";
 import { buildShipmentOptionLabel, ShipmentLabelInput } from "@/utils/shipmentLabel";
+import { validatePaymentInput } from "@/utils/usePaymentForm";
 
 type ShipmentPick = ShipmentLabelInput;
 type BrokerPick = { id: number; name: string; partner_type?: string };
@@ -456,11 +457,12 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
       alert("اختر الصندوق أولاً.");
       return;
     }
-    const amount = Number(payAmount || 0);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      alert("المبلغ غير صالح.");
+    const vErr = validatePaymentInput({ amount: payAmount, date: payDate });
+    if (vErr.amount || vErr.date) {
+      alert(vErr.amount || vErr.date);
       return;
     }
+    const amount = Number(payAmount || 0);
     setPaying(true);
     setErr(null);
     try {
@@ -513,11 +515,12 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
       alert("اختر الصندوق.");
       return;
     }
-    const amount = Number(shipPayAmount || 0);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      alert("المبلغ غير صالح.");
+    const vErr = validatePaymentInput({ amount: shipPayAmount, date: shipPayDate });
+    if (vErr.amount || vErr.date) {
+      alert(vErr.amount || vErr.date);
       return;
     }
+    const amount = Number(shipPayAmount || 0);
     setPaying(true);
     setErr(null);
     try {
@@ -1000,6 +1003,32 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                       {remainingShippingOnly.toLocaleString()}
                     </p>
                   </div>
+
+                  {!!selected?.local_shipments?.length && (
+                    <div className="rounded-xl border border-amber-300 dark:border-amber-800 bg-white/70 dark:bg-gray-900/40 p-3 space-y-2">
+                      <p className="text-xs font-bold text-amber-950 dark:text-amber-100">
+                        سجلات الشحن المحلي الرسمية المرتبطة (المصدر الموحّد — تُدار من صفحة «الشحن المحلي»):
+                      </p>
+                      <ul className="text-xs space-y-1">
+                        {selected.local_shipments.map((ls) => (
+                          <li
+                            key={ls.id}
+                            className="flex items-center justify-between gap-2 border-b border-amber-100 dark:border-amber-900/40 pb-1 last:border-0"
+                          >
+                            <span className="font-semibold tabular-nums">{ls.shipment_number}</span>
+                            <span className="tabular-nums">{Number(ls.amount).toLocaleString()}</span>
+                            <span>{ls.status}</span>
+                            <span className={ls.is_posted ? "text-emerald-700" : "text-gray-500"}>
+                              {ls.is_posted ? "مُرحّل" : "غير مُرحّل"}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                      <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                        ملاحظة: عند وجود سجل شحن محلي مُرحّل ومُرسمَل، تُستبعد تكلفته من بنود التخليص تلقائياً لمنع ازدواج الترسمل (T1-01).
+                      </p>
+                    </div>
+                  )}
 
                   <label className="block text-xs space-y-1 text-gray-700 dark:text-gray-300">
                     <span className="font-medium">مبلغ النقل المحلي ₪</span>

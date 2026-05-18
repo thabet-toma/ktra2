@@ -34,6 +34,7 @@ import { accountingApi } from "@/services/accountingApi";
 import { apiGetList } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
 import { getSalesSettings, type SalesSettings } from "@/services/salesApi";
+import { validatePaymentInput } from "@/utils/usePaymentForm";
 
 type Partner = { id: number; name: string; partner_type?: string };
 type Account = { id: number; code: string; name: string; account_type?: string };
@@ -535,8 +536,16 @@ const LocalShipmentFormModal: React.FC<{
 
   const submit = async () => {
     setError(null);
+    const vErr = validatePaymentInput({
+      amount: String(form.amount ?? ""),
+      date: String(form.pickup_date ?? ""),
+    });
+    if (vErr.amount || vErr.date) {
+      setError(vErr.amount || vErr.date || "");
+      return;
+    }
     if (!canSubmit) {
-      setError("اكمل الحقول المطلوبة (ناقل، مبلغ، حسابات)");
+      setError("اكمل الحقول المطلوبة (ناقل، حسابات)");
       return;
     }
     setSubmitting(true);

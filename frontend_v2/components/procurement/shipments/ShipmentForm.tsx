@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Shipment, Supplier, Deal, DealPayment, User, ShipmentInstallment } from '../../../types';
 import { maxPaymentPrincipalForDeal } from '@/utils/dealPaymentLimits';
+import { validatePaymentInput } from '@/utils/usePaymentForm';
 import { shipmentsService } from '../../../services/shipmentsService';
 import { suppliersService } from '../../../services/firestoreService';
 import { dealsService } from '../../../services/dealsService';
@@ -482,6 +483,16 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
                     break;
                 }
                 case "swift": {
+                    {
+                        const vErr = validatePaymentInput({
+                            amount: String(data.amount ?? ""),
+                            date: String(data.paymentDate || new Date().toISOString()),
+                        });
+                        if (vErr.amount || vErr.date) {
+                            alert(vErr.amount || vErr.date);
+                            return;
+                        }
+                    }
                     let payment = formData.payments?.find((p) => p.type === paymentType);
                     let swiftPaymentId = paymentId;
 

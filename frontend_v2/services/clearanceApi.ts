@@ -26,6 +26,16 @@ export type ClearanceRow = {
   deals_count?: number;
   /** معاينة عناوين الصفقات (من description / رقم الصفقة) */
   deals_preview?: string | null;
+  /** سجلات الشحن المحلي المرتبطة بهذا التخليص (مصدر الحقيقة — T2-04/T4-04).
+   *  وجودها يعني أن النقل المحلي يُدار كسجل رسمي لا كسطر تكلفة مكرّر. */
+  local_shipments?: {
+    id: number;
+    shipment_number: string;
+    amount: string;
+    status: string;
+    is_posted: boolean;
+    currency: number | null;
+  }[];
 };
 
 /** سطر عرض موحّد: «اسم الشحنة — S-00xx» كما في شاشة التخليص */

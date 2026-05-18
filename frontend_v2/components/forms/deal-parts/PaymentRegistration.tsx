@@ -19,6 +19,7 @@ import { accountingApi } from "@/services/accountingApi";
 import type { TrialBalanceRow } from "@/types/accounting";
 import { Deal, DealPayment, DealStatus } from "@/types";
 import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
+import { validatePaymentInput } from "@/utils/usePaymentForm";
 import { isAwaitingSupplierConfirmation } from "@/utils/dealPaymentFlow";
 
 /** ربط صندوق (external_id = معرف Firestore) برصيد حسابه في ميزان المراجعة */
@@ -246,6 +247,12 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
 
   // ⭐ دالة محسنة لحفظ السليب مع التواريخ
   const handleSaveSwift = () => {
+    const vErr = validatePaymentInput({ amount: String(amount), date: paymentDate });
+    if (vErr.amount || vErr.date) {
+      alert(vErr.amount || vErr.date);
+      return;
+    }
+
     if (!swiftImage) {
       alert("يرجى رفع صورة السليب");
       return;
