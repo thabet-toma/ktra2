@@ -64,6 +64,26 @@
 
 ---
 
+## مراجعة المرحلة 2 بعد التحقق البصري الحيّ (Opus 2026-05-18) — تاسكات تصحيح للموديل الأرخص
+
+> شُغّل الباك-إند (Django:8000) + الواجهة (Vite:3000)، دخول كمدير، تصفّح فعلي: deals/shipments/clearance/local-shipping. الكونسول **نظيف بلا أخطاء**. بناء Vite كامل صفر خطأ. منطق `validatePaymentInput` مُختبَر حتمياً 8/8. الثغرات أدناه **مؤكَّدة بالكود + المتصفح**. كل تاسك مستقل: file:line + المشكلة + الإصلاح + التحقق.
+
+- [ ] **T2-FIX-01 (حرج — شكوى المالك الأساسية لم تُحلّ).** الصفحة الرئيسية للشحنات الفعلية هي مسار `/shipments` → `App.tsx:282` → `appView="shipments-management"` → `components/procurement/shipments/ShipmentManagement.tsx` → `ShipmentList.tsx`. السطر `ShipmentList.tsx:231-232` يبني الاسم بمنطق **خاص مغاير**: `shipment.shipmentName || shipment.agentShipmentNumber || shipment.shipmentNumber` ولا يستخدم `@/utils/shipmentLabel`. الـutil المشترك (T2-02) وصل فقط لـ`SqlShipmentsPage.tsx` (مسار ثانوي `sql-shipments`، غير الصفحة التي يراها المالك) و`CustomsClearanceManagement.tsx`. **ملاحظة بنيوية:** `ShipmentList` يستخدم camelCase (`shipmentName/shipmentNumber/agentShipmentNumber`) من نوع `Shipment` (Firestore) بينما `ShipmentLabelInput` يستخدم snake_case — يلزم محوّل حقول.
+  **الإصلاح:** في `shipmentLabel.ts` أضِف دالة `buildShipmentLabelFromShipment(s: {shipmentName?,shipmentNumber?,agentShipmentNumber?,israeliSideName?,id})` (تطبيع camelCase→نفس منطق `buildShipmentOptionLabel`)، أو محوّل صغير `toShipmentLabelInput()`. ثم استبدل `ShipmentList.tsx:231-232` (و`:241` إن لزم) لاستدعائه. ابحث عن أي مكوّن آخر يعرض اسم شحنة بمنطق خاص (`grep -rn "shipmentName ||" frontend_v2/components`) ووحّده كذلك.
+  **التحقق:** صفحة `/shipments` تعرض نفس صياغة التخليص؛ تغيير منطق العرض في `shipmentLabel.ts` فقط ينعكس على `/shipments` و`/clearance` معاً؛ صفر خطأ TS؛ بناء Vite نظيف.
+
+- [ ] **T2-FIX-02 (متوسط — توحيد T2-03 ميت عملياً في نموذج الشحن المحلي).** `LocalShippingPage.tsx:848` الزر `disabled={!canSubmit || submitting}` و`canSubmit` (`:532-534`) يشترط `Number(form.amount||0) > 0`. النتيجة: عند مبلغ فارغ/صفر الزر معطّل فلا يُستدعى `submit()` ولا يُنفَّذ حارس `validatePaymentInput` الذي أُضيف داخله → المستخدم يرى زراً معطّلاً بلا رسالة موحّدة (توحيد الرسائل لا يظهر أبداً هنا).
+  **الإصلاح:** اجعل المُحقِّق هو المصدر الوحيد لرسالة المبلغ/التاريخ: أزِل شرط `Number(form.amount||0) > 0` من `canSubmit` (أبقِ `carrier` و`cash_or_bank_account` فقط)، فيصبح الزر فعّالاً ويُستدعى `submit()` الذي يعرض رسالة `validatePaymentInput` الموحّدة (نمط بقية النماذج التي تستخدم alert/setError لا زراً معطّلاً). لا تُزِل فحص الحقول الأخرى.
+  **التحقق:** فتح «شحنة محلية جديدة» بمبلغ فارغ ثم «حفظ» يُظهر «المبلغ مطلوب.»؛ بمبلغ 0 يُظهر «المبلغ يجب أن يكون أكبر من صفر.»؛ بمبلغ صحيح + ناقل ناقص يظهر فحص الحقول الأصلي.
+
+- [ ] **T2-FIX-03 (منخفض — ترتيب الحارس في مساري التخليص، اختياري).** `CustomsClearanceManagement.handlePostPayment` و`handleShipPostPayment`: حارس «مدفوع بالكامل» (`if (clearancePayClosed)` / `if (shippingPayClosed)`) يسبق `validatePaymentInput`. سليم وظيفياً (لا دفع عند الإغلاق) لكن يعني أن الرسالة الموحّدة لا تظهر إلا لتخليص بمتبقٍّ + مبلغ/تاريخ غير صالح (تعذّر تأكيده بصرياً لأن كل تخليصات البيئة مدفوعة بالكامل — قيد بيانات لا خطأ كود).
+  **الإصلاح (اختياري للاتساق):** اقبله كما هو (موثّق)، أو حرّك `validatePaymentInput` لأول الدالة قبل حارس الإغلاق إن رغب المالك برسالة المبلغ/التاريخ أولاً. قرار منتج لا إصلاح خطأ.
+  **التحقق:** تخليص بمتبقٍّ > 0 + مبلغ فارغ → «المبلغ مطلوب.».
+
+> **سليم بعد التحقق (لا تاسك):** T2-01 (قائمة الصفقات تُبقي الوصف العربي «100 حبة تتش» — منطق `text_utils` المشترك يعمل). T2-04 باك-إند (مفتاح `local_shipments` موجود في استجابة `LogisticsClearanceSerializer`، قيمته `[]` لعدم وجود سجلات؛ اللوحة الأمامية تختفي صحيحاً بشرط `length`). الكونسول نظيف. منطق `validatePaymentInput` صحيح حتمياً. **قيد بيئة (ليس خطأ):** 0 سجلات `LocalShipment` في القاعدة، والنقل المحلي ما زال يُدخَل كسطر/دفعة تخليص (مثال S-0012 بـ2700₪) — هذا بالضبط ما يحلّه **T4-04** (مصدر حقيقة واحد + data migration) المخطّط مسبقاً؛ لا تاسك جديد.
+
+---
+
 ## المرحلة 3 — أخطاء صغيرة / robustness داخل النطاق
 
 - [ ] **T3-01** `core/payments.py` — `validate_payment()` يرفض `partner_id=None` دائماً، لكن دفعات التخليص قد تكون بلا `customs_broker` ودفعات الوكيل بلا `shipping_agent` (الحقول `null=True`). راجع: هل المنع سلوك تجاري مقصود أم صرامة زائدة تكسر حالات صحيحة؟ وثّق القرار في docstring.
