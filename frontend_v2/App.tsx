@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { SearchForm } from "./components/SearchForm";
+import { AppLayout } from "./components/layout/AppLayout";
 import { ResultsPage } from "./components/ResultsPage";
 import { LoadingSpinner } from "./components/LoadingSpinner";
 import { ErrorDisplay } from "./components/ErrorDisplay";
@@ -1495,31 +1496,13 @@ const App: React.FC = () => {
   const showReturnButton = !!activeTask && appView !== "sourcing";
 
   return (
-    <div
-      dir="rtl"
-      className="min-h-screen bg-gray-100 dark:bg-gray-900 font-sans text-gray-800 dark:text-gray-200 flex flex-col md:flex-row"
-    >
-      <Sidebar user={currentUser} activeView={appView} setView={setViewAndSyncPath} />
-
-      <div className="flex-1 flex flex-col h-screen overflow-hidden mb-16 md:mb-0">
-        <Header
-          user={currentUser}
-          onLogout={handleLogout}
-          activeTask={activeTask}
-          userTaskTime={userTaskTime}
-          theme={theme}
-          toggleTheme={toggleTheme}
-          showReturnButton={showReturnButton}
-          onReturnToTask={() => setAppView("sourcing")}
-          onNavigate={setViewAndSyncPath}
-        />
-
+    <div dir="rtl">
+      <AppLayout user={currentUser} activeView={appView} onNavigate={setViewAndSyncPath}>
         <NoSqlMigrationBanner isManager={currentUser?.role === "manager"} />
-
-        <main className="flex-1 overflow-y-auto p-3 sm:p-6 lg:p-8 w-full mx-auto max-w-7xl">
+        <main className="p-3 sm:p-4 lg:p-6">
           {renderMainContent()}
         </main>
-      </div>
+      </AppLayout>
 
       {selectedTaskDetails && (
         <TaskDetailsModal

@@ -149,12 +149,12 @@ export const AccountingJournalListPage: React.FC<Props> = ({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-gradient-to-l from-slate-800 to-slate-900 text-white rounded-xl shadow">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-[var(--spacing-4)] bg-[var(--color-surface-3)] dark:bg-[var(--color-surface-3)] text-[var(--color-text)] dark:text-[var(--color-text-inverted)] rounded-[var(--radius-lg)] shadow-[var(--shadow-md)]">
         <div className="flex items-center gap-3">
-          <FileText className="w-8 h-8 text-slate-300" />
+          <FileText className="w-8 h-8 text-[var(--color-text-muted)]" />
           <div>
-            <h1 className="text-lg font-bold">دفتر اليومية</h1>
-            <p className="text-xs text-slate-400">
+            <h1 className="text-[var(--font-size-xl)] font-bold">دفتر اليومية</h1>
+            <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
               قيود مرحّلة ومسودات — بحث برقم الصفقة أو البيان أو نوع المرجع
             </p>
           </div>
@@ -162,55 +162,55 @@ export const AccountingJournalListPage: React.FC<Props> = ({
         <button
           type="button"
           onClick={onNew}
-          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-sm font-medium"
+          className="flex items-center gap-2 px-[var(--spacing-4)] py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] rounded-[var(--radius-lg)] text-[var(--font-size-sm)] font-medium"
         >
           <Plus className="w-4 h-4" />
           قيد جديد
         </button>
       </div>
 
-      <div className="flex flex-col gap-3 bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700">
+      <div className="flex flex-col gap-3 bg-[var(--color-surface)] dark:bg-[var(--color-surface-2)] p-[var(--spacing-4)] rounded-[var(--radius-lg)] border border-[var(--color-border)] dark:border-[var(--color-border)]">
         <div className="flex flex-wrap items-end gap-3">
           <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
             <input
               placeholder="بحث: رقم القيد، مرجع، نص البيان، أو رقم صفقة (D-…)"
-              className="w-full border rounded-lg pr-10 pl-3 py-2 text-sm dark:bg-gray-900 dark:border-gray-600"
+              className="w-full border border-[var(--color-border)] rounded-[var(--radius-lg)] pr-10 pl-3 py-2 text-[var(--font-size-sm)] dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && load()}
             />
           </div>
           <div className="flex flex-wrap gap-2 items-center">
-            <Filter className="w-4 h-4 text-gray-500 hidden sm:block" />
+            <Filter className="w-4 h-4 text-[var(--color-text-muted)] hidden sm:block" />
             <div>
-              <label className="block text-[10px] text-gray-500 mb-0.5">
+              <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-0.5">
                 من تاريخ
               </label>
               <input
                 type="date"
-                className="border rounded-lg px-2 py-1.5 text-sm dark:bg-gray-900 dark:border-gray-600"
+                className="border border-[var(--color-border)] rounded-[var(--radius-lg)] px-2 py-1.5 text-[var(--font-size-sm)] dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
               />
             </div>
             <div>
-              <label className="block text-[10px] text-gray-500 mb-0.5">
+              <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-0.5">
                 إلى تاريخ
               </label>
               <input
                 type="date"
-                className="border rounded-lg px-2 py-1.5 text-sm dark:bg-gray-900 dark:border-gray-600"
+                className="border border-[var(--color-border)] rounded-[var(--radius-lg)] px-2 py-1.5 text-[var(--font-size-sm)] dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
               />
             </div>
             <div>
-              <label className="block text-[10px] text-gray-500 mb-0.5">
+              <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-0.5">
                 نوع المرجع
               </label>
               <select
-                className="border rounded-lg px-2 py-1.5 text-sm min-w-[160px] dark:bg-gray-900 dark:border-gray-600"
+                className="border border-[var(--color-border)] rounded-[var(--radius-lg)] px-2 py-1.5 text-[var(--font-size-sm)] min-w-[160px] dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
                 value={refType}
                 onChange={(e) => setRefType(e.target.value)}
               >
@@ -224,7 +224,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
             <button
               type="button"
               onClick={() => load()}
-              className="flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-700 text-white text-sm hover:bg-slate-600"
+              className="flex items-center gap-1 px-3 py-2 rounded-[var(--radius-lg)] bg-[var(--color-surface-3)] text-[var(--color-text-inverted)] text-[var(--font-size-sm)] hover:bg-[var(--color-border)]"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
               تطبيق
@@ -234,22 +234,22 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       </div>
 
       {err && (
-        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm">
+        <div className="p-3 rounded-[var(--radius-lg)] bg-[var(--color-danger)]/10 dark:bg-[var(--color-danger)]/20 text-[var(--color-danger)] dark:text-[var(--color-danger)] text-[var(--font-size-sm)]">
           {err}
         </div>
       )}
       {postErr && (
-        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 text-sm border border-red-200 dark:border-red-800">
+        <div className="p-3 rounded-[var(--radius-lg)] bg-[var(--color-danger)]/10 dark:bg-[var(--color-danger)]/20 text-[var(--color-danger)] dark:text-[var(--color-danger)] text-[var(--font-size-sm)] border border-[var(--color-danger)]/30 dark:border-[var(--color-danger)]/50">
           {postErr}
         </div>
       )}
 
       {loading ? (
-        <div className="py-20 text-center text-gray-500">جاري التحميل…</div>
+        <div className="py-20 text-center text-[var(--color-text-muted)]">جاري التحميل…</div>
       ) : (
-        <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900/50 text-gray-600 dark:text-gray-400">
+        <div className="overflow-x-auto bg-[var(--color-surface)] dark:bg-[var(--color-surface-2)] rounded-[var(--radius-lg)] border border-[var(--color-border)] dark:border-[var(--color-border)] shadow-[var(--shadow-sm)]">
+          <table className="min-w-full text-[var(--font-size-sm)]">
+            <thead className="bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-3)] text-[var(--color-text)] dark:text-[var(--color-text-muted)]">
               <tr>
                 <th className="text-right p-3 font-semibold whitespace-nowrap">
                   رقم القيد
@@ -279,24 +279,24 @@ export const AccountingJournalListPage: React.FC<Props> = ({
               {rows.map((j) => (
                 <tr
                   key={j.id}
-                  className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50/80 dark:hover:bg-gray-900/30 align-top"
+                  className="border-t border-[var(--color-border)] dark:border-[var(--color-border)] hover:bg-[var(--color-surface-2)]/80 dark:hover:bg-[var(--color-surface-3)]/30 align-top"
                 >
                   <td className="p-3 font-mono whitespace-nowrap">{j.id}</td>
                   <td className="p-3 whitespace-nowrap dir-ltr text-right">
                     <span>{formatTxDate(j.transaction_date)}</span>
                     {j.currency_code && j.currency_code !== "ILS" && (
-                      <span className="mr-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300">
+                      <span className="mr-2 inline-flex items-center px-1.5 py-0.5 rounded-[var(--radius-sm)] text-[var(--font-size-xs)] font-bold bg-[var(--color-primary)]/20 text-[var(--color-primary)] dark:bg-[var(--color-primary)]/30 dark:text-[var(--color-primary)]">
                         {j.currency_code}
                       </span>
                     )}
                   </td>
                   <td className="p-3 text-xs">
                     <div className="flex flex-col gap-0.5">
-                      <span className="font-medium text-slate-700 dark:text-slate-200">
+                      <span className="font-medium text-[var(--color-text)] dark:text-[var(--color-text)]">
                         {j.source_label || refTypeLabel(j.reference_type)}
                       </span>
                       {j.tenant_name && (
-                        <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                        <span className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] dark:text-[var(--color-text-muted)]">
                           {j.tenant_name}
                         </span>
                       )}
@@ -307,18 +307,18 @@ export const AccountingJournalListPage: React.FC<Props> = ({
                       <button
                         type="button"
                         onClick={() => onNavigateToDeal(j.deal_ref_number!)}
-                        className="text-right whitespace-pre-wrap break-words text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 hover:underline transition-colors font-medium"
+                        className="text-right whitespace-pre-wrap break-words text-[var(--color-primary)] dark:text-[var(--color-primary)] hover:text-[var(--color-primary-hover)] dark:hover:text-[var(--color-primary)] hover:underline transition-all font-medium"
                         title={`فتح الصفقة ${j.deal_ref_number}`}
                       >
                         {j.reference_summary?.trim() || j.deal_ref_number}
                       </button>
                     ) : (
-                      <span className="text-blue-900 dark:text-blue-200 whitespace-pre-wrap break-words">
+                      <span className="text-[var(--color-text)] dark:text-[var(--color-text)] whitespace-pre-wrap break-words">
                         {j.reference_summary?.trim() || "—"}
                       </span>
                     )}
                   </td>
-                  <td className="p-3 text-xs text-gray-800 dark:text-gray-200 whitespace-pre-wrap break-words max-w-md">
+                  <td className="p-3 text-[var(--font-size-xs)] text-[var(--color-text)] dark:text-[var(--color-text)] whitespace-pre-wrap break-words max-w-md">
                     {j.description?.trim() || "—"}
                   </td>
                   <td className="p-3 font-mono text-xs whitespace-nowrap">
@@ -326,11 +326,11 @@ export const AccountingJournalListPage: React.FC<Props> = ({
                   </td>
                   <td className="p-3 whitespace-nowrap">
                     {j.is_posted ? (
-                      <span className="text-emerald-600 dark:text-emerald-400 text-xs font-medium">
+                      <span className="text-[var(--color-success)] dark:text-[var(--color-success)] text-[var(--font-size-xs)] font-medium">
                         مرحّل
                       </span>
                     ) : (
-                      <span className="text-slate-600 dark:text-slate-300 text-xs font-medium">
+                      <span className="text-[var(--color-text-muted)] dark:text-[var(--color-text-muted)] text-[var(--font-size-xs)] font-medium">
                         مسودة
                       </span>
                     )}
@@ -340,7 +340,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
                       <button
                         type="button"
                         onClick={() => onOpen(j.id, j.deal_ref_number, j.reference_summary)}
-                        className="px-2 py-1 text-xs rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200"
+                        className="px-2 py-1 text-[var(--font-size-xs)] rounded-[var(--radius-lg)] bg-[var(--color-primary)]/20 text-[var(--color-primary)] dark:bg-[var(--color-primary)]/30 dark:text-[var(--color-primary)]"
                       >
                         فتح
                       </button>
@@ -349,7 +349,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
                           type="button"
                           disabled={posting === j.id}
                           onClick={() => handlePost(j.id)}
-                          className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 disabled:opacity-50"
+                          className="flex items-center gap-1 px-2 py-1 text-[var(--font-size-xs)] rounded-[var(--radius-lg)] bg-[var(--color-success)]/20 text-[var(--color-success)] dark:bg-[var(--color-success)]/30 dark:text-[var(--color-success)] disabled:opacity-50"
                         >
                           {posting === j.id ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
@@ -364,7 +364,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
                           type="button"
                           disabled={reversing === j.id}
                           onClick={() => handleReverse(j.id)}
-                          className="flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-violet-100 dark:bg-violet-900/40 text-violet-800 dark:text-violet-200 disabled:opacity-50"
+                          className="flex items-center gap-1 px-2 py-1 text-[var(--font-size-xs)] rounded-[var(--radius-lg)] bg-[var(--color-primary)]/20 text-[var(--color-primary)] dark:bg-[var(--color-primary)]/30 dark:text-[var(--color-primary)] disabled:opacity-50"
                         >
                           {reversing === j.id ? (
                             <Loader2 className="w-3 h-3 animate-spin" />
@@ -381,7 +381,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
             </tbody>
           </table>
           {rows.length === 0 && (
-            <p className="p-8 text-center text-gray-500">
+            <p className="p-[var(--spacing-6)] text-center text-[var(--color-text-muted)]">
               لا قيود تطابق الفلاتر الحالية
             </p>
           )}

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import type { LandedCostReport, LandedCostShipment } from "../../types/accounting";
 import { Ship, Search, ChevronRight, ChevronDown, Package, AlertCircle } from "lucide-react";
+import { Spinner, EmptyState } from "../ui";
 
 export const AccountingLandedCostPage: React.FC = () => {
   const today = new Date();
@@ -112,7 +113,7 @@ export const AccountingLandedCostPage: React.FC = () => {
       )}
 
       {loading ? (
-        <div className="py-16 text-center text-gray-500">جاري التحميل…</div>
+        <div className="py-16 flex justify-center"><Spinner /></div>
       ) : (
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
           <table className="min-w-full text-sm">
@@ -174,9 +175,7 @@ export const AccountingLandedCostPage: React.FC = () => {
                         {detail ? (
                           <ShipmentDetail sh={detail} fmt={fmt} />
                         ) : (
-                          <div className="py-4 text-center text-gray-500">
-                            جاري التحميل…
-                          </div>
+                          <div className="py-4 flex justify-center"><Spinner size="sm" /></div>
                         )}
                       </td>
                     </tr>
@@ -186,7 +185,7 @@ export const AccountingLandedCostPage: React.FC = () => {
             </tbody>
           </table>
           {data && data.shipments.length === 0 && (
-            <p className="p-8 text-center text-gray-500">لا توجد شحنات</p>
+            <EmptyState title="لا توجد شحنات" />
           )}
         </div>
       )}

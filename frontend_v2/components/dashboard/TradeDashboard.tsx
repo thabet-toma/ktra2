@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { fetchDashboard } from "../../services/dashboardApi";
 import type { DashboardData, DashboardAlert } from "../../types/dashboard";
 import type { AppView } from "../../types/common";
+import { StatusBadge, Spinner, DataGrid, EmptyState } from "../../components/ui";
 import {
   Handshake,
   Ship,
@@ -9,7 +10,6 @@ import {
   FileText,
   Package,
   BookOpen,
-  Loader2,
   AlertTriangle,
   AlertCircle,
   Info,
@@ -68,21 +68,21 @@ const INV_STATUS_AR: Record<string, string> = {
 const alertIcon = (t: DashboardAlert["type"]) => {
   switch (t) {
     case "danger":
-      return <AlertCircle className="w-4 h-4 text-red-500" />;
+      return <AlertCircle className="w-4 h-4 text-[var(--color-danger)]" />;
     case "warning":
-      return <AlertTriangle className="w-4 h-4 text-amber-500" />;
+      return <AlertTriangle className="w-4 h-4 text-[var(--color-warning)]" />;
     default:
-      return <Info className="w-4 h-4 text-blue-500" />;
+      return <Info className="w-4 h-4 text-[var(--color-primary)]" />;
   }
 };
 const alertBg = (t: DashboardAlert["type"]) => {
   switch (t) {
     case "danger":
-      return "bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800";
+      return "bg-[var(--color-danger)]/10 border-[var(--color-danger)]/30";
     case "warning":
-      return "bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800";
+      return "bg-[var(--color-warning)]/10 border-[var(--color-warning)]/30";
     default:
-      return "bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800";
+      return "bg-[var(--color-primary)]/10 border-[var(--color-primary)]/30";
   }
 };
 
@@ -114,39 +114,41 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[500px]">
-        <Loader2 className="w-8 h-8 animate-spin text-indigo-500" />
+        <Spinner size="md" />
       </div>
     );
   }
   if (err || !data) {
     return (
-      <div className="p-8 text-center text-red-600">
-        <AlertTriangle className="w-10 h-10 mx-auto mb-3" />
-        <p>{err || "فشل تحميل البيانات"}</p>
-        <button onClick={load} className="mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg">
-          إعادة المحاولة
-        </button>
-      </div>
+      <EmptyState
+        icon={<AlertTriangle className="w-10 h-10" />}
+        title={err || "فشل تحميل البيانات"}
+        action={
+          <button onClick={load} className="px-4 py-2 bg-[var(--color-primary)] text-white rounded-[var(--radius-md)]">
+            إعادة المحاولة
+          </button>
+        }
+      />
     );
   }
 
   const { deals, shipments, payments, invoices, inventory, accounting, alerts } = data;
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6" dir="rtl">
+    <div className="p-[var(--spacing-4)] md:p-[var(--spacing-6)] max-w-7xl mx-auto gap-[var(--spacing-6)]" dir="rtl">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-[var(--spacing-3)]">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-slate-800 dark:text-white">
+          <h1 className="text-[var(--font-size-2xl)] md:text-[var(--font-size-2xl)] font-bold text-[var(--color-text)]">
             مرحباً، {userName.split(" ")[0]}
           </h1>
-          <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">
+          <p className="text-[var(--color-text-muted)] text-[var(--font-size-sm)] mt-[var(--spacing-1)]">
             لوحة التحكم التجارية — نظرة شاملة على العمليات
           </p>
         </div>
         <button
           onClick={load}
-          className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600"
+          className="flex items-center gap-2 text-[var(--font-size-sm)] px-[var(--spacing-3)] py-2 rounded-[var(--radius-lg)] bg-[var(--color-muted)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
         >
           <RefreshCw className="w-4 h-4" />
           تحديث
@@ -155,19 +157,19 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
 
       {/* Alerts */}
       {alerts.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[var(--spacing-3)]">
           {alerts.map((a, i) => (
             <button
               key={i}
               onClick={() => a.link && onNavigate(a.link as AppView)}
-              className={`flex items-start gap-3 p-3 rounded-xl border text-right transition-all hover:shadow-sm ${alertBg(a.type)}`}
+              className={`flex items-start gap-[var(--spacing-3)] p-3 rounded-[var(--radius-lg)] border text-right transition-all hover:shadow-sm ${alertBg(a.type)}`}
             >
               <div className="mt-0.5 shrink-0">{alertIcon(a.type)}</div>
               <div>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                <p className="text-[var(--font-size-sm)] font-semibold text-[var(--color-text)]">
                   {a.title}
                 </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">{a.message}</p>
+                <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">{a.message}</p>
               </div>
             </button>
           ))}
@@ -175,7 +177,7 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
       )}
 
       {/* Main KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-[var(--spacing-3)]">
         <KpiCard
           icon={Handshake}
           label="صفقات مفتوحة"
@@ -226,30 +228,30 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
       </div>
 
       {/* Two-column layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-[var(--spacing-6)]">
         {/* Left: deals status distribution + recent deals + recent shipments */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-2 gap-[var(--spacing-6)]">
           {/* Deal Status Chart (simple bars) */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5">
-            <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-indigo-500" />
+          <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-5)]">
+            <h3 className="text-[var(--font-size-sm)] font-bold text-[var(--color-text)] mb-[var(--spacing-4)] flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-[var(--color-primary)]" />
               توزيع حالات الصفقات
             </h3>
-            <div className="space-y-3">
+            <div className="gap-[var(--spacing-3)]">
               {deals.status_distribution.map((s) => {
                 const pct = deals.total > 0 ? Math.round((s.count / deals.total) * 100) : 0;
                 return (
-                  <div key={s.status} className="flex items-center gap-3">
-                    <span className="text-xs w-20 text-slate-600 dark:text-slate-300 shrink-0">
+                  <div key={s.status} className="flex items-center gap-[var(--spacing-3)]">
+                    <span className="text-[var(--font-size-xs)] w-20 text-[var(--color-text-muted)] shrink-0">
                       {DEAL_STATUS_AR[s.status] || s.status}
                     </span>
-                    <div className="flex-1 h-5 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
+                    <div className="flex-1 h-5 bg-[var(--color-muted)] rounded-[var(--radius-full)] overflow-hidden">
                       <div
-                        className="h-full bg-gradient-to-l from-indigo-500 to-blue-500 rounded-full transition-all"
+                        className="h-full bg-[var(--color-primary)] rounded-[var(--radius-full)] transition-all"
                         style={{ width: `${pct}%` }}
                       />
                     </div>
-                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 w-12 text-left">
+                    <span className="text-[var(--font-size-xs)] font-semibold text-[var(--color-text)] w-12 text-left">
                       {s.count} ({pct}%)
                     </span>
                   </div>
@@ -259,163 +261,147 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
           </div>
 
           {/* Recent Deals */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-                <Handshake className="w-4 h-4 text-blue-500" />
+          <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-5)]">
+            <div className="flex items-center justify-between mb-[var(--spacing-4)]">
+              <h3 className="text-[var(--font-size-sm)] font-bold text-[var(--color-text)] flex items-center gap-2">
+                <Handshake className="w-4 h-4 text-[var(--color-primary)]" />
                 آخر الصفقات
               </h3>
               <button
                 onClick={() => onNavigate("deals-management")}
-                className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                className="text-[var(--font-size-xs)] text-[var(--color-primary)] hover:underline flex items-center gap-1"
               >
                 عرض الكل <ArrowLeft className="w-3 h-3" />
               </button>
             </div>
-            <div className="space-y-2.5">
+            <div className="gap-[var(--spacing-2)]">
               {deals.recent.map((d: any) => (
                 <div
                   key={d.id}
-                  className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-700 last:border-0"
+                  className="flex items-center justify-between py-2 border-b border-[var(--color-muted)] last:border-0"
                 >
                   <div>
-                    <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                    <p className="text-[var(--font-size-sm)] font-medium text-[var(--color-text)]">
                       {d.ref_number}
                     </p>
-                    <p className="text-xs text-slate-500">{d.partner_name}</p>
+                    <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">{d.partner_name}</p>
                   </div>
                   <div className="text-left">
-                    <p className="text-sm font-mono font-semibold text-slate-700 dark:text-slate-200">
+                    <p className="text-[var(--font-size-sm)] font-mono font-semibold text-[var(--color-text)]">
                       {fmtMoney(d.total_amount)} $
                     </p>
-                    <StatusBadge label={DEAL_STATUS_AR[d.status] || d.status} status={d.status} />
+                    <StatusBadge status={d.status} />
                   </div>
                 </div>
               ))}
               {deals.recent.length === 0 && (
-                <p className="text-center text-sm text-slate-400 py-4">لا توجد صفقات</p>
+                <EmptyState title="لا توجد صفقات" />
               )}
             </div>
           </div>
 
           {/* Recent Shipments */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-                <Ship className="w-4 h-4 text-indigo-500" />
+          <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-5)]">
+            <div className="flex items-center justify-between mb-[var(--spacing-4)]">
+              <h3 className="text-[var(--font-size-sm)] font-bold text-[var(--color-text)] flex items-center gap-2">
+                <Ship className="w-4 h-4 text-[var(--color-primary)]" />
                 آخر الشحنات
               </h3>
               <button
                 onClick={() => onNavigate("shipments-management")}
-                className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                className="text-[var(--font-size-xs)] text-[var(--color-primary)] hover:underline flex items-center gap-1"
               >
                 عرض الكل <ArrowLeft className="w-3 h-3" />
               </button>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-xs text-slate-500 dark:text-slate-400 border-b border-slate-100 dark:border-slate-700">
-                    <th className="text-right py-2 font-medium">رقم الشحنة</th>
-                    <th className="text-center py-2 font-medium">الحالة</th>
-                    <th className="text-center py-2 font-medium">المغادرة</th>
-                    <th className="text-center py-2 font-medium">الوصول</th>
-                    <th className="text-left py-2 font-medium">التكلفة</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shipments.recent.map((s: any) => (
-                    <tr key={s.id} className="border-b border-slate-50 dark:border-slate-700/50 last:border-0">
-                      <td className="py-2 font-medium text-slate-800 dark:text-slate-100">
-                        {s.shipment_number}
-                      </td>
-                      <td className="py-2 text-center">
-                        <StatusBadge label={SHIP_STATUS_AR[s.status] || s.status} status={s.status} />
-                      </td>
-                      <td className="py-2 text-center text-xs text-slate-500">{fmtDate(s.departure_date)}</td>
-                      <td className="py-2 text-center text-xs text-slate-500">{fmtDate(s.arrival_date)}</td>
-                      <td className="py-2 text-left font-mono text-xs">{fmtMoney(s.total_shipping_cost_usd)} $</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {shipments.recent.length === 0 && (
-                <p className="text-center text-sm text-slate-400 py-4">لا توجد شحنات</p>
-              )}
-            </div>
+            {shipments.recent.length === 0 ? (
+              <EmptyState title="لا توجد شحنات" />
+            ) : (
+              <DataGrid
+                columns={[
+                  { key: 'shipment_number', header: 'رقم الشحنة' },
+                  { key: 'status', header: 'الحالة', align: 'center', render: (row: any) => <StatusBadge status={row.status} /> },
+                  { key: 'departure_date', header: 'المغادرة', align: 'center', render: (row: any) => <span className="text-[var(--font-size-xs)]">{fmtDate(row.departure_date)}</span> },
+                  { key: 'arrival_date', header: 'الوصول', align: 'center', render: (row: any) => <span className="text-[var(--font-size-xs)]">{fmtDate(row.arrival_date)}</span> },
+                  { key: 'total_shipping_cost_usd', header: 'التكلفة', align: 'end', render: (row: any) => <span className="font-mono text-[var(--font-size-xs)]">{fmtMoney(row.total_shipping_cost_usd)} $</span> },
+                ]}
+                data={shipments.recent}
+                keyField="id"
+              />
+            )}
           </div>
         </div>
 
         {/* Right column: invoices + inventory + quick nav */}
-        <div className="space-y-6">
+        <div className="gap-[var(--spacing-6)]">
           {/* Recent Invoices */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-                <FileText className="w-4 h-4 text-purple-500" />
+          <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-5)]">
+            <div className="flex items-center justify-between mb-[var(--spacing-4)]">
+              <h3 className="text-[var(--font-size-sm)] font-bold text-[var(--color-text)] flex items-center gap-2">
+                <FileText className="w-4 h-4 text-[var(--color-primary)]" />
                 آخر الفواتير
               </h3>
               <button
                 onClick={() => onNavigate("purchase-invoices")}
-                className="text-xs text-blue-600 hover:underline flex items-center gap-1"
+                className="text-[var(--font-size-xs)] text-[var(--color-primary)] hover:underline flex items-center gap-1"
               >
                 الكل <ArrowLeft className="w-3 h-3" />
               </button>
             </div>
-            <div className="space-y-2.5">
+            <div className="gap-[var(--spacing-2)]">
               {invoices.recent.map((inv: any) => (
                 <div
                   key={inv.id}
-                  className="flex items-center justify-between py-2 border-b border-slate-100 dark:border-slate-700 last:border-0"
+                  className="flex items-center justify-between py-2 border-b border-[var(--color-muted)] last:border-0"
                 >
                   <div>
-                    <p className="text-sm font-medium text-slate-800 dark:text-slate-100">
+                    <p className="text-[var(--font-size-sm)] font-medium text-[var(--color-text)]">
                       {inv.invoice_number}
                     </p>
-                    <p className="text-xs text-slate-500">{inv.partner_name}</p>
+                    <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">{inv.partner_name}</p>
                   </div>
                   <div className="text-left">
-                    <p className="text-sm font-mono font-semibold">{fmtMoney(inv.grand_total)}</p>
-                    <span className="text-[10px] text-slate-400">
+                    <p className="text-[var(--font-size-sm)] font-mono font-semibold">{fmtMoney(inv.grand_total)}</p>
+                    <span className="text-[10px] text-[var(--color-text-muted)]">
                       {INV_STATUS_AR[inv.status] || inv.status}
                     </span>
                   </div>
                 </div>
               ))}
               {invoices.recent.length === 0 && (
-                <p className="text-center text-sm text-slate-400 py-4">لا توجد فواتير</p>
+                <EmptyState title="لا توجد فواتير" />
               )}
             </div>
           </div>
 
           {/* Inventory Summary */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5">
-            <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-4 flex items-center gap-2">
-              <Boxes className="w-4 h-4 text-amber-500" />
+          <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-5)]">
+            <h3 className="text-[var(--font-size-sm)] font-bold text-[var(--color-text)] mb-[var(--spacing-4)] flex items-center gap-2">
+              <Boxes className="w-4 h-4 text-[var(--color-warning)]" />
               ملخص المخزون
             </h3>
-            <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="grid grid-cols-2 gap-[var(--spacing-3)] mb-[var(--spacing-4)]">
               <MiniStat label="إجمالي الأصناف" value={inventory.total_products} />
               <MiniStat label="بمخزون" value={inventory.in_stock} />
               <MiniStat label="منخفض" value={inventory.low_stock} danger={inventory.low_stock > 0} />
               <MiniStat label="نفذ" value={inventory.out_of_stock} danger={inventory.out_of_stock > 0} />
             </div>
-            <div className="flex items-center justify-between pt-3 border-t border-slate-100 dark:border-slate-700">
-              <span className="text-xs text-slate-500">قيمة المخزون</span>
-              <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+            <div className="flex items-center justify-between pt-3 border-t border-[var(--color-muted)]">
+              <span className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">قيمة المخزون</span>
+              <span className="text-[var(--font-size-sm)] font-bold text-[var(--color-success)]">
                 {fmtMoney(inventory.inventory_value)} ₪
               </span>
             </div>
             {inventory.low_stock_items.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-700">
-                <p className="text-xs font-semibold text-amber-600 mb-2">أصناف تحت الحد الأدنى:</p>
+              <div className="mt-3 pt-3 border-t border-[var(--color-muted)]">
+                <p className="text-[var(--font-size-xs)] font-semibold text-[var(--color-warning)] mb-2">أصناف تحت الحد الأدنى:</p>
                 {inventory.low_stock_items.slice(0, 4).map((p) => (
                   <div
                     key={p.id}
-                    className="flex justify-between text-xs py-1 text-slate-600 dark:text-slate-300"
+                    className="flex justify-between text-[var(--font-size-xs)] py-1 text-[var(--color-text-muted)]"
                   >
                     <span>{p.name_ar || p.sku}</span>
-                    <span className="font-mono text-red-500">
+                    <span className="font-mono text-[var(--color-danger)]">
                       {Number(p.quantity_on_hand).toFixed(0)} / {p.min_stock_level}
                     </span>
                   </div>
@@ -425,12 +411,12 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
           </div>
 
           {/* Quick Navigation */}
-          <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5">
-            <h3 className="text-sm font-bold text-slate-700 dark:text-slate-200 mb-3 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-slate-500" />
+          <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-5)]">
+            <h3 className="text-[var(--font-size-sm)] font-bold text-[var(--color-text)] mb-3 flex items-center gap-2">
+              <Activity className="w-4 h-4 text-[var(--color-text-muted)]" />
               وصول سريع
             </h3>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-[var(--spacing-2)]">
               {[
                 { label: "الصفقات", view: "deals-management" as AppView, icon: Handshake },
                 { label: "الشحنات", view: "shipments-management" as AppView, icon: Ship },
@@ -442,7 +428,7 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
                 <button
                   key={item.view}
                   onClick={() => onNavigate(item.view)}
-                  className="flex items-center gap-2 p-2.5 rounded-xl text-xs font-medium text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-700/50 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-600 transition-colors"
+                  className="flex items-center gap-2 p-2.5 rounded-[var(--radius-lg)] text-[var(--font-size-xs)] font-medium text-[var(--color-text-muted)] bg-[var(--color-muted)] hover:bg-[var(--color-primary)]/10 hover:text-[var(--color-primary)] transition-colors"
                 >
                   <item.icon className="w-4 h-4" />
                   {item.label}
@@ -474,26 +460,26 @@ function KpiCard({
   onClick?: () => void;
 }) {
   const colorMap: Record<string, string> = {
-    blue: "from-blue-500 to-blue-600",
-    indigo: "from-indigo-500 to-indigo-600",
-    green: "from-emerald-500 to-emerald-600",
-    purple: "from-purple-500 to-purple-600",
-    amber: "from-amber-500 to-amber-600",
-    slate: "from-slate-500 to-slate-600",
+    blue: "bg-[var(--color-primary)]",
+    indigo: "bg-[var(--color-primary)]",
+    green: "bg-[var(--color-success)]",
+    purple: "bg-[var(--color-primary)]",
+    amber: "bg-[var(--color-warning)]",
+    slate: "bg-[var(--color-text-muted)]",
   };
-  const grad = colorMap[color] || colorMap.slate;
+  const bg = colorMap[color] || colorMap.slate;
 
   return (
     <button
       onClick={onClick}
-      className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 text-right hover:shadow-md transition-all group"
+      className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-3)] text-right hover:shadow-md transition-all group"
     >
-      <div className={`inline-flex p-2 rounded-xl bg-gradient-to-br ${grad} text-white mb-3`}>
+      <div className={`inline-flex p-[var(--spacing-1.5)] rounded-[var(--radius-md)] ${bg} text-white mb-3`}>
         <Icon className="w-5 h-5" />
       </div>
-      <p className="text-xl md:text-2xl font-bold text-slate-800 dark:text-white">{value}</p>
-      <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">{label}</p>
-      {sub && <p className="text-[10px] text-slate-400 mt-1">{sub}</p>}
+      <p className="text-[var(--font-size-xl)] md:text-[var(--font-size-2xl)] font-bold text-[var(--color-text)]">{value}</p>
+      <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mt-[var(--spacing-0.5)]">{label}</p>
+      {sub && <p className="text-[10px] text-[var(--color-text-muted)] mt-1">{sub}</p>}
     </button>
   );
 }
@@ -508,35 +494,17 @@ function MiniStat({
   danger?: boolean;
 }) {
   return (
-    <div className="text-center p-2 rounded-lg bg-slate-50 dark:bg-slate-700/40">
+    <div className="text-center p-2 rounded-[var(--radius-lg)] bg-[var(--color-muted)]">
       <p
         className={`text-lg font-bold ${
-          danger ? "text-red-500" : "text-slate-800 dark:text-white"
+          danger ? "text-[var(--color-danger)]" : "text-[var(--color-text)]"
         }`}
       >
         {value}
       </p>
-      <p className="text-[10px] text-slate-500">{label}</p>
+      <p className="text-[10px] text-[var(--color-text-muted)]">{label}</p>
     </div>
   );
 }
 
-function StatusBadge({ label, status }: { label: string; status: string }) {
-  let cls = "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300";
-  if (["Open", "Pending", "draft", "incomplete"].includes(status))
-    cls = "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300";
-  if (["Shipped", "In-Transit", "deposit_paid", "partially_paid"].includes(status))
-    cls = "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300";
-  if (["Cleared", "Arrived", "completed", "fully_paid"].includes(status))
-    cls = "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300";
-  if (["Closed", "Clearing", "archived"].includes(status))
-    cls = "bg-slate-200 text-slate-600 dark:bg-slate-600 dark:text-slate-200";
-  if (["Cancelled"].includes(status))
-    cls = "bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300";
 
-  return (
-    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${cls}`}>
-      {label}
-    </span>
-  );
-}

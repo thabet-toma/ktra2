@@ -11,12 +11,15 @@ import { PublicLayout } from './components/layout/PublicLayout';
 import { StorePage } from './components/store/StorePage';
 import { ProductDetailPage } from './components/store/ProductDetailPage'; // استيراد صفحة التفاصيل
 
+import { AuthProvider } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
+
+import './styles/index.css';
+
 const rootElement = document.getElementById('root');
 if (!rootElement) {
   throw new Error("Could not find root element to mount to");
 }
-
-import { AuthProvider } from './contexts/AuthContext';
 
 const root = ReactDOM.createRoot(rootElement);
 root.render(
@@ -24,7 +27,7 @@ root.render(
     <BrowserRouter>
       <Routes>
         {/* مسار App للوحة التحكم والتطبيق الداخلي */}
-        <Route path="/*" element={<AuthProvider><App /></AuthProvider>} />
+        <Route path="/*" element={<AuthProvider><ThemeProvider><App /></ThemeProvider></AuthProvider>} />
 
         {/* الصفحات العامة */}
         <Route path="/store" element={<StorePage />} />

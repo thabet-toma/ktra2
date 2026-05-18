@@ -112,6 +112,12 @@ Reviewed the external model's T3-01..03 + T4-01/02/03/05. **Bugs fixed:**
 ### Task2 scope — remaining (M3-M4 UI, pending)
 - **T4-06..09** (UI: linked-document tracker, unified PaymentPanel, deal/shipment list columns, missing sales screens) — not executed by the external model; still `[ ]`. T4-02 production wiring still deferred.
 
+### [TASK3 — UI/UX redesign plan, awaiting approval (Opus 2026-05-18)]
+> Design-only plan in **`task3.md`** (3 phases, no API/business-logic change). Owner: UI is weak / not professional / not information-dense. Confirmed scope: Tailwind CDN → **Tailwind v4 build + design tokens**, structural+visual (dense DataGrids replacing card lists, unified app shell, compact forms), Odoo/Daftra/Fiori-style dense aesthetic, core trade flow prioritized.
+- **Audit findings:** A1 no design system (186 hand-styled components, ~8 ad-hoc commons); A2 Tailwind via CDN (no tokens/theme/purge, non-prod); A3 low density (huge card lists, 4–6 rows/screen vs 20+); A4 no unified app shell/toolbar/breadcrumb; A5 oversized modal forms; A6 inconsistent status display; A7 ad-hoc empty/loading/error.
+- **M1** Design-system foundation (Tailwind v4 build + `@theme` tokens + `components/ui/` primitives + `AppLayout` shell). **M2** Densify core flow (Dashboard/Deals/Shipments/Clearance/LocalShipping/Sales/PI → DataGrid + drawer forms, ≥2× rows/screen). **M3** Consistency/polish (remaining screens, linked-document context bar, unified states, remove ad-hoc styling).
+- Not started — pending owner approval.
+
 ## [PHASE 1 FIXES — 2026-05-17]
 
 ### Accounting

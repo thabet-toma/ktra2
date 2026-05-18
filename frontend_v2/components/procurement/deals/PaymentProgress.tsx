@@ -277,10 +277,10 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
         return (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 z-50">
                 {/* استخدمنا max-w-5xl لعرض أكبر واستغلال العرض بدلاً من الطول */}
-                <div className="bg-white dark:bg-[#0f172a] rounded-xl shadow-2xl w-full max-w-6xl overflow-hidden border border-gray-200 dark:border-gray-700 flex flex-col max-h-[95vh]">
+                <div className="bg-white dark:bg-[var(--color-surface)] rounded-xl shadow-2xl w-full max-w-6xl overflow-hidden border border-gray-200 dark:border-gray-700 flex flex-col max-h-[95vh]">
 
                     {/* Header: Compact & Includes Exchange Rate */}
-                    <div className="px-5 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50 dark:bg-[#1e293b]">
+                    <div className="px-5 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50 dark:bg-[var(--color-surface-2)]">
                         <div className="flex items-center gap-4">
                             <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
                                 <FileText className="w-5 h-5" />
@@ -332,7 +332,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                     </div>
 
                     {/* Content: Grid Layout to reduce height */}
-                    <div className="p-4 overflow-y-auto custom-scrollbar bg-white dark:bg-[#0f172a]">
+                    <div className="p-4 overflow-y-auto custom-scrollbar bg-white dark:bg-[var(--color-surface)]">
                         {payment ? (
                             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-full">
 
@@ -340,7 +340,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 <div className="lg:col-span-4 flex flex-col gap-3">
 
                                     {/* Financial Card */}
-                                    <div className="bg-gradient-to-br from-gray-50 to-white dark:from-[#1e293b] dark:to-[#1e293b] rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm">
+                                    <div className="bg-gradient-to-br from-gray-50 to-white dark:from-[var(--color-surface-2)] dark:to-[var(--color-surface-2)] rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm">
                                         <h4 className="text-gray-900 dark:text-gray-200 font-bold text-sm mb-3 flex items-center gap-2">
                                             <Wallet className="w-4 h-4 text-emerald-500" />
                                             البيانات المالية
@@ -364,7 +364,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                     </div>
 
                                     {/* Dates Card */}
-                                    <div className="bg-white dark:bg-[#1e293b] rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm flex-1">
+                                    <div className="bg-white dark:bg-[var(--color-surface-2)] rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm flex-1">
                                         <h4 className="text-gray-900 dark:text-gray-200 font-bold text-sm mb-3 flex items-center gap-2">
                                             <Calendar className="w-4 h-4 text-blue-500" />
                                             التواريخ

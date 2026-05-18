@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { SalesInvoiceEditor, type PartnerRow, type ProductRow } from "./SalesInvoiceEditor";
 import { resolveTenantId } from "../../utils/tenantContext";
+import { DataGrid, Toolbar, Badge } from "../../components/ui";
 
 type CurrOpt = { CurrencyID: number; Code: string };
 type AccountOpt = {
@@ -62,6 +63,7 @@ export const SalesInvoicesPage: React.FC = () => {
   const [fifoCustomerId, setFifoCustomerId] = useState<number | "">("");
   const [fifoAmount, setFifoAmount] = useState("");
   const [fifoRows, setFifoRows] = useState<FifoAllocationRow[]>([]);
+  const [search, setSearch] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -210,28 +212,34 @@ export const SalesInvoicesPage: React.FC = () => {
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6" dir="rtl">
       <div className="flex items-center gap-3">
-        <Receipt className="h-8 w-8 text-emerald-600" />
+        <Receipt className="h-8 w-8 text-[var(--color-success)]" />
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">فواتير المبيعات</h1>
-          <p className="text-gray-500 dark:text-gray-400 text-sm">
+          <h1 className="text-[var(--font-size-xl)] font-bold text-[var(--color-text)]">فواتير المبيعات</h1>
+          <p className="text-[var(--font-size-sm)] text-[var(--color-text-muted)]">
             مسودة متعددة الأسطر → ترحيل محاسبي ومخزون — مرتبطة بالأصناف والعملات والعملاء
           </p>
         </div>
         <button
           type="button"
           onClick={load}
-          className="mr-auto inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600"
+          className="mr-auto inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-[var(--color-border)]"
         >
           {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
           تحديث
         </button>
       </div>
 
+      <Toolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="بحث في الفواتير..."
+      />
+
       {err && (
-        <div className="p-4 rounded-lg bg-red-50 text-red-800 dark:bg-red-900/30 dark:text-red-200">{err}</div>
+        <div className="p-4 rounded-lg bg-[var(--color-danger-light)] text-[var(--color-danger)]">{err}</div>
       )}
       {msg && (
-        <div className="p-4 rounded-lg bg-emerald-50 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-200">
+        <div className="p-4 rounded-lg bg-[var(--color-success-light)] text-[var(--color-success)]">
           {msg}
         </div>
       )}
@@ -248,206 +256,85 @@ export const SalesInvoicesPage: React.FC = () => {
         salesSettings={salesSettings}
       />
 
-      <section className="border border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-4 space-y-3 bg-gray-50/80 dark:bg-gray-900/50">
-        <h2 className="font-semibold text-gray-900 dark:text-white">توزيع دفعة (FIFO)</h2>
-        <p className="text-xs text-gray-500 dark:text-gray-400">
+      <section className="border border-dashed border-[var(--color-border)] rounded-xl p-4 space-y-3 bg-[var(--color-surface-2)]">
+        <h2 className="font-semibold text-[var(--color-text)]">توزيع دفعة (FIFO)</h2>
+        <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
           اقتراح تلقائي على الفواتير غير المسددة من الأقدم — يُنسخ لاحقاً عند تسجيل دفعة في الـ API.
         </p>
         <div className="flex flex-wrap gap-2 items-end">
-          <label className="flex flex-col gap-1 text-sm">
+          <label className="flex flex-col gap-1 text-[var(--font-size-sm)]">
             <span>العميل</span>
             <select
               value={fifoCustomerId}
               onChange={(e) => setFifoCustomerId(e.target.value ? Number(e.target.value) : "")}
-              className="rounded border border-gray-300 dark:border-gray-600 dark:bg-gray-800 px-2 py-2 min-w-[200px]"
+              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2 min-w-[200px]"
             >
               <option value="">—</option>
               {fifoCustomers.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
+                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
           </label>
-          <label className="flex flex-col gap-1 text-sm">
+          <label className="flex flex-col gap-1 text-[var(--font-size-sm)]">
             <span>مبلغ الدفعة</span>
             <input
               value={fifoAmount}
               onChange={(e) => setFifoAmount(e.target.value)}
-              className="rounded border border-gray-300 dark:border-gray-600 dark:bg-gray-800 px-2 py-2 w-40"
+              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2 w-40"
               placeholder="0.00"
             />
           </label>
           <button
             type="button"
             onClick={handleFifoSuggest}
-            className="px-3 py-2 rounded-lg bg-white border border-gray-300 dark:border-gray-600 dark:bg-gray-800 text-sm"
+            className="px-3 py-2 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--font-size-sm)]"
           >
             اقتراح FIFO
           </button>
         </div>
         {fifoRows.length > 0 && (
-          <ul className="text-sm space-y-1 font-mono">
+          <ul className="text-[var(--font-size-sm)] space-y-1 font-mono">
             {fifoRows.map((r) => (
-              <li key={r.invoice}>
-                {r.invoice_number}: {r.amount}
-              </li>
+              <li key={r.invoice}>{r.invoice_number}: {r.amount}</li>
             ))}
           </ul>
         )}
       </section>
 
-      <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-white dark:bg-gray-900">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-800">
-            <tr>
-              <th className="text-right p-3">رقم</th>
-              <th className="text-right p-3">العميل</th>
-              <th className="text-right p-3">التاريخ</th>
-              <th className="text-right p-3">النوع</th>
-              <th className="text-right p-3">الحالة</th>
-              <th className="text-right p-3">الإجمالي</th>
-              <th className="text-right p-3">مدفوع</th>
-              <th className="text-right p-3">متبقي</th>
-              <th className="text-right p-3">إجراءات</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr
-                key={r.id}
-                className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50/80 dark:hover:bg-gray-800/50"
-              >
-                <td className="p-3 font-mono">{r.invoice_number}</td>
-                <td className="p-3">{r.customer_name || r.customer}</td>
-                <td className="p-3">{r.invoice_date}</td>
-                <td className="p-3">{r.invoice_type === "cash" ? "نقدي" : "آجل"}</td>
-                <td className="p-3">
-                  <span
-                    className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${
-                      r.status === "posted"
-                        ? "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200"
-                        : r.status === "draft"
-                          ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
-                          : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
-                    }`}
-                  >
-                    {r.status === "posted" ? "مرحّلة" : r.status === "draft" ? "مسودة" : r.status}
-                  </span>
-                </td>
-                <td className="p-3 font-mono">{fmt(r.grand_total)}</td>
-                <td className="p-3 font-mono">{fmt(r.amount_paid)}</td>
-                <td className="p-3 font-mono">
-                  {(() => {
-                    const bal = Number(r.grand_total || 0) - Number(r.amount_paid || 0);
-                    return (
-                      <span
-                        className={
-                          bal > 0
-                            ? "text-red-700 dark:text-red-300"
-                            : "text-emerald-700 dark:text-emerald-400"
-                        }
-                      >
-                        {bal.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                      </span>
-                    );
-                  })()}
-                </td>
-                <td className="p-3">
-                  <div className="flex flex-wrap gap-2 justify-end">
-                    {r.status === "draft" && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => setDraftToEditId(r.id)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-xs"
-                          title="تعديل المسودة"
-                        >
-                          <Pencil className="h-3 w-3" />
-                          تعديل
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handlePostRow(r.id)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded bg-blue-600 text-white text-xs"
-                        >
-                          <Send className="h-3 w-3" />
-                          ترحيل
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDuplicate(r.id)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-emerald-500 text-emerald-700 dark:text-emerald-400 text-xs"
-                          title="نسخ إلى مسودة جديدة"
-                        >
-                          <Copy className="h-3 w-3" />
-                          نسخ
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteDraft(r.id)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-red-300 text-red-700 dark:border-red-700 dark:text-red-300 text-xs"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                          حذف
-                        </button>
-                      </>
-                    )}
-                    {r.status === "posted" && (
-                      <>
-                        {!r.stock_on_post && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (
-                                window.confirm(
-                                  "إصدار أمر إخراج وتسليم الآن؟ سيتم خصم المخزون وتسجيل قيد COGS.",
-                                )
-                              ) {
-                                handleDelivery(r.id, true);
-                              }
-                            }}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded bg-cyan-600 text-white text-xs"
-                            title="إصدار أمر إخراج وتسليمه فوراً"
-                          >
-                            <Truck className="h-3 w-3" />
-                            تسليم
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => handleDelivery(r.id, false)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-gray-300 dark:border-gray-600 text-xs"
-                          title="إنشاء أمر إخراج بدون تسليم"
-                        >
-                          <Truck className="h-3 w-3" />
-                          أمر إخراج
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDuplicate(r.id)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded border border-emerald-500 text-emerald-700 dark:text-emerald-400 text-xs"
-                          title="نسخ إلى مسودة جديدة"
-                        >
-                          <Copy className="h-3 w-3" />
-                          نسخ
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {!rows.length && !loading && (
-              <tr>
-                <td colSpan={9} className="p-8 text-center text-gray-500">
-                  لا توجد فواتير
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataGrid
+        columns={[
+          { key: "invoice_number", header: "رقم", render: (r) => <span className="font-mono">{r.invoice_number}</span> },
+          { key: "customer", header: "العميل", render: (r) => r.customer_name || r.customer },
+          { key: "invoice_date", header: "التاريخ" },
+          { key: "invoice_type", header: "النوع", render: (r) => r.invoice_type === "cash" ? "نقدي" : "آجل" },
+          { key: "status", header: "الحالة", render: (r) => <Badge variant={r.status === "posted" ? "success" : r.status === "draft" ? "warning" : "muted"}>{r.status === "posted" ? "مرحّلة" : r.status === "draft" ? "مسودة" : r.status}</Badge> },
+          { key: "grand_total", header: "الإجمالي", render: (r) => <span className="font-mono">{fmt(r.grand_total)}</span> },
+          { key: "amount_paid", header: "مدفوع", render: (r) => <span className="font-mono">{fmt(r.amount_paid)}</span> },
+          { key: "balance", header: "متبقي", render: (r) => { const bal = Number(r.grand_total || 0) - Number(r.amount_paid || 0); return <span className={bal > 0 ? "text-[var(--color-danger)]" : "text-[var(--color-success)]"}>{bal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>; } },
+          { key: "actions", header: "إجراءات", align: "end", render: (r) => (
+            <div className="flex flex-wrap gap-2 justify-end">
+              {r.status === "draft" && (
+                <>
+                  <button type="button" onClick={() => setDraftToEditId(r.id)} className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--color-border)] text-[var(--font-size-xs)]" title="تعديل المسودة"><Pencil className="h-3 w-3" />تعديل</button>
+                  <button type="button" onClick={() => handlePostRow(r.id)} className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--color-primary)] text-white text-[var(--font-size-xs)]"><Send className="h-3 w-3" />ترحيل</button>
+                  <button type="button" onClick={() => handleDuplicate(r.id)} className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--color-success)] text-[var(--color-success)] text-[var(--font-size-xs)]" title="نسخ إلى مسودة جديدة"><Copy className="h-3 w-3" />نسخ</button>
+                  <button type="button" onClick={() => handleDeleteDraft(r.id)} className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--color-danger)] text-[var(--color-danger)] text-[var(--font-size-xs)]"><Trash2 className="h-3 w-3" />حذف</button>
+                </>
+              )}
+              {r.status === "posted" && (
+                <>
+                  {!r.stock_on_post && <button type="button" onClick={() => { if (window.confirm("إصدار أمر إخراج وتسليم الآن؟ سيتم خصم المخزون وتسجيل قيد COGS.")) { handleDelivery(r.id, true); } }} className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--color-primary)] text-white text-[var(--font-size-xs)]" title="إصدار أمر إخراج وتسليمه فوراً"><Truck className="h-3 w-3" />تسليم</button>}
+                  <button type="button" onClick={() => handleDelivery(r.id, false)} className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--color-border)] text-[var(--font-size-xs)]" title="إنشاء أمر إخراج بدون تسليم"><Truck className="h-3 w-3" />أمر إخراج</button>
+                  <button type="button" onClick={() => handleDuplicate(r.id)} className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--color-success)] text-[var(--color-success)] text-[var(--font-size-xs)]" title="نسخ إلى مسودة جديدة"><Copy className="h-3 w-3" />نسخ</button>
+                </>
+              )}
+            </div>
+          )},
+        ]}
+        data={rows.filter(r => !search || r.invoice_number?.includes(search) || r.customer_name?.includes(search) || r.customer?.includes(search))}
+        loading={loading}
+        emptyMessage={<div className="py-8 text-[var(--color-text-muted)]">لا توجد فواتير</div>}
+      />
     </div>
   );
 };

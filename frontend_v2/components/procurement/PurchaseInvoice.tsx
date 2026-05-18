@@ -425,8 +425,8 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
   if (loading || invoiceRouteLoading) {
     return (
       <div className="flex items-center justify-center min-h-[500px]">
-        <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
-        <span className="mr-3 text-gray-500">
+        <Loader2 className="w-8 h-8 text-[var(--color-primary)] animate-spin" />
+        <span className="mr-3 text-[var(--color-text-muted)]">
           {invoiceRouteLoading ? "جاري تحميل الفاتورة..." : "جاري تحميل الفواتير..."}
         </span>
       </div>
@@ -434,19 +434,19 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 pb-10">
+    <div className="min-h-screen bg-[var(--color-surface-2)] pb-10">
 
       {/* Header - يظهر فقط في وضع القائمة */}
       {viewMode === 'list' && (
-        <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 mb-6">
+        <div className="bg-[var(--color-surface)] border-b border-[var(--color-border)] mb-6">
           <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
             <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-50 dark:bg-blue-900/30 rounded-lg">
-                <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+              <div className="p-2 bg-[var(--color-primary-light)] rounded-lg">
+                <FileText className="w-6 h-6 text-[var(--color-primary)]" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900 dark:text-white">فواتير المشتريات</h1>
-                <p className="text-sm text-gray-500 dark:text-gray-400">
+                <h1 className="text-[var(--font-size-xl)] font-bold text-[var(--color-text)]">فواتير المشتريات</h1>
+                <p className="text-[var(--font-size-sm)] text-[var(--color-text-muted)]">
                   إدارة فواتير الشراء ({invoices.length})
                 </p>
               </div>
@@ -456,14 +456,14 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
               <button
                 onClick={() => setShowImportModal(true)}
                 disabled={importing}
-                className="flex items-center gap-2 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-800/60 px-5 py-2.5 rounded-xl font-medium transition-all border border-indigo-200 dark:border-indigo-700 disabled:opacity-50"
+                className="flex items-center gap-2 bg-[var(--color-primary-light)] text-[var(--color-primary)] hover:bg-[var(--color-muted)] px-5 py-2.5 rounded-xl font-medium transition-all border border-[var(--color-primary)] disabled:opacity-50"
               >
                 {importing ? <Loader2 className="w-5 h-5 animate-spin" /> : <ScrollText className="w-5 h-5" />}
                 <span>استيراد من تخليص جمركي</span>
               </button>
               <button
                 onClick={handleCreateNew}
-                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-medium transition-all shadow-sm hover:shadow-md"
+                className="flex items-center gap-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white px-5 py-2.5 rounded-xl font-medium transition-all shadow-sm hover:shadow-md"
               >
                 <Plus className="w-5 h-5" />
                 <span>فاتورة جديدة</span>

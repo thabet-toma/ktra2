@@ -91,7 +91,7 @@ export const ShipmentShippingDetails: React.FC<ShipmentShippingDetailsProps> = (
                     ) : (
                         <>
                             {(shippingInfo.imoNumber || shippingInfo.shipName) && (
-                                <a href={`https://www.marinetraffic.com/en/ais/index/search/all/keyword:${shippingInfo.imoNumber || shippingInfo.shipName}`} target="_blank" rel="noopener noreferrer" className="flex-1 py-2 px-3 bg-[#004e82] text-white rounded-lg text-xs font-bold text-center flex items-center justify-center gap-2">
+                                <a href={`https://www.marinetraffic.com/en/ais/index/search/all/keyword:${shippingInfo.imoNumber || shippingInfo.shipName}`} target="_blank" rel="noopener noreferrer" className="flex-1 py-2 px-3 bg-[var(--color-primary-dark,#004e82)] text-white rounded-lg text-xs font-bold text-center flex items-center justify-center gap-2">
                                     <Ship className="w-3 h-3" /> MarineTraffic
                                 </a>
                             )}

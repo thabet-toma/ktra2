@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   X,
 } from "lucide-react";
+import { DataGrid, Drawer } from '../../../components/ui';
 import { User } from "@/types";
 import { DEFAULT_CLEARANCE_COST_LINES, type ClearanceCostLine } from "@/constants/clearanceDefaults";
 import {
@@ -511,11 +512,11 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
     <div className="p-4 md:p-8 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-3 rounded-2xl bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">
+          <div className="p-3 rounded-2xl bg-[var(--color-primary-light)] text-[var(--color-primary)]">
             <FileText className="w-8 h-8" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+            <h1 className="text-[var(--font-size-2xl)] font-bold text-[var(--color-text)]">
               التخليص الجمركي
             </h1>
           </div>
@@ -524,7 +525,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
           <button
             type="button"
             onClick={() => reload()}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
           >
             <RefreshCw className="w-4 h-4" />
             تحديث
@@ -532,7 +533,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
           <button
             type="button"
             onClick={() => setNewOpen(true)}
-            className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-amber-600 text-white font-bold hover:bg-amber-700 shadow-md"
+            className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-[var(--color-primary)] text-white font-bold hover:opacity-90"
           >
             <Plus className="w-5 h-5" />
             تخليص من شحنة
@@ -541,85 +542,77 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
       </div>
 
       {err && (
-        <div className="p-4 rounded-xl bg-red-50 dark:bg-red-900/20 text-red-800 dark:text-red-200 text-sm border border-red-100 dark:border-red-900/40">
+        <div className="p-4 rounded-xl bg-[var(--color-danger-light)] text-[var(--color-danger)] text-sm border border-[var(--color-danger)]/20">
           {err}
         </div>
       )}
 
       <div className="flex flex-col gap-6">
         <div
-          className={`rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm overflow-hidden ${
+          className={`rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm overflow-hidden ${
             selected ? "max-h-52 lg:max-h-60" : ""
           }`}
         >
-          <div className="px-4 py-3 border-b border-gray-100 dark:border-gray-800 font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-            <Truck className="w-4 h-4 text-amber-600" />
+          <div className="px-4 py-3 border-b border-[var(--color-border-subtle)] font-bold text-[var(--color-text)] flex items-center gap-2">
+            <Truck className="w-4 h-4 text-[var(--color-primary)]" />
             السجلات ({clearances.length})
           </div>
           <div
             className={`overflow-y-auto ${selected ? "max-h-40 lg:max-h-48" : "max-h-[min(560px,70vh)]"}`}
           >
-            {loading ? (
-              <div className="flex justify-center py-16 text-gray-400">
-                <Loader2 className="w-8 h-8 animate-spin" />
-              </div>
-            ) : clearances.length === 0 ? (
-              <p className="p-8 text-center text-gray-500 text-sm">
-                لا توجد تخليصات بعد. استخدم «تخليص من شحنة».
-              </p>
-            ) : (
-              <ul className="divide-y divide-gray-100 dark:divide-gray-800">
-                {clearances.map((c) => {
-                  const total = sumLines(c.cost_lines || []);
-                  const active = selected?.id === c.id;
-                  return (
-                    <li key={c.id}>
-                      <button
-                        type="button"
-                        onClick={() => openDetail(c)}
-                        className={`w-full text-right px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-800/80 transition-colors ${
-                          active ? "bg-amber-50/80 dark:bg-amber-900/20" : ""
-                        }`}
-                      >
-                        <div className="font-bold text-gray-900 dark:text-white leading-snug">
-                          {clearanceShipmentTitle(c)}
-                        </div>
-                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1 flex flex-wrap gap-2">
-                          <span>المخلص: {c.broker_name || "—"}</span>
-                          <span>|</span>
-                          <span>
-                            الإجمالي: ₪
-                            {total.toLocaleString(undefined, {
-                              minimumFractionDigits: 2,
-                            })}
-                          </span>
-                          <span>|</span>
-                          <span>{c.status}</span>
-                        </div>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
+            <DataGrid<ClearanceRow>
+              columns={[
+                {
+                  key: "shipment",
+                  header: "الشحنة",
+                  render: (row) => (
+                    <div className="font-bold text-[var(--color-text)] leading-snug">
+                      {clearanceShipmentTitle(row)}
+                    </div>
+                  ),
+                },
+                {
+                  key: "broker",
+                  header: "المخلص",
+                  render: (row) => row.broker_name || "—",
+                },
+                {
+                  key: "total",
+                  header: "الإجمالي",
+                  align: "end",
+                  render: (row) => `₪${sumLines(row.cost_lines || []).toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+                },
+                {
+                  key: "status",
+                  header: "الحالة",
+                  render: (row) => row.status,
+                },
+              ]}
+              data={clearances}
+              keyField="id"
+              loading={loading}
+              emptyMessage="لا توجد تخليصات بعد. استخدم «تخليص من شحنة»."
+              onRowClick={(row) => openDetail(row)}
+              rowClassName={(row) => selected?.id === row.id ? "bg-[var(--color-primary-light)]" : ""}
+            />
           </div>
         </div>
 
-        <div className="w-full max-w-6xl mx-auto rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm p-5 sm:p-6 space-y-4">
+        <div className="w-full max-w-6xl mx-auto rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-sm p-5 sm:p-6 space-y-4">
           {!selected ? (
-            <p className="text-center text-gray-500 py-12 text-sm">
+            <p className="text-center text-[var(--color-text-muted)] py-12 text-sm">
               اختر سجلاً من القائمة أعلاه
             </p>
           ) : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 dark:border-gray-800 pb-3">
-                <h2 className="font-bold text-lg text-gray-900 dark:text-white leading-snug">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-subtle)] pb-3">
+                <h2 className="font-bold text-[var(--font-size-lg)] text-[var(--color-text)] leading-snug">
                   {clearanceShipmentTitle(selected)}
                 </h2>
                 <button
                   type="button"
                   onClick={() => setSelected(null)}
-                  className="text-sm font-semibold text-amber-800 dark:text-amber-300 hover:underline"
+                  className="text-sm font-semibold text-[var(--color-primary)] hover:underline"
                 >
                   ← القائمة
                 </button>
@@ -627,7 +620,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <label className="block text-sm space-y-1">
-                  <span className="text-gray-500">المخلص الجمركي</span>
+                  <span className="text-[var(--color-text-muted)]">المخلص الجمركي</span>
                   <select
                     value={formBroker === "" ? "" : String(formBroker)}
                     onChange={(e) =>
@@ -635,7 +628,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                         e.target.value === "" ? "" : Number(e.target.value)
                       )
                     }
-                    className="w-full rounded-xl border border-gray-200 dark:border-gray-600 px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    className="w-full rounded-xl border border-[var(--color-border)] px-3 py-2 bg-[var(--color-surface)] text-[var(--color-text)]"
                   >
                     <option value="">—</option>
                     {brokers.map((b) => (
@@ -646,28 +639,28 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                   </select>
                 </label>
                 <label className="block text-sm space-y-1">
-                  <span className="text-gray-500">رقم البيان / الإقرار</span>
+                  <span className="text-[var(--color-text-muted)]">رقم البيان / الإقرار</span>
                   <input
                     value={formDecl}
                     onChange={(e) => setFormDecl(e.target.value)}
-                    className="w-full rounded-xl border border-gray-200 dark:border-gray-600 px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    className="w-full rounded-xl border border-[var(--color-border)] px-3 py-2 bg-[var(--color-surface)] text-[var(--color-text)]"
                   />
                 </label>
                 <label className="block text-sm space-y-1">
-                  <span className="text-gray-500">تاريخ التخليص</span>
+                  <span className="text-[var(--color-text-muted)]">تاريخ التخليص</span>
                   <input
                     type="date"
                     value={formDate}
                     onChange={(e) => setFormDate(e.target.value)}
-                    className="w-full rounded-xl border border-gray-200 dark:border-gray-600 px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    className="w-full rounded-xl border border-[var(--color-border)] px-3 py-2 bg-[var(--color-surface)] text-[var(--color-text)]"
                   />
                 </label>
                 <label className="block text-sm space-y-1">
-                  <span className="text-gray-500">الحالة</span>
+                  <span className="text-[var(--color-text-muted)]">الحالة</span>
                   <select
                     value={formStatus}
                     onChange={(e) => setFormStatus(e.target.value)}
-                    className="w-full rounded-xl border border-gray-200 dark:border-gray-600 px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                    className="w-full rounded-xl border border-[var(--color-border)] px-3 py-2 bg-[var(--color-surface)] text-[var(--color-text)]"
                   >
                     {STATUS_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>
@@ -679,22 +672,22 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
               </div>
 
               <label className="block text-sm space-y-1">
-                <span className="text-gray-500">ملاحظات</span>
+                <span className="text-[var(--color-text-muted)]">ملاحظات</span>
                 <textarea
                   value={formNotes}
                   onChange={(e) => setFormNotes(e.target.value)}
                   rows={2}
-                  className="w-full rounded-xl border border-gray-200 dark:border-gray-600 px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  className="w-full rounded-xl border border-[var(--color-border)] px-3 py-2 bg-[var(--color-surface)] text-[var(--color-text)]"
                 />
               </label>
 
               <div className="grid grid-cols-1 gap-6">
-                <div className="rounded-2xl border-2 border-blue-200/90 dark:border-blue-900/55 bg-blue-50/25 dark:bg-blue-950/20 p-4 sm:p-5 space-y-4">
-                  <div className="border-b border-blue-200/80 dark:border-blue-900/50 pb-2">
-                    <h3 className="text-sm font-bold text-blue-900 dark:text-blue-100">
+                <div className="rounded-2xl border-2 border-[var(--color-info)]/30 bg-[var(--color-info-light)] p-4 sm:p-5 space-y-4">
+                  <div className="border-b border-[var(--color-info)]/30 pb-2">
+                    <h3 className="text-sm font-bold text-[var(--color-info)]">
                       التخليص — دفع المخلّص
                     </h3>
-                    <p className="text-xs font-semibold text-blue-900 dark:text-blue-100 mt-1.5 tabular-nums">
+                    <p className="text-xs font-semibold text-[var(--color-info)] mt-1.5 tabular-nums">
                       أصل ₪{clearanceBudgetIls.toLocaleString()} · مدفوع ₪{paidClearanceIls.toLocaleString()} · متبقي
                       ₪{remainingClearanceOnly.toLocaleString()}
                     </p>
@@ -702,7 +695,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
 
               <div className="space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-bold text-gray-800 dark:text-gray-100 text-sm">
+                  <span className="font-bold text-[var(--color-text)] text-sm">
                     بنود التخليص (₪)
                   </span>
                   <div className="flex flex-wrap gap-2">
@@ -713,7 +706,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                           DEFAULT_CLEARANCE_COST_LINES.map((x) => ({ ...x }))
                         )
                       }
-                      className="text-xs px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700"
+                      className="text-xs px-3 py-1.5 rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)] hover:opacity-80"
                     >
                       استعادة الافتراضي
                     </button>
@@ -725,14 +718,14 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                           { label: "بند جديد", amount: 0 },
                         ])
                       }
-                      className="text-xs px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700"
+                      className="text-xs px-3 py-1.5 rounded-lg bg-[var(--color-success)] text-white hover:opacity-90"
                     >
                       + بند
                     </button>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-end gap-2 p-3 rounded-xl bg-amber-50/60 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-900/50">
-                  <label className="text-xs font-semibold text-amber-900 dark:text-amber-100 flex-1 min-w-[140px]">
+                <div className="flex flex-wrap items-end gap-2 p-3 rounded-xl bg-[var(--color-primary-light)] border border-[var(--color-primary)]/30">
+                  <label className="text-xs font-semibold text-[var(--color-primary)] flex-1 min-w-[140px]">
                     التكلفة الكلية للتخليص (₪) — بند واحد
                     <input
                       type="number"
@@ -741,25 +734,25 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                       value={quickLumpTotal}
                       onChange={(e) => setQuickLumpTotal(e.target.value)}
                       placeholder="مثال: 14487"
-                      className="mt-1 w-full rounded-lg border border-amber-200 dark:border-amber-800 px-2 py-2 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-sm font-bold"
+                      className="mt-1 w-full rounded-lg border border-[var(--color-primary)]/30 px-2 py-2 bg-[var(--color-surface)] text-[var(--color-text)] text-sm font-bold"
                     />
                   </label>
                   <button
                     type="button"
                     onClick={applyQuickLumpTotal}
-                    className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-bold hover:bg-amber-700 shadow-sm"
+                    className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-[var(--color-primary)] text-white text-sm font-bold hover:opacity-90"
                   >
                     تطبيق كإجمالي
                   </button>
                 </div>
 
-                <details className="rounded-xl border border-dashed border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/40 px-3 py-2">
-                  <summary className="text-xs cursor-pointer text-gray-600 dark:text-gray-400 select-none py-1">
+<details className="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)] px-3 py-2">
+                  <summary className="text-xs cursor-pointer text-[var(--color-text-muted)] select-none py-1">
                     توزيع تلقائي بالتساوي على البنود الحالية (اختياري)
                   </summary>
                   <div className="flex flex-wrap items-end gap-2 pt-2 pb-1">
-                    <label className="text-xs text-gray-500 flex-1 min-w-[120px]">
-                      مبلغ يُقسَّم بالتساوي
+                    <label className="text-xs text-[var(--color-text-muted)] flex-1 min-w-[120px]">
+                      مبلغ يُقسَّم بالتساوي
                       <input
                         type="number"
                         step="0.01"
@@ -767,13 +760,13 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                         value={distributeInput}
                         onChange={(e) => setDistributeInput(e.target.value)}
                         placeholder="مثال: 1500"
-                        className="mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-600 px-2 py-1.5 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+                        className="mt-1 w-full rounded-lg border border-[var(--color-border)] px-2 py-1.5 bg-[var(--color-surface)] text-[var(--color-text)] text-sm"
                       />
                     </label>
                     <button
                       type="button"
                       onClick={applyDistribute}
-                      className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700"
+                      className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-[var(--color-secondary)] text-white text-sm font-medium hover:opacity-90"
                     >
                       <Split className="w-4 h-4" />
                       وزّع
@@ -781,16 +774,16 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                   </div>
                 </details>
 
-                <div className="rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
+                <div className="rounded-xl border border-[var(--color-border)] overflow-hidden">
                   <table className="w-full text-sm">
-                    <thead className="bg-gray-50 dark:bg-gray-800/80 text-gray-600 dark:text-gray-300">
+                    <thead className="bg-[var(--color-surface-2)] text-[var(--color-text-muted)]">
                       <tr>
                         <th className="text-right px-3 py-2">البند</th>
                         <th className="text-right px-3 py-2 w-32">المبلغ</th>
                         <th className="w-10" />
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    <tbody className="divide-y divide-[var(--color-border-subtle)]">
                       {formLines.map((row, idx) => (
                         <tr key={idx}>
                           <td className="px-2 py-1">
@@ -804,7 +797,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                                   )
                                 );
                               }}
-                              className="w-full rounded-lg border border-transparent hover:border-gray-200 dark:hover:border-gray-600 focus:border-amber-500 px-2 py-1 bg-transparent text-gray-900 dark:text-white"
+                              className="w-full rounded-lg border border-transparent hover:border-[var(--color-border)] focus:border-[var(--color-primary)] px-2 py-1 bg-transparent text-[var(--color-text)]"
                             />
                           </td>
                           <td className="px-2 py-1">
@@ -821,7 +814,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                                   )
                                 );
                               }}
-                              className="w-full rounded-lg border border-gray-200 dark:border-gray-600 px-2 py-1 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                              className="w-full rounded-lg border border-[var(--color-border)] px-2 py-1 bg-[var(--color-surface)] text-[var(--color-text)]"
                             />
                           </td>
                           <td className="px-1 text-center">
@@ -833,7 +826,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                                   lines.filter((_, i) => i !== idx)
                                 )
                               }
-                              className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg"
+                              className="p-1.5 text-[var(--color-danger)] hover:bg-[var(--color-danger-light)] rounded-lg"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -843,7 +836,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                     </tbody>
                   </table>
                 </div>
-                <div className="text-left font-bold text-amber-700 dark:text-amber-300 text-sm">
+                <div className="text-left font-bold text-[var(--color-primary)] text-sm">
                   مجموع بنود التخليص: ₪
                   {sumLines(formLines).toLocaleString(undefined, {
                     minimumFractionDigits: 2,
@@ -851,23 +844,23 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                 </div>
               </div>
 
-                  <div className="space-y-3 border-t border-blue-200/70 dark:border-blue-900/40 pt-4">
+                  <div className="space-y-3 border-t border-[var(--color-info)]/30 pt-4">
                     {clearancePayClosed ? (
-                      <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200 py-2">
+                      <p className="text-xs font-semibold text-[var(--color-success)] py-2">
                         تم سداد التخليص بالكامل — لا دفع إضافي ضمن هذا الأصل.
                       </p>
                     ) : (
                       <>
-                        <span className="text-xs font-bold text-blue-900 dark:text-blue-100 block">
+                        <span className="text-xs font-bold text-[var(--color-info)] block">
                           دفع للمخلّص (صف واحد)
                         </span>
                         <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
-                          <label className="block text-xs space-y-1 sm:col-span-5 text-gray-600 dark:text-gray-400">
+                          <label className="block text-xs space-y-1 sm:col-span-5 text-[var(--color-text-muted)]">
                             <span>الصندوق</span>
                             <select
                               value={payCashBoxId}
                               onChange={(e) => setPayCashBoxId(e.target.value)}
-                              className="w-full rounded-lg border border-gray-200 dark:border-gray-600 px-2 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+                              className="w-full rounded-lg border border-[var(--color-border)] px-2 py-2 bg-[var(--color-surface)] text-[var(--color-text)] text-sm"
                             >
                               <option value="">اختر…</option>
                               {cashLedgers.map((l) => (
@@ -877,16 +870,16 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                               ))}
                             </select>
                           </label>
-                          <label className="block text-xs space-y-1 sm:col-span-3 text-gray-600 dark:text-gray-400">
+                          <label className="block text-xs space-y-1 sm:col-span-3 text-[var(--color-text-muted)]">
                             <span>التاريخ</span>
                             <input
                               type="date"
                               value={payDate}
                               onChange={(e) => setPayDate(e.target.value)}
-                              className="w-full rounded-lg border border-gray-200 dark:border-gray-600 px-2 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+                              className="w-full rounded-lg border border-[var(--color-border)] px-2 py-2 bg-[var(--color-surface)] text-[var(--color-text)] text-sm"
                             />
                           </label>
-                          <label className="block text-xs space-y-1 sm:col-span-2 text-gray-600 dark:text-gray-400">
+                          <label className="block text-xs space-y-1 sm:col-span-2 text-[var(--color-text-muted)]">
                             <span>₪</span>
                             <input
                               type="number"
@@ -894,7 +887,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                               step="0.01"
                               value={payAmount}
                               onChange={(e) => setPayAmount(e.target.value)}
-                              className="w-full rounded-lg border border-gray-200 dark:border-gray-600 px-2 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm font-semibold"
+                              className="w-full rounded-lg border border-[var(--color-border)] px-2 py-2 bg-[var(--color-surface)] text-[var(--color-text)] text-sm font-semibold"
                             />
                           </label>
                           <div className="sm:col-span-2">
@@ -902,7 +895,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                               type="button"
                               onClick={handlePostPayment}
                               disabled={paying}
-                              className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-blue-600 px-3 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+                              className="w-full inline-flex items-center justify-center gap-1.5 rounded-xl bg-[var(--color-info)] px-3 py-2.5 text-sm font-bold text-white hover:opacity-90 disabled:opacity-50"
                             >
                               {paying ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                               دفع
@@ -910,13 +903,13 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                           </div>
                         </div>
                         <details className="text-xs">
-                          <summary className="cursor-pointer text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                          <summary className="cursor-pointer text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
                             ملاحظات الدفع (اختياري)
                           </summary>
                           <input
                             value={payNotes}
                             onChange={(e) => setPayNotes(e.target.value)}
-                            className="mt-2 w-full rounded-lg border border-gray-200 dark:border-gray-600 px-2 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm"
+                            className="mt-2 w-full rounded-lg border border-[var(--color-border)] px-2 py-2 bg-[var(--color-surface)] text-[var(--color-text)] text-sm"
                             placeholder="اختياري"
                           />
                         </details>
@@ -926,44 +919,44 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                   </div>
                 </div>
 
-                <div className="rounded-2xl border-2 border-amber-300/90 dark:border-amber-800/55 bg-amber-50/35 dark:bg-amber-950/25 p-4 sm:p-5 space-y-4">
-                  <div className="border-b border-amber-200/80 dark:border-amber-900/50 pb-2">
-                    <h3 className="text-sm font-bold text-amber-950 dark:text-amber-100">
+                <div className="rounded-2xl border-2 border-[var(--color-primary)]/50 bg-[var(--color-primary-light)]/50 p-4 sm:p-5 space-y-4">
+                  <div className="border-b border-[var(--color-primary)]/30 pb-2">
+                    <h3 className="text-sm font-bold text-[var(--color-primary)]">
                       النقل المحلي — دفع الناقل
                     </h3>
-                    <p className="text-xs font-semibold text-amber-950 dark:text-amber-100 mt-1.5 tabular-nums">
+                    <p className="text-xs font-semibold text-[var(--color-primary)] mt-1.5 tabular-nums">
                       أصل ₪{shippingBudgetIls.toLocaleString()} · مدفوع ₪{paidShippingIls.toLocaleString()} · متبقي ₪
                       {remainingShippingOnly.toLocaleString()}
                     </p>
                   </div>
 
                   {!!selected?.local_shipments?.length && (
-                    <div className="rounded-xl border border-amber-300 dark:border-amber-800 bg-white/70 dark:bg-gray-900/40 p-3 space-y-2">
-                      <p className="text-xs font-bold text-amber-950 dark:text-amber-100">
+                    <div className="rounded-xl border border-[var(--color-primary)]/50 bg-[var(--color-surface)]/70 p-3 space-y-2">
+                      <p className="text-xs font-bold text-[var(--color-primary)]">
                         سجلات الشحن المحلي الرسمية المرتبطة (المصدر الموحّد — تُدار من صفحة «الشحن المحلي»):
                       </p>
                       <ul className="text-xs space-y-1">
                         {selected.local_shipments.map((ls) => (
                           <li
                             key={ls.id}
-                            className="flex items-center justify-between gap-2 border-b border-amber-100 dark:border-amber-900/40 pb-1 last:border-0"
+                            className="flex items-center justify-between gap-2 border-b border-[var(--color-primary)]/10 pb-1 last:border-0"
                           >
                             <span className="font-semibold tabular-nums">{ls.shipment_number}</span>
                             <span className="tabular-nums">{Number(ls.amount).toLocaleString()}</span>
                             <span>{ls.status}</span>
-                            <span className={ls.is_posted ? "text-emerald-700" : "text-gray-500"}>
+                            <span className={ls.is_posted ? "text-[var(--color-success)]" : "text-[var(--color-text-muted)]"}>
                               {ls.is_posted ? "مُرحّل" : "غير مُرحّل"}
                             </span>
                           </li>
                         ))}
                       </ul>
-                      <p className="text-[11px] text-amber-800 dark:text-amber-300">
+                      <p className="text-[11px] text-[var(--color-primary)]">
                         ملاحظة: عند وجود سجل شحن محلي مُرحّل ومُرسمَل، تُستبعد تكلفته من بنود التخليص تلقائياً لمنع ازدواج الترسمل (T1-01).
                       </p>
                     </div>
                   )}
 
-                  <div className="rounded-xl border border-amber-300 dark:border-amber-800 bg-white/60 dark:bg-gray-900/40 p-3 text-xs text-amber-900 dark:text-amber-200 space-y-1">
+                  <div className="rounded-xl border border-[var(--color-primary)]/50 bg-[var(--color-surface)]/60 p-3 text-xs text-[var(--color-primary)] space-y-1">
                     <p className="font-bold">إدارة النقل المحلي انتقلت إلى صفحة «الشحن المحلي».</p>
                     <p>
                       لم يَعُد النقل المحلي يُدخَل أو يُدفَع من شاشة التخليص (إزالة الازدواج — T4-04).
@@ -974,14 +967,14 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                 </div>
               </div>
 
-              <div className="text-left space-y-0.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/80 dark:bg-gray-800/40 px-4 py-3">
-                <div className="text-xs font-bold text-gray-700 dark:text-gray-200">
+              <div className="text-left space-y-0.5 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] px-4 py-3">
+                <div className="text-xs font-bold text-[var(--color-text)]">
                   الإجمالي (تخليص + نقل محلي): ₪
                   {totalClearance.toLocaleString(undefined, {
                     minimumFractionDigits: 2,
                   })}
                 </div>
-                <div className="text-[10px] text-gray-600 dark:text-gray-400">
+                <div className="text-[10px] text-[var(--color-text-muted)]">
                   المتبقي بعد كل الدفعات: ₪{remaining.toLocaleString()}
                   {remaining === 0 ? " — مغلق" : ""}
                 </div>
@@ -991,7 +984,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
                 type="button"
                 onClick={handleSave}
                 disabled={saving}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-amber-600 text-white font-bold hover:bg-amber-700 disabled:opacity-50"
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[var(--color-primary)] text-white font-bold hover:opacity-90 disabled:opacity-50"
               >
                 {saving ? (
                   <Loader2 className="w-5 h-5 animate-spin" />

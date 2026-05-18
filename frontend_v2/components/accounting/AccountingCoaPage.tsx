@@ -114,11 +114,11 @@ const CoaRow: React.FC<RowProps> = ({
           onOpenRowMenu(account, e.currentTarget as HTMLElement);
         }}
         className={[
-          "flex items-center gap-2 py-2 px-3 rounded-lg",
-          "hover:bg-gray-100 dark:hover:bg-gray-800/80",
-          "border border-transparent hover:border-gray-200 dark:hover:border-gray-700",
+          "flex items-center gap-2 py-2 px-3 rounded-[var(--radius-lg)]",
+          "hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]",
+          "border border-transparent hover:border-[var(--color-border)]",
           isMatch
-            ? "bg-emerald-50/70 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-700"
+            ? "bg-[var(--color-success)]/10 dark:bg-[var(--color-success)]/20 border-[var(--color-success)]/30 dark:border-[var(--color-success)]/50"
             : "",
         ].join(" ")}
       >
@@ -131,11 +131,11 @@ const CoaRow: React.FC<RowProps> = ({
           {depth > 0 && (
             <>
               <div
-                className="absolute inset-y-0 w-px bg-gray-300 dark:bg-gray-500"
+                className="absolute inset-y-0 w-px bg-[var(--color-border)] dark:bg-[var(--color-text-muted)]"
                 style={{ right: rightOffset }}
               />
               <div
-                className="absolute top-1/2 h-px bg-gray-300 dark:bg-gray-500 -translate-y-1/2"
+                className="absolute top-1/2 h-px bg-[var(--color-border)] dark:bg-[var(--color-text-muted)] -translate-y-1/2"
                 style={{ right: rightOffset, width: linkWidth }}
               />
             </>
@@ -146,7 +146,7 @@ const CoaRow: React.FC<RowProps> = ({
           <button
             type="button"
             onClick={() => toggle(account.id)}
-            className="p-1 text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+            className="p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)] rounded-[var(--radius-md)]"
           >
             {isOpen ? (
               <ChevronDown className="w-4 h-4" />
@@ -159,7 +159,7 @@ const CoaRow: React.FC<RowProps> = ({
         )}
         {typeLetter && (
           <span
-            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-indigo-100 text-xs font-bold text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200"
+            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-primary)]/20 text-[var(--font-size-xs)] font-bold text-[var(--color-primary)] dark:bg-[var(--color-primary)]/30 dark:text-[var(--color-primary-foreground)]"
             title="حساب رئيسي"
           >
             {typeLetter}
@@ -167,34 +167,34 @@ const CoaRow: React.FC<RowProps> = ({
         )}
         {!typeLetter && lp && (
           <span
-            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200"
+            className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-warning)]/20 text-[var(--color-warning)] dark:bg-[var(--color-warning)]/30 dark:text-[var(--color-warning)]"
             title="حساب مرتبط بمورد"
           >
             <Factory className="w-4 h-4" />
           </span>
         )}
         {!typeLetter && !lp && <span className="w-7 flex-shrink-0" />}
-        <span className="font-mono text-sm text-blue-600 dark:text-blue-400 w-20">
+        <span className="font-mono text-[var(--font-size-sm)] text-[var(--color-primary)] dark:text-[var(--color-primary)] w-20">
           {account.code || "—"}
         </span>
-        <span className="flex-1 min-w-0 text-sm font-medium text-gray-900 dark:text-gray-100">
+        <span className="flex-1 min-w-0 text-[var(--font-size-sm)] font-medium text-[var(--color-text)] dark:text-[var(--color-text)]">
           <span className="block truncate" title={displayName}>
             {displayName}
           </span>
           {subLegal && (
-            <span className="block truncate text-[11px] font-normal uppercase tracking-wide text-gray-400 dark:text-gray-500 mt-0.5">
+            <span className="block truncate text-[var(--font-size-xs)] font-normal uppercase tracking-wide text-[var(--color-text-muted)] dark:text-[var(--color-text-muted)] mt-0.5">
               {subLegal}
             </span>
           )}
           {lp && !aliasName && (
-            <span className="block text-[11px] text-amber-700 dark:text-amber-400 mt-0.5">
+            <span className="block text-[var(--font-size-xs)] text-[var(--color-warning)] dark:text-[var(--color-warning)] mt-0.5">
               أضف اسماً مستعاراً للمورد (الحقل Name) ليظهر هنا
             </span>
           )}
           {lp && (
             <button
               type="button"
-              className="mt-0.5 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline dark:text-blue-400"
+              className="mt-0.5 inline-flex items-center gap-1 text-[var(--font-size-xs)] text-[var(--color-primary)] hover:underline dark:text-[var(--color-primary)]"
               onClick={(e) => {
                 e.stopPropagation();
                 onOpenSupplier?.(lp.id);
@@ -205,7 +205,7 @@ const CoaRow: React.FC<RowProps> = ({
             </button>
           )}
         </span>
-        <span className="text-xs text-gray-500 hidden md:inline">
+        <span className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] hidden md:inline">
           {ACCOUNT_TYPES.find((t) => t.v === account.account_type)?.l ||
             account.account_type}
         </span>
@@ -214,8 +214,8 @@ const CoaRow: React.FC<RowProps> = ({
           className={[
             "w-2.5 h-2.5 rounded-full border inline-flex flex-shrink-0",
             account.is_active
-              ? "bg-green-500/15 border-green-400 dark:bg-green-900/20 dark:border-green-500"
-              : "bg-gray-500/15 border-gray-400 dark:bg-gray-900/20 dark:border-gray-500",
+              ? "bg-[var(--color-success)]/20 border-[var(--color-success)] dark:bg-[var(--color-success)]/30 dark:border-[var(--color-success)]"
+              : "bg-[var(--color-text-muted)]/20 border-[var(--color-text-muted)] dark:bg-[var(--color-surface-3)] dark:border-[var(--color-text-muted)]",
           ].join(" ")}
           title={account.is_active ? "حساب نشط" : "حساب غير نشط"}
           aria-label={account.is_active ? "حساب نشط" : "حساب غير نشط"}
@@ -224,7 +224,7 @@ const CoaRow: React.FC<RowProps> = ({
         <button
           type="button"
           onClick={() => onAddChild(account)}
-          className="p-1.5 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 rounded opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto focus:pointer-events-auto"
+          className="p-1.5 text-[var(--color-success)] hover:bg-[var(--color-success)]/10 dark:hover:bg-[var(--color-success)]/20 rounded-[var(--radius-md)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all pointer-events-none group-hover:pointer-events-auto focus:pointer-events-auto"
           title="حساب فرعي"
         >
           <Plus className="w-4 h-4" />
@@ -232,21 +232,21 @@ const CoaRow: React.FC<RowProps> = ({
         <button
           type="button"
           onClick={() => onEdit(account)}
-          className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto focus:pointer-events-auto"
+          className="p-1.5 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 dark:hover:bg-[var(--color-primary)]/20 rounded-[var(--radius-md)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all pointer-events-none group-hover:pointer-events-auto focus:pointer-events-auto"
         >
           <Pencil className="w-4 h-4" />
         </button>
         <button
           type="button"
           onClick={() => onDelete(account.id)}
-          className="p-1.5 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity pointer-events-none group-hover:pointer-events-auto focus:pointer-events-auto"
+          className="p-1.5 text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 dark:hover:bg-[var(--color-danger)]/20 rounded-[var(--radius-md)] opacity-0 group-hover:opacity-100 focus:opacity-100 transition-all pointer-events-none group-hover:pointer-events-auto focus:pointer-events-auto"
         >
           <Trash2 className="w-4 h-4" />
         </button>
         <button
           type="button"
           title="خيارات"
-          className="p-1.5 text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+          className="p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)] rounded-[var(--radius-md)]"
           onClick={(e) => {
             e.stopPropagation();
             onOpenRowMenu(account, e.currentTarget);
@@ -257,7 +257,7 @@ const CoaRow: React.FC<RowProps> = ({
         <button
           type="button"
           title="الأستاذ العام"
-          className="p-1.5 text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded"
+          className="p-1.5 text-[var(--color-success)] hover:bg-[var(--color-success)]/10 dark:hover:bg-[var(--color-success)]/20 rounded-[var(--radius-md)]"
           onClick={(e) => {
             e.stopPropagation();
             onOpenGeneralLedger?.(account.id);
@@ -267,7 +267,7 @@ const CoaRow: React.FC<RowProps> = ({
         </button>
       </div>
       {hasChildren && isOpen && (
-        <div className="relative me-3 pe-2 border-e-2 border-gray-400 dark:border-gray-500 min-h-[2px]">
+        <div className="relative me-3 pe-2 border-e-2 border-[var(--color-border)] dark:border-[var(--color-text-muted)] min-h-[2px]">
           {children.map((c) => (
             <CoaRow
               key={c.id}
@@ -488,12 +488,12 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-gradient-to-l from-slate-800 to-slate-900 text-white rounded-xl shadow">
+      <div className="flex flex-wrap items-center justify-between gap-3 p-[var(--spacing-4)] bg-[var(--color-surface-3)] dark:bg-[var(--color-surface-3)] text-[var(--color-text)] dark:text-[var(--color-text-inverted)] rounded-[var(--radius-lg)] shadow-[var(--shadow-md)]">
         <div className="flex items-center gap-3">
-          <FolderTree className="w-8 h-8 text-emerald-400" />
+          <FolderTree className="w-8 h-8 text-[var(--color-success)]" />
           <div>
-            <h1 className="text-lg font-bold">شجرة الحسابات</h1>
-            <p className="text-xs text-slate-400">
+            <h1 className="text-[var(--font-size-xl)] font-bold">شجرة الحسابات</h1>
+            <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
               دليل الحسابات المرتبط بقاعدة البيانات المحاسبية
             </p>
           </div>
@@ -501,7 +501,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
         <button
           type="button"
           onClick={() => openCreate(null)}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-medium"
+          className="flex items-center gap-2 px-[var(--spacing-4)] py-2 bg-[var(--color-success)] hover:bg-[var(--color-success-hover)] rounded-[var(--radius-lg)] text-[var(--font-size-sm)] font-medium"
         >
           <Plus className="w-4 h-4" />
           حساب رئيسي
@@ -511,13 +511,13 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
       {/* Toolbar: search / expand / collapse */}
       <div className="flex flex-wrap items-center gap-3">
         <input
-          className="flex-1 min-w-[220px] border border-gray-200 dark:border-gray-700 rounded-lg px-3 py-2 dark:bg-gray-900"
+          className="flex-1 min-w-[220px] border border-[var(--color-border)] dark:border-[var(--color-border)] rounded-[var(--radius-lg)] px-3 py-2 dark:bg-[var(--color-surface-3)]"
           placeholder="بحث بالكود أو الاسم..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
 
-        <label className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200 select-none">
+        <label className="flex items-center gap-2 text-[var(--font-size-sm)] text-[var(--color-text)] dark:text-[var(--color-text)] select-none">
           <input
             type="checkbox"
             checked={activeOnly}
@@ -530,14 +530,14 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
           <button
             type="button"
             onClick={expandAll}
-            className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
+            className="px-3 py-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] dark:border-[var(--color-border)] text-[var(--font-size-sm)] bg-[var(--color-surface)] dark:bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
           >
             توسيع الكل
           </button>
           <button
             type="button"
             onClick={collapseAll}
-            className="px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-sm bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
+            className="px-3 py-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] dark:border-[var(--color-border)] text-[var(--font-size-sm)] bg-[var(--color-surface)] dark:bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
           >
             طيّ الكل
           </button>
@@ -545,17 +545,17 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
       </div>
 
       {err && (
-        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 text-sm">
+        <div className="p-3 rounded-[var(--radius-lg)] bg-[var(--color-danger)]/10 dark:bg-[var(--color-danger)]/20 text-[var(--color-danger)] dark:text-[var(--color-danger)] text-[var(--font-size-sm)]">
           {err}
         </div>
       )}
 
       {loading ? (
-        <div className="py-20 text-center text-gray-500">جاري التحميل…</div>
+        <div className="py-20 text-center text-[var(--color-text-muted)]">جاري التحميل…</div>
       ) : (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-2 shadow-sm">
+        <div className="bg-[var(--color-surface)] dark:bg-[var(--color-surface-2)] rounded-[var(--radius-lg)] border border-[var(--color-border)] dark:border-[var(--color-border)] p-2 shadow-[var(--shadow-sm)]">
           {roots.length === 0 ? (
-            <p className="p-8 text-center text-gray-500">
+            <p className="p-[var(--spacing-6)] text-center text-[var(--color-text-muted)]">
               لا توجد حسابات. أضف حساباً رئيسياً.
             </p>
           ) : (
@@ -590,7 +590,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
       {rowMenu && (
         <div
           ref={rowMenuRef}
-          className="fixed z-[70] min-w-[200px] rounded-lg border border-gray-200 bg-white py-1 shadow-xl dark:border-gray-600 dark:bg-gray-800"
+          className="fixed z-[70] min-w-[200px] rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-lg)] dark:border-[var(--color-border)] dark:bg-[var(--color-surface-2)]"
           style={{
             top: Math.min(rowMenu.anchor.bottom + 4, window.innerHeight - 200),
             left: Math.min(rowMenu.anchor.left, window.innerWidth - 220),
@@ -598,7 +598,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
         >
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
             onClick={() => {
               openCreate(rowMenu.account);
               setRowMenu(null);
@@ -609,7 +609,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
           </button>
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
             onClick={() => {
               openEdit(rowMenu.account);
               setRowMenu(null);
@@ -620,7 +620,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
           </button>
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
             onClick={() => {
               onOpenGeneralLedger?.(rowMenu.account.id);
               setRowMenu(null);
@@ -632,7 +632,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
           {rowMenu.account.linked_partner && (
             <button
               type="button"
-              className="flex w-full items-center gap-2 px-3 py-2 text-right text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+              className="flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
               onClick={() => {
                 onOpenSupplier?.(rowMenu.account.linked_partner!.id);
                 setRowMenu(null);
@@ -646,41 +646,41 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
       )}
 
       {dialog && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-md w-full p-6 border border-gray-200 dark:border-gray-700">
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-[var(--spacing-4)] bg-black/50">
+          <div className="bg-[var(--color-surface)] dark:bg-[var(--color-surface-2)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] max-w-md w-full p-[var(--spacing-6)] border border-[var(--color-border)] dark:border-[var(--color-border)]">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold text-lg">
+              <h3 className="font-bold text-[var(--font-size-xl)]">
                 {dialog.mode === "edit" ? "تعديل حساب" : "حساب جديد"}
               </h3>
               <button
                 type="button"
                 onClick={() => setDialog(null)}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                className="p-1 rounded-[var(--radius-md)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="space-y-3">
               <div>
-                <label className="block text-xs text-gray-500 mb-1">الكود</label>
+                <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">الكود</label>
                 <input
-                  className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
+                  className="w-full border border-[var(--color-border)] rounded-[var(--radius-lg)] px-3 py-2 dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
                   value={form.code}
                   onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">الاسم</label>
+                <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">الاسم</label>
                 <input
-                  className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
+                  className="w-full border border-[var(--color-border)] rounded-[var(--radius-lg)] px-3 py-2 dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                 />
               </div>
               <div>
-                <label className="block text-xs text-gray-500 mb-1">النوع</label>
+                <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">النوع</label>
                 <select
-                  className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
+                  className="w-full border border-[var(--color-border)] rounded-[var(--radius-lg)] px-3 py-2 dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
                   value={form.account_type}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, account_type: e.target.value }))
@@ -708,14 +708,14 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
               <button
                 type="button"
                 onClick={() => setDialog(null)}
-                className="px-4 py-2 rounded-lg border dark:border-gray-600"
+                className="px-[var(--spacing-4)] py-2 rounded-[var(--radius-lg)] border dark:border-[var(--color-border)]"
               >
                 إلغاء
               </button>
               <button
                 type="button"
                 onClick={saveDialog}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white"
+                className="flex items-center gap-2 px-[var(--spacing-4)] py-2 rounded-[var(--radius-lg)] bg-[var(--color-primary)] text-[var(--color-primary-foreground)]"
               >
                 <Save className="w-4 h-4" />
                 حفظ

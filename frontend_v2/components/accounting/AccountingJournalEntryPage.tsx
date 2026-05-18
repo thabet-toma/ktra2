@@ -304,7 +304,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   /* ── loading state ── */
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-24 text-gray-400">
+      <div className="flex items-center justify-center py-24 text-[var(--color-text-muted)]">
         <Loader2 className="w-6 h-6 animate-spin ml-2" />
         جاري التحميل…
       </div>
@@ -337,17 +337,17 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+            className="flex items-center gap-1.5 text-[var(--font-size-sm)] text-[var(--color-primary)] dark:text-[var(--color-primary)] hover:underline"
           >
             <ArrowRight className="w-4 h-4" />
             العودة
           </button>
-          <span className="text-gray-300 dark:text-gray-600">|</span>
-          <h1 className="text-base font-bold text-gray-800 dark:text-white">
+          <span className="text-[var(--color-border)] dark:text-[var(--color-border)]">|</span>
+          <h1 className="text-[var(--font-size-base)] font-bold text-[var(--color-text)] dark:text-[var(--color-text)]">
             {journalId ? `قيد رقم #${journalId}` : "قيد يومية جديد"}
           </h1>
           {posted && (
-            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+            <span className="inline-flex items-center gap-1 text-[var(--font-size-xs)] font-medium px-2 py-0.5 rounded-full bg-[var(--color-success)]/20 text-[var(--color-success)] dark:bg-[var(--color-success)]/30 dark:text-[var(--color-success)]">
               <CheckCircle className="w-3 h-3" />
               مرحّل — للقراءة فقط
             </span>
@@ -357,15 +357,15 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
 
       {/* ── ارتباط بصفقة أو شحنة (تنقّل فقط — لا ترحيل من هنا) ── */}
       {activeDealRef && (
-        <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700">
-          <div className="p-2 bg-slate-200/80 dark:bg-slate-800 rounded-lg flex-shrink-0">
-            <Handshake className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+        <div className="flex items-center gap-3 p-3 rounded-[var(--radius-lg)] bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-3)] border border-[var(--color-border)] dark:border-[var(--color-border)]">
+          <div className="p-2 bg-[var(--color-surface-3)]/80 dark:bg-[var(--color-surface-2)] rounded-[var(--radius-lg)] flex-shrink-0">
+            <Handshake className="w-5 h-5 text-[var(--color-text-muted)] dark:text-[var(--color-text)]" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-xs text-slate-500 dark:text-slate-400 mb-0.5">
+            <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] dark:text-[var(--color-text-muted)] mb-0.5">
               {isShipmentLink ? "مرتبط بشحنة" : "مرتبط بصفقة"}
             </p>
-            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate">
+            <p className="text-[var(--font-size-sm)] font-semibold text-[var(--color-text)] dark:text-[var(--color-text)] truncate">
               {activeDealRef.displayName}
             </p>
           </div>

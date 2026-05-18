@@ -5,12 +5,12 @@ import { shipmentsService } from '../../../services/shipmentsService';
 import { suppliersService } from '../../../services/firestoreService';
 import { dealsService } from '../../../services/dealsService';
 import {
-    Plus, Truck, Search
+    Plus, Truck, Edit, Eye, Trash2
 } from 'lucide-react';
 import { LoadingSpinner } from '../../LoadingSpinner';
 import { ShipmentForm } from './ShipmentForm';
-import { ShipmentList } from './ShipmentList';
 import { ShipmentDetailView } from './ShipmentDetailView';
+import { DataGrid, Toolbar, StatusBadge, Button } from '../../ui';
 
 interface ShipmentManagementProps {
     currentUser: User;
@@ -191,126 +191,234 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
             <div className="max-w-[1600px] mx-auto space-y-6">
                 {viewMode === 'list' ? (
                     <>
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[var(--color-surface)] p-6 rounded-2xl shadow-sm border border-[var(--color-border)]">
                             <div>
-                                <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-                                    <Truck className="w-8 h-8 text-blue-600" />
+                                <h1 className="text-[var(--font-size-xl)] font-bold text-[var(--color-text)] flex items-center gap-3">
+                                    <Truck className="w-8 h-8 text-[var(--color-primary)]" />
                                     إدارة الشحنات
                                 </h1>
-                                <p className="text-gray-500 dark:text-gray-400 mt-1">تتبع توزيع تكاليف الشحن على الصفقات المكتملة</p>
+                                <p className="text-[var(--font-size-sm)] text-[var(--color-text-muted)] mt-1">تتبع توزيع تكاليف الشحن على الصفقات المكتملة</p>
                             </div>
-                            <button
+                            <Button
                                 onClick={handleCreateNew}
-                                className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all shadow-lg shadow-blue-500/20 font-bold"
+                                icon={<Plus className="w-5 h-5" />}
                             >
-                                <Plus className="w-5 h-5" />
                                 إنشاء شحنة جديدة
-                            </button>
+                            </Button>
                         </div>
 
-                        <div className="bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-                            <div className="flex flex-col md:flex-row gap-4 mb-6">
-                                <div className="flex-1 relative">
-                                    <Search className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                                    <input
-                                        type="text"
-                                        placeholder="بحث عن شحنة..."
-                                        value={searchTerm}
-                                        onChange={(e) => setSearchTerm(e.target.value)}
-                                        className="w-full pr-10 py-3 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                                    />
-                                </div>
-                                <select
-                                    value={typeFilter}
-                                    onChange={(e) => {
-                                        setTypeFilter(e.target.value as any);
-                                        setDetailedStatusFilter('all');
-                                    }}
-                                    className="px-4 py-3 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-xl outline-none shadow-sm transition-all text-sm"
-                                >
-                                    <option value="all">� كل أنواع الشحن</option>
-                                    <option value="sea">🚢 بحري</option>
-                                    <option value="air">✈️ جوي</option>
-                                </select>
+<div className="bg-[var(--color-surface)] rounded-2xl shadow-sm border border-[var(--color-border)]">
+                            <Toolbar
+                                search={searchTerm}
+                                onSearch={setSearchTerm}
+                                searchPlaceholder="بحث عن شحنة..."
+                                filters={
+                                    <>
+                                        <select
+                                            value={typeFilter}
+                                            onChange={(e) => {
+                                                setTypeFilter(e.target.value as 'all' | 'sea' | 'air');
+                                                setDetailedStatusFilter('all');
+                                            }}
+                                            className="h-7 px-2 text-[var(--font-size-sm)] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                        >
+                                            <option value="all">كل أنواع الشحن</option>
+                                            <option value="sea">🚢 بحري</option>
+                                            <option value="air">✈️ جوي</option>
+                                        </select>
 
-                                {/* فلاتر الحالات التفصيلية - تظهر بناءً على النوع */}
-                                {typeFilter === 'sea' && (
-                                    <select
-                                        value={detailedStatusFilter}
-                                        onChange={(e) => setDetailedStatusFilter(e.target.value)}
-                                        className="px-4 py-3 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-xl outline-none shadow-sm transition-all text-sm border-blue-200 focus:ring-2 focus:ring-blue-500"
-                                    >
-                                        <option value="all">📍 حالة الشحنة (الكل)</option>
-                                        <option value="agent_warehouse">وكيل الشحن</option>
-                                        <option value="china_customs_clearance">🇨🇳 جمارك الصين</option>
-                                        <option value="on_board">🚢 على السفينة</option>
-                                        <option value="at_sea">🌊 في البحر</option>
-                                        <option value="arrived_port">⚓ وصلت الميناء</option>
-                                        <option value="israel_customs_clearance">🇮🇱 جمارك إسرائيل</option>
-                                        <option value="released">🔓 مفرج عنها</option>
-                                        <option value="delivered_local">📦 تم التسليم</option>
-                                    </select>
-                                )}
+                                        {typeFilter === 'sea' && (
+                                            <select
+                                                value={detailedStatusFilter}
+                                                onChange={(e) => setDetailedStatusFilter(e.target.value)}
+                                                className="h-7 px-2 text-[var(--font-size-sm)] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                            >
+                                                <option value="all">حالة الشحنة (الكل)</option>
+                                                <option value="agent_warehouse">وكيل الشحن</option>
+                                                <option value="china_customs_clearance">جمارك الصين</option>
+                                                <option value="on_board">على السفينة</option>
+                                                <option value="at_sea">في البحر</option>
+                                                <option value="arrived_port">وصلت الميناء</option>
+                                                <option value="israel_customs_clearance">جمارك Israel</option>
+                                                <option value="released">مفرج عنها</option>
+                                                <option value="delivered_local">تم التسليم</option>
+                                            </select>
+                                        )}
 
-                                {typeFilter === 'air' && (
-                                    <select
-                                        value={detailedStatusFilter}
-                                        onChange={(e) => setDetailedStatusFilter(e.target.value)}
-                                        className="px-4 py-3 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-xl outline-none shadow-sm transition-all text-sm border-purple-200 focus:ring-2 focus:ring-purple-500"
-                                    >
-                                        <option value="all">📍 حالة الشحنة (الكل)</option>
-                                        <option value="agent_warehouse">وكيل الشحن</option>
-                                        <option value="delivered_to_shipping_company">🤝 لشركة الشحن</option>
-                                        <option value="china_customs_clearance">🇨🇳 جمارك الصين</option>
-                                        <option value="departed">✈️ انطلقت</option>
-                                        <option value="in_transit">🚚 في الطريق</option>
-                                        <option value="arrived_airport">🛬 وصلت المطار</option>
-                                        <option value="israel_customs_clearance">🇮🇱 جمارك إسرائيل</option>
-                                        <option value="released">🔓 مفرج عنها</option>
-                                        <option value="delivered_local">📦 تم التسليم</option>
-                                    </select>
-                                )}
+                                        {typeFilter === 'air' && (
+                                            <select
+                                                value={detailedStatusFilter}
+                                                onChange={(e) => setDetailedStatusFilter(e.target.value)}
+                                                className="h-7 px-2 text-[var(--font-size-sm)] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                            >
+                                                <option value="all">حالة الشحنة (الكل)</option>
+                                                <option value="agent_warehouse">وكيل الشحن</option>
+                                                <option value="delivered_to_shipping_company">لشركة الشحن</option>
+                                                <option value="china_customs_clearance">جمارك الصين</option>
+                                                <option value="departed">انطلقت</option>
+                                                <option value="in_transit">في الطريق</option>
+                                                <option value="arrived_airport">وصلت المطار</option>
+                                                <option value="israel_customs_clearance">جمارك Israel</option>
+                                                <option value="released">مفرج عنها</option>
+                                                <option value="delivered_local">تم التسليم</option>
+                                            </select>
+                                        )}
 
-                                <select
-                                    value={paymentFilter}
-                                    onChange={(e) => setPaymentFilter(e.target.value)}
-                                    className="px-4 py-3 border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 rounded-xl outline-none shadow-sm transition-all text-sm focus:ring-2 focus:ring-blue-500/20"
-                                >
-                                    <option value="all">💳 كل حالات الدفع</option>
-                                    <option value="unpaid">غير مدفوع</option>
-                                    <option value="payment_pending">بانتظار الدفع</option>
-                                    <option value="partially_paid">مدفوع جزئياً</option>
-                                    <option value="paid">مدفوع بالكامل</option>
-                                </select>
+                                        <select
+                                            value={paymentFilter}
+                                            onChange={(e) => setPaymentFilter(e.target.value)}
+                                            className="h-7 px-2 text-[var(--font-size-sm)] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
+                                        >
+                                            <option value="all">كل حالات الدفع</option>
+                                            <option value="unpaid">غير مدفوع</option>
+                                            <option value="payment_pending">بانتظار الدفع</option>
+                                            <option value="partially_paid">مدفوع جزئياً</option>
+                                            <option value="paid">مدفوع بالكامل</option>
+                                        </select>
 
-                                {(statusFilter !== 'all' || typeFilter !== 'all' || detailedStatusFilter !== 'all' || paymentFilter !== 'all' || searchTerm !== '') && (
-                                    <button
-                                        onClick={() => {
-                                            setStatusFilter('all');
-                                            setTypeFilter('all');
-                                            setDetailedStatusFilter('all');
-                                            setPaymentFilter('all');
-                                            setSearchTerm('');
-                                        }}
-                                        className="px-4 py-3 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-xl transition-colors text-sm font-medium"
-                                    >
-                                        تفريغ الفلاتر
-                                    </button>
-                                )}
-                            </div>
+                                        {(statusFilter !== 'all' || typeFilter !== 'all' || detailedStatusFilter !== 'all' || paymentFilter !== 'all' || searchTerm !== '') && (
+                                            <button
+                                                onClick={() => {
+                                                    setStatusFilter('all');
+                                                    setTypeFilter('all');
+                                                    setDetailedStatusFilter('all');
+                                                    setPaymentFilter('all');
+                                                    setSearchTerm('');
+                                                }}
+                                                className="h-7 px-2 text-[var(--font-size-sm)] text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded-md transition-colors"
+                                            >
+                                                تفريغ الفلاتر
+                                            </button>
+                                        )}
+                                    </>
+                                }
+                                actions={
+                                    <div className="text-[var(--font-size-sm)] text-[var(--color-text-muted)]">
+                                        {filteredShipments.length} شحنة
+                                    </div>
+                                }
+                            />
 
-                            <div className="flex items-center justify-between mb-4 px-1">
-                                <div className="text-sm text-gray-500 dark:text-gray-400">
-                                    نتائج البحث: <span className="font-bold text-blue-600">{filteredShipments.length}</span> شحنة
-                                </div>
-                            </div>
-
-                            <ShipmentList
-                                shipments={filteredShipments}
-                                onEdit={handleEdit}
-                                onView={handleView}
-                                onDelete={handleDelete}
-                                shippingAgents={suppliers}
+                            <DataGrid
+                                columns={[
+                                    {
+                                        key: 'shipmentNumber',
+                                        header: 'الشحنة',
+                                        width: '180px',
+                                        render: (row: Shipment) => {
+                                            const shippingType = row.shippingInfo?.shippingType || 'sea';
+                                            const dealsCount = row.deals?.length || 0;
+                                            return (
+                                                <div className="flex items-center gap-2 py-1">
+                                                    <div className={`p-1 rounded ${shippingType === 'sea' ? 'bg-[var(--color-primary)]/10' : 'bg-purple-500/10'}`}>
+                                                        <span className="text-[var(--font-size-xs)]">{shippingType === 'sea' ? '🚢' : '✈️'}</span>
+                                                    </div>
+                                                    <div className="flex flex-col">
+                                                        <span className="text-[var(--font-size-sm)] font-medium text-[var(--color-text)]">{row.shipmentNumber}</span>
+                                                        <span className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">{dealsCount} صفقة</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        }
+                                    },
+                                    {
+                                        key: 'shippingAgentName',
+                                        header: 'الوكيل',
+                                        width: '140px',
+                                        render: (row: Shipment) => (
+                                            <span className="text-[var(--font-size-sm)] text-[var(--color-text)]">{row.shippingAgentName || '-'}</span>
+                                        )
+                                    },
+                                    {
+                                        key: 'status',
+                                        header: 'الحالة',
+                                        width: '120px',
+                                        render: (row: Shipment) => {
+                                            const statusMap: Record<string, string> = {
+                                                draft: 'مسودة',
+                                                payment_pending: 'بانتظار الدفع',
+                                                partially_paid: 'مدفوع جزئياً',
+                                                paid: 'مدفوع بالكامل',
+                                                shipped: 'تم الشحن',
+                                                delivered: 'تم التسليم',
+                                                cancelled: 'ملغاة'
+                                            };
+                                            return <StatusBadge status={statusMap[row.status] || row.status} />;
+                                        }
+                                    },
+                                    {
+                                        key: 'departureDate',
+                                        header: 'تاريخ المغادرة',
+                                        width: '120px',
+                                        sortable: true,
+                                        render: (row: Shipment) => {
+                                            const date = row.shippingInfo?.departureDate
+                                                ? new Date(row.shippingInfo.departureDate).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' })
+                                                : '-';
+                                            return <span className="text-[var(--font-size-sm)] text-[var(--color-text)]">{date}</span>;
+                                        }
+                                    },
+                                    {
+                                        key: 'arrivalDate',
+                                        header: 'تاريخ الوصول',
+                                        width: '120px',
+                                        sortable: true,
+                                        render: (row: Shipment) => {
+                                            const date = row.shippingInfo?.arrivalDate
+                                                ? new Date(row.shippingInfo.arrivalDate).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' })
+                                                : '-';
+                                            return <span className="text-[var(--font-size-sm)] text-[var(--color-text)]">{date}</span>;
+                                        }
+                                    },
+                                    {
+                                        key: 'totalShippingCostUsd',
+                                        header: 'التكلفة',
+                                        width: '100px',
+                                        align: 'end' as const,
+                                        sortable: true,
+                                        render: (row: Shipment) => (
+                                            <span className="text-[var(--font-size-sm)] font-medium text-[var(--color-text)]">
+                                                ${(row.totalShippingCostUsd || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                                            </span>
+                                        )
+                                    },
+                                    {
+                                        key: 'actions',
+                                        header: 'الإجراءات',
+                                        width: '120px',
+                                        align: 'center' as const,
+                                        render: (row: Shipment) => (
+                                            <div className="flex items-center justify-center gap-0.5 py-1">
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleView(row); }}
+                                                    className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 rounded transition-colors"
+                                                    title="عرض التفاصيل"
+                                                >
+                                                    <Eye className="w-3.5 h-3.5" />
+                                                </button>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleEdit(row); }}
+                                                    className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 rounded transition-colors"
+                                                    title="تعديل"
+                                                >
+                                                    <Edit className="w-3.5 h-3.5" />
+                                                </button>
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); handleDelete(String(row.id)); }}
+                                                    className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded transition-colors"
+                                                    title="حذف"
+                                                >
+                                                    <Trash2 className="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
+                                        )
+                                    }
+                                ]}
+                                data={filteredShipments}
+                                keyField="id"
+                                emptyMessage="لا توجد شحنات"
+                                onRowClick={(row) => handleView(row)}
+                                rowClassName={() => 'h-8'}
                             />
                         </div>
 

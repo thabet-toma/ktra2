@@ -3,7 +3,6 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { Deal, DealItem, PriceOffer, User, DealStatus, Item, Supplier } from '../../types'; // 1. تأكد من استيراد Supplier
 import { priceOffersService, itemsService, suppliersService } from '../../services/firestoreService'; // 2. استيراد suppliersService
 import { dealsService } from '../../services/dealsService';
-import { DealList } from './deals/DealList';
 import { DealForm } from './deals/DealForm';
 import { DealPrintView } from './deals/DealPrintView';
 import {
@@ -11,10 +10,12 @@ import {
     DollarSign, Package, CheckCircle, Clock, Users, Sparkles,
     BarChart3, ChevronDown, ChevronUp, RefreshCw, Eye, FileText,
     AlertCircle, Factory, Truck, Calendar, TrendingDown,
-    Grid, List, Target, ArrowUpRight, Download, Upload, Settings
+    Grid, List, Target, ArrowUpRight, Download, Upload, Settings,
+    Printer, Edit2, Trash2
 } from 'lucide-react';
 import { LoadingSpinner } from '../LoadingSpinner';
 import { PriceOfferSelectionModal } from './price-offers/PriceOfferSelectionModal';
+import { DataGrid, Toolbar, StatusBadge as UIStatusBadge } from '../../components/ui';
 
 interface DealManagementProps {
     currentUser: User;
@@ -81,6 +82,26 @@ export const DealManagement: React.FC<DealManagementProps> = ({
             'cancelled':                 'bg-red-50 text-red-700 border-red-200',
         };
         return colors[status] ?? colors['initial'];
+    };
+
+    const getStatusBadgeVariant = (status: string): string => {
+        const variantMap: Record<string, string> = {
+            'initial': 'neutral',
+            'manufacturing_started': 'primary',
+            'first_payment_pending': 'warning',
+            'first_payment_done': 'primary',
+            'first_payment_confirmed': 'success',
+            'production_completed': 'primary',
+            'second_payment_pending': 'warning',
+            'second_payment_done': 'primary',
+            'second_payment_confirmed': 'success',
+            'shipping_preparation': 'warning',
+            'shipping_in_progress': 'primary',
+            'shipped': 'primary',
+            'completed': 'success',
+            'cancelled': 'danger',
+        };
+        return variantMap[status] || 'muted';
     };
 
     useEffect(() => {
@@ -342,24 +363,29 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     if (loading) return <LoadingSpinner />;
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-gray-50 to-blue-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 p-3 md:p-4">
+        <>
+            <style>{`
+                .deal-data-grid table tr { height: 34px; }
+                .deal-data-grid table td { padding: 4px 8px; font-size: var(--font-size-sm); }
+                .deal-data-grid table th { padding: 6px 8px; font-size: var(--font-size-sm); font-weight: 600; }
+                .deal-data-grid table { border-collapse: collapse; }
+            `}</style>
+            <div className="min-h-screen p-3 md:p-4" style={{ backgroundColor: 'var(--color-background)' }}>
             <div className="max-w-[1600px] mx-auto space-y-4">
                 {viewMode === 'list' ? (
                     <>
-                        {/* الهيدر وبقية العناصر كما هي ... */}
-                        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
+                        <div className="rounded-xl shadow-lg" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
                             <div className="p-4 md:p-5">
-                                {/* ... (محتوى الهيدر والفلاتر كما هو) ... */}
                                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4">
                                     <div className="flex items-center gap-3">
-                                        <div className="p-2 bg-gradient-to-r from-blue-100 to-purple-100 dark:from-blue-900/30 dark:to-purple-900/30 rounded-lg">
-                                            <Handshake className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                                        <div className="p-2 rounded-lg" style={{ backgroundColor: 'var(--color-primary-light)' }}>
+                                            <Handshake className="w-6 h-6" style={{ color: 'var(--color-primary)' }} />
                                         </div>
                                         <div>
-                                            <h1 className="text-xl font-bold text-gray-900 dark:text-white">
+                                            <h1 className="text-xl font-bold" style={{ color: 'var(--color-text)' }}>
                                                 إدارة الصفقات
                                             </h1>
-                                            <p className="text-sm text-gray-600 dark:text-gray-400 mt-0.5">
+                                            <p className="text-sm mt-0.5" style={{ color: 'var(--color-text-muted)' }}>
                                                 {stats.total} صفقة • {stats.active} نشطة
                                             </p>
                                         </div>
@@ -368,14 +394,16 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                                     <div className="flex flex-wrap gap-2">
                                         <button
                                             onClick={() => setShowFilters(!showFilters)}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors hover:opacity-90"
+                                            style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)' }}
                                         >
                                             <Filter className="w-4 h-4" />
                                             تصفية
                                         </button>
                                         <button
                                             onClick={() => setIsOfferModalOpen(true)}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-gradient-to-r from-indigo-500 to-purple-500 text-white rounded-lg hover:from-indigo-600 hover:to-purple-600 transition-all"
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-all hover:opacity-90"
+                                            style={{ background: 'linear-gradient(90deg, var(--color-primary), var(--color-primary-dark))', color: 'white' }}
                                         >
                                             <FileInput className="w-4 h-4" />
                                             من عرض
@@ -387,7 +415,8 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                                         </button>
                                         <button
                                             onClick={handleCreateNew}
-                                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:from-blue-700 hover:to-blue-800 transition-all font-medium"
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-all hover:opacity-90 font-medium"
+                                            style={{ background: 'linear-gradient(90deg, var(--color-success), var(--color-success-dark, var(--color-success)))', color: 'white' }}
                                         >
                                             <Plus className="w-4 h-4" />
                                             صفقة جديدة
@@ -461,78 +490,77 @@ export const DealManagement: React.FC<DealManagementProps> = ({
 
                         {/* البطاقات الإحصائية (Stats) */}
                         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                            {/* ... (نفس كود الإحصائيات السابق) ... */}
-                            <div className="bg-gradient-to-r from-blue-50 to-blue-100 dark:from-blue-900/30 dark:to-blue-900/50 p-3 rounded-xl border border-blue-200 dark:border-blue-800/30">
+                            <div className="p-3 rounded-xl" style={{ background: 'linear-gradient(135deg, var(--color-primary-light), var(--color-primary-lighter))', border: '1px solid var(--color-primary)' }}>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <p className="text-xs text-blue-600 dark:text-blue-400">إجمالي الصفقات</p>
-                                        <p className="text-lg font-bold text-blue-900 dark:text-blue-300">{stats.total}</p>
+                                        <p className="text-xs" style={{ color: 'var(--color-primary)' }}>إجمالي الصفقات</p>
+                                        <p className="text-lg font-bold" style={{ color: 'var(--color-primary-dark)' }}>{stats.total}</p>
                                     </div>
-                                    <Target className="w-5 h-5 text-blue-500" />
+                                    <Target className="w-5 h-5" style={{ color: 'var(--color-primary)' }} />
                                 </div>
                             </div>
-                            <div className="bg-gradient-to-r from-green-50 to-emerald-100 dark:from-green-900/30 dark:to-emerald-900/50 p-3 rounded-xl border border-green-200 dark:border-green-800/30">
+                            <div className="p-3 rounded-xl" style={{ background: 'linear-gradient(135deg, var(--color-success-light), var(--color-success-lighter))', border: '1px solid var(--color-success)' }}>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <p className="text-xs text-green-600 dark:text-green-400">نشطة</p>
-                                        <p className="text-lg font-bold text-green-900 dark:text-green-300">{stats.active}</p>
+                                        <p className="text-xs" style={{ color: 'var(--color-success)' }}>نشطة</p>
+                                        <p className="text-lg font-bold" style={{ color: 'var(--color-success-dark)' }}>{stats.active}</p>
                                     </div>
-                                    <TrendingUp className="w-5 h-5 text-green-500" />
+                                    <TrendingUp className="w-5 h-5" style={{ color: 'var(--color-success)' }} />
                                 </div>
                             </div>
-                            <div className="bg-gradient-to-r from-orange-50 to-amber-100 dark:from-orange-900/30 dark:to-amber-900/50 p-3 rounded-xl border border-orange-200 dark:border-orange-800/30">
+                            <div className="p-3 rounded-xl" style={{ background: 'linear-gradient(135deg, var(--color-warning-light), var(--color-warning-lighter))', border: '1px solid var(--color-warning)' }}>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <p className="text-xs text-orange-600 dark:text-orange-400">بانتظار دفع</p>
-                                        <p className="text-lg font-bold text-orange-900 dark:text-orange-300">{stats.pendingPayment}</p>
+                                        <p className="text-xs" style={{ color: 'var(--color-warning)' }}>بانتظار دفع</p>
+                                        <p className="text-lg font-bold" style={{ color: 'var(--color-warning-dark)' }}>{stats.pendingPayment}</p>
                                     </div>
-                                    <Clock className="w-5 h-5 text-orange-500" />
+                                    <Clock className="w-5 h-5" style={{ color: 'var(--color-warning)' }} />
                                 </div>
                             </div>
-                            <div className="bg-gradient-to-r from-purple-50 to-violet-100 dark:from-purple-900/30 dark:to-violet-900/50 p-3 rounded-xl border border-purple-200 dark:border-purple-800/30">
+                            <div className="p-3 rounded-xl" style={{ background: 'linear-gradient(135deg, var(--color-purple-light, #f3e8ff), var(--color-purple-lighter, #ede9fe))', border: '1px solid var(--color-purple, #a855f7)' }}>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <p className="text-xs text-purple-600 dark:text-purple-400">في التصنيع</p>
-                                        <p className="text-lg font-bold text-purple-900 dark:text-purple-300">{stats.inManufacturing}</p>
+                                        <p className="text-xs" style={{ color: 'var(--color-purple-dark, #9333ea)' }}>في التصنيع</p>
+                                        <p className="text-lg font-bold" style={{ color: 'var(--color-purple-dark, #7e22ce)' }}>{stats.inManufacturing}</p>
                                     </div>
-                                    <Factory className="w-5 h-5 text-purple-500" />
+                                    <Factory className="w-5 h-5" style={{ color: 'var(--color-purple, #a855f7)' }} />
                                 </div>
                             </div>
-                            <div className="bg-gradient-to-r from-teal-50 to-cyan-100 dark:from-teal-900/30 dark:to-cyan-900/50 p-3 rounded-xl border border-teal-200 dark:border-teal-800/30">
+                            <div className="p-3 rounded-xl" style={{ background: 'linear-gradient(135deg, var(--color-teal-light, #ccfbf1), var(--color-teal-lighter, #99f6e4))', border: '1px solid var(--color-teal, #14b8a6)' }}>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <p className="text-xs text-teal-600 dark:text-teal-400">تم الشحن</p>
-                                        <p className="text-lg font-bold text-teal-900 dark:text-teal-300">{stats.shipped}</p>
+                                        <p className="text-xs" style={{ color: 'var(--color-teal-dark, #0d9488)' }}>تم الشحن</p>
+                                        <p className="text-lg font-bold" style={{ color: 'var(--color-teal-dark, #0f766e)' }}>{stats.shipped}</p>
                                     </div>
-                                    <Truck className="w-5 h-5 text-teal-500" />
+                                    <Truck className="w-5 h-5" style={{ color: 'var(--color-teal, #14b8a6)' }} />
                                 </div>
                             </div>
-                            <div className="bg-gradient-to-r from-indigo-50 to-blue-100 dark:from-indigo-900/30 dark:to-blue-900/50 p-3 rounded-xl border border-indigo-200 dark:border-indigo-800/30">
+                            <div className="p-3 rounded-xl" style={{ background: 'linear-gradient(135deg, var(--color-info-light), var(--color-info-lighter))', border: '1px solid var(--color-info)' }}>
                                 <div className="flex items-center justify-between">
                                     <div>
-                                        <p className="text-xs text-indigo-600 dark:text-indigo-400">القيمة الإجمالية</p>
-                                        <p className="text-lg font-bold text-indigo-900 dark:text-indigo-300">
+                                        <p className="text-xs" style={{ color: 'var(--color-info)' }}>القيمة الإجمالية</p>
+                                        <p className="text-lg font-bold" style={{ color: 'var(--color-info-dark)' }}>
                                             ${(stats.totalValue / 1000).toFixed(1)}K
                                         </p>
                                     </div>
-                                    <DollarSign className="w-5 h-5 text-indigo-500" />
+                                    <DollarSign className="w-5 h-5" style={{ color: 'var(--color-info)' }} />
                                 </div>
                             </div>
                         </div>
 
                         {/* قائمة الصفقات */}
-                        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700">
-                            <div className="p-4 border-b border-gray-100 dark:border-gray-700">
+                        <div className="rounded-xl shadow-lg" style={{ backgroundColor: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                            <div className="p-4" style={{ borderBottom: '1px solid var(--color-border)' }}>
                                 <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                                     <div className="flex items-center gap-2">
-                                        <div className="p-1.5 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                                            <Package className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                        <div className="p-1.5 rounded-lg" style={{ backgroundColor: 'var(--color-primary-light)' }}>
+                                            <Package className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
                                         </div>
                                         <div>
-                                            <h2 className="font-bold text-gray-900 dark:text-white text-sm">
+                                            <h2 className="font-bold text-sm" style={{ color: 'var(--color-text)' }}>
                                                 الصفقات ({filteredDeals.length})
                                             </h2>
-                                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
                                                 {statusFilter !== 'all' && `مرشحة حسب: ${statusOptions.find(o => o.value === statusFilter)?.label}`}
                                             </p>
                                         </div>
@@ -541,61 +569,180 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                                         {filteredDeals.length !== deals.length && (
                                             <button
                                                 onClick={() => { setSearchTerm(''); setStatusFilter('all'); }}
-                                                className="flex items-center gap-1 px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600"
+                                                className="flex items-center gap-1 px-2 py-1 rounded-lg hover:opacity-90"
+                                                style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-muted)', border: '1px solid var(--color-border)' }}
                                             >
                                                 <RefreshCw className="w-3 h-3" />
                                                 إعادة تعيين
                                             </button>
                                         )}
-                                        <span className="text-gray-400">|</span>
-                                        <span className="text-gray-500 dark:text-gray-400">
+                                        <span style={{ color: 'var(--color-text-muted)' }}>|</span>
+                                        <span style={{ color: 'var(--color-text-muted)' }}>
                                             آخر تحديث: {new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
                                         </span>
                                     </div>
                                 </div>
                             </div>
 
-                            <div className="p-3">
-                                {filteredDeals.length > 0 ? (
-                                    <DealList
-                                        deals={filteredDeals}
-                                        onEdit={handleEdit}
-                                        onPrint={(deal) => setDealToPrint(deal)}
-                                        onDelete={handleDelete}
-                                        // تمرير الموردين
-                                        allSuppliers={suppliers}
-                                        compactMode={compactMode}
-                                    />
-                                ) : (
-                                    <div className="py-10 text-center">
-                                        {/* ... (حالة لا توجد صفقات) ... */}
-                                        <div className="inline-flex p-4 bg-gray-100 dark:bg-gray-900 rounded-xl mb-4">
-                                            <Search className="w-8 h-8 text-gray-400 dark:text-gray-600" />
-                                        </div>
-                                        <h3 className="font-medium text-gray-800 dark:text-gray-200 mb-2">
-                                            لا توجد صفقات
-                                        </h3>
-                                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4 max-w-xs mx-auto">
-                                            {searchTerm
-                                                ? `لا توجد صفقات تطابق "${searchTerm}"`
-                                                : 'قم بإنشاء أول صفقة أو تغيير عوامل التصفية'}
-                                        </p>
-                                        <div className="flex gap-2 justify-center">
-                                            <button
-                                                onClick={() => { setSearchTerm(''); setStatusFilter('all'); }}
-                                                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                                            >
-                                                عرض الكل
-                                            </button>
+                            <div className="p-3 deal-data-grid">
+                                <div className="border border-[var(--color-border)] rounded-lg overflow-hidden" style={{ backgroundColor: 'var(--color-surface)' }}>
+                                    <Toolbar
+                                        search={searchTerm}
+                                        onSearch={setSearchTerm}
+                                        searchPlaceholder="بحث برقم الصفقة، المورد، المنتج..."
+                                        filters={
+                                            <div className="flex items-center gap-1">
+                                                <button
+                                                    onClick={() => setStatusFilter('all')}
+                                                    className={`px-2 py-1 text-xs rounded transition-colors ${statusFilter === 'all' ? 'bg-[var(--color-primary)] text-white' : 'bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:bg-[var(--color-hover)]'}`}
+                                                >
+                                                    الكل
+                                                </button>
+                                                {statusOptions.slice(1).slice(0, 6).map((opt) => (
+                                                    <button
+                                                        key={opt.value}
+                                                        onClick={() => setStatusFilter(opt.value)}
+                                                        className={`px-2 py-1 text-xs rounded transition-colors ${statusFilter === opt.value ? 'bg-[var(--color-primary)] text-white' : 'bg-[var(--color-surface)] text-[var(--color-text-muted)] hover:bg-[var(--color-hover)]'}`}
+                                                    >
+                                                        {opt.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        }
+                                        actions={
                                             <button
                                                 onClick={handleCreateNew}
-                                                className="px-3 py-1.5 text-sm bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700"
+                                                className="flex items-center gap-1 px-2 py-1 text-xs bg-[var(--color-primary)] text-white rounded hover:opacity-90 transition-opacity"
                                             >
-                                                + صفقة جديدة
+                                                <Plus className="w-3 h-3" />
+                                                صفقة جديدة
                                             </button>
+                                        }
+                                    />
+                                    {filteredDeals.length > 0 ? (
+                                        <DataGrid
+                                            columns={[
+                                                {
+                                                    key: 'dealNumber',
+                                                    header: 'رقم الصفقة',
+                                                    width: '100px',
+                                                    sortable: true,
+                                                },
+                                                {
+                                                    key: 'partner_name',
+                                                    header: 'المورد',
+                                                    render: (deal: Deal) => {
+                                                        const supplier = suppliers.find(s => s.id === deal.supplierId);
+                                                        if (supplier) {
+                                                            return supplier.alias && supplier.alias.trim() !== ''
+                                                                ? `${supplier.tradeName} (${supplier.alias})`
+                                                                : supplier.tradeName;
+                                                        }
+                                                        return deal.factoryName || 'غير محدد';
+                                                    },
+                                                },
+                                                {
+                                                    key: 'status',
+                                                    header: 'الحالة',
+                                                    width: '120px',
+                                                    render: (deal: Deal) => {
+                                                        const statusLabel = statusOptions.find(o => o.value === deal.status)?.label || deal.status;
+                                                        const variant = getStatusBadgeVariant(deal.status);
+                                                        return <UIStatusBadge status={variant} />;
+                                                    },
+                                                },
+                                                {
+                                                    key: 'totalAmount',
+                                                    header: 'المبلغ',
+                                                    width: '110px',
+                                                    sortable: true,
+                                                    align: 'end',
+                                                    render: (deal: Deal) => {
+                                                        const amount = deal.totalAmount || 0;
+                                                        return <span className="font-mono text-[var(--color-text)]">${amount.toLocaleString()}</span>;
+                                                    },
+                                                },
+                                                {
+                                                    key: 'createdAt',
+                                                    header: 'التاريخ',
+                                                    width: '100px',
+                                                    sortable: true,
+                                                    render: (deal: Deal) => {
+                                                        if (!deal.createdAt) return '-';
+                                                        const date = new Date(deal.createdAt);
+                                                        if (isNaN(date.getTime())) return '-';
+                                                        return date.toLocaleDateString('ar-EG', { day: '2-digit', month: '2-digit', year: '2-digit' });
+                                                    },
+                                                },
+                                                {
+                                                    key: 'actions',
+                                                    header: '',
+                                                    width: '100px',
+                                                    align: 'end',
+                                                    render: (deal: Deal, idx: number) => (
+                                                        <div className="flex items-center justify-end gap-1">
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); handleEdit(deal); }}
+                                                                className="p-1 rounded hover:bg-[var(--color-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-primary)]"
+                                                                title="تعديل"
+                                                            >
+                                                                <Edit2 className="w-3.5 h-3.5" />
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); setDealToPrint(deal); }}
+                                                                className="p-1 rounded hover:bg-[var(--color-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-primary)]"
+                                                                title="طباعة"
+                                                            >
+                                                                <Printer className="w-3.5 h-3.5" />
+                                                            </button>
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); handleDelete(deal.id); }}
+                                                                className="p-1 rounded hover:bg-[var(--color-hover)] text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
+                                                                title="حذف"
+                                                            >
+                                                                <Trash2 className="w-3.5 h-3.5" />
+                                                            </button>
+                                                        </div>
+                                                    ),
+                                                },
+                                            ]}
+                                            data={filteredDeals}
+                                            keyField="id"
+                                            onRowClick={(deal) => handleEdit(deal)}
+                                            rowClassName={() => 'hover:bg-[var(--color-hover)] transition-colors'}
+                                        />
+                                    ) : (
+                                        <div className="py-10 text-center" style={{ backgroundColor: 'var(--color-surface)' }}>
+                                            <div className="inline-flex p-4 rounded-xl mb-4" style={{ backgroundColor: 'var(--color-background)' }}>
+                                                <Search className="w-8 h-8 text-[var(--color-text-muted)]" />
+                                            </div>
+                                            <h3 className="font-medium mb-2" style={{ color: 'var(--color-text)' }}>
+                                                لا توجد صفقات
+                                            </h3>
+                                            <p className="text-sm mb-4 max-w-xs mx-auto" style={{ color: 'var(--color-text-muted)' }}>
+                                                {searchTerm
+                                                    ? `لا توجد صفقات تطابق "${searchTerm}"`
+                                                    : 'قم بإنشاء أول صفقة أو تغيير عوامل التصفية'}
+                                            </p>
+                                            <div className="flex gap-2 justify-center">
+                                                <button
+                                                    onClick={() => { setSearchTerm(''); setStatusFilter('all'); }}
+                                                    className="px-3 py-1.5 text-sm rounded transition-colors"
+                                                    style={{ backgroundColor: 'var(--color-primary)', color: 'white' }}
+                                                >
+                                                    عرض الكل
+                                                </button>
+                                                <button
+                                                    onClick={handleCreateNew}
+                                                    className="px-3 py-1.5 text-sm rounded transition-colors"
+                                                    style={{ backgroundColor: 'var(--color-success)', color: 'white' }}
+                                                >
+                                                    + صفقة جديدة
+                                                </button>
+                                            </div>
                                         </div>
-                                    </div>
-                                )}
+                                    )}
+                                </div>
                             </div>
                         </div>
 
@@ -676,5 +823,6 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 </div>
             )}
         </div>
+        </>
     );
 };

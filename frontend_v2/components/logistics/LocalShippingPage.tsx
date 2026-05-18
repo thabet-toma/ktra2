@@ -35,6 +35,7 @@ import { apiGetList } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
 import { getSalesSettings, type SalesSettings } from "@/services/salesApi";
 import { validatePaymentInput } from "@/utils/usePaymentForm";
+import { DataGrid, Toolbar, Drawer, Badge } from "../../components/ui";
 
 type Partner = { id: number; name: string; partner_type?: string };
 type Account = { id: number; code: string; name: string; account_type?: string };
@@ -53,13 +54,6 @@ const STATUS_LABEL: Record<LocalShipmentStatus, string> = {
   cancelled: "ملغية",
 };
 
-const STATUS_COLOR: Record<LocalShipmentStatus, string> = {
-  pending: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200",
-  in_transit: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200",
-  delivered: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200",
-  cancelled: "bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200",
-};
-
 export const LocalShippingPage: React.FC = () => {
   const [rows, setRows] = useState<LocalShipmentRow[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
@@ -74,6 +68,7 @@ export const LocalShippingPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<LocalShipmentRow | null>(null);
   const [importFor, setImportFor] = useState<LocalShipmentRow | null>(null);
+  const [search, setSearch] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -189,11 +184,11 @@ export const LocalShippingPage: React.FC = () => {
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-4" dir="rtl">
-      <div className="flex items-center gap-3 p-4 bg-gradient-to-l from-cyan-900 to-slate-900 text-white rounded-xl">
-        <Truck className="w-8 h-8 text-cyan-300" />
+      <div className="flex items-center gap-3 p-4 bg-gradient-to-l from-[var(--color-primary)] to-[var(--color-surface-2)] text-[var(--color-inverse)] rounded-xl">
+        <Truck className="w-8 h-8 text-[var(--color-primary-light)]" />
         <div className="flex-1">
-          <h1 className="text-lg font-bold">الشحن المحلي</h1>
-          <p className="text-xs text-cyan-200">
+          <h1 className="text-[var(--font-size-lg)] font-bold">الشحن المحلي</h1>
+          <p className="text-[var(--font-size-xs)] text-[var(--color-inverse-muted)]">
             نقل البضاعة بين التخليص الجمركي والمستودع/الوجهة — ناقل، تكلفة، ترحيل
             محاسبي
           </p>
@@ -201,7 +196,7 @@ export const LocalShippingPage: React.FC = () => {
         <button
           type="button"
           onClick={load}
-          className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm"
+          className="inline-flex items-center gap-1 px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-[var(--font-size-sm)]"
         >
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
           تحديث
@@ -212,12 +207,18 @@ export const LocalShippingPage: React.FC = () => {
             setEditing(null);
             setShowForm(true);
           }}
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-sm font-medium"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-[var(--font-size-sm)] font-medium"
         >
           <Plus className="h-4 w-4" />
           شحنة محلية جديدة
         </button>
       </div>
+
+      <Toolbar
+        search={search}
+        onSearch={setSearch}
+        searchPlaceholder="بحث في الشحنات..."
+      />
 
       {err && (
         <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 text-sm flex items-center gap-2">
@@ -234,170 +235,62 @@ export const LocalShippingPage: React.FC = () => {
       {/* بطاقات الحالة */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {(Object.keys(STATUS_LABEL) as LocalShipmentStatus[]).map((s) => (
-          <div
-            key={s}
-            className="rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3"
-          >
-            <div className="text-xs text-gray-500">{STATUS_LABEL[s]}</div>
-            <div className="text-2xl font-bold">
-              {totalsByStatus[s].count}
-            </div>
-            <div className="text-[11px] text-gray-500 mt-1">
-              {fmt(totalsByStatus[s].amount)}
-            </div>
+          <div key={s} className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
+            <div className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">{STATUS_LABEL[s]}</div>
+            <div className="text-[var(--font-size-2xl)] font-bold">{totalsByStatus[s].count}</div>
+            <div className="text-[11px] text-[var(--color-text-muted)] mt-1">{fmt(totalsByStatus[s].amount)}</div>
           </div>
         ))}
       </div>
 
       {/* الجدول */}
-      <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-900/50">
-            <tr>
-              <th className="text-right p-3">رقم</th>
-              <th className="text-right p-3">التاريخ</th>
-              <th className="text-right p-3">الناقل</th>
-              <th className="text-right p-3">التخليص</th>
-              <th className="text-right p-3">من → إلى</th>
-              <th className="text-right p-3">المبلغ</th>
-              <th className="text-right p-3">الدفع</th>
-              <th className="text-right p-3">الحالة</th>
-              <th className="text-center p-3">الترحيل</th>
-              <th className="text-right p-3">إجراءات</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr
-                key={r.id}
-                className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900/40"
-              >
-                <td className="p-2 font-mono">{r.shipment_number}</td>
-                <td className="p-2 text-xs">
-                  {r.pickup_date || r.delivery_date || "—"}
-                </td>
-                <td className="p-2">
-                  <div>{r.carrier_name || `#${r.carrier}`}</div>
-                  {r.driver_name && (
-                    <div className="text-[11px] text-gray-500">
-                      {r.driver_name}
-                      {r.vehicle_number ? ` • ${r.vehicle_number}` : ""}
-                    </div>
-                  )}
-                </td>
-                <td className="p-2 text-xs">
-                  {r.clearance_number
-                    ? `بيان ${r.clearance_number}`
-                    : r.shipment_number_source || "—"}
-                </td>
-                <td className="p-2 text-xs">
-                  {r.origin || "—"} → {r.destination || "—"}
-                </td>
-                <td className="p-2 font-mono">
-                  {fmt(r.amount)} {r.currency_code || ""}
-                </td>
-                <td className="p-2 text-xs">
-                  {r.payment_type === "cash" ? "نقدي" : "آجل"}
-                  {r.capitalize_to_inventory && (
-                    <div className="text-[10px] text-cyan-700 dark:text-cyan-300">
-                      Landed
-                    </div>
-                  )}
-                </td>
-                <td className="p-2">
-                  <span
-                    className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLOR[r.status]}`}
-                  >
-                    {STATUS_LABEL[r.status]}
-                  </span>
-                </td>
-                <td className="p-2 text-center">
-                  {r.is_posted ? (
-                    <span className="text-xs px-2 py-1 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded">
-                      مرحّلة #{r.journal}
-                    </span>
-                  ) : (
-                    <span className="text-xs text-gray-500">—</span>
-                  )}
-                  {r.purchase_invoice && (
-                    <div className="text-[10px] text-indigo-700 mt-1">
-                      استُورِدت للفاتورة {r.purchase_invoice_number || `#${r.purchase_invoice}`}
-                    </div>
-                  )}
-                </td>
-                <td className="p-2">
-                  <div className="flex flex-wrap gap-1 justify-end">
-                    {!r.is_posted && !r.purchase_invoice && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditing(r);
-                            setShowForm(true);
-                          }}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded"
-                          title="تعديل"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handlePost(r.id)}
-                          className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded"
-                          title="ترحيل"
-                        >
-                          <Send className="w-4 h-4" />
-                        </button>
-                      </>
-                    )}
-                    {r.is_posted && (
-                      <button
-                        type="button"
-                        onClick={() => handleUnpost(r.id)}
-                        className="p-1.5 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30 rounded"
-                        title="إلغاء الترحيل"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                      </button>
-                    )}
-                    {!r.is_posted && !r.purchase_invoice && (
-                      <button
-                        type="button"
-                        onClick={() => setImportFor(r)}
-                        className="p-1.5 text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded"
-                        title="نقل إلى فاتورة مشتريات"
-                      >
-                        <LinkIcon className="w-4 h-4" />
-                      </button>
-                    )}
-                    {!r.is_posted && (
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(r)}
-                        className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded"
-                        title="حذف"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {!rows.length && !loading && (
-              <tr>
-                <td colSpan={10} className="p-8 text-center text-gray-500">
-                  <Package className="w-12 h-12 mx-auto text-gray-300 mb-2" />
-                  لا توجد شحنات محلية بعد — اضغط "شحنة محلية جديدة"
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <DataGrid
+        columns={[
+          { key: "shipment_number", header: "رقم", render: (r) => <span className="font-mono">{r.shipment_number}</span> },
+          { key: "pickup_date", header: "التاريخ", render: (r) => <span className="text-[var(--font-size-xs)]">{r.pickup_date || r.delivery_date || "—"}</span> },
+          { key: "carrier", header: "الناقل", render: (r) => (
+            <div>
+              <div>{r.carrier_name || `#${r.carrier}`}</div>
+              {r.driver_name && <div className="text-[11px] text-[var(--color-text-muted)]">{r.driver_name}{r.vehicle_number ? ` • ${r.vehicle_number}` : ""}</div>}
+            </div>
+          )},
+          { key: "clearance", header: "التخليص", render: (r) => <span className="text-[var(--font-size-xs)]">{r.clearance_number ? `بيان ${r.clearance_number}` : r.shipment_number_source || "—"}</span> },
+          { key: "route", header: "من → إلى", render: (r) => <span className="text-[var(--font-size-xs)]">{r.origin || "—"} → {r.destination || "—"}</span> },
+          { key: "amount", header: "المبلغ", render: (r) => <span className="font-mono">{fmt(r.amount)} {r.currency_code || ""}</span> },
+          { key: "payment", header: "الدفع", render: (r) => (
+            <div>
+              <span>{r.payment_type === "cash" ? "نقدي" : "آجل"}</span>
+              {r.capitalize_to_inventory && <div className="text-[10px] text-[var(--color-primary)]">Landed</div>}
+            </div>
+          )},
+          { key: "status", header: "الحالة", render: (r) => <Badge variant={r.status === "delivered" ? "success" : r.status === "in_transit" ? "primary" : r.status === "cancelled" ? "danger" : "warning"}>{STATUS_LABEL[r.status]}</Badge> },
+          { key: "posted", header: "الترحيل", align: "center", render: (r) => (
+            <div>
+              {r.is_posted ? <span className="text-[var(--font-size-xs)] px-2 py-1 bg-[var(--color-success-light)] text-[var(--color-success)] rounded">مرحّلة #{r.journal}</span> : <span className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">—</span>}
+              {r.purchase_invoice && <div className="text-[10px] text-[var(--color-primary)] mt-1">استُورِدت للفاتورة {r.purchase_invoice_number || `#${r.purchase_invoice}`}</div>}
+            </div>
+          )},
+          { key: "actions", header: "إجراءات", align: "end", render: (r) => (
+            <div className="flex flex-wrap gap-1 justify-end">
+              {!r.is_posted && !r.purchase_invoice && (
+                <>
+                  <button type="button" onClick={() => { setEditing(r); setShowForm(true); }} className="p-1.5 text-[var(--color-primary)] hover:bg-[var(--color-muted)] rounded" title="تعديل"><Pencil className="w-4 h-4" /></button>
+                  <button type="button" onClick={() => handlePost(r.id)} className="p-1.5 text-[var(--color-success)] hover:bg-[var(--color-muted)] rounded" title="ترحيل"><Send className="w-4 h-4" /></button>
+                </>
+              )}
+              {r.is_posted && <button type="button" onClick={() => handleUnpost(r.id)} className="p-1.5 text-[var(--color-warning)] hover:bg-[var(--color-muted)] rounded" title="إلغاء الترحيل"><RotateCcw className="w-4 h-4" /></button>}
+              {!r.is_posted && !r.purchase_invoice && <button type="button" onClick={() => setImportFor(r)} className="p-1.5 text-[var(--color-primary)] hover:bg-[var(--color-muted)] rounded" title="نقل إلى فاتورة مشتريات"><LinkIcon className="w-4 h-4" /></button>}
+              {!r.is_posted && <button type="button" onClick={() => handleDelete(r)} className="p-1.5 text-[var(--color-danger)] hover:bg-[var(--color-muted)] rounded" title="حذف"><Trash2 className="w-4 h-4" /></button>}
+            </div>
+          )},
+        ]}
+        data={rows.filter(r => !search || r.shipment_number?.includes(search) || r.carrier_name?.includes(search) || r.origin?.includes(search) || r.destination?.includes(search))}
+        loading={loading}
+        emptyMessage={<div className="flex flex-col items-center py-8"><Package className="w-12 h-12 text-[var(--color-text-muted)] mb-2" /><span>لا توجد شحنات محلية بعد — اضغط "شحنة محلية جديدة"</span></div>}
+      />
 
       {showForm && (
-        <LocalShipmentFormModal
+        <LocalShipmentFormDrawer
           editing={editing}
           carriers={carriers}
           accounts={accounts}
@@ -418,7 +311,7 @@ export const LocalShippingPage: React.FC = () => {
       )}
 
       {importFor && (
-        <ImportToInvoiceModal
+        <ImportToInvoiceDrawer
           shipment={importFor}
           invoices={invoices.filter((i) => !i.is_posted && i.status !== "archived")}
           onClose={() => setImportFor(null)}
@@ -434,9 +327,9 @@ export const LocalShippingPage: React.FC = () => {
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Modal إنشاء/تعديل
+// Drawer إنشاء/تعديل
 // ═══════════════════════════════════════════════════════════════════════════
-const LocalShipmentFormModal: React.FC<{
+const LocalShipmentFormDrawer: React.FC<{
   editing: LocalShipmentRow | null;
   carriers: Partner[];
   accounts: Account[];
@@ -481,7 +374,6 @@ const LocalShipmentFormModal: React.FC<{
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // defaults: ILS currency + local shipping expense 5305
   useEffect(() => {
     if (editing) return;
     if (!form.currency && currencies.length) {
@@ -529,9 +421,6 @@ const LocalShipmentFormModal: React.FC<{
   const update = <K extends keyof LocalShipmentCreate>(k: K, v: LocalShipmentCreate[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  // amount>0 is enforced by validatePaymentInput inside submit() so the
-  // unified message actually shows; keeping it here would disable the
-  // button and the validator would never run (T2-FIX-02).
   const canSubmit =
     form.carrier &&
     (form.payment_type !== "cash" || form.cash_or_bank_account);
@@ -566,281 +455,16 @@ const LocalShipmentFormModal: React.FC<{
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-auto"
-      dir="rtl"
-    >
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-3xl mt-8">
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-bold">
-            {editing ? `تعديل ${editing.shipment_number}` : "شحنة محلية جديدة"}
-          </h2>
+    <Drawer
+      open={true}
+      onClose={onClose}
+      title={editing ? `تعديل ${editing.shipment_number}` : "شحنة محلية جديدة"}
+      footer={
+        <>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-4 space-y-4">
-          {/* الربط */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">
-                التخليص الجمركي (اختياري)
-              </label>
-              <select
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.clearance ?? ""}
-                onChange={(e) =>
-                  update("clearance", e.target.value ? Number(e.target.value) : null)
-                }
-              >
-                <option value="">— بدون تخليص —</option>
-                {clearances.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {formatClearanceShipmentLine(c)} · {c.status}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[11px] text-gray-500 mt-1">
-                إن اخترت تخليصاً ستُربط الشحنة الدولية تلقائياً
-              </p>
-            </div>
-
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">الحالة</label>
-              <select
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.status ?? "pending"}
-                onChange={(e) => update("status", e.target.value as LocalShipmentStatus)}
-              >
-                {(
-                  Object.keys(STATUS_LABEL) as LocalShipmentStatus[]
-                ).map((s) => (
-                  <option key={s} value={s}>
-                    {STATUS_LABEL[s]}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* الناقل */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            <div className="md:col-span-1">
-              <label className="block text-xs text-gray-500 mb-1">الناقل *</label>
-              <select
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.carrier || ""}
-                onChange={(e) => update("carrier", Number(e.target.value))}
-              >
-                <option value="">اختر...</option>
-                {carriers.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">السائق</label>
-              <input
-                type="text"
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.driver_name || ""}
-                onChange={(e) => update("driver_name", e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">رقم المركبة</label>
-              <input
-                type="text"
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.vehicle_number || ""}
-                onChange={(e) => update("vehicle_number", e.target.value)}
-              />
-            </div>
-          </div>
-
-          {/* المسار + التواريخ */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">من (نقطة الانطلاق)</label>
-              <input
-                type="text"
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.origin || ""}
-                onChange={(e) => update("origin", e.target.value)}
-                placeholder="مخزن التخليص، الميناء..."
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">إلى (الوجهة)</label>
-              <input
-                type="text"
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.destination || ""}
-                onChange={(e) => update("destination", e.target.value)}
-                placeholder="المستودع، عنوان العميل..."
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">تاريخ الاستلام</label>
-              <input
-                type="date"
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.pickup_date || ""}
-                onChange={(e) => update("pickup_date", e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-500 mb-1">تاريخ التسليم</label>
-              <input
-                type="date"
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.delivery_date || ""}
-                onChange={(e) => update("delivery_date", e.target.value)}
-              />
-            </div>
-          </div>
-
-          {/* المالي */}
-          <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-            <h3 className="text-sm font-semibold mb-3">المالي والمحاسبي</h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">المبلغ *</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                  value={String(form.amount ?? "")}
-                  onChange={(e) => update("amount", e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">العملة</label>
-                <select
-                  className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                  value={form.currency ?? ""}
-                  onChange={(e) =>
-                    update("currency", e.target.value ? Number(e.target.value) : undefined)
-                  }
-                >
-                  {currencies.map((c) => (
-                    <option key={c.CurrencyID} value={c.CurrencyID}>
-                      {c.Code}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">سعر الصرف</label>
-                <input
-                  type="number"
-                  step="0.000001"
-                  className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                  value={String(form.exchange_rate ?? "1")}
-                  onChange={(e) => update("exchange_rate", e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">طريقة الدفع</label>
-                <select
-                  className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                  value={form.payment_type}
-                  onChange={(e) =>
-                    update("payment_type", e.target.value as LocalShipmentPaymentType)
-                  }
-                >
-                  <option value="credit">آجل (على ذمة الناقل)</option>
-                  <option value="cash">نقدي (من الصندوق)</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-gray-500 mb-1">حساب المصروف</label>
-                <select
-                  className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                  value={form.expense_account ?? ""}
-                  onChange={(e) =>
-                    update(
-                      "expense_account",
-                      e.target.value ? Number(e.target.value) : null,
-                    )
-                  }
-                >
-                  <option value="">— افتراضي 5305 الشحن المحلي —</option>
-                  {expenseAccounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.code} {a.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {form.payment_type === "cash" && (
-                <div>
-                  <label className="block text-xs text-gray-500 mb-1">
-                    الصندوق / البنك *
-                  </label>
-                  <select
-                    className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                    value={form.cash_or_bank_account ?? ""}
-                    onChange={(e) =>
-                      update(
-                        "cash_or_bank_account",
-                        e.target.value ? Number(e.target.value) : null,
-                      )
-                    }
-                  >
-                    <option value="">اختر...</option>
-                    {cashAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.code} {a.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            <label className="flex items-center gap-2 text-sm mt-3">
-              <input
-                type="checkbox"
-                checked={form.capitalize_to_inventory ?? true}
-                onChange={(e) => update("capitalize_to_inventory", e.target.checked)}
-              />
-              <span>
-                رسملة على <strong>Landed Cost</strong> (تُضاف لتكلفة المخزون
-                المستورد)
-              </span>
-            </label>
-          </div>
-
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">ملاحظات</label>
-            <textarea
-              className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-              rows={2}
-              value={form.notes || ""}
-              onChange={(e) => update("notes", e.target.value)}
-            />
-          </div>
-
-          {error && (
-            <div className="p-2 rounded bg-red-50 dark:bg-red-900/20 text-red-700 text-sm">
-              {error}
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 p-4 border-t border-gray-200 dark:border-gray-700">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600"
+            className="px-4 py-2 text-[var(--font-size-sm)] rounded-lg border border-[var(--color-border)]"
           >
             إلغاء
           </button>
@@ -848,20 +472,146 @@ const LocalShipmentFormModal: React.FC<{
             type="button"
             onClick={submit}
             disabled={!canSubmit || submitting}
-            className="px-4 py-2 text-sm rounded-lg bg-cyan-600 text-white font-medium disabled:opacity-40"
+            className="px-4 py-2 text-[var(--font-size-sm)] rounded-lg bg-[var(--color-primary)] text-white font-medium disabled:opacity-40"
           >
             {submitting ? "جاري الحفظ..." : "حفظ"}
           </button>
+        </>
+      }
+    >
+      <div className="space-y-4" dir="rtl">
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">التخليص الجمركي (اختياري)</label>
+            <select
+              className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]"
+              value={form.clearance ?? ""}
+              onChange={(e) => update("clearance", e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">— بدون تخليص —</option>
+              {clearances.map((c) => (
+                <option key={c.id} value={c.id}>{formatClearanceShipmentLine(c)} · {c.status}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-[var(--color-text-muted)] mt-1">إن اخترت تخليصاً ستُربط الشحنة الدولية تلقائياً</p>
+          </div>
+          <div>
+            <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">الحالة</label>
+            <select
+              className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]"
+              value={form.status ?? "pending"}
+              onChange={(e) => update("status", e.target.value as LocalShipmentStatus)}
+            >
+              {(Object.keys(STATUS_LABEL) as LocalShipmentStatus[]).map((s) => (
+                <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+              ))}
+            </select>
+          </div>
         </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">الناقل *</label>
+            <select
+              className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]"
+              value={form.carrier || ""}
+              onChange={(e) => update("carrier", Number(e.target.value))}
+            >
+              <option value="">اختر...</option>
+              {carriers.map((p) => (<option key={p.id} value={p.id}>{p.name}</option>))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">السائق</label>
+            <input type="text" className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={form.driver_name || ""} onChange={(e) => update("driver_name", e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">رقم المركبة</label>
+            <input type="text" className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={form.vehicle_number || ""} onChange={(e) => update("vehicle_number", e.target.value)} />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">من (نقطة الانطلاق)</label>
+            <input type="text" className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={form.origin || ""} onChange={(e) => update("origin", e.target.value)} placeholder="مخزن التخليص، الميناء..." />
+          </div>
+          <div>
+            <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">إلى (الوجهة)</label>
+            <input type="text" className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={form.destination || ""} onChange={(e) => update("destination", e.target.value)} placeholder="المستودع، عنوان العميل..." />
+          </div>
+          <div>
+            <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">تاريخ الاستلام</label>
+            <input type="date" className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={form.pickup_date || ""} onChange={(e) => update("pickup_date", e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">تاريخ التسليم</label>
+            <input type="date" className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={form.delivery_date || ""} onChange={(e) => update("delivery_date", e.target.value)} />
+          </div>
+        </div>
+
+        <div className="border-t border-[var(--color-border)] pt-3">
+          <h3 className="text-[var(--font-size-sm)] font-semibold mb-3">المالي والمحاسبي</h3>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">المبلغ *</label>
+              <input type="number" step="0.01" className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={String(form.amount ?? "")} onChange={(e) => update("amount", e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">العملة</label>
+              <select className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={form.currency ?? ""} onChange={(e) => update("currency", e.target.value ? Number(e.target.value) : undefined)}>
+                {currencies.map((c) => (<option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">سعر الصرف</label>
+              <input type="number" step="0.000001" className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={String(form.exchange_rate ?? "1")} onChange={(e) => update("exchange_rate", e.target.value)} />
+            </div>
+            <div>
+              <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">طريقة الدفع</label>
+              <select className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={form.payment_type} onChange={(e) => update("payment_type", e.target.value as LocalShipmentPaymentType)}>
+                <option value="credit">آجل (على ذمة الناقل)</option>
+                <option value="cash">نقدي (من الصندوق)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">حساب المصروف</label>
+              <select className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={form.expense_account ?? ""} onChange={(e) => update("expense_account", e.target.value ? Number(e.target.value) : null)}>
+                <option value="">— افتراضي 5305 الشحن المحلي —</option>
+                {expenseAccounts.map((a) => (<option key={a.id} value={a.id}>{a.code} {a.name}</option>))}
+              </select>
+            </div>
+            {form.payment_type === "cash" && (
+              <div>
+                <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">الصندوق / البنك *</label>
+                <select className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={form.cash_or_bank_account ?? ""} onChange={(e) => update("cash_or_bank_account", e.target.value ? Number(e.target.value) : null)}>
+                  <option value="">اختر...</option>
+                  {cashAccounts.map((a) => (<option key={a.id} value={a.id}>{a.code} {a.name}</option>))}
+                </select>
+              </div>
+            )}
+          </div>
+          <label className="flex items-center gap-2 text-[var(--font-size-sm)] mt-3">
+            <input type="checkbox" checked={form.capitalize_to_inventory ?? true} onChange={(e) => update("capitalize_to_inventory", e.target.checked)} />
+            <span>رسملة على <strong>Landed Cost</strong> (تُضاف لتكلفة المخزون المستورد)</span>
+          </label>
+        </div>
+
+        <div>
+          <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">ملاحظات</label>
+          <textarea className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" rows={2} value={form.notes || ""} onChange={(e) => update("notes", e.target.value)} />
+        </div>
+
+        {error && <div className="p-2 rounded bg-[var(--color-danger-light)] text-[var(--color-danger)] text-[var(--font-size-sm)]">{error}</div>}
       </div>
-    </div>
+    </Drawer>
   );
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Modal استيراد إلى فاتورة مشتريات
+// Drawer استيراد إلى فاتورة مشتريات
 // ═══════════════════════════════════════════════════════════════════════════
-const ImportToInvoiceModal: React.FC<{
+const ImportToInvoiceDrawer: React.FC<{
   shipment: LocalShipmentRow;
   invoices: PurchaseInvoiceMini[];
   onClose: () => void;
@@ -889,82 +639,33 @@ const ImportToInvoiceModal: React.FC<{
   };
 
   return (
-    <div
-      className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-auto"
-      dir="rtl"
-    >
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-md mt-8">
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-bold">نقل إلى فاتورة مشتريات</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-4 space-y-3">
-          <div className="text-sm">
-            الشحنة: <strong>{shipment.shipment_number}</strong> —{" "}
-            {Number(shipment.amount).toLocaleString()}{" "}
-            {shipment.currency_code || ""}
-          </div>
-          <p className="text-xs text-gray-500">
-            ستُضاف قيمة الشحن كـ<strong> رسم</strong> على الفاتورة المختارة
-            {shipment.capitalize_to_inventory
-              ? " — مرسمل على Landed Cost."
-              : " — كمصروف فترة."}
-          </p>
-
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">فاتورة المشتريات *</label>
-            <select
-              className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-              value={invId}
-              onChange={(e) => setInvId(e.target.value ? Number(e.target.value) : "")}
-            >
-              <option value="">اختر...</option>
-              {invoices.map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.invoice_number} · {i.status}
-                </option>
-              ))}
-            </select>
-            {invoices.length === 0 && (
-              <p className="text-xs text-amber-700 mt-1">
-                لا توجد فواتير مشتريات غير مرحّلة — أنشئ فاتورة أولاً.
-              </p>
-            )}
-          </div>
-
-          {error && (
-            <div className="p-2 rounded bg-red-50 dark:bg-red-900/20 text-red-700 text-sm">
-              {error}
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-end gap-2 p-4 border-t border-gray-200 dark:border-gray-700">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600"
-          >
-            إلغاء
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!invId || submitting}
-            className="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white font-medium disabled:opacity-40"
-          >
+    <Drawer
+      open={true}
+      onClose={onClose}
+      title="نقل إلى فاتورة مشتريات"
+      footer={
+        <>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-[var(--font-size-sm)] rounded-lg border border-[var(--color-border)]">إلغاء</button>
+          <button type="button" onClick={submit} disabled={!invId || submitting} className="px-4 py-2 text-[var(--font-size-sm)] rounded-lg bg-[var(--color-primary)] text-white font-medium disabled:opacity-40">
             {submitting ? "..." : "استيراد"}
           </button>
+        </>
+      }
+    >
+      <div className="space-y-3" dir="rtl">
+        <div className="text-[var(--font-size-sm)]">الشحنة: <strong>{shipment.shipment_number}</strong> — {Number(shipment.amount).toLocaleString()} {shipment.currency_code || ""}</div>
+        <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">ستُضاف قيمة الشحن كـ<strong> رسم</strong> على الفاتورة المختارة{shipment.capitalize_to_inventory ? " — مرسمل على Landed Cost." : " — كمصروف فترة."}</p>
+        <div>
+          <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">فاتورة المشتريات *</label>
+          <select className="w-full border rounded-lg px-3 py-2 bg-[var(--color-surface)] border-[var(--color-border)]" value={invId} onChange={(e) => setInvId(e.target.value ? Number(e.target.value) : "")}>
+            <option value="">اختر...</option>
+            {invoices.map((i) => (<option key={i.id} value={i.id}>{i.invoice_number} · {i.status}</option>))}
+          </select>
+          {invoices.length === 0 && <p className="text-[var(--font-size-xs)] text-[var(--color-warning)] mt-1">لا توجد فواتير مشتريات غير مرحّلة — أنشئ فاتورة أولاً.</p>}
         </div>
+        {error && <div className="p-2 rounded bg-[var(--color-danger-light)] text-[var(--color-danger)] text-[var(--font-size-sm)]">{error}</div>}
       </div>
-    </div>
+    </Drawer>
   );
 };
 
