@@ -197,8 +197,13 @@ const App: React.FC = () => {
     }
     // Surface a console warning if localStorage.tenantId doesn't match the
     // env-configured tenant — helps diagnose the "0 شحنة / 0 بيان but deals
-    // work" symptom by pointing at the actual mismatch.
-    import("./utils/tenantContext").then((m) => m.warnIfTenantMismatch?.());
+    // work" symptom by pointing at the actual mismatch. Then run the
+    // boot-time auto-recovery: if the backend rejects the stored tenantId,
+    // clear it and reload (no manual DevTools step needed).
+    import("./utils/tenantContext").then((m) => {
+      m.warnIfTenantMismatch?.();
+      void m.autoRecoverInvalidTenant?.();
+    });
 
     // تنظيف عند إغلاق التطبيق أو تغيير المستخدم
     return () => {

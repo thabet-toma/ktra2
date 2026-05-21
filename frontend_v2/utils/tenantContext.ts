@@ -47,3 +47,59 @@ export function warnIfTenantMismatch(): void {
     /* ignore */
   }
 }
+
+/**
+ * Boot-time auto-recovery. Pings `tenants/settings/current/` with the resolved
+ * tenant id; if the backend rejects it (404 / 400 / "tenant not found"), it
+ * clears localStorage.tenantId so the next reload falls back to the default.
+ *
+ * Why this exists: the owner saw "0 شحنة / 0 بيان" while Deals worked. The
+ * cause was a stale localStorage.tenantId that no longer matched any tenant
+ * in the DB. With this auto-recovery, no DevTools intervention is needed —
+ * the app self-heals on next boot.
+ *
+ * Safe to call multiple times: the validation only runs once per session.
+ */
+let _validated = false;
+export async function autoRecoverInvalidTenant(): Promise<void> {
+  if (_validated) return;
+  _validated = true;
+  try {
+    const raw = localStorage.getItem("tenantId");
+    if (!raw) return; // no override → using default → no need to validate
+    const tid = parseInt(raw, 10);
+    if (!Number.isFinite(tid) || tid <= 0) {
+      localStorage.removeItem("tenantId");
+      console.warn("[tenantContext] Cleared invalid localStorage.tenantId");
+      return;
+    }
+    // Validate with a cheap GET. If it fails, the tenant is bad → clear.
+    const token = localStorage.getItem("token");
+    const apiBase =
+      (import.meta as any).env?.VITE_API_URL || "http://localhost:8000/api";
+    const url = `${String(apiBase).replace(/\/+$/, "")}/tenants/settings/current/`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: {
+        ...(token ? { Authorization: `Token ${token}` } : {}),
+        "X-Tenant-Id": String(tid),
+      },
+    });
+    if (res.status === 400 || res.status === 404) {
+      // Backend explicitly rejected the tenant id.
+      localStorage.removeItem("tenantId");
+      console.warn(
+        `[tenantContext] tenantId=${tid} rejected by backend (${res.status}). ` +
+          "Cleared localStorage; reloading to recover.",
+      );
+      try {
+        location.reload();
+      } catch {
+        /* ignore */
+      }
+    }
+    // 401/403/network errors leave the override alone — those are unrelated.
+  } catch {
+    /* network down or backend offline — leave override intact */
+  }
+}
