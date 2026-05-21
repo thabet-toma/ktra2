@@ -31,6 +31,7 @@ import {
   AseelDenseTable,
   AseelReportTable,
   AseelStatusBarItem,
+  AseelDateInput,
   useRecordNavigation,
   useAseelKeymap,
   useAseelIndexKeymap,
@@ -288,6 +289,25 @@ export const AseelKitStory: React.FC = () => {
             <AseelStatusBarItem label="الحالة" value="متصل" />
           </div>
         </div>
+
+        {/* N1-T5 — AseelDateInput */}
+        <DateInputStoryPanel />
+      </div>
+    </div>
+  );
+};
+
+const DateInputStoryPanel: React.FC = () => {
+  const [d, setD] = React.useState<string>(new Date().toISOString().slice(0, 10));
+  return (
+    <div className="mt-4">
+      <h4 className="font-bold mb-2">AseelDateInput — حقل تاريخ مع تقويم سنوي</h4>
+      <p className="text-xs text-gray-500 mb-2">
+        داخل الحقل: * يَزيد يوم · - يَنقص يوم · + يَزيد شهر · double-click يَفتح التقويم السنوي.
+      </p>
+      <div className="flex gap-3 items-center">
+        <AseelDateInput value={d} onChange={setD} style={{ width: 180 }} />
+        <span className="text-xs">القيمة الحالية: <b>{d || '—'}</b></span>
       </div>
     </div>
   );

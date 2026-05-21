@@ -864,3 +864,65 @@ tbody td {
   color: #6b551a;
 }
 [data-skin="aseel"] .aseel-picker-foot { padding: 5px 10px; border-top: 1px solid var(--aseel-border-soft); color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); }
+
+/* N1-T5 AseelDateInput — year calendar modal */
+[data-skin="aseel"] .aseel-date-cal__backdrop {
+  position: fixed; inset: 0; background: rgba(0,0,0,.45);
+  z-index: 9999; display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+[data-skin="aseel"] .aseel-date-cal {
+  background: var(--aseel-panel);
+  border: 1px solid var(--aseel-border);
+  border-radius: var(--aseel-radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  width: min(960px, 95vw); max-height: 90vh; overflow: auto;
+  padding: 12px;
+}
+[data-skin="aseel"] .aseel-date-cal__header {
+  display: flex; align-items: center; gap: 6px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--aseel-border-soft);
+  margin-bottom: 8px;
+}
+[data-skin="aseel"] .aseel-date-cal__year {
+  width: 90px; text-align: center; font-weight: bold;
+}
+[data-skin="aseel"] .aseel-date-cal__grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+}
+@media (max-width: 720px) {
+  [data-skin="aseel"] .aseel-date-cal__grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
+  [data-skin="aseel"] .aseel-date-cal__grid { grid-template-columns: 1fr; }
+}
+[data-skin="aseel"] .aseel-date-cal__month {
+  border: 1px solid var(--aseel-border-soft);
+  border-radius: var(--aseel-radius);
+  padding: 6px;
+  background: var(--aseel-field);
+}
+[data-skin="aseel"] .aseel-date-cal__month-title {
+  font-weight: bold; font-size: var(--aseel-fs-sm);
+  text-align: center; padding-bottom: 4px;
+  color: var(--aseel-accent);
+}
+[data-skin="aseel"] .aseel-date-cal__weekdays {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  font-size: 10px; color: var(--aseel-ink-soft);
+  text-align: center; padding-bottom: 2px;
+}
+[data-skin="aseel"] .aseel-date-cal__days {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px;
+}
+[data-skin="aseel"] .aseel-date-cal__day {
+  font-size: 11px; padding: 3px 0;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--aseel-ink);
+  cursor: pointer; border-radius: 2px;
+  font-variant-numeric: tabular-nums;
+}
+[data-skin="aseel"] .aseel-date-cal__day:hover { background: var(--aseel-accent-bg); }
+[data-skin="aseel"] .aseel-date-cal__day--today { border-color: var(--aseel-accent); font-weight: bold; }
+[data-skin="aseel"] .aseel-date-cal__day--sel { background: var(--aseel-accent); color: var(--aseel-on-accent, #fff); }

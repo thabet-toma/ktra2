@@ -31,7 +31,7 @@ class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):
 
 
 class TenantSettingsViewSet(viewsets.ModelViewSet):
-    """ThenantSettings — one row per tenant. Provides /current/ action."""
+    """TenantSettings — one row per tenant. Provides /current/ action."""
 
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]

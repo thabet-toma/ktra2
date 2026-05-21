@@ -34,7 +34,10 @@ function isEditableTextTarget(el: EventTarget | null): boolean {
   if (el instanceof HTMLTextAreaElement) return true;
   if (el instanceof HTMLInputElement) {
     const t = (el.type || 'text').toLowerCase();
-    return ['text', 'search', 'email', 'url', 'tel', 'password'].includes(t);
+    // 'number' is included so '-' inside a numeric input lets the user type a
+    // negative value instead of being captured as a "prev record" shortcut.
+    // Numeric fields that DO want Aseel +/- semantics opt in with data-aseel-key="1".
+    return ['text', 'search', 'email', 'url', 'tel', 'password', 'number'].includes(t);
   }
   return false;
 }
