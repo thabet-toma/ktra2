@@ -353,3 +353,15 @@ Reviewed the external model's T3-01..03 + T4-01/02/03/05. **Bugs fixed:**
 - **SalesQuotationsPage.tsx (M4):** Added Ctrl+nav handlers + CtrlIns opens new quotation form.
 
 **Final verification:** `tsc --noEmit` = **78 ≤ 78** · `vite build` = 0 errors · `manage.py check` = 0 issues.
+
+## [TASK5 N1 — DONE & VERIFIED 2026-05-21]
+
+### Frontend Primitives
+- **N1-T1** `AseelFormSection.tsx`: Subsection box with `var(--aseel-border-soft)`, title, 2/3/4 col auto-fit grid. Supports nesting. CSS in `styles/index.css:745-777`.
+- **N1-T2** `AseelDenseTable.tsx`: List page table replacing DataGrid. Props: columns/rows/getRowKey, onRowClick/DoubleClick, selectable, sortable, pagination, footer. CSS in `styles/index.css:783-792`.
+- **N1-T3** `AseelReportTable.tsx`: Report table with filterBar, numeric columns (tabular-nums), totals footer, CSV export (UTF-8 BOM). CSS in `styles/index.css:820+`.
+- **N1-T4** `AseelStatusBarItem.tsx`: Type-safe status bar item (label, value, icon). CSS already exists at `styles/index.css:577-578`.
+- **N1-T5** `AseelDateInput.tsx`: Date input wrapper with `useAseelFieldShortcuts` (* = +1 day, - = -1 day) + double-click year picker modal (20-year range).
+- **N1-T6** `aseel/index.ts`: Barrel exports all 6 primitives. `AseelKitStory.tsx`: Live demos for all primitives with Arabic labels.
+
+**Verified:** `tsc --noEmit` = **78 ≤ 78** · `manage.py check` = 0 issues · All primitives exported + demoed on `/aseel-kit`.
