@@ -879,6 +879,29 @@ tbody td {
 }
 [data-skin="aseel"] .aseel-picker-foot { padding: 5px 10px; border-top: 1px solid var(--aseel-border-soft); color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); }
 
+/* Commercial-details band — always-visible strip above the items grid for
+   the critical commercial fields (Alibaba link, shipping method, dealDescription,
+   payment terms, …). Sits inside the document body so it never gets clipped
+   by a too-tall headband or off-screen tab. */
+[data-skin="aseel"] .aseel-commercial-band {
+  background: linear-gradient(180deg, var(--aseel-panel) 0%, var(--aseel-field) 100%);
+  border: 1px solid var(--aseel-border-soft);
+  border-radius: var(--aseel-radius);
+  padding: 8px 10px;
+  margin: 6px 8px 8px;
+}
+[data-skin="aseel"] .aseel-commercial-band__title {
+  font-weight: 700;
+  font-size: var(--aseel-fs-sm);
+  color: var(--aseel-accent);
+  margin-bottom: 6px;
+}
+[data-skin="aseel"] .aseel-commercial-band__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 4px 12px;
+}
+
 /* N1-T5 AseelDateInput — year calendar modal */
 [data-skin="aseel"] .aseel-date-cal__backdrop {
   position: fixed; inset: 0; background: rgba(0,0,0,.45);
