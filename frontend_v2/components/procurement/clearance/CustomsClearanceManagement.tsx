@@ -11,6 +11,12 @@ import {
   Search,
   CheckCircle2,
   X,
+  ChevronRight,
+  ChevronLeft,
+  ChevronsRight,
+  ChevronsLeft,
+  Printer,
+  FileDown,
 } from "lucide-react";
 import { DataGrid, Drawer } from '../../../components/ui';
 import { User } from "@/types";
@@ -31,6 +37,12 @@ import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi"
 import { resolveTenantId } from "@/utils/tenantContext";
 import { buildShipmentOptionLabel, ShipmentLabelInput } from "@/utils/shipmentLabel";
 import { validatePaymentInput } from "@/utils/usePaymentForm";
+import {
+  AseelDocumentShell,
+  useRecordNavigation,
+  useAseelKeymap,
+  AseelIndexPicker,
+} from "../../aseel";
 
 type ShipmentPick = ShipmentLabelInput;
 type BrokerPick = { id: number; name: string; partner_type?: string };
@@ -115,11 +127,26 @@ const STATUS_OPTIONS = [
 export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
   currentUser,
 }) => {
-  const [clearances, setClearances] = useState<ClearanceRow[]>([]);
+const [clearances, setClearances] = useState<ClearanceRow[]>([]);
   const [shipments, setShipments] = useState<ShipmentPick[]>([]);
   const [brokers, setBrokers] = useState<BrokerPick[]>([]);
-  /** شركاء نقل / سائقون لدفعة الشحن */
   const [transportPartners, setTransportPartners] = useState<BrokerPick[]>([]);
+
+  // Aseel Navigation State
+  const [showBrokerPicker, setShowBrokerPicker] = useState(false);
+
+  const handleNewClearance = () => {
+    setSelected(null);
+    setFormBroker("");
+    setFormDecl("");
+    setFormDate(new Date().toISOString().slice(0, 10));
+    setFormStatus("Processing");
+    setFormNotes("");
+    setFormLines([...DEFAULT_CLEARANCE_COST_LINES]);
+    setShippingLineAmount(0);
+    setNewOpen(true);
+  };
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -153,6 +180,53 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
   const [payCashBoxId, setPayCashBoxId] = useState("");
   const [payNotes, setPayNotes] = useState("");
   const [paying, setPaying] = useState(false);
+
+  // Aseel Navigation
+  const nav = useRecordNavigation<ClearanceRow>({
+    items: clearances,
+    getId: (c) => c.id || 0,
+    currentId: selected?.id || null,
+    onSelect: async (id) => {
+      if (id === null) {
+        handleNewClearance();
+      } else {
+        try {
+          const loaded = await getClearance(Number(id));
+          setSelected(loaded);
+          setFormBroker(loaded.customs_broker || "");
+          setFormDecl(loaded.declaration_number || "");
+          setFormDate(loaded.clearance_date?.slice(0, 10) || "");
+          setFormStatus(loaded.status || "Processing");
+          setFormNotes(loaded.notes || "");
+          setFormLines(loaded.cost_lines || []);
+        } catch (err) {
+          console.error('Error loading clearance:', err);
+        }
+      }
+    },
+  });
+
+  // M3-T4: Aseel keyboard shortcuts — real handlers.
+  useAseelKeymap({
+    F2: () => window.print(),
+    F5: () => reload(),
+    F6: () => {
+      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      el?.focus();
+    },
+    F12: () => { if (!saving) handleSave(); },
+    Escape: () => {
+      if (showBrokerPicker) { setShowBrokerPicker(false); return; }
+      setNewOpen(false);
+      setSelected(null);
+    },
+    plus: () => {
+      const ae = document.activeElement;
+      if (ae?.getAttribute?.('data-aseel-key') === '1') {
+        setShowBrokerPicker(true);
+      }
+    },
+  }, { enabled: !showBrokerPicker });
 
   const reload = useCallback(async () => {
     setErr(null);
@@ -509,7 +583,49 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
   }
 
   return (
-    <div className="p-4 md:p-8 space-y-6 max-w-7xl mx-auto">
+    <div
+      data-skin="aseel"
+      style={{ height: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
+    >
+      <AseelDocumentShell
+        title="فاتورة البيان الجمركي"
+        state={selected ? `بيان #${selected.declaration_number || selected.id}` : 'بيان جديد'}
+        nav={nav}
+        actions={[
+          { key: 'new', label: 'إضافة', icon: <Plus />, onClick: handleNewClearance },
+          {
+            key: 'reload',
+            label: 'تحديث',
+            icon: <RefreshCw />,
+            onClick: () => reload(),
+            separatorBefore: true,
+          },
+          {
+            key: 'print',
+            label: 'طباعة',
+            icon: <Printer />,
+            onClick: () => window.print(),
+          },
+        ]}
+        header={<></>}
+        status={
+          <>
+            <span className="aseel-status-item">
+              المستخدم <b>{currentUser?.name || '—'}</b>
+            </span>
+            <span className="aseel-status-item">
+              السجل <b>{nav.position}/{nav.total}</b>
+            </span>
+            <span className="aseel-status-item">
+              {clearances.length} بيان
+            </span>
+          </>
+        }
+      >
+        <div
+          className="p-4 md:p-8 space-y-6 max-w-7xl mx-auto"
+          style={{ height: '100%', overflow: 'auto', background: '#ffffff' }}
+        >
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="p-3 rounded-2xl bg-[var(--color-primary-light)] text-[var(--color-primary)]">
@@ -1132,6 +1248,28 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({
           </div>
         </div>
       )}
+
+        </div>
+      </AseelDocumentShell>
+
+      {/* M3-T4: Aseel broker index picker. */}
+      <AseelIndexPicker<BrokerPick>
+        open={showBrokerPicker}
+        title="فهرس المخلّصين الجمركيين"
+        rows={brokers}
+        columns={[
+          { key: 'id', header: 'الرقم', width: '90px', value: (r) => r.id },
+          { key: 'name', header: 'الاسم', value: (r) => r.name },
+          { key: 'type', header: 'النوع', width: '140px', value: (r) => r.partner_type ?? '—' },
+        ]}
+        getRowKey={(r) => r.id}
+        searchValue={(r) => `${r.id} ${r.name}`}
+        onSelect={(r) => {
+          setFormBroker(String(r.id));
+          setShowBrokerPicker(false);
+        }}
+        onClose={() => setShowBrokerPicker(false)}
+      />
     </div>
   );
 };

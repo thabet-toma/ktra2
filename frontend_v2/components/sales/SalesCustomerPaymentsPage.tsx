@@ -8,6 +8,13 @@ import {
   Sparkles,
   X,
   Search,
+  ChevronRight,
+  ChevronLeft,
+  ChevronsRight,
+  ChevronsLeft,
+  Printer,
+  FileDown,
+  RefreshCw,
 } from "lucide-react";
 import {
   listCustomerPayments,
@@ -19,6 +26,11 @@ import {
   type CustomerPaymentRow,
 } from "../../services/salesApi";
 import { accountingApi } from "../../services/accountingApi";
+import {
+  AseelDocumentShell,
+  useRecordNavigation,
+  useAseelKeymap,
+} from "../aseel";
 
 type Partner = { id: number; name: string };
 type Account = { id: number; code: string; name: string; account_type?: string };
@@ -45,6 +57,46 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
   const [err, setErr] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState("");
+
+  // M4-T3: Aseel Navigation for customer payments
+  const [selectedPayment, setSelectedPayment] = useState<CustomerPaymentRow | null>(null);
+  const [showPartnerPicker, setShowPartnerPicker] = useState(false);
+
+  const nav = useRecordNavigation<CustomerPaymentRow>({
+    items: payments,
+    getId: (p) => p.id || 0,
+    currentId: selectedPayment?.id || null,
+    onSelect: (id) => {
+      if (id === null) {
+        setSelectedPayment(null);
+        setShowForm(true);
+      } else {
+        const found = payments.find(p => p.id === id);
+        setSelectedPayment(found || null);
+      }
+    },
+  });
+
+  // M4-T3: Aseel keyboard shortcuts — real handlers.
+  useAseelKeymap({
+    F2: () => window.print(),
+    F5: () => loadAll(),
+    F6: () => {
+      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      el?.focus();
+    },
+    Escape: () => {
+      if (showPartnerPicker) { setShowPartnerPicker(false); return; }
+      setShowForm(false);
+      setSelectedPayment(null);
+    },
+    plus: () => {
+      const ae = document.activeElement;
+      if (ae?.getAttribute?.('data-aseel-key') === '1') {
+        setShowPartnerPicker(true);
+      }
+    },
+  }, { enabled: !showPartnerPicker });
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -131,7 +183,28 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     .reduce((s, p) => s + Number(p.amount), 0);
 
   return (
-    <div className="space-y-4" dir="rtl">
+    <div
+      data-skin="aseel"
+      style={{ height: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
+    >
+    <AseelDocumentShell
+      title="سند قبض/صرف"
+      state={selectedPayment ? `سند #${selectedPayment.id}` : 'دفعات العملاء'}
+      nav={nav}
+      actions={[
+        { key: 'new', label: 'سند جديد', icon: <Plus />, onClick: () => setShowForm(true) },
+        { key: 'reload', label: 'تحديث', icon: <RefreshCw />, onClick: () => loadAll(), separatorBefore: true },
+        { key: 'print', label: 'طباعة', icon: <Printer />, onClick: () => window.print() },
+      ]}
+      header={<></>}
+      status={
+        <>
+          <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+          <span className="aseel-status-item">{payments.length} سند</span>
+        </>
+      }
+    >
+    <div className="space-y-4" dir="rtl" style={{ height: '100%', overflow: 'auto', padding: '12px', background: '#ffffff' }}>
       <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l from-emerald-900 to-slate-900 text-white rounded-xl">
         <Banknote className="w-8 h-8 text-emerald-300" />
         <div className="flex-1">
@@ -300,6 +373,8 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
           }}
         />
       )}
+    </div>
+    </AseelDocumentShell>
     </div>
   );
 };

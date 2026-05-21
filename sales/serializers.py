@@ -8,6 +8,7 @@ from partners.models import Partner
 from tenants.models import Currency
 
 from .models import (
+    CreditDebitNote,
     CustomerPayment,
     DeliveryOrder,
     PaymentAllocation,
@@ -17,7 +18,11 @@ from .models import (
     SalesQuotationLine,
     SalesSettings,
 )
-from .services import next_invoice_number, recalculate_invoice_amounts
+from .services import (
+    next_credit_debit_note_number,
+    next_invoice_number,
+    recalculate_invoice_amounts,
+)
 
 
 def _as_product(value):
@@ -83,6 +88,12 @@ class SalesInvoiceLineSerializer(serializers.ModelSerializer):
             "tax_rate",
             "line_total_excl_tax",
             "line_tax_amount",
+            "unit",
+            "warehouse",
+            "catalog_no",
+            "expiry_date",
+            "extra_quantity",
+            "line_tax_percent",
         ]
         read_only_fields = ["line_total_excl_tax", "line_tax_amount"]
 
@@ -105,7 +116,21 @@ class SalesInvoiceListSerializer(serializers.ModelSerializer):
             "amount_paid",
             "currency",
             "stock_on_post",
+            "book_number",
         ]
+
+
+class _AttachedChequeSerializer(serializers.Serializer):
+    """Read-only nested view of an invoice's attached cheques (M2-T3)."""
+    id = serializers.IntegerField()
+    cheque_number = serializers.CharField()
+    bank_name = serializers.CharField(allow_blank=True)
+    amount = serializers.DecimalField(max_digits=18, decimal_places=2)
+    due_date = serializers.DateField(allow_null=True)
+    issue_date = serializers.DateField(allow_null=True)
+    payee_name = serializers.CharField(allow_blank=True, allow_null=True)
+    status = serializers.CharField()
+    notes = serializers.CharField(allow_blank=True, allow_null=True)
 
 
 class SalesInvoiceSerializer(serializers.ModelSerializer):
@@ -118,6 +143,9 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
     currency = serializers.PrimaryKeyRelatedField(
         queryset=Currency.objects.all(), required=False, allow_null=True
     )
+    # M2-T3: attached cheques (read-only). Posting/clearing handled via
+    # the `payment-voucher` endpoint.
+    cheques = _AttachedChequeSerializer(many=True, read_only=True)
 
     class Meta:
         model = SalesInvoice
@@ -145,6 +173,22 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
             "notes",
             "lines",
             "created_at",
+            # M2-T1: Aseel fields
+            "book_number",
+            "second_date",
+            "licensed_dealer_no",
+            "settlement_invoice_no",
+            "prices_include_tax",
+            "discount_percent",
+            # M2-T3: Financial instrument
+            "financial_document_no",
+            # M2-T4: Source-discount overrides (null → use customer default)
+            "source_discount_percent_override",
+            "source_discount_amount_override",
+            # M2-T3: Attached payment voucher (cash + cheques)
+            "attached_cash_amount",
+            "attached_cash_account",
+            "cheques",
         ]
         read_only_fields = [
             "id",
@@ -156,6 +200,7 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
             "created_at",
             "journal",
             "customer_name",
+            "cheques",  # mutated only via /payment-voucher endpoint
         ]
 
     def create(self, validated_data):
@@ -190,7 +235,8 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"customer": "العميل لا يتبع نفس الشركة."})
         inv_num = validated_data.get("invoice_number") or ""
         if not str(inv_num).strip():
-            validated_data["invoice_number"] = next_invoice_number(tenant.TenantID)
+            book_num = validated_data.get("book_number", 0)
+            validated_data["invoice_number"] = next_invoice_number(tenant.TenantID, book_num)
         if not lines_data:
             raise serializers.ValidationError({"lines": "يجب إضافة بند واحد على الأقل."})
         for row in lines_data:
@@ -535,3 +581,56 @@ class SalesQuotationListSerializer(serializers.ModelSerializer):
             "currency",
             "created_at",
         ]
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# M4-T4 — Credit/Debit notes
+# ─────────────────────────────────────────────────────────────────────────
+
+class CreditDebitNoteSerializer(serializers.ModelSerializer):
+    customer_name = serializers.CharField(source="customer.name", read_only=True)
+    related_invoice_number = serializers.CharField(
+        source="related_invoice.invoice_number", read_only=True, allow_null=True,
+    )
+    note_number = serializers.CharField(required=False, allow_blank=True)
+
+    class Meta:
+        model = CreditDebitNote
+        fields = [
+            "id",
+            "note_number",
+            "note_date",
+            "note_type",
+            "customer",
+            "customer_name",
+            "related_invoice",
+            "related_invoice_number",
+            "amount",
+            "reason",
+            "status",
+            "journal",
+            "created_at",
+        ]
+        read_only_fields = ["id", "status", "journal", "created_at", "customer_name", "related_invoice_number"]
+
+    def validate(self, attrs):
+        amt = attrs.get("amount")
+        if amt is None or Decimal(str(amt)) <= 0:
+            raise serializers.ValidationError({"amount": "المبلغ يجب أن يكون أكبر من صفر."})
+        nt = attrs.get("note_type")
+        if nt not in (CreditDebitNote.TYPE_CREDIT, CreditDebitNote.TYPE_DEBIT):
+            raise serializers.ValidationError({"note_type": "نوع غير صالح."})
+        return attrs
+
+    def create(self, validated_data):
+        # Auto-generate the note number atomically using the per-tenant
+        # `select_for_update` helper — same race-safety pattern as invoices.
+        if not validated_data.get("note_number"):
+            tenant = validated_data.get("tenant")
+            tenant_id = getattr(tenant, "TenantID", None) or getattr(tenant, "pk", None)
+            if tenant_id is None:
+                raise serializers.ValidationError({"tenant": "Tenant is required."})
+            validated_data["note_number"] = next_credit_debit_note_number(
+                tenant_id, validated_data["note_type"]
+            )
+        return super().create(validated_data)

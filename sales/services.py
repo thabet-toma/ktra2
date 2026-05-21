@@ -25,6 +25,7 @@ from inventory.services import record_stock_movement
 from partners.models import Partner, PartnerGroup
 
 from .models import (
+    CreditDebitNote,
     CustomerPayment,
     DeliveryOrder,
     PaymentAllocation,
@@ -144,21 +145,31 @@ def line_net(line: SalesInvoiceLine) -> Decimal:
 
 
 def recalculate_invoice_amounts(invoice: SalesInvoice, lines: list[SalesInvoiceLine] | None = None) -> None:
-    """يحدّث حقول الأسطر والفاتورة (بدون حفظ في قاعدة البيانات)."""
+    """يحدّث حقول الأسطر والفاتورة (بدون حفظ في قاعدة البيانات).
+    M2-T1: supports discount_percent (per-invoice %) and prices_include_tax per-invoice override.
+    """
     if lines is None:
         lines = list(invoice.lines.select_related("tax_rate"))
     sub = Decimal("0.00")
     pairs: list[tuple[SalesInvoiceLine, Decimal]] = []
     for line in lines:
-        n = line_net(line)
-        pairs.append((line, n))
-        sub += n
+        net = line_net(line)
+        if invoice.prices_include_tax and line.tax_rate:
+            rate = Decimal(str(line.tax_rate.rate))
+            tax_inclusive = net / (Decimal("1") + rate / Decimal("100"))
+            net = tax_inclusive.quantize(DEC)
+        pairs.append((line, net))
+        sub += net
 
     disc = Decimal(str(invoice.invoice_discount or 0))
     if sub > 0 and disc > sub:
         disc = sub
     ratio = ((sub - disc) / sub) if sub > 0 else Decimal(0)
     excl_after = (sub - disc).quantize(DEC) if sub > 0 else Decimal("0.00")
+
+    pct = Decimal(str(getattr(invoice, "discount_percent", 0) or 0))
+    if pct > 0:
+        excl_after = (excl_after * (Decimal("100") - pct) / Decimal("100")).quantize(DEC)
 
     tax_sum = Decimal("0.00")
     for line, orig_n in pairs:
@@ -376,6 +387,112 @@ def _build_tax_buckets(lines: list[SalesInvoiceLine]) -> dict[int, Decimal]:
     return buckets
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# M2-T3 — Invoice-attached payment voucher (cash + cheques)
+# ─────────────────────────────────────────────────────────────────────────
+
+def attach_payment_voucher(
+    invoice: SalesInvoice,
+    *,
+    cash_amount: Decimal | str | float = 0,
+    cash_account_id: int | None = None,
+    cheques: list[dict] | None = None,
+    user=None,
+) -> SalesInvoice:
+    """يربط سند مالي (نقدي + شيكات) بالفاتورة قبل الترحيل.
+
+    - Replace-semantics: each call replaces previously-attached cheques on the
+      invoice (no duplicates). Use empty `cheques=[]` to clear.
+    - The journal is NOT posted here — `post_sales_invoice` reads the attached
+      cash + cheques and posts ONE integrated journal (M2-T3 spec).
+    - Idempotency: posting goes through `post_journal()` which deduplicates by
+      (reference_type, reference_id). Calling this function multiple times
+      pre-post just updates the attachment state.
+
+    cheques: list of dicts with keys:
+        cheque_number (str, required)
+        amount        (Decimal/str, required)
+        bank_name     (str, optional)
+        due_date      (date or ISO str, optional)
+        issue_date    (date or ISO str, optional)
+        payee_name    (str, optional)
+        notes         (str, optional)
+    """
+    from accounting.models import Cheque
+
+    if invoice.status == SalesInvoice.STATUS_POSTED:
+        raise ValidationError("لا يمكن تعديل السند بعد ترحيل الفاتورة.")
+
+    cash_amount = Decimal(str(cash_amount or 0)).quantize(DEC)
+    if cash_amount < 0:
+        raise ValidationError("مبلغ النقدي لا يمكن أن يكون سالباً.")
+
+    cheques = cheques or []
+    # Validate each cheque payload
+    for i, c in enumerate(cheques):
+        if not str(c.get("cheque_number", "")).strip():
+            raise ValidationError(f"الشيك #{i+1}: رقم الشيك مطلوب.")
+        try:
+            amt = Decimal(str(c.get("amount", 0)))
+        except Exception:
+            raise ValidationError(f"الشيك #{i+1}: مبلغ غير صالح.")
+        if amt <= 0:
+            raise ValidationError(f"الشيك #{i+1}: المبلغ يجب أن يكون أكبر من صفر.")
+
+    cheques_total = sum(
+        (Decimal(str(c.get("amount", 0))) for c in cheques), Decimal("0")
+    ).quantize(DEC)
+
+    # Compute current invoice total to validate against (without saving)
+    if invoice.pk:
+        recalculate_invoice_amounts(invoice)
+    grand = Decimal(str(invoice.grand_total or 0)).quantize(DEC)
+    if (cash_amount + cheques_total) > grand:
+        raise ValidationError(
+            f"مجموع السند ({cash_amount} نقدي + {cheques_total} شيكات) "
+            f"يتجاوز مبلغ الفاتورة {grand}."
+        )
+
+    if cash_amount > 0 and not cash_account_id:
+        raise ValidationError("لا بدّ من تحديد حساب الصندوق عند وجود مبلغ نقدي.")
+
+    with transaction.atomic():
+        # 1) Cash side on the invoice
+        invoice.attached_cash_amount = cash_amount
+        if cash_amount > 0:
+            invoice.attached_cash_account_id = cash_account_id
+        else:
+            invoice.attached_cash_account_id = None
+        invoice.save(update_fields=[
+            "attached_cash_amount", "attached_cash_account",
+        ])
+
+        # 2) Cheques side — REPLACE previously-linked DRAFT cheques only
+        # (don't touch cheques already in Under_Collection or beyond).
+        Cheque.objects.filter(
+            sales_invoice=invoice, status="Draft"
+        ).delete()
+        for c in cheques:
+            Cheque.objects.create(
+                tenant_id=invoice.tenant_id,
+                sales_invoice=invoice,
+                partner=invoice.customer,
+                direction="Incoming",
+                status="Draft",  # promoted to Under_Collection on invoice post
+                cheque_number=str(c.get("cheque_number")).strip(),
+                bank_name=(c.get("bank_name") or "")[:100],
+                amount=Decimal(str(c.get("amount"))).quantize(DEC),
+                currency_id=invoice.currency_id,
+                due_date=c.get("due_date") or None,
+                issue_date=c.get("issue_date") or None,
+                payee_name=(c.get("payee_name") or "")[:150],
+                notes=c.get("notes") or "",
+                created_by=user if user and not getattr(user, "is_anonymous", False) else None,
+            )
+
+    return invoice
+
+
 def post_sales_invoice(
     invoice: SalesInvoice,
     *,
@@ -446,28 +563,108 @@ def post_sales_invoice(
 
         journal_lines: list[dict] = []
 
+        # ── M2-T3: Attached payment voucher (cash + cheques) ─────────────────
+        # The Aseel invoice carries optional «مدفوع نقدا» + «مدفوع شيكات»
+        # alongside the invoice itself. Both reduce the primary debit (AR for
+        # credit invoices, cash for cash invoices) and post as additional Dr
+        # lines in the SAME integrated journal — Aseel-style single voucher.
+        attached_cash = Decimal(str(invoice.attached_cash_amount or 0)).quantize(DEC)
+        # Cheques attached via accounting.Cheque.sales_invoice FK (M2-T3 migration)
+        attached_cheques = list(invoice.cheques.all()) if invoice.pk else []
+        cheques_total = sum(
+            (Decimal(str(c.amount or 0)) for c in attached_cheques),
+            Decimal("0.00"),
+        ).quantize(DEC)
+        attached_total = (attached_cash + cheques_total).quantize(DEC)
+        if attached_total > grand:
+            raise ValidationError(
+                f"مجموع السند المرفق (نقدي {attached_cash} + شيكات {cheques_total}) "
+                f"يتجاوز مبلغ الفاتورة {grand}."
+            )
+
         if invoice.invoice_type == SalesInvoice.INVOICE_CASH:
             cash = invoice.cash_or_bank_account
             if not cash:
                 raise ValidationError("فواتير النقدي تتطلب حساب صندوق/بنك (cash_or_bank_account).")
-            journal_lines.append(
-                {
-                    "account": cash.id,
-                    "partner": invoice.customer_id,
-                    "debit": grand,
-                    "credit": Decimal("0"),
-                    "description": f"تحصيل نقدي — {invoice.invoice_number}",
-                }
-            )
+            # Cash invoice: primary cash line = grand − cheques_total (cheques
+            # go to under-collection bucket). attached_cash on cash invoices is
+            # redundant — its account is the same as cash_or_bank_account.
+            primary_debit = (grand - cheques_total).quantize(DEC)
+            if primary_debit > 0:
+                journal_lines.append(
+                    {
+                        "account": cash.id,
+                        "partner": invoice.customer_id,
+                        "debit": primary_debit,
+                        "credit": Decimal("0"),
+                        "description": f"تحصيل نقدي — {invoice.invoice_number}",
+                    }
+                )
         else:
             ar = _resolve_ar_account(invoice)
+            ar_debit = (grand - attached_total).quantize(DEC)
+            # NOTE: We always emit the AR line first so the source-discount
+            # logic below can adjust its debit. If everything is paid (cash +
+            # cheques == grand), AR debit is 0 — we still emit a placeholder
+            # so source-discount reduction logic has a stable target index.
             journal_lines.append(
                 {
                     "account": ar.id,
                     "partner": invoice.customer_id,
-                    "debit": grand,
+                    "debit": ar_debit if ar_debit > 0 else Decimal("0"),
                     "credit": Decimal("0"),
                     "description": f"ذمم — {invoice.invoice_number}",
+                }
+            )
+            # Attached cash (different cashbox than the AR resolution)
+            if attached_cash > 0:
+                pay_acc = invoice.attached_cash_account
+                if not pay_acc:
+                    raise ValidationError(
+                        "السند المرفق فيه مبلغ نقدي لكن لم يُحدَّد حساب الصندوق "
+                        "(attached_cash_account)."
+                    )
+                journal_lines.append(
+                    {
+                        "account": pay_acc.id,
+                        "partner": invoice.customer_id,
+                        "debit": attached_cash,
+                        "credit": Decimal("0"),
+                        "description": f"مدفوع نقدا — {invoice.invoice_number}",
+                    }
+                )
+
+        # Cheques bucket (شيكات برسم التحصيل) — both cash and credit invoices.
+        if cheques_total > 0:
+            ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
+            uc_acc = (
+                ss.default_cheques_under_collection_account if ss else None
+            )
+            if not uc_acc:
+                # Fall back to any Asset account named «شيكات…» or coded 1106.
+                from django.db.models import Q
+                uc_acc = (
+                    Account.objects.filter(
+                        tenant_id=invoice.tenant_id,
+                        account_type="Asset",
+                        is_active=True,
+                    )
+                    .filter(Q(code__startswith="1106") | Q(name__icontains="شيكات"))
+                    .first()
+                )
+            if not uc_acc:
+                raise ValidationError(
+                    "فاتورة بها شيكات مرفقة لكن لا يوجد حساب «شيكات برسم التحصيل». "
+                    "عيّن `default_cheques_under_collection_account` في إعدادات "
+                    "المبيعات، أو أنشئ حساب Asset بكود يبدأ بـ 1106."
+                )
+            journal_lines.append(
+                {
+                    "account": uc_acc.id,
+                    "partner": invoice.customer_id,
+                    "debit": cheques_total,
+                    "credit": Decimal("0"),
+                    "description": f"مدفوع شيكات — {invoice.invoice_number}",
                 }
             )
 
@@ -499,6 +696,76 @@ def post_sales_invoice(
 
         if invoice.stock_on_post:
             journal_lines.extend(_build_cogs_journal_line_dicts(invoice, lines, products_by_id))
+
+        # ── M2-T4 (G6): Source-discount / withholding ──────────────────────
+        # Source discount = the slice of the invoice the customer holds back as
+        # withholding tax against the seller (Aseel «خصم مصدر»). It is NOT the
+        # regular invoice discount (`discount_percent`/`invoice_discount`) which
+        # is ALREADY netted into `subtotal_excl_tax`/`grand_total` upstream.
+        #
+        # Lookup priority (per-invoice override → customer default):
+        #   1. invoice.source_discount_amount_override (explicit amount)
+        #   2. invoice.source_discount_percent_override (% of grand_total)
+        #   3. customer.source_discount_amount  (default amount)
+        #   4. customer.source_discount_percent (default % of grand_total)
+        src_disc_amt = Decimal("0.00")
+        src_disc_pct_used = Decimal("0.00")
+        if invoice.source_discount_amount_override is not None:
+            src_disc_amt = Decimal(str(invoice.source_discount_amount_override)).quantize(DEC)
+        elif invoice.source_discount_percent_override is not None:
+            src_disc_pct_used = Decimal(str(invoice.source_discount_percent_override))
+            src_disc_amt = (grand * src_disc_pct_used / Decimal("100")).quantize(DEC)
+        elif invoice.customer:
+            cust_amt = Decimal(str(getattr(invoice.customer, "source_discount_amount", 0) or 0))
+            cust_pct = Decimal(str(getattr(invoice.customer, "source_discount_percent", 0) or 0))
+            if cust_amt > 0:
+                src_disc_amt = cust_amt
+            elif cust_pct > 0:
+                src_disc_pct_used = cust_pct
+                src_disc_amt = (grand * src_disc_pct_used / Decimal("100")).quantize(DEC)
+
+        # Clamp: cannot exceed the receivable/cash debit
+        if src_disc_amt > grand:
+            src_disc_amt = grand
+
+        if src_disc_amt > 0:
+            ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
+            disc_acct = None
+            # Priority: dedicated SalesSettings setting → COA code 1107 (Asset).
+            if ss and ss.default_source_discount_account_id:
+                disc_acct = ss.default_source_discount_account
+            if not disc_acct:
+                disc_acct = Account.objects.filter(
+                    tenant_id=invoice.tenant_id,
+                    code__startswith="1107",
+                    account_type="Asset",
+                    is_active=True,
+                ).first()
+            if not disc_acct:
+                raise ValidationError(
+                    "خصم المصدر مفعّل (افتراضي العميل أو تجاوز الفاتورة) لكن لا يوجد حساب "
+                    "خصم مصدر مهيّأ. عيّن `default_source_discount_account` في إعدادات "
+                    "المبيعات، أو أنشئ حساب Asset بكود يبدأ بـ 1107 (خصم مصدر مقدّم)."
+                )
+            # Add Dr source-discount-receivable for the withheld amount.
+            desc_pct = (
+                f" ({src_disc_pct_used}%)" if src_disc_pct_used > 0 else ""
+            )
+            journal_lines.append({
+                "account": disc_acct.id,
+                "partner": invoice.customer_id,
+                "debit": src_disc_amt,
+                "credit": Decimal("0"),
+                "description": f"خصم مصدر{desc_pct} — {invoice.invoice_number}",
+            })
+            # REDUCE the receivable/cash debit line by src_disc_amt — customer
+            # actually owes (or pays) `grand − src_disc_amt`; the rest is now a
+            # claim on the tax authority.  Journal remains balanced because we
+            # added a Dr of the same amount on the source-discount account.
+            # The first journal line is always AR (credit invoice) or cash (cash
+            # invoice) — both built immediately above with `debit=grand`.
+            recv_line = journal_lines[0]
+            recv_line["debit"] = (Decimal(str(recv_line["debit"])) - src_disc_amt).quantize(DEC)
 
         tenant_name = ""
         try:
@@ -534,7 +801,24 @@ def post_sales_invoice(
 
         invoice.journal = jh
         invoice.status = SalesInvoice.STATUS_POSTED
-        invoice.save(update_fields=["journal", "status"])
+        # M2-T3: amount_paid reflects what came in with the invoice itself
+        # (cash + cheques). Subsequent CustomerPayments will add on top of this
+        # via post_customer_payment's allocation logic.
+        if attached_total > 0:
+            invoice.amount_paid = (
+                Decimal(str(invoice.amount_paid or 0)) + attached_total
+            ).quantize(DEC)
+            invoice.save(update_fields=["journal", "status", "amount_paid"])
+        else:
+            invoice.save(update_fields=["journal", "status"])
+
+        # M2-T3: promote attached cheques from Draft → Under_Collection now that
+        # the journal is posted. Cheques already past Draft are untouched.
+        if attached_cheques:
+            from accounting.models import Cheque
+            Cheque.objects.filter(
+                sales_invoice=invoice, status="Draft"
+            ).update(status="Under_Collection")
 
         if invoice.stock_on_post:
             _post_stock_out_for_invoice(invoice, lines, user=user)
@@ -949,29 +1233,47 @@ def suggest_fifo_allocations(
     return out
 
 
-def next_invoice_number(tenant_id: int) -> str:
+def next_invoice_number(tenant_id: int, book_number: int = 0) -> str:
     """يقفل آخر فاتورة (select_for_update) لتقليل تصادم الأرقام تحت حمل متزامن.
+    M2-T5: Per-book_number sequence (handles multi-book invoices).
 
-    ملاحظة: الإدراج الفعلي للفاتورة يتم في السيريالايزر، لذا القفل هنا
-    يقلّل التصادم عند استدعائه ضمن معاملة المنشئ ولا يلغيه تماماً؛ الضمان
-    القاطع يحتاج تسلسل DB أو قيد فريد + إعادة محاولة (مرحلة 4 / I4-01).
+    book_number=0 → manual (any number accepted), generate with tenant prefix.
+    book_number>0 → use book prefix for isolated per-book sequence.
     """
-    prefix = f"SI-{tenant_id}-"
-    with transaction.atomic():
-        last = (
-            SalesInvoice.objects
-            .filter(tenant_id=tenant_id, invoice_number__startswith=prefix)
-            .select_for_update()
-            .order_by("-id")
-            .first()
-        )
-        if not last:
-            return f"{prefix}1"
-        try:
-            n = int(last.invoice_number.replace(prefix, ""))
-        except ValueError:
-            n = last.id
-        return f"{prefix}{n + 1}"
+    if book_number == 0:
+        prefix = f"SI-{tenant_id}-"
+        with transaction.atomic():
+            last = (
+                SalesInvoice.objects
+                .filter(tenant_id=tenant_id, invoice_number__startswith=prefix)
+                .select_for_update()
+                .order_by("-id")
+                .first()
+            )
+            if not last:
+                return f"{prefix}1"
+            try:
+                n = int(last.invoice_number.replace(prefix, ""))
+            except ValueError:
+                n = last.id
+            return f"{prefix}{n + 1}"
+    else:
+        prefix = f"SI-{tenant_id}-B{book_number}-"
+        with transaction.atomic():
+            last = (
+                SalesInvoice.objects
+                .filter(tenant_id=tenant_id, invoice_number__startswith=prefix)
+                .select_for_update()
+                .order_by("-id")
+                .first()
+            )
+            if not last:
+                return f"{prefix}1"
+            try:
+                n = int(last.invoice_number.replace(prefix, ""))
+            except ValueError:
+                n = last.id
+            return f"{prefix}{n + 1}"
 
 
 def convert_quotation_to_invoice(quotation, user=None):
@@ -1029,4 +1331,134 @@ def convert_quotation_to_invoice(quotation, user=None):
         quotation.save(update_fields=["status", "invoice"])
 
     return invoice
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# M4-T4 — Credit / Debit notes posting
+# ─────────────────────────────────────────────────────────────────────────
+
+def next_credit_debit_note_number(tenant_id: int, note_type: str) -> str:
+    """Atomic per-tenant numbering with `select_for_update` (m3-06 pattern).
+
+    Prefix: `CN-` for credit, `DN-` for debit.  Falls back to count-based
+    numbering only if no prior notes exist (still race-free under the lock).
+    """
+    prefix = "CN" if note_type == CreditDebitNote.TYPE_CREDIT else "DN"
+    with transaction.atomic():
+        last = (
+            CreditDebitNote.objects.select_for_update()
+            .filter(tenant_id=tenant_id, note_number__startswith=f"{prefix}-")
+            .order_by("-id")
+            .first()
+        )
+        next_seq = 1
+        if last and last.note_number:
+            try:
+                # Format: PREFIX-NNNN
+                tail = last.note_number.rsplit("-", 1)[-1]
+                next_seq = int(tail) + 1
+            except (ValueError, IndexError):
+                next_seq = (CreditDebitNote.objects.filter(tenant_id=tenant_id).count()) + 1
+        return f"{prefix}-{next_seq:04d}"
+
+
+def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNote:
+    """Post a credit/debit note via the canonical `post_journal()`.
+
+    Account resolution (in priority order):
+      • Revenue: related_invoice.revenue_account → SalesSettings default → first Revenue account.
+      • AR:      related_invoice.accounts_receivable_account → customer.linked_account
+                 → customer.group.account_receivable → SalesSettings default.
+
+    Journal lines (both note types balance Dr=Cr=note.amount):
+      • Credit note: Dr Revenue (reverse sale) / Cr AR (release receivable).
+      • Debit  note: Dr AR (extra receivable) / Cr Revenue (extra sale).
+
+    Idempotent via `post_journal()`'s `(reference_type, reference_id)` lock.
+    """
+    if note.status == CreditDebitNote.STATUS_POSTED:
+        raise ValidationError("الإشعار مرحَّل مسبقاً.")
+    if note.status == CreditDebitNote.STATUS_CANCELLED:
+        raise ValidationError("لا يمكن ترحيل إشعار ملغي.")
+    amt = Decimal(str(note.amount or 0)).quantize(DEC)
+    if amt <= 0:
+        raise ValidationError("مبلغ الإشعار يجب أن يكون أكبر من صفر.")
+
+    # ── Resolve revenue account ─────────────────────────────────────────
+    revenue_account_id = None
+    if note.related_invoice_id and note.related_invoice.revenue_account_id:
+        revenue_account_id = note.related_invoice.revenue_account_id
+    if not revenue_account_id:
+        revenue_account_id = _default_revenue_account(note.tenant_id).id
+
+    # ── Resolve AR account (mirror `_resolve_ar_account` semantics) ────
+    ar_account_id = None
+    if note.related_invoice_id and note.related_invoice.accounts_receivable_account_id:
+        ar_account_id = note.related_invoice.accounts_receivable_account_id
+    if not ar_account_id:
+        cust: Partner = note.customer
+        if cust.linked_account_id:
+            ar_account_id = cust.linked_account_id
+        elif cust.group_id:
+            g = PartnerGroup.objects.filter(pk=cust.group_id).first()
+            if g and g.account_receivable_id:
+                ar_account_id = g.account_receivable_id
+        if not ar_account_id:
+            ss = SalesSettings.objects.filter(tenant_id=note.tenant_id).first()
+            if ss and ss.default_ar_account_id:
+                ar_account_id = ss.default_ar_account_id
+    if not ar_account_id:
+        raise ValidationError(
+            "لا يوجد حساب ذمم: عيّن حساباً مرتبطاً بالعميل أو في إعدادات المبيعات."
+        )
+
+    # ── Build journal lines per note type ──────────────────────────────
+    if note.note_type == CreditDebitNote.TYPE_CREDIT:
+        dr_acc, cr_acc = revenue_account_id, ar_account_id
+        dr_desc, cr_desc = "تخفيض إيراد", "إشعار دائن للعميل"
+    else:  # debit
+        dr_acc, cr_acc = ar_account_id, revenue_account_id
+        dr_desc, cr_desc = "إشعار مدين للعميل", "زيادة إيراد"
+
+    journal_lines = [
+        {
+            "account": dr_acc,
+            "partner": note.customer_id if dr_acc == ar_account_id else None,
+            "debit": amt,
+            "credit": Decimal("0"),
+            "description": dr_desc,
+        },
+        {
+            "account": cr_acc,
+            "partner": note.customer_id if cr_acc == ar_account_id else None,
+            "debit": Decimal("0"),
+            "credit": amt,
+            "description": cr_desc,
+        },
+    ]
+
+    # ── Currency: inherit from related invoice if any, else first tenant currency
+    currency = None
+    exchange_rate = Decimal("1")
+    if note.related_invoice_id:
+        currency = note.related_invoice.currency
+        exchange_rate = Decimal(str(note.related_invoice.exchange_rate or 1))
+
+    with transaction.atomic():
+        jh = post_journal(
+            tenant_id=note.tenant_id,
+            transaction_date=note.note_date,
+            reference_type="CREDIT_DEBIT_NOTE",
+            reference_id=note.id,
+            description=f"إشعار {note.get_note_type_display()} — {note.note_number}",
+            lines_data=journal_lines,
+            currency=currency,
+            exchange_rate=exchange_rate,
+            user=user,
+        )
+        note.journal = jh
+        note.status = CreditDebitNote.STATUS_POSTED
+        note.save(update_fields=["journal", "status"])
+
+    return note
 

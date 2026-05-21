@@ -23,6 +23,21 @@ export type SalesInvoiceRow = {
   amount_paid?: string;
   currency: number;
   stock_on_post?: boolean;
+  /** M2-T1: book number (0 = manual). */
+  book_number?: number;
+};
+
+/** M2-T3: cheque attached to a sales invoice (read-side). */
+export type AttachedCheque = {
+  id: number;
+  cheque_number: string;
+  bank_name?: string;
+  amount: string;
+  due_date?: string | null;
+  issue_date?: string | null;
+  payee_name?: string | null;
+  status: string;
+  notes?: string | null;
 };
 
 export type SalesInvoiceDetail = SalesInvoiceRow & {
@@ -44,9 +59,55 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
     tax_rate: number | null;
     line_total_excl_tax: string;
     line_tax_amount: string;
+    /** M2-T2: Aseel line columns */
+    unit?: string;
+    warehouse?: string;
+    catalog_no?: string;
+    expiry_date?: string | null;
+    extra_quantity?: string | null;
+    line_tax_percent?: string | null;
   }[];
   created_at?: string;
+  // M2-T1: Aseel header fields
+  book_number?: number;
+  second_date?: string | null;
+  licensed_dealer_no?: string;
+  settlement_invoice_no?: string;
+  prices_include_tax?: boolean;
+  discount_percent?: string;
+  // M2-T3: Financial instrument + attached voucher
+  financial_document_no?: string;
+  attached_cash_amount?: string;
+  attached_cash_account?: number | null;
+  cheques?: AttachedCheque[];
+  // M2-T4: source-discount overrides (null = use customer default)
+  source_discount_percent_override?: string | null;
+  source_discount_amount_override?: string | null;
 };
+
+/** M2-T3: payload for attaching cash + cheques to an invoice. */
+export type PaymentVoucherInput = {
+  cash_amount: string;
+  cash_account_id?: number | null;
+  cheques: Array<{
+    cheque_number: string;
+    amount: string;
+    bank_name?: string;
+    due_date?: string | null;
+    issue_date?: string | null;
+    payee_name?: string;
+    notes?: string;
+  }>;
+};
+
+export async function attachPaymentVoucher(
+  invoiceId: number,
+  payload: PaymentVoucherInput
+): Promise<SalesInvoiceDetail> {
+  return apiPostObject(`${BASE}/invoices/${invoiceId}/payment-voucher/`, payload, {
+    tenantId: tid(),
+  });
+}
 
 export async function listSalesInvoices(
   query?: Record<string, string | number | boolean | undefined>
@@ -253,4 +314,139 @@ export async function getAgingReport(): Promise<
   }[]
 > {
   return apiGetList(`${BASE}/reports/aging/`, { tenantId: tid() });
+}
+
+// -------------------------------------------------------------
+// Sales Quotations (العروض والطلبيات — T4-01)
+// -------------------------------------------------------------
+export type SalesQuotationRow = {
+  id: number;
+  quotation_number: string;
+  customer: number;
+  customer_name?: string;
+  quotation_date: string;
+  valid_until?: string | null;
+  status: string;
+  grand_total: string;
+  notes?: string;
+};
+
+export type SalesQuotationDetail = SalesQuotationRow & {
+  currency: number;
+  currency_code?: string;
+  exchange_rate: string;
+  subtotal: string;
+  discount_amount: string;
+  tax_amount: string;
+  lines: {
+    id: number;
+    product: number;
+    product_name?: string;
+    quantity: string;
+    unit_price: string;
+    line_discount: string;
+    tax_rate: number | null;
+    line_total: string;
+  }[];
+};
+
+export async function listQuotations(): Promise<SalesQuotationRow[]> {
+  return apiGetList(`${BASE}/quotations/`, { tenantId: tid() });
+}
+
+export async function getQuotation(id: number): Promise<SalesQuotationDetail> {
+  return apiGetObject(`${BASE}/quotations/${id}/`, { tenantId: tid() });
+}
+
+export async function createQuotation(
+  body: Record<string, unknown>,
+): Promise<SalesQuotationDetail> {
+  return apiPostObject(`${BASE}/quotations/`, body, { tenantId: tid() });
+}
+
+export async function updateQuotation(
+  id: number,
+  body: Record<string, unknown>,
+): Promise<SalesQuotationDetail> {
+  return apiPatchObject(`${BASE}/quotations/${id}/`, body, { tenantId: tid() });
+}
+
+export async function deleteQuotation(id: number): Promise<void> {
+  return apiDelete(`${BASE}/quotations/${id}/`, { tenantId: tid() });
+}
+
+export async function convertQuotationToInvoice(
+  id: number,
+): Promise<{ invoice_id: number; invoice_number: string }> {
+  return apiPostObject(
+    `${BASE}/quotations/${id}/convert/`,
+    {},
+    { tenantId: tid() },
+  );
+}
+
+// -------------------------------------------------------------
+// M4-T4 — Credit / Debit notes (إشعارات مدينة/دائنة)
+// -------------------------------------------------------------
+export type CreditDebitNoteRow = {
+  id: number;
+  note_number: string;
+  note_date: string;
+  note_type: "credit" | "debit";
+  customer: number;
+  customer_name?: string;
+  related_invoice: number | null;
+  related_invoice_number?: string | null;
+  amount: string;
+  reason?: string;
+  status: string;
+  journal?: number | null;
+  created_at?: string;
+};
+
+export async function listCreditDebitNotes(): Promise<CreditDebitNoteRow[]> {
+  return apiGetList(`${BASE}/credit-debit-notes/`, { tenantId: tid() });
+}
+
+export async function getCreditDebitNote(id: number): Promise<CreditDebitNoteRow> {
+  return apiGetObject(`${BASE}/credit-debit-notes/${id}/`, { tenantId: tid() });
+}
+
+export async function createCreditDebitNote(
+  body: {
+    note_date: string;
+    note_type: "credit" | "debit";
+    customer: number;
+    related_invoice?: number | null;
+    amount: string | number;
+    reason?: string;
+  },
+): Promise<CreditDebitNoteRow> {
+  return apiPostObject(`${BASE}/credit-debit-notes/`, body, { tenantId: tid() });
+}
+
+export async function updateCreditDebitNote(
+  id: number,
+  body: Partial<{
+    note_date: string;
+    note_type: "credit" | "debit";
+    customer: number;
+    related_invoice: number | null;
+    amount: string | number;
+    reason: string;
+  }>,
+): Promise<CreditDebitNoteRow> {
+  return apiPatchObject(`${BASE}/credit-debit-notes/${id}/`, body, { tenantId: tid() });
+}
+
+export async function deleteCreditDebitNote(id: number): Promise<void> {
+  return apiDelete(`${BASE}/credit-debit-notes/${id}/`, { tenantId: tid() });
+}
+
+export async function postCreditDebitNote(id: number): Promise<CreditDebitNoteRow> {
+  return apiPostObject(
+    `${BASE}/credit-debit-notes/${id}/post/`,
+    {},
+    { tenantId: tid() },
+  );
 }

@@ -53,7 +53,16 @@ export type AppView =
     | "accounting-exchange-rates"
     | "stock-levels"
     | "stock-movements"
-    | "property-rental";
+    | "property-rental"
+    | "aseel-kit"
+    | "aseel-sales"
+    | "sales-quotations"
+    | "credit-debit-notes"
+    | "sql-clearances"
+    | "sql-purchase-invoices"
+    | "shipments"
+    | "shipment-management"
+    | "clearance";
 
 export interface Attachment {
     id: string;

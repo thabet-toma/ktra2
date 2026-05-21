@@ -292,6 +292,38 @@ class LogisticsShipment(SoftDeleteMixin, models.Model):
     mmsi_number = models.CharField(max_length=100, null=True, blank=True, db_column='mmsi_number')
     tracking_link = models.CharField(max_length=500, null=True, blank=True, db_column='tracking_link')
 
+    # ── M3-T2: Aseel «إرسالية» header fields (mirror sales-invoice M2-T1) ──
+    # The Aseel program treats a shipment as an "إرسالية" (incoming) with the
+    # same header chrome as invoices. These are independent of the existing
+    # KTRA shipment workflow — they coexist as Aseel-side metadata.
+    SHIPMENT_TYPE_INVOICE = "invoice"   # إرسالية تتحوّل لفاتورة شراء
+    SHIPMENT_TYPE_TRANSPORT = "transport"  # إرسالية نقل فقط (لا تتحوّل لفاتورة)
+    SHIPMENT_TYPE_CHOICES = [
+        (SHIPMENT_TYPE_INVOICE, "إرسالية فاتورة"),
+        (SHIPMENT_TYPE_TRANSPORT, "إرسالية نقل"),
+    ]
+    book_number = models.PositiveIntegerField(
+        default=0, db_column='BookNumber',
+        help_text='رقم الدفتر. 0 = يدوي. >0 = مسلسل لكل دفتر مستقل.',
+    )
+    second_date = models.DateField(
+        null=True, blank=True, db_column='SecondDate',
+        help_text='تاريخ ثاني لحركة الإرسالية',
+    )
+    licensed_dealer_no = models.CharField(
+        max_length=100, blank=True, default='', db_column='LicensedDealerNo',
+        help_text='رقم المشتغل المرخص للمورد/المستورد',
+    )
+    shipment_type = models.CharField(
+        max_length=20, choices=SHIPMENT_TYPE_CHOICES,
+        default=SHIPMENT_TYPE_INVOICE, db_column='ShipmentType',
+        help_text='نوع الإرسالية (فاتورة → قابلة للتحويل لفاتورة شراء، أو نقل فقط)',
+    )
+    supplier_address = models.CharField(
+        max_length=500, blank=True, default='', db_column='SupplierAddress',
+        help_text='عنوان المورد/المستورد (نصّي حر، لا يتعارض مع شريك)',
+    )
+
     deals = models.ManyToManyField(LogisticsDeal, through='LogisticsShipmentDeal', related_name='shipments')
 
     class Meta:

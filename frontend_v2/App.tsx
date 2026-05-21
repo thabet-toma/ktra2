@@ -37,6 +37,10 @@ import { DealManagement } from "./components/procurement/DealManagement";
 import { ItemsManagement } from "./components/items/ItemsManagement";
 import { SupplierManagement } from "./components/suppliers/SupplierManagement";
 import { ShipmentManagement } from "./components/procurement/shipments/ShipmentManagement";
+import { AseelKitStory } from "./components/aseel/AseelKitStory";
+import { SalesInvoiceAseelStory } from "./components/sales/SalesInvoiceAseelStory";
+import { SalesQuotationsPage } from "./components/sales/SalesQuotationsPage";
+import { CreditDebitNotesPage } from "./components/sales/CreditDebitNotesPage";
 import { TaskList } from "./components/TaskList";
 import { RejectReasonModal } from "./components/modals/RejectReasonModal";
 import {
@@ -256,6 +260,13 @@ const App: React.FC = () => {
     });
   }, [currentUser, tasks, activeTask]);
 
+  // مسارات معاينة الأصيل (dev/QA) — تُكتشف قبل حارس المصادقة لأن لها bypass خاص
+  useEffect(() => {
+    const p = (location.pathname || "/").replace(/\/$/, "") || "/";
+    if (p === "/aseel-kit") setAppView("aseel-kit");
+    else if (p === "/aseel-sales") setAppView("aseel-sales");
+  }, [location.pathname]);
+
   // مسارات الصفقات + ?view= القديم؛ لا نفرض شاشة الدور عند كل زيارة لـ /
   useEffect(() => {
     if (!currentUser?.isApproved) return;
@@ -290,6 +301,14 @@ const App: React.FC = () => {
     }
     if (path === "/assistant") {
       setAppView("smart-assistant");
+      return;
+    }
+    if (path === "/aseel-kit") {
+      setAppView("aseel-kit");
+      return;
+    }
+    if (path === "/aseel-sales") {
+      setAppView("aseel-sales");
       return;
     }
     if (path === "/clearance") {
@@ -1437,6 +1456,18 @@ const App: React.FC = () => {
       case "smart-assistant":
         return <SmartAssistantPage />;
 
+      case "aseel-kit":
+        return <AseelKitStory />;
+
+      case "aseel-sales":
+        return <SalesInvoiceAseelStory />;
+
+      case "sales-quotations":
+        return <SalesQuotationsPage />;
+
+      case "credit-debit-notes":
+        return <CreditDebitNotesPage />;
+
       default:
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
     }
@@ -1463,6 +1494,14 @@ const App: React.FC = () => {
   //     </div>
   //   );
   // }
+
+  // Dev kit — no auth required
+  if (appView === "aseel-kit") {
+    return <AseelKitStory />;
+  }
+  if (appView === "aseel-sales") {
+    return <SalesInvoiceAseelStory />;
+  }
 
   // 2. Auth Checks
   if (authLoading) {

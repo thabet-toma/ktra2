@@ -17,7 +17,20 @@ import {
   Handshake,
   AlertTriangle,
   Info,
+  ChevronRight,
+  ChevronLeft,
+  ChevronsRight,
+  ChevronsLeft,
+  Printer,
+  FileDown,
+  RefreshCw,
+  X,
 } from "lucide-react";
+import {
+  AseelDocumentShell,
+  useRecordNavigation,
+  useAseelKeymap,
+} from "../aseel";
 
 /* ─────────── types ─────────── */
 
@@ -114,6 +127,96 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   });
 
   const [lines, setLines] = useState<LineState[]>([emptyLine(), emptyLine(), emptyLine()]);
+
+  // M4-T2: Aseel Navigation for journal entries
+  const [journalsList, setJournalsList] = useState<any[]>([]);
+  const [showAccountPicker, setShowAccountPicker] = useState(false);
+
+  const nav = useRecordNavigation<any>({
+    items: journalsList,
+    getId: (j) => j.id || 0,
+    currentId: journalId,
+    onSelect: async (id) => {
+      if (id === null) {
+        // New journal - reset form
+        setHeader({
+          transaction_date: new Date().toISOString().split("T")[0],
+          description: "",
+          reference_type: "",
+          reference_id: "",
+          reference_summary: "",
+          deal_ref_number: "",
+          currency: "",
+          exchange_rate: "1",
+          currency_code: "",
+        });
+        setLines([emptyLine(), emptyLine(), emptyLine()]);
+        setPosted(false);
+      } else {
+        try {
+          const j = await accountingApi.getJournal(Number(id));
+          setPosted(!!j.is_posted);
+          setHeader({
+            transaction_date: j.transaction_date || "",
+            description: j.description || "",
+            reference_type: j.reference_type || "",
+            reference_id: j.reference_id != null ? String(j.reference_id) : "",
+            reference_summary: j.reference_summary || "",
+            deal_ref_number: j.deal_ref_number || "",
+            currency: j.currency != null ? String(j.currency) : "",
+            exchange_rate: j.exchange_rate != null ? String(j.exchange_rate) : "1",
+            currency_code: j.currency_code || "",
+          });
+          const mapped: LineState[] = (j.lines || []).map((line: any) => ({
+            id: line.id,
+            accountId: String(line.account || ""),
+            partnerId: String(line.partner || ""),
+            costCenterId: String(line.cost_center || ""),
+            debit: String(line.debit || ""),
+            credit: String(line.credit || ""),
+            description: line.description || "",
+          }));
+          setLines(mapped.length > 0 ? mapped : [emptyLine(), emptyLine(), emptyLine()]);
+        } catch (err) {
+          console.error('Error loading journal:', err);
+        }
+      }
+    },
+  });
+
+  // M4-T2: Aseel keyboard shortcuts — real handlers.
+  useAseelKeymap({
+    F2: () => window.print(),
+    F5: () => load(),
+    F6: () => {
+      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      el?.focus();
+    },
+    F12: () => saveAndPost(),
+    Escape: () => {
+      if (showAccountPicker) { setShowAccountPicker(false); return; }
+      onBack();
+    },
+    plus: () => {
+      const ae = document.activeElement;
+      if (ae?.getAttribute?.('data-aseel-key') === '1') {
+        setShowAccountPicker(true);
+      }
+    },
+  }, { enabled: !showAccountPicker });
+
+  // Load journals list for navigation
+  useEffect(() => {
+    const loadJournals = async () => {
+      try {
+        const list = await accountingApi.getJournals();
+        setJournalsList(list);
+      } catch (err) {
+        console.error('Error loading journals list:', err);
+      }
+    };
+    loadJournals();
+  }, []);
 
   /* ── load data ── */
   const load = useCallback(async () => {
@@ -329,7 +432,54 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       /\bشحنة\b/i.test(header.description || ""));
 
   return (
-    <div className="space-y-5 max-w-5xl mx-auto">
+    <div
+      data-skin="aseel"
+      style={{ height: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
+    >
+    <AseelDocumentShell
+      title="قيود المحاسبة"
+      state={journalId ? `قيد #${journalId}` : 'قيد جديد'}
+      nav={nav}
+      actions={[
+        {
+          key: 'save',
+          label: posted ? 'مرحَّل' : 'تخزين',
+          icon: <Save />,
+          onClick: !posted ? saveAndPost : undefined,
+          disabled: posted,
+        },
+        {
+          key: 'reload',
+          label: 'تحديث',
+          icon: <RefreshCw />,
+          onClick: load,
+          separatorBefore: true,
+        },
+        {
+          key: 'back',
+          label: 'خروج',
+          icon: <X />,
+          onClick: onBack,
+          danger: true,
+          separatorBefore: true,
+        },
+        {
+          key: 'print',
+          label: 'طباعة',
+          icon: <Printer />,
+          onClick: () => window.print(),
+        },
+      ]}
+      header={<></>}
+      status={
+        <>
+          <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+          <span className="aseel-status-item">الحالة <b>{posted ? 'مرحَّل' : 'مسودة'}</b></span>
+          {journalId && <span className="aseel-status-item">رقم القيد <b>{journalId}</b></span>}
+        </>
+      }
+    >
+    <div className="space-y-5 max-w-5xl mx-auto" style={{ height: '100%', overflow: 'auto', padding: '12px', background: '#ffffff' }}>
 
       {/* ── شريط العنوان ── */}
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -824,6 +974,8 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
           هذا القيد مرحّل ومؤكد — لا يمكن تعديله.
         </div>
       )}
+    </div>
+    </AseelDocumentShell>
     </div>
   );
 };

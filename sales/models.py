@@ -103,6 +103,30 @@ class SalesSettings(models.Model):
         related_name="sales_settings_ar",
         help_text="حساب ذمم افتراضي للعملاء الآجلين",
     )
+    # M2-T3: cheques-receivable-undeposited (شيكات برسم التحصيل) account — used
+    # when cheques are attached to invoices (Dr this account, Cr customer AR).
+    default_cheques_under_collection_account = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column="DefaultChequesUnderCollectionAccountID",
+        related_name="sales_settings_cheques_uc",
+        help_text="حساب شيكات برسم التحصيل (Asset). يستقبل الشيكات الواردة المرفقة بفواتير المبيعات.",
+    )
+
+    # M2-T4: dedicated source-discount (withholding) receivable account.
+    # Source discount is NOT a COGS — it's an amount withheld by the customer
+    # against future tax credit; sits as a receivable from the tax authority.
+    default_source_discount_account = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column="DefaultSourceDiscountAccountID",
+        related_name="sales_settings_source_disc",
+        help_text="حساب خصم المصدر (Asset/Receivable). يستلم مبلغ الضريبة المحجوزة من العميل عند الترحيل.",
+    )
 
     default_payment_type = models.CharField(
         max_length=20,
@@ -277,10 +301,75 @@ class SalesInvoice(models.Model):
         db_column="JournalID",
         related_name="sales_invoices",
     )
+    # M2-T3: linked financial instrument (سند مالي)
+    financial_document_no = models.CharField(
+        max_length=50, blank=True, default="", db_column="FinancialDocumentNo",
+        help_text="رقم السند المالي المرفق بالفاتورة (إيصال قبض/صرف)",
+    )
     stock_on_post = models.BooleanField(
         default=True,
         db_column="StockOnPost",
         help_text="إذا عطّل: لا يُخصم المخزون عند الترحيل بل عند تسليم أمر الإخراج",
+    )
+
+    book_number = models.PositiveIntegerField(
+        default=0,
+        db_column="BookNumber",
+        help_text="رقم الدفتر. 0 = يدوي. >0 = مسلسل لكل دفتر مستقل.",
+    )
+    second_date = models.DateField(
+        null=True, blank=True, db_column="SecondDate",
+        help_text="تاريخ ثاني لحركة الفواتير (حقل اختياري)",
+    )
+    licensed_dealer_no = models.CharField(
+        max_length=100, blank=True, default="", db_column="LicensedDealerNo",
+        help_text="رقم المشتغل المرخص الخاص بالمورد أو العميل",
+    )
+    settlement_invoice_no = models.CharField(
+        max_length=100, blank=True, default="", db_column="SettlementInvoiceNo",
+        help_text="رقم فاتورة المقاصة",
+    )
+    prices_include_tax = models.BooleanField(
+        default=False,
+        db_column="PricesIncludeTax",
+        help_text="إذا مفعّل: الأسعار المدخلة شاملة للضريبة (تجاوز إعدادات المبيعات)",
+    )
+    discount_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0, db_column="DiscountPercent",
+        help_text="نسبة الخصم على مستوى الفاتورة (0-100)",
+    )
+
+    # M2-T3: Attached payment voucher (cash side; cheques attach via Cheque.sales_invoice FK).
+    # When the operator records cash/cheques alongside the invoice, these fields
+    # capture the cash portion. The integrated journal posts cash + cheques as
+    # additional Dr lines, reducing the AR remainder.
+    attached_cash_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0,
+        db_column="AttachedCashAmount",
+        help_text="مبلغ نقدي مرفق مع الفاتورة (يُحسم من ذمم العميل ويُرحَّل ضمن نفس قيد الفاتورة)",
+    )
+    attached_cash_account = models.ForeignKey(
+        Account,
+        on_delete=models.PROTECT,
+        null=True, blank=True,
+        db_column="AttachedCashAccountID",
+        related_name="sales_invoices_attached_cash",
+        help_text="حساب الصندوق/البنك الذي استلم المبلغ النقدي المرفق",
+    )
+
+    # M2-T4: per-invoice OVERRIDE of source discount (نسبة/مبلغ خصم المصدر).
+    # If null → falls back to customer's source_discount_percent/source_discount_amount.
+    # Source discount is the withholding-tax slice the customer holds back (Aseel «خصم مصدر»);
+    # it is NOT the regular discount (`discount_percent`/`invoice_discount`).
+    source_discount_percent_override = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        db_column="SourceDiscountPercentOverride",
+        help_text="نسبة خصم مصدر — تجاوز على مستوى الفاتورة (null = استخدم افتراضي العميل)",
+    )
+    source_discount_amount_override = models.DecimalField(
+        max_digits=18, decimal_places=2, null=True, blank=True,
+        db_column="SourceDiscountAmountOverride",
+        help_text="مبلغ خصم مصدر — تجاوز على مستوى الفاتورة (null = احسب من النسبة أو افتراضي العميل)",
     )
 
     notes = models.TextField(null=True, blank=True, db_column="Notes")
@@ -350,6 +439,18 @@ class SalesInvoiceLine(models.Model):
     )
     line_tax_amount = models.DecimalField(
         max_digits=18, decimal_places=2, default=0, db_column="LineTaxAmount"
+    )
+
+    unit = models.CharField(max_length=50, blank=True, default="", db_column="Unit")
+    warehouse = models.CharField(max_length=100, blank=True, default="", db_column="Warehouse")
+    catalog_no = models.CharField(max_length=100, blank=True, default="", db_column="CatalogNo")
+    expiry_date = models.DateField(null=True, blank=True, db_column="ExpiryDate")
+    extra_quantity = models.DecimalField(
+        max_digits=18, decimal_places=4, null=True, blank=True, db_column="ExtraQuantity"
+    )
+    line_tax_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True, db_column="LineTaxPercent",
+        help_text="نسبة ضريبة مخصصة للسطر (تجاوز النسبة الافتراضية)",
     )
 
     class Meta:
@@ -657,4 +758,83 @@ class SalesQuotationLine(models.Model):
 
     def __str__(self):
         return f"Line {self.id} quote={self.quotation_id}"
+
+
+class CreditDebitNote(models.Model):
+    """M4-T4 — إشعار مدين/دائن (Credit/Debit Note).
+
+    يربط بحساب عميل وفاتورة اختيارياً، ويُنشئ قيداً محاسبياً متوازناً
+    عبر `accounting.services.post_journal()` عند الترحيل.
+
+    دلالات الإشارات (per `notices.txt` + standard accounting):
+    - إشعار دائن (credit): العميل يحصل على رصيد لنا (تخفيض إيراد، خصم ذمم) →
+      Dr إيرادات (نقص الإيراد)، Cr ذمم العميل (نقص الدائن).
+    - إشعار مدين (debit): العميل مدين لنا بمبلغ إضافي → Dr ذمم العميل (زيادة)،
+      Cr إيرادات (زيادة).
+
+    Reference: docs/aseel_reference/notices.txt
+    """
+
+    TYPE_CREDIT = "credit"
+    TYPE_DEBIT = "debit"
+    TYPE_CHOICES = [(TYPE_CREDIT, "دائن"), (TYPE_DEBIT, "مدين")]
+
+    STATUS_DRAFT = "draft"
+    STATUS_POSTED = "posted"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "مسودة"),
+        (STATUS_POSTED, "مرحّل"),
+        (STATUS_CANCELLED, "ملغي"),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column="CreditDebitNoteID")
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column="TenantID", to_field="TenantID",
+    )
+    note_number = models.CharField(max_length=50, db_column="NoteNumber")
+    note_date = models.DateField(db_column="NoteDate")
+    note_type = models.CharField(
+        max_length=10, choices=TYPE_CHOICES, db_column="NoteType",
+    )
+    customer = models.ForeignKey(
+        Partner,
+        on_delete=models.PROTECT,
+        db_column="CustomerID",
+        related_name="credit_debit_notes",
+    )
+    related_invoice = models.ForeignKey(
+        "SalesInvoice",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="RelatedInvoiceID",
+        related_name="credit_debit_notes",
+    )
+    amount = models.DecimalField(max_digits=18, decimal_places=2, db_column="Amount")
+    reason = models.TextField(blank=True, default="", db_column="Reason")
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES,
+        default=STATUS_DRAFT, db_column="Status",
+    )
+    journal = models.ForeignKey(
+        "accounting.JournalHeader",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="JournalID",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="CreatedBy_UserID",
+    )
+
+    class Meta:
+        db_table = "sales_module_credit_debit_notes"
+        managed = True
+        unique_together = [("tenant", "note_number")]
+
+    def __str__(self):
+        return f"{self.note_number} ({self.note_type})"
 

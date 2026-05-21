@@ -15,7 +15,7 @@ import {
   Handshake, Users, Menu, X, ChevronRight, ChevronLeft, Info,
   Calculator, BookMarked, Scale, BookOpen, Banknote, Sparkles,
   CalendarDays, ArrowLeftRight, Boxes, BarChart3, Building2,
-  ShoppingCart, Receipt, Ship, Truck,
+  ShoppingCart, Receipt, Ship, Truck, Wrench,
 } from 'lucide-react';
 
 
@@ -54,6 +54,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
       activeView === "sales-invoices" ||
       activeView === "sales-customers" ||
       activeView === "sales-customer-payments" ||
+      activeView === "sales-quotations" ||
+      activeView === "credit-debit-notes" ||
       activeView === "sales-settings"
     )
       setSalesExpanded(true);
@@ -69,6 +71,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
   const salesLinks = [
     { view: "sales-invoices" as AppView, label: "فواتير المبيعات", icon: <FileText className="h-5 w-5" /> },
+    { view: "sales-quotations" as AppView, label: "العروض والطلبيات", icon: <FileText className="h-5 w-5" /> },
+    { view: "credit-debit-notes" as AppView, label: "الإشعارات المدينة/الدائنة", icon: <FileText className="h-5 w-5" /> },
     { view: "sales-customer-payments" as AppView, label: "دفعات العملاء", icon: <Banknote className="h-5 w-5" /> },
     { view: "sales-customers" as AppView, label: "العملاء", icon: <Users className="h-5 w-5" /> },
     { view: "sales-settings" as AppView, label: "إعدادات المبيعات", icon: <SettingsIcon className="h-5 w-5" /> },
@@ -87,6 +91,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "stock-levels" as AppView, label: "أرصدة المخزون", icon: <BarChart3 className="h-5 w-5" /> },
     { view: "stock-movements" as AppView, label: "حركات المخزون", icon: <Boxes className="h-5 w-5" /> },
     { view: "property-rental" as AppView, label: "تأجير العقارات والعدادات", icon: <Building2 className="h-5 w-5" /> },
+    { view: "aseel-kit" as AppView, label: "🔧 Aseel Kit (M0)", icon: <Wrench className="h-5 w-5" />, roles: ['manager', 'procurement'] as string[] },
   ];
 
   const financeLinks = [
@@ -105,72 +110,72 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     const showText = !isCollapsed || isMobile;
 
     return (
-      <div className="flex flex-col h-full bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 transition-all duration-300 relative shadow-lg">
-        {/* Header */}
-        <div className={`p-4 h-16 border-b border-gray-200 dark:border-gray-700 flex items-center ${isCollapsed && !isMobile ? 'justify-center' : 'justify-between'}`}>
+      <div className="flex flex-col h-full bg-[var(--color-surface-2)] border-l border-[var(--color-border)] transition-all duration-300 relative" data-skin="aseel">
+        {/* M5-T2: Header بنمط الأصيل */}
+        <div className={`p-2 h-12 border-b border-[var(--color-border)] flex items-center ${isCollapsed && !isMobile ? 'justify-center' : 'justify-between'} bg-[var(--color-surface)]`}>
           <div className="flex items-center overflow-hidden">
-            <LogoIcon className="h-8 w-8 text-blue-600 flex-shrink-0" />
-            {showText && <span className="mr-2 text-xl font-bold dark:text-white truncate">K.T.R.A</span>}
+            <LogoIcon className="h-6 w-6 text-[var(--color-primary)] flex-shrink-0" />
+            {showText && <span className="mr-2 text-sm font-bold text-[var(--color-text)] truncate">K.T.R.A</span>}
           </div>
           {isMobile && (
-            <button onClick={() => setIsMobileMenuOpen(false)} className="p-2 text-gray-500 hover:bg-gray-100 rounded-lg">
-              <X className="h-6 w-6" />
+            <button onClick={() => setIsMobileMenuOpen(false)} className="p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] rounded">
+              <X className="h-5 w-5" />
             </button>
           )}
         </div>
 
-        {/* Navigation */}
+        {/* Navigation بنمط الأصيل */}
         <nav
-          className="flex-1 overflow-y-auto p-3 space-y-2 scrollbar-hide"
+          className="flex-1 overflow-y-auto p-1 space-y-0.5"
           style={{ msOverflowStyle: 'none', scrollbarWidth: 'none' }}
         >
           <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; }`}</style>
 
-          {/* الرئيسية - للمدير فقط */}
+          {/* الرئيسية */}
           {hasAccess('manager') && (
             <button
               onClick={() => { setView("dashboard"); if (isMobile) setIsMobileMenuOpen(false); }}
-              className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("dashboard") ? "bg-blue-600 text-white shadow-md" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
+              className={`flex items-center w-full p-2 text-sm rounded transition-all ${isViewActive("dashboard") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
               title="الرئيسية"
             >
-              <DashboardIcon className="h-6 w-6 flex-shrink-0" />
-              {showText && <span className="mr-3 text-right flex-1">الرئيسية</span>}
+              <DashboardIcon className="h-4 w-4 flex-shrink-0" />
+              {showText && <span className="mr-2 text-right flex-1">الرئيسية</span>}
             </button>
           )}
 
           <button
             onClick={() => { setView(user.role === 'manager' ? "task-management" : "tasks"); if (isMobile) setIsMobileMenuOpen(false); }}
-            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("task-management") || isViewActive("tasks") ? "bg-blue-600 text-white shadow-md" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
+            className={`flex items-center w-full p-2 text-sm rounded transition-all ${isViewActive("task-management") || isViewActive("tasks") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
             title="المهام"
           >
-            <TasksIcon className="h-6 w-6 flex-shrink-0" />
-            {showText && <span className="mr-3 text-right flex-1">{user.role === 'manager' ? "إدارة المهام" : "مهامي"}</span>}
+            <TasksIcon className="h-4 w-4 flex-shrink-0" />
+            {showText && <span className="mr-2 text-right flex-1">{user.role === 'manager' ? "إدارة المهام" : "مهامي"}</span>}
           </button>
 
           <button
             onClick={() => { setView("smart-assistant"); if (isMobile) setIsMobileMenuOpen(false); }}
-            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("smart-assistant") ? "bg-[var(--color-primary)] text-white shadow-md" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
+            className={`flex items-center w-full p-2 text-sm rounded transition-all ${isViewActive("smart-assistant") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
             title="المساعد الذكي"
           >
-            <Sparkles className="h-6 w-6 flex-shrink-0" />
-            {showText && <span className="mr-3 text-right flex-1">المساعد الذكي</span>}
+            <Sparkles className="h-4 w-4 flex-shrink-0" />
+            {showText && <span className="mr-2 text-right flex-1">المساعد الذكي</span>}
           </button>
 
           {/* إدارة الموظفين */}
-          <div className="space-y-1">
+          <div className="space-y-0.5">
             <button
               onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); setUserManagementExpanded(!userManagementExpanded); }}
-              className={`flex items-center justify-between w-full p-3 rounded-lg ${userManagementExpanded ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
+              className={`flex items-center justify-between w-full p-2 text-sm rounded ${userManagementExpanded ? "bg-[var(--color-surface-2)] text-[var(--color-primary)]" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
               title="إدارة الموظفين"
             >
               <div className="flex items-center">
-                <Users className="h-6 w-6 flex-shrink-0" />
-                {showText && <span className="mr-3">إدارة الموظفين</span>}
+                <Users className="h-4 w-4 flex-shrink-0" />
+                {showText && <span className="mr-2">إدارة الموظفين</span>}
               </div>
-              {showText && (userManagementExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
+              {showText && (userManagementExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
             </button>
             {userManagementExpanded && showText && (
-              <div className="mr-4 pr-4 border-r-2 border-gray-100 dark:border-gray-700 space-y-1 mt-1">
+              <div className="mr-3 pr-2 border-r border-[var(--color-border)] space-y-0.5 mt-0.5">
                 {userManagementLinks.filter(l => l.roles.includes(user.role)).map(link => (
                   <button
                     key={link.view}
@@ -232,7 +237,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
               </button>
               {procurementExpanded && showText && (
                 <div className="mr-4 pr-4 border-r-2 border-gray-100 dark:border-gray-700 space-y-1 mt-1">
-                  {procurementLinks.map(link => (
+                  {procurementLinks.filter(l => !l.roles || l.roles.includes(user.role)).map(link => (
                     <button
                       key={link.view}
                       onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}

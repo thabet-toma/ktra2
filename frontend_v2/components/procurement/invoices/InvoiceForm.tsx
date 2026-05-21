@@ -19,6 +19,15 @@ import {
   Briefcase,
   Calculator,
   RefreshCw,
+  ChevronRight,
+  ChevronLeft,
+  ChevronsRight,
+  ChevronsLeft,
+  Plus,
+  Trash2,
+  Printer,
+  FileDown,
+  X,
 } from "lucide-react";
 import { ItemsTableSection } from "@/components/forms/shared/ItemsTableSection";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
@@ -47,6 +56,11 @@ import {
   NISFinancialSummary,
   NISInvoiceTaxStrip,
 } from "./sections";
+import {
+  AseelDocumentShell,
+  useRecordNavigation,
+  useAseelKeymap,
+} from "../../aseel";
 
 interface InvoiceFormProps {
   invoice: Partial<Invoice> | null;
@@ -102,6 +116,68 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [dealActivities, setDealActivities] = useState<DealActivity[]>(
     initialInvoice?.dealInfo?.activityLog || []
   );
+
+  // M4-T1: Aseel Navigation for invoices
+  const [invoicesList, setInvoicesList] = useState<any[]>([]);
+  const [showSupplierPicker, setShowSupplierPicker] = useState(false);
+
+  const nav = useRecordNavigation<any>({
+    items: invoicesList,
+    getId: (inv) => inv.id || '',
+    currentId: formData.id || null,
+    onSelect: async (id) => {
+      if (id === null) {
+        setFormData({});
+        setDealInfo({ createdBy: currentUser.id, createdAt: new Date().toISOString() });
+        setInstallments([]);
+        setInstallmentPlanEnabled(false);
+      } else {
+        try {
+          const loaded = await purchaseInvoiceApi.get(Number(id));
+          const mapped = mapPurchaseInvoiceDtoToInvoice(loaded);
+          setFormData(mapped);
+          setDealInfo(mapped.dealInfo || { createdBy: currentUser.id, createdAt: new Date().toISOString() });
+          setInstallments(mapped.installments || []);
+          setInstallmentPlanEnabled(mapped.installmentPlanEnabled || false);
+        } catch (err) {
+          console.error('Error loading invoice:', err);
+        }
+      }
+    },
+  });
+
+  // M4-T1: Aseel keyboard shortcuts — real handlers.
+  useAseelKeymap({
+    F2: () => window.print(),
+    F6: () => {
+      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      el?.focus();
+    },
+    F12: () => handleSave(),
+    Escape: () => {
+      if (showSupplierPicker) { setShowSupplierPicker(false); return; }
+      onCancel();
+    },
+    plus: () => {
+      const ae = document.activeElement;
+      if (ae?.getAttribute?.('data-aseel-key') === '1') {
+        setShowSupplierPicker(true);
+      }
+    },
+  }, { enabled: !showSupplierPicker });
+
+  // Load invoices list for navigation
+  useEffect(() => {
+    const loadInvoices = async () => {
+      try {
+        const list = await purchaseInvoiceApi.list();
+        setInvoicesList(list);
+      } catch (err) {
+        console.error('Error loading invoices list:', err);
+      }
+    };
+    loadInvoices();
+  }, []);
 
   const effectiveShippingForTotals = (data: Partial<Invoice>) => {
     if (data.currency === "ILS") return 0;
@@ -618,7 +694,29 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   ]);
 
   return (
-    <div className="bg-gray-50 dark:bg-gray-900 min-h-screen pb-20">
+    <div
+      data-skin="aseel"
+      style={{ height: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
+    >
+    <AseelDocumentShell
+      title="فاتورة الشراء"
+      state={formData.id ? `فاتورة ${formData.invoiceNumber || `#${formData.id}`}` : 'فاتورة جديدة'}
+      nav={nav}
+      actions={[
+        { key: 'save', label: saving ? '...تخزين' : 'تخزين', icon: <Save />, onClick: !saving ? () => handleSave() : undefined, disabled: saving },
+        { key: 'cancel', label: 'إلغاء', icon: <X />, onClick: onCancel, danger: true, separatorBefore: true },
+        { key: 'print', label: 'طباعة', icon: <Printer />, onClick: () => window.print(), separatorBefore: true },
+      ]}
+      header={<></>}
+      status={
+        <>
+          <span className="aseel-status-item">المستخدم <b>{currentUser?.name || '—'}</b></span>
+          <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+          {formData.invoiceNumber && <span className="aseel-status-item">رقم الفاتورة <b>{formData.invoiceNumber}</b></span>}
+        </>
+      }
+    >
+    <div className="bg-gray-50 dark:bg-gray-900 pb-20" style={{ height: '100%', overflow: 'auto' }}>
       <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-30 shadow-sm">
         <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-3">
@@ -932,6 +1030,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           </button>
         </div>
       )}
+    </div>
+    </AseelDocumentShell>
     </div>
   );
 };

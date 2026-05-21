@@ -186,6 +186,21 @@ class Cheque(models.Model):
     created_by = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True, db_column='CreatedBy_UserID')
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
     notes = models.TextField(null=True, blank=True, db_column='Notes')
+    # M2-T3: link to sales invoice + customer payment
+    sales_invoice = models.ForeignKey(
+        'sales.SalesInvoice',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column='SalesInvoiceID',
+        related_name='cheques',
+    )
+    customer_payment = models.ForeignKey(
+        'sales.CustomerPayment',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column='CustomerPaymentID',
+        related_name='cheques',
+    )
 
     class Meta:
         db_table = 'cheques'

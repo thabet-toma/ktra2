@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -10,6 +11,7 @@ from rest_framework.response import Response
 from core.api_defaults import ApiAuthAndUser
 from core.tenant_utils import get_tenant
 from .models import (
+    CreditDebitNote,
     CustomerPayment,
     DeliveryOrder,
     SalesInvoice,
@@ -19,6 +21,7 @@ from .models import (
     SalesSettings,
 )
 from .serializers import (
+    CreditDebitNoteSerializer,
     CustomerPaymentSerializer,
     DeliveryOrderSerializer,
     SalesInvoiceListSerializer,
@@ -28,11 +31,13 @@ from .serializers import (
     SalesSettingsSerializer,
 )
 from .services import (
+    attach_payment_voucher,
     convert_quotation_to_invoice,
     credit_preview_for_sale,
     deliver_delivery_order,
     get_or_create_sales_settings,
     next_invoice_number,
+    post_credit_debit_note,
     post_customer_payment,
     post_sales_invoice,
     recalculate_invoice_amounts,
@@ -131,7 +136,7 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             with transaction.atomic():
                 inv = SalesInvoice.objects.create(
                     tenant=tenant,
-                    invoice_number=next_invoice_number(tenant.TenantID),
+                    invoice_number=next_invoice_number(tenant.TenantID, getattr(src, "book_number", 0)),
                     customer=src.customer,
                     invoice_date=date.today(),
                     due_date=src.due_date,
@@ -139,11 +144,15 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                     currency=src.currency,
                     exchange_rate=src.exchange_rate,
                     invoice_discount=src.invoice_discount,
+                    discount_percent=getattr(src, "discount_percent", 0) or 0,
                     stock_on_post=src.stock_on_post,
                     notes=src.notes,
                     revenue_account=src.revenue_account,
                     cash_or_bank_account=src.cash_or_bank_account,
                     accounts_receivable_account=src.accounts_receivable_account,
+                    prices_include_tax=getattr(src, "prices_include_tax", False),
+                    licensed_dealer_no=src.licensed_dealer_no or "",
+                    settlement_invoice_no=src.settlement_invoice_no or "",
                     status=SalesInvoice.STATUS_DRAFT,
                 )
                 for line in src.lines.all():
@@ -155,6 +164,12 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                         unit_price=line.unit_price,
                         line_discount=line.line_discount,
                         tax_rate=line.tax_rate,
+                        unit=line.unit or "",
+                        warehouse=line.warehouse or "",
+                        catalog_no=line.catalog_no or "",
+                        expiry_date=line.expiry_date,
+                        extra_quantity=line.extra_quantity,
+                        line_tax_percent=line.line_tax_percent,
                     )
                 lines = list(inv.lines.select_related("tax_rate", "tax_rate__tax_account"))
                 recalculate_invoice_amounts(inv, lines)
@@ -179,6 +194,37 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         invoice = self.get_object()
         try:
             post_sales_invoice(invoice, user=request.user)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        invoice.refresh_from_db()
+        ser = SalesInvoiceSerializer(invoice, context={"request": request})
+        return Response(ser.data)
+
+    @action(detail=True, methods=["post"], url_path="payment-voucher")
+    def payment_voucher(self, request, pk=None):
+        """M2-T3 — Attach the financial voucher (cash + cheques) to the invoice.
+
+        Body:
+            {
+                "cash_amount": "100.00",
+                "cash_account_id": 12,
+                "cheques": [
+                    {"cheque_number": "12345", "amount": "50", "bank_name": "...",
+                     "due_date": "2026-06-01", "issue_date": "2026-05-20", "notes": ""}
+                ]
+            }
+        Replaces previously-attached DRAFT cheques. Posting still happens via
+        the `/post` endpoint, which produces ONE integrated journal (M2-T3).
+        """
+        invoice = self.get_object()
+        try:
+            attach_payment_voucher(
+                invoice,
+                cash_amount=request.data.get("cash_amount", 0),
+                cash_account_id=request.data.get("cash_account_id"),
+                cheques=request.data.get("cheques") or [],
+                user=request.user,
+            )
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         invoice.refresh_from_db()
@@ -404,3 +450,37 @@ class SalesQuotationViewSet(viewsets.ModelViewSet):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class CreditDebitNoteViewSet(viewsets.ModelViewSet):
+    """M4-T4 — Credit / Debit notes (إشعارات مدينة/دائنة)."""
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    serializer_class = CreditDebitNoteSerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        qs = CreditDebitNote.objects.select_related("customer", "related_invoice", "journal")
+        if tenant:
+            qs = qs.filter(tenant=tenant)
+        return qs.order_by("-note_date", "-id")
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            raise DRFValidationError({"tenant": "لا يوجد شركة محددة."})
+        serializer.save(tenant=tenant, created_by=self.request.user if self.request.user.is_authenticated else None)
+
+    @action(detail=True, methods=["post"], url_path="post")
+    def post_action(self, request, pk=None):
+        """ترحيل الإشعار — قيد متوازن idempotent عبر post_journal()."""
+        note = self.get_object()
+        try:
+            post_credit_debit_note(note, user=request.user)
+        except ValidationError as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        note.refresh_from_db()
+        return Response(CreditDebitNoteSerializer(note).data)

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Deal,
   DealPayment,
@@ -12,6 +12,13 @@ import {
   DealInstallment,
   ShippingWorkflowStatus,
 } from "../../../types";
+import {
+  AseelDocumentShell,
+  useRecordNavigation,
+  useAseelKeymap,
+  AseelIndexPicker,
+  AseelGrid,
+} from "../../aseel";
 import {
   itemsService,
   suppliersService,
@@ -30,6 +37,9 @@ import {
   Truck,
   DollarSign,
   ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Layers,
   Wallet,
   Factory,
@@ -63,7 +73,11 @@ import {
   Sparkles,
   Zap,
   Activity,
-  RefreshCw
+  RefreshCw,
+  Plus,
+  Trash2,
+  Printer,
+  FileDown,
 } from "lucide-react";
 import { BasicInfoSection } from "@/components/forms/shared/BasicInfoSection";
 import { DealStageControl } from "@/components/forms/deal-parts/DealStageControl";
@@ -189,6 +203,68 @@ export const DealForm: React.FC<DealFormProps> = ({
   const [allDbItems, setAllDbItems] = useState<Item[]>([]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Aseel Navigation State
+  const [dealsList, setDealsList] = useState<Deal[]>([]);
+  const [showSupplierPicker, setShowSupplierPicker] = useState(false);
+
+  const nav = useRecordNavigation<Deal>({
+    items: dealsList,
+    getId: (d) => d.id || '',
+    currentId: formData.id || null,
+    onSelect: async (id) => {
+      if (id === null) {
+        handleNewDeal();
+      } else {
+        try {
+          const loaded = await dealsService.getDeal(String(id));
+          setFormData(loaded);
+          setItems(loaded.items || []);
+          setInstallments(loaded.installments || []);
+          setInstallmentPlanEnabled(loaded.installmentPlanEnabled || false);
+        } catch (err) {
+          console.error('Error loading deal:', err);
+        }
+      }
+    },
+  });
+
+  // M3-T1: Aseel keyboard shortcuts — real handlers (no placeholders).
+  useAseelKeymap({
+    F2: () => window.print(),
+    F6: () => {
+      // Focus the first searchable field (supplier name) for quick lookup.
+      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"], [name="supplierName"]');
+      el?.focus();
+    },
+    F12: () => { if (!saving) handleFinalSave(); },
+    Escape: () => {
+      if (showSupplierPicker) { setShowSupplierPicker(false); return; }
+      onCancel();
+    },
+    plus: () => {
+      // Open supplier index when focus is on an opt-in field (data-aseel-key="1").
+      const ae = document.activeElement;
+      if (ae?.getAttribute?.('data-aseel-key') === '1') {
+        setShowSupplierPicker(true);
+      }
+    },
+  }, { enabled: !showSupplierPicker });
+
+  const handleNewDeal = () => {
+    setFormData({});
+    setItems([]);
+    setInstallments([]);
+    setInstallmentPlanEnabled(false);
+  };
+
+  // Load deals list for navigation
+  useEffect(() => {
+    const unsub = dealsService.subscribeToDeals((fetchedDeals: Deal[]) => {
+      setDealsList(fetchedDeals);
+    });
+    return () => unsub();
+  }, []);
 
   // Modals State
   const [showItemSearch, setShowItemSearch] = useState(false);
@@ -1194,12 +1270,10 @@ export const DealForm: React.FC<DealFormProps> = ({
           }
         });
 
-        const dealId = await dealsService.createDeal(
-          createData,
-          currentUser.id,
-          currentUser.name,
-          currentUser.role || "user"
-        );
+        // Current signature: dealsService.createDeal(data) — audit happens
+        // server-side via authenticated user. Earlier Firestore signature took
+        // (data, userId, userName, userRole); not needed on the SQL pipeline.
+        const dealId = await dealsService.createDeal(createData);
 
         const createdDeal = await dealsService.getDeal(dealId);
         setFormData(createdDeal);
@@ -1428,7 +1502,66 @@ export const DealForm: React.FC<DealFormProps> = ({
   };
 
   return (
-    <div className={`bg-gray-50 dark:bg-gray-900 min-h-screen ${compactMode ? 'p-3' : 'p-4 md:p-6'}`}>
+    <div
+      data-skin="aseel"
+      style={{ height: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
+    >
+    <AseelDocumentShell
+      title="صفقة استيراد"
+      state={
+        formData.id
+          ? `صفقة ${formData.dealNumber || `#${formData.id}`}`
+          : 'صفقة جديدة'
+      }
+      nav={nav}
+      actions={[
+        { key: 'new', label: 'إضافة', icon: <Plus />, onClick: handleNewDeal },
+        {
+          key: 'save',
+          label: saving ? '...تخزين' : 'تخزين',
+          icon: <Save />,
+          onClick: !saving ? () => void handleFinalSave() : undefined,
+          disabled: saving,
+        },
+        {
+          key: 'cancel',
+          label: 'إلغاء',
+          icon: <X />,
+          onClick: onCancel,
+          danger: true,
+          separatorBefore: true,
+        },
+        {
+          key: 'print',
+          label: 'طباعة',
+          icon: <Printer />,
+          onClick: () => window.print(),
+          separatorBefore: true,
+        },
+      ]}
+      header={<></>}
+      status={
+        <>
+          <span className="aseel-status-item">
+            المستخدم <b>{currentUser?.name || '—'}</b>
+          </span>
+          <span className="aseel-status-item">
+            السجل <b>{nav.position}/{nav.total}</b>
+          </span>
+          {formData.dealNumber && (
+            <span className="aseel-status-item">
+              رقم الصفقة <b>{formData.dealNumber}</b>
+            </span>
+          )}
+          {formData.shippingWorkflowStatus && (
+            <span className="aseel-status-item">
+              المرحلة <b>{formData.shippingWorkflowStatus}</b>
+            </span>
+          )}
+        </>
+      }
+    >
+    <div className={`bg-gray-50 dark:bg-gray-900 ${compactMode ? 'p-3' : 'p-4 md:p-6'}`} style={{ height: '100%', overflow: 'auto' }}>
       {/* Top Header */}
       <div className={`flex flex-col ${compactMode ? 'gap-3 mb-4' : 'gap-4 mb-6'} sticky top-0 z-20 bg-gray-50/95 dark:bg-gray-900/95 backdrop-blur py-3 border-b border-gray-200 dark:border-gray-800`}>
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
@@ -1872,6 +2005,28 @@ export const DealForm: React.FC<DealFormProps> = ({
           />
         </div>
       )}
+
+    </div>
+    </AseelDocumentShell>
+
+      {/* M3-T1: Aseel supplier index picker (opens via +/… or programmatically). */}
+      <AseelIndexPicker<Supplier>
+        open={showSupplierPicker}
+        title="فهرس الموردين"
+        rows={suppliers}
+        columns={[
+          { key: 'id', header: 'الرقم', width: '90px', value: (r) => r.id ?? '' },
+          { key: 'name', header: 'الاسم', value: (r) => r.tradeName ?? r.alias ?? '' },
+          { key: 'phone', header: 'الهاتف', width: '140px', value: (r) => r.phone ?? r.mobile ?? '—' },
+        ]}
+        getRowKey={(r) => r.id ?? ''}
+        searchValue={(r) => `${r.id ?? ''} ${r.tradeName ?? ''} ${r.alias ?? ''}`}
+        onSelect={(r) => {
+          setFormData({ ...formData, supplierId: r.id ?? '', supplierName: r.tradeName ?? r.alias ?? '' });
+          setShowSupplierPicker(false);
+        }}
+        onClose={() => setShowSupplierPicker(false)}
+      />
     </div>
 
 

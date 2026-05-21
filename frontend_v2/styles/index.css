@@ -339,3 +339,403 @@ tbody td {
   flex: 1;
   overflow-y: auto;
 }
+
+/* ════════════════════════════════════════════════════════════════════
+   M0-T2 — Aseel hybrid skin (classic dense Windows-accounting look)
+   Activated by data-skin="aseel" on any ancestor (story scopes it;
+   M5 will set it on <html>). Does NOT alter the default theme.
+   Faithful to the «الأصيل» screenshots: cream workspace, pale-blue
+   title chip, red doc-state, pale-yellow thin-bordered fields,
+   sharp 2px corners, Tahoma, high density.
+   ════════════════════════════════════════════════════════════════════ */
+[data-skin="aseel"] {
+  --aseel-font: 'Tahoma', 'Segoe UI', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  --aseel-fs: 12px;
+  --aseel-fs-sm: 11px;
+  --aseel-bg: #e9e6d6;
+  --aseel-panel: #f2f0e4;
+  --aseel-field: #fcfcec;
+  --aseel-field-hl: #dce9f5;
+  --aseel-field-focus: #ffffff;
+  --aseel-border: #9e9c7e;
+  --aseel-border-soft: #c4c2a6;
+  --aseel-line: #cdcbb2;
+  --aseel-ink: #2b2b1c;
+  --aseel-ink-soft: #5c5a45;
+  --aseel-accent: #2f5f8f;
+  --aseel-accent-bg: #bcd3e8;
+  --aseel-accent-bd: #7fa8c9;
+  --aseel-state: #c0392b;
+  --aseel-grid-head: #d7d4be;
+  --aseel-row-alt: #f7f6ec;
+  --aseel-row-sel: #cbd9e8;
+  --aseel-radius: 2px;
+}
+
+[data-skin="aseel"] .aseel-doc {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--aseel-bg);
+  color: var(--aseel-ink);
+  font-family: var(--aseel-font);
+  font-size: var(--aseel-fs);
+  direction: rtl;
+}
+
+/* ── Title bar ── */
+[data-skin="aseel"] .aseel-titlebar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.35rem 0.6rem 0.15rem;
+  background: var(--aseel-panel);
+  border-bottom: 1px solid var(--aseel-border-soft);
+}
+[data-skin="aseel"] .aseel-title-grp { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+[data-skin="aseel"] .aseel-title-chip {
+  background: var(--aseel-accent-bg);
+  border: 1px solid var(--aseel-accent-bd);
+  border-radius: var(--aseel-radius);
+  color: var(--aseel-accent);
+  font-weight: 700;
+  font-size: 13px;
+  padding: 3px 14px;
+}
+[data-skin="aseel"] .aseel-title-state { color: var(--aseel-state); font-weight: 700; font-size: var(--aseel-fs); }
+[data-skin="aseel"] .aseel-company { color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); text-align: start; }
+
+/* ── Command toolbar ── */
+[data-skin="aseel"] .aseel-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 1px;
+  padding: 3px 6px;
+  background: var(--aseel-panel);
+  border-bottom: 1px solid var(--aseel-border-soft);
+}
+[data-skin="aseel"] .aseel-toolgrp { display: flex; align-items: stretch; gap: 1px; }
+[data-skin="aseel"] .aseel-toolsep { width: 1px; background: var(--aseel-border-soft); margin: 2px 4px; }
+[data-skin="aseel"] .aseel-toolbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--aseel-radius);
+  color: var(--aseel-ink);
+  font-family: inherit;
+  font-size: var(--aseel-fs-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background .1s, border-color .1s;
+}
+[data-skin="aseel"] .aseel-toolbtn:hover:not(:disabled) { background: #dceaf6; border-color: var(--aseel-accent-bd); }
+[data-skin="aseel"] .aseel-toolbtn:active:not(:disabled) { background: #c7ddef; }
+[data-skin="aseel"] .aseel-toolbtn:disabled { opacity: .4; cursor: default; }
+[data-skin="aseel"] .aseel-toolbtn--danger:hover:not(:disabled) { background: #f6dcdc; border-color: #c98686; color: var(--aseel-state); }
+[data-skin="aseel"] .aseel-toolbtn svg { width: 15px; height: 15px; }
+
+/* ── Header field band ── */
+[data-skin="aseel"] .aseel-headband {
+  padding: 6px 8px;
+  background: var(--aseel-panel);
+  border-bottom: 1px solid var(--aseel-border-soft);
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 4px 14px;
+}
+[data-skin="aseel"] .aseel-field { display: flex; align-items: center; gap: 6px; }
+[data-skin="aseel"] .aseel-field-label {
+  flex: 0 0 92px;
+  text-align: start;
+  color: var(--aseel-ink);
+  font-size: var(--aseel-fs-sm);
+}
+[data-skin="aseel"] .aseel-input,
+[data-skin="aseel"] .aseel-doc input:not([type="checkbox"]):not([type="radio"]),
+[data-skin="aseel"] .aseel-doc select {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 1px 5px;
+  background: var(--aseel-field);
+  border: 1px solid var(--aseel-border);
+  border-radius: var(--aseel-radius);
+  color: var(--aseel-ink);
+  font-family: inherit;
+  font-size: var(--aseel-fs);
+  box-shadow: none;
+}
+[data-skin="aseel"] .aseel-doc input:focus,
+[data-skin="aseel"] .aseel-doc select:focus {
+  outline: none;
+  border-color: var(--aseel-accent);
+  background: var(--aseel-field-focus);
+  box-shadow: 0 0 0 1px var(--aseel-accent);
+}
+[data-skin="aseel"] .aseel-input--hl { background: var(--aseel-field-hl); }
+
+/* ── Grid area ── */
+[data-skin="aseel"] .aseel-gridwrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: #ffffff;
+  border-top: 1px solid var(--aseel-border);
+  border-bottom: 1px solid var(--aseel-border);
+}
+[data-skin="aseel"] .aseel-grid { width: 100%; border-collapse: collapse; font-size: var(--aseel-fs); }
+[data-skin="aseel"] .aseel-grid thead th {
+  position: sticky;
+  top: 0;
+  background: var(--aseel-grid-head);
+  color: var(--aseel-ink);
+  font-weight: 700;
+  font-size: var(--aseel-fs-sm);
+  text-transform: none;
+  letter-spacing: 0;
+  text-align: center;
+  padding: 3px 6px;
+  border: 1px solid var(--aseel-border);
+  white-space: nowrap;
+}
+[data-skin="aseel"] .aseel-grid tbody td {
+  padding: 1px 5px;
+  border: 1px solid var(--aseel-line);
+  height: 22px;
+  background: #ffffff;
+}
+[data-skin="aseel"] .aseel-grid tbody tr:nth-child(even) td { background: var(--aseel-row-alt); }
+[data-skin="aseel"] .aseel-grid tbody tr.aseel-row--sel td { background: var(--aseel-row-sel); }
+[data-skin="aseel"] .aseel-grid tbody tr:hover td { background: #eef4fa; }
+[data-skin="aseel"] .aseel-grid input,
+[data-skin="aseel"] .aseel-grid select {
+  width: 100%;
+  height: 20px;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 0 3px;
+  font: inherit;
+}
+[data-skin="aseel"] .aseel-grid input:focus,
+[data-skin="aseel"] .aseel-grid select:focus {
+  border-color: var(--aseel-accent);
+  background: var(--aseel-field-focus);
+  box-shadow: none;
+}
+[data-skin="aseel"] .aseel-num { text-align: left; font-variant-numeric: tabular-nums; }
+
+/* ── Bottom tabs + totals dock ── */
+[data-skin="aseel"] .aseel-bottom { display: flex; align-items: stretch; gap: 8px; background: var(--aseel-panel); border-top: 1px solid var(--aseel-border-soft); padding: 4px 8px 6px; }
+[data-skin="aseel"] .aseel-tabscol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+[data-skin="aseel"] .aseel-tabs { display: flex; gap: 2px; }
+[data-skin="aseel"] .aseel-tab {
+  padding: 3px 12px;
+  background: #e4e1d0;
+  border: 1px solid var(--aseel-border-soft);
+  border-bottom: none;
+  border-radius: var(--aseel-radius) var(--aseel-radius) 0 0;
+  color: var(--aseel-ink-soft);
+  font-size: var(--aseel-fs-sm);
+  cursor: pointer;
+}
+[data-skin="aseel"] .aseel-tab--active { background: var(--aseel-field); color: var(--aseel-ink); font-weight: 700; }
+[data-skin="aseel"] .aseel-tabpanel {
+  border: 1px solid var(--aseel-border-soft);
+  background: var(--aseel-field);
+  padding: 6px 8px;
+  min-height: 64px;
+}
+[data-skin="aseel"] .aseel-totals {
+  flex: 0 0 280px;
+  background: var(--aseel-panel);
+  border: 1px solid var(--aseel-border-soft);
+  border-radius: var(--aseel-radius);
+  padding: 5px 8px;
+}
+[data-skin="aseel"] .aseel-total-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 1px 0; font-size: var(--aseel-fs-sm); }
+[data-skin="aseel"] .aseel-total-row--grand { border-top: 1px solid var(--aseel-border); margin-top: 3px; padding-top: 4px; font-weight: 700; font-size: var(--aseel-fs); }
+[data-skin="aseel"] .aseel-total-value { min-width: 110px; text-align: left; background: var(--aseel-field); border: 1px solid var(--aseel-border); border-radius: var(--aseel-radius); padding: 1px 6px; font-variant-numeric: tabular-nums; }
+
+/* ── Status bar ── */
+[data-skin="aseel"] .aseel-statusbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  padding: 3px 10px;
+  background: #dedbc8;
+  border-top: 1px solid var(--aseel-border);
+  color: var(--aseel-ink-soft);
+  font-size: var(--aseel-fs-sm);
+}
+[data-skin="aseel"] .aseel-status-item { display: inline-flex; align-items: center; gap: 5px; }
+[data-skin="aseel"] .aseel-status-item b { color: var(--aseel-ink); font-weight: 700; }
+
+/* ── Index picker modal ── */
+[data-skin="aseel"] .aseel-picker-mask {
+  position: fixed; inset: 0; z-index: 70;
+  background: rgba(0,0,0,.35);
+  display: flex; align-items: center; justify-content: center;
+}
+[data-skin="aseel"] .aseel-picker {
+  width: min(680px, 92vw);
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+  background: var(--aseel-panel);
+  border: 1px solid var(--aseel-border);
+  border-radius: var(--aseel-radius);
+  box-shadow: 0 8px 28px rgba(0,0,0,.3);
+  font-family: var(--aseel-font);
+  direction: rtl;
+}
+[data-skin="aseel"] .aseel-picker-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 10px;
+  background: var(--aseel-accent-bg);
+  border-bottom: 1px solid var(--aseel-accent-bd);
+  color: var(--aseel-accent); font-weight: 700;
+}
+[data-skin="aseel"] .aseel-picker-body { flex: 1; overflow: auto; }
+
+/* ───────── M1 — Sales-invoice screen extras (scoped to data-skin) ───────── */
+
+/* message banner above the grid */
+[data-skin="aseel"] .aseel-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 5px 6px 0;
+  padding: 4px 8px;
+  border: 1px solid var(--aseel-border);
+  border-radius: var(--aseel-radius);
+  font-size: var(--aseel-fs-sm);
+}
+[data-skin="aseel"] .aseel-banner--err { background: #f7dcd7; border-color: var(--aseel-state); color: #7a241a; }
+[data-skin="aseel"] .aseel-banner--ok { background: #dceadb; border-color: #5f8f5f; color: #2c4f2c; }
+
+/* in-cell product picker button */
+[data-skin="aseel"] .aseel-cell-picker {
+  width: 100%;
+  height: 20px;
+  border: 1px solid transparent;
+  background: transparent;
+  font: inherit;
+  text-align: right;
+  cursor: pointer;
+  color: var(--aseel-accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+[data-skin="aseel"] .aseel-cell-picker:hover:not(:disabled) { background: var(--aseel-field-hl); }
+[data-skin="aseel"] .aseel-cell-picker:disabled { color: var(--aseel-ink-soft); cursor: default; }
+
+/* in-cell tax editor (select + manual % button) */
+[data-skin="aseel"] .aseel-cell-tax { display: flex; align-items: center; gap: 2px; }
+[data-skin="aseel"] .aseel-cell-tax > :first-child { flex: 1; min-width: 0; }
+
+/* small icon buttons (tax-edit / delete) */
+[data-skin="aseel"] .aseel-iconbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--aseel-border-soft);
+  background: var(--aseel-panel);
+  border-radius: var(--aseel-radius);
+  color: var(--aseel-accent);
+  cursor: pointer;
+  flex: none;
+}
+[data-skin="aseel"] .aseel-iconbtn:hover { background: var(--aseel-accent-bg); }
+[data-skin="aseel"] .aseel-iconbtn--danger { color: var(--aseel-state); }
+[data-skin="aseel"] .aseel-iconbtn--danger:hover { background: #f1d6d1; }
+
+/* "add row" affordance under the grid */
+[data-skin="aseel"] .aseel-addrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 4px 6px;
+  padding: 2px 10px;
+  border: 1px dashed var(--aseel-accent-bd);
+  background: var(--aseel-panel);
+  color: var(--aseel-accent);
+  border-radius: var(--aseel-radius);
+  font-size: var(--aseel-fs-sm);
+  cursor: pointer;
+}
+[data-skin="aseel"] .aseel-addrow:hover { background: var(--aseel-accent-bg); }
+
+/* account/customer pick field with «…» affordance */
+[data-skin="aseel"] .aseel-pickfield { display: flex; align-items: stretch; gap: 2px; flex: 1; }
+[data-skin="aseel"] .aseel-pickfield .aseel-input { flex: 1; cursor: pointer; }
+[data-skin="aseel"] .aseel-ellipsis {
+  flex: none;
+  width: 22px;
+  border: 1px solid var(--aseel-border);
+  background: var(--aseel-panel);
+  border-radius: var(--aseel-radius);
+  color: var(--aseel-accent);
+  cursor: pointer;
+  font-weight: 700;
+  line-height: 1;
+}
+[data-skin="aseel"] .aseel-ellipsis:hover:not(:disabled) { background: var(--aseel-accent-bg); }
+[data-skin="aseel"] .aseel-ellipsis:disabled { color: var(--aseel-ink-soft); cursor: default; }
+
+/* journal-preview tab (M1-T4) */
+[data-skin="aseel"] .aseel-journal { display: flex; flex-direction: column; gap: 5px; }
+[data-skin="aseel"] .aseel-journal-empty { color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); margin: 4px 0; }
+[data-skin="aseel"] .aseel-journal-errs { display: flex; flex-direction: column; gap: 2px; }
+[data-skin="aseel"] .aseel-journal-err {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: var(--aseel-fs-sm);
+  color: #7a241a;
+}
+[data-skin="aseel"] .aseel-grid tbody tr.aseel-row--total td {
+  background: var(--aseel-grid-head);
+  font-weight: 700;
+  border-top: 2px solid var(--aseel-border);
+}
+[data-skin="aseel"] .aseel-ok-text { color: #2c6f2c; font-weight: 700; }
+[data-skin="aseel"] .aseel-err-text { color: var(--aseel-state); font-weight: 700; }
+
+/* "other data" tab — config notes */
+[data-skin="aseel"] .aseel-other { display: flex; flex-direction: column; gap: 6px; }
+[data-skin="aseel"] .aseel-note {
+  padding: 4px 8px;
+  border: 1px solid var(--aseel-border);
+  border-radius: var(--aseel-radius);
+  font-size: var(--aseel-fs-sm);
+}
+[data-skin="aseel"] .aseel-note code {
+  background: rgba(0, 0, 0, .07);
+  padding: 0 3px;
+  border-radius: 2px;
+  font-family: ui-monospace, monospace;
+}
+[data-skin="aseel"] .aseel-note--err { background: #f7dcd7; border-color: var(--aseel-state); color: #7a241a; }
+[data-skin="aseel"] .aseel-note--warn { background: #f3eccf; border-color: #b9982f; color: #6b551a; }
+[data-skin="aseel"] .aseel-hint { font-size: var(--aseel-fs-sm); color: var(--aseel-ink-soft); margin: 2px 0 0; }
+[data-skin="aseel"] .aseel-field--inline { flex-direction: row; align-items: center; gap: 6px; }
+
+/* discount input inside the totals dock */
+[data-skin="aseel"] .aseel-total-input {
+  min-width: 110px;
+  width: 110px;
+  height: 18px;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+[data-skin="aseel"] .aseel-total-row--warn .aseel-total-value { background: #f3eccf; border-color: #b9982f; }
+[data-skin="aseel"] .aseel-picker-foot { padding: 5px 10px; border-top: 1px solid var(--aseel-border-soft); color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); }

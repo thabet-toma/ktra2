@@ -2,7 +2,7 @@ import React from 'react';
 import { AppView } from '../../types';
 import { ChevronLeft } from 'lucide-react';
 
-const VIEW_LABELS: Record<AppView, string> = {
+export const VIEW_LABELS: Record<AppView, string> = {
   dashboard: 'الرئيسية',
   tasks: 'مهامي',
   'task-management': 'إدارة المهام',
@@ -48,6 +48,16 @@ const VIEW_LABELS: Record<AppView, string> = {
   'sql-shipments': 'الشحنات (SQL)',
   sourcing: 'البحث',
   'smart-assistant': 'المساعد الذكي',
+  store: 'المتجر',
+  'aseel-kit': 'مكوّنات الأصيل',
+  'aseel-sales': 'فاتورة المبيعات (الأصيل)',
+  'sales-quotations': 'العروض والطلبيات',
+  'credit-debit-notes': 'الإشعارات المدينة/الدائنة',
+  'sql-clearances': 'التخليص (SQL)',
+  'sql-purchase-invoices': 'فواتير الشراء (SQL)',
+  shipments: 'الشحنات',
+  'shipment-management': 'إدارة الشحنات',
+  clearance: 'التخليص الجمركي',
 };
 
 interface BreadcrumbItem {

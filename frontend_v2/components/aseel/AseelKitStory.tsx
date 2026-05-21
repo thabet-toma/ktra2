@@ -1,0 +1,231 @@
+/**
+ * M0 verification page — /aseel-kit
+ * Exercises the whole Aseel shell layer with sample data laid out like the
+ * owner's «فواتير الشراء» screenshot, so M0 can be visually + behaviourally
+ * verified WITHOUT touching any backend or real screen.
+ */
+import React, { useMemo, useState } from 'react';
+import {
+  Plus,
+  Save,
+  Trash2,
+  Ban,
+  FolderOpen,
+  Table2,
+  Receipt,
+  Printer,
+  RefreshCw,
+  FileSearch,
+  FileBarChart2,
+  MoreHorizontal,
+  LogOut,
+  HelpCircle,
+} from 'lucide-react';
+import {
+  AseelDocumentShell,
+  AseelGrid,
+  AseelIndexPicker,
+  useRecordNavigation,
+  useAseelKeymap,
+  type AseelGridColumn,
+  type AseelIndexColumn,
+  type AseelToolbarAction,
+} from './index';
+
+interface DemoInvoice { id: number; number: string; account: string; }
+interface DemoLine { sku: string; name: string; unit: string; qty: string; price: string; }
+interface DemoAccount { code: string; name: string; kind: string; }
+
+const DEMO_INVOICES: DemoInvoice[] = [
+  { id: 101, number: '۱۰۱', account: 'شركة خالد الخواجا' },
+  { id: 102, number: '۱۰۲', account: 'بكدار' },
+  { id: 103, number: '۱۰۳', account: 'محلات بليل' },
+  { id: 104, number: '۱۰٤', account: 'مبيعات نقدية' },
+];
+
+const DEMO_ACCOUNTS: DemoAccount[] = [
+  { code: '1101', name: 'الصندوق', kind: 'أصول' },
+  { code: '1103', name: 'البنك العربي', kind: 'أصول' },
+  { code: '4101', name: 'المبيعات', kind: 'إيراد' },
+  { code: '2101', name: 'الموردون', kind: 'خصوم' },
+  { code: '5101', name: 'المشتريات', kind: 'متاجرة' },
+];
+
+const fld = (label: string, node: React.ReactNode) => (
+  <label className="aseel-field">
+    <span className="aseel-field-label">{label}</span>
+    {node}
+  </label>
+);
+
+export const AseelKitStory: React.FC = () => {
+  const [currentId, setCurrentId] = useState<number | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [lastKey, setLastKey] = useState('—');
+  const [account, setAccount] = useState('');
+  const [lines, setLines] = useState<DemoLine[]>([
+    { sku: '', name: '', unit: 'عدد', qty: '1', price: '0' },
+  ]);
+
+  const nav = useRecordNavigation<DemoInvoice>({
+    items: DEMO_INVOICES,
+    getId: (r) => r.id,
+    currentId,
+    onSelect: setCurrentId,
+  });
+
+  useAseelKeymap(
+    {
+      F2: () => setLastKey('F2 — طباعة الفاتورة'),
+      F3: () => setLastKey('F3 — إيصال القبض'),
+      F6: () => { setLastKey('F6 — بحث'); setPickerOpen(true); },
+      F12: () => setLastKey('F12 — تخزين'),
+      Escape: () => setLastKey('Esc — إلغاء'),
+      plus: () => { setLastKey('+ — فهرس'); setPickerOpen(true); },
+      star: () => { setLastKey('* — التالي'); nav.next(); },
+      minus: () => { setLastKey('- — السابق'); nav.prev(); },
+    },
+    { enabled: !pickerOpen },
+  );
+
+  const cols: AseelGridColumn<DemoLine>[] = useMemo(
+    () => [
+      { key: '_n', header: 'مسلسل', width: '52px', align: 'center', readOnly: true },
+      { key: 'sku', header: 'رقم الصنف', width: '120px' },
+      { key: 'name', header: 'بيان الصنف' },
+      { key: 'unit', header: 'الوحدة', width: '90px', align: 'center' },
+      { key: 'qty', header: 'الكمية', width: '90px', type: 'number' },
+      { key: 'price', header: 'سعر الوحدة', width: '110px', type: 'number' },
+      { key: '_total', header: 'السعر الإجمالي', width: '120px', type: 'number', readOnly: true },
+    ],
+    [],
+  );
+
+  const accountCols: AseelIndexColumn<DemoAccount>[] = [
+    { key: 'code', header: 'رقم الحساب', width: '110px', value: (r) => r.code },
+    { key: 'name', header: 'اسم الحساب', value: (r) => r.name },
+    { key: 'kind', header: 'النوع', width: '110px', value: (r) => r.kind },
+  ];
+
+  const actions: AseelToolbarAction[] = [
+    { key: 'add', label: 'إضافة', icon: <Plus />, onClick: () => nav.goNew() },
+    { key: 'save', label: 'تخزين', icon: <Save />, onClick: () => setLastKey('تخزين') },
+    { key: 'del', label: 'حذف', icon: <Trash2 />, danger: true, onClick: () => setLastKey('حذف') },
+    { key: 'cancel', label: 'إلغاء', icon: <Ban />, onClick: () => setLastKey('إلغاء') },
+    { key: 'open', label: 'فتح', icon: <FolderOpen />, onClick: () => setLastKey('فتح') },
+    { key: 'grid', label: 'جدول', icon: <Table2 />, separatorBefore: true, onClick: () => setLastKey('جدول') },
+    { key: 'voucher', label: 'سند الصرف', icon: <Receipt />, onClick: () => setLastKey('سند الصرف') },
+    { key: 'print', label: 'طباعة الفاتورة', icon: <Printer />, onClick: () => setLastKey('طباعة') },
+    { key: 'prices', label: 'تحديث أسعار الأصناف', icon: <RefreshCw />, onClick: () => setLastKey('تحديث الأسعار') },
+    { key: 'cons', label: 'مراجعة إرساليات الفاتورة', icon: <FileSearch />, onClick: () => setLastKey('الإرساليات') },
+    { key: 'rep', label: 'تقارير القوائم', icon: <FileBarChart2 />, separatorBefore: true, onClick: () => setLastKey('تقارير') },
+    { key: 'more', label: 'أوامر أخرى', icon: <MoreHorizontal />, onClick: () => setLastKey('أوامر') },
+    { key: 'exit', label: 'إنهاء وخروج', icon: <LogOut />, onClick: () => setLastKey('خروج') },
+    { key: 'help', label: 'المساعدة', icon: <HelpCircle />, onClick: () => setLastKey('مساعدة') },
+  ];
+
+  const cur = DEMO_INVOICES.find((i) => i.id === currentId);
+
+  return (
+    <div style={{ height: 'calc(100vh - 7rem)' }}>
+      <AseelDocumentShell
+        title="فواتير الشراء"
+        state={cur ? `فاتورة ${cur.number}` : 'فاتورة جديدة'}
+        company="الشركة العامة للزهور [ السنة المالية 1996 ]"
+        nav={nav}
+        actions={actions}
+        header={
+          <>
+            {fld('رقم الفاتورة', <input className="aseel-input" defaultValue={cur?.number ?? ''} />)}
+            {fld('دفتر', <input className="aseel-input" data-aseel-key="1" defaultValue="0" />)}
+            {fld('التاريخ', <input className="aseel-input" type="date" defaultValue="2026-05-19" />)}
+            {fld('الساعة', <input className="aseel-input" defaultValue="09:24:45 ص" />)}
+            {fld('تاريخ ثاني', <input className="aseel-input" type="date" />)}
+            {fld('تاريخ الاستحقاق', <input className="aseel-input" type="date" />)}
+            {fld(
+              'رقم الحساب',
+              <input
+                className="aseel-input aseel-input--hl"
+                data-aseel-key="1"
+                value={account}
+                onChange={(e) => setAccount(e.target.value)}
+              />,
+            )}
+            {fld('الاسم', <input className="aseel-input" defaultValue={cur?.account ?? ''} />)}
+            {fld('العنوان', <input className="aseel-input" />)}
+            {fld('مشتغل مرخص', <input className="aseel-input" />)}
+            {fld('عملة الفاتورة', <input className="aseel-input" defaultValue="شيكل جديد" />)}
+            {fld('سعر العملة', <input className="aseel-input" data-aseel-key="1" defaultValue="1.00000" />)}
+            {fld('رقم المستند', <input className="aseel-input" />)}
+            <label className="aseel-field" style={{ gridColumn: '1 / -1' }}>
+              <input type="checkbox" />
+              <span className="aseel-field-label" style={{ flex: 'unset' }}>
+                الأسعار تشمل ض.ق.م
+              </span>
+            </label>
+          </>
+        }
+        tabs={[
+          { key: 'notes', label: 'الملاحظات', content: <textarea className="aseel-input" rows={3} style={{ width: '100%' }} /> },
+          { key: 'accounts', label: 'الحسابات / مركز التكلفة', content: <span>تصنيف أول / تصنيف ثاني / مركز التكلفة …</span> },
+          { key: 'other', label: 'بيانات أخرى', content: <span>تعبئة من … · رقم فاتورة المقاصة …</span> },
+        ]}
+        totals={
+          <>
+            <div className="aseel-total-row"><span>المجموع بدون الضريبة</span><span className="aseel-total-value">0.00</span></div>
+            <div className="aseel-total-row"><span>خصم مكتسب</span><span className="aseel-total-value">0.00</span></div>
+            <div className="aseel-total-row"><span>خصم مكتسب %</span><span className="aseel-total-value">0.00</span></div>
+            <div className="aseel-total-row"><span>الضريبة المضافة 16%</span><span className="aseel-total-value">0.00</span></div>
+            <div className="aseel-total-row"><span>مدفوع نقدا</span><span className="aseel-total-value">0.00</span></div>
+            <div className="aseel-total-row aseel-total-row--grand"><span>مبلغ الفاتورة الإجمالي</span><span className="aseel-total-value">0.00</span></div>
+          </>
+        }
+        status={
+          <>
+            <span className="aseel-status-item">المستخدم <b>admin</b></span>
+            <span className="aseel-status-item">رقم القيد <b>—</b></span>
+            <span className="aseel-status-item">رقم الحركة <b>—</b></span>
+            <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+            <span className="aseel-status-item">آخر مفتاح <b>{lastKey}</b></span>
+            <label className="aseel-status-item"><input type="checkbox" defaultChecked /> قابل للتعديل</label>
+          </>
+        }
+      >
+        <AseelGrid<DemoLine>
+          columns={cols}
+          rows={lines}
+          getRowKey={(_, i) => i}
+          getCell={(row, key) => {
+            if (key === '_n') return lines.indexOf(row) + 1;
+            if (key === '_total')
+              return (Number(row.qty) || 0) * (Number(row.price) || 0);
+            return (row as unknown as Record<string, string>)[key];
+          }}
+          onChange={(ri, key, value) =>
+            setLines((prev) =>
+              prev.map((r, i) => (i === ri ? { ...r, [key]: value } : r)),
+            )
+          }
+          onAddRow={() =>
+            setLines((prev) => [...prev, { sku: '', name: '', unit: 'عدد', qty: '1', price: '0' }])
+          }
+        />
+      </AseelDocumentShell>
+
+      <AseelIndexPicker<DemoAccount>
+        open={pickerOpen}
+        title="فهرس الحسابات"
+        rows={DEMO_ACCOUNTS}
+        columns={accountCols}
+        getRowKey={(r) => r.code}
+        searchValue={(r) => `${r.code} ${r.name} ${r.kind}`}
+        onSelect={(r) => {
+          setAccount(r.code);
+          setPickerOpen(false);
+          setLastKey(`اختير ${r.code} ${r.name}`);
+        }}
+        onClose={() => setPickerOpen(false)}
+      />
+    </div>
+  );
+};

@@ -411,3 +411,9 @@ export function DataGrid<T>({
 
 // ── Export all as named exports for tree-shaking ─────────────────
 export { Field } from './Field';
+// M5-T4: unified Aseel-skinned states. `EmptyState`/`Spinner` already exist in
+// this barrel from D1-03 — to avoid name clashes, the Aseel variants are
+// exposed via a namespace import: `import { AseelStates } from '@/components/ui'`.
+// For new screens that want the cream theme, use these. Existing screens keep
+// the legacy variants — no breakage.
+export * as AseelStates from './EmptyState';

@@ -7,7 +7,7 @@ import { suppliersService } from '../../../services/firestoreService';
 import { dealsService } from '../../../services/dealsService';
 import { notificationsService } from '../../../services/notificationsService';
 import { cloudinaryService } from '../../../services/cloudinaryService';
-import { Truck, Save, Info, CreditCard, AlertCircle, Navigation } from 'lucide-react';
+import { Truck, Save, Info, CreditCard, AlertCircle, Navigation, ChevronRight, ChevronLeft, ChevronsRight, ChevronsLeft, Plus, Trash2, Printer, FileDown, FileText, X } from 'lucide-react';
 import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
 import { InstallmentManager } from '../deals/InstallmentManager';
 import { PaymentProgress } from '../deals/PaymentProgress';
@@ -18,6 +18,13 @@ import { ShipmentShippingDetails } from './form/ShipmentShippingDetails';
 import { ShipmentDealsTable } from './form/ShipmentDealsTable';
 import { ShipmentDealSelector } from './form/ShipmentDealSelector';
 import { ShipmentStatusVisualizer } from './form/ShipmentStatusVisualizer';
+import {
+  AseelDocumentShell,
+  useRecordNavigation,
+  useAseelKeymap,
+  AseelIndexPicker,
+} from '../../aseel';
+import { listLocalShipments, type LocalShipmentRow } from '@/services/localShippingApi';
 
 
 
@@ -90,6 +97,110 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
     const [uploadingFile, setUploadingFile] = useState(false);
     const linkedDealIdsRef = useRef<string[]>([]);
     linkedDealIdsRef.current = (formData.deals || []).map((d: any) => String(d.dealId));
+
+    // Aseel Navigation State
+    const [shipmentsList, setShipmentsList] = useState<Shipment[]>([]);
+    const [showAgentPicker, setShowAgentPicker] = useState(false);
+
+    // Local Shipments (M3-T3)
+    const [localShipments, setLocalShipments] = useState<LocalShipmentRow[]>([]);
+    const [loadingLocalShipments, setLoadingLocalShipments] = useState(false);
+
+    const nav = useRecordNavigation<Shipment>({
+        items: shipmentsList,
+        getId: (s) => s.id || '',
+        currentId: formData.id || null,
+        onSelect: async (id) => {
+            if (id === null) {
+                handleNewShipment();
+            } else {
+                try {
+                    const loaded = await shipmentsService.getShipment(String(id));
+                    setFormData(loaded);
+                    setShippingInfo(loaded.shippingInfo || {});
+                    setInstallments(loaded.installments || []);
+                    setInstallmentPlanEnabled(loaded.installmentPlanEnabled || false);
+                } catch (err) {
+                    console.error('Error loading shipment:', err);
+                }
+            }
+        },
+    });
+
+    // M3-T2: Aseel keyboard shortcuts — real handlers.
+    useAseelKeymap({
+        F2: () => window.print(),
+        F6: () => {
+            const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+            el?.focus();
+        },
+        F12: () => { if (!saving) handleSaveClick(); },
+        Escape: () => {
+            if (showAgentPicker) { setShowAgentPicker(false); return; }
+            onCancel();
+        },
+        plus: () => {
+            const ae = document.activeElement;
+            if (ae?.getAttribute?.('data-aseel-key') === '1') {
+                setShowAgentPicker(true);
+            }
+        },
+    }, { enabled: !showAgentPicker });
+
+    const handleNewShipment = () => {
+        setFormData({
+            status: 'draft',
+            shipmentNumber: 'New',
+            agentShipmentNumber: '',
+            deals: [],
+            totalShippingCostUsd: 0,
+            totalVolume: 0,
+            totalWeightKg: 0,
+            installments: [],
+            installmentPlanEnabled: false,
+            payments: [],
+            pricingMethod: 'total',
+            unitType: 'cbm',
+            pricePerUnit: 0,
+            shipmentName: '',
+            israeliSideName: ''
+        });
+        setShippingInfo({
+            shippingType: 'sea',
+            shipmentStatus: { status: 'agent_warehouse', statusDate: new Date().toISOString(), completed: false, notes: '' },
+        });
+        setInstallments([]);
+        setInstallmentPlanEnabled(false);
+    };
+
+    // Load shipments list for navigation
+    useEffect(() => {
+        const unsub = shipmentsService.subscribeToShipments((fetchedShipments: Shipment[]) => {
+            setShipmentsList(fetchedShipments);
+        });
+        return () => unsub();
+    }, []);
+
+    // Load local shipments when shipment is loaded (M3-T3)
+    useEffect(() => {
+        if (!formData.id) {
+            setLocalShipments([]);
+            return;
+        }
+        const loadLocalShipments = async () => {
+            setLoadingLocalShipments(true);
+            try {
+                const allLocal = await listLocalShipments();
+                const filtered = allLocal.filter((ls: LocalShipmentRow) => ls.shipment === Number(formData.id));
+                setLocalShipments(filtered);
+            } catch (err) {
+                console.error('Error loading local shipments:', err);
+            } finally {
+                setLoadingLocalShipments(false);
+            }
+        };
+        loadLocalShipments();
+    }, [formData.id]);
 
     // --- Effects ---
     useEffect(() => {
@@ -729,7 +840,64 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
     if (loading) return <div>جاري التحميل...</div>;
 
     return (
-        <div className="space-y-6 pb-20">
+        <div
+            data-skin="aseel"
+            style={{ height: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
+        >
+        <AseelDocumentShell
+            title="إرسالية"
+            state={
+                formData.id
+                    ? `إرسالية ${formData.shipmentNumber || `#${formData.id}`}`
+                    : 'إرسالية جديدة'
+            }
+            nav={nav}
+            actions={[
+                { key: 'new', label: 'إضافة', icon: <Plus />, onClick: handleNewShipment },
+                {
+                    key: 'save',
+                    label: saving ? '...تخزين' : 'تخزين',
+                    icon: <Save />,
+                    onClick: !saving ? handleSaveClick : undefined,
+                    disabled: saving,
+                },
+                {
+                    key: 'cancel',
+                    label: 'إلغاء',
+                    icon: <X />,
+                    onClick: onCancel,
+                    danger: true,
+                    separatorBefore: true,
+                },
+                {
+                    key: 'print',
+                    label: 'طباعة',
+                    icon: <Printer />,
+                    onClick: () => window.print(),
+                    separatorBefore: true,
+                },
+            ]}
+            header={<></>}
+            status={
+                <>
+                    <span className="aseel-status-item">
+                        المستخدم <b>{currentUser?.name || '—'}</b>
+                    </span>
+                    <span className="aseel-status-item">
+                        السجل <b>{nav.position}/{nav.total}</b>
+                    </span>
+                    <span className="aseel-status-item">
+                        الحالة <b>{formData.status || 'draft'}</b>
+                    </span>
+                    {formData.shipmentNumber && (
+                        <span className="aseel-status-item">
+                            رقم الإرسالية <b>{formData.shipmentNumber}</b>
+                        </span>
+                    )}
+                </>
+            }
+        >
+        <div className="space-y-6 pb-20" style={{ height: '100%', overflow: 'auto', padding: '12px', background: '#ffffff' }}>
             {/* Header */}
             <div className="flex justify-between items-center bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 sticky top-0 z-10">
                 <div className="flex items-center gap-4">
@@ -743,6 +911,27 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
                 </div>
                 <div className="flex gap-3">
                     <button onClick={onCancel} className="px-5 py-2.5 bg-gray-100 dark:bg-gray-700 rounded-xl hover:bg-gray-200 dark:text-white">رجوع</button>
+                    {/* M3-T5: convert shipment → purchase invoice.  Transport-type
+                        shipments cannot be converted (per Aseel spec: shipments.txt 156-161).
+                    */}
+                    {formData.id && (formData as any).shipment_type !== 'transport' && (
+                        <button
+                            onClick={() => window.open(`/purchase-invoices/new?shipment=${formData.id}`, '_blank')}
+                            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700"
+                            title="تكوين فاتورة شراء من بيانات الإرسالية (تُحوَّل لمسودة جديدة في صفحة فواتير الشراء)"
+                        >
+                            <FileDown className="w-5 h-5" /> تكوين فاتورة
+                        </button>
+                    )}
+                    {formData.id && (formData as any).shipment_type === 'transport' && (
+                        <button
+                            disabled
+                            className="flex items-center gap-2 px-5 py-2.5 bg-gray-200 dark:bg-gray-700 text-gray-500 font-bold rounded-xl cursor-not-allowed opacity-60"
+                            title="إرساليات «نقل» لا تُحوَّل لفواتير"
+                        >
+                            <FileDown className="w-5 h-5" /> غير قابل للتحويل
+                        </button>
+                    )}
                     <button onClick={handleSaveClick} disabled={saving} className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50">
                         {saving ? 'جاري الحفظ...' : <><Save className="w-5 h-5" /> حفظ الشحنة</>}
                     </button>
@@ -772,12 +961,119 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
                 />
             </div>
 
+            {/* M3-T3: النقل المحلي - Section */}
+            <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-bold dark:text-white flex items-center gap-2">
+                        <Truck className="w-5 h-5 text-amber-500" />
+                        النقل المحلي
+                    </h3>
+                    <a href="/local-shipping" className="text-sm text-blue-600 hover:underline">فتح صفحة النقل المحلي ↗</a>
+                </div>
+                {loadingLocalShipments ? (
+                    <p className="text-gray-500">جاري التحميل...</p>
+                ) : localShipments.length === 0 ? (
+                    <p className="text-gray-400 text-sm">لا توجد سجلات نقل محلي مرتبطة بهذه الشحنة</p>
+                ) : (
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead className="bg-gray-50 dark:bg-gray-700">
+                                <tr>
+                                    <th className="text-right p-2">رقم</th>
+                                    <th className="text-right p-2">الناقل</th>
+                                    <th className="text-right p-2">السائق</th>
+                                    <th className="text-right p-2">المركبة</th>
+                                    <th className="text-right p-2">المبلغ</th>
+                                    <th className="text-right p-2">الحالة</th>
+                                    <th className="text-right p-2">المرحّل</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {localShipments.map((ls) => (
+                                    <tr key={ls.id} className="border-t border-gray-100 dark:border-gray-700">
+                                        <td className="p-2 font-mono">{ls.shipment_number}</td>
+                                        <td className="p-2">{ls.carrier_name || '-'}</td>
+                                        <td className="p-2">{ls.driver_name || '-'}</td>
+                                        <td className="p-2">{ls.vehicle_number || '-'}</td>
+                                        <td className="p-2">{Number(ls.amount).toLocaleString()} {ls.currency_code || ''}</td>
+                                        <td className="p-2">
+                                            <span className={`px-2 py-0.5 rounded text-xs ${
+                                                ls.status === 'delivered' ? 'bg-green-100 text-green-700' :
+                                                ls.status === 'in_transit' ? 'bg-blue-100 text-blue-700' :
+                                                'bg-gray-100 text-gray-700'
+                                            }`}>
+                                                {ls.status === 'delivered' ? 'تم التسليم' :
+                                                 ls.status === 'in_transit' ? 'في الطريق' :
+                                                 ls.status === 'pending' ? 'معلق' : ls.status}
+                                            </span>
+                                        </td>
+                                        <td className="p-2">
+                                            {ls.is_posted ? (
+                                                <span className="text-green-600">✓ #{ls.journal}</span>
+                                            ) : (
+                                                <span className="text-gray-400">—</span>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
+            </div>
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Left Column: Basic Info & Shipping Details */}
                 <div className="lg:col-span-1 space-y-6">
                     <div className="flex items-center gap-2 mb-2">
                         <Info className="w-5 h-5 text-blue-500" />
                         <h3 className="text-lg font-bold dark:text-white">بيانات الشحنة</h3>
+                    </div>
+
+                    {/* ─── M3-T2: Aseel header band (book/second_date/dealer/type) ─── */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-3 mb-3 rounded-xl bg-amber-50/40 dark:bg-amber-900/10 border border-amber-200/60 dark:border-amber-800/40">
+                        <label className="flex flex-col gap-1 text-sm">
+                            <span className="text-gray-600 dark:text-gray-300">دفتر</span>
+                            <input
+                                type="number"
+                                min={0}
+                                data-aseel-key="1"
+                                value={(formData as any).book_number ?? 0}
+                                onChange={(e) => setFormData({ ...formData, ...{ book_number: Number(e.target.value) || 0 } } as any)}
+                                className="rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 px-3 py-1.5 font-mono"
+                                title="0 = ترقيم يدوي · >0 = مسلسل مستقل لكل دفتر"
+                            />
+                        </label>
+                        <label className="flex flex-col gap-1 text-sm">
+                            <span className="text-gray-600 dark:text-gray-300">تاريخ ثاني</span>
+                            <input
+                                type="date"
+                                value={(formData as any).second_date ?? ''}
+                                onChange={(e) => setFormData({ ...formData, ...{ second_date: e.target.value || null } } as any)}
+                                className="rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 px-3 py-1.5"
+                            />
+                        </label>
+                        <label className="flex flex-col gap-1 text-sm">
+                            <span className="text-gray-600 dark:text-gray-300">مشتغل مرخص</span>
+                            <input
+                                type="text"
+                                value={(formData as any).licensed_dealer_no ?? ''}
+                                onChange={(e) => setFormData({ ...formData, ...{ licensed_dealer_no: e.target.value } } as any)}
+                                className="rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 px-3 py-1.5"
+                                placeholder="رقم المشتغل المرخص"
+                            />
+                        </label>
+                        <label className="flex flex-col gap-1 text-sm">
+                            <span className="text-gray-600 dark:text-gray-300">نوع الإرسالية</span>
+                            <select
+                                value={(formData as any).shipment_type ?? 'invoice'}
+                                onChange={(e) => setFormData({ ...formData, ...{ shipment_type: e.target.value } } as any)}
+                                className="rounded-lg border border-gray-300 dark:border-gray-600 dark:bg-gray-800 px-3 py-1.5"
+                            >
+                                <option value="invoice">إرسالية فاتورة</option>
+                                <option value="transport">إرسالية نقل</option>
+                            </select>
+                        </label>
                     </div>
 
                     <ShipmentBasicInfo
@@ -866,6 +1162,28 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
                 allSuppliers={allSuppliers}
                 onAddDeals={handleAddDeals}
             />
+
+        </div>
+        </AseelDocumentShell>
+
+        {/* M3-T2: Aseel agent (shipping-agent supplier) index picker. */}
+        <AseelIndexPicker<Supplier>
+            open={showAgentPicker}
+            title="فهرس وكلاء الشحن"
+            rows={allSuppliers.filter((s) => s.type === 'shipping_agent')}
+            columns={[
+                { key: 'id', header: 'الرقم', width: '90px', value: (r) => r.id ?? '' },
+                { key: 'name', header: 'الاسم', value: (r) => r.tradeName ?? r.alias ?? '' },
+                { key: 'phone', header: 'الهاتف', width: '140px', value: (r) => r.phone ?? r.mobile ?? '—' },
+            ]}
+            getRowKey={(r) => r.id ?? ''}
+            searchValue={(r) => `${r.id ?? ''} ${r.tradeName ?? ''} ${r.alias ?? ''}`}
+            onSelect={(r) => {
+                setFormData({ ...formData, ...{ shipping_agent: r.id, shippingAgentId: r.id } } as any);
+                setShowAgentPicker(false);
+            }}
+            onClose={() => setShowAgentPicker(false)}
+        />
         </div>
     );
 };

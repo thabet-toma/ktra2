@@ -50,6 +50,14 @@ class Partner(models.Model):
     
     # Financial Info
     credit_limit = models.DecimalField(max_digits=18, decimal_places=2, blank=True, null=True, db_column='CreditLimit')
+    source_discount_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0, db_column='SourceDiscountPercent',
+        help_text="نسبة خصم مصدر افتراضية على مستوى العميل (0-100)",
+    )
+    source_discount_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='SourceDiscountAmount',
+        help_text="مبلغ خصم مصدر افتراضي على مستوى العميل",
+    )
     opening_balance = models.DecimalField(max_digits=18, decimal_places=2, default=0, db_column='OpeningBalance')
     opening_balance_date = models.DateField(blank=True, null=True, db_column='OpeningBalanceDate')
     currency = models.ForeignKey(Currency, on_delete=models.SET_NULL, null=True, blank=True, related_name='partners', db_column='CurrencyID')

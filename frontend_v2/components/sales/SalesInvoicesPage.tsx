@@ -253,6 +253,7 @@ export const SalesInvoicesPage: React.FC = () => {
         draftToEditId={draftToEditId}
         onDraftEditConsumed={() => setDraftToEditId(null)}
         onInvoiceSaved={load}
+        invoiceList={rows}
         salesSettings={salesSettings}
       />
 
