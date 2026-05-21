@@ -226,6 +226,12 @@ const [clearances, setClearances] = useState<ClearanceRow[]>([]);
         setShowBrokerPicker(true);
       }
     },
+    // N0-T11: Ctrl+nav handlers
+    CtrlHome: () => nav?.first?.(),
+    CtrlEnd: () => nav?.last?.(),
+    CtrlPageUp: () => nav?.prev?.(),
+    CtrlPageDown: () => nav?.next?.(),
+    CtrlIns: () => { setNewOpen(true); setSelected(null); },
   }, { enabled: !showBrokerPicker });
 
   const reload = useCallback(async () => {

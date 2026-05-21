@@ -20,16 +20,26 @@ import {
   MoreHorizontal,
   LogOut,
   HelpCircle,
+  User,
+  Calendar,
 } from 'lucide-react';
 import {
   AseelDocumentShell,
   AseelGrid,
   AseelIndexPicker,
+  AseelFormSection,
+  AseelDenseTable,
+  AseelReportTable,
+  AseelStatusBarItem,
   useRecordNavigation,
   useAseelKeymap,
+  useAseelIndexKeymap,
+  useAseelFieldShortcuts,
   type AseelGridColumn,
   type AseelIndexColumn,
   type AseelToolbarAction,
+  type DenseColumn,
+  type ReportColumn,
 } from './index';
 
 interface DemoInvoice { id: number; number: string; account: string; }
@@ -226,6 +236,59 @@ export const AseelKitStory: React.FC = () => {
         }}
         onClose={() => setPickerOpen(false)}
       />
+
+      {/* ─ N0 + N1: أمثلة الـ primitives الجديدة ──────────────────── */}
+      <div className="mt-8 p-4 border-t border-[var(--aseel-border)]">
+        <h3 className="text-lg font-bold mb-4 text-amber-700">N0 + N1: مكوّنات جديدة</h3>
+
+        {/* AseelFormSection */}
+        <AseelFormSection title="مثال: قسم نموذج فرعي" cols={3}>
+          {fld('حقل 1', <input className="aseel-input" placeholder="..." />)}
+          {fld('حقل 2', <input className="aseel-input" placeholder="..." />)}
+          {fld('حقل 3', <input className="aseel-input" placeholder="..." />)}
+        </AseelFormSection>
+
+        {/* AseelDenseTable */}
+        <div className="mt-4">
+          <h4 className="font-bold mb-2">AseelDenseTable — جدول إدارة</h4>
+          <AseelDenseTable<DemoInvoice>
+            columns={[
+              { key: 'number', header: 'الرقم', width: '80px', sortable: true },
+              { key: 'account', header: 'الحساب', sortable: true },
+              { key: 'id', header: 'المعرّف', width: '80px', align: 'center', numeric: true },
+            ] as DenseColumn<DemoInvoice>[]}
+            rows={DEMO_INVOICES}
+            getRowKey={(r) => r.id}
+            onRowDoubleClick={(r) => setLastKey(`فتح فاتورة ${r.number}`)}
+          />
+        </div>
+
+        {/* AseelReportTable */}
+        <div className="mt-4">
+          <h4 className="font-bold mb-2">AseelReportTable — جدول تقرير</h4>
+          <AseelReportTable<DemoLine>
+            columns={[
+              { key: 'sku', header: 'الصنف' },
+              { key: 'name', header: 'البيان' },
+              { key: 'qty', header: 'الكمية', numeric: true },
+              { key: 'price', header: 'السعر', numeric: true },
+            ] as ReportColumn<DemoLine>[]}
+            rows={lines.filter((l) => l.sku)}
+            totals={{ qty: String(lines.reduce((s, l) => s + Number(l.qty), 0)), price: '—' }}
+            exportable
+          />
+        </div>
+
+        {/* AseelStatusBarItem */}
+        <div className="mt-4">
+          <h4 className="font-bold mb-2">AseelStatusBarItem — عناصر شريط الحالة</h4>
+          <div className="flex gap-4 flex-wrap">
+            <AseelStatusBarItem label="المستخدم" value="admin" icon={<User className="h-3 w-3" />} />
+            <AseelStatusBarItem label="التاريخ" value="2026-05-21" icon={<Calendar className="h-3 w-3" />} />
+            <AseelStatusBarItem label="الحالة" value="متصل" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 };

@@ -95,6 +95,7 @@ import { SalesCustomersPage } from "./components/sales/SalesCustomersPage";
 import SalesCustomerPaymentsPage from "./components/sales/SalesCustomerPaymentsPage";
 import SalesSettingsPage from "./components/sales/SalesSettingsPage";
 import LocalShippingPage from "./components/logistics/LocalShippingPage";
+import { GroupConstantsPage } from './components/settings/GroupConstantsPage';
 import { useLocation, useNavigate } from "react-router-dom";
 
 type SourcingView = "search" | "loading" | "results";
@@ -184,6 +185,8 @@ const App: React.FC = () => {
   const [accountingSupplierPartnerId, setAccountingSupplierPartnerId] = useState<number | null>(null);
   const [rejectingTask, setRejectingTask] = useState<Task | null>(null);
   const [theme, setTheme] = useState<Theme>("light");
+  /** N0-T5: F11 modal portal لثوابت المجموعة */
+  const [groupConstantsOpen, setGroupConstantsOpen] = useState(false);
 
   const activeTaskRef = useRef<Task | null>(activeTask);
 
@@ -1536,12 +1539,21 @@ const App: React.FC = () => {
 
   return (
     <div dir="rtl">
-      <AppLayout user={currentUser} activeView={appView} onNavigate={setViewAndSyncPath}>
+      <AppLayout user={currentUser} activeView={appView} onNavigate={setViewAndSyncPath} onOpenGroupConstants={() => setGroupConstantsOpen(true)}>
         <NoSqlMigrationBanner isManager={currentUser?.role === "manager"} />
         <main className="p-3 sm:p-4 lg:p-6">
           {renderMainContent()}
         </main>
       </AppLayout>
+
+      {/* N0-T5: F11 modal portal لثوابت المجموعة */}
+      {groupConstantsOpen && (
+        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setGroupConstantsOpen(false)}>
+          <div className="w-full max-w-6xl h-[90vh] bg-white rounded-lg shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <GroupConstantsPage />
+          </div>
+        </div>
+      )}
 
       {selectedTaskDetails && (
         <TaskDetailsModal

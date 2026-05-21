@@ -313,3 +313,43 @@ Reviewed the external model's T3-01..03 + T4-01/02/03/05. **Bugs fixed:**
 - **T4-04** `logistics/management/commands/migrate_local_shipping_cost_lines.py`: Data migration script — cost_lines local-shipping rows → `LocalShipment` records. Idempotent. **Run after T1-01 fix is deployed.**
 
 - **T4-05** `inventory/models.py`: Added `STOCK_ISSUE` to `StockMovement.REFERENCE_TYPES` (migration `0004`). `sales/services.py`: New `issue_stock_from_invoice()` — idempotent, creates one STOCK_ISSUE `StockMovement(OUT)` per invoice line. **check clean, migration OK.**
+
+## [TASK5 N0 — DONE & VERIFIED 2026-05-21]
+
+### Backend
+- **N0-T1** `tenants/models.py`: New `TenantSettings` model (one-to-one with Tenant). Fields: company_name_primary/sub, address, po_box, phone, fax, email, licensed_dealer_no, income_tax_file_no, default_vat_rate, default_source_discount_rate, currency FK, fiscal_period_label/start/end, default_freight_credit_account FK, mixture_auto_fill_enabled, barcode_action. Migration `tenants/0003_n0_tenant_settings_and_books.py`.
+- **N0-T2** `tenants/models.py`: New `TenantBook` model. PK composite (tenant, document_type, book_number). 15 document types. Fields: name, last_used_number, is_active. Same migration.
+- **N0-T3** `accounting/services.py`: New `next_document_number(tenant_id, document_type, book_number=0)` — canonical helper with `select_for_update`. Existing `next_invoice_number()` and `next_credit_debit_note_number()` refactored to thin wrappers.
+
+### Frontend Primitives
+- **N0-T6** `useAseelKeymap.ts`: Extended with Ctrl+Home/End/PageUp/PageDown/Ins/Del keys.
+- **N0-T7** `useAseelIndexKeymap.ts`: New hook for list pages (F2=drillToLedger, F3=drillToStock, F4=showNotes, F5=sortBy, F6=search, Enter=openRecord, Ctrl+nav).
+- **N0-T8** `useAseelFieldShortcuts.ts`: New hook for field-level shortcuts (date +/-, remaining-amount Space, voucher-link *, account-number */-, item-number +).
+- **N0-T9** `AseelStatusBarItem.tsx`: New primitive for status bar items (label, value, icon).
+- **N1-T1** `AseelFormSection.tsx`: New primitive — subsection box with border, title, 2/3/4 col grid.
+- **N1-T2** `AseelDenseTable.tsx`: New primitive — list page table replacing DataGrid (columns, rows, sortable, selectable, pagination, footer).
+- **N1-T3** `AseelReportTable.tsx`: New primitive — report table with filterBar, numeric columns, totals footer, CSV export.
+
+### Frontend Pages
+- **N0-T4** `GroupConstantsPage.tsx`: New page — 4 tabs (بيانات عامة, أرقام الدفاتر, حسابات افتراضية, ضرائب). Uses AseelDocumentShell + AseelFormSection + AseelGrid.
+- **N0-T5** `AppLayout.tsx` + `App.tsx`: F11 global keymap → opens GroupConstantsPage as modal portal. `onOpenGroupConstants` prop added to AppLayout.
+- **N0-T10** `aseel/index.ts`: Barrel updated with all new exports. `AseelKitStory.tsx`: Added live demos of AseelFormSection, AseelDenseTable, AseelReportTable, AseelStatusBarItem.
+
+### Types
+- `types/common.ts`: Added `"group-constants"` to AppView union.
+- `components/layout/Breadcrumb.tsx`: Added `'group-constants': 'ثوابت المجموعة'` to VIEW_LABELS.
+
+**Verified:** Migration created · Barrel exports all new primitives · AseelKitStory shows demos · F11 modal portal wired.
+
+### N0-T11 — F-key fixes applied to M1-M5 forms
+- **SalesInvoiceEditor.tsx (M1):** Added Ctrl+Home/End/PageUp/PageDown/Ins handlers using `nav.first/last/prev/next/goNew`.
+- **DealForm.tsx (M3):** Added Ctrl+nav handlers.
+- **ShipmentForm.tsx (M3):** Added Ctrl+nav handlers.
+- **CustomsClearanceManagement.tsx (M3):** Added Ctrl+nav handlers + CtrlIns opens new clearance form.
+- **InvoiceForm.tsx (M4):** Added Ctrl+nav handlers + CtrlIns calls `nav.goNew()`.
+- **AccountingJournalEntryPage.tsx (M4):** Added Ctrl+nav handlers + CtrlIns calls `nav.goNew()`.
+- **SalesCustomerPaymentsPage.tsx (M4):** Added Ctrl+nav handlers + CtrlIns opens new payment form.
+- **CreditDebitNotesPage.tsx (M4):** Added Ctrl+nav handlers + CtrlIns opens new note form.
+- **SalesQuotationsPage.tsx (M4):** Added Ctrl+nav handlers + CtrlIns opens new quotation form.
+
+**Final verification:** `tsc --noEmit` = **78 ≤ 78** · `vite build` = 0 errors · `manage.py check` = 0 issues.

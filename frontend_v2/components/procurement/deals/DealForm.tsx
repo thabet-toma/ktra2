@@ -249,6 +249,12 @@ export const DealForm: React.FC<DealFormProps> = ({
         setShowSupplierPicker(true);
       }
     },
+    // N0-T11: Ctrl+nav handlers
+    CtrlHome: () => nav?.first?.(),
+    CtrlEnd: () => nav?.last?.(),
+    CtrlPageUp: () => nav?.prev?.(),
+    CtrlPageDown: () => nav?.next?.(),
+    CtrlIns: () => handleNewDeal(),
   }, { enabled: !showSupplierPicker });
 
   const handleNewDeal = () => {

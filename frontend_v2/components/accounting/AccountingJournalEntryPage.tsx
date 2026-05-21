@@ -203,6 +203,12 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         setShowAccountPicker(true);
       }
     },
+    // N0-T11: Ctrl+nav handlers
+    CtrlHome: () => nav?.first?.(),
+    CtrlEnd: () => nav?.last?.(),
+    CtrlPageUp: () => nav?.prev?.(),
+    CtrlPageDown: () => nav?.next?.(),
+    CtrlIns: () => nav.goNew(),
   }, { enabled: !showAccountPicker });
 
   // Load journals list for navigation

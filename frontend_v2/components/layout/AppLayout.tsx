@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sidebar } from '../Sidebar';
 import { User, AppView } from '../../types';
 import {
@@ -24,6 +24,8 @@ interface AppLayoutProps {
   activeView: AppView;
   onNavigate: (view: AppView, targetId?: string) => void;
   children: React.ReactNode;
+  /** N0-T5: callback لفتح صفحة ثوابت المجموعة (F11). */
+  onOpenGroupConstants?: () => void;
 }
 
 export const AppLayout: React.FC<AppLayoutProps> = ({
@@ -31,10 +33,24 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   activeView,
   onNavigate,
   children,
+  onOpenGroupConstants,
 }) => {
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
 
   const currentViewLabel = VIEW_LABELS[activeView] || activeView;
+
+  // N0-T5: F11 global keymap → يفتح GroupConstantsPage كـ modal portal
+  useEffect(() => {
+    if (!onOpenGroupConstants) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'F11') {
+        e.preventDefault();
+        onOpenGroupConstants();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onOpenGroupConstants]);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[var(--color-surface)]" data-density={density} data-skin="aseel">

@@ -145,6 +145,12 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
                 setShowAgentPicker(true);
             }
         },
+        // N0-T11: Ctrl+nav handlers
+        CtrlHome: () => nav?.first?.(),
+        CtrlEnd: () => nav?.last?.(),
+        CtrlPageUp: () => nav?.prev?.(),
+        CtrlPageDown: () => nav?.next?.(),
+        CtrlIns: () => handleNewShipment(),
     }, { enabled: !showAgentPicker });
 
     const handleNewShipment = () => {

@@ -1,5 +1,5 @@
 /**
- * M0-T5 — useAseelKeymap
+ * M0-T5 + N0-T6 — useAseelKeymap
  * Aseel keyboard model. NON-BLOCKING by design:
  *  - Function keys (F2..F6, F12), Enter-as-save (F12), Escape and Alt+F4
  *    always fire (these never conflict with text entry).
@@ -9,13 +9,18 @@
  *    hijacking normal typing — exactly the Aseel behaviour.
  *  - The whole map is suppressed when `enabled === false` (pass false while a
  *    modal/picker is open so it owns the keyboard).
- * Reference: docs/aseel_reference/invoices.txt 193–200; shipments.txt 114–121.
+ *  - N0-T6 additions: Ctrl+Home/End/PageUp/PageDown (nav), Ctrl+Ins (add),
+ *    Ctrl+Del (delete), Alt+F4 (exit).
+ * Reference: docs/aseel_reference/invoices.txt 193–200; shipments.txt 114–121;
+ *            invoices.txt 207–229.
  */
 import { useEffect, useRef } from 'react';
 
 export type AseelKey =
   | 'F1' | 'F2' | 'F3' | 'F4' | 'F5' | 'F6' | 'F12'
-  | 'Escape' | 'AltF4' | 'plus' | 'star' | 'minus';
+  | 'Escape' | 'AltF4' | 'plus' | 'star' | 'minus'
+  | 'CtrlHome' | 'CtrlEnd' | 'CtrlPageUp' | 'CtrlPageDown'
+  | 'CtrlIns' | 'CtrlDel';
 
 export type AseelKeymapHandlers = Partial<Record<AseelKey, () => void>>;
 
@@ -29,7 +34,6 @@ function isEditableTextTarget(el: EventTarget | null): boolean {
   if (el instanceof HTMLTextAreaElement) return true;
   if (el instanceof HTMLInputElement) {
     const t = (el.type || 'text').toLowerCase();
-    // text-like inputs where typing must not be hijacked
     return ['text', 'search', 'email', 'url', 'tel', 'password'].includes(t);
   }
   return false;
@@ -39,7 +43,6 @@ export function useAseelKeymap(
   handlers: AseelKeymapHandlers,
   { enabled = true }: Options = {},
 ): void {
-  // Keep latest handlers without re-binding the listener every render.
   const ref = useRef<AseelKeymapHandlers>(handlers);
   ref.current = handlers;
 
@@ -59,6 +62,18 @@ export function useAseelKeymap(
       // Alt+F4 — exit
       if (e.altKey && e.key === 'F4') return fire('AltF4');
 
+      // Ctrl+nav keys
+      if (e.ctrlKey) {
+        switch (e.key) {
+          case 'Home': return fire('CtrlHome');
+          case 'End': return fire('CtrlEnd');
+          case 'PageUp': return fire('CtrlPageUp');
+          case 'PageDown': return fire('CtrlPageDown');
+          case 'Insert': return fire('CtrlIns');
+          case 'Delete': return fire('CtrlDel');
+        }
+      }
+
       switch (e.key) {
         case 'F1': return fire('F1');
         case 'F2': return fire('F2');
@@ -70,8 +85,7 @@ export function useAseelKeymap(
         case 'Escape': return fire('Escape');
       }
 
-      // +/*/- — index lookup & record stepping. Only when not typing free
-      // text, or when the focused field opted in (data-aseel-key="1").
+      // +/*/- — index lookup & record stepping
       const target = e.target as HTMLElement | null;
       const optedIn = target?.getAttribute?.('data-aseel-key') === '1';
       const typing = isEditableTextTarget(target);

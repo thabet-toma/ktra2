@@ -58,6 +58,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   shipments: 'الشحنات',
   'shipment-management': 'إدارة الشحنات',
   clearance: 'التخليص الجمركي',
+  'group-constants': 'ثوابت المجموعة',
 };
 
 interface BreadcrumbItem {

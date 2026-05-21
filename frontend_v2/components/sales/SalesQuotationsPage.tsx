@@ -121,6 +121,12 @@ export const SalesQuotationsPage: React.FC = () => {
         setShowPartnerPicker(true);
       }
     },
+    // N0-T11: Ctrl+nav handlers
+    CtrlHome: () => nav?.first?.(),
+    CtrlEnd: () => nav?.last?.(),
+    CtrlPageUp: () => nav?.prev?.(),
+    CtrlPageDown: () => nav?.next?.(),
+    CtrlIns: () => { setSelectedId(null); setShowForm(true); },
   });
 
   const loadAll = useCallback(async () => {

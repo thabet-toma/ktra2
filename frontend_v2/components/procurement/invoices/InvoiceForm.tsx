@@ -164,6 +164,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         setShowSupplierPicker(true);
       }
     },
+    // N0-T11: Ctrl+nav handlers
+    CtrlHome: () => nav?.first?.(),
+    CtrlEnd: () => nav?.last?.(),
+    CtrlPageUp: () => nav?.prev?.(),
+    CtrlPageDown: () => nav?.next?.(),
+    CtrlIns: () => nav.goNew(),
   }, { enabled: !showSupplierPicker });
 
   // Load invoices list for navigation

@@ -1047,6 +1047,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           }
         }
       },
+      // N0-T11: Ctrl+nav handlers
+      CtrlHome: () => { noteKey("Ctrl+Home الأول"); nav.first(); },
+      CtrlEnd: () => { noteKey("Ctrl+End الأخير"); nav.last(); },
+      CtrlPageUp: () => { noteKey("Ctrl+PgUp السابق"); nav.prev(); },
+      CtrlPageDown: () => { noteKey("Ctrl+PgDn التالي"); nav.next(); },
+      CtrlIns: () => { noteKey("Ctrl+Ins جديد"); resetForm(); },
     },
     { enabled: !customerPickerOpen && productPickerLineKey === null && !voucherOpen }
   );

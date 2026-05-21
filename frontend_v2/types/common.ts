@@ -48,6 +48,7 @@ export type AppView =
     | "sql-partners"
     | "sql-deals"
     | "sql-shipments"
+    | "group-constants"
     | "smart-assistant"
     | "accounting-fiscal-periods"
     | "accounting-exchange-rates"

@@ -6,9 +6,50 @@ from django.db import transaction
 from .models import Account, ExchangeRate, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod, CostCenter
 from decimal import Decimal
 from partners.models import Partner
-from tenants.models import Currency
+from tenants.models import Currency, TenantBook
 
 logger = logging.getLogger(__name__)
+
+
+# ─────────────────────────────────────────────────────────
+#  N0-T3: Document Numbering (Canonical)
+# ─────────────────────────────────────────────────────────
+
+def next_document_number(
+    tenant_id: int,
+    document_type: str,
+    book_number: int = 0,
+) -> int:
+    """يُولّد الرقم التالي لمستند معين عبر TenantBook مع select_for_update.
+
+    هذا هو الـ canonical helper — كل الـ helpers الأخرى (next_invoice_number إلخ)
+    تصبح thin wrappers تُمرّر له.
+
+    Args:
+        tenant_id: معرف الشركة
+        document_type: نوع المستند (sales_invoice, purchase_invoice, deal, ...)
+        book_number: رقم الدفتر (0 = الافتراضي)
+
+    Returns:
+        الرقم التالي (last_used_number + 1)
+    """
+    with transaction.atomic():
+        book, created = TenantBook.objects.select_for_update().get_or_create(
+            tenant_id=tenant_id,
+            document_type=document_type,
+            book_number=book_number,
+            defaults={
+                'name': f'{document_type} [{book_number}]',
+                'last_used_number': 0,
+                'is_active': True,
+            },
+        )
+        if not book.is_active:
+            raise ValidationError(f"الدفتر {book_number} لنوع {document_type} غير نشط.")
+        next_num = book.last_used_number + 1
+        book.last_used_number = next_num
+        book.save(update_fields=['last_used_number'])
+        return next_num
 
 
 # ─────────────────────────────────────────────────────────

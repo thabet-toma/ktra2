@@ -1234,46 +1234,21 @@ def suggest_fifo_allocations(
 
 
 def next_invoice_number(tenant_id: int, book_number: int = 0) -> str:
-    """يقفل آخر فاتورة (select_for_update) لتقليل تصادم الأرقام تحت حمل متزامن.
-    M2-T5: Per-book_number sequence (handles multi-book invoices).
+    """Thin wrapper حول next_document_number() — N8-T4.
 
     book_number=0 → manual (any number accepted), generate with tenant prefix.
     book_number>0 → use book prefix for isolated per-book sequence.
     """
+    from accounting.services import next_document_number
+
     if book_number == 0:
         prefix = f"SI-{tenant_id}-"
-        with transaction.atomic():
-            last = (
-                SalesInvoice.objects
-                .filter(tenant_id=tenant_id, invoice_number__startswith=prefix)
-                .select_for_update()
-                .order_by("-id")
-                .first()
-            )
-            if not last:
-                return f"{prefix}1"
-            try:
-                n = int(last.invoice_number.replace(prefix, ""))
-            except ValueError:
-                n = last.id
-            return f"{prefix}{n + 1}"
+        seq = next_document_number(tenant_id, 'sales_invoice', book_number=0)
+        return f"{prefix}{seq}"
     else:
         prefix = f"SI-{tenant_id}-B{book_number}-"
-        with transaction.atomic():
-            last = (
-                SalesInvoice.objects
-                .filter(tenant_id=tenant_id, invoice_number__startswith=prefix)
-                .select_for_update()
-                .order_by("-id")
-                .first()
-            )
-            if not last:
-                return f"{prefix}1"
-            try:
-                n = int(last.invoice_number.replace(prefix, ""))
-            except ValueError:
-                n = last.id
-            return f"{prefix}{n + 1}"
+        seq = next_document_number(tenant_id, 'sales_invoice', book_number=book_number)
+        return f"{prefix}{seq}"
 
 
 def convert_quotation_to_invoice(quotation, user=None):
@@ -1338,28 +1313,16 @@ def convert_quotation_to_invoice(quotation, user=None):
 # ─────────────────────────────────────────────────────────────────────────
 
 def next_credit_debit_note_number(tenant_id: int, note_type: str) -> str:
-    """Atomic per-tenant numbering with `select_for_update` (m3-06 pattern).
+    """Thin wrapper حول next_document_number() — N8-T4.
 
-    Prefix: `CN-` for credit, `DN-` for debit.  Falls back to count-based
-    numbering only if no prior notes exist (still race-free under the lock).
+    Prefix: `CN-` for credit, `DN-` for debit.
     """
+    from accounting.services import next_document_number
+
+    doc_type = 'credit_note' if note_type == CreditDebitNote.TYPE_CREDIT else 'debit_note'
     prefix = "CN" if note_type == CreditDebitNote.TYPE_CREDIT else "DN"
-    with transaction.atomic():
-        last = (
-            CreditDebitNote.objects.select_for_update()
-            .filter(tenant_id=tenant_id, note_number__startswith=f"{prefix}-")
-            .order_by("-id")
-            .first()
-        )
-        next_seq = 1
-        if last and last.note_number:
-            try:
-                # Format: PREFIX-NNNN
-                tail = last.note_number.rsplit("-", 1)[-1]
-                next_seq = int(tail) + 1
-            except (ValueError, IndexError):
-                next_seq = (CreditDebitNote.objects.filter(tenant_id=tenant_id).count()) + 1
-        return f"{prefix}-{next_seq:04d}"
+    seq = next_document_number(tenant_id, doc_type)
+    return f"{prefix}-{seq:04d}"
 
 
 def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNote:
