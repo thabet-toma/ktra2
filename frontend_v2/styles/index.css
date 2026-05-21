@@ -738,4 +738,119 @@ tbody td {
   font-variant-numeric: tabular-nums;
 }
 [data-skin="aseel"] .aseel-total-row--warn .aseel-total-value { background: #f3eccf; border-color: #b9982f; }
+
+/* ───────── N0/N1 primitives — Form section + Dense table + Report table ───── */
+
+/* AseelFormSection: bordered subsection with title + responsive grid */
+[data-skin="aseel"] .aseel-form-section {
+  border: 1px solid var(--aseel-border-soft);
+  border-radius: var(--aseel-radius);
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: var(--aseel-panel);
+}
+[data-skin="aseel"] .aseel-form-section-title {
+  color: var(--aseel-ink-soft);
+  font-size: var(--aseel-fs-sm);
+  font-weight: 700;
+  margin-bottom: 6px;
+  border-bottom: 1px dashed var(--aseel-border-soft);
+  padding-bottom: 4px;
+}
+[data-skin="aseel"] .aseel-form-section-body {
+  display: grid;
+  gap: 4px 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+[data-skin="aseel"] .aseel-form-section.aseel-grid-2 .aseel-form-section-body {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+[data-skin="aseel"] .aseel-form-section.aseel-grid-3 .aseel-form-section-body {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+[data-skin="aseel"] .aseel-form-section.aseel-grid-4 .aseel-form-section-body {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+@media (max-width: 640px) {
+  [data-skin="aseel"] .aseel-form-section.aseel-grid-2 .aseel-form-section-body,
+  [data-skin="aseel"] .aseel-form-section.aseel-grid-3 .aseel-form-section-body,
+  [data-skin="aseel"] .aseel-form-section.aseel-grid-4 .aseel-form-section-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* AseelDenseTable: list/index table wrapper */
+[data-skin="aseel"] .aseel-dense-table {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+[data-skin="aseel"] .aseel-dense-table .aseel-sortable {
+  cursor: pointer;
+  user-select: none;
+}
+[data-skin="aseel"] .aseel-dense-table .aseel-sortable:hover { background: var(--aseel-accent-bg); }
+[data-skin="aseel"] .aseel-sort-indicator { font-size: 9px; margin-inline-start: 4px; color: var(--aseel-accent); }
+
+[data-skin="aseel"] .aseel-grid tbody tr.aseel-row--selected td { background: var(--aseel-row-sel) !important; }
+[data-skin="aseel"] .aseel-grid tbody tr.aseel-row--hover td { background: #eef4fa; }
+
+[data-skin="aseel"] .aseel-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 4px 8px;
+  background: var(--aseel-panel);
+  border: 1px solid var(--aseel-border-soft);
+  border-radius: var(--aseel-radius);
+  font-size: var(--aseel-fs-sm);
+}
+[data-skin="aseel"] .aseel-pagination button {
+  padding: 2px 10px;
+  border: 1px solid var(--aseel-border);
+  background: var(--aseel-field);
+  border-radius: var(--aseel-radius);
+  cursor: pointer;
+}
+[data-skin="aseel"] .aseel-pagination button:disabled { opacity: 0.4; cursor: default; }
+[data-skin="aseel"] .aseel-pagination button:hover:not(:disabled) { background: var(--aseel-accent-bg); }
+
+/* AseelReportTable */
+[data-skin="aseel"] .aseel-report-table {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+[data-skin="aseel"] .aseel-report-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--aseel-panel);
+  border: 1px solid var(--aseel-border-soft);
+  border-radius: var(--aseel-radius);
+}
+[data-skin="aseel"] .aseel-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 12px;
+  border: 1px solid var(--aseel-border);
+  background: var(--aseel-field);
+  color: var(--aseel-ink);
+  border-radius: var(--aseel-radius);
+  font-size: var(--aseel-fs-sm);
+  cursor: pointer;
+}
+[data-skin="aseel"] .aseel-btn:hover:not(:disabled) { background: var(--aseel-accent-bg); }
+[data-skin="aseel"] .aseel-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* Banner warn variant (used by GroupConstantsPage seed-prompt) */
+[data-skin="aseel"] .aseel-banner--warn {
+  background: #f3eccf;
+  border-color: #b9982f;
+  color: #6b551a;
+}
 [data-skin="aseel"] .aseel-picker-foot { padding: 5px 10px; border-top: 1px solid var(--aseel-border-soft); color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); }

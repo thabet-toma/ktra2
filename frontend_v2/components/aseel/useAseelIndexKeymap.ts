@@ -11,7 +11,6 @@
  * Reference: docs/aseel_reference/accounting.txt 48–69.
  */
 import { useEffect, useRef } from 'react';
-import { AseelKey, AseelKeymapHandlers, useAseelKeymap } from './useAseelKeymap';
 
 export type AseelIndexKey =
   | 'F2' | 'F3' | 'F4' | 'F5' | 'F6'
@@ -23,6 +22,18 @@ export type AseelIndexKeymapHandlers = Partial<Record<AseelIndexKey, () => void>
 
 interface Options {
   enabled?: boolean;
+}
+
+/** Don't hijack Enter inside text inputs (would break form submission). */
+function isEditableTextTarget(el: EventTarget | null): boolean {
+  if (!(el instanceof HTMLElement)) return false;
+  if (el.isContentEditable) return true;
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLInputElement) {
+    const t = (el.type || 'text').toLowerCase();
+    return ['text', 'search', 'email', 'url', 'tel', 'password', 'number'].includes(t);
+  }
+  return false;
 }
 
 export function useAseelIndexKeymap(
@@ -48,7 +59,7 @@ export function useAseelIndexKeymap(
       // Alt+F4
       if (e.altKey && e.key === 'F4') return fire('AltF4');
 
-      // Ctrl+nav
+      // Ctrl+nav (safe — never conflict with typing)
       if (e.ctrlKey) {
         switch (e.key) {
           case 'Home': return fire('CtrlHome');
@@ -60,15 +71,19 @@ export function useAseelIndexKeymap(
         }
       }
 
-      // F-keys
+      // F-keys — safe inside inputs
       switch (e.key) {
         case 'F2': return fire('F2');
         case 'F3': return fire('F3');
         case 'F4': return fire('F4');
         case 'F5': return fire('F5');
         case 'F6': return fire('F6');
-        case 'Enter': return fire('Enter');
         case 'Escape': return fire('Escape');
+      }
+
+      // Enter — must NOT hijack inside text inputs (would break form submission).
+      if (e.key === 'Enter' && !isEditableTextTarget(e.target)) {
+        return fire('Enter');
       }
     };
 

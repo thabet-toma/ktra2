@@ -35,4 +35,6 @@ urlpatterns = [
     path('api/hr/', include('hr.urls')),
     path('api/realestate/', include('realestate.urls')),
     path('api/sales/', include('sales.urls')),
+    # N0-T4: Group Constants (F11) — tenant-level settings + books + currencies
+    path('api/tenants/', include('tenants.urls')),
 ]
