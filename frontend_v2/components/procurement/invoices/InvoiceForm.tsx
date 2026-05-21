@@ -13,24 +13,12 @@ import {
   Save,
   ArrowRight,
   Loader2,
-  Paperclip,
-  DollarSign,
-  Coins,
-  Briefcase,
-  Calculator,
-  RefreshCw,
-  ChevronRight,
-  ChevronLeft,
-  ChevronsRight,
-  ChevronsLeft,
   Plus,
-  Trash2,
   Printer,
-  FileDown,
+  RefreshCw,
+  Trash2,
   X,
 } from "lucide-react";
-import { ItemsTableSection } from "@/components/forms/shared/ItemsTableSection";
-import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
 import {
   suppliersService,
 } from "@/services/firestoreService";
@@ -38,28 +26,20 @@ import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { mapPurchaseInvoiceDtoToInvoice } from "@/utils/mapPurchaseInvoiceDto";
 import { dealsService } from "@/services/dealsService";
 import { shipmentsService } from "@/services/shipmentsService";
-import { formatInvoiceImportLogisticsLine } from "@/utils/invoiceConversionUtils";
 import {
   invoiceGrandTotalIls,
   invoiceVatBaseIls,
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
-import { CollapsibleSection } from "@/components/ui/CollapsibleSection";
 import { ItemSearchModal } from "../price-offers/ItemSearchModal";
 import {
-  InvoiceBasicInfo,
-  DealInfoSection,
-  InstallmentsSection,
-  DealActivityLog,
-  ConversionDetailsSection,
-  NISItemsTable,
-  NISFinancialSummary,
-  NISInvoiceTaxStrip,
-} from "./sections";
-import {
   AseelDocumentShell,
+  AseelGrid,
+  AseelIndexPicker,
   useRecordNavigation,
   useAseelKeymap,
+  type AseelGridColumn,
+  type AseelToolbarAction,
 } from "../../aseel";
 
 interface InvoiceFormProps {
@@ -699,345 +679,409 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     ilsMerchandiseBase,
   ]);
 
+  const fmt = (v: number) => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  const fld = (label: string, node: React.ReactNode) => (
+    <label className="aseel-field">
+      <span className="aseel-field-label">{label}</span>
+      {node}
+    </label>
+  );
+
+  const selectedSupplier = formData.supplierId
+    ? suppliers.find((s) => s.id === formData.supplierId)
+    : undefined;
+
+  /* ───────────── أعمدة جدول البنود (AseelGrid) ───────────── */
+  const itemColumns: AseelGridColumn<InvoiceItem>[] = [
+    { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
+    { key: "itemId", header: "رقم الصنف", width: "100px" },
+    { key: "name", header: "اسم الصنف", width: "25%" },
+    { key: "specifications", header: "بيان", width: "20%" },
+    { key: "quantity", header: "الكمية", width: "80px", align: "center", type: "number" },
+    { key: "unitPrice", header: "سعر الوحدة", width: "100px", align: "center", type: "number" },
+    { key: "totalPrice", header: "الإجمالي", width: "100px", align: "center", readOnly: true },
+    { key: "del", header: "", width: "36px", align: "center" },
+  ];
+
+  const itemGetCell = (row: InvoiceItem, key: string): string | number => {
+    const idx = (formData.items || []).indexOf(row);
+    switch (key) {
+      case "seq": return idx + 1;
+      case "itemId": return row.itemId || "";
+      case "name": return row.name || "";
+      case "specifications": return row.specifications || "";
+      case "quantity": return row.quantity || 0;
+      case "unitPrice": return row.unitPrice || 0;
+      case "totalPrice": return row.totalPrice || 0;
+      default: return "";
+    }
+  };
+
+  const itemOnChange = (rowIndex: number, key: string, value: string) => {
+    const items = [...(formData.items || [])];
+    const item = { ...items[rowIndex] };
+    if (key === "quantity") {
+      item.quantity = Number(value) || 0;
+      item.totalPrice = roundSqlMoney2(item.quantity * (item.unitPrice || 0));
+    } else if (key === "unitPrice") {
+      item.unitPrice = Number(value) || 0;
+      item.totalPrice = roundSqlMoney2((item.quantity || 0) * item.unitPrice);
+    }
+    items[rowIndex] = item;
+    recalculateTotals({ items });
+  };
+
+  const addRow = () => {
+    const newItem: InvoiceItem = {
+      id: crypto.randomUUID(),
+      itemId: "",
+      name: "",
+      categoryId: "",
+      categoryName: "",
+      specifications: "",
+      imageUrls: [],
+      quantity: 1,
+      unitPrice: 0,
+      totalPrice: 0,
+    };
+    recalculateTotals({ items: [...(formData.items || []), newItem] });
+  };
+
+  const removeRow = (key: string) => {
+    const updated = (formData.items || []).filter((i) => i.id !== key);
+    recalculateTotals({ items: updated });
+  };
+
+  const renderItemIdCell = (row: InvoiceItem) => (
+    <button
+      type="button"
+      className="aseel-cell-picker"
+      disabled={readOnly || formData.isHistorical}
+      data-aseel-key="1"
+      onClick={() => setShowItemSearch(true)}
+      title="اختر صنفاً (+ فهرس الأصناف)"
+    >
+      {row.itemId ? `#${row.itemId}` : "— اختر صنفاً —"}
+    </button>
+  );
+
+  const renderDeleteCell = (row: InvoiceItem) =>
+    readOnly || formData.isHistorical ? null : (
+      <button
+        type="button"
+        className="aseel-iconbtn aseel-iconbtn--danger"
+        onClick={() => removeRow(row.id)}
+        title="حذف السطر"
+      >
+        <Trash2 className="h-3 w-3" />
+      </button>
+    );
+
+  itemColumns[1].render = renderItemIdCell;
+  itemColumns[7].render = renderDeleteCell;
+
+  /* ───────────── تبويبات ───────────── */
+  const notesTab = (
+    <textarea
+      className="aseel-input"
+      rows={3}
+      style={{ width: "100%" }}
+      disabled={readOnly || formData.isHistorical}
+      value={formData.notes || formData.dealInfo?.internalNotes || ""}
+      onChange={(e) => handleDealInfoUpdate("internalNotes", e.target.value)}
+    />
+  );
+
+  const attachmentsTab = (
+    <div className="aseel-other">
+      <p className="aseel-hint">المرفقات والصور — يُدار من قسم بيانات الصفقة.</p>
+    </div>
+  );
+
+  const otherTab = (
+    <div className="aseel-other">
+      <label className="aseel-field aseel-field--inline">
+        <input
+          type="checkbox"
+          disabled={readOnly || formData.isHistorical}
+          checked={formData.shippingIncluded || false}
+          onChange={(e) => handleUpdateFinancial("shippingIncluded", e.target.checked)}
+        />
+        <span className="aseel-field-label" style={{ flex: "unset" }}>
+          الأسعار تشمل الشحن
+        </span>
+      </label>
+      <p className="aseel-hint">
+        عملة الفاتورة: {formData.currency === "ILS" ? "شيكل (₪)" : "دولار ($)"}
+        {formData.dealId ? ` — مرتبطة بالصفقة ${formData.dealNumber || formData.dealId}` : ""}
+      </p>
+    </div>
+  );
+
+  const toolbarActions: AseelToolbarAction[] = [
+    { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: <Save />, onClick: !saving ? () => handleSave() : undefined, disabled: saving },
+    { key: "new", label: "جديدة", icon: <Plus />, onClick: () => nav.goNew(), separatorBefore: true },
+    { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => window.print(), separatorBefore: true },
+    { key: "cancel", label: "إلغاء", icon: <X />, onClick: onCancel, danger: true, separatorBefore: true },
+  ];
+
   return (
     <div
-      data-skin="aseel"
-      style={{ height: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
+      id="purchase-invoice-print"
+      dir="rtl"
+      style={{ height: "calc(100vh - 13rem)", minHeight: 560 }}
     >
     <AseelDocumentShell
       title="فاتورة الشراء"
-      state={formData.id ? `فاتورة ${formData.invoiceNumber || `#${formData.id}`}` : 'فاتورة جديدة'}
+      state={formData.id ? `فاتورة ${formData.invoiceNumber || `#${formData.id}`}` : "فاتورة جديدة"}
+      company={
+        formData.glPurchaseReceiptJournalId != null ? `قيد محاسبي #${formData.glPurchaseReceiptJournalId}` : undefined
+      }
       nav={nav}
-      actions={[
-        { key: 'save', label: saving ? '...تخزين' : 'تخزين', icon: <Save />, onClick: !saving ? () => handleSave() : undefined, disabled: saving },
-        { key: 'cancel', label: 'إلغاء', icon: <X />, onClick: onCancel, danger: true, separatorBefore: true },
-        { key: 'print', label: 'طباعة', icon: <Printer />, onClick: () => window.print(), separatorBefore: true },
+      actions={toolbarActions}
+      header={
+        <>
+          {fld(
+            "رقم الفاتورة",
+            <input
+              className="aseel-input"
+              readOnly
+              value={formData.id ? `#${formData.invoiceNumber || formData.id}` : "— جديدة —"}
+            />
+          )}
+          {fld(
+            "التاريخ",
+            <input
+              className="aseel-input"
+              type="date"
+              disabled={readOnly || formData.isHistorical}
+              value={formData.invoiceDate || ""}
+              onChange={(e) => handleUpdateFinancial("invoiceDate", e.target.value)}
+            />
+          )}
+          {fld(
+            "تاريخ الاستحقاق",
+            <input
+              className="aseel-input"
+              type="date"
+              disabled={readOnly || formData.isHistorical}
+              value={formData.dealInfo?.dueDate || ""}
+              onChange={(e) => handleDealInfoUpdate("dueDate", e.target.value)}
+            />
+          )}
+          {fld(
+            "رقم المستند",
+            <input
+              className="aseel-input"
+              disabled={readOnly || formData.isHistorical}
+              value={formData.supplierInvoiceNumber || ""}
+              onChange={(e) => handleUpdateFinancial("supplierInvoiceNumber", e.target.value)}
+              placeholder="رقم فاتورة المورد"
+            />
+          )}
+          {fld(
+            "المورد",
+            <div className="aseel-pickfield">
+              <input
+                className="aseel-input aseel-input--hl"
+                data-aseel-field="supplier"
+                data-aseel-key="1"
+                readOnly
+                disabled={readOnly || formData.isHistorical}
+                value={selectedSupplier ? `#${selectedSupplier.id}` : ""}
+                placeholder="+ للفهرس"
+                onClick={() => !readOnly && !formData.isHistorical && setShowSupplierPicker(true)}
+              />
+              <button
+                type="button"
+                className="aseel-ellipsis"
+                disabled={readOnly || formData.isHistorical}
+                onClick={() => setShowSupplierPicker(true)}
+                title="فهرس الموردين (+)"
+              >
+                …
+              </button>
+            </div>
+          )}
+          {fld(
+            "الاسم",
+            <input
+              className="aseel-input"
+              readOnly
+              value={headerSupplierName || ""}
+            />
+          )}
+          {fld(
+            "العملة",
+            <select
+              className="aseel-input"
+              disabled={readOnly || formData.isHistorical}
+              value={formData.currency || "USD"}
+              onChange={(e) => handleUpdateFinancial("currency", e.target.value)}
+            >
+              <option value="USD">USD — دولار</option>
+              <option value="ILS">ILS — شيكل</option>
+            </select>
+          )}
+          {formData.currency === "ILS" && fld(
+            "نسبة الضريبة %",
+            <input
+              className="aseel-input"
+              data-aseel-key="1"
+              type="number"
+              min={0}
+              max={100}
+              step={0.01}
+              disabled={readOnly || formData.isHistorical}
+              value={formData.taxRate || 0}
+              onChange={(e) => handleUpdateFinancial("taxRate", Number(e.target.value))}
+            />
+          )}
+          {fld(
+            "مشتغل مرخص",
+            <input
+              className="aseel-input"
+              disabled={readOnly || formData.isHistorical}
+              value={formData.dealInfo?.licensedDealerNo || ""}
+              onChange={(e) => handleDealInfoUpdate("licensedDealerNo", e.target.value)}
+              placeholder="رقم المشتغل المرخص"
+            />
+          )}
+          {formData.dealNumber && fld(
+            "رقم الصفقة",
+            <input
+              className="aseel-input"
+              readOnly
+              value={formData.dealNumber}
+            />
+          )}
+          {formData.importLogistics && fld(
+            "رقم الشحنة",
+            <input
+              className="aseel-input"
+              readOnly
+              value={formData.importLogistics.shipmentNumber || ""}
+            />
+          )}
+          {formData.importLogistics && fld(
+            "رقم التخليص",
+            <input
+              className="aseel-input"
+              readOnly
+              value={String(formData.importLogistics.clearanceId || "")}
+            />
+          )}
+          <label className="aseel-field aseel-field--inline">
+            <input
+              type="checkbox"
+              disabled={readOnly || formData.isHistorical}
+              checked={formData.shippingIncluded || false}
+              onChange={(e) => handleUpdateFinancial("shippingIncluded", e.target.checked)}
+            />
+            <span className="aseel-field-label" style={{ flex: "unset" }}>
+              الأسعار تشمل ض.ق.م
+            </span>
+          </label>
+        </>
+      }
+      tabs={[
+        { key: "notes", label: "الملاحظات", content: notesTab },
+        { key: "other", label: "بيانات أخرى", content: otherTab },
+        { key: "attachments", label: "المرفقات", content: attachmentsTab },
       ]}
-      header={<></>}
+      totals={
+        <>
+          <div className="aseel-total-row">
+            <span>مجموع البنود (قبل الخصم)</span>
+            <span className="aseel-total-value">{fmt(ilsMerchandiseBase - (formData.shippingIncluded ? 0 : formData.shippingCost || 0))}</span>
+          </div>
+          {(formData.discountAmount || 0) > 0 && (
+            <div className="aseel-total-row">
+              <span>الخصم</span>
+              <span className="aseel-total-value">{fmt(formData.discountAmount || 0)}</span>
+            </div>
+          )}
+          <div className="aseel-total-row">
+            <span>المجموع قبل الضريبة</span>
+            <span className="aseel-total-value">{fmt(formData.subtotal || 0)}</span>
+          </div>
+          <div className="aseel-total-row">
+            <span>الضريبة المضافة</span>
+            <span className="aseel-total-value">{fmt(formData.taxAmount || 0)}</span>
+          </div>
+          <div className="aseel-total-row aseel-total-row--grand">
+            <span>مبلغ الفاتورة الإجمالي</span>
+            <span className="aseel-total-value">{fmt(formData.grandTotal || 0)}</span>
+          </div>
+        </>
+      }
       status={
         <>
-          <span className="aseel-status-item">المستخدم <b>{currentUser?.name || '—'}</b></span>
+          <span className="aseel-status-item">المستخدم <b>{currentUser?.name || "—"}</b></span>
+          <span className="aseel-status-item">رقم القيد <b>{formData.glPurchaseReceiptJournalId ?? "—"}</b></span>
+          {formData.importLogistics && (
+            <span className="aseel-status-item">رقم الحركة <b>{formData.importLogistics.shipmentNumber || "—"}</b></span>
+          )}
+          <span className="aseel-status-item">الحالة <b>{formData.isPosted ? "مرحّلة" : formData.isHistorical ? "مؤرشفة" : formData.id ? "مسودة" : "جديدة"}</b></span>
           <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
-          {formData.invoiceNumber && <span className="aseel-status-item">رقم الفاتورة <b>{formData.invoiceNumber}</b></span>}
+          <span className="aseel-status-item">{readOnly || formData.isHistorical ? "للقراءة فقط" : "قابل للتعديل ✓"}</span>
         </>
       }
     >
-    <div className="bg-gray-50 dark:bg-gray-900 pb-20" style={{ height: '100%', overflow: 'auto' }}>
-      <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onCancel}
-              className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-            >
-              <ArrowRight className="w-5 h-5 text-gray-500" />
-            </button>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <h1 className="text-xl font-bold text-gray-900 dark:text-white flex flex-wrap items-center gap-2">
-                  {formData.id ? `تعديل الفاتورة: ${formData.invoiceNumber}` : "إنشاء فاتورة جديدة"}
-                  {formData.isHistorical && <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded">مؤرشف</span>}
-                  {formData.dealId && <span className="text-xs bg-blue-100 text-blue-800 px-2 py-0.5 rounded">مرتبطة بصفقة</span>}
-                  <span className={`text-xs px-2 py-0.5 rounded ${formData.currency === 'ILS' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
-                    العملة: {formData.currency === 'ILS' ? 'شيكل (₪)' : 'دولار ($)'}
-                  </span>
-                </h1>
-                <button
-                  type="button"
-                  onClick={() => setInvoiceHeaderDetailsOpen((o) => !o)}
-                  aria-expanded={invoiceHeaderDetailsOpen}
-                  title={invoiceHeaderDetailsOpen ? "إخفاء" : "عرض بيانات الفاتورة والمورد"}
-                  className={`text-sm font-semibold shrink-0 rounded-md px-2 py-0.5 transition-colors underline-offset-2 hover:underline ${
-                    invoiceHeaderDetailsOpen
-                      ? "text-blue-800 dark:text-blue-200 bg-blue-100 dark:bg-blue-900/50 ring-1 ring-blue-300 dark:ring-blue-600"
-                      : "text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300"
-                  }`}
-                >
-                  تفاصيل
-                </button>
-              </div>
-              <p className="text-sm text-gray-500 dark:text-gray-400 space-y-1">
-                {formData.importLogistics ? (
-                  <>
-                    {formData.dealNumber ? (
-                      <span className="block">
-                        مرتبطة بالصفقة {formData.dealNumber}
-                        {headerDealDescription ? (
-                          <span className="block mt-0.5 text-gray-700 dark:text-gray-300 font-medium">
-                            وصف الصفقة: {headerDealDescription}
-                          </span>
-                        ) : null}
-                      </span>
-                    ) : null}
-                    <span className="block mt-1 text-[var(--color-primary)] dark:text-[var(--color-primary)] font-medium">
-                      {formatInvoiceImportLogisticsLine(formData.importLogistics)}
-                    </span>
-                  </>
-                ) : formData.dealNumber ? (
-                  <>
-                    <span className="block">
-                      الفاتورة مرتبطة بالصفقة: {formData.dealNumber}
-                    </span>
-                    {headerDealDescription ? (
-                      <span className="block text-gray-700 dark:text-gray-300 font-medium">
-                        وصف الصفقة: {headerDealDescription}
-                      </span>
-                    ) : null}
-                  </>
-                ) : (
-                  <>
-                    <span className="block">إدارة تفاصيل فاتورة المشتريات</span>
-                    {formData.dealId && headerDealDescription ? (
-                      <span className="block text-gray-700 dark:text-gray-300 font-medium">
-                        وصف الصفقة: {headerDealDescription}
-                      </span>
-                    ) : null}
-                  </>
-                )}
-                {headerSupplierName ? (
-                  <span className="block text-gray-700 dark:text-gray-300 font-medium">
-                    المورد: {headerSupplierName}
-                  </span>
-                ) : null}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            <button
-              onClick={onCancel}
-              className="px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 dark:text-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 rounded-lg transition-colors flex-1 sm:flex-none justify-center"
-            >
-              رجوع
-            </button>
-            {!readOnly && formData.shipment && formData.id && formData.currency === "ILS" ? (
-              <button
-                type="button"
-                onClick={() => void handleRecalculateLanded()}
-                disabled={recalcBusy || formData.isPosted}
-                title={
-                  formData.isPosted
-                    ? "الترحيل لا يغيّر النسب والحصص المعروضة (محفوظة في الفاتورة). إعادة الحساب من الخادم معطّلة للمرحّل — ألغِ الترحيل لتجديد الأرقام."
-                    : undefined
-                }
-                className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-600 rounded-lg flex items-center gap-2 text-sm font-semibold disabled:opacity-50 hover:bg-slate-200 dark:hover:bg-slate-700"
-              >
-                {recalcBusy ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="w-4 h-4" />
-                )}
-                إعادة حساب التكلفة
-              </button>
-            ) : null}
-            {!readOnly && (
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm flex items-center justify-center gap-2 transition-all flex-1 sm:flex-none disabled:opacity-70 disabled:cursor-not-allowed"
-              >
-                {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-                <span>{formData.id ? "حفظ التغييرات" : "حفظ الفاتورة"}</span>
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {invoiceHeaderDetailsOpen ? (
-        <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 py-4">
-            <p className="text-xs font-bold text-gray-500 dark:text-gray-400 mb-3">بيانات الفاتورة والمورد</p>
-            <InvoiceBasicInfo
-              data={formData}
-              setData={setFormData}
-              suppliers={suppliers}
-              readOnly={readOnly || formData.isHistorical}
-              items={formData.items}
-            />
-          </div>
-        </div>
-      ) : null}
-
-      <div className="max-w-7xl mx-auto px-4 py-8 space-y-6">
-        {formData.currency === 'ILS' ? (
-          <div className="space-y-6">
-            {(formData.conversionMetadata || formData.importLogistics) && (
-              <ConversionDetailsSection
-                metadata={formData.conversionMetadata}
-                importLogistics={formData.importLogistics}
-                shippingIncluded={Boolean(formData.shippingIncluded)}
-                invoiceShippingCostIls={formData.shippingCost}
-                invoiceClearanceId={formData.clearanceId}
-              />
-            )}
-
-            <CollapsibleSection title="سلة المنتجات (شيكل)" icon={Briefcase} defaultOpen={true}>
-              <NISItemsTable
-                items={formData.items || []}
-                conversionRate={formData.conversionMetadata?.dealEffectiveRate || 1}
-                invoiceTaxAmount={formData.taxAmount || 0}
-                localPayments={formData.localPayments || {}}
-                taxableBaseIls={ilsMerchandiseBase}
-                invoiceVatBaseIls={ilsVatBase}
-                conversionMetadata={formData.conversionMetadata}
-              />
-            </CollapsibleSection>
-
-            <NISInvoiceTaxStrip
-              taxType={formData.taxType || "percentage"}
-              taxRate={formData.taxRate || 0}
-              taxAmount={formData.taxAmount || 0}
-              localPayments={formData.localPayments || {}}
-              taxableBaseIls={ilsMerchandiseBase}
-              vatBaseIls={ilsVatBase}
-              readOnly={readOnly || !!formData.isHistorical}
-              onFinancial={handleUpdateFinancial}
-            />
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              <div className="lg:col-span-8">
-                <CollapsibleSection title="أقساط الدفع" icon={Calculator} defaultOpen={true}>
-                  <InstallmentsSection
-                    installments={installments}
-                    installmentPlanEnabled={installmentPlanEnabled}
-                    items={formData.items || []}
-                    discountAmount={formData.discountAmount}
-                    taxRate={formData.taxRate}
-                    shippingCost={formData.shippingCost || 0}
-                    shippingIncluded={formData.shippingIncluded || false}
-                    localPayments={formData.localPayments || {}}
-                    onToggleInstallmentPlan={handleToggleInstallmentPlan}
-                    onAddInstallment={handleAddInstallment}
-                    onRemoveInstallment={handleRemoveInstallment}
-                    onUpdateInstallment={handleUpdateInstallment}
-                    readOnly={formData.isHistorical || false}
-                    currency={formData.currency}
-                    grandTotalFromForm={
-                      formData.currency === "ILS" ? formData.grandTotal : undefined
-                    }
-                    mainVatForExtras={formData.taxAmount || 0}
-                    conversionMetadata={formData.conversionMetadata}
-                  />
-                </CollapsibleSection>
-              </div>
-
-              <div className="lg:col-span-4">
-                <NISFinancialSummary
-                  subtotal={formData.subtotal || 0}
-                  discountAmount={formData.discountAmount || 0}
-                  taxAmount={formData.taxAmount || 0}
-                  taxRate={formData.taxRate || 0}
-                  shippingCost={0}
-                  grandTotal={formData.grandTotal || 0}
-                  localPayments={formData.localPayments || {}}
-                  taxableBaseIls={ilsMerchandiseBase}
-                  invoiceVatBaseIls={ilsVatBase}
-                  hideShippingRow
-                />
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            <CollapsibleSection title="معلومات الفاتورة" icon={Briefcase} defaultOpen={true}>
-              <ItemsTableSection
-                items={formData.items || []}
-                onAddItem={handleAddItem}
-                onUpdateItem={handleUpdateItem}
-                onRemoveItem={handleRemoveItem}
-                onPreviewImage={setPreviewImage}
-                supplierId={formData.supplierId}
-                readOnly={readOnly || formData.isHistorical}
-                allDbItems={allDbItems}
-                discountAmount={formData.discountAmount}
-                taxRate={formData.taxRate || 0}
-                taxAmount={formData.taxAmount || 0}
-                taxType={formData.taxType || 'percentage'}
-                shippingCost={formData.shippingCost || 0}
-                shippingIncluded={formData.shippingIncluded || false}
-                localPayments={formData.localPayments || {}}
-                productionDays={formData.dealInfo?.productionDays}
-                deliveryDays={formData.dealInfo?.deliveryDays}
-                paymentMethod={formData.dealInfo?.paymentMethod}
-                shippingMethod={formData.dealInfo?.shippingMethod}
-                warrantyDuration={formData.dealInfo?.warrantyDuration}
-                totalWeight={formData.totalWeight}
-                totalVolume={formData.totalVolume}
-                certificates={formData.dealInfo?.certificates}
-                shipmentNotes={formData.dealInfo?.shipmentNotes || ""}
-                onUpdateFinancial={(field, value) => {
-                  const dealInfoFields = [
-                    'productionDays', 'deliveryDays', 'paymentMethod',
-                    'shippingMethod', 'warrantyDuration', 'certificates',
-                    'shipmentNotes'
-                  ];
-                  const weightVolumeFields = ['totalWeight', 'totalVolume'];
-
-                  if (dealInfoFields.includes(field)) {
-                    handleDealInfoUpdate(field, value);
-                  } else if (weightVolumeFields.includes(field)) {
-                    handleDealInfoUpdate(field, value);
-                    handleUpdateFinancial(field, value);
-                  } else {
-                    handleUpdateFinancial(field, value);
-                  }
-                }}
-                currency={formData.currency}
-              />
-            </CollapsibleSection>
-
-            <InstallmentsSection
-              installments={installments}
-              installmentPlanEnabled={installmentPlanEnabled}
-              items={formData.items || []}
-              discountAmount={formData.discountAmount}
-              taxRate={formData.taxRate}
-              shippingCost={formData.shippingCost || 0}
-              shippingIncluded={formData.shippingIncluded || false}
-              localPayments={formData.localPayments || {}}
-              onToggleInstallmentPlan={handleToggleInstallmentPlan}
-              onAddInstallment={handleAddInstallment}
-              onRemoveInstallment={handleRemoveInstallment}
-              onUpdateInstallment={handleUpdateInstallment}
-              readOnly={formData.isHistorical || false}
-              currency={formData.currency}
-            />
-          </>
-        )}
-
-        {/* Hiding DealInfoSection per user request */}
-        {/* {formData.currency !== 'ILS' && (formData.dealId || formData.dealNumber) && (
-          <DealInfoSection dealInfo={dealInfo} formData={formData} onUpdateDealInfo={handleDealInfoUpdate} />
-        )} */}
-
-        {dealActivities.length > 0 && <DealActivityLog activities={dealActivities} />}
-
-        <CollapsibleSection title="المرفقات والصور" icon={Paperclip} defaultOpen={false}>
-          <AttachmentsSection data={formData} setData={setFormData} />
-        </CollapsibleSection>
-      </div>
-
-      {showItemSearch && (
-        <ItemSearchModal
-          isOpen={showItemSearch}
-          onClose={() => setShowItemSearch(false)}
-          onSelectItem={handleItemSelect}
-          items={allDbItems}
-          supplierId={formData.supplierId}
-        />
+      <AseelGrid<InvoiceItem>
+        columns={itemColumns}
+        rows={formData.items || []}
+        getCell={itemGetCell}
+        getRowKey={(r) => r.id}
+        onChange={readOnly || formData.isHistorical ? undefined : itemOnChange}
+        onAddRow={readOnly || formData.isHistorical ? undefined : addRow}
+        emptyHint="لا توجد بنود — أضف صنفاً (+ فهرس الأصناف)"
+      />
+      {!readOnly && !formData.isHistorical && (
+        <button type="button" className="aseel-addrow" onClick={addRow}>
+          <Plus className="h-3 w-3" /> إضافة سطر
+        </button>
       )}
-
-      {previewImage && (
-        <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
-          <img src={previewImage} alt="Preview" className="max-w-full max-h-full rounded-lg" />
-          <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 text-white p-2 bg-gray-800 rounded-full">
-            <ArrowRight className="w-6 h-6 rotate-180" />
-          </button>
-        </div>
-      )}
-    </div>
     </AseelDocumentShell>
+
+    {/* فهرس الموردين */}
+    <AseelIndexPicker<Supplier>
+      open={showSupplierPicker}
+      title="فهرس الموردين"
+      rows={suppliers}
+      columns={[
+        { key: "id", header: "الرقم", width: "70px", value: (r) => r.id },
+        { key: "tradeName", header: "الاسم التجاري", value: (r) => r.tradeName || "" },
+        { key: "city", header: "المدينة", value: (r) => r.city || "" },
+      ]}
+      getRowKey={(r) => r.id}
+      searchValue={(r) => `${r.id} ${r.tradeName || ""} ${r.city || ""}`}
+      onSelect={(r) => {
+        setFormData((prev) => ({ ...prev, supplierId: r.id, factoryName: r.tradeName }));
+        setShowSupplierPicker(false);
+      }}
+      onClose={() => setShowSupplierPicker(false)}
+    />
+
+    {showItemSearch && (
+      <ItemSearchModal
+        isOpen={showItemSearch}
+        onClose={() => setShowItemSearch(false)}
+        onSelectItem={handleItemSelect}
+        items={allDbItems}
+        supplierId={formData.supplierId}
+      />
+    )}
+
+    {previewImage && (
+      <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
+        <img src={previewImage} alt="Preview" className="max-w-full max-h-full rounded-lg" />
+        <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 text-white p-2 bg-gray-800 rounded-full">
+          <ArrowRight className="w-6 h-6 rotate-180" />
+        </button>
+      </div>
+    )}
     </div>
   );
 };
