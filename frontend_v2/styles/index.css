@@ -712,6 +712,14 @@ tbody td {
 
 /* "other data" tab — config notes */
 [data-skin="aseel"] .aseel-other { display: flex; flex-direction: column; gap: 6px; }
+/* Wrapper for legacy section components embedded inside Aseel tabs (DealForm/ShipmentForm/etc.).
+   Keeps modern card chrome subdued so the surrounding Aseel cream surface stays primary,
+   without touching the section's own internal layout. */
+[data-skin="aseel"] .aseel-legacy-tab { padding: 4px; display: flex; flex-direction: column; gap: 10px; }
+[data-skin="aseel"] .aseel-legacy-tab .shadow,
+[data-skin="aseel"] .aseel-legacy-tab .shadow-sm,
+[data-skin="aseel"] .aseel-legacy-tab .shadow-md,
+[data-skin="aseel"] .aseel-legacy-tab .shadow-lg { box-shadow: none !important; }
 [data-skin="aseel"] .aseel-note {
   padding: 4px 8px;
   border: 1px solid var(--aseel-border);

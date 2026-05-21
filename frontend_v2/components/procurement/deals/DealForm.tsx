@@ -743,9 +743,93 @@ export const DealForm: React.FC<DealFormProps> = ({
     </div>
   );
 
+  const basicInfoTab = (
+    <div className="aseel-legacy-tab">
+      <BasicInfoSection
+        data={formData}
+        setData={setFormData}
+        suppliers={suppliers}
+        isDeal={true}
+        dealsService={dealsService}
+        items={items}
+        readOnly={formData.status === 'shipped' || formData.status === 'cancelled'}
+      />
+    </div>
+  );
+
+  const termsAndShippingTab = (
+    <div className="aseel-legacy-tab">
+      <TermsAndShippingSection
+        data={formData}
+        setData={setFormData}
+        readOnly={formData.status === 'shipped' || formData.status === 'cancelled'}
+      />
+    </div>
+  );
+
+  const paymentsTab = (
+    <div className="aseel-legacy-tab" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <InstallmentManager
+        installments={installments}
+        grandTotal={calculateGrandTotal()}
+        onUpdateInstallments={(newInstallments) => {
+          setInstallments(newInstallments);
+          setFormData(prev => ({ ...prev, installments: newInstallments }));
+        }}
+        validationError={installmentValidationError}
+        installmentPlanEnabled={installmentPlanEnabled}
+        onTogglePlan={toggleInstallmentPlan}
+        deal={formData}
+        readOnly={formData.status === 'shipped' || formData.status === 'cancelled'}
+      />
+      <PaymentProgress
+        installments={
+          formData.installments && formData.installments.length > 0
+            ? formData.installments
+            : installments
+        }
+        deal={formData}
+        currentUser={currentUser}
+        onPaymentOperation={handlePaymentOperation}
+        onConfirmSupplier={handlePaymentConfirmation}
+        onOpenAccountingJournal={onOpenAccountingJournal}
+        readOnly={formData.status === "shipped" || formData.status === "cancelled"}
+      />
+      {formData.id ? (
+        <DealPaymentList
+          deal={formData}
+          currentUser={currentUser}
+          onPaymentOperation={handlePaymentOperation}
+          onConfirmSupplier={handlePaymentConfirmation}
+          onOpenAccountingJournal={onOpenAccountingJournal}
+        />
+      ) : null}
+      <DealStageControl
+        data={formData}
+        setData={setFormData}
+        currentUser={currentUser}
+        onStatusChange={handleStatusChange}
+        onShippingWorkflowChange={handleShippingWorkflowChange}
+      />
+    </div>
+  );
+
   const attachmentsTab = (
-    <div className="aseel-other">
-      <p className="aseel-hint">المرفقات والوثائق — يُدار من قسم بيانات الصفقة.</p>
+    <div className="aseel-legacy-tab">
+      <AttachmentsSection
+        data={formData}
+        setData={setFormData}
+      />
+    </div>
+  );
+
+  const activityTab = (
+    <div className="aseel-legacy-tab">
+      {formData.id && activities.length > 0 ? (
+        <ActivityLog activities={activities} />
+      ) : (
+        <p className="aseel-hint">لا يوجد سجل نشاطات بعد.</p>
+      )}
     </div>
   );
 
@@ -776,7 +860,9 @@ export const DealForm: React.FC<DealFormProps> = ({
             {fld("الاسم", <input className="aseel-input" readOnly value={selectedSupplier?.tradeName || formData.factoryName || ""} />)}
             {fld("رقم العرض", <input className="aseel-input" readOnly value={formData.originalOfferNumber || ""} />)}
             {fld("مشتغل مرخص", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.licensedDealerNo || ""} onChange={(e) => setFormData(prev => ({ ...prev, licensedDealerNo: e.target.value }))} placeholder="رقم المشتغل المرخص" />)}
-            {formData.dealDescription && fld("الوصف", <input className="aseel-input" readOnly value={formData.dealDescription} />)}
+            {fld("وصف الصفقة", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.dealDescription || ""} onChange={(e) => setFormData(prev => ({ ...prev, dealDescription: e.target.value }))} placeholder="وصف مختصر" />)}
+            {fld("رابط علي بابا", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.alibabaOrderLink || ""} onChange={(e) => setFormData(prev => ({ ...prev, alibabaOrderLink: e.target.value }))} placeholder="https://…" />)}
+            {fld("طريقة الشحن", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.shippingMethod || ""} onChange={(e) => setFormData(prev => ({ ...prev, shippingMethod: e.target.value }))} placeholder="بحري / جوي / بري" />)}
             <label className="aseel-field aseel-field--inline">
               <input type="checkbox" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} checked={formData.shippingIncluded || false} onChange={(e) => setFormData(prev => ({ ...prev, shippingIncluded: e.target.checked }))} />
               <span className="aseel-field-label" style={{ flex: "unset" }}>الأسعار تشمل الشحن</span>
@@ -784,9 +870,13 @@ export const DealForm: React.FC<DealFormProps> = ({
           </>
         }
         tabs={[
+          { key: "basic", label: "البيانات الأساسية", content: basicInfoTab },
+          { key: "terms", label: "الشروط والشحن", content: termsAndShippingTab },
+          { key: "payments", label: "الدفعات والمراحل", content: paymentsTab },
           { key: "notes", label: "الملاحظات", content: notesTab },
-          { key: "other", label: "بيانات أخرى", content: otherTab },
           { key: "attachments", label: "المرفقات", content: attachmentsTab },
+          { key: "activity", label: "سجل النشاطات", content: activityTab },
+          { key: "other", label: "بيانات أخرى", content: otherTab },
         ]}
         totals={
           <>

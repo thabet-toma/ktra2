@@ -33,6 +33,18 @@ import {
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { ItemSearchModal } from "../price-offers/ItemSearchModal";
 import {
+  InvoiceBasicInfo,
+  DealInfoSection,
+  InstallmentsSection,
+  DealActivityLog,
+  ConversionDetailsSection,
+  NISItemsTable,
+  NISFinancialSummary,
+  NISInvoiceTaxStrip,
+} from "./sections";
+import { ItemsTableSection } from "@/components/forms/shared/ItemsTableSection";
+import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
+import {
   AseelDocumentShell,
   AseelGrid,
   AseelIndexPicker,
@@ -41,6 +53,7 @@ import {
   type AseelGridColumn,
   type AseelToolbarAction,
 } from "../../aseel";
+import { formatInvoiceImportLogisticsLine } from "@/utils/invoiceConversionUtils";
 
 interface InvoiceFormProps {
   invoice: Partial<Invoice> | null;
@@ -794,8 +807,157 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   );
 
   const attachmentsTab = (
-    <div className="aseel-other">
-      <p className="aseel-hint">المرفقات والصور — يُدار من قسم بيانات الصفقة.</p>
+    <div className="aseel-legacy-tab">
+      <AttachmentsSection data={formData} setData={setFormData} />
+    </div>
+  );
+
+  const basicInfoTab = (
+    <div className="aseel-legacy-tab">
+      <InvoiceBasicInfo
+        data={formData}
+        setData={setFormData}
+        suppliers={suppliers}
+        readOnly={readOnly || formData.isHistorical}
+        items={formData.items}
+      />
+    </div>
+  );
+
+  const itemsTab = (
+    <div className="aseel-legacy-tab">
+      {formData.currency === "ILS" ? (
+        <>
+          {(formData.conversionMetadata || formData.importLogistics) && (
+            <ConversionDetailsSection
+              metadata={formData.conversionMetadata}
+              importLogistics={formData.importLogistics}
+              shippingIncluded={Boolean(formData.shippingIncluded)}
+              invoiceShippingCostIls={formData.shippingCost}
+              invoiceClearanceId={formData.clearanceId}
+            />
+          )}
+          <NISItemsTable
+            items={formData.items || []}
+            conversionRate={formData.conversionMetadata?.dealEffectiveRate || 1}
+            invoiceTaxAmount={formData.taxAmount || 0}
+            localPayments={formData.localPayments || {}}
+            taxableBaseIls={ilsMerchandiseBase}
+            invoiceVatBaseIls={ilsVatBase}
+            conversionMetadata={formData.conversionMetadata}
+          />
+          <NISInvoiceTaxStrip
+            taxType={formData.taxType || "percentage"}
+            taxRate={formData.taxRate || 0}
+            taxAmount={formData.taxAmount || 0}
+            localPayments={formData.localPayments || {}}
+            taxableBaseIls={ilsMerchandiseBase}
+            vatBaseIls={ilsVatBase}
+            readOnly={readOnly || !!formData.isHistorical}
+            onFinancial={handleUpdateFinancial}
+          />
+          <NISFinancialSummary
+            subtotal={formData.subtotal || 0}
+            discountAmount={formData.discountAmount || 0}
+            taxAmount={formData.taxAmount || 0}
+            taxRate={formData.taxRate || 0}
+            shippingCost={0}
+            grandTotal={formData.grandTotal || 0}
+            localPayments={formData.localPayments || {}}
+            taxableBaseIls={ilsMerchandiseBase}
+            invoiceVatBaseIls={ilsVatBase}
+            hideShippingRow
+          />
+        </>
+      ) : (
+        <ItemsTableSection
+          items={formData.items || []}
+          onAddItem={handleAddItem}
+          onUpdateItem={handleUpdateItem}
+          onRemoveItem={handleRemoveItem}
+          onPreviewImage={setPreviewImage}
+          supplierId={formData.supplierId}
+          readOnly={readOnly || formData.isHistorical}
+          allDbItems={allDbItems}
+          discountAmount={formData.discountAmount}
+          taxRate={formData.taxRate || 0}
+          taxAmount={formData.taxAmount || 0}
+          taxType={formData.taxType || "percentage"}
+          shippingCost={formData.shippingCost || 0}
+          shippingIncluded={formData.shippingIncluded || false}
+          localPayments={formData.localPayments || {}}
+          productionDays={formData.dealInfo?.productionDays}
+          deliveryDays={formData.dealInfo?.deliveryDays}
+          paymentMethod={formData.dealInfo?.paymentMethod}
+          shippingMethod={formData.dealInfo?.shippingMethod}
+          warrantyDuration={formData.dealInfo?.warrantyDuration}
+          totalWeight={formData.totalWeight}
+          totalVolume={formData.totalVolume}
+          certificates={formData.dealInfo?.certificates}
+          shipmentNotes={formData.dealInfo?.shipmentNotes || ""}
+          onUpdateFinancial={(field: string, value: any) => {
+            const dealInfoFields = [
+              "productionDays", "deliveryDays", "paymentMethod",
+              "shippingMethod", "warrantyDuration", "certificates",
+              "shipmentNotes",
+            ];
+            const weightVolumeFields = ["totalWeight", "totalVolume"];
+            if (dealInfoFields.includes(field)) {
+              handleDealInfoUpdate(field, value);
+            } else if (weightVolumeFields.includes(field)) {
+              handleDealInfoUpdate(field, value);
+              handleUpdateFinancial(field, value);
+            } else {
+              handleUpdateFinancial(field, value);
+            }
+          }}
+          currency={formData.currency}
+        />
+      )}
+    </div>
+  );
+
+  const installmentsTab = (
+    <div className="aseel-legacy-tab">
+      <InstallmentsSection
+        installments={installments}
+        installmentPlanEnabled={installmentPlanEnabled}
+        items={formData.items || []}
+        discountAmount={formData.discountAmount}
+        taxRate={formData.taxRate}
+        shippingCost={formData.shippingCost || 0}
+        shippingIncluded={formData.shippingIncluded || false}
+        localPayments={formData.localPayments || {}}
+        onToggleInstallmentPlan={handleToggleInstallmentPlan}
+        onAddInstallment={handleAddInstallment}
+        onRemoveInstallment={handleRemoveInstallment}
+        onUpdateInstallment={handleUpdateInstallment}
+        readOnly={formData.isHistorical || false}
+        currency={formData.currency}
+        grandTotalFromForm={formData.currency === "ILS" ? formData.grandTotal : undefined}
+        mainVatForExtras={formData.taxAmount || 0}
+        conversionMetadata={formData.conversionMetadata}
+      />
+    </div>
+  );
+
+  const dealInfoTab = (
+    <div className="aseel-legacy-tab">
+      <DealInfoSection
+        dealInfo={dealInfo}
+        formData={formData}
+        onUpdateDealInfo={handleDealInfoUpdate}
+      />
+    </div>
+  );
+
+  const activityTab = (
+    <div className="aseel-legacy-tab">
+      {dealActivities.length > 0 ? (
+        <DealActivityLog activities={dealActivities} />
+      ) : (
+        <p className="aseel-hint">لا يوجد سجل نشاطات للصفقة المرتبطة.</p>
+      )}
     </div>
   );
 
@@ -986,9 +1148,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         </>
       }
       tabs={[
+        { key: "basic", label: "بيانات الفاتورة", content: basicInfoTab },
+        { key: "items", label: "البنود والمنتجات", content: itemsTab },
+        { key: "installments", label: "أقساط الدفع", content: installmentsTab },
+        { key: "dealinfo", label: "معلومات الصفقة", content: dealInfoTab },
         { key: "notes", label: "الملاحظات", content: notesTab },
-        { key: "other", label: "بيانات أخرى", content: otherTab },
         { key: "attachments", label: "المرفقات", content: attachmentsTab },
+        { key: "activity", label: "سجل النشاطات", content: activityTab },
+        { key: "other", label: "بيانات أخرى", content: otherTab },
       ]}
       totals={
         <>
