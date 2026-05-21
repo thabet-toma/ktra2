@@ -195,6 +195,10 @@ const App: React.FC = () => {
     if (currentUser && currentUser.role === "manager") {
       autoDisableScheduler.start();
     }
+    // Surface a console warning if localStorage.tenantId doesn't match the
+    // env-configured tenant — helps diagnose the "0 شحنة / 0 بيان but deals
+    // work" symptom by pointing at the actual mismatch.
+    import("./utils/tenantContext").then((m) => m.warnIfTenantMismatch?.());
 
     // تنظيف عند إغلاق التطبيق أو تغيير المستخدم
     return () => {

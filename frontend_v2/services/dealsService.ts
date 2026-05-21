@@ -27,7 +27,13 @@ export type PaymentPostingDiagnostics = {
 
 type SqlDeal = any;
 
-const TENANT_ID = 1;
+// Was previously hardcoded to 1. That caused a silent inconsistency:
+// dealsService.subscribeToDeals returned tenant=1 data unconditionally while
+// shipments/clearance read from resolveTenantId(). If localStorage.tenantId
+// was set to a different value, the user saw deals but empty shipments/
+// clearance — exactly the symptom in the owner's screenshot.
+import { resolveTenantId as _resolveTenantId } from "../utils/tenantContext";
+const getTenantId = () => _resolveTenantId();
 
 function pickFirst(...values: any[]): string {
   for (const v of values) {
@@ -494,7 +500,7 @@ function resolvePaymentIdForApi(
 }
 
 async function fetchDealsMapped(): Promise<Deal[]> {
-  const rows = await apiGetList<SqlDeal>("logistics/deals/", { tenantId: TENANT_ID });
+  const rows = await apiGetList<SqlDeal>("logistics/deals/", { tenantId: getTenantId() });
   return rows.map(mapDealFromSql);
 }
 
@@ -518,7 +524,7 @@ export const dealsService = {
   },
 
   async getDeal(dealId: string): Promise<Deal> {
-    const row = await apiGetObject<SqlDeal>(`logistics/deals/${dealId}/`, { tenantId: TENANT_ID });
+    const row = await apiGetObject<SqlDeal>(`logistics/deals/${dealId}/`, { tenantId: getTenantId() });
     return mapDealFromSql(row);
   },
 
@@ -554,7 +560,7 @@ export const dealsService = {
     const created = await apiPostObject<SqlDeal>(
       "logistics/deals/",
       payload,
-      { tenantId: TENANT_ID }
+      { tenantId: getTenantId() }
     );
     return String(created.id);
   },
@@ -572,7 +578,7 @@ export const dealsService = {
     const merged = { ...current, ...updates };
     const payload = mapDealToSqlPayload(merged);
     delete payload.payments;
-    await apiPatchObject(`logistics/deals/${dealId}/`, payload, { tenantId: TENANT_ID });
+    await apiPatchObject(`logistics/deals/${dealId}/`, payload, { tenantId: getTenantId() });
   },
 
   /**
@@ -593,7 +599,7 @@ export const dealsService = {
     }
     assertDealPaymentsNotOverTotal(merged, previousPaymentsDeduped);
     const payload = mapDealToSqlPayload(merged);
-    await apiPatchObject(`logistics/deals/${dealId}/`, payload, { tenantId: TENANT_ID });
+    await apiPatchObject(`logistics/deals/${dealId}/`, payload, { tenantId: getTenantId() });
   },
 
   async updateDealStatus(
@@ -604,7 +610,7 @@ export const dealsService = {
     _userRole?: string,
     _notes?: string
   ): Promise<void> {
-    await apiPatchObject(`logistics/deals/${dealId}/`, { status: mapStatusToSql(newStatus) }, { tenantId: TENANT_ID });
+    await apiPatchObject(`logistics/deals/${dealId}/`, { status: mapStatusToSql(newStatus) }, { tenantId: getTenantId() });
   },
 
   /** مراحل الشحن/التصنيع (حقل shipping_workflow_status في SQL) */
@@ -615,7 +621,7 @@ export const dealsService = {
     await apiPatchObject(
       `logistics/deals/${dealId}/`,
       { shipping_workflow_status: code },
-      { tenantId: TENANT_ID }
+      { tenantId: getTenantId() }
     );
   },
 
@@ -656,7 +662,7 @@ export const dealsService = {
   ): Promise<PaymentPostingDiagnostics> {
     return apiGetObject<PaymentPostingDiagnostics>(
       `logistics/deals/${dealId}/payment-posting-diagnostics/${encodeURIComponent(String(paymentId))}/`,
-      { tenantId: TENANT_ID }
+      { tenantId: getTenantId() }
     );
   },
 
@@ -669,7 +675,7 @@ export const dealsService = {
     return apiPostObject(
       `logistics/deals/${dealId}/post_payment/${encodeURIComponent(String(paymentId))}/`,
       body || {},
-      { tenantId: TENANT_ID }
+      { tenantId: getTenantId() }
     );
   },
 
@@ -727,7 +733,7 @@ export const dealsService = {
     return apiPostObject(
       `logistics/deals/${dealId}/link_payment_journal/${encodeURIComponent(String(paymentId))}/`,
       { journal_id: journalId },
-      { tenantId: TENANT_ID }
+      { tenantId: getTenantId() }
     );
   },
 
@@ -746,7 +752,7 @@ export const dealsService = {
       {
         ...(opts?.reversalDate ? { reversal_date: opts.reversalDate } : {}),
       },
-      { tenantId: TENANT_ID }
+      { tenantId: getTenantId() }
     );
   },
 
@@ -867,7 +873,7 @@ export const dealsService = {
         await apiPostObject(
           `logistics/deals/${dealId}/remove_payment/${encodeURIComponent(pid)}/`,
           {},
-          { tenantId: TENANT_ID }
+          { tenantId: getTenantId() }
         );
         return;
       } catch (e: unknown) {
@@ -904,7 +910,7 @@ export const dealsService = {
   },
 
   async deleteDeal(dealId: string): Promise<void> {
-    await apiDelete(`logistics/deals/${dealId}/`, { tenantId: TENANT_ID });
+    await apiDelete(`logistics/deals/${dealId}/`, { tenantId: getTenantId() });
   },
 };
 

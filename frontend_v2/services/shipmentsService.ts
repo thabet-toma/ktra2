@@ -374,7 +374,11 @@ export const shipmentsService = {
       try {
         const rows = await apiGetList<any>("logistics/shipments/", { tenantId: getTenantId() });
         if (alive) callback(rows.map(mapShipmentFromSql));
-      } catch {
+      } catch (err) {
+        // Silent fallback would mask "0 شحنة" when the API actually errored.
+        // Log loudly so the user/devtools sees that data wasn't loaded vs.
+        // legitimately empty — diagnostic seen in the screenshot the owner sent.
+        console.error("[shipmentsService] failed to load shipments:", err);
         if (alive) callback([]);
       }
     };

@@ -446,8 +446,11 @@ tbody td {
   background: var(--aseel-panel);
   border-bottom: 1px solid var(--aseel-border-soft);
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 4px 14px;
+  /* 180px lets ~6 cols fit on a 1280px viewport, ~7 on 1440px, so 10-12
+     header fields land in 2 rows — every field stays visible without
+     forcing the user to hunt through tabs. */
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 4px 12px;
 }
 [data-skin="aseel"] .aseel-field { display: flex; align-items: center; gap: 6px; }
 [data-skin="aseel"] .aseel-field-label {
@@ -535,7 +538,16 @@ tbody td {
 /* ── Bottom tabs + totals dock ── */
 [data-skin="aseel"] .aseel-bottom { display: flex; align-items: stretch; gap: 8px; background: var(--aseel-panel); border-top: 1px solid var(--aseel-border-soft); padding: 4px 8px 6px; }
 [data-skin="aseel"] .aseel-tabscol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-[data-skin="aseel"] .aseel-tabs { display: flex; gap: 2px; }
+/* Tabs row: scrolls horizontally when there are too many tabs to fit, so
+   "البيانات الأساسية / الشروط والشحن / الدفعات" never get clipped off-screen. */
+[data-skin="aseel"] .aseel-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+[data-skin="aseel"] .aseel-tabs::-webkit-scrollbar { height: 4px; }
+[data-skin="aseel"] .aseel-tabs::-webkit-scrollbar-thumb { background: var(--aseel-border); border-radius: 2px; }
 [data-skin="aseel"] .aseel-tab {
   padding: 3px 12px;
   background: #e4e1d0;
@@ -545,6 +557,8 @@ tbody td {
   color: var(--aseel-ink-soft);
   font-size: var(--aseel-fs-sm);
   cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 [data-skin="aseel"] .aseel-tab--active { background: var(--aseel-field); color: var(--aseel-ink); font-weight: 700; }
 [data-skin="aseel"] .aseel-tabpanel {
