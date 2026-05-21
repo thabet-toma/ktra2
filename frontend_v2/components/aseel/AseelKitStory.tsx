@@ -31,6 +31,7 @@ import {
   AseelDenseTable,
   AseelReportTable,
   AseelStatusBarItem,
+  AseelDateInput,
   useRecordNavigation,
   useAseelKeymap,
   useAseelIndexKeymap,
@@ -286,6 +287,15 @@ export const AseelKitStory: React.FC = () => {
             <AseelStatusBarItem label="المستخدم" value="admin" icon={<User className="h-3 w-3" />} />
             <AseelStatusBarItem label="التاريخ" value="2026-05-21" icon={<Calendar className="h-3 w-3" />} />
             <AseelStatusBarItem label="الحالة" value="متصل" />
+          </div>
+        </div>
+
+        {/* AseelDateInput */}
+        <div className="mt-4">
+          <h4 className="font-bold mb-2">AseelDateInput — حقل تاريخ مع اختصارات</h4>
+          <div className="flex gap-4 items-center">
+            <AseelDateInput value="2026-05-21" onChange={() => {}} />
+            <span className="text-xs text-gray-500">* = +1 يوم · - = −1 يوم · double-click = تقويم سنوي</span>
           </div>
         </div>
       </div>

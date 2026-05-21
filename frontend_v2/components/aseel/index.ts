@@ -44,3 +44,7 @@ export type { DenseColumn, DensePagination, AseelDenseTableProps } from './Aseel
 // N1-T3
 export { AseelReportTable } from './AseelReportTable';
 export type { ReportColumn, AseelReportTableProps } from './AseelReportTable';
+
+// N1-T5
+export { AseelDateInput } from './AseelDateInput';
+export type { AseelDateInputProps } from './AseelDateInput';
