@@ -25,7 +25,7 @@ import {
 } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { getSalesSettings, updateSalesSettings, type SalesSettings } from "../../services/salesApi";
-import { Save, RefreshCw, Database } from "lucide-react";
+import { Save, RefreshCw, Database, X } from "lucide-react";
 
 /** ── Types ───────────────────────────────────────────────────────────── */
 
@@ -93,7 +93,14 @@ const fld = (label: string, node: React.ReactNode) => (
 
 /** ── Component ───────────────────────────────────────────────────────── */
 
-export const GroupConstantsPage: React.FC = () => {
+export interface GroupConstantsPageProps {
+  /** Current user name (shown in status bar). Falls back to "—" if omitted. */
+  currentUserName?: string;
+  /** Called when user wants to close the modal (X button or Escape). */
+  onClose?: () => void;
+}
+
+export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentUserName, onClose }) => {
   const tenantId = resolveTenantId();
   const [settings, setSettings] = useState<TenantSettingsData | null>(null);
   const [books, setBooks] = useState<TenantBookRow[]>([]);
@@ -137,6 +144,19 @@ export const GroupConstantsPage: React.FC = () => {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  /** Escape closes the modal when an onClose callback is provided. */
+  useEffect(() => {
+    if (!onClose) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   /** Seed the default 10 books per doc type if missing. */
   const seedBooks = async () => {
@@ -468,6 +488,16 @@ export const GroupConstantsPage: React.FC = () => {
       onClick: loadData,
       separatorBefore: true,
     },
+    ...(onClose
+      ? [{
+          key: "close",
+          label: "إغلاق (Esc)",
+          icon: <X />,
+          onClick: onClose,
+          danger: true,
+          separatorBefore: true,
+        } as AseelToolbarAction]
+      : []),
   ];
 
   const banner = (localErr || msg) ? (
@@ -496,7 +526,7 @@ export const GroupConstantsPage: React.FC = () => {
         status={
           <>
             <span className="aseel-status-item">
-              المستخدم <b>admin</b>
+              المستخدم <b>{currentUserName || "—"}</b>
             </span>
             <span className="aseel-status-item">
               {books.length} دفتر · {accounts.length} حساب · {currencies.length} عملة

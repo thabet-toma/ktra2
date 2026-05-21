@@ -22,6 +22,12 @@ export type AseelReportTableProps<T> = {
   exportable?: boolean;
   onExport?: () => void;
   className?: string;
+  /** Stable row key. Falls back to row index if omitted. */
+  getRowKey?: (row: T, idx: number) => string | number;
+  /** Message when rows is empty. Defaults to "لا توجد بيانات في النطاق المحدد". */
+  emptyHint?: React.ReactNode;
+  /** Show loading state instead of empty hint while fetching. */
+  loading?: boolean;
 };
 
 export function AseelReportTable<T>({
@@ -32,6 +38,9 @@ export function AseelReportTable<T>({
   exportable,
   onExport,
   className = '',
+  getRowKey,
+  emptyHint = 'لا توجد بيانات في النطاق المحدد',
+  loading = false,
 }: AseelReportTableProps<T>) {
   const getAlign = (col: ReportColumn<T>) => {
     if (col.align) return col.align;
@@ -96,8 +105,15 @@ export function AseelReportTable<T>({
           </tr>
         </thead>
         <tbody>
+          {rows.length === 0 && (
+            <tr className="aseel-row--empty">
+              <td colSpan={columns.length} style={{ textAlign: 'center', padding: '16px 8px', color: 'var(--aseel-ink-soft)' }}>
+                {loading ? 'جاري التحميل…' : emptyHint}
+              </td>
+            </tr>
+          )}
           {rows.map((row, idx) => (
-            <tr key={idx}>
+            <tr key={getRowKey ? getRowKey(row, idx) : idx}>
               {columns.map((col) => (
                 <td
                   key={col.key}
@@ -109,7 +125,7 @@ export function AseelReportTable<T>({
               ))}
             </tr>
           ))}
-          {totals && (
+          {totals && rows.length > 0 && (
             <tr className="aseel-row--total">
               {columns.map((col) => (
                 <td

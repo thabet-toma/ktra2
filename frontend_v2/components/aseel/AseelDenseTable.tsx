@@ -46,6 +46,10 @@ export type AseelDenseTableProps<T> = {
   footer?: React.ReactNode;
   pagination?: DensePagination;
   className?: string;
+  /** Message shown when rows is empty. Defaults to "لا توجد سجلات". */
+  emptyHint?: React.ReactNode;
+  /** Show "جاري التحميل…" instead of empty hint while data is loading. */
+  loading?: boolean;
 };
 
 export function AseelDenseTable<T>({
@@ -63,7 +67,10 @@ export function AseelDenseTable<T>({
   footer,
   pagination,
   className = '',
+  emptyHint = 'لا توجد سجلات',
+  loading = false,
 }: AseelDenseTableProps<T>) {
+  const totalCols = columns.length + (selectable ? 1 : 0);
   const [hoveredKey, setHoveredKey] = useState<string | number | null>(null);
 
   const handleSort = (col: DenseColumn<T>) => {
@@ -100,6 +107,13 @@ export function AseelDenseTable<T>({
           </tr>
         </thead>
         <tbody>
+          {rows.length === 0 && (
+            <tr className="aseel-row--empty">
+              <td colSpan={totalCols} style={{ textAlign: 'center', padding: '16px 8px', color: 'var(--aseel-ink-soft)' }}>
+                {loading ? 'جاري التحميل…' : emptyHint}
+              </td>
+            </tr>
+          )}
           {rows.map((row, idx) => {
             const key = getRowKey(row);
             const isSelected = selectedKey === key;
@@ -139,12 +153,7 @@ export function AseelDenseTable<T>({
           })}
           {footer && (
             <tr className="aseel-row--total">
-              {selectable && <td></td>}
-              {columns.map((col) => (
-                <td key={col.key} style={{ textAlign: getAlign(col) as any }}>
-                  {col.key === columns[0].key ? footer : null}
-                </td>
-              ))}
+              <td colSpan={totalCols}>{footer}</td>
             </tr>
           )}
         </tbody>

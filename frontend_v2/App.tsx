@@ -1550,7 +1550,10 @@ const App: React.FC = () => {
       {groupConstantsOpen && (
         <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setGroupConstantsOpen(false)}>
           <div className="w-full max-w-6xl h-[90vh] bg-white rounded-lg shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
-            <GroupConstantsPage />
+            <GroupConstantsPage
+              currentUserName={currentUser?.name}
+              onClose={() => setGroupConstantsOpen(false)}
+            />
           </div>
         </div>
       )}

@@ -528,7 +528,9 @@ tbody td {
   background: var(--aseel-field-focus);
   box-shadow: none;
 }
-[data-skin="aseel"] .aseel-num { text-align: left; font-variant-numeric: tabular-nums; }
+/* Numeric cells: right-aligned (Aseel convention) + tabular-nums for column alignment.
+   Inline style="text-align:right" on the <td> still wins, keeping per-cell overrides intact. */
+[data-skin="aseel"] .aseel-num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ── Bottom tabs + totals dock ── */
 [data-skin="aseel"] .aseel-bottom { display: flex; align-items: stretch; gap: 8px; background: var(--aseel-panel); border-top: 1px solid var(--aseel-border-soft); padding: 4px 8px 6px; }
