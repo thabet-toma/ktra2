@@ -1,5 +1,12 @@
+/**
+ * N4-T3 — SalesSettingsPage (L9): Aseel shell wrap + إشارة لـ GroupConstantsPage
+ * Ref: task5.md:681-683
+ *
+ * تَبقى الحسابات الافتراضية المتعلّقة بالمبيعات. الحقول العامة (طوابع رسوم...)
+ * انتقلت إلى GroupConstantsPage (N0-T4).
+ */
 import React, { useCallback, useEffect, useState } from "react";
-import { Loader2, Save, Settings2 } from "lucide-react";
+import { Loader2, Save, Info } from "lucide-react";
 import {
   getSalesSettings,
   updateSalesSettings,
@@ -7,6 +14,7 @@ import {
 } from "../../services/salesApi";
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
+import { AseelDocumentShell, type AseelToolbarAction, type AseelTab } from "../aseel";
 
 type AccountOpt = {
   id: number;
@@ -182,33 +190,25 @@ export const SalesSettingsPage: React.FC = () => {
   const accountLabel = (a: AccountOpt) =>
     `${a.code ? a.code + " — " : ""}${a.name || ""}`;
 
-  return (
+  const toolbarActions: AseelToolbarAction[] = [
+    {
+      key: "save",
+      label: saving ? "..." : "حفظ الإعدادات",
+      icon: saving ? <Loader2 className="animate-spin" /> : <Save />,
+      onClick: handleSave,
+      disabled: saving,
+    },
+  ];
+
+  const innerContent = (
     <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-5" dir="rtl">
-      <header className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Settings2 className="w-6 h-6 text-[var(--color-primary)]" />
-          <div>
-            <h1 className="text-xl font-bold text-slate-800 dark:text-slate-100">
-              إعدادات فواتير المبيعات
-            </h1>
-            <p className="text-xs text-slate-500 dark:text-slate-400">
-              مركز واحد لكل القيم الافتراضية المُستخدَمة في فواتير المبيعات
-            </p>
-          </div>
-        </div>
-        <button
-          className="inline-flex items-center gap-2 rounded-md bg-[var(--color-primary)] px-4 py-2 text-white text-sm font-semibold hover:bg-[var(--color-primary-hover)] disabled:opacity-50"
-          disabled={saving}
-          onClick={handleSave}
-        >
-          {saving ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Save className="w-4 h-4" />
-          )}
-          حفظ الإعدادات
-        </button>
-      </header>
+      <div className="aseel-banner" style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", background: "var(--aseel-surface-2, #f4ede0)" }}>
+        <Info className="w-4 h-4" style={{ color: "var(--aseel-ink-soft)" }} />
+        <span style={{ fontSize: "12px" }}>
+          الحقول العامة (طوابع رسوم، عملة أساسية، إلخ.) انتقلت إلى صفحة «ثوابت المجموعة».
+          تَبقى هنا الحسابات الافتراضية الخاصة بفواتير المبيعات فقط.
+        </span>
+      </div>
 
       {msg && (
         <div className="rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 text-sm px-3 py-2">
@@ -532,6 +532,22 @@ export const SalesSettingsPage: React.FC = () => {
           />
         </FieldLabel>
       </Section>
+    </div>
+  );
+
+  const tabs: AseelTab[] = [
+    { key: "settings", label: "الإعدادات", content: innerContent },
+  ];
+
+  return (
+    <div data-skin="aseel" style={{ height: "calc(100vh - 5rem)" }}>
+      <AseelDocumentShell
+        title="إعدادات فواتير المبيعات"
+        state="حسابات افتراضية + ضرائب + شحن"
+        actions={toolbarActions}
+        header={<></>}
+        tabs={tabs}
+      />
     </div>
   );
 };
