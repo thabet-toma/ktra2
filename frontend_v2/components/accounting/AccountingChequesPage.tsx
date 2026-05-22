@@ -42,11 +42,12 @@ export const AccountingChequesPage: React.FC = () => {
     notes: "",
   });
 
-  // Filters
+  // Filters — تاريخ الاستحقاق + شريك + حالة + اتجاه (per N3-T4 spec)
   const [filterDirection, setFilterDirection] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [filterFrom, setFilterFrom] = useState("");
-  const [filterTo, setFilterTo] = useState("");
+  const [filterDueFrom, setFilterDueFrom] = useState("");
+  const [filterDueTo, setFilterDueTo] = useState("");
+  const [filterPartner, setFilterPartner] = useState("");
 
   // Transfer dialog
   const [transferCheque, setTransferCheque] = useState<ChequeDto | null>(null);
@@ -146,8 +147,10 @@ export const AccountingChequesPage: React.FC = () => {
   const filteredRows = rows.filter((r) => {
     if (filterDirection && r.direction !== filterDirection) return false;
     if (filterStatus && r.status !== filterStatus) return false;
-    if (filterFrom && r.issue_date && r.issue_date < filterFrom) return false;
-    if (filterTo && r.issue_date && r.issue_date > filterTo) return false;
+    // فلتر تاريخ الاستحقاق (per spec)
+    if (filterDueFrom && r.due_date && r.due_date < filterDueFrom) return false;
+    if (filterDueTo && r.due_date && r.due_date > filterDueTo) return false;
+    if (filterPartner && String(r.partner ?? "") !== filterPartner) return false;
     return true;
   });
 
@@ -158,12 +161,20 @@ export const AccountingChequesPage: React.FC = () => {
   };
 
   const columns: DenseColumn<ChequeDto>[] = [
-    { key: "cheque_number", header: "رقم الشيك", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.cheque_number}</span> },
-    { key: "bank_name", header: "البنك", render: (r) => r.bank_name || "—" },
-    { key: "amount", header: "المبلغ", numeric: true, render: (r) => Number(r.amount).toLocaleString("ar-EG", { minimumFractionDigits: 2 }) },
-    { key: "due_date", header: "تاريخ الاستحقاق", render: (r) => r.due_date || "—" },
-    { key: "issue_date", header: "تاريخ الإصدار", render: (r) => r.issue_date || "—" },
-    { key: "partner", header: "الشريك", render: (r) => getPartnerName(r.partner) },
+    { key: "cheque_number", header: "رقم الشيك", width: "100px", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.cheque_number}</span> },
+    { key: "bank_name", header: "البنك", width: "120px", render: (r) => r.bank_name || "—" },
+    { key: "branch_name", header: "الفرع", width: "100px", render: (r) => (r as ChequeDto & { branch_name?: string }).branch_name || "—" },
+    { key: "amount", header: "المبلغ", width: "110px", numeric: true, render: (r) => Number(r.amount).toLocaleString("ar-EG", { minimumFractionDigits: 2 }) },
+    { key: "due_date", header: "تاريخ الاستحقاق", width: "110px", render: (r) => r.due_date || "—" },
+    { key: "issue_date", header: "تاريخ الإصدار", width: "110px", render: (r) => r.issue_date || "—" },
+    { key: "partner", header: "الشريك", width: "140px", render: (r) => getPartnerName(r.partner) },
+    {
+      key: "account", header: "الحساب", width: "110px",
+      render: (r) => {
+        const acc = (r as ChequeDto & { account_code?: string; account_name?: string });
+        return acc.account_code ? `${acc.account_code}${acc.account_name ? ' — ' + acc.account_name : ''}` : "—";
+      },
+    },
     {
       key: "direction", header: "الاتجاه",
       render: (r) => (
@@ -224,12 +235,19 @@ export const AccountingChequesPage: React.FC = () => {
         </select>
       </div>
       <div className="aseel-field">
-        <label className="aseel-field-label">من تاريخ</label>
-        <input type="date" className="aseel-input" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
+        <label className="aseel-field-label">استحقاق من</label>
+        <input type="date" className="aseel-input" value={filterDueFrom} onChange={(e) => setFilterDueFrom(e.target.value)} />
       </div>
       <div className="aseel-field">
-        <label className="aseel-field-label">إلى تاريخ</label>
-        <input type="date" className="aseel-input" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} />
+        <label className="aseel-field-label">استحقاق إلى</label>
+        <input type="date" className="aseel-input" value={filterDueTo} onChange={(e) => setFilterDueTo(e.target.value)} />
+      </div>
+      <div className="aseel-field" style={{ minWidth: "160px" }}>
+        <label className="aseel-field-label">الشريك</label>
+        <select className="aseel-input" value={filterPartner} onChange={(e) => setFilterPartner(e.target.value)}>
+          <option value="">الكل</option>
+          {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
       </div>
     </div>
   );
@@ -391,7 +409,6 @@ export const AccountingChequesPage: React.FC = () => {
               <button type="button" className="aseel-toolbtn" onClick={doTransfer}>
                 <ArrowRightLeft className="w-4 h-4" />تحويل
               </button>
-              <button type="button" className="aseel-toolbtn aseel-toolbtn--danger" onClick={() => remove(transferCheque.id)}>حذف</button>
             </div>
           </div>
         </div>

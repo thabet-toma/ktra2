@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
-import type { TrialBalanceRow } from "../../types/accounting";
+import type { TrialBalanceRow, CurrencyDto } from "../../types/accounting";
 import {
   AseelDocumentShell,
   AseelReportTable,
@@ -22,6 +22,12 @@ export const BalanceSheetPage: React.FC = () => {
   const [rows, setRows] = useState<BalanceSheetRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [currencies, setCurrencies] = useState<CurrencyDto[]>([]);
+  const [currencyId, setCurrencyId] = useState("");
+
+  useEffect(() => {
+    accountingApi.getCurrencies().then((c) => setCurrencies(c as CurrencyDto[])).catch(() => setCurrencies([]));
+  }, []);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -94,6 +100,15 @@ export const BalanceSheetPage: React.FC = () => {
         <label className="aseel-field-label">التاريخ (كما في)</label>
         <input type="date" className="aseel-input" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
       </div>
+      <div className="aseel-field" style={{ minWidth: "140px" }}>
+        <label className="aseel-field-label">العملة</label>
+        <select className="aseel-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value)}>
+          <option value="">الأساسية</option>
+          {currencies.map((c) => (
+            <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>
+          ))}
+        </select>
+      </div>
       <button type="button" className="aseel-toolbtn" onClick={fetchData} style={{ marginTop: "18px" }}>
         <Search className="w-4 h-4" />عرض
       </button>
@@ -163,7 +178,7 @@ export const BalanceSheetPage: React.FC = () => {
       <AseelDocumentShell
         title="الميزانية العمومية"
         actions={shellActions}
-        header={<></>}
+        header={filterBar}
         tabs={tabs}
         status={
           rows.length > 0 ? (

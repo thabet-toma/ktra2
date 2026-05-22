@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { accountingApi } from "../../services/accountingApi";
-import type { AccountingAccount, GeneralLedgerResponse } from "../../types/accounting";
+import type { AccountingAccount, GeneralLedgerResponse, CurrencyDto } from "../../types/accounting";
 import {
   AseelDocumentShell,
   AseelReportTable,
@@ -20,7 +20,9 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
   onInitialAccountConsumed,
 }) => {
   const [accounts, setAccounts] = useState<AccountingAccount[]>([]);
+  const [currencies, setCurrencies] = useState<CurrencyDto[]>([]);
   const [accountId, setAccountId] = useState("");
+  const [currencyId, setCurrencyId] = useState("");
   const today = new Date();
   const [start, setStart] = useState(`${today.getFullYear()}-01-01`);
   const [end, setEnd] = useState(today.toISOString().split("T")[0]);
@@ -38,6 +40,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
         setAccounts((a as AccountingAccount[]).filter((x) => x.is_active))
       )
       .catch(() => setAccounts([]));
+    accountingApi.getCurrencies().then((c) => setCurrencies(c as CurrencyDto[])).catch(() => setCurrencies([]));
   }, []);
 
   useEffect(() => {
@@ -85,6 +88,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
         end_date: end,
       };
       if (unposted) params.include_unposted = "true";
+      if (currencyId) params.currency_id = currencyId;
       const res = await accountingApi.getGeneralLedger(params);
       setData(res as GeneralLedgerResponse);
     } catch (e: unknown) {
@@ -93,7 +97,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
     } finally {
       setLoading(false);
     }
-  }, [accountId, start, end, unposted]);
+  }, [accountId, start, end, unposted, currencyId]);
 
   const fmt = (n: number) =>
     Number(n).toLocaleString(undefined, {
@@ -139,6 +143,15 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
       <div className="aseel-field">
         <label className="aseel-field-label">إلى</label>
         <input type="date" className="aseel-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+      </div>
+      <div className="aseel-field" style={{ minWidth: "120px" }}>
+        <label className="aseel-field-label">العملة</label>
+        <select className="aseel-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value)}>
+          <option value="">كل العملات</option>
+          {currencies.map((c) => (
+            <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>
+          ))}
+        </select>
       </div>
       <label className="flex items-center gap-2 text-sm" style={{ paddingTop: "18px" }}>
         <input type="checkbox" checked={unposted} onChange={(e) => setUnposted(e.target.checked)} />
