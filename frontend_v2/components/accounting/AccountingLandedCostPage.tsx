@@ -1,8 +1,13 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import type { LandedCostReport, LandedCostShipment } from "../../types/accounting";
-import { Ship, Search, ChevronRight, ChevronDown, Package, AlertCircle } from "lucide-react";
-import { Spinner, EmptyState } from "../ui";
+import {
+  AseelDocumentShell,
+  AseelReportTable,
+} from "../aseel";
+import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
+import { Search, ChevronRight, ChevronDown, Package, AlertCircle } from "lucide-react";
+import { Spinner } from "../ui";
 
 export const AccountingLandedCostPage: React.FC = () => {
   const today = new Date();
@@ -17,7 +22,7 @@ export const AccountingLandedCostPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const fetch = useCallback(async () => {
+  const fetchReport = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
@@ -55,8 +60,8 @@ export const AccountingLandedCostPage: React.FC = () => {
   }, [expanded]);
 
   useEffect(() => {
-    fetch();
-  }, [fetch]);
+    fetchReport();
+  }, [fetchReport]);
 
   const fmt = (n: number | null | undefined) =>
     (Number(n) || 0).toLocaleString(undefined, {
@@ -64,131 +69,112 @@ export const AccountingLandedCostPage: React.FC = () => {
       maximumFractionDigits: 2,
     });
 
-  return (
-    <div className="space-y-4" dir="rtl">
-      <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l from-[var(--color-primary)] to-slate-900 text-white rounded-xl">
-        <Ship className="w-8 h-8 text-[var(--color-primary)]" />
-        <div>
-          <h1 className="text-lg font-bold">تقرير التكلفة المستوردة (Landed Cost)</h1>
-          <p className="text-xs text-[var(--color-primary)]">
-            بضاعة + شحن دولي + تخليص + رسوم مرسملة — لكل شحنة
-          </p>
-        </div>
-      </div>
+  const shipments = data?.shipments || [];
 
-      <div className="flex flex-wrap gap-3 items-end bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700">
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">وصول من</label>
-          <input
-            type="date"
-            className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">وصول إلى</label>
-          <input
-            type="date"
-            className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-          />
-        </div>
-        <button
-          type="button"
-          onClick={fetch}
-          className="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] text-white rounded-lg text-sm"
-        >
-          <Search className="w-4 h-4" />
-          تحديث
+  // For AseelReportTable we need flat rows
+  const columns: ReportColumn<LandedCostShipment>[] = [
+    {
+      key: "expand", header: "",
+      render: (r) => (
+        <button type="button" style={{ background: "none", border: "none", cursor: "pointer" }}
+          onClick={() => openDetail(r.shipment_id)}>
+          {expanded === r.shipment_id
+            ? <ChevronDown className="w-4 h-4" />
+            : <ChevronRight className="w-4 h-4" />}
         </button>
-      </div>
+      ),
+    },
+    { key: "shipment_number", header: "الشحنة", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.shipment_number}</span> },
+    { key: "arrival_date", header: "الوصول", render: (r) => r.arrival_date || "—" },
+    { key: "status", header: "الحالة", render: (r) => r.status },
+    { key: "total_merchandise", header: "البضاعة", numeric: true, render: (r) => fmt(r.total_merchandise) },
+    { key: "total_shipping_cost_usd", header: "شحن دولي (USD)", numeric: true, render: (r) => fmt(r.total_shipping_cost_usd) },
+    { key: "clearance_total", header: "تخليص", numeric: true, render: (r) => fmt(r.clearance_total) },
+    { key: "capitalized_fees_total", header: "رسوم مرسملة", numeric: true, render: (r) => fmt(r.capitalized_fees_total) },
+    {
+      key: "grand_landed_cost_approx", header: "إجمالي Landed", numeric: true,
+      render: (r) => <strong>{fmt(r.grand_landed_cost_approx)}</strong>,
+    },
+  ];
 
+  const totals = shipments.length > 0 ? {
+    total_merchandise: fmt(shipments.reduce((s, sh) => s + sh.total_merchandise, 0)),
+    total_shipping_cost_usd: fmt(shipments.reduce((s, sh) => s + sh.total_shipping_cost_usd, 0)),
+    clearance_total: fmt(shipments.reduce((s, sh) => s + sh.clearance_total, 0)),
+    capitalized_fees_total: fmt(shipments.reduce((s, sh) => s + sh.capitalized_fees_total, 0)),
+    grand_landed_cost_approx: fmt(shipments.reduce((s, sh) => s + sh.grand_landed_cost_approx, 0)),
+  } : undefined;
+
+  const filterBar = (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
+      <div className="aseel-field">
+        <label className="aseel-field-label">وصول من</label>
+        <input type="date" className="aseel-input" value={start} onChange={(e) => setStart(e.target.value)} />
+      </div>
+      <div className="aseel-field">
+        <label className="aseel-field-label">وصول إلى</label>
+        <input type="date" className="aseel-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+      </div>
+      <button type="button" className="aseel-toolbtn" onClick={fetchReport} style={{ marginTop: "18px" }}>
+        <Search className="w-4 h-4" />تحديث
+      </button>
+    </div>
+  );
+
+  // Custom table because we need expand rows — we'll render a custom section after AseelReportTable
+  const reportContent = (
+    <>
       {err && (
-        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 text-sm flex gap-2 items-center">
-          <AlertCircle className="w-4 h-4" />
-          {err}
+        <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px", display: "flex", gap: "8px", alignItems: "center" }}>
+          <AlertCircle className="w-4 h-4" />{err}
         </div>
       )}
-
-      {loading ? (
-        <div className="py-16 flex justify-center"><Spinner /></div>
-      ) : (
-        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900/50">
-              <tr>
-                <th className="w-8"></th>
-                <th className="text-right p-3">الشحنة</th>
-                <th className="text-right p-3">الوصول</th>
-                <th className="text-right p-3">الحالة</th>
-                <th className="text-right p-3">الوكيل</th>
-                <th className="text-right p-3">البضاعة</th>
-                <th className="text-right p-3">شحن دولي (USD)</th>
-                <th className="text-right p-3">تخليص</th>
-                <th className="text-right p-3">رسوم مرسملة</th>
-                <th className="text-right p-3">إجمالي Landed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.shipments || []).map((sh) => (
-                <React.Fragment key={sh.shipment_id}>
-                  <tr
-                    className={`border-t border-gray-100 dark:border-gray-700 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-900/40 ${
-                      expanded === sh.shipment_id
-                        ? "bg-[var(--color-surface-2)]/50 dark:bg-[var(--color-surface-2)]/10"
-                        : ""
-                    }`}
-                    onClick={() => openDetail(sh.shipment_id)}
-                  >
-                    <td className="text-center">
-                      {expanded === sh.shipment_id ? (
-                        <ChevronDown className="w-4 h-4 inline text-[var(--color-primary)]" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4 inline text-gray-400" />
-                      )}
-                    </td>
-                    <td className="p-2 font-mono">{sh.shipment_number}</td>
-                    <td className="p-2">{sh.arrival_date || "—"}</td>
-                    <td className="p-2">
-                      <span className="text-xs px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700">
-                        {sh.status}
-                      </span>
-                    </td>
-                    <td className="p-2">{sh.shipping_agent || "—"}</td>
-                    <td className="p-2 text-right">{fmt(sh.total_merchandise)}</td>
-                    <td className="p-2 text-right">
-                      {fmt(sh.total_shipping_cost_usd)}
-                    </td>
-                    <td className="p-2 text-right">{fmt(sh.clearance_total)}</td>
-                    <td className="p-2 text-right">
-                      {fmt(sh.capitalized_fees_total)}
-                    </td>
-                    <td className="p-2 text-right font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
-                      {fmt(sh.grand_landed_cost_approx)}
-                    </td>
-                  </tr>
-                  {expanded === sh.shipment_id && (
-                    <tr>
-                      <td colSpan={10} className="bg-slate-50 dark:bg-slate-900/40 p-4">
-                        {detail ? (
-                          <ShipmentDetail sh={detail} fmt={fmt} />
-                        ) : (
-                          <div className="py-4 flex justify-center"><Spinner size="sm" /></div>
-                        )}
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
-          {data && data.shipments.length === 0 && (
-            <EmptyState title="لا توجد شحنات" />
+      <AseelReportTable<LandedCostShipment>
+        filterBar={filterBar}
+        columns={columns}
+        rows={shipments}
+        totals={totals}
+        exportable={true}
+        loading={loading}
+        emptyHint="لا توجد شحنات في الفترة"
+        getRowKey={(r) => r.shipment_id}
+      />
+      {/* Expand detail panel */}
+      {expanded != null && (
+        <div style={{ marginTop: "8px", border: "1px solid var(--aseel-border)", borderRadius: "var(--aseel-radius)", padding: "12px" }}>
+          {detail ? (
+            <ShipmentDetail sh={detail} fmt={fmt} />
+          ) : (
+            <div style={{ padding: "16px", textAlign: "center" }}><Spinner size="sm" /></div>
           )}
         </div>
       )}
+    </>
+  );
+
+  const shellActions: AseelToolbarAction[] = [
+    { key: "run", label: "تحديث", icon: <Search className="w-4 h-4" />, onClick: fetchReport },
+  ];
+
+  const tabs: AseelTab[] = [
+    { key: "landed", label: "التكلفة المستوردة", content: reportContent },
+  ];
+
+  return (
+    <div data-skin="aseel">
+      <AseelDocumentShell
+        title="تقرير التكلفة المستوردة"
+        actions={shellActions}
+        header={<></>}
+        tabs={tabs}
+        status={
+          data ? (
+            <span className="aseel-status-item">{shipments.length} شحنة</span>
+          ) : undefined
+        }
+      >
+        <></>
+      </AseelDocumentShell>
     </div>
   );
 };
@@ -198,156 +184,97 @@ const ShipmentDetail: React.FC<{
   fmt: (n: number | null | undefined) => string;
 }> = ({ sh, fmt }) => (
   <div className="space-y-4">
-    {/* الصفقات */}
     {sh.deals.map((d) => (
-      <div
-        key={d.deal_id}
-        className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3"
-      >
-        <div className="flex flex-wrap items-center gap-3 mb-2">
-          <Package className="w-4 h-4 text-[var(--color-primary)]" />
-          <span className="font-semibold">
-            صفقة {d.ref_number || `#${d.deal_id}`}
-          </span>
-          <span className="text-xs text-gray-500">
-            {d.partner_name} — {d.currency}
-          </span>
-          <span className="ml-auto text-xs">
-            بضاعة: {fmt(d.merchandise_total)} | شحن مُخصَّص:{" "}
-            {fmt(d.allocated_shipping_cost_usd)} USD
+      <div key={d.deal_id}
+        style={{ background: "var(--aseel-surface)", border: "1px solid var(--aseel-border)", borderRadius: "var(--aseel-radius)", padding: "12px" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
+          <Package className="w-4 h-4" style={{ color: "var(--color-primary,#3b82f6)" }} />
+          <span style={{ fontWeight: "600" }}>صفقة {d.ref_number || `#${d.deal_id}`}</span>
+          <span style={{ fontSize: "0.8rem", color: "var(--aseel-ink-soft)" }}>{d.partner_name} — {d.currency}</span>
+          <span style={{ fontSize: "0.8rem", marginInlineStart: "auto" }}>
+            بضاعة: {fmt(d.merchandise_total)} | شحن مُخصَّص: {fmt(d.allocated_shipping_cost_usd)} USD
           </span>
         </div>
 
         {d.purchase_invoice ? (
-          <div className="mt-2 space-y-2">
-            <div className="flex flex-wrap gap-2 text-xs">
-              <span className="px-2 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded">
-                فاتورة شراء: {d.purchase_invoice.invoice_number || "—"}
+          <div style={{ marginTop: "8px" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", fontSize: "0.75rem", marginBottom: "8px" }}>
+              <span style={{ padding: "2px 8px", background: "#dcfce715", borderRadius: "10px", color: "#16a34a" }}>
+                فاتورة: {d.purchase_invoice.invoice_number || "—"}
               </span>
               {d.purchase_invoice.is_posted && (
-                <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded">
-                  مرحّلة
-                </span>
+                <span style={{ padding: "2px 8px", background: "#dbeafe15", borderRadius: "10px", color: "#2563eb" }}>مرحّلة</span>
               )}
-              <span className="px-2 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded">
+              <span style={{ padding: "2px 8px", background: "#fef9c315", borderRadius: "10px", color: "#ca8a04" }}>
                 رسوم مرسملة: {fmt(d.purchase_invoice.capitalized_fees_total)}
               </span>
-              <span className="px-2 py-1 bg-rose-100 dark:bg-rose-900/30 text-rose-700 dark:text-rose-300 rounded">
-                رسوم مصروفة: {fmt(d.purchase_invoice.expensed_fees_total)}
-              </span>
             </div>
-
-            {d.purchase_invoice.fees.length > 0 && (
-              <div>
-                <div className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                  الرسوم
-                </div>
-                <table className="w-full text-xs">
-                  <thead className="bg-gray-50 dark:bg-gray-900/40">
-                    <tr>
-                      <th className="text-right p-1.5">الوصف</th>
-                      <th className="text-right p-1.5">الحساب</th>
-                      <th className="text-right p-1.5">المبلغ</th>
-                      <th className="text-center p-1.5">رسملة</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {d.purchase_invoice.fees.map((f) => (
-                      <tr key={f.id} className="border-t border-gray-100 dark:border-gray-700">
-                        <td className="p-1.5">{f.description}</td>
-                        <td className="p-1.5 font-mono">
-                          {f.account_code} {f.account_name}
-                        </td>
-                        <td className="p-1.5 text-right">{fmt(f.amount)}</td>
-                        <td className="p-1.5 text-center">
-                          {f.capitalize_to_inventory ? "✓" : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-
             {d.purchase_invoice.items.length > 0 && (
-              <div>
-                <div className="text-xs font-medium text-gray-600 dark:text-gray-300 mb-1">
-                  البنود (تكلفة مُنَزَّلة)
-                </div>
-                <table className="w-full text-xs">
-                  <thead className="bg-gray-50 dark:bg-gray-900/40">
-                    <tr>
-                      <th className="text-right p-1.5">الصنف</th>
-                      <th className="text-right p-1.5">الكمية</th>
-                      <th className="text-right p-1.5">سعر الصفقة</th>
-                      <th className="text-right p-1.5">Landed/وحدة (ILS)</th>
-                      <th className="text-right p-1.5">Landed إجمالي (ILS)</th>
+              <table style={{ width: "100%", fontSize: "0.8rem", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ background: "var(--aseel-surface-2,#f8f9fa)" }}>
+                    <th style={{ padding: "4px 8px", textAlign: "right" }}>الصنف</th>
+                    <th style={{ padding: "4px 8px", textAlign: "right" }}>الكمية</th>
+                    <th style={{ padding: "4px 8px", textAlign: "right" }}>سعر الصفقة</th>
+                    <th style={{ padding: "4px 8px", textAlign: "right" }}>Landed/وحدة (ILS)</th>
+                    <th style={{ padding: "4px 8px", textAlign: "right" }}>Landed إجمالي (ILS)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.purchase_invoice.items.map((it) => (
+                    <tr key={it.id} style={{ borderTop: "1px solid var(--aseel-border)" }}>
+                      <td style={{ padding: "4px 8px" }}>{it.name}</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(it.quantity)}</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(it.unit_price)}</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: "600" }}>
+                        {it.landed_unit_price_ils != null ? fmt(it.landed_unit_price_ils) : "—"}
+                      </td>
+                      <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: "600" }}>
+                        {it.landed_line_total_ils != null ? fmt(it.landed_line_total_ils) : "—"}
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {d.purchase_invoice.items.map((it) => (
-                      <tr key={it.id} className="border-t border-gray-100 dark:border-gray-700">
-                        <td className="p-1.5">{it.name}</td>
-                        <td className="p-1.5 text-right">{fmt(it.quantity)}</td>
-                        <td className="p-1.5 text-right">{fmt(it.unit_price)}</td>
-                        <td className="p-1.5 text-right font-semibold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
-                          {it.landed_unit_price_ils != null
-                            ? fmt(it.landed_unit_price_ils)
-                            : "—"}
-                        </td>
-                        <td className="p-1.5 text-right font-semibold">
-                          {it.landed_line_total_ils != null
-                            ? fmt(it.landed_line_total_ils)
-                            : "—"}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
         ) : (
-          <div className="text-xs text-amber-700 bg-amber-50 dark:bg-amber-900/20 p-2 rounded mt-1">
-            لا توجد فاتورة شراء مرتبطة بهذه الصفقة — استورد من التخليص الجمركي
-            لحساب Landed Cost.
+          <div style={{ fontSize: "0.8rem", color: "#ca8a04", background: "#fef9c315", padding: "8px", borderRadius: "6px", marginTop: "4px" }}>
+            لا توجد فاتورة شراء مرتبطة — استورد من التخليص لحساب Landed Cost.
           </div>
         )}
       </div>
     ))}
 
-    {/* تفاصيل التخليص */}
     {sh.clearance && (
-      <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-        <div className="font-semibold text-sm mb-2">
+      <div style={{ background: "var(--aseel-surface)", border: "1px solid var(--aseel-border)", borderRadius: "var(--aseel-radius)", padding: "12px" }}>
+        <div style={{ fontWeight: "600", marginBottom: "8px" }}>
           التخليص الجمركي #{sh.clearance.id}
-          {sh.clearance.declaration_number &&
-            ` — بيان ${sh.clearance.declaration_number}`}
+          {sh.clearance.declaration_number && ` — بيان ${sh.clearance.declaration_number}`}
         </div>
-        <div className="text-xs text-gray-500 mb-2">
-          {sh.clearance.broker_name} · {sh.clearance.status} · دفعات مرحّلة:{" "}
-          {fmt(sh.clearance.posted_payments_total)}
+        <div style={{ fontSize: "0.8rem", color: "var(--aseel-ink-soft)", marginBottom: "8px" }}>
+          {sh.clearance.broker_name} · {sh.clearance.status} · دفعات مرحّلة: {fmt(sh.clearance.posted_payments_total)}
         </div>
         {sh.clearance.cost_lines.length > 0 && (
-          <table className="w-full text-xs">
-            <thead className="bg-gray-50 dark:bg-gray-900/40">
-              <tr>
-                <th className="text-right p-1.5">البند</th>
-                <th className="text-right p-1.5">المبلغ</th>
+          <table style={{ width: "100%", fontSize: "0.8rem", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: "var(--aseel-surface-2,#f8f9fa)" }}>
+                <th style={{ padding: "4px 8px", textAlign: "right" }}>البند</th>
+                <th style={{ padding: "4px 8px", textAlign: "right" }}>المبلغ</th>
               </tr>
             </thead>
             <tbody>
               {sh.clearance.cost_lines.map((ln, i) => (
-                <tr key={i} className="border-t border-gray-100 dark:border-gray-700">
-                  <td className="p-1.5">{ln.label}</td>
-                  <td className="p-1.5 text-right">{fmt(ln.amount)}</td>
+                <tr key={i} style={{ borderTop: "1px solid var(--aseel-border)" }}>
+                  <td style={{ padding: "4px 8px" }}>{ln.label}</td>
+                  <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(ln.amount)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot>
-              <tr className="bg-gray-100 dark:bg-gray-900/40 font-semibold">
-                <td className="p-1.5">الإجمالي</td>
-                <td className="p-1.5 text-right">{fmt(sh.clearance.cost_lines_total)}</td>
+              <tr style={{ fontWeight: "600", borderTop: "1px solid var(--aseel-border)" }}>
+                <td style={{ padding: "4px 8px" }}>الإجمالي</td>
+                <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(sh.clearance.cost_lines_total)}</td>
               </tr>
             </tfoot>
           </table>
