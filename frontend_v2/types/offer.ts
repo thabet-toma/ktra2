@@ -7,11 +7,18 @@ export interface PriceOfferItem extends InvoiceItem {
     factoryImageUrl?: string;
 }
 
+export type PriceOfferType = 'incoming_offer' | 'outgoing_offer' | 'incoming_order' | 'outgoing_order';
+
 export interface PriceOffer {
     id: string;
     offerNumber: string;
     supplierId: string;
     factoryName?: string;
+    offerType?: PriceOfferType;
+    offerDate?: string;
+    validUntil?: string;
+    currency?: string;
+    exchangeRate?: number;
     totalWeight?: number;
     totalVolume?: number;
     shipmentNotes?: string;

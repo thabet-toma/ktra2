@@ -4,7 +4,7 @@
  * القالب: SalesInvoiceEditor.tsx
  */
 import React, { useState, useEffect, useCallback } from "react";
-import { PriceOffer, PriceOfferItem, PriceOfferStatus, Supplier, Item } from "../../../types";
+import { PriceOffer, PriceOfferItem, PriceOfferStatus, PriceOfferType, Supplier, Item } from "../../../types";
 import {
   AseelDocumentShell,
   AseelGrid,
@@ -30,8 +30,12 @@ const STATUS_LABELS: Record<string, string> = {
 type LineItem = PriceOfferItem & { key: string };
 const newLineKey = () => `ln-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 const blankLine = (): LineItem => ({
-  key: newLineKey(), id: "", name: "", hsCode: "", quantity: 0,
-  unitPrice: 0, totalPrice: 0, currency: "USD", unit: "عدد",
+  key: newLineKey(),
+  id: "", itemId: "", name: "",
+  categoryId: "", categoryName: "",
+  specifications: "", imageUrls: [],
+  hsCodePrimary: "",
+  quantity: 0, unitPrice: 0, totalPrice: 0,
 });
 
 interface Props {
@@ -62,12 +66,14 @@ export const PriceOfferForm: React.FC<Props> = ({
   const [offerNumber, setOfferNumber] = useState(offer.offerNumber || "");
   const [supplierId, setSupplierId] = useState(offer.supplierId || "");
   const [factoryName, setFactoryName] = useState(offer.factoryName || "");
-  const [offerDate, setOfferDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [validUntil, setValidUntil] = useState("");
-  const [offerType, setOfferType] = useState("incoming_offer");
+  const [offerDate, setOfferDate] = useState(
+    offer.offerDate || new Date().toISOString().slice(0, 10)
+  );
+  const [validUntil, setValidUntil] = useState(offer.validUntil || "");
+  const [offerType, setOfferType] = useState<PriceOfferType>(offer.offerType || "incoming_offer");
   const [status, setStatus] = useState<PriceOfferStatus>(offer.status || "initial");
-  const [currency, setCurrency] = useState("USD");
-  const [exchangeRate, setExchangeRate] = useState("1");
+  const [currency, setCurrency] = useState(offer.currency || "USD");
+  const [exchangeRate, setExchangeRate] = useState(String(offer.exchangeRate ?? 1));
   const [shippingMethod, setShippingMethod] = useState(offer.shippingMethod || "");
   const [paymentMethod, setPaymentMethod] = useState(offer.paymentMethod || "");
   const [deliveryDays, setDeliveryDays] = useState(String(offer.deliveryDays ?? ""));
@@ -88,6 +94,11 @@ export const PriceOfferForm: React.FC<Props> = ({
     setOfferNumber(offer.offerNumber || "");
     setSupplierId(offer.supplierId || "");
     setFactoryName(offer.factoryName || "");
+    setOfferDate(offer.offerDate || new Date().toISOString().slice(0, 10));
+    setValidUntil(offer.validUntil || "");
+    setOfferType(offer.offerType || "incoming_offer");
+    setCurrency(offer.currency || "USD");
+    setExchangeRate(String(offer.exchangeRate ?? 1));
     setStatus(offer.status || "initial");
     setShippingMethod(offer.shippingMethod || "");
     setPaymentMethod(offer.paymentMethod || "");
@@ -112,6 +123,11 @@ export const PriceOfferForm: React.FC<Props> = ({
     offerNumber,
     supplierId,
     factoryName,
+    offerType,
+    offerDate,
+    validUntil: validUntil || undefined,
+    currency,
+    exchangeRate: Number(exchangeRate) || 1,
     status,
     shippingMethod,
     paymentMethod,
@@ -126,7 +142,8 @@ export const PriceOfferForm: React.FC<Props> = ({
     updatedAt: new Date().toISOString(),
     createdAt: offer.createdAt || new Date().toISOString(),
     createdBy: offer.createdBy || "user",
-  }), [offer, offerNumber, supplierId, factoryName, status, shippingMethod, paymentMethod,
+  }), [offer, offerNumber, supplierId, factoryName, offerType, offerDate, validUntil,
+    currency, exchangeRate, status, shippingMethod, paymentMethod,
     deliveryDays, internalNotes, taxRate, discountAmount, subtotal, tax, grandTotal, lines]);
 
   const handleSave = async () => {
@@ -163,13 +180,12 @@ export const PriceOfferForm: React.FC<Props> = ({
   // ── أعمدة جدول البنود ──
   const gridColumns: AseelGridColumn<LineItem>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
-    { key: "name", header: "بيان الصنف", width: "30%" },
-    { key: "hsCode", header: "كود HS", width: "100px" },
-    { key: "unit", header: "الوحدة", width: "70px" },
-    { key: "quantity", header: "الكمية", width: "80px", align: "center", type: "number" },
-    { key: "unitPrice", header: "سعر الوحدة", width: "100px", align: "center", type: "number" },
-    { key: "currency", header: "العملة", width: "70px" },
-    { key: "total", header: "الإجمالي", width: "100px", align: "center", readOnly: true },
+    { key: "name", header: "بيان الصنف", width: "35%" },
+    { key: "specifications", header: "مواصفات", width: "20%" },
+    { key: "hsCodePrimary", header: "كود HS", width: "110px" },
+    { key: "quantity", header: "الكمية", width: "90px", align: "center", type: "number" },
+    { key: "unitPrice", header: "سعر الوحدة", width: "110px", align: "center", type: "number" },
+    { key: "total", header: "الإجمالي", width: "110px", align: "center", readOnly: true },
     { key: "del", header: "", width: "36px", align: "center" },
   ];
 
@@ -177,11 +193,10 @@ export const PriceOfferForm: React.FC<Props> = ({
     const idx = lines.findIndex((l) => l.key === row.key);
     if (key === "seq") return idx + 1;
     if (key === "name") return row.name;
-    if (key === "hsCode") return row.hsCode || "";
-    if (key === "unit") return row.unit || "";
+    if (key === "specifications") return row.specifications || "";
+    if (key === "hsCodePrimary") return row.hsCodePrimary || "";
     if (key === "quantity") return String(row.quantity);
     if (key === "unitPrice") return String(row.unitPrice);
-    if (key === "currency") return row.currency || "USD";
     if (key === "total") return fmt((Number(row.quantity) || 0) * (Number(row.unitPrice) || 0));
     return "";
   };
@@ -191,15 +206,14 @@ export const PriceOfferForm: React.FC<Props> = ({
     if (!row) return;
     const patch: Partial<LineItem> = {};
     if (key === "name") patch.name = val;
-    else if (key === "hsCode") patch.hsCode = val;
-    else if (key === "unit") patch.unit = val;
+    else if (key === "specifications") patch.specifications = val;
+    else if (key === "hsCodePrimary") patch.hsCodePrimary = val;
     else if (key === "quantity") patch.quantity = Number(val) || 0;
     else if (key === "unitPrice") patch.unitPrice = Number(val) || 0;
-    else if (key === "currency") patch.currency = val;
     updateLine(row.key, patch);
   };
 
-  gridColumns[8].render = (row: LineItem) =>
+  gridColumns[gridColumns.length - 1].render = (row: LineItem) =>
     isReadOnly ? null : (
       <button type="button" className="aseel-iconbtn aseel-iconbtn--danger" onClick={() => removeLine(row.key)}>
         <Trash2 className="h-3 w-3" />
@@ -248,7 +262,7 @@ export const PriceOfferForm: React.FC<Props> = ({
             {fld("صالح حتى", <input className="aseel-input" type="date" disabled={isReadOnly}
               value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />)}
             {fld("نوع العرض", <select className="aseel-input" disabled={isReadOnly}
-              value={offerType} onChange={(e) => setOfferType(e.target.value)}>
+              value={offerType} onChange={(e) => setOfferType(e.target.value as PriceOfferType)}>
               {OFFER_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
             </select>)}
             {fld("المورد / الحساب", <select className="aseel-input" disabled={isReadOnly}
