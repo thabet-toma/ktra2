@@ -81,6 +81,9 @@ import { AccountingVatReportPage } from "./components/accounting/AccountingVatRe
 import { AccountingLandedCostPage } from "./components/accounting/AccountingLandedCostPage";
 import { FiscalPeriodsPage } from "./components/accounting/FiscalPeriodsPage";
 import { ExchangeRatesPage } from "./components/accounting/ExchangeRatesPage";
+import { BalanceSheetPage } from "./components/accounting/BalanceSheetPage";
+import { IncomeStatementPage } from "./components/accounting/IncomeStatementPage";
+import { VatStatementsPage } from "./components/accounting/VatStatementsPage";
 import { SqlProductsPage } from "./components/sql/SqlProductsPage";
 import { SqlPartnersPage } from "./components/sql/SqlPartnersPage";
 import { SqlDealsPage } from "./components/sql/SqlDealsPage";
@@ -1428,6 +1431,24 @@ const App: React.FC = () => {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <ExchangeRatesPage />;
+
+      case "accounting-balance-sheet":
+        if (currentUser!.role !== "manager") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <BalanceSheetPage />;
+
+      case "accounting-income-statement":
+        if (currentUser!.role !== "manager") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <IncomeStatementPage />;
+
+      case "accounting-vat-statements":
+        if (currentUser!.role !== "manager") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <VatStatementsPage />;
 
       case "stock-levels":
         return <StockLevelsPage />;
