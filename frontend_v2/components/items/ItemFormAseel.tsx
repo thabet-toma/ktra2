@@ -13,7 +13,19 @@ import {
   type AseelGridColumn,
   type AseelToolbarAction,
 } from "../aseel";
-import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Info } from "lucide-react";
+
+const pendingN8 = (msg: string) => (
+  <div className="aseel-banner" style={{
+    background: "color-mix(in srgb, var(--aseel-warn, #b8800a) 12%, transparent)",
+    color: "var(--aseel-warn, #b8800a)",
+    border: "1px solid color-mix(in srgb, var(--aseel-warn, #b8800a) 30%, transparent)",
+    marginBottom: 6,
+  }}>
+    <Info className="h-4 w-4 shrink-0" />
+    <span>{msg}</span>
+  </div>
+);
 
 type Props = {
   productId: number | null;
@@ -123,26 +135,14 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
     if (!form.sku.trim()) { setErr("رقم الصنف مطلوب."); return; }
     setSaving(true); setErr(null); setMsg(null);
     try {
+      // ProductSerializer.Meta.fields only — أي حقول إضافية سيَتجاهلها DRF بصمت.
+      // الحقول المتأخرة (catalog_no, item_type, sale_tiers, *_account_override, …)
+      // ستُضاف عند تَنفيذ N8-T9 + N8-T10.
       const payload = {
         sku: form.sku,
-        catalog_no: form.catalog_no || null,
         name_ar: form.name_ar || null,
         name_en: form.name_en || null,
-        description: form.description || null,
-        location: form.location || null,
-        uom_primary: form.uom_primary || null,
         min_stock_level: form.min_stock_level ? Number(form.min_stock_level) : null,
-        max_stock_level: form.max_stock_level ? Number(form.max_stock_level) : null,
-        reorder_level: form.reorder_level ? Number(form.reorder_level) : null,
-        item_type: form.item_type,
-        sale_tiers: form.sale_tiers,
-        purchase_tiers: form.purchase_tiers,
-        sale_account_override: form.sale_account || null,
-        sale_return_account_override: form.sale_return_account || null,
-        purchase_account_override: form.purchase_account || null,
-        purchase_return_account_override: form.purchase_return_account || null,
-        supplier_account_override: form.supplier_account || null,
-        ending_inventory_account_override: form.ending_inventory_account || null,
       };
       if (currentId) {
         await inventoryApi.updateProduct(currentId, payload);
@@ -293,6 +293,7 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
 
   const tabPrices = (
     <div style={{ padding: "8px 4px" }}>
+      {pendingN8("هذه القيم تُعرَض ولكن لا تُحفَظ بعد — تَنتظر N8-T9 (ProductPriceTier migration).")}
       {tierTable(form.sale_tiers, "أسعار البيع (5 فئات)", (i, k, v) => {
         const next = [...form.sale_tiers];
         next[i] = { ...next[i], [k]: v };
@@ -308,7 +309,9 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
 
   // ── صفحة 4: بيانات المتاجرة ──
   const tabTrading = (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8, padding: "8px 4px" }}>
+    <div style={{ padding: "8px 4px" }}>
+      {pendingN8("حقول overrides الحسابات لا تُحفَظ بعد — تَنتظر N8-T10.")}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>
       {fld("حساب البيع", <input className="aseel-input" value={form.sale_account}
         onChange={(e) => patch("sale_account", e.target.value)} placeholder="رقم الحساب (+ فهرس)" />)}
       {fld("حساب مرجع البيع", <input className="aseel-input" value={form.sale_return_account}
@@ -324,18 +327,22 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
       <div style={{ gridColumn: "1/-1", fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)" }}>
         اترك الحقل فارغاً لاستخدام القيم الافتراضية من ثوابت المجموعة. استخدم + لفهرس الحسابات.
       </div>
+      </div>
     </div>
   );
 
   // ── صفحة 5: بيانات أخرى ──
   const tabOther = (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8, padding: "8px 4px" }}>
-      {fld("إضافي بعد الكمية", <input className="aseel-input" type="number" min="0" step="1"
-        value={form.bonus_after_qty} onChange={(e) => patch("bonus_after_qty", e.target.value)} />)}
-      {fld("إضافي كل كمية", <input className="aseel-input" type="number" min="1" step="1"
-        value={form.bonus_every_qty} onChange={(e) => patch("bonus_every_qty", e.target.value)} />)}
-      <div style={{ gridColumn: "1/-1", fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)" }}>
-        مثال: إضافي 1 بعد كل 10 وحدات مشتراة.
+    <div style={{ padding: "8px 4px" }}>
+      {pendingN8("الكميات الإضافية لا تُحفَظ بعد — حقل backend غير متوفّر.")}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>
+        {fld("إضافي بعد الكمية", <input className="aseel-input" type="number" min="0" step="1"
+          value={form.bonus_after_qty} onChange={(e) => patch("bonus_after_qty", e.target.value)} />)}
+        {fld("إضافي كل كمية", <input className="aseel-input" type="number" min="1" step="1"
+          value={form.bonus_every_qty} onChange={(e) => patch("bonus_every_qty", e.target.value)} />)}
+        <div style={{ gridColumn: "1/-1", fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)" }}>
+          مثال: إضافي 1 بعد كل 10 وحدات مشتراة.
+        </div>
       </div>
     </div>
   );
