@@ -95,6 +95,7 @@ import { SmartAssistantPage } from "./components/SmartAssistantPage";
 import { CustomsClearanceManagement } from "./components/procurement/clearance/CustomsClearanceManagement";
 import { StockMovementsPage } from "./components/inventory/StockMovementsPage";
 import { StockLevelsPage } from "./components/inventory/StockLevelsPage";
+import { InventoryValuationPage } from "./components/inventory/InventoryValuationPage";
 import { PropertyRentalPage } from "./components/realestate/PropertyRentalPage";
 import { SalesInvoicesPage } from "./components/sales/SalesInvoicesPage";
 import { SalesCustomersPage } from "./components/sales/SalesCustomersPage";
@@ -1458,6 +1459,9 @@ const App: React.FC = () => {
 
       case "stock-movements":
         return <StockMovementsPage />;
+
+      case "inventory-valuation":
+        return <InventoryValuationPage />;
 
       case "property-rental":
         if (currentUser!.role === "manager" || currentUser!.role === "procurement") {
