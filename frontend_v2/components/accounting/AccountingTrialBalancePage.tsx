@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import type { TrialBalanceResponse, TrialBalanceRow } from "../../types/accounting";
-import { Scale, Search, CheckCircle2, AlertTriangle } from "lucide-react";
+import {
+  AseelDocumentShell,
+  AseelReportTable,
+} from "../aseel";
+import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
+import { Search, CheckCircle2, AlertTriangle } from "lucide-react";
 
 export const AccountingTrialBalancePage: React.FC = () => {
   const today = new Date();
@@ -86,192 +91,111 @@ export const AccountingTrialBalancePage: React.FC = () => {
   const cd = totals?.closing_debit || 0;
   const cc = totals?.closing_credit || 0;
 
+  const columns: ReportColumn<TrialBalanceRow>[] = [
+    { key: "code", header: "كود", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.code}</span> },
+    { key: "name", header: "الاسم", render: (r) => r.name },
+    { key: "account_type", header: "النوع", render: (r) => r.account_type },
+    {
+      key: "period_debit", header: "مدين الفترة", numeric: true,
+      render: (r) => fmt(r.period_debit ?? r.total_debit ?? 0),
+    },
+    {
+      key: "period_credit", header: "دائن الفترة", numeric: true,
+      render: (r) => fmt(r.period_credit ?? r.total_credit ?? 0),
+    },
+    { key: "closing_debit", header: "مدين الختامي", numeric: true, render: (r) => fmt(r.closing_debit) },
+    { key: "closing_credit", header: "دائن الختامي", numeric: true, render: (r) => fmt(r.closing_credit) },
+  ];
+
+  const reportTotals = {
+    period_debit: fmt(pd),
+    period_credit: fmt(pc),
+    closing_debit: fmt(cd),
+    closing_credit: fmt(cc),
+  };
+
+  const filterBar = (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
+      <div className="aseel-field">
+        <label className="aseel-field-label">من</label>
+        <input type="date" className="aseel-input" value={start} onChange={(e) => setStart(e.target.value)} />
+      </div>
+      <div className="aseel-field">
+        <label className="aseel-field-label">إلى</label>
+        <input type="date" className="aseel-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+      </div>
+      <div className="aseel-field">
+        <label className="aseel-field-label">نوع</label>
+        <select className="aseel-input" style={{ minWidth: "120px" }} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+          <option value="">الكل</option>
+          {types.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+      </div>
+      <div className="aseel-field" style={{ flex: "1", minWidth: "180px" }}>
+        <label className="aseel-field-label">بحث</label>
+        <input type="text" className="aseel-input" placeholder="كود أو اسم..."
+          value={search} onChange={(e) => setSearch(e.target.value)} />
+      </div>
+      <label className="flex items-center gap-2 text-sm" style={{ paddingTop: "18px" }}>
+        <input type="checkbox" checked={unposted} onChange={(e) => setUnposted(e.target.checked)} />
+        تضمين غير المرحّل
+      </label>
+      <label className="flex items-center gap-2 text-sm" style={{ paddingTop: "18px" }}>
+        <input type="checkbox" checked={showZero} onChange={(e) => setShowZero(e.target.checked)} />
+        عرض بدون حركة
+      </label>
+      <button type="button" className="aseel-toolbtn" onClick={fetchData} style={{ marginTop: "18px" }}>
+        <Search className="w-4 h-4" />تحديث
+      </button>
+    </div>
+  );
+
+  const reportContent = (
+    <>
+      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      <AseelReportTable<TrialBalanceRow>
+        filterBar={filterBar}
+        columns={columns}
+        rows={rows}
+        totals={rows.length > 0 ? reportTotals : undefined}
+        exportable={true}
+        loading={loading}
+        emptyHint="لا بيانات"
+        getRowKey={(r) => r.id}
+      />
+    </>
+  );
+
+  const shellActions: AseelToolbarAction[] = [
+    { key: "run", label: "تحديث", icon: <Search className="w-4 h-4" />, onClick: fetchData },
+  ];
+
+  const tabs: AseelTab[] = [
+    { key: "balance", label: "ميزان المراجعة", content: reportContent },
+  ];
+
   return (
-    <div className="space-y-4" dir="rtl">
-      <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l from-[var(--color-primary)] to-slate-900 text-white rounded-xl">
-        <Scale className="w-8 h-8 text-[var(--color-primary)]" />
-        <div className="flex-1">
-          <h1 className="text-lg font-bold">ميزان المراجعة</h1>
-          <p className="text-xs text-[var(--color-primary)]">
-            افتتاحي + حركة الفترة + ختامي — مع التحقق من التوازن
-          </p>
-        </div>
-        {totals && (
-          <div
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium ${
-              totals.balanced
-                ? "bg-emerald-500/20 text-emerald-200"
-                : "bg-red-500/20 text-red-200"
-            }`}
-          >
-            {totals.balanced ? (
-              <CheckCircle2 className="w-4 h-4" />
-            ) : (
-              <AlertTriangle className="w-4 h-4" />
-            )}
-            {totals.balanced ? "متوازن" : `فرق ${fmt(totals.period_difference)}`}
-          </div>
-        )}
-      </div>
-
-      <div className="flex flex-wrap gap-3 items-end bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700">
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">من</label>
-          <input
-            type="date"
-            className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">إلى</label>
-          <input
-            type="date"
-            className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">نوع</label>
-          <select
-            className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600 min-w-[120px]"
-            value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value)}
-          >
-            <option value="">الكل</option>
-            {types.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="flex-1 min-w-[200px]">
-          <label className="block text-xs text-gray-500 mb-1">بحث</label>
-          <input
-            type="text"
-            placeholder="كود أو اسم..."
-            className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <label className="flex items-center gap-2 text-sm pb-2">
-          <input
-            type="checkbox"
-            checked={unposted}
-            onChange={(e) => setUnposted(e.target.checked)}
-          />
-          تضمين غير المرحّل
-        </label>
-        <label className="flex items-center gap-2 text-sm pb-2">
-          <input
-            type="checkbox"
-            checked={showZero}
-            onChange={(e) => setShowZero(e.target.checked)}
-          />
-          عرض الحسابات بدون حركة
-        </label>
-        <button
-          type="button"
-          onClick={fetchData}
-          className="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] text-white rounded-lg text-sm"
-        >
-          <Search className="w-4 h-4" />
-          تحديث
-        </button>
-      </div>
-
-      {err && (
-        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 text-sm">
-          {err}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="py-16 text-center text-gray-500">جاري التحميل…</div>
-      ) : (
-        <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900/50">
-              <tr>
-                <th rowSpan={2} className="text-right p-3 border-b">
-                  كود
-                </th>
-                <th rowSpan={2} className="text-right p-3 border-b">
-                  الحساب
-                </th>
-                <th rowSpan={2} className="text-center p-3 border-b">
-                  النوع
-                </th>
-                <th colSpan={2} className="text-center p-2 border-b bg-slate-100 dark:bg-slate-900/40">
-                  الرصيد الافتتاحي
-                </th>
-                <th colSpan={2} className="text-center p-2 border-b bg-blue-50 dark:bg-blue-900/20">
-                  حركة الفترة
-                </th>
-                <th colSpan={2} className="text-center p-2 border-b bg-emerald-50 dark:bg-emerald-900/20">
-                  الرصيد الختامي
-                </th>
-              </tr>
-              <tr className="text-xs">
-                <th className="text-right p-2 bg-slate-100 dark:bg-slate-900/40">مدين</th>
-                <th className="text-right p-2 bg-slate-100 dark:bg-slate-900/40">دائن</th>
-                <th className="text-right p-2 bg-blue-50 dark:bg-blue-900/20">مدين</th>
-                <th className="text-right p-2 bg-blue-50 dark:bg-blue-900/20">دائن</th>
-                <th className="text-right p-2 bg-emerald-50 dark:bg-emerald-900/20">مدين</th>
-                <th className="text-right p-2 bg-emerald-50 dark:bg-emerald-900/20">دائن</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const pdN = r.period_debit ?? r.total_debit ?? 0;
-                const pcN = r.period_credit ?? r.total_credit ?? 0;
-                return (
-                  <tr
-                    key={r.id}
-                    className="border-t border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-900/40"
-                  >
-                    <td className="p-2 font-mono">{r.code}</td>
-                    <td className="p-2">{r.name}</td>
-                    <td className="p-2 text-center text-xs text-gray-500">
-                      {r.account_type}
-                    </td>
-                    <td className="p-2 text-right">{fmt(r.opening_debit)}</td>
-                    <td className="p-2 text-right">{fmt(r.opening_credit)}</td>
-                    <td className="p-2 text-right">{fmt(pdN)}</td>
-                    <td className="p-2 text-right">{fmt(pcN)}</td>
-                    <td className="p-2 text-right font-medium text-emerald-700 dark:text-emerald-400">
-                      {fmt(r.closing_debit)}
-                    </td>
-                    <td className="p-2 text-right font-medium text-rose-700 dark:text-rose-400">
-                      {fmt(r.closing_credit)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-            {totals && rows.length > 0 && (
-              <tfoot className="bg-gray-100 dark:bg-gray-900/40 font-semibold">
-                <tr>
-                  <td colSpan={5} className="p-3 text-right">
-                    الإجمالي
-                  </td>
-                  <td className="p-2 text-right">{fmt(pd)}</td>
-                  <td className="p-2 text-right">{fmt(pc)}</td>
-                  <td className="p-2 text-right">{fmt(cd)}</td>
-                  <td className="p-2 text-right">{fmt(cc)}</td>
-                </tr>
-              </tfoot>
-            )}
-          </table>
-          {rows.length === 0 && (
-            <p className="p-8 text-center text-gray-500">لا بيانات</p>
-          )}
-        </div>
-      )}
+    <div data-skin="aseel">
+      <AseelDocumentShell
+        title="ميزان المراجعة"
+        actions={shellActions}
+        header={<></>}
+        tabs={tabs}
+        status={
+          totals ? (
+            <span className="aseel-status-item">
+              {totals.balanced ? (
+                <CheckCircle2 className="w-3 h-3" style={{ color: "var(--color-success,#16a34a)" }} />
+              ) : (
+                <AlertTriangle className="w-3 h-3" style={{ color: "var(--color-danger,#dc2626)" }} />
+              )}
+              {totals.balanced ? "متوازن" : `فرق ${fmt(totals.period_difference)}`}
+            </span>
+          ) : undefined
+        }
+      >
+        <></>
+      </AseelDocumentShell>
     </div>
   );
 };

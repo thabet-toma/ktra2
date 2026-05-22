@@ -2,12 +2,11 @@ import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import type { ExchangeRateDto, CurrencyDto } from "../../types/accounting";
 import {
-  ArrowLeftRight,
-  Plus,
-  Trash2,
-  Loader2,
-  AlertTriangle,
-} from "lucide-react";
+  AseelDocumentShell,
+  AseelDenseTable,
+} from "../aseel";
+import type { AseelToolbarAction, AseelTab, DenseColumn } from "../aseel";
+import { Plus, Trash2 } from "lucide-react";
 
 export const ExchangeRatesPage: React.FC = () => {
   const [rates, setRates] = useState<ExchangeRateDto[]>([]);
@@ -22,6 +21,9 @@ export const ExchangeRatesPage: React.FC = () => {
   const [effDate, setEffDate] = useState(
     new Date().toISOString().split("T")[0]
   );
+
+  // Currency filter
+  const [filterCurrency, setFilterCurrency] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -92,163 +94,131 @@ export const ExchangeRatesPage: React.FC = () => {
     return `${day}/${m}/${y}`;
   };
 
+  const getCurrencyLabel = (id: number) => {
+    const c = currencies.find((x) => x.CurrencyID === id);
+    return c ? `${c.Code}${c.Name ? ` — ${c.Name}` : ""}` : String(id);
+  };
+
+  const filteredRates = filterCurrency
+    ? rates.filter((r) =>
+        String(r.from_currency) === filterCurrency ||
+        String(r.to_currency) === filterCurrency
+      )
+    : rates;
+
+  const columns: DenseColumn<ExchangeRateDto>[] = [
+    {
+      key: "from_currency", header: "من عملة",
+      render: (r) => r.from_currency_code || getCurrencyLabel(r.from_currency),
+    },
+    {
+      key: "to_currency", header: "إلى عملة",
+      render: (r) => r.to_currency_code || getCurrencyLabel(r.to_currency),
+    },
+    {
+      key: "rate", header: "السعر", numeric: true,
+      render: (r) => Number(r.rate).toFixed(6),
+    },
+    {
+      key: "effective_date", header: "تاريخ السريان",
+      render: (r) => fmtDate(r.effective_date),
+    },
+    {
+      key: "delete", header: "حذف",
+      render: (r) => (
+        <button
+          type="button"
+          className="aseel-toolbtn aseel-toolbtn--danger"
+          disabled={busy}
+          onClick={(e) => { e.stopPropagation(); deleteRate(r.id); }}
+        >
+          <Trash2 className="w-3 h-3" />
+        </button>
+      ),
+    },
+  ];
+
+  const actions: AseelToolbarAction[] = [
+    { key: "refresh", label: "تحديث", onClick: load },
+  ];
+
+  const headerBand = (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
+      <div className="aseel-field">
+        <label className="aseel-field-label">من عملة</label>
+        <select className="aseel-input" value={fromCur} onChange={(e) => setFromCur(e.target.value)}>
+          <option value="">—</option>
+          {currencies.map((c) => (
+            <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}{c.Name ? ` — ${c.Name}` : ""}</option>
+          ))}
+        </select>
+      </div>
+      <div className="aseel-field">
+        <label className="aseel-field-label">إلى عملة</label>
+        <select className="aseel-input" value={toCur} onChange={(e) => setToCur(e.target.value)}>
+          <option value="">—</option>
+          {currencies.map((c) => (
+            <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}{c.Name ? ` — ${c.Name}` : ""}</option>
+          ))}
+        </select>
+      </div>
+      <div className="aseel-field">
+        <label className="aseel-field-label">سعر الصرف</label>
+        <input type="number" step="0.000001" className="aseel-input aseel-num"
+          style={{ width: "120px" }} placeholder="3.650000"
+          value={rate} onChange={(e) => setRate(e.target.value)} />
+      </div>
+      <div className="aseel-field">
+        <label className="aseel-field-label">تاريخ السريان</label>
+        <input type="date" className="aseel-input" value={effDate} onChange={(e) => setEffDate(e.target.value)} />
+      </div>
+      <button type="button" className="aseel-toolbtn" disabled={busy || !fromCur || !toCur || !rate}
+        onClick={addRate} style={{ marginTop: "18px" }}>
+        <Plus className="w-4 h-4" />إضافة
+      </button>
+      <div style={{ flex: "1" }} />
+      <div className="aseel-field" style={{ minWidth: "160px" }}>
+        <label className="aseel-field-label">تصفية حسب عملة</label>
+        <select className="aseel-input" value={filterCurrency} onChange={(e) => setFilterCurrency(e.target.value)}>
+          <option value="">الكل</option>
+          {currencies.map((c) => (
+            <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>
+          ))}
+        </select>
+      </div>
+    </div>
+  );
+
+  const tableContent = (
+    <>
+      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      <AseelDenseTable<ExchangeRateDto>
+        columns={columns}
+        rows={filteredRates}
+        getRowKey={(r) => r.id}
+        loading={loading}
+        emptyHint="لا توجد أسعار صرف"
+      />
+    </>
+  );
+
+  const tabs: AseelTab[] = [
+    { key: "rates", label: "أسعار الصرف", content: tableContent },
+  ];
+
   return (
-    <div className="p-6 max-w-5xl mx-auto" dir="rtl">
-      <div className="flex items-center gap-3 mb-6">
-        <ArrowLeftRight className="w-7 h-7 text-[var(--color-primary)] dark:text-[var(--color-primary)]" />
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-          أسعار الصرف
-        </h1>
-      </div>
-
-      {err && (
-        <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg border border-red-200 dark:border-red-800 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          {err}
-        </div>
-      )}
-
-      <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-5 mb-6">
-        <h2 className="text-sm font-semibold text-slate-600 dark:text-slate-300 mb-3">
-          إضافة سعر صرف
-        </h2>
-        <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">
-              من عملة
-            </label>
-            <select
-              value={fromCur}
-              onChange={(e) => setFromCur(e.target.value)}
-              className="w-36 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
-            >
-              <option value="">—</option>
-              {currencies.map((c) => (
-                <option key={c.CurrencyID} value={c.CurrencyID}>
-                  {c.Code} — {c.Name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">
-              إلى عملة
-            </label>
-            <select
-              value={toCur}
-              onChange={(e) => setToCur(e.target.value)}
-              className="w-36 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
-            >
-              <option value="">—</option>
-              {currencies.map((c) => (
-                <option key={c.CurrencyID} value={c.CurrencyID}>
-                  {c.Code} — {c.Name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">
-              سعر الصرف
-            </label>
-            <input
-              type="number"
-              step="0.000001"
-              value={rate}
-              onChange={(e) => setRate(e.target.value)}
-              placeholder="3.650000"
-              className="w-36 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">
-              تاريخ السريان
-            </label>
-            <input
-              type="date"
-              value={effDate}
-              onChange={(e) => setEffDate(e.target.value)}
-              className="w-40 px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100"
-            />
-          </div>
-          <button
-            onClick={addRate}
-            disabled={busy || !fromCur || !toCur || !rate}
-            className="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white rounded-lg disabled:opacity-50 transition-colors"
-          >
-            {busy ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Plus className="w-4 h-4" />
-            )}
-            إضافة
-          </button>
-        </div>
-      </div>
-
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
-        </div>
-      ) : rates.length === 0 ? (
-        <div className="text-center py-12 text-slate-500 dark:text-slate-400">
-          لا توجد أسعار صرف مسجلة
-        </div>
-      ) : (
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-600">
-                <th className="text-right px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                  من
-                </th>
-                <th className="text-center px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                  إلى
-                </th>
-                <th className="text-center px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                  سعر الصرف
-                </th>
-                <th className="text-center px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                  تاريخ السريان
-                </th>
-                <th className="text-center px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                  حذف
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rates.map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors"
-                >
-                  <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-100">
-                    {r.from_currency_code}
-                  </td>
-                  <td className="px-4 py-3 text-center text-slate-600 dark:text-slate-300">
-                    {r.to_currency_code}
-                  </td>
-                  <td className="px-4 py-3 text-center font-mono text-slate-800 dark:text-slate-100">
-                    {Number(r.rate).toFixed(6)}
-                  </td>
-                  <td className="px-4 py-3 text-center text-slate-600 dark:text-slate-300">
-                    {fmtDate(r.effective_date)}
-                  </td>
-                  <td className="px-4 py-3 text-center">
-                    <button
-                      onClick={() => deleteRate(r.id)}
-                      disabled={busy}
-                      className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors disabled:opacity-50"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+    <div data-skin="aseel">
+      <AseelDocumentShell
+        title="أسعار الصرف"
+        actions={actions}
+        header={headerBand}
+        tabs={tabs}
+        status={
+          <span className="aseel-status-item">{filteredRates.length} سعر</span>
+        }
+      >
+        <></>
+      </AseelDocumentShell>
     </div>
   );
 };

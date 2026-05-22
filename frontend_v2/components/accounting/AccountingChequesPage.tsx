@@ -1,7 +1,26 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import type { ChequeDto, AccountingPartner } from "../../types/accounting";
-import { Banknote, Plus, Trash2, X, Save } from "lucide-react";
+import {
+  AseelDocumentShell,
+  AseelDenseTable,
+} from "../aseel";
+import type { AseelToolbarAction, AseelTab, DenseColumn } from "../aseel";
+import { Plus, Save, X, ArrowRightLeft } from "lucide-react";
+
+const CHEQUE_STATUSES = [
+  { v: "Draft", l: "مسودة" },
+  { v: "Under_Collection", l: "قيد التحصيل" },
+  { v: "Collected", l: "محصّل" },
+  { v: "Bounced", l: "مرتجع" },
+  { v: "Returned", l: "معاد" },
+];
+
+const DIRECTIONS = [
+  { v: "", l: "الكل" },
+  { v: "Incoming", l: "وارد" },
+  { v: "Outgoing", l: "صادر" },
+];
 
 export const AccountingChequesPage: React.FC = () => {
   const [rows, setRows] = useState<ChequeDto[]>([]);
@@ -22,6 +41,18 @@ export const AccountingChequesPage: React.FC = () => {
     currency: "1",
     notes: "",
   });
+
+  // Filters
+  const [filterDirection, setFilterDirection] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+
+  // Transfer dialog
+  const [transferCheque, setTransferCheque] = useState<ChequeDto | null>(null);
+  const [newStatus, setNewStatus] = useState("");
+  const [transferDate, setTransferDate] = useState(new Date().toISOString().split("T")[0]);
+  const [transferNotes, setTransferNotes] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -94,206 +125,273 @@ export const AccountingChequesPage: React.FC = () => {
     }
   };
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 p-4 bg-gradient-to-l from-emerald-900 to-slate-900 text-white rounded-xl">
-        <div className="flex items-center gap-3">
-          <Banknote className="w-8 h-8 text-emerald-300" />
-          <div>
-            <h1 className="text-lg font-bold">الشيكات</h1>
-            <p className="text-xs text-emerald-200">وارد / صادر</p>
-          </div>
-        </div>
+  const doTransfer = async () => {
+    if (!transferCheque || !newStatus) return;
+    try {
+      await accountingApi.updateCheque(transferCheque.id, {
+        ...transferCheque,
+        status: newStatus,
+        notes: transferNotes
+          ? `${transferCheque.notes || ""}\n[${transferDate}] ${transferNotes}`.trim()
+          : transferCheque.notes,
+      });
+      setTransferCheque(null);
+      setTransferNotes("");
+      await load();
+    } catch (e: unknown) {
+      alert(e instanceof Error ? e.message : "فشل التحويل");
+    }
+  };
+
+  const filteredRows = rows.filter((r) => {
+    if (filterDirection && r.direction !== filterDirection) return false;
+    if (filterStatus && r.status !== filterStatus) return false;
+    if (filterFrom && r.issue_date && r.issue_date < filterFrom) return false;
+    if (filterTo && r.issue_date && r.issue_date > filterTo) return false;
+    return true;
+  });
+
+  const getPartnerName = (id: number | null | undefined) => {
+    if (!id) return "—";
+    const p = partners.find((x) => x.id === id);
+    return p?.name || String(id);
+  };
+
+  const columns: DenseColumn<ChequeDto>[] = [
+    { key: "cheque_number", header: "رقم الشيك", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.cheque_number}</span> },
+    { key: "bank_name", header: "البنك", render: (r) => r.bank_name || "—" },
+    { key: "amount", header: "المبلغ", numeric: true, render: (r) => Number(r.amount).toLocaleString("ar-EG", { minimumFractionDigits: 2 }) },
+    { key: "due_date", header: "تاريخ الاستحقاق", render: (r) => r.due_date || "—" },
+    { key: "issue_date", header: "تاريخ الإصدار", render: (r) => r.issue_date || "—" },
+    { key: "partner", header: "الشريك", render: (r) => getPartnerName(r.partner) },
+    {
+      key: "direction", header: "الاتجاه",
+      render: (r) => (
+        <span style={{
+          padding: "2px 8px", borderRadius: "12px",
+          background: r.direction === "Incoming" ? "var(--color-success,#22c55e)15" : "var(--color-primary,#3b82f6)15",
+          color: r.direction === "Incoming" ? "var(--color-success,#16a34a)" : "var(--color-primary,#2563eb)",
+          fontSize: "0.75rem",
+        }}>
+          {r.direction === "Incoming" ? "وارد" : "صادر"}
+        </span>
+      ),
+    },
+    {
+      key: "status", header: "الحالة",
+      render: (r) => <span>{CHEQUE_STATUSES.find((s) => s.v === r.status)?.l || r.status}</span>,
+    },
+    {
+      key: "actions", header: "",
+      render: (r) => (
         <button
           type="button"
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-medium"
+          className="aseel-toolbtn"
+          title="تحويل الشيك"
+          onClick={(e) => {
+            e.stopPropagation();
+            setTransferCheque(r);
+            setNewStatus(r.status);
+            setTransferDate(new Date().toISOString().split("T")[0]);
+            setTransferNotes("");
+          }}
         >
-          <Plus className="w-4 h-4" />
-          شيك جديد
+          <ArrowRightLeft className="w-3 h-3" />
+          تحويل
         </button>
+      ),
+    },
+  ];
+
+  const actions: AseelToolbarAction[] = [
+    { key: "new", label: "شيك جديد", icon: <Plus className="w-4 h-4" />, onClick: () => setShowForm(true) },
+    { key: "refresh", label: "تحديث", onClick: load },
+  ];
+
+  const filterBar = (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
+      <div className="aseel-field">
+        <label className="aseel-field-label">الاتجاه</label>
+        <select className="aseel-input" value={filterDirection} onChange={(e) => setFilterDirection(e.target.value)}>
+          {DIRECTIONS.map((d) => <option key={d.v} value={d.v}>{d.l}</option>)}
+        </select>
       </div>
+      <div className="aseel-field">
+        <label className="aseel-field-label">الحالة</label>
+        <select className="aseel-input" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <option value="">الكل</option>
+          {CHEQUE_STATUSES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+        </select>
+      </div>
+      <div className="aseel-field">
+        <label className="aseel-field-label">من تاريخ</label>
+        <input type="date" className="aseel-input" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
+      </div>
+      <div className="aseel-field">
+        <label className="aseel-field-label">إلى تاريخ</label>
+        <input type="date" className="aseel-input" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} />
+      </div>
+    </div>
+  );
 
-      {err && (
-        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 text-sm">
-          {err}
-        </div>
-      )}
+  const tableContent = (
+    <AseelDenseTable<ChequeDto>
+      columns={columns}
+      rows={filteredRows}
+      getRowKey={(r) => r.id}
+      loading={loading}
+      emptyHint="لا توجد شيكات"
+    />
+  );
 
-      {loading ? (
-        <div className="py-16 text-center text-gray-500">جاري التحميل…</div>
-      ) : (
-        <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900/50">
-              <tr>
-                <th className="text-right p-3">رقم</th>
-                <th className="text-right p-3">البنك</th>
-                <th className="text-right p-3">المبلغ</th>
-                <th className="text-right p-3">الاستحقاق</th>
-                <th className="text-right p-3">الاتجاه</th>
-                <th className="text-right p-3">الحالة</th>
-                <th className="text-right p-3 w-16" />
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((c) => (
-                <tr
-                  key={c.id}
-                  className="border-t border-gray-100 dark:border-gray-700"
-                >
-                  <td className="p-3 font-mono">{c.cheque_number}</td>
-                  <td className="p-3">{c.bank_name || "—"}</td>
-                  <td className="p-3">{c.amount}</td>
-                  <td className="p-3">{c.due_date || "—"}</td>
-                  <td className="p-3">{c.direction}</td>
-                  <td className="p-3">{c.status}</td>
-                  <td className="p-3">
-                    <button
-                      type="button"
-                      onClick={() => remove(c.id)}
-                      className="p-1 text-red-600 hover:bg-red-50 rounded"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {rows.length === 0 && (
-            <p className="p-8 text-center text-gray-500">لا شيكات</p>
-          )}
-        </div>
-      )}
+  const tabs: AseelTab[] = [
+    { key: "list", label: "قائمة الشيكات", content: tableContent },
+  ];
 
+  return (
+    <div data-skin="aseel">
+      <AseelDocumentShell
+        title="الشيكات"
+        actions={actions}
+        header={filterBar}
+        tabs={tabs}
+        status={
+          <span className="aseel-status-item">{filteredRows.length} شيك</span>
+        }
+      >
+        <></>
+      </AseelDocumentShell>
+
+      {/* Add cheque dialog */}
       {showForm && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-lg w-full p-6 border border-gray-200 dark:border-gray-700 max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="font-bold">شيك جديد</h3>
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700"
-              >
-                <X className="w-5 h-5" />
+          <div style={{
+            background: "var(--aseel-surface)", borderRadius: "var(--aseel-radius)",
+            boxShadow: "0 8px 32px #0004", maxWidth: "520px", width: "100%",
+            padding: "24px", border: "1px solid var(--aseel-border)", maxHeight: "90vh", overflowY: "auto",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <h3 style={{ fontWeight: "bold", fontSize: "1.1rem" }}>شيك جديد</h3>
+              <button type="button" className="aseel-toolbtn" onClick={() => setShowForm(false)}>
+                <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-3 text-sm">
-              <input
-                placeholder="رقم الشيك *"
-                className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.cheque_number}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, cheque_number: e.target.value }))
-                }
-              />
-              <input
-                placeholder="البنك"
-                className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.bank_name}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, bank_name: e.target.value }))
-                }
-              />
-              <input
-                placeholder="المبلغ"
-                type="number"
-                step="0.01"
-                className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.amount}
-                onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
-              />
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  type="date"
-                  className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                  value={form.issue_date}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, issue_date: e.target.value }))
-                  }
-                />
-                <input
-                  type="date"
-                  className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                  value={form.due_date}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, due_date: e.target.value }))
-                  }
-                />
+            {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+            <div style={{ display: "grid", gap: "10px" }}>
+              <div className="aseel-field">
+                <label className="aseel-field-label">رقم الشيك *</label>
+                <input className="aseel-input" value={form.cheque_number}
+                  onChange={(e) => setForm((f) => ({ ...f, cheque_number: e.target.value }))} />
               </div>
-              <input
-                placeholder="اسم المستفيد"
-                className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.payee_name}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, payee_name: e.target.value }))
-                }
-              />
-              <select
-                className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.direction}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, direction: e.target.value }))
-                }
-              >
-                <option value="Incoming">وارد</option>
-                <option value="Outgoing">صادر</option>
-              </select>
-              <select
-                className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.status}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, status: e.target.value }))
-                }
-              >
-                <option value="Draft">مسودة</option>
-                <option value="Under_Collection">قيد التحصيل</option>
-                <option value="Collected">محصّل</option>
-                <option value="Bounced">مرتجع</option>
-                <option value="Returned">معاد</option>
-              </select>
-              <select
-                className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.partner}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, partner: e.target.value }))
-                }
-              >
-                <option value="">— شريك (اختياري) —</option>
-                {partners.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <textarea
-                placeholder="ملاحظات"
-                rows={2}
-                className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-                value={form.notes}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, notes: e.target.value }))
-                }
-              />
+              <div className="aseel-field">
+                <label className="aseel-field-label">البنك</label>
+                <input className="aseel-input" value={form.bank_name}
+                  onChange={(e) => setForm((f) => ({ ...f, bank_name: e.target.value }))} />
+              </div>
+              <div className="aseel-field">
+                <label className="aseel-field-label">المبلغ</label>
+                <input type="number" step="0.01" className="aseel-input aseel-num" value={form.amount}
+                  onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                <div className="aseel-field">
+                  <label className="aseel-field-label">تاريخ الإصدار</label>
+                  <input type="date" className="aseel-input" value={form.issue_date}
+                    onChange={(e) => setForm((f) => ({ ...f, issue_date: e.target.value }))} />
+                </div>
+                <div className="aseel-field">
+                  <label className="aseel-field-label">تاريخ الاستحقاق</label>
+                  <input type="date" className="aseel-input" value={form.due_date}
+                    onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))} />
+                </div>
+              </div>
+              <div className="aseel-field">
+                <label className="aseel-field-label">اسم المستفيد</label>
+                <input className="aseel-input" value={form.payee_name}
+                  onChange={(e) => setForm((f) => ({ ...f, payee_name: e.target.value }))} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                <div className="aseel-field">
+                  <label className="aseel-field-label">الاتجاه</label>
+                  <select className="aseel-input" value={form.direction}
+                    onChange={(e) => setForm((f) => ({ ...f, direction: e.target.value }))}>
+                    <option value="Incoming">وارد</option>
+                    <option value="Outgoing">صادر</option>
+                  </select>
+                </div>
+                <div className="aseel-field">
+                  <label className="aseel-field-label">الحالة</label>
+                  <select className="aseel-input" value={form.status}
+                    onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}>
+                    {CHEQUE_STATUSES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="aseel-field">
+                <label className="aseel-field-label">الشريك</label>
+                <select className="aseel-input" value={form.partner}
+                  onChange={(e) => setForm((f) => ({ ...f, partner: e.target.value }))}>
+                  <option value="">— اختياري —</option>
+                  {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div className="aseel-field">
+                <label className="aseel-field-label">ملاحظات</label>
+                <textarea className="aseel-input" rows={2} value={form.notes}
+                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+              </div>
             </div>
-            <div className="flex justify-end gap-2 mt-6">
-              <button
-                type="button"
-                onClick={() => setShowForm(false)}
-                className="px-4 py-2 rounded-lg border dark:border-gray-600"
-              >
-                إلغاء
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
+              <button type="button" className="aseel-toolbtn" onClick={() => setShowForm(false)}>إلغاء</button>
+              <button type="button" className="aseel-toolbtn" onClick={submit}>
+                <Save className="w-4 h-4" />حفظ
               </button>
-              <button
-                type="button"
-                onClick={submit}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white"
-              >
-                <Save className="w-4 h-4" />
-                حفظ
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transfer dialog */}
+      {transferCheque && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50">
+          <div style={{
+            background: "var(--aseel-surface)", borderRadius: "var(--aseel-radius)",
+            boxShadow: "0 8px 32px #0004", maxWidth: "420px", width: "100%",
+            padding: "24px", border: "1px solid var(--aseel-border)",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <h3 style={{ fontWeight: "bold" }}>تحويل الشيك #{transferCheque.cheque_number}</h3>
+              <button type="button" className="aseel-toolbtn" onClick={() => setTransferCheque(null)}>
+                <X className="w-4 h-4" />
               </button>
+            </div>
+            <div style={{ display: "grid", gap: "10px" }}>
+              <div style={{ fontSize: "0.85rem", color: "var(--aseel-ink-soft)" }}>
+                الحالة الحالية: <strong>{CHEQUE_STATUSES.find((s) => s.v === transferCheque.status)?.l || transferCheque.status}</strong>
+              </div>
+              <div className="aseel-field">
+                <label className="aseel-field-label">الحالة الجديدة</label>
+                <select className="aseel-input" value={newStatus} onChange={(e) => setNewStatus(e.target.value)}>
+                  {CHEQUE_STATUSES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+                </select>
+              </div>
+              <div className="aseel-field">
+                <label className="aseel-field-label">تاريخ التحويل</label>
+                <input type="date" className="aseel-input" value={transferDate}
+                  onChange={(e) => setTransferDate(e.target.value)} />
+              </div>
+              <div className="aseel-field">
+                <label className="aseel-field-label">ملاحظات</label>
+                <textarea className="aseel-input" rows={2} value={transferNotes}
+                  onChange={(e) => setTransferNotes(e.target.value)} />
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
+              <button type="button" className="aseel-toolbtn" onClick={() => setTransferCheque(null)}>إلغاء</button>
+              <button type="button" className="aseel-toolbtn" onClick={doTransfer}>
+                <ArrowRightLeft className="w-4 h-4" />تحويل
+              </button>
+              <button type="button" className="aseel-toolbtn aseel-toolbtn--danger" onClick={() => remove(transferCheque.id)}>حذف</button>
             </div>
           </div>
         </div>

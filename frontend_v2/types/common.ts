@@ -63,7 +63,10 @@ export type AppView =
     | "sql-purchase-invoices"
     | "shipments"
     | "shipment-management"
-    | "clearance";
+    | "clearance"
+    | "accounting-balance-sheet"
+    | "accounting-income-statement"
+    | "accounting-vat-statements";
 
 export interface Attachment {
     id: string;

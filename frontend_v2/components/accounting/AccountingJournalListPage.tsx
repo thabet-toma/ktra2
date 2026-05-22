@@ -1,15 +1,19 @@
+/**
+ * N3-T2 — AccountingJournalListPage (L15) inside-out
+ * AseelDenseTable + شريط فلاتر + useAseelIndexKeymap
+ * Ref: المحاسبة.txt:48-69
+ */
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { accountingApi } from "../../services/accountingApi";
+import { Plus, RefreshCw, Printer } from "lucide-react";
 import {
-  Plus,
-  Search,
-  CheckCircle,
-  FileText,
-  Loader2,
-  Undo2,
-  Filter,
-  RefreshCw,
-} from "lucide-react";
+  AseelDenseTable,
+  AseelDocumentShell,
+  useAseelIndexKeymap,
+  type DenseColumn,
+  type AseelToolbarAction,
+} from "../aseel";
+import type { AseelTab } from "../aseel";
 
 export interface JournalListItem {
   id: number;
@@ -26,40 +30,30 @@ export interface JournalListItem {
   source_label?: string | null;
 }
 
-function refTypeLabel(rt: string | null | undefined): string {
-  const t = (rt || "").trim();
-  const map: Record<string, string> = {
-    LOGISTICS_PAYMENT: "دفعة لوجستية",
-    PURCHASE_RECEIPT: "استلام مخزون",
-    JOURNAL_REVERSAL: "عكس قيد",
-    LOGISTICS_EXPENSE: "مصروف لوجستي",
-    LOGISTICS_SHIPMENT: "شحنة دولية",
-    LOGISTICS_CLEARANCE_PAYMENT: "دفعة تخليص",
-    SALES_INVOICE: "فاتورة مبيعات",
-    SALES_DELIVERY_COGS: "تكلفة بضاعة مباعة",
-    CUSTOMER_PAYMENT: "تحصيل عميل",
-    PURCHASE_INVOICE: "فاتورة شراء",
-    MANUAL: "قيد يدوي",
-  };
-  return map[t] || (t ? t : "عام / يدوي");
+const REF_LABELS: Record<string, string> = {
+  LOGISTICS_PAYMENT: "دفعة لوجستية",
+  PURCHASE_RECEIPT: "استلام مخزون",
+  JOURNAL_REVERSAL: "عكس قيد",
+  LOGISTICS_EXPENSE: "مصروف لوجستي",
+  LOGISTICS_SHIPMENT: "شحنة دولية",
+  LOGISTICS_CLEARANCE_PAYMENT: "دفعة تخليص",
+  SALES_INVOICE: "فاتورة مبيعات",
+  SALES_DELIVERY_COGS: "تكلفة بضاعة مباعة",
+  CUSTOMER_PAYMENT: "تحصيل عميل",
+  PURCHASE_INVOICE: "فاتورة شراء",
+  MANUAL: "قيد يدوي",
+};
+function refLabel(rt: string | null | undefined) {
+  return REF_LABELS[rt || ""] || (rt ? rt : "عام / يدوي");
 }
-
-function formatTxDate(raw: string | null | undefined): string {
+function fmtDate(raw: string | null | undefined) {
   if (!raw) return "—";
   const s = String(raw).slice(0, 10);
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
     const [y, m, d] = s.split("-");
     return `${d}/${m}/${y}`;
   }
-  try {
-    return new Date(raw).toLocaleDateString("ar-EG", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
-  } catch {
-    return raw;
-  }
+  return raw;
 }
 
 interface Props {
@@ -71,18 +65,15 @@ interface Props {
 export const AccountingJournalListPage: React.FC<Props> = ({
   onNew,
   onOpen,
-  onNavigateToDeal,
 }) => {
   const [rows, setRows] = useState<JournalListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [refType, setRefType] = useState("");
-  const [posting, setPosting] = useState<number | null>(null);
-  const [reversing, setReversing] = useState<number | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const [postErr, setPostErr] = useState<string | null>(null);
+  const [selectedKey, setSelectedKey] = useState<number | null>(null);
   const searchRef = useRef(search);
   searchRef.current = search;
 
@@ -96,7 +87,6 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       if (refType.trim()) params.reference_type = refType.trim();
       const sq = searchRef.current.trim();
       if (sq) params.search = sq;
-
       const data = (await accountingApi.getJournals(
         Object.keys(params).length ? params : undefined
       )) as JournalListItem[];
@@ -108,285 +98,226 @@ export const AccountingJournalListPage: React.FC<Props> = ({
     }
   }, [dateFrom, dateTo, refType]);
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  useEffect(() => { void load(); }, [load]);
 
-  const handlePost = async (id: number) => {
-    if (!confirm("ترحيل القيد؟ لا يمكن التعديل بعد الترحيل.")) return;
-    setPostErr(null);
-    setPosting(id);
-    try {
-      await accountingApi.postJournal(id);
-      setRows((r) =>
-        r.map((j) => (j.id === id ? { ...j, is_posted: true } : j))
-      );
-    } catch (e: unknown) {
-      setPostErr(e instanceof Error ? e.message : "فشل الترحيل");
-    } finally {
-      setPosting(null);
-    }
-  };
+  const openSelected = useCallback(() => {
+    if (selectedKey == null) return;
+    const row = rows.find((r) => r.id === selectedKey);
+    if (row) onOpen(row.id, row.deal_ref_number, row.reference_summary);
+  }, [selectedKey, rows, onOpen]);
 
-  const handleReverse = async (id: number) => {
-    if (
-      !confirm(
-        "إنشاء قيد عكسي (مدين↔دائن) لهذا القيد المرحّل؟ سيُنشأ قيد جديد مرحّل."
-      )
-    )
-      return;
-    setPostErr(null);
-    setReversing(id);
-    try {
-      await accountingApi.reverseJournal(id);
-      await load();
-    } catch (e: unknown) {
-      setPostErr(e instanceof Error ? e.message : "فشل العكس");
-    } finally {
-      setReversing(null);
-    }
-  };
+  useAseelIndexKeymap({
+    F2: openSelected,
+    F6: () => {
+      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      el?.focus();
+    },
+    CtrlIns: onNew,
+    Enter: openSelected,
+  });
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 p-[var(--spacing-4)] bg-[var(--color-surface-3)] dark:bg-[var(--color-surface-3)] text-[var(--color-text)] dark:text-[var(--color-text-inverted)] rounded-[var(--radius-lg)] shadow-[var(--shadow-md)]">
-        <div className="flex items-center gap-3">
-          <FileText className="w-8 h-8 text-[var(--color-text-muted)]" />
-          <div>
-            <h1 className="text-[var(--font-size-xl)] font-bold">دفتر اليومية</h1>
-            <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
-              قيود مرحّلة ومسودات — بحث برقم الصفقة أو البيان أو نوع المرجع
-            </p>
-          </div>
-        </div>
+  const columns: DenseColumn<JournalListItem>[] = [
+    {
+      key: "id",
+      header: "رقم القيد",
+      width: "90px",
+      align: "center",
+      render: (r) => <span className="aseel-num font-mono text-xs">{r.id}</span>,
+    },
+    {
+      key: "transaction_date",
+      header: "تاريخ القيد",
+      width: "110px",
+      align: "center",
+      render: (r) => <span className="text-xs">{fmtDate(r.transaction_date)}</span>,
+    },
+    {
+      key: "description",
+      header: "بيان القيد الإجمالي",
+      render: (r) => (
+        <span className="text-xs" title={r.description || ""}>
+          {r.description || "—"}
+        </span>
+      ),
+    },
+    {
+      key: "ref_type",
+      header: "النوع",
+      width: "130px",
+      render: (r) => (
+        <span className="text-xs text-[var(--aseel-ink-soft)]">
+          {refLabel(r.reference_type)}
+          {r.reference_id ? ` #${r.reference_id}` : ""}
+        </span>
+      ),
+    },
+    {
+      key: "currency",
+      header: "العملة",
+      width: "70px",
+      align: "center",
+      render: (r) => <span className="text-xs">{r.currency_code || "—"}</span>,
+    },
+    {
+      key: "status",
+      header: "الحالة",
+      width: "80px",
+      align: "center",
+      render: (r) => (
+        <span
+          style={{
+            fontSize: "11px",
+            fontWeight: 600,
+            color: r.is_posted ? "var(--aseel-ok, #2d7d46)" : "var(--aseel-warn, #b06800)",
+          }}
+        >
+          {r.is_posted ? "مرحَّل" : "مسودة"}
+        </span>
+      ),
+    },
+    {
+      key: "action",
+      header: "",
+      width: "60px",
+      align: "center",
+      render: (r) => (
         <button
           type="button"
-          onClick={onNew}
-          className="flex items-center gap-2 px-[var(--spacing-4)] py-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] rounded-[var(--radius-lg)] text-[var(--font-size-sm)] font-medium"
+          className="aseel-toolbtn"
+          style={{ fontSize: "11px", padding: "2px 8px" }}
+          onClick={() => onOpen(r.id, r.deal_ref_number, r.reference_summary)}
         >
-          <Plus className="w-4 h-4" />
-          قيد جديد
+          فتح
         </button>
-      </div>
+      ),
+    },
+  ];
 
-      <div className="flex flex-col gap-3 bg-[var(--color-surface)] dark:bg-[var(--color-surface-2)] p-[var(--spacing-4)] rounded-[var(--radius-lg)] border border-[var(--color-border)] dark:border-[var(--color-border)]">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-text-muted)]" />
-            <input
-              placeholder="بحث: رقم القيد، مرجع، نص البيان، أو رقم صفقة (D-…)"
-              className="w-full border border-[var(--color-border)] rounded-[var(--radius-lg)] pr-10 pl-3 py-2 text-[var(--font-size-sm)] dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && load()}
+  const toolbarActions: AseelToolbarAction[] = [
+    { key: "new", label: "قيد جديد", icon: <Plus />, onClick: onNew },
+    {
+      key: "refresh",
+      label: "تحديث",
+      icon: <RefreshCw className={loading ? "animate-spin" : ""} />,
+      onClick: () => void load(),
+      separatorBefore: true,
+    },
+    {
+      key: "print",
+      label: "طباعة",
+      icon: <Printer />,
+      onClick: () => window.print(),
+    },
+  ];
+
+  const filterBar = (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
+      <label className="aseel-field" style={{ flex: "1", minWidth: "160px" }}>
+        <span className="aseel-field-label">بحث</span>
+        <input
+          className="aseel-input"
+          data-aseel-field="search"
+          placeholder="رقم القيد / البيان / مرجع"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && void load()}
+        />
+      </label>
+      <label className="aseel-field">
+        <span className="aseel-field-label">من تاريخ</span>
+        <input
+          className="aseel-input"
+          type="date"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+        />
+      </label>
+      <label className="aseel-field">
+        <span className="aseel-field-label">إلى تاريخ</span>
+        <input
+          className="aseel-input"
+          type="date"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+        />
+      </label>
+      <label className="aseel-field">
+        <span className="aseel-field-label">نوع المرجع</span>
+        <select
+          className="aseel-input"
+          value={refType}
+          onChange={(e) => setRefType(e.target.value)}
+        >
+          <option value="">الكل</option>
+          {Object.entries(REF_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>{v}</option>
+          ))}
+        </select>
+      </label>
+      <button
+        type="button"
+        className="aseel-toolbtn"
+        onClick={() => void load()}
+        style={{ alignSelf: "flex-end" }}
+      >
+        <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} />
+        تطبيق
+      </button>
+    </div>
+  );
+
+  const tabs: AseelTab[] = [
+    {
+      key: "list",
+      label: "دفتر اليومية",
+      content: (
+        <div style={{ padding: "8px" }}>
+          {filterBar}
+          {err && (
+            <div className="aseel-banner aseel-banner--err" style={{ marginTop: "8px" }}>
+              {err}
+            </div>
+          )}
+          <div style={{ marginTop: "8px" }}>
+            <AseelDenseTable<JournalListItem>
+              columns={columns}
+              rows={rows}
+              getRowKey={(r) => r.id}
+              loading={loading}
+              emptyHint="لا توجد قيود — أضف قيداً جديداً (Ctrl+Ins)"
+              selectable
+              selectedKey={selectedKey}
+              onSelect={(k) => setSelectedKey(k as number | null)}
+              onRowDoubleClick={(r) => onOpen(r.id, r.deal_ref_number, r.reference_summary)}
             />
           </div>
-          <div className="flex flex-wrap gap-2 items-center">
-            <Filter className="w-4 h-4 text-[var(--color-text-muted)] hidden sm:block" />
-            <div>
-              <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-0.5">
-                من تاريخ
-              </label>
-              <input
-                type="date"
-                className="border border-[var(--color-border)] rounded-[var(--radius-lg)] px-2 py-1.5 text-[var(--font-size-sm)] dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-0.5">
-                إلى تاريخ
-              </label>
-              <input
-                type="date"
-                className="border border-[var(--color-border)] rounded-[var(--radius-lg)] px-2 py-1.5 text-[var(--font-size-sm)] dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-              />
-            </div>
-            <div>
-              <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-0.5">
-                نوع المرجع
-              </label>
-              <select
-                className="border border-[var(--color-border)] rounded-[var(--radius-lg)] px-2 py-1.5 text-[var(--font-size-sm)] min-w-[160px] dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
-                value={refType}
-                onChange={(e) => setRefType(e.target.value)}
-              >
-                <option value="">الكل</option>
-                <option value="LOGISTICS_PAYMENT">دفعات صفقات</option>
-                <option value="PURCHASE_RECEIPT">استلام مخزون</option>
-                <option value="LOGISTICS_EXPENSE">مصاريف لوجستية</option>
-                <option value="JOURNAL_REVERSAL">قيود عكسية</option>
-              </select>
-            </div>
-            <button
-              type="button"
-              onClick={() => load()}
-              className="flex items-center gap-1 px-3 py-2 rounded-[var(--radius-lg)] bg-[var(--color-surface-3)] text-[var(--color-text-inverted)] text-[var(--font-size-sm)] hover:bg-[var(--color-border)]"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-              تطبيق
-            </button>
-          </div>
         </div>
-      </div>
+      ),
+    },
+  ];
 
-      {err && (
-        <div className="p-3 rounded-[var(--radius-lg)] bg-[var(--color-danger)]/10 dark:bg-[var(--color-danger)]/20 text-[var(--color-danger)] dark:text-[var(--color-danger)] text-[var(--font-size-sm)]">
-          {err}
-        </div>
-      )}
-      {postErr && (
-        <div className="p-3 rounded-[var(--radius-lg)] bg-[var(--color-danger)]/10 dark:bg-[var(--color-danger)]/20 text-[var(--color-danger)] dark:text-[var(--color-danger)] text-[var(--font-size-sm)] border border-[var(--color-danger)]/30 dark:border-[var(--color-danger)]/50">
-          {postErr}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="py-20 text-center text-[var(--color-text-muted)]">جاري التحميل…</div>
-      ) : (
-        <div className="overflow-x-auto bg-[var(--color-surface)] dark:bg-[var(--color-surface-2)] rounded-[var(--radius-lg)] border border-[var(--color-border)] dark:border-[var(--color-border)] shadow-[var(--shadow-sm)]">
-          <table className="min-w-full text-[var(--font-size-sm)]">
-            <thead className="bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-3)] text-[var(--color-text)] dark:text-[var(--color-text-muted)]">
-              <tr>
-                <th className="text-right p-3 font-semibold whitespace-nowrap">
-                  رقم القيد
-                </th>
-                <th className="text-right p-3 font-semibold whitespace-nowrap">
-                  التاريخ
-                </th>
-                <th className="text-right p-3 font-semibold whitespace-nowrap">
-                  نوع المرجع
-                </th>
-                <th className="text-right p-3 font-semibold min-w-[200px]">
-                  مرتبط بـ (صفقة / مصدر)
-                </th>
-                <th className="text-right p-3 font-semibold min-w-[220px]">
-                  البيان الكامل
-                </th>
-                <th className="text-right p-3 font-semibold whitespace-nowrap">
-                  مرجع #
-                </th>
-                <th className="text-right p-3 font-semibold whitespace-nowrap">
-                  الحالة
-                </th>
-                <th className="text-right p-3 font-semibold w-44">إجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((j) => (
-                <tr
-                  key={j.id}
-                  className="border-t border-[var(--color-border)] dark:border-[var(--color-border)] hover:bg-[var(--color-surface-2)]/80 dark:hover:bg-[var(--color-surface-3)]/30 align-top"
-                >
-                  <td className="p-3 font-mono whitespace-nowrap">{j.id}</td>
-                  <td className="p-3 whitespace-nowrap dir-ltr text-right">
-                    <span>{formatTxDate(j.transaction_date)}</span>
-                    {j.currency_code && j.currency_code !== "ILS" && (
-                      <span className="mr-2 inline-flex items-center px-1.5 py-0.5 rounded-[var(--radius-sm)] text-[var(--font-size-xs)] font-bold bg-[var(--color-primary)]/20 text-[var(--color-primary)] dark:bg-[var(--color-primary)]/30 dark:text-[var(--color-primary)]">
-                        {j.currency_code}
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-3 text-xs">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="font-medium text-[var(--color-text)] dark:text-[var(--color-text)]">
-                        {j.source_label || refTypeLabel(j.reference_type)}
-                      </span>
-                      {j.tenant_name && (
-                        <span className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] dark:text-[var(--color-text-muted)]">
-                          {j.tenant_name}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="p-3 text-xs max-w-xs">
-                    {j.deal_ref_number && onNavigateToDeal ? (
-                      <button
-                        type="button"
-                        onClick={() => onNavigateToDeal(j.deal_ref_number!)}
-                        className="text-right whitespace-pre-wrap break-words text-[var(--color-primary)] dark:text-[var(--color-primary)] hover:text-[var(--color-primary-hover)] dark:hover:text-[var(--color-primary)] hover:underline transition-all font-medium"
-                        title={`فتح الصفقة ${j.deal_ref_number}`}
-                      >
-                        {j.reference_summary?.trim() || j.deal_ref_number}
-                      </button>
-                    ) : (
-                      <span className="text-[var(--color-text)] dark:text-[var(--color-text)] whitespace-pre-wrap break-words">
-                        {j.reference_summary?.trim() || "—"}
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-3 text-[var(--font-size-xs)] text-[var(--color-text)] dark:text-[var(--color-text)] whitespace-pre-wrap break-words max-w-md">
-                    {j.description?.trim() || "—"}
-                  </td>
-                  <td className="p-3 font-mono text-xs whitespace-nowrap">
-                    {j.reference_id ?? "—"}
-                  </td>
-                  <td className="p-3 whitespace-nowrap">
-                    {j.is_posted ? (
-                      <span className="text-[var(--color-success)] dark:text-[var(--color-success)] text-[var(--font-size-xs)] font-medium">
-                        مرحّل
-                      </span>
-                    ) : (
-                      <span className="text-[var(--color-text-muted)] dark:text-[var(--color-text-muted)] text-[var(--font-size-xs)] font-medium">
-                        مسودة
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-3">
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => onOpen(j.id, j.deal_ref_number, j.reference_summary)}
-                        className="px-2 py-1 text-[var(--font-size-xs)] rounded-[var(--radius-lg)] bg-[var(--color-primary)]/20 text-[var(--color-primary)] dark:bg-[var(--color-primary)]/30 dark:text-[var(--color-primary)]"
-                      >
-                        فتح
-                      </button>
-                      {!j.is_posted && (
-                        <button
-                          type="button"
-                          disabled={posting === j.id}
-                          onClick={() => handlePost(j.id)}
-                          className="flex items-center gap-1 px-2 py-1 text-[var(--font-size-xs)] rounded-[var(--radius-lg)] bg-[var(--color-success)]/20 text-[var(--color-success)] dark:bg-[var(--color-success)]/30 dark:text-[var(--color-success)] disabled:opacity-50"
-                        >
-                          {posting === j.id ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <CheckCircle className="w-3 h-3" />
-                          )}
-                          ترحيل
-                        </button>
-                      )}
-                      {j.is_posted && (
-                        <button
-                          type="button"
-                          disabled={reversing === j.id}
-                          onClick={() => handleReverse(j.id)}
-                          className="flex items-center gap-1 px-2 py-1 text-[var(--font-size-xs)] rounded-[var(--radius-lg)] bg-[var(--color-primary)]/20 text-[var(--color-primary)] dark:bg-[var(--color-primary)]/30 dark:text-[var(--color-primary)] disabled:opacity-50"
-                        >
-                          {reversing === j.id ? (
-                            <Loader2 className="w-3 h-3 animate-spin" />
-                          ) : (
-                            <Undo2 className="w-3 h-3" />
-                          )}
-                          عكس
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {rows.length === 0 && (
-            <p className="p-[var(--spacing-6)] text-center text-[var(--color-text-muted)]">
-              لا قيود تطابق الفلاتر الحالية
-            </p>
-          )}
-        </div>
-      )}
+  return (
+    <div data-skin="aseel" style={{ height: "calc(100vh - 5rem)" }}>
+      <AseelDocumentShell
+        title="دفتر اليومية"
+        state={loading ? "جاري التحميل…" : `${rows.length} قيد`}
+        actions={toolbarActions}
+        header={<></>}
+        tabs={tabs}
+        status={
+          <>
+            <span className="aseel-status-item">
+              الإجمالي <b>{rows.length}</b>
+            </span>
+            <span className="aseel-status-item">
+              مرحَّل <b>{rows.filter((r) => r.is_posted).length}</b>
+            </span>
+            <span className="aseel-status-item">
+              مسودات <b>{rows.filter((r) => !r.is_posted).length}</b>
+            </span>
+          </>
+        }
+      />
     </div>
   );
 };

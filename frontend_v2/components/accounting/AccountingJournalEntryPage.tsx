@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import type {
   AccountingAccount,
@@ -17,19 +17,19 @@ import {
   Handshake,
   AlertTriangle,
   Info,
-  ChevronRight,
-  ChevronLeft,
-  ChevronsRight,
-  ChevronsLeft,
   Printer,
-  FileDown,
   RefreshCw,
   X,
+  Search,
 } from "lucide-react";
 import {
   AseelDocumentShell,
+  AseelGrid,
+  AseelIndexPicker,
   useRecordNavigation,
   useAseelKeymap,
+  useAseelFieldShortcuts,
+  type AseelGridColumn,
 } from "../aseel";
 
 /* ─────────── types ─────────── */
@@ -128,9 +128,14 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
 
   const [lines, setLines] = useState<LineState[]>([emptyLine(), emptyLine(), emptyLine()]);
 
-  // M4-T2: Aseel Navigation for journal entries
+  // N3-T1: Aseel Navigation + account picker state
   const [journalsList, setJournalsList] = useState<any[]>([]);
   const [showAccountPicker, setShowAccountPicker] = useState(false);
+  // which line index is waiting for account pick
+  const [pickerTargetLine, setPickerTargetLine] = useState<number | null>(null);
+  // tooltip: { lineIdx, balance }
+  const [balanceTooltip, setBalanceTooltip] = useState<{ lineIdx: number; balance: string } | null>(null);
+  const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const nav = useRecordNavigation<any>({
     items: journalsList,
@@ -184,7 +189,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     },
   });
 
-  // M4-T2: Aseel keyboard shortcuts — real handlers.
+  // N3-T1: Aseel keyboard shortcuts.
   useAseelKeymap({
     F2: () => window.print(),
     F5: () => load(),
@@ -194,21 +199,35 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     },
     F12: () => saveAndPost(),
     Escape: () => {
-      if (showAccountPicker) { setShowAccountPicker(false); return; }
+      if (balanceTooltip) { setBalanceTooltip(null); return; }
+      if (showAccountPicker) { setShowAccountPicker(false); setPickerTargetLine(null); return; }
       onBack();
     },
-    plus: () => {
-      const ae = document.activeElement;
-      if (ae?.getAttribute?.('data-aseel-key') === '1') {
-        setShowAccountPicker(true);
-      }
-    },
-    // N0-T11: Ctrl+nav handlers
     CtrlHome: () => nav?.first?.(),
     CtrlEnd: () => nav?.last?.(),
     CtrlPageUp: () => nav?.prev?.(),
     CtrlPageDown: () => nav?.next?.(),
     CtrlIns: () => nav.goNew(),
+  }, { enabled: !showAccountPicker });
+
+  // N3-T1: Field shortcuts — Space=auto-balance, *=balance-lookup, +=account-picker
+  useAseelFieldShortcuts({
+    'remaining-fill': () => {
+      // autofill the remaining diff on the focused debit/credit cell
+      const ae = document.activeElement as HTMLInputElement | null;
+      if (!ae) return;
+      const lineIdx = Number(ae.getAttribute('data-line-idx'));
+      if (isNaN(lineIdx)) return;
+      const side = ae.getAttribute('data-side') as 'debit' | 'credit' | null;
+      if (!side) return;
+      const remaining = Math.abs(diff);
+      if (remaining < 0.005) return;
+      if (side === 'debit' && diff < 0) {
+        updateLine(lineIdx, { debit: String(remaining.toFixed(2)) });
+      } else if (side === 'credit' && diff > 0) {
+        updateLine(lineIdx, { credit: String(remaining.toFixed(2)) });
+      }
+    },
   }, { enabled: !showAccountPicker });
 
   // Load journals list for navigation
@@ -420,6 +439,162 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     );
   }
 
+  /* ── N3-T1: account balance lookup helper ── */
+  const showAccountBalance = useCallback(async (lineIdx: number, accountId: string) => {
+    if (!accountId) return;
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    try {
+      const balance = await accountingApi.getAccountBalance(Number(accountId));
+      const fmt = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const label = balance.net_balance != null
+        ? `الرصيد: ${fmt(Math.abs(balance.net_balance))} ${balance.net_balance >= 0 ? 'مدين' : 'دائن'}`
+        : 'لا يوجد رصيد';
+      setBalanceTooltip({ lineIdx, balance: label });
+      tooltipTimerRef.current = setTimeout(() => setBalanceTooltip(null), 4000);
+    } catch {
+      setBalanceTooltip({ lineIdx, balance: 'تعذّر جلب الرصيد' });
+      tooltipTimerRef.current = setTimeout(() => setBalanceTooltip(null), 3000);
+    }
+  }, []);
+
+  /* ── N3-T1: AseelGrid columns for journal lines ── */
+  const journalGridColumns: AseelGridColumn<LineState & { _idx: number }>[] = [
+    { key: 'seq',         header: '#',          width: '40px',  align: 'center', readOnly: true },
+    { key: 'account',     header: 'الحساب',      width: '28%' },
+    { key: 'description', header: 'البيان',      width: '22%' },
+    { key: 'partner',     header: 'الجهة',       width: '14%' },
+    { key: 'debit',       header: 'مدين (Dr)',    width: '110px', align: 'center', type: 'number' },
+    { key: 'credit',      header: 'دائن (Cr)',    width: '110px', align: 'center', type: 'number' },
+    { key: 'del',         header: '',            width: '36px',  align: 'center' },
+  ];
+
+  type GridLine = LineState & { _idx: number };
+
+  const gridLines: GridLine[] = lines.map((l, i) => ({ ...l, _idx: i }));
+
+  const gridGetCell = (row: GridLine, key: string): string | number => {
+    switch (key) {
+      case 'seq':    return row._idx + 1;
+      case 'debit':  return row.debit;
+      case 'credit': return row.credit;
+      case 'description': return row.description;
+      default: return '';
+    }
+  };
+
+  const gridOnChange = (rowIndex: number, key: string, value: string) => {
+    if (key === 'description') updateLine(rowIndex, { description: value });
+    else if (key === 'debit')  updateLine(rowIndex, { debit: value });
+    else if (key === 'credit') updateLine(rowIndex, { credit: value });
+  };
+
+  const renderAccountCell = (row: GridLine) => {
+    const acc = accounts.find((a) => String(a.id) === row.accountId);
+    const label = acc ? `${acc.code} — ${acc.name}` : '— اختر الحساب —';
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', position: 'relative' }}>
+        <button
+          type="button"
+          className="aseel-cell-picker"
+          disabled={posted}
+          data-aseel-key="1"
+          title="+ فتح فهرس الحسابات  |  * عرض الرصيد"
+          onKeyDown={(e) => {
+            if (e.key === '+') { e.preventDefault(); setPickerTargetLine(row._idx); setShowAccountPicker(true); }
+            if (e.key === '*') { e.preventDefault(); void showAccountBalance(row._idx, row.accountId); }
+          }}
+          onClick={() => { if (!posted) { setPickerTargetLine(row._idx); setShowAccountPicker(true); } }}
+        >
+          {label}
+        </button>
+        {balanceTooltip?.lineIdx === row._idx && (
+          <span style={{
+            position: 'absolute', top: '100%', right: 0, zIndex: 50,
+            background: 'var(--aseel-bg, #fffbf5)',
+            border: '1px solid var(--aseel-border, #c8b99a)',
+            borderRadius: '4px', padding: '3px 8px',
+            fontSize: '11px', whiteSpace: 'nowrap', fontWeight: 600,
+            boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
+          }}>
+            {balanceTooltip.balance}
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  const renderDebitCell = (row: GridLine) => {
+    const isDebit = parseFloat(row.debit) > 0;
+    if (posted) return (
+      <span className={`block text-center text-xs font-mono font-semibold ${isDebit ? 'text-blue-700' : 'text-gray-300'}`}>
+        {isDebit ? fmtAmount(row.debit) : ''}
+      </span>
+    );
+    return (
+      <input
+        type="number" step="0.01" min="0" placeholder="0.00"
+        className="aseel-input aseel-num"
+        data-aseel-field="remaining-amount"
+        data-line-idx={String(row._idx)}
+        data-side="debit"
+        value={row.debit}
+        onChange={(e) => updateLine(row._idx, { debit: e.target.value })}
+        title="Space = تعبئة الفرق تلقائياً"
+        style={{ color: isDebit ? 'var(--color-primary, #3b5bdb)' : undefined }}
+      />
+    );
+  };
+
+  const renderCreditCell = (row: GridLine) => {
+    const isCredit = parseFloat(row.credit) > 0;
+    if (posted) return (
+      <span className={`block text-center text-xs font-mono font-semibold ${isCredit ? 'text-rose-700' : 'text-gray-300'}`}>
+        {isCredit ? fmtAmount(row.credit) : ''}
+      </span>
+    );
+    return (
+      <input
+        type="number" step="0.01" min="0" placeholder="0.00"
+        className="aseel-input aseel-num"
+        data-aseel-field="remaining-amount"
+        data-line-idx={String(row._idx)}
+        data-side="credit"
+        value={row.credit}
+        onChange={(e) => updateLine(row._idx, { credit: e.target.value })}
+        title="Space = تعبئة الفرق تلقائياً"
+        style={{ color: isCredit ? 'var(--color-danger, #e03131)' : undefined }}
+      />
+    );
+  };
+
+  const renderPartnerCell = (row: GridLine) => {
+    if (posted) return <span className="text-xs">{partners.find((p) => String(p.id) === row.partnerId)?.name || '—'}</span>;
+    return (
+      <select
+        className="aseel-input"
+        value={row.partnerId}
+        onChange={(e) => updateLine(row._idx, { partnerId: e.target.value })}
+      >
+        <option value="">—</option>
+        {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+    );
+  };
+
+  const renderDelCell = (row: GridLine) =>
+    (!posted && lines.length > 1) ? (
+      <button type="button" className="aseel-iconbtn aseel-iconbtn--danger" onClick={() => removeLine(row._idx)} title="حذف السطر">
+        <Trash2 className="h-3 w-3" />
+      </button>
+    ) : null;
+
+  journalGridColumns[1].render = renderAccountCell;
+  journalGridColumns[3].render = renderPartnerCell;
+  journalGridColumns[4].render = renderDebitCell;
+  journalGridColumns[5].render = renderCreditCell;
+  journalGridColumns[6].render = renderDelCell;
+
+  /* ── render ── */
   /* ── render ── */
   const activeDealRef: DealRef | null = dealRef ?? (
     header.reference_type === "LOGISTICS_PAYMENT" && (header.reference_summary || header.deal_ref_number)
@@ -476,12 +651,112 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
           onClick: () => window.print(),
         },
       ]}
-      header={<></>}
+      header={
+        <>
+          {/* رقم القيد */}
+          <label className="aseel-field">
+            <span className="aseel-field-label">رقم القيد</span>
+            <input className="aseel-input" readOnly value={journalId ? `#${journalId}` : '— جديد —'} />
+          </label>
+          {/* التاريخ */}
+          <label className="aseel-field">
+            <span className="aseel-field-label">التاريخ</span>
+            <input
+              className="aseel-input"
+              type="date"
+              disabled={posted}
+              value={header.transaction_date}
+              onChange={(e) => setHeader((h) => ({ ...h, transaction_date: e.target.value }))}
+            />
+          </label>
+          {/* العملة */}
+          <label className="aseel-field">
+            <span className="aseel-field-label">العملة</span>
+            <select
+              className="aseel-input"
+              disabled={posted}
+              value={header.currency}
+              onChange={(e) => {
+                const sel = currencies.find((c) => String(c.CurrencyID) === e.target.value);
+                setHeader((h) => ({
+                  ...h,
+                  currency: e.target.value,
+                  exchange_rate: sel?.IsBaseCurrency ? '1' : h.exchange_rate,
+                  currency_code: sel?.Code || '',
+                }));
+              }}
+            >
+              <option value="">— اختر —</option>
+              {currencies.map((c) => (
+                <option key={c.CurrencyID} value={c.CurrencyID}>
+                  {c.Code} {c.IsBaseCurrency ? '(أساسية)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          {/* سعر العملة */}
+          <label className="aseel-field">
+            <span className="aseel-field-label">سعر العملة</span>
+            <input
+              className="aseel-input"
+              type="number"
+              step="0.000001"
+              min="0"
+              disabled={posted || !!currencies.find((c) => String(c.CurrencyID) === header.currency)?.IsBaseCurrency}
+              value={header.exchange_rate}
+              onChange={(e) => setHeader((h) => ({ ...h, exchange_rate: e.target.value }))}
+            />
+          </label>
+          {/* نوع المرجع */}
+          <label className="aseel-field">
+            <span className="aseel-field-label">نوع المرجع</span>
+            <select
+              className="aseel-input"
+              disabled={posted}
+              value={header.reference_type}
+              onChange={(e) => setHeader((h) => ({ ...h, reference_type: e.target.value }))}
+            >
+              <option value="">—</option>
+              {Object.entries(REF_TYPE_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+              <option value="MANUAL">قيد يدوي</option>
+            </select>
+          </label>
+          {/* البيان الإجمالي */}
+          <label className="aseel-field" style={{ gridColumn: 'span 2' }}>
+            <span className="aseel-field-label">البيان الإجمالي</span>
+            <input
+              className="aseel-input"
+              disabled={posted}
+              placeholder="وصف موجز للقيد"
+              value={header.description}
+              onChange={(e) => setHeader((h) => ({ ...h, description: e.target.value }))}
+            />
+          </label>
+        </>
+      }
       status={
         <>
           <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
           <span className="aseel-status-item">الحالة <b>{posted ? 'مرحَّل' : 'مسودة'}</b></span>
           {journalId && <span className="aseel-status-item">رقم القيد <b>{journalId}</b></span>}
+          <span className="aseel-status-item">
+            مدين <b className="aseel-num">{totalDebit.toFixed(2)}</b>
+          </span>
+          <span className="aseel-status-item">
+            دائن <b className="aseel-num">{totalCredit.toFixed(2)}</b>
+          </span>
+          {!balanced && totalDebit > 0 && (
+            <span className="aseel-status-item" style={{ color: 'var(--aseel-err, #c0392b)' }}>
+              فرق <b>{Math.abs(diff).toFixed(2)}</b>
+            </span>
+          )}
+          {balanced && totalDebit > 0 && (
+            <span className="aseel-status-item" style={{ color: 'var(--aseel-ok, #27ae60)' }}>
+              متوازن ✓
+            </span>
+          )}
         </>
       }
     >

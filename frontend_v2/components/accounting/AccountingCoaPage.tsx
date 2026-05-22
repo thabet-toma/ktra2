@@ -2,6 +2,10 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from "react"
 import { accountingApi } from "../../services/accountingApi";
 import type { AccountingAccount } from "../../types/accounting";
 import {
+  AseelDocumentShell,
+} from "../aseel";
+import type { AseelToolbarAction, AseelTab } from "../aseel";
+import {
   ChevronDown,
   ChevronLeft,
   FolderTree,
@@ -14,6 +18,7 @@ import {
   BookOpen,
   ExternalLink,
   Factory,
+  RefreshCw,
 } from "lucide-react";
 
 const TYPE_LETTER: Record<string, string> = {
@@ -486,80 +491,28 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
     }
   };
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 p-[var(--spacing-4)] bg-[var(--color-surface-3)] dark:bg-[var(--color-surface-3)] text-[var(--color-text)] dark:text-[var(--color-text-inverted)] rounded-[var(--radius-lg)] shadow-[var(--shadow-md)]">
-        <div className="flex items-center gap-3">
-          <FolderTree className="w-8 h-8 text-[var(--color-success)]" />
-          <div>
-            <h1 className="text-[var(--font-size-xl)] font-bold">شجرة الحسابات</h1>
-            <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
-              دليل الحسابات المرتبط بقاعدة البيانات المحاسبية
-            </p>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={() => openCreate(null)}
-          className="flex items-center gap-2 px-[var(--spacing-4)] py-2 bg-[var(--color-success)] hover:bg-[var(--color-success-hover)] rounded-[var(--radius-lg)] text-[var(--font-size-sm)] font-medium"
-        >
-          <Plus className="w-4 h-4" />
-          حساب رئيسي
-        </button>
-      </div>
+  const shellActions: AseelToolbarAction[] = [
+    { key: "new", label: "حساب رئيسي", icon: <Plus className="w-4 h-4" />, onClick: () => openCreate(null) },
+    { key: "expand", label: "توسيع الكل", onClick: expandAll },
+    { key: "collapse", label: "طيّ الكل", onClick: collapseAll },
+    { key: "refresh", label: "تحديث", icon: <RefreshCw className="w-4 h-4" />, onClick: load },
+  ];
 
-      {/* Toolbar: search / expand / collapse */}
-      <div className="flex flex-wrap items-center gap-3">
-        <input
-          className="flex-1 min-w-[220px] border border-[var(--color-border)] dark:border-[var(--color-border)] rounded-[var(--radius-lg)] px-3 py-2 dark:bg-[var(--color-surface-3)]"
-          placeholder="بحث بالكود أو الاسم..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-
-        <label className="flex items-center gap-2 text-[var(--font-size-sm)] text-[var(--color-text)] dark:text-[var(--color-text)] select-none">
-          <input
-            type="checkbox"
-            checked={activeOnly}
-            onChange={(e) => setActiveOnly(e.target.checked)}
-          />
-          حسابات نشطة فقط
-        </label>
-
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={expandAll}
-            className="px-3 py-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] dark:border-[var(--color-border)] text-[var(--font-size-sm)] bg-[var(--color-surface)] dark:bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
-          >
-            توسيع الكل
-          </button>
-          <button
-            type="button"
-            onClick={collapseAll}
-            className="px-3 py-2 rounded-[var(--radius-lg)] border border-[var(--color-border)] dark:border-[var(--color-border)] text-[var(--font-size-sm)] bg-[var(--color-surface)] dark:bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
-          >
-            طيّ الكل
-          </button>
-        </div>
-      </div>
-
+  const treeContent = (
+    <>
       {err && (
-        <div className="p-3 rounded-[var(--radius-lg)] bg-[var(--color-danger)]/10 dark:bg-[var(--color-danger)]/20 text-[var(--color-danger)] dark:text-[var(--color-danger)] text-[var(--font-size-sm)]">
-          {err}
-        </div>
+        <div className="aseel-banner aseel-banner--err" style={{ margin: "4px 0" }}>{err}</div>
       )}
-
       {loading ? (
-        <div className="py-20 text-center text-[var(--color-text-muted)]">جاري التحميل…</div>
+        <div style={{ padding: "40px", textAlign: "center", color: "var(--aseel-ink-soft)" }}>جاري التحميل…</div>
       ) : (
-        <div className="bg-[var(--color-surface)] dark:bg-[var(--color-surface-2)] rounded-[var(--radius-lg)] border border-[var(--color-border)] dark:border-[var(--color-border)] p-2 shadow-[var(--shadow-sm)]">
+        <div style={{ background: "var(--aseel-surface)", border: "1px solid var(--aseel-border)", borderRadius: "var(--aseel-radius)", padding: "8px" }}>
           {roots.length === 0 ? (
-            <p className="p-[var(--spacing-6)] text-center text-[var(--color-text-muted)]">
+            <p style={{ padding: "24px", textAlign: "center", color: "var(--aseel-ink-soft)" }}>
               لا توجد حسابات. أضف حساباً رئيسياً.
             </p>
           ) : (
-            <div className="max-h-[70vh] overflow-auto pr-1">
+            <div style={{ maxHeight: "60vh", overflowY: "auto", paddingInlineEnd: "4px" }}>
               {roots.map((r) => (
                 <CoaRow
                   key={r.id}
@@ -599,47 +552,31 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
           <button
             type="button"
             className="flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
-            onClick={() => {
-              openCreate(rowMenu.account);
-              setRowMenu(null);
-            }}
+            onClick={() => { openCreate(rowMenu.account); setRowMenu(null); }}
           >
-            <Plus className="h-4 w-4" />
-            إنشاء حساب فرعي
+            <Plus className="h-4 w-4" />إنشاء حساب فرعي
           </button>
           <button
             type="button"
             className="flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
-            onClick={() => {
-              openEdit(rowMenu.account);
-              setRowMenu(null);
-            }}
+            onClick={() => { openEdit(rowMenu.account); setRowMenu(null); }}
           >
-            <Pencil className="h-4 w-4" />
-            تعديل الحساب
+            <Pencil className="h-4 w-4" />تعديل الحساب
           </button>
           <button
             type="button"
             className="flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
-            onClick={() => {
-              onOpenGeneralLedger?.(rowMenu.account.id);
-              setRowMenu(null);
-            }}
+            onClick={() => { onOpenGeneralLedger?.(rowMenu.account.id); setRowMenu(null); }}
           >
-            <BookOpen className="h-4 w-4" />
-            الأستاذ العام
+            <BookOpen className="h-4 w-4" />الأستاذ العام
           </button>
           {rowMenu.account.linked_partner && (
             <button
               type="button"
               className="flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
-              onClick={() => {
-                onOpenSupplier?.(rowMenu.account.linked_partner!.id);
-                setRowMenu(null);
-              }}
+              onClick={() => { onOpenSupplier?.(rowMenu.account.linked_partner!.id); setRowMenu(null); }}
             >
-              <ExternalLink className="h-4 w-4" />
-              بطاقة المورد
+              <ExternalLink className="h-4 w-4" />بطاقة المورد
             </button>
           )}
         </div>
@@ -652,78 +589,89 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
               <h3 className="font-bold text-[var(--font-size-xl)]">
                 {dialog.mode === "edit" ? "تعديل حساب" : "حساب جديد"}
               </h3>
-              <button
-                type="button"
-                onClick={() => setDialog(null)}
-                className="p-1 rounded-[var(--radius-md)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
-              >
+              <button type="button" onClick={() => setDialog(null)}
+                className="p-1 rounded-[var(--radius-md)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <div className="space-y-3">
-              <div>
-                <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">الكود</label>
-                <input
-                  className="w-full border border-[var(--color-border)] rounded-[var(--radius-lg)] px-3 py-2 dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
-                  value={form.code}
-                  onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))}
-                />
+              <div className="aseel-field">
+                <label className="aseel-field-label">الكود</label>
+                <input className="aseel-input" value={form.code}
+                  onChange={(e) => setForm((f) => ({ ...f, code: e.target.value }))} />
               </div>
-              <div>
-                <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">الاسم</label>
-                <input
-                  className="w-full border border-[var(--color-border)] rounded-[var(--radius-lg)] px-3 py-2 dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
-                  value={form.name}
-                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                />
+              <div className="aseel-field">
+                <label className="aseel-field-label">الاسم</label>
+                <input className="aseel-input" value={form.name}
+                  onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} />
               </div>
-              <div>
-                <label className="block text-[var(--font-size-xs)] text-[var(--color-text-muted)] mb-1">النوع</label>
-                <select
-                  className="w-full border border-[var(--color-border)] rounded-[var(--radius-lg)] px-3 py-2 dark:bg-[var(--color-surface-3)] dark:border-[var(--color-border)]"
-                  value={form.account_type}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, account_type: e.target.value }))
-                  }
-                >
+              <div className="aseel-field">
+                <label className="aseel-field-label">النوع</label>
+                <select className="aseel-input" value={form.account_type}
+                  onChange={(e) => setForm((f) => ({ ...f, account_type: e.target.value }))}>
                   {ACCOUNT_TYPES.map((t) => (
-                    <option key={t.v} value={t.v}>
-                      {t.l}
-                    </option>
+                    <option key={t.v} value={t.v}>{t.l}</option>
                   ))}
                 </select>
               </div>
               <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.is_active}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, is_active: e.target.checked }))
-                  }
-                />
+                <input type="checkbox" checked={form.is_active}
+                  onChange={(e) => setForm((f) => ({ ...f, is_active: e.target.checked }))} />
                 نشط
               </label>
             </div>
             <div className="flex justify-end gap-2 mt-6">
-              <button
-                type="button"
-                onClick={() => setDialog(null)}
-                className="px-[var(--spacing-4)] py-2 rounded-[var(--radius-lg)] border dark:border-[var(--color-border)]"
-              >
-                إلغاء
-              </button>
-              <button
-                type="button"
-                onClick={saveDialog}
-                className="flex items-center gap-2 px-[var(--spacing-4)] py-2 rounded-[var(--radius-lg)] bg-[var(--color-primary)] text-[var(--color-primary-foreground)]"
-              >
-                <Save className="w-4 h-4" />
-                حفظ
+              <button type="button" onClick={() => setDialog(null)}
+                className="aseel-toolbtn">إلغاء</button>
+              <button type="button" onClick={saveDialog}
+                className="aseel-toolbtn">
+                <Save className="w-4 h-4" />حفظ
               </button>
             </div>
           </div>
         </div>
       )}
+    </>
+  );
+
+  const shellTabs: AseelTab[] = [
+    { key: "tree", label: "شجرة الحسابات", content: treeContent },
+  ];
+
+  const headerBand = (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center" }}>
+      <div className="aseel-field" style={{ flex: "1", minWidth: "220px" }}>
+        <label className="aseel-field-label">بحث</label>
+        <input
+          className="aseel-input"
+          placeholder="بحث بالكود أو الاسم..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+      </div>
+      <label className="flex items-center gap-2 text-[var(--font-size-sm)] select-none" style={{ paddingTop: "18px" }}>
+        <input type="checkbox" checked={activeOnly} onChange={(e) => setActiveOnly(e.target.checked)} />
+        حسابات نشطة فقط
+      </label>
+    </div>
+  );
+
+  return (
+    <div data-skin="aseel">
+      <AseelDocumentShell
+        title="شجرة الحسابات"
+        actions={shellActions}
+        header={headerBand}
+        tabs={shellTabs}
+        status={
+          <span className="aseel-status-item">
+            <FolderTree className="w-3 h-3" />
+            {accounts.length} حساب
+          </span>
+        }
+      >
+        <></>
+      </AseelDocumentShell>
     </div>
   );
 };

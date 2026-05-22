@@ -15,7 +15,7 @@ import {
   Handshake, Users, Menu, X, ChevronRight, ChevronLeft, Info,
   Calculator, BookMarked, Scale, BookOpen, Banknote, Sparkles,
   CalendarDays, ArrowLeftRight, Boxes, BarChart3, Building2,
-  ShoppingCart, Receipt, Ship, Truck, Wrench,
+  ShoppingCart, Receipt, Ship, Truck, Wrench, TrendingUp, ClipboardList,
 } from 'lucide-react';
 
 
@@ -43,6 +43,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "accounting-landed-cost", label: "تقرير التكلفة المستوردة", icon: <Ship className="h-4 w-4" /> },
     { view: "accounting-fiscal-periods", label: "الفترات المالية", icon: <CalendarDays className="h-4 w-4" /> },
     { view: "accounting-exchange-rates", label: "أسعار الصرف", icon: <ArrowLeftRight className="h-4 w-4" /> },
+    { view: "accounting-balance-sheet", label: "الميزانية العمومية", icon: <BarChart3 className="h-4 w-4" /> },
+    { view: "accounting-income-statement", label: "قائمة الدخل", icon: <TrendingUp className="h-4 w-4" /> },
+    { view: "accounting-vat-statements", label: "كشوف ضريبة القيمة المضافة", icon: <ClipboardList className="h-4 w-4" /> },
   ];
 
   useEffect(() => {
