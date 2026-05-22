@@ -15,7 +15,8 @@ export const StockLevelsPage: React.FC = () => {
 
   // فلاتر
   const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState<"" | "low" | "out">(""); // تحت الحد / نفذ
+  const [filterStatus, setFilterStatus] = useState<"" | "low" | "out" | "over">("");
+  const [filterCategory, setFilterCategory] = useState<string>("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -36,6 +37,10 @@ export const StockLevelsPage: React.FC = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  const categories = Array.from(
+    new Set(products.map((p) => p.category_name || "").filter(Boolean))
+  ).sort();
+
   const filtered = products.filter((p) => {
     if (search) {
       const s = search.toLowerCase();
@@ -45,8 +50,12 @@ export const StockLevelsPage: React.FC = () => {
         !(p.name_en || "").toLowerCase().includes(s)
       ) return false;
     }
-    if (filterStatus === "out") return Number(p.quantity_on_hand) <= 0;
-    if (filterStatus === "low") return Number(p.quantity_on_hand) > 0 && p.stock_status === "low_stock";
+    if (filterCategory && p.category_name !== filterCategory) return false;
+    const qty = Number(p.quantity_on_hand);
+    const min = Number(p.min_stock_level ?? 0);
+    if (filterStatus === "out") return qty <= 0;
+    if (filterStatus === "low") return qty > 0 && min > 0 && qty <= min;
+    if (filterStatus === "over") return min > 0 && qty > min * 3;
     return true;
   });
 
@@ -111,12 +120,22 @@ export const StockLevelsPage: React.FC = () => {
         <select
           className="aseel-input"
           style={{ width: 140 }}
+          value={filterCategory}
+          onChange={(e) => setFilterCategory(e.target.value)}
+        >
+          <option value="">كل التصنيفات</option>
+          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select
+          className="aseel-input"
+          style={{ width: 140 }}
           value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value as "" | "low" | "out")}
+          onChange={(e) => setFilterStatus(e.target.value as "" | "low" | "out" | "over")}
         >
           <option value="">كل الحالات</option>
           <option value="low">منخفض</option>
           <option value="out">نفذ</option>
+          <option value="over">فوق الحد الأقصى</option>
         </select>
         <button className="aseel-toolbtn" onClick={load} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -134,14 +153,10 @@ export const StockLevelsPage: React.FC = () => {
         loading={loading}
         emptyHint="لا توجد أصناف"
         footer={
-          <tr className="aseel-row--total">
-            <td colSpan={7} style={{ textAlign: "right", padding: "2px 6px" }}>
-              <strong>إجمالي القيمة</strong>
-            </td>
-            <td className="aseel-num" style={{ padding: "2px 6px" }}>
-              <strong>{fmt(totalVal)}</strong>
-            </td>
-          </tr>
+          <span style={{ fontWeight: 700, color: "var(--aseel-ink)" }}>
+            إجمالي القيمة ({filtered.length} صنف):{" "}
+            <span style={{ color: "var(--aseel-accent, #1857a4)" }}>{fmt(totalVal)}</span>
+          </span>
         }
       />
     </div>
