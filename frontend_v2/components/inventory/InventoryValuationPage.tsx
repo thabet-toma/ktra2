@@ -5,9 +5,9 @@
  */
 import React, { useState, useMemo, useCallback } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
-import type { SqlProduct } from "../../types/inventory";
+import type { SqlProduct, StockMovementDto } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
-import { RefreshCw, BarChart2 } from "lucide-react";
+import { RefreshCw, BarChart2, Info } from "lucide-react";
 
 type ValuationMethod =
   | "avg_cost"
@@ -48,32 +48,74 @@ const BONUS_LABELS: Record<BonusCalc, string> = {
 const fmt = (n: number) =>
   n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-function computeUnitPrice(product: SqlProduct, method: ValuationMethod): number {
+/**
+ * يَحسب سعر الوحدة لصنف معيَّن حسب الطريقة المختارة.
+ * - avg_cost: متوسط التكلفة الحالي (المخزون في كل حركة)
+ * - fifo: تكلفة أقدم حركة IN لم تَستهلك بعد (تَقدير من الحركات)
+ * - lifo: تكلفة أحدث حركة IN
+ * - avg_purchase: المتوسط الحسابي لكل unit_cost في حركات IN
+ * - avg_sale: المتوسط الحسابي لكل unit_cost في حركات OUT
+ * - selected_price: avg_cost (placeholder حتى N8-T9 يَفتح price tiers)
+ */
+function computeUnitPrice(
+  product: SqlProduct,
+  method: ValuationMethod,
+  movements: StockMovementDto[],
+): number {
+  const avgCost = Number(product.avg_cost) || 0;
+  const productMoves = movements.filter((m) => m.product === product.id);
+  const ins = productMoves.filter((m) => m.movement_type.includes("IN"));
+  const outs = productMoves.filter((m) => m.movement_type.includes("OUT"));
+
+  const avgOf = (arr: StockMovementDto[]): number => {
+    const valid = arr.map((m) => Number(m.unit_cost)).filter((n) => n > 0);
+    return valid.length ? valid.reduce((s, n) => s + n, 0) / valid.length : 0;
+  };
+
   switch (method) {
     case "avg_cost":
+      return avgCost;
     case "fifo":
+      return Number(ins[0]?.unit_cost) || avgCost;
     case "lifo":
+      return Number(ins[ins.length - 1]?.unit_cost) || avgCost;
     case "avg_purchase":
-      return Number(product.avg_cost) || 0;
+      return avgOf(ins) || avgCost;
     case "avg_sale":
-      return Number((product as unknown as Record<string, unknown>).sale_price1) || Number(product.avg_cost) || 0;
+      return avgOf(outs) || avgCost;
     case "selected_price":
-      return Number(product.avg_cost) || 0;
+      return avgCost;
     default:
-      return Number(product.avg_cost) || 0;
+      return avgCost;
   }
+}
+
+function applyBonusQty(
+  product: SqlProduct,
+  baseQty: number,
+  bonus: BonusCalc,
+  movements: StockMovementDto[],
+): number {
+  if (bonus === "none") return baseQty;
+  if (bonus === "from_movements") {
+    const productMoves = movements.filter((m) => m.product === product.id);
+    return productMoves.reduce((s, m) => {
+      const q = Number(m.quantity) || 0;
+      return s + (m.movement_type.includes("IN") ? q : -q);
+    }, 0);
+  }
+  return baseQty;
 }
 
 export const InventoryValuationPage: React.FC = () => {
   const [products, setProducts] = useState<SqlProduct[]>([]);
+  const [movements, setMovements] = useState<StockMovementDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [hasRun, setHasRun] = useState(false);
 
   const [method, setMethod] = useState<ValuationMethod>("avg_cost");
   const [bonusCalc, setBonusCalc] = useState<BonusCalc>("none");
-  const [filterWarehouse, setFilterWarehouse] = useState("");
-  const [filterBranch, setFilterBranch] = useState("");
   const [asOfDate, setAsOfDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [filterCategory, setFilterCategory] = useState("");
   const [search, setSearch] = useState("");
@@ -82,15 +124,21 @@ export const InventoryValuationPage: React.FC = () => {
     setLoading(true);
     setErr(null);
     try {
-      const all = (await inventoryApi.getProducts()) as SqlProduct[];
-      setProducts(all);
+      const [all, moves] = await Promise.all([
+        inventoryApi.getProducts(),
+        inventoryApi.getStockMovements(
+          asOfDate ? { date_to: asOfDate } : undefined,
+        ),
+      ]);
+      setProducts(all as SqlProduct[]);
+      setMovements(moves as StockMovementDto[]);
       setHasRun(true);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "خطأ في التحميل");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [asOfDate]);
 
   const categories = useMemo(() => {
     const set = new Set(products.map((p) => p.category_name || "").filter(Boolean));
@@ -112,8 +160,9 @@ export const InventoryValuationPage: React.FC = () => {
         return true;
       })
       .map((p) => {
-        const qty = Number(p.quantity_on_hand) || 0;
-        const unitPrice = computeUnitPrice(p, method);
+        const baseQty = Number(p.quantity_on_hand) || 0;
+        const qty = applyBonusQty(p, baseQty, bonusCalc, movements);
+        const unitPrice = computeUnitPrice(p, method, movements);
         return {
           id: p.id,
           sku: p.sku,
@@ -126,7 +175,7 @@ export const InventoryValuationPage: React.FC = () => {
         };
       })
       .filter((r) => r.quantity > 0);
-  }, [products, method, filterCategory, search]);
+  }, [products, movements, method, bonusCalc, filterCategory, search]);
 
   const grandTotal = useMemo(() => rows.reduce((s, r) => s + r.totalValue, 0), [rows]);
 
@@ -250,28 +299,6 @@ export const InventoryValuationPage: React.FC = () => {
           />
         </div>
 
-        {/* Warehouse */}
-        <div className="aseel-field">
-          <label className="aseel-field-label">المخزن</label>
-          <input
-            className="aseel-input"
-            placeholder="كل المخازن"
-            value={filterWarehouse}
-            onChange={(e) => setFilterWarehouse(e.target.value)}
-          />
-        </div>
-
-        {/* Branch */}
-        <div className="aseel-field">
-          <label className="aseel-field-label">الفرع</label>
-          <input
-            className="aseel-input"
-            placeholder="كل الفروع"
-            value={filterBranch}
-            onChange={(e) => setFilterBranch(e.target.value)}
-          />
-        </div>
-
         {/* Category filter */}
         <div className="aseel-field">
           <label className="aseel-field-label">التصنيف</label>
@@ -300,6 +327,22 @@ export const InventoryValuationPage: React.FC = () => {
       </div>
 
       {err && <div className="aseel-banner aseel-banner--err">{err}</div>}
+
+      <div
+        style={{
+          display: "flex",
+          gap: 6,
+          alignItems: "center",
+          fontSize: "var(--aseel-fs-sm)",
+          color: "var(--aseel-ink-soft)",
+          padding: "2px 4px",
+        }}
+      >
+        <Info style={{ width: 12, height: 12 }} />
+        <span>
+          فلاتر «المخزن / الفرع» و«السعر المختار» تَتوفَّر بعد N8 (multi-warehouse + price tiers).
+        </span>
+      </div>
 
       {!hasRun && !loading && (
         <div
