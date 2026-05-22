@@ -1,7 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import type { AccountingAccount, GeneralLedgerResponse } from "../../types/accounting";
-import { BookOpen, Search } from "lucide-react";
+import {
+  AseelDocumentShell,
+  AseelReportTable,
+} from "../aseel";
+import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
+import { Search } from "lucide-react";
+
+type LedgerRow = GeneralLedgerResponse["transactions"][number];
 
 export interface AccountingGeneralLedgerPageProps {
   initialAccountId?: number | null;
@@ -42,7 +49,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
     appliedInitial.current = initialAccountId;
     setAccountId(String(initialAccountId));
     onInitialAccountConsumed?.();
-    // تشغيل التقرير تلقائياً عند الانتقال من شجرة الحسابات
+    // Auto-run when navigating from CoA
     void (async () => {
       setLoading(true);
       setErr(null);
@@ -94,123 +101,101 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
       maximumFractionDigits: 2,
     });
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l from-[var(--color-primary)] to-slate-900 text-white rounded-xl">
-        <BookOpen className="w-8 h-8 text-[var(--color-primary)]" />
-        <div>
-          <h1 className="text-lg font-bold">الأستاذ العام</h1>
-          <p className="text-xs text-[var(--color-primary)]">حركة حساب مع الرصيد الجاري</p>
-        </div>
-      </div>
+  // Use transactions from GeneralLedgerResponse
+  const ledgerRows: LedgerRow[] = data?.transactions || [];
 
-      <div className="flex flex-wrap gap-3 items-end bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-200 dark:border-gray-700">
-        <div className="flex-1 min-w-[200px]">
-          <label className="block text-xs text-gray-500 mb-1">الحساب</label>
-          <select
-            className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-            value={accountId}
-            onChange={(e) => setAccountId(e.target.value)}
-          >
-            <option value="">— اختر —</option>
-            {accounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {a.code} — {a.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">من</label>
-          <input
-            type="date"
-            className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="block text-xs text-gray-500 mb-1">إلى</label>
-          <input
-            type="date"
-            className="border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-            value={end}
-            onChange={(e) => setEnd(e.target.value)}
-          />
-        </div>
-        <label className="flex items-center gap-2 text-sm pb-2">
-          <input
-            type="checkbox"
-            checked={unposted}
-            onChange={(e) => setUnposted(e.target.checked)}
-          />
-          غير المرحّل
-        </label>
-        <button
-          type="button"
-          onClick={run}
-          className="flex items-center gap-2 px-4 py-2 bg-[var(--color-primary)] text-white rounded-lg text-sm"
-        >
-          <Search className="w-4 h-4" />
-          عرض
-        </button>
-      </div>
+  const columns: ReportColumn<LedgerRow>[] = [
+    { key: "date", header: "التاريخ", render: (r) => r.date },
+    { key: "journal_id", header: "رقم القيد", render: (r) => `#${r.journal_id}` },
+    { key: "description", header: "البيان", render: (r) => r.description },
+    { key: "debit", header: "مدين", numeric: true, render: (r) => fmt(Number(r.debit)) },
+    { key: "credit", header: "دائن", numeric: true, render: (r) => fmt(Number(r.credit)) },
+    { key: "balance", header: "الرصيد المتراكم", numeric: true, render: (r) => fmt(Number(r.balance)) },
+  ];
 
-      {err && (
-        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 text-sm">
-          {err}
+  const totalDebit = ledgerRows.reduce((s, r) => s + Number(r.debit), 0);
+  const totalCredit = ledgerRows.reduce((s, r) => s + Number(r.credit), 0);
+  const totals = data ? {
+    debit: fmt(totalDebit),
+    credit: fmt(totalCredit),
+    balance: fmt(Number(data.closing_balance)),
+  } : undefined;
+
+  const filterBar = (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
+      <div className="aseel-field" style={{ flex: "1", minWidth: "200px" }}>
+        <label className="aseel-field-label">الحساب</label>
+        <select className="aseel-input" value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+          <option value="">— اختر —</option>
+          {accounts.map((a) => (
+            <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
+          ))}
+        </select>
+      </div>
+      <div className="aseel-field">
+        <label className="aseel-field-label">من</label>
+        <input type="date" className="aseel-input" value={start} onChange={(e) => setStart(e.target.value)} />
+      </div>
+      <div className="aseel-field">
+        <label className="aseel-field-label">إلى</label>
+        <input type="date" className="aseel-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+      </div>
+      <label className="flex items-center gap-2 text-sm" style={{ paddingTop: "18px" }}>
+        <input type="checkbox" checked={unposted} onChange={(e) => setUnposted(e.target.checked)} />
+        غير المرحّل
+      </label>
+      <button type="button" className="aseel-toolbtn" onClick={run} style={{ marginTop: "18px" }}>
+        <Search className="w-4 h-4" />عرض
+      </button>
+    </div>
+  );
+
+  const reportContent = (
+    <>
+      {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+      {data && (
+        <div style={{ padding: "8px 0", fontSize: "0.85rem", color: "var(--aseel-ink-soft)" }}>
+          <strong>{data.account_code} — {data.account_name}</strong>
+          &nbsp;|&nbsp; رصيد افتتاحي: <strong>{fmt(Number(data.opening_balance))}</strong>
+          &nbsp;|&nbsp; رصيد ختامي: <strong>{fmt(Number(data.closing_balance))}</strong>
         </div>
       )}
+      <AseelReportTable<LedgerRow>
+        filterBar={filterBar}
+        columns={columns}
+        rows={ledgerRows}
+        totals={totals}
+        exportable={true}
+        loading={loading}
+        emptyHint="اختر حساباً واضغط عرض"
+        getRowKey={(r, idx) => `${r.journal_id}-${idx}`}
+      />
+    </>
+  );
 
-      {loading ? (
-        <div className="py-16 text-center text-gray-500">جاري التحميل…</div>
-      ) : data ? (
-        <div className="space-y-3">
-          <div className="p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-            <p className="font-bold">
-              {data.account_code} — {data.account_name}
-            </p>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              رصيد افتتاحي: {fmt(Number(data.opening_balance))} — رصيد
-              ختامي: {fmt(Number(data.closing_balance))}
-            </p>
-          </div>
-          <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-50 dark:bg-gray-900/50">
-                <tr>
-                  <th className="text-right p-2">التاريخ</th>
-                  <th className="text-right p-2">اليومية</th>
-                  <th className="text-right p-2">البيان</th>
-                  <th className="text-right p-2">مدين</th>
-                  <th className="text-right p-2">دائن</th>
-                  <th className="text-right p-2">الرصيد</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.transactions.map((t) => (
-                  <tr
-                    key={t.id}
-                    className="border-t border-gray-100 dark:border-gray-700"
-                  >
-                    <td className="p-2 whitespace-nowrap">{t.date}</td>
-                    <td className="p-2 font-mono">{t.journal_id}</td>
-                    <td className="p-2 max-w-xs truncate">{t.description}</td>
-                    <td className="p-2">{fmt(Number(t.debit))}</td>
-                    <td className="p-2">{fmt(Number(t.credit))}</td>
-                    <td className="p-2 font-medium">
-                      {fmt(Number(t.balance))}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {data.transactions.length === 0 && (
-              <p className="p-6 text-center text-gray-500">لا حركات</p>
-            )}
-          </div>
-        </div>
-      ) : null}
+  const shellActions: AseelToolbarAction[] = [
+    { key: "run", label: "عرض", icon: <Search className="w-4 h-4" />, onClick: run },
+  ];
+
+  const tabs: AseelTab[] = [
+    { key: "ledger", label: "حركة الحساب", content: reportContent },
+  ];
+
+  return (
+    <div data-skin="aseel">
+      <AseelDocumentShell
+        title="الأستاذ العام"
+        actions={shellActions}
+        header={<></>}
+        tabs={tabs}
+        status={
+          data ? (
+            <span className="aseel-status-item">{ledgerRows.length} حركة</span>
+          ) : undefined
+        }
+      >
+        <></>
+      </AseelDocumentShell>
     </div>
   );
 };
