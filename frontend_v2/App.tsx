@@ -41,6 +41,9 @@ import { AseelKitStory } from "./components/aseel/AseelKitStory";
 import { SalesInvoiceAseelStory } from "./components/sales/SalesInvoiceAseelStory";
 import { SalesQuotationsPage } from "./components/sales/SalesQuotationsPage";
 import { CreditDebitNotesPage } from "./components/sales/CreditDebitNotesPage";
+import { SalesReturnEditor } from "./components/sales/SalesReturnEditor";
+import { PurchaseReturnEditor } from "./components/sales/PurchaseReturnEditor";
+import { SupplierPaymentsPage } from "./components/sales/SupplierPaymentsPage";
 import { TaskList } from "./components/TaskList";
 import { RejectReasonModal } from "./components/modals/RejectReasonModal";
 import {
@@ -1500,6 +1503,15 @@ const App: React.FC = () => {
 
       case "credit-debit-notes":
         return <CreditDebitNotesPage />;
+
+      case "sales-return":
+        return <SalesReturnEditor onBack={() => setAppView("sales-invoices")} />;
+
+      case "purchase-return":
+        return <PurchaseReturnEditor onBack={() => setAppView("purchase-invoices")} />;
+
+      case "supplier-payments":
+        return <SupplierPaymentsPage />;
 
       default:
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;

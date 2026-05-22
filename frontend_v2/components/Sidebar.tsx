@@ -76,7 +76,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "sales-invoices" as AppView, label: "فواتير المبيعات", icon: <FileText className="h-5 w-5" /> },
     { view: "sales-quotations" as AppView, label: "العروض والطلبيات", icon: <FileText className="h-5 w-5" /> },
     { view: "credit-debit-notes" as AppView, label: "الإشعارات المدينة/الدائنة", icon: <FileText className="h-5 w-5" /> },
+    { view: "sales-return" as AppView, label: "مرجع البيع", icon: <FileText className="h-5 w-5" /> },
+    { view: "purchase-return" as AppView, label: "مرجع الشراء", icon: <FileText className="h-5 w-5" /> },
     { view: "sales-customer-payments" as AppView, label: "دفعات العملاء", icon: <Banknote className="h-5 w-5" /> },
+    { view: "supplier-payments" as AppView, label: "سندات الصرف للموردين", icon: <Banknote className="h-5 w-5" /> },
     { view: "sales-customers" as AppView, label: "العملاء", icon: <Users className="h-5 w-5" /> },
     { view: "sales-settings" as AppView, label: "إعدادات المبيعات", icon: <SettingsIcon className="h-5 w-5" /> },
   ];
