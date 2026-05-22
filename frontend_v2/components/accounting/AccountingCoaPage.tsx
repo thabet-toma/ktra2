@@ -3,6 +3,7 @@ import { accountingApi } from "../../services/accountingApi";
 import type { AccountingAccount } from "../../types/accounting";
 import {
   AseelDocumentShell,
+  useAseelIndexKeymap,
 } from "../aseel";
 import type { AseelToolbarAction, AseelTab } from "../aseel";
 import {
@@ -330,6 +331,9 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
   } | null>(null);
   const rowMenuRef = useRef<HTMLDivElement | null>(null);
 
+  // N3-T3: keyboard-selected account for drill-to-ledger via F2
+  const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+
   useEffect(() => {
     if (!rowMenu) return;
     const close = (e: MouseEvent) => {
@@ -351,13 +355,22 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
       setAccounts(data);
       const tree = buildTree(data);
       const o: Record<number, boolean> = {};
-      // Default: open only roots, collapse everything else.
+      // N3-T3 spec: default open 3 levels deep.
+      const parentById = new Map<number, number | null>();
+      for (const a of data) parentById.set(a.id, a.parent ?? null);
+      const depthOf = (id: number): number => {
+        let d = 0;
+        let cur = parentById.get(id) ?? null;
+        while (cur != null && d < 10) {
+          d += 1;
+          cur = parentById.get(cur) ?? null;
+        }
+        return d;
+      };
       for (const a of data) {
         const children = tree.get(a.id) ?? [];
-        if (children.length > 0) o[a.id] = false;
+        if (children.length > 0) o[a.id] = depthOf(a.id) < 2; // open levels 0,1 (so depths 0,1,2 visible)
       }
-      const rootList = tree.get(null) ?? [];
-      for (const r of rootList) o[r.id] = true;
       setOpen(o);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
@@ -365,6 +378,31 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
       setLoading(false);
     }
   }, []);
+
+  // N3-T3: F2 = drillToLedger, F4 = showNotes (N8-T7 backend pending), CtrlIns = new root, F6 = focus search
+  useAseelIndexKeymap({
+    F2: () => {
+      if (selectedAccountId != null && onOpenGeneralLedger) {
+        onOpenGeneralLedger(selectedAccountId);
+      } else if (onOpenGeneralLedger) {
+        // fallback: first visible root
+        const first = (buildTree(accounts).get(null) ?? [])[0];
+        if (first) onOpenGeneralLedger(first.id);
+      }
+    },
+    F4: () => {
+      // showNotes — يَنتظر backend N8-T7. حالياً يَفتح بطاقة المورد إن وُجد.
+      if (selectedAccountId != null) {
+        const acc = accounts.find((a) => a.id === selectedAccountId);
+        if (acc?.linked_partner && onOpenSupplier) onOpenSupplier(acc.linked_partner.id);
+      }
+    },
+    F6: () => {
+      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      el?.focus();
+    },
+    CtrlIns: () => openCreate(null),
+  });
 
   useEffect(() => {
     load();
@@ -528,6 +566,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
                   onOpenGeneralLedger={onOpenGeneralLedger}
                   onOpenSupplier={onOpenSupplier}
                   onOpenRowMenu={(acc, el) => {
+                    setSelectedAccountId(acc.id);
                     if (el) {
                       const r = el.getBoundingClientRect();
                       setRowMenu({ account: acc, anchor: r });
@@ -644,7 +683,8 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
         <label className="aseel-field-label">بحث</label>
         <input
           className="aseel-input"
-          placeholder="بحث بالكود أو الاسم..."
+          data-aseel-field="search"
+          placeholder="بحث بالكود أو الاسم... (F6)"
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
