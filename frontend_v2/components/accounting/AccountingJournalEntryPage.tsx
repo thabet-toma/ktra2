@@ -30,6 +30,7 @@ import {
   useAseelKeymap,
   useAseelFieldShortcuts,
   type AseelGridColumn,
+  type AseelIndexColumn,
 } from "../aseel";
 
 /* ─────────── types ─────────── */
@@ -439,16 +440,21 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     );
   }
 
-  /* ── N3-T1: account balance lookup helper ── */
+  /* ── N3-T1: account balance lookup helper (يَستخدم getGeneralLedger مع YTD) ── */
   const showAccountBalance = useCallback(async (lineIdx: number, accountId: string) => {
     if (!accountId) return;
     if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    setBalanceTooltip({ lineIdx, balance: '...' });
     try {
-      const balance = await accountingApi.getAccountBalance(Number(accountId));
+      const today = new Date();
+      const ledger = await accountingApi.getGeneralLedger({
+        account_id: accountId,
+        start_date: `${today.getFullYear()}-01-01`,
+        end_date: today.toISOString().split('T')[0],
+      });
+      const closing = Number((ledger as { closing_balance?: number | string })?.closing_balance ?? 0);
       const fmt = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const label = balance.net_balance != null
-        ? `الرصيد: ${fmt(Math.abs(balance.net_balance))} ${balance.net_balance >= 0 ? 'مدين' : 'دائن'}`
-        : 'لا يوجد رصيد';
+      const label = `الرصيد: ${fmt(Math.abs(closing))} ${closing >= 0 ? 'مدين' : 'دائن'}`;
       setBalanceTooltip({ lineIdx, balance: label });
       tooltipTimerRef.current = setTimeout(() => setBalanceTooltip(null), 4000);
     } catch {
@@ -460,12 +466,20 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   /* ── N3-T1: AseelGrid columns for journal lines ── */
   const journalGridColumns: AseelGridColumn<LineState & { _idx: number }>[] = [
     { key: 'seq',         header: '#',          width: '40px',  align: 'center', readOnly: true },
-    { key: 'account',     header: 'الحساب',      width: '28%' },
-    { key: 'description', header: 'البيان',      width: '22%' },
-    { key: 'partner',     header: 'الجهة',       width: '14%' },
+    { key: 'account',     header: 'الحساب',      width: '22%' },
+    { key: 'description', header: 'البيان',      width: '20%' },
+    { key: 'partner',     header: 'الجهة',       width: '13%' },
+    { key: 'costCenter',  header: 'مركز التكلفة', width: '13%' },
     { key: 'debit',       header: 'مدين (Dr)',    width: '110px', align: 'center', type: 'number' },
     { key: 'credit',      header: 'دائن (Cr)',    width: '110px', align: 'center', type: 'number' },
     { key: 'del',         header: '',            width: '36px',  align: 'center' },
+  ];
+
+  /* ── N3-T1: AseelIndexPicker columns for accounts ── */
+  const accountPickerColumns: AseelIndexColumn<AccountingAccount>[] = [
+    { key: 'code', header: 'الكود', width: '90px', value: (a) => a.code || '' },
+    { key: 'name', header: 'الاسم', value: (a) => a.name || '' },
+    { key: 'type', header: 'النوع', width: '90px', value: (a) => a.account_type || '' },
   ];
 
   type GridLine = LineState & { _idx: number };
@@ -480,6 +494,20 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       case 'description': return row.description;
       default: return '';
     }
+  };
+
+  const renderCostCenterCell = (row: GridLine) => {
+    if (posted) return <span className="text-xs">{costCenters.find((c) => String(c.id) === row.costCenterId)?.name || '—'}</span>;
+    return (
+      <select
+        className="aseel-input"
+        value={row.costCenterId}
+        onChange={(e) => updateLine(row._idx, { costCenterId: e.target.value })}
+      >
+        <option value="">—</option>
+        {costCenters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+    );
   };
 
   const gridOnChange = (rowIndex: number, key: string, value: string) => {
@@ -535,6 +563,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         type="number" step="0.01" min="0" placeholder="0.00"
         className="aseel-input aseel-num"
         data-aseel-field="remaining-amount"
+        data-aseel-key="1"
         data-line-idx={String(row._idx)}
         data-side="debit"
         value={row.debit}
@@ -557,6 +586,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         type="number" step="0.01" min="0" placeholder="0.00"
         className="aseel-input aseel-num"
         data-aseel-field="remaining-amount"
+        data-aseel-key="1"
         data-line-idx={String(row._idx)}
         data-side="credit"
         value={row.credit}
@@ -588,11 +618,12 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       </button>
     ) : null;
 
-  journalGridColumns[1].render = renderAccountCell;
-  journalGridColumns[3].render = renderPartnerCell;
-  journalGridColumns[4].render = renderDebitCell;
-  journalGridColumns[5].render = renderCreditCell;
-  journalGridColumns[6].render = renderDelCell;
+  journalGridColumns[1].render = renderAccountCell;     // الحساب
+  journalGridColumns[3].render = renderPartnerCell;     // الجهة
+  journalGridColumns[4].render = renderCostCenterCell;  // مركز التكلفة
+  journalGridColumns[5].render = renderDebitCell;       // مدين
+  journalGridColumns[6].render = renderCreditCell;      // دائن
+  journalGridColumns[7].render = renderDelCell;         // حذف
 
   /* ── render ── */
   /* ── render ── */
@@ -760,502 +791,162 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         </>
       }
     >
-    <div className="space-y-5 max-w-5xl mx-auto" style={{ height: '100%', overflow: 'auto', padding: '12px', background: '#ffffff' }}>
+    <div style={{ height: '100%', overflow: 'auto', padding: '8px 12px', background: 'var(--aseel-bg, #fffbf5)' }}>
 
-      {/* ── شريط العنوان ── */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={onBack}
-            className="flex items-center gap-1.5 text-[var(--font-size-sm)] text-[var(--color-primary)] dark:text-[var(--color-primary)] hover:underline"
-          >
-            <ArrowRight className="w-4 h-4" />
-            العودة
-          </button>
-          <span className="text-[var(--color-border)] dark:text-[var(--color-border)]">|</span>
-          <h1 className="text-[var(--font-size-base)] font-bold text-[var(--color-text)] dark:text-[var(--color-text)]">
-            {journalId ? `قيد رقم #${journalId}` : "قيد يومية جديد"}
-          </h1>
-          {posted && (
-            <span className="inline-flex items-center gap-1 text-[var(--font-size-xs)] font-medium px-2 py-0.5 rounded-full bg-[var(--color-success)]/20 text-[var(--color-success)] dark:bg-[var(--color-success)]/30 dark:text-[var(--color-success)]">
-              <CheckCircle className="w-3 h-3" />
-              مرحّل — للقراءة فقط
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* ── ارتباط بصفقة أو شحنة (تنقّل فقط — لا ترحيل من هنا) ── */}
+      {/* ── ارتباط بصفقة/شحنة (تنقّل) ── */}
       {activeDealRef && (
-        <div className="flex items-center gap-3 p-3 rounded-[var(--radius-lg)] bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-3)] border border-[var(--color-border)] dark:border-[var(--color-border)]">
-          <div className="p-2 bg-[var(--color-surface-3)]/80 dark:bg-[var(--color-surface-2)] rounded-[var(--radius-lg)] flex-shrink-0">
-            <Handshake className="w-5 h-5 text-[var(--color-text-muted)] dark:text-[var(--color-text)]" />
+        <div className="aseel-banner" style={{ marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '12px', padding: '8px 12px' }}>
+          <Handshake className="w-4 h-4" />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ fontSize: '11px', color: 'var(--aseel-ink-soft)' }}>
+              {isShipmentLink ? 'مرتبط بشحنة:' : 'مرتبط بصفقة:'}
+            </span>
+            <span style={{ fontWeight: 600, marginInlineStart: '6px' }}>{activeDealRef.displayName}</span>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] dark:text-[var(--color-text-muted)] mb-0.5">
-              {isShipmentLink ? "مرتبط بشحنة" : "مرتبط بصفقة"}
-            </p>
-            <p className="text-[var(--font-size-sm)] font-semibold text-[var(--color-text)] dark:text-[var(--color-text)] truncate">
-              {activeDealRef.displayName}
-            </p>
-          </div>
-          {isShipmentLink &&
-            activeDealRef.dealId &&
-            onNavigateToShipment &&
-            /^\d+$/.test(String(activeDealRef.dealId).trim()) && (
-              <button
-                type="button"
-                onClick={() => onNavigateToShipment(String(activeDealRef.dealId).trim())}
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-700 text-white hover:bg-slate-800 transition-colors flex-shrink-0"
-              >
-                فتح الشحنة
-                <ExternalLink className="w-3.5 h-3.5" />
-              </button>
-            )}
-          {!isShipmentLink &&
-            (activeDealRef.dealId || activeDealRef.dealNumber) &&
-            onNavigateToDeal && (
-              <button
-                type="button"
-                onClick={() =>
-                  onNavigateToDeal(activeDealRef.dealId || activeDealRef.dealNumber)
-                }
-                className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-slate-700 text-white hover:bg-slate-800 transition-colors flex-shrink-0"
-              >
-                فتح الصفقة
-                <ExternalLink className="w-3.5 h-3.5" />
-              </button>
-            )}
+          {isShipmentLink && activeDealRef.dealId && onNavigateToShipment && /^\d+$/.test(String(activeDealRef.dealId).trim()) && (
+            <button type="button" className="aseel-toolbtn" onClick={() => onNavigateToShipment(String(activeDealRef.dealId).trim())}>
+              <ExternalLink className="w-3 h-3" /> فتح الشحنة
+            </button>
+          )}
+          {!isShipmentLink && (activeDealRef.dealId || activeDealRef.dealNumber) && onNavigateToDeal && (
+            <button type="button" className="aseel-toolbtn" onClick={() => onNavigateToDeal(activeDealRef.dealId || activeDealRef.dealNumber)}>
+              <ExternalLink className="w-3 h-3" /> فتح الصفقة
+            </button>
+          )}
         </div>
       )}
 
       {/* ── خطأ ── */}
       {err && (
-        <div className="flex items-start gap-2 p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm">
-          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+        <div className="aseel-banner aseel-banner--err" style={{ marginBottom: '8px' }}>
+          <AlertTriangle className="w-4 h-4" style={{ marginInlineEnd: '6px' }} />
           {err}
         </div>
       )}
 
-      {/* ── رأس القيد ── */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5 space-y-4">
-        <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300 border-b border-gray-100 dark:border-gray-700 pb-2">
-          بيانات القيد
-        </h2>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* التاريخ */}
-          <div>
-            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-              تاريخ القيد <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="date"
-              disabled={posted}
-              className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:text-white disabled:opacity-60 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              value={header.transaction_date}
-              onChange={(e) => setHeader((h) => ({ ...h, transaction_date: e.target.value }))}
-            />
-          </div>
-
-          {/* المرجع */}
-          <div>
-            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-              المرجع
-            </label>
-            {posted ? (
-              /* عرض قراءة فقط للمرجع */
-              header.reference_type ? (
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-xs font-medium text-gray-700 dark:text-gray-300">
-                    <Info className="w-3.5 h-3.5" />
-                    {refTypeLabel(header.reference_type, header.description)}
-                    {header.reference_id && (
-                      <span className="text-gray-400 dark:text-gray-500">
-                        · #{header.reference_id}
-                      </span>
-                    )}
-                  </span>
-                </div>
-              ) : (
-                <div className="px-3 py-2 text-sm text-gray-400">—</div>
-              )
-            ) : (
-              <div className="flex gap-2">
-                <select
-                  className="flex-1 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  value={header.reference_type}
-                  onChange={(e) => setHeader((h) => ({ ...h, reference_type: e.target.value }))}
-                >
-                  <option value="">— نوع المرجع —</option>
-                  {Object.entries(REF_TYPE_LABELS).map(([k, v]) => (
-                    <option key={k} value={k}>{v}</option>
-                  ))}
-                  <option value="OTHER">أخرى</option>
-                </select>
-                <input
-                  type="number"
-                  placeholder="رقم"
-                  className="w-24 border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  value={header.reference_id}
-                  onChange={(e) => setHeader((h) => ({ ...h, reference_id: e.target.value }))}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* العملة + سعر الصرف */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-              العملة
-            </label>
-            {posted ? (
-              <span className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-xs font-medium text-gray-700 dark:text-gray-300">
-                {header.currency_code || currencies.find((c) => String(c.CurrencyID) === header.currency)?.Code || "—"}
-              </span>
-            ) : (
-              <select
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                value={header.currency}
-                onChange={(e) => {
-                  const sel = currencies.find((c) => String(c.CurrencyID) === e.target.value);
-                  setHeader((h) => ({
-                    ...h,
-                    currency: e.target.value,
-                    exchange_rate: sel?.IsBaseCurrency ? "1" : h.exchange_rate,
-                    currency_code: sel?.Code || "",
-                  }));
-                }}
-              >
-                <option value="">— اختر العملة —</option>
-                {currencies.map((c) => (
-                  <option key={c.CurrencyID} value={c.CurrencyID}>
-                    {c.Code} — {c.Name} {c.IsBaseCurrency ? "(أساسية)" : ""}
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-              سعر الصرف (مقابل العملة الأساسية)
-            </label>
-            {posted ? (
-              <span className="inline-flex items-center px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 text-xs font-mono font-medium text-gray-700 dark:text-gray-300">
-                {Number(header.exchange_rate).toFixed(6)}
-              </span>
-            ) : (
-              <input
-                type="number"
-                step="0.000001"
-                min="0"
-                className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm font-mono bg-white dark:bg-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                value={header.exchange_rate}
-                onChange={(e) => setHeader((h) => ({ ...h, exchange_rate: e.target.value }))}
-                disabled={
-                  !!currencies.find((c) => String(c.CurrencyID) === header.currency)?.IsBaseCurrency
-                }
-              />
-            )}
-          </div>
-        </div>
-
-        {/* البيان */}
-        <div>
-          <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-            البيان <span className="text-red-500">*</span>
-          </label>
-          <textarea
+      {/* ── شريط الإعدادات الثانوية: مرجع + مركز التكلفة ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '8px' }}>
+        <label className="aseel-field">
+          <span className="aseel-field-label">رقم المرجع</span>
+          <input
+            className="aseel-input"
+            type="number"
             disabled={posted}
-            rows={2}
-            placeholder="وصف موجز للقيد — مثال: دفعة أولى · صفقة D-0023 — مصنع ABC"
-            className="w-full border border-gray-300 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-900 dark:text-white disabled:opacity-60 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-            value={header.description}
-            onChange={(e) => setHeader((h) => ({ ...h, description: e.target.value }))}
+            value={header.reference_id}
+            onChange={(e) => setHeader((h) => ({ ...h, reference_id: e.target.value }))}
+            placeholder="—"
           />
-        </div>
+        </label>
+        <label className="aseel-field" style={{ gridColumn: 'span 2' }}>
+          <span className="aseel-field-label">معلومات المرجع</span>
+          <div className="aseel-input" style={{ display: 'flex', alignItems: 'center', minHeight: '28px', background: 'var(--aseel-surface-2, #f4ede0)' }}>
+            <Info className="w-3 h-3" style={{ marginInlineEnd: '6px', color: 'var(--aseel-ink-soft)' }} />
+            <span style={{ fontSize: '12px' }}>
+              {header.reference_type
+                ? `${refTypeLabel(header.reference_type, header.description)}${header.reference_id ? ' · #' + header.reference_id : ''}`
+                : '— لا مرجع —'}
+            </span>
+          </div>
+        </label>
       </div>
 
-      {/* ── بنود القيد ── */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-700 dark:text-gray-300">بنود القيد</h2>
-          {totalDebit > 0 || totalCredit > 0 ? (
-            balanced ? (
-              <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                <CheckCircle className="w-3.5 h-3.5" /> متوازن
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 text-xs text-rose-600 dark:text-rose-400 font-medium">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                فرق: {diff > 0 ? "+" : ""}{diff.toFixed(2)}
-              </span>
-            )
-          ) : null}
-        </div>
+      {/* ── AseelGrid لبنود القيد ── */}
+      <AseelGrid<GridLine>
+        columns={journalGridColumns}
+        rows={gridLines}
+        getCell={gridGetCell}
+        getRowKey={(r) => r._idx}
+        onChange={gridOnChange}
+        onAddRow={() => setLines((prev) => [...prev, emptyLine()])}
+        variant="journal"
+        emptyHint="ابدأ إدخال بنود القيد — Enter للسطر التالي"
+      />
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900/50">
-              <tr>
-                <th className="text-right px-3 py-2.5 font-medium text-gray-600 dark:text-gray-400 min-w-[180px]">
-                  الحساب <span className="text-red-400">*</span>
-                </th>
-                <th className="text-right px-3 py-2.5 font-medium text-gray-600 dark:text-gray-400 min-w-[160px]">
-                  بيان السطر
-                </th>
-                <th className="text-right px-3 py-2.5 font-medium text-gray-600 dark:text-gray-400 hidden lg:table-cell min-w-[140px]">
-                  شريك / جهة
-                </th>
-                <th className="text-right px-3 py-2.5 font-medium text-gray-600 dark:text-gray-400 hidden xl:table-cell min-w-[130px]">
-                  مركز تكلفة
-                </th>
-                <th className="text-center px-3 py-2.5 font-medium text-blue-600 dark:text-blue-400 w-32">
-                  مدين (Dr)
-                </th>
-                <th className="text-center px-3 py-2.5 font-medium text-rose-600 dark:text-rose-400 w-32">
-                  دائن (Cr)
-                </th>
-                <th className="w-9" />
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-              {lines.map((line, i) => {
-                const hasAmount = parseFloat(line.debit) > 0 || parseFloat(line.credit) > 0;
-                const isDebit = parseFloat(line.debit) > 0;
-                const isCredit = parseFloat(line.credit) > 0;
-                return (
-                  <tr
-                    key={i}
-                    className={`transition-colors ${
-                      hasAmount
-                        ? isDebit
-                          ? "bg-blue-50/30 dark:bg-blue-900/10"
-                          : "bg-rose-50/30 dark:bg-rose-900/10"
-                        : "hover:bg-gray-50 dark:hover:bg-gray-900/20"
-                    }`}
-                  >
-                    {/* الحساب */}
-                    <td className="px-3 py-2">
-                      {posted ? (
-                        <span className="text-xs text-gray-700 dark:text-gray-300">
-                          {accounts.find((a) => String(a.id) === line.accountId)
-                            ? `${accounts.find((a) => String(a.id) === line.accountId)!.code} — ${accounts.find((a) => String(a.id) === line.accountId)!.name}`
-                            : "—"}
-                        </span>
-                      ) : (
-                        <select
-                          className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1.5 text-xs bg-white dark:bg-gray-900 dark:text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                          value={line.accountId}
-                          onChange={(e) => updateLine(i, { accountId: e.target.value })}
-                        >
-                          <option value="">— اختر الحساب —</option>
-                          {accounts.map((a) => (
-                            <option key={a.id} value={a.id}>
-                              {a.code} — {a.name}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-
-                    {/* بيان السطر */}
-                    <td className="px-3 py-2">
-                      {posted ? (
-                        <span className="text-xs text-gray-600 dark:text-gray-400">
-                          {line.description || "—"}
-                        </span>
-                      ) : (
-                        <input
-                          type="text"
-                          placeholder="وصف اختياري"
-                          className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1.5 text-xs bg-white dark:bg-gray-900 dark:text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                          value={line.description}
-                          onChange={(e) => updateLine(i, { description: e.target.value })}
-                        />
-                      )}
-                    </td>
-
-                    {/* الشريك */}
-                    <td className="px-3 py-2 hidden lg:table-cell">
-                      {posted ? (
-                        <span className="text-xs text-gray-600 dark:text-gray-400">
-                          {partners.find((p) => String(p.id) === line.partnerId)?.name || "—"}
-                        </span>
-                      ) : (
-                        <select
-                          className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1.5 text-xs bg-white dark:bg-gray-900 dark:text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                          value={line.partnerId}
-                          onChange={(e) => updateLine(i, { partnerId: e.target.value })}
-                        >
-                          <option value="">—</option>
-                          {partners.map((p) => (
-                            <option key={p.id} value={p.id}>{p.name}</option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-
-                    {/* مركز التكلفة */}
-                    <td className="px-3 py-2 hidden xl:table-cell">
-                      {posted ? (
-                        <span className="text-xs text-gray-600 dark:text-gray-400">
-                          {costCenters.find((c) => String(c.id) === line.costCenterId)?.name || "—"}
-                        </span>
-                      ) : (
-                        <select
-                          className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1.5 text-xs bg-white dark:bg-gray-900 dark:text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
-                          value={line.costCenterId}
-                          onChange={(e) => updateLine(i, { costCenterId: e.target.value })}
-                        >
-                          <option value="">—</option>
-                          {costCenters.map((c) => (
-                            <option key={c.id} value={c.id}>{c.name}</option>
-                          ))}
-                        </select>
-                      )}
-                    </td>
-
-                    {/* مدين */}
-                    <td className="px-3 py-2">
-                      {posted ? (
-                        <span className={`block text-center text-xs font-mono font-semibold ${isDebit ? "text-blue-700 dark:text-blue-300" : "text-gray-300 dark:text-gray-600"}`}>
-                          {isDebit ? fmtAmount(line.debit) : ""}
-                        </span>
-                      ) : (
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          className={`w-full border rounded-lg px-2 py-1.5 text-center text-xs font-mono focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-900 dark:text-white ${
-                            isDebit
-                              ? "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-900/20"
-                              : "border-gray-200 dark:border-gray-600"
-                          }`}
-                          value={line.debit}
-                          onChange={(e) => updateLine(i, { debit: e.target.value })}
-                        />
-                      )}
-                    </td>
-
-                    {/* دائن */}
-                    <td className="px-3 py-2">
-                      {posted ? (
-                        <span className={`block text-center text-xs font-mono font-semibold ${isCredit ? "text-rose-700 dark:text-rose-300" : "text-gray-300 dark:text-gray-600"}`}>
-                          {isCredit ? fmtAmount(line.credit) : ""}
-                        </span>
-                      ) : (
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          className={`w-full border rounded-lg px-2 py-1.5 text-center text-xs font-mono focus:ring-1 focus:ring-rose-500 focus:border-rose-500 bg-white dark:bg-gray-900 dark:text-white ${
-                            isCredit
-                              ? "border-rose-300 dark:border-rose-700 bg-rose-50 dark:bg-rose-900/20"
-                              : "border-gray-200 dark:border-gray-600"
-                          }`}
-                          value={line.credit}
-                          onChange={(e) => updateLine(i, { credit: e.target.value })}
-                        />
-                      )}
-                    </td>
-
-                    {/* حذف */}
-                    <td className="px-2 py-2">
-                      {!posted && lines.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeLine(i)}
-                          className="p-1 text-gray-300 hover:text-red-500 dark:hover:text-red-400 rounded transition-colors"
-                          title="حذف السطر"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-
-            {/* مجموع */}
-            <tfoot className="bg-gray-50 dark:bg-gray-900/40 border-t-2 border-gray-200 dark:border-gray-600">
-              <tr>
-                <td colSpan={2} className="px-3 py-3 text-xs text-gray-500 dark:text-gray-400">
-                  {lines.filter((l) => l.accountId && (parseFloat(l.debit) > 0 || parseFloat(l.credit) > 0)).length} سطر نشط
-                </td>
-                <td className="hidden lg:table-cell" />
-                <td className="hidden xl:table-cell" />
-                <td className="px-3 py-3 text-center">
-                  <span className="block text-xs text-blue-600 dark:text-blue-400 mb-0.5">مدين</span>
-                  <span className="font-mono font-bold text-blue-700 dark:text-blue-300 text-sm">
-                    {totalDebit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </td>
-                <td className="px-3 py-3 text-center">
-                  <span className="block text-xs text-rose-600 dark:text-rose-400 mb-0.5">دائن</span>
-                  <span className="font-mono font-bold text-rose-700 dark:text-rose-300 text-sm">
-                    {totalCredit.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </td>
-                <td />
-              </tr>
-            </tfoot>
-          </table>
-        </div>
+      {/* ── إجمالي/فرق row ── */}
+      <div className="aseel-total-row aseel-total-row--grand" style={{ marginTop: '6px', display: 'grid', gridTemplateColumns: '1fr auto auto auto', gap: '12px', padding: '8px 12px' }}>
+        <span style={{ fontSize: '12px', color: 'var(--aseel-ink-soft)' }}>
+          {lines.filter((l) => l.accountId && (parseFloat(l.debit) > 0 || parseFloat(l.credit) > 0)).length} سطر نشط
+        </span>
+        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <span style={{ fontSize: '10px', color: 'var(--aseel-ink-soft)' }}>مدين</span>
+          <span className="aseel-num" style={{ fontWeight: 700, color: 'var(--color-primary, #3b5bdb)' }}>{fmtAmount(totalDebit)}</span>
+        </span>
+        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <span style={{ fontSize: '10px', color: 'var(--aseel-ink-soft)' }}>دائن</span>
+          <span className="aseel-num" style={{ fontWeight: 700, color: 'var(--color-danger, #e03131)' }}>{fmtAmount(totalCredit)}</span>
+        </span>
+        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+          <span style={{ fontSize: '10px', color: 'var(--aseel-ink-soft)' }}>{balanced ? 'متوازن' : 'فرق'}</span>
+          <span className="aseel-num" style={{
+            fontWeight: 700,
+            color: balanced && totalDebit > 0 ? 'var(--aseel-ok, #2d7d46)' : 'var(--aseel-err, #c0392b)',
+          }}>
+            {balanced && totalDebit > 0 ? '✓' : fmtAmount(Math.abs(diff))}
+          </span>
+        </span>
       </div>
 
-      {/* ── أزرار الحفظ ── */}
+      {/* ── أزرار سفلية ── */}
       {!posted && (
-        <div className="flex flex-wrap items-center gap-3">
+        <div style={{ display: 'flex', gap: '8px', marginTop: '10px', justifyContent: 'flex-end' }}>
           <button
             type="button"
+            className="aseel-toolbtn"
             onClick={() => setLines((prev) => [...prev, emptyLine()])}
-            className="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
           >
-            <Plus className="w-4 h-4" />
-            إضافة سطر
+            <Plus className="w-3 h-3" /> سطر جديد
           </button>
-          <div className="flex-1" />
           <button
             type="button"
+            className="aseel-toolbtn"
             disabled={saving}
             onClick={saveOnly}
-            className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50 transition-colors"
           >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
             حفظ مسودة
           </button>
           <button
             type="button"
-            disabled={saving}
+            className="aseel-toolbtn"
+            disabled={saving || !balanced || totalDebit <= 0}
             onClick={saveAndPost}
-            className={`flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors ${
-              balanced && totalDebit > 0
-                ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                : "bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed"
-            }`}
-            title={!balanced ? "يجب توازن القيد أولاً" : ""}
+            title={!balanced ? 'يجب توازن القيد أولاً (F12)' : 'F12 = حفظ وترحيل'}
+            style={{
+              background: balanced && totalDebit > 0 ? 'var(--aseel-ok, #2d7d46)' : undefined,
+              color: balanced && totalDebit > 0 ? '#fff' : undefined,
+            }}
           >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-            حفظ وترحيل
+            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
+            حفظ وترحيل (F12)
           </button>
         </div>
       )}
 
-      {/* تذكير متوازن */}
       {posted && (
-        <div className="flex items-center gap-2 text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-xl px-4 py-3">
-          <CheckCircle className="w-4 h-4 flex-shrink-0" />
-          هذا القيد مرحّل ومؤكد — لا يمكن تعديله.
+        <div className="aseel-banner" style={{ marginTop: '10px', background: 'var(--aseel-ok-bg, #e3f6e9)', color: 'var(--aseel-ok, #2d7d46)' }}>
+          <CheckCircle className="w-3 h-3" style={{ marginInlineEnd: '6px' }} />
+          هذا القيد مرحَّل — لا يمكن تعديله.
         </div>
       )}
     </div>
+
+    {/* ── AseelIndexPicker للحسابات (يُفتح بـ + على خلية الحساب) ── */}
+    <AseelIndexPicker<AccountingAccount>
+      open={showAccountPicker}
+      title="فهرس الحسابات"
+      rows={accounts}
+      columns={accountPickerColumns}
+      getRowKey={(a) => a.id}
+      searchValue={(a) => `${a.code || ''} ${a.name || ''}`}
+      onSelect={(a) => {
+        if (pickerTargetLine != null) {
+          updateLine(pickerTargetLine, { accountId: String(a.id) });
+        }
+        setShowAccountPicker(false);
+        setPickerTargetLine(null);
+      }}
+      onClose={() => { setShowAccountPicker(false); setPickerTargetLine(null); }}
+    />
     </AseelDocumentShell>
     </div>
   );
