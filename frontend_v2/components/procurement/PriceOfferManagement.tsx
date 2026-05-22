@@ -100,9 +100,16 @@ export const PriceOfferManagement: React.FC = () => {
     setSaving(true);
     try {
       if (offerData.id) {
-        await priceOffersService.updatePriceOffer(offerData as PriceOffer);
+        await priceOffersService.updatePriceOfferInDb(offerData as PriceOffer);
       } else {
-        await priceOffersService.addPriceOffer(offerData as Omit<PriceOffer, "id">);
+        const newOffer: PriceOffer = {
+          ...(offerData as PriceOffer),
+          id: `offer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          offerNumber: offerData.offerNumber || await priceOffersService.getNextOfferNumber(),
+          createdAt: offerData.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await priceOffersService.addPriceOfferToDb(newOffer);
       }
       setViewMode("list");
     } catch (e) {
@@ -113,7 +120,13 @@ export const PriceOfferManagement: React.FC = () => {
   };
 
   const handleStatusChange = async (offerId: string, newStatus: PriceOfferStatus) => {
-    await priceOffersService.updatePriceOfferStatus(offerId, newStatus);
+    const target = offers.find((o) => o.id === offerId);
+    if (!target) { setStatusModalOpen(false); return; }
+    await priceOffersService.updatePriceOfferInDb({
+      ...target,
+      status: newStatus,
+      updatedAt: new Date().toISOString(),
+    });
     setStatusModalOpen(false);
   };
 
@@ -123,7 +136,7 @@ export const PriceOfferManagement: React.FC = () => {
     { key: "supplier", header: "المورد",
       render: (o) => <>{suppliers.find((s) => s.id === o.supplierId)?.name || "—"}</> },
     { key: "date", header: "التاريخ", width: "100px",
-      render: (o) => <>{fmtDate(o.offerDate)}</> },
+      render: (o) => <>{fmtDate(o.createdAt)}</> },
     { key: "items", header: "الأصناف", width: "70px", align: "center",
       render: (o) => <>{(o.items || []).length}</> },
     { key: "total", header: "الإجمالي", width: "120px", align: "center", numeric: true,
