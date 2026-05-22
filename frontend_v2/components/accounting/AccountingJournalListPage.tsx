@@ -28,6 +28,11 @@ export interface JournalListItem {
   exchange_rate?: string | number;
   tenant_name?: string | null;
   source_label?: string | null;
+  created_at?: string | null;
+  created_by_name?: string | null;
+  total_debit?: string | number | null;
+  total_credit?: string | number | null;
+  lines?: Array<{ debit?: string | number; credit?: string | number }>;
 }
 
 const REF_LABELS: Record<string, string> = {
@@ -54,6 +59,27 @@ function fmtDate(raw: string | null | undefined) {
     return `${d}/${m}/${y}`;
   }
   return raw;
+}
+
+function fmtTime(raw: string | null | undefined) {
+  if (!raw) return "—";
+  // expect ISO with time portion, e.g. 2024-12-01T13:45:00Z
+  const m = String(raw).match(/T(\d{2}:\d{2})/);
+  return m ? m[1] : "—";
+}
+
+function fmtAmount(v: string | number | null | undefined) {
+  const n = typeof v === "string" ? parseFloat(v) : v;
+  if (n == null || isNaN(Number(n))) return "—";
+  return Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function journalAmount(j: JournalListItem): number {
+  if (j.total_debit != null) return Number(j.total_debit);
+  if (j.lines && j.lines.length) {
+    return j.lines.reduce((s, l) => s + (Number(l.debit) || 0), 0);
+  }
+  return 0;
 }
 
 interface Props {
@@ -120,16 +146,38 @@ export const AccountingJournalListPage: React.FC<Props> = ({
     {
       key: "id",
       header: "رقم القيد",
-      width: "90px",
+      width: "80px",
       align: "center",
       render: (r) => <span className="aseel-num font-mono text-xs">{r.id}</span>,
     },
     {
       key: "transaction_date",
       header: "تاريخ القيد",
-      width: "110px",
+      width: "100px",
       align: "center",
       render: (r) => <span className="text-xs">{fmtDate(r.transaction_date)}</span>,
+    },
+    {
+      key: "time",
+      header: "الساعة",
+      width: "70px",
+      align: "center",
+      render: (r) => <span className="text-xs aseel-num font-mono">{fmtTime(r.created_at)}</span>,
+    },
+    {
+      key: "amount",
+      header: "مبلغ القيد",
+      width: "120px",
+      align: "left",
+      numeric: true,
+      render: (r) => <span className="text-xs aseel-num font-mono font-semibold">{fmtAmount(journalAmount(r))}</span>,
+    },
+    {
+      key: "currency",
+      header: "العملة",
+      width: "60px",
+      align: "center",
+      render: (r) => <span className="text-xs">{r.currency_code || "—"}</span>,
     },
     {
       key: "description",
@@ -141,9 +189,17 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       ),
     },
     {
+      key: "user",
+      header: "المستخدم",
+      width: "110px",
+      render: (r) => (
+        <span className="text-xs text-[var(--aseel-ink-soft)]">{r.created_by_name || "—"}</span>
+      ),
+    },
+    {
       key: "ref_type",
       header: "النوع",
-      width: "130px",
+      width: "120px",
       render: (r) => (
         <span className="text-xs text-[var(--aseel-ink-soft)]">
           {refLabel(r.reference_type)}
@@ -152,16 +208,9 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       ),
     },
     {
-      key: "currency",
-      header: "العملة",
-      width: "70px",
-      align: "center",
-      render: (r) => <span className="text-xs">{r.currency_code || "—"}</span>,
-    },
-    {
       key: "status",
       header: "الحالة",
-      width: "80px",
+      width: "70px",
       align: "center",
       render: (r) => (
         <span
@@ -178,7 +227,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
     {
       key: "action",
       header: "",
-      width: "60px",
+      width: "56px",
       align: "center",
       render: (r) => (
         <button
