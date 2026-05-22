@@ -57,6 +57,27 @@ export const CreditDebitNotesPage: React.FC = () => {
   const [formDate, setFormDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [formAmount, setFormAmount] = useState("");
   const [formReason, setFormReason] = useState("");
+  // N4-T5: حقول إضافية per spec
+  const [formIncludesTax, setFormIncludesTax] = useState(false);
+  const [formTaxRate, setFormTaxRate] = useState("17");
+  const [formRelatedInvoice, setFormRelatedInvoice] = useState("");
+  const [formVatStatementNo, setFormVatStatementNo] = useState("");
+  const [activeTab, setActiveTab] = useState<"main" | "notes" | "accounts">("main");
+
+  // N4-T5: حساب المبلغ بدون ضريبة / مبلغ الضريبة / الإجمالي
+  const amt = Number(formAmount) || 0;
+  const taxPct = Number(formTaxRate) || 0;
+  const { amountExcl, taxAmount, totalAmount } = (() => {
+    if (formIncludesTax) {
+      // formAmount includes tax → extract
+      const excl = amt / (1 + taxPct / 100);
+      return { amountExcl: excl, taxAmount: amt - excl, totalAmount: amt };
+    } else {
+      // formAmount excludes tax → add
+      const tax = amt * (taxPct / 100);
+      return { amountExcl: amt, taxAmount: tax, totalAmount: amt + tax };
+    }
+  })();
 
   const nav = useRecordNavigation<NoteRow>({
     items: notes,
@@ -144,7 +165,13 @@ export const CreditDebitNotesPage: React.FC = () => {
         note_type: formType,
         customer: Number(formCustomer),
         note_date: formDate,
-        amount: formAmount,
+        amount: String(totalAmount.toFixed(2)),
+        amount_excl_tax: String(amountExcl.toFixed(2)),
+        tax_amount: String(taxAmount.toFixed(2)),
+        tax_rate: String(taxPct),
+        includes_tax: formIncludesTax,
+        related_invoice: formRelatedInvoice ? Number(formRelatedInvoice) : null,
+        vat_statement_no: formVatStatementNo || null,
         reason: formReason,
       };
       if (selectedId) {
@@ -296,34 +323,101 @@ export const CreditDebitNotesPage: React.FC = () => {
               <button onClick={() => setShowForm(false)} className="p-1 hover:bg-gray-100 rounded"><FileDown className="w-5 h-5" /></button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">النوع</label>
-                <select value={formType} onChange={(e) => setFormType(e.target.value as "credit" | "debit")} className="w-full border rounded-lg p-2" data-aseel-key="1">
-                  <option value="credit">إشعار دائن</option>
-                  <option value="debit">إشعار مدين</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">العميل</label>
-                <select value={formCustomer} onChange={(e) => setFormCustomer(e.target.value)} className="w-full border rounded-lg p-2" data-aseel-key="1">
-                  <option value="">-- اختر --</option>
-                  {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">التاريخ</label>
-                <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full border rounded-lg p-2" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">المبلغ</label>
-                <input type="number" value={formAmount} onChange={(e) => setFormAmount(e.target.value)} className="w-full border rounded-lg p-2" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">السبب</label>
-                <textarea value={formReason} onChange={(e) => setFormReason(e.target.value)} className="w-full border rounded-lg p-2" rows={3} />
-              </div>
+            {/* N4-T5 tabs */}
+            <div className="flex gap-1 border-b border-gray-200 mb-3">
+              {[
+                { k: "main", l: "الرئيسية" },
+                { k: "notes", l: "الملاحظات" },
+                { k: "accounts", l: "الحسابات" },
+              ].map((t) => (
+                <button key={t.k} type="button"
+                  onClick={() => setActiveTab(t.k as "main" | "notes" | "accounts")}
+                  className={`px-3 py-1.5 text-xs font-medium border-b-2 ${activeTab === t.k ? "border-blue-600 text-blue-700" : "border-transparent text-gray-500"}`}>
+                  {t.l}
+                </button>
+              ))}
             </div>
+
+            {activeTab === "main" && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium mb-1">النوع</label>
+                  <select value={formType} onChange={(e) => setFormType(e.target.value as "credit" | "debit")} className="w-full border rounded p-1.5 text-sm" data-aseel-key="1">
+                    <option value="credit">إشعار دائن</option>
+                    <option value="debit">إشعار مدين</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1">التاريخ</label>
+                  <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full border rounded p-1.5 text-sm" />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-medium mb-1">الحساب (العميل/المورد)</label>
+                  <select value={formCustomer} onChange={(e) => setFormCustomer(e.target.value)} className="w-full border rounded p-1.5 text-sm" data-aseel-key="1">
+                    <option value="">-- اختر (+) --</option>
+                    {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1">رقم فاتورة المقاصة</label>
+                  <input type="text" value={formRelatedInvoice} onChange={(e) => setFormRelatedInvoice(e.target.value)} className="w-full border rounded p-1.5 text-sm font-mono" placeholder="رقم الفاتورة المرتبطة" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1">كشف الضريبة</label>
+                  <input type="text" value={formVatStatementNo} onChange={(e) => setFormVatStatementNo(e.target.value)} className="w-full border rounded p-1.5 text-sm" placeholder="رقم كشف الضريبة" />
+                </div>
+
+                {/* المبلغ + ضريبة */}
+                <div className="col-span-2 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
+                  <label className="flex items-center gap-2 text-xs mb-2">
+                    <input type="checkbox" checked={formIncludesTax} onChange={(e) => setFormIncludesTax(e.target.checked)} />
+                    المبلغ يشمل قيمة الضريبة المضافة
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[11px] mb-0.5">المبلغ (Space=رصيد)</label>
+                      <input
+                        type="number" step="0.01"
+                        data-aseel-field="remaining-amount"
+                        value={formAmount}
+                        onChange={(e) => setFormAmount(e.target.value)}
+                        className="w-full border rounded p-1 text-sm font-mono"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] mb-0.5">نسبة ض.ق.م %</label>
+                      <input type="number" step="0.01" value={formTaxRate} onChange={(e) => setFormTaxRate(e.target.value)} className="w-full border rounded p-1 text-sm font-mono" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] mb-0.5">المبلغ بدون ضريبة</label>
+                      <input type="text" readOnly value={amountExcl.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono bg-gray-100" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] mb-0.5">مبلغ الضريبة</label>
+                      <input type="text" readOnly value={taxAmount.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono bg-gray-100" />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="block text-[11px] mb-0.5">مبلغ الإشعار الإجمالي</label>
+                      <input type="text" readOnly value={totalAmount.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono font-bold bg-emerald-50" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === "notes" && (
+              <div>
+                <label className="block text-xs font-medium mb-1">السبب / الملاحظات</label>
+                <textarea value={formReason} onChange={(e) => setFormReason(e.target.value)} className="w-full border rounded p-2" rows={6} />
+              </div>
+            )}
+
+            {activeTab === "accounts" && (
+              <div className="text-xs text-gray-600 p-3 bg-gray-50 rounded">
+                معاينة القيد المحاسبي: {formType === "credit" ? "Dr إيراد مرتجعات / Cr ذمم" : "Dr ذمم / Cr إيراد إضافي"} —
+                المبلغ: {totalAmount.toFixed(2)} (ضمنه ض.ق.م {taxAmount.toFixed(2)}).
+              </div>
+            )}
 
             <div className="flex justify-end gap-3 mt-4">
               <button onClick={() => setShowForm(false)} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">إلغاء</button>

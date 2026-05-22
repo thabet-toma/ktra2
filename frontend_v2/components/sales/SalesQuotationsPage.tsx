@@ -61,6 +61,11 @@ export const SalesQuotationsPage: React.FC = () => {
   const [formDate, setFormDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [formValidUntil, setFormValidUntil] = useState("");
   const [formNotes, setFormNotes] = useState("");
+  // N4-T6: حقول إضافية per spec — فعال checkbox + prices include VAT
+  const [formIsActive, setFormIsActive] = useState(true);
+  const [formPricesIncludeTax, setFormPricesIncludeTax] = useState(false);
+  const [formCustomerAddress, setFormCustomerAddress] = useState("");
+  const [formCustomerTaxNumber, setFormCustomerTaxNumber] = useState("");
   const [formLines, setFormLines] = useState<LineState[]>([{
     id: undefined, product_id: "", product_name: "", quantity: "1", unit_price: "", discount: "0", tax_rate: "0", total: "0"
   }]);
@@ -199,6 +204,11 @@ export const SalesQuotationsPage: React.FC = () => {
     try {
       const body = {
         customer: Number(formCustomer),
+        // N4-T6 new fields (backend may ignore unknown keys)
+        is_active: formIsActive,
+        prices_include_tax: formPricesIncludeTax,
+        customer_address: formCustomerAddress || null,
+        customer_tax_number: formCustomerTaxNumber || null,
         quotation_date: formDate,
         valid_until: formValidUntil || null,
         notes: formNotes,
@@ -393,10 +403,32 @@ export const SalesQuotationsPage: React.FC = () => {
                 <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full border rounded-lg p-2" />
               </div>
               <div>
-                <label className="block text-sm font-medium mb-1">صالحة حتى</label>
+                <label className="block text-sm font-medium mb-1">فعال حتى تاريخ</label>
                 <input type="date" value={formValidUntil} onChange={(e) => setFormValidUntil(e.target.value)} className="w-full border rounded-lg p-2" />
               </div>
+              {/* N4-T6: فعال + الأسعار تشمل ض.ق.م + الاسم/العنوان/الضريبي */}
+              <div className="col-span-2 flex flex-wrap gap-4 items-center bg-amber-50 border border-amber-200 rounded p-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={formIsActive} onChange={(e) => setFormIsActive(e.target.checked)} />
+                  العرض فعّال
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={formPricesIncludeTax} onChange={(e) => setFormPricesIncludeTax(e.target.checked)} />
+                  الأسعار تشمل ض.ق.م
+                </label>
+                {formValidUntil && new Date(formValidUntil) < new Date() && (
+                  <span className="text-xs text-red-600 font-semibold">⚠️ منتهي الصلاحية</span>
+                )}
+              </div>
               <div>
+                <label className="block text-xs font-medium mb-1">عنوان الزبون</label>
+                <input type="text" value={formCustomerAddress} onChange={(e) => setFormCustomerAddress(e.target.value)} className="w-full border rounded-lg p-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1">مشتغل مرخص (رقم ضريبي)</label>
+                <input type="text" value={formCustomerTaxNumber} onChange={(e) => setFormCustomerTaxNumber(e.target.value)} className="w-full border rounded-lg p-2 text-sm font-mono" />
+              </div>
+              <div className="col-span-2">
                 <label className="block text-sm font-medium mb-1">ملاحظات</label>
                 <input type="text" value={formNotes} onChange={(e) => setFormNotes(e.target.value)} className="w-full border rounded-lg p-2" />
               </div>

@@ -387,7 +387,26 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Modal إنشاء دفعة
+// N4-T4: + حقول خصم المصدر (withholding) + grid شيكات + tabs ملاحظات/حسابات
 // ═══════════════════════════════════════════════════════════════════════════
+interface ChequeLine {
+  cheque_number: string;
+  payee_name: string;
+  due_date: string;
+  amount: string;
+  bank_name: string;
+  branch: string;
+}
+
+const newChequeLine = (): ChequeLine => ({
+  cheque_number: "",
+  payee_name: "",
+  due_date: "",
+  amount: "",
+  bank_name: "",
+  branch: "",
+});
+
 const NewPaymentModal: React.FC<{
   partners: Partner[];
   accounts: Account[];
@@ -399,16 +418,41 @@ const NewPaymentModal: React.FC<{
   const today = new Date().toISOString().split("T")[0];
   const [partnerId, setPartnerId] = useState<number | "">("");
   const [date, setDate] = useState(today);
-  const [amount, setAmount] = useState("");
+  const [amount, setAmount] = useState(""); // total payment amount
+  const [cashAmount, setCashAmount] = useState(""); // N4-T4: نقد جزء
   const [currencyId, setCurrencyId] = useState<number | "">("");
   const [exchangeRate, setExchangeRate] = useState("1");
   const [cashAccountId, setCashAccountId] = useState<number | "">("");
   const [notes, setNotes] = useState("");
+  // N4-T4: withholding (خصم المصدر) — يُحسَب من amount
+  const [withholdingPct, setWithholdingPct] = useState("0");
+  const [withholdingAmt, setWithholdingAmt] = useState("0");
+  // N4-T4: cheques inside payment (تفاصيل السند)
+  const [cheques, setCheques] = useState<ChequeLine[]>([]);
+  const [activeTab, setActiveTab] = useState<"alloc" | "cheques" | "notes" | "accounts">("alloc");
   const [allocations, setAllocations] = useState<
     Array<{ invoice: number; invoice_number?: string; amount: string }>
   >([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // مجموع الشيكات = sum cheques.amount
+  const totalCheques = cheques.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+  const cashNum = Number(cashAmount) || 0;
+  // المجموع = نقد + شيكات
+  const computedTotal = cashNum + totalCheques;
+
+  // N4-T4: تَحديث amount auto عند تَغيير cash/cheques
+  useEffect(() => {
+    if (computedTotal > 0) setAmount(String(computedTotal.toFixed(2)));
+  }, [computedTotal]);
+
+  // N4-T4: تَحديث withholdingAmt من النسبة
+  useEffect(() => {
+    const pct = Number(withholdingPct) || 0;
+    const amt = (Number(amount) || 0) * (pct / 100);
+    setWithholdingAmt(String(amt.toFixed(2)));
+  }, [withholdingPct, amount]);
 
   useEffect(() => {
     // default currency = ILS if exists
@@ -619,17 +663,197 @@ const NewPaymentModal: React.FC<{
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">ملاحظات</label>
-            <input
-              type="text"
-              className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-            />
+          {/* N4-T4: حقول مالية: نقدا + شيكات + المجموع + خصم المصدر */}
+          <div className="bg-amber-50/40 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/40 rounded-lg p-3">
+            <h3 className="text-xs font-semibold text-amber-900 dark:text-amber-200 mb-2">حقول الدفع (N4-T4)</h3>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              <div>
+                <label className="block text-[11px] text-gray-600 mb-0.5">نقدا (Space = remaining)</label>
+                <input
+                  type="number" step="0.01"
+                  data-aseel-field="remaining-amount"
+                  className="w-full border rounded px-2 py-1 text-sm dark:bg-gray-900 dark:border-gray-600 font-mono"
+                  value={cashAmount}
+                  onChange={(e) => setCashAmount(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-gray-600 mb-0.5">مجموع الشيكات (auto)</label>
+                <input type="text" readOnly className="w-full border rounded px-2 py-1 text-sm bg-gray-50 dark:bg-gray-800 font-mono" value={fmt(totalCheques)} />
+              </div>
+              <div>
+                <label className="block text-[11px] text-gray-600 mb-0.5">المجموع</label>
+                <input type="text" readOnly className="w-full border rounded px-2 py-1 text-sm bg-gray-50 dark:bg-gray-800 font-mono font-semibold" value={fmt(computedTotal)} />
+              </div>
+              <div>
+                <label className="block text-[11px] text-gray-600 mb-0.5">نسبة خصم المصدر %</label>
+                <input
+                  type="number" step="0.01"
+                  className="w-full border rounded px-2 py-1 text-sm dark:bg-gray-900 dark:border-gray-600 font-mono"
+                  value={withholdingPct}
+                  onChange={(e) => setWithholdingPct(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-gray-600 mb-0.5">مبلغ خصم المصدر</label>
+                <input
+                  type="number" step="0.01"
+                  className="w-full border rounded px-2 py-1 text-sm dark:bg-gray-900 dark:border-gray-600 font-mono"
+                  value={withholdingAmt}
+                  onChange={(e) => {
+                    setWithholdingAmt(e.target.value);
+                    const amt = Number(e.target.value) || 0;
+                    const t = Number(amount) || 0;
+                    if (t > 0) setWithholdingPct(((amt / t) * 100).toFixed(2));
+                  }}
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] text-gray-600 mb-0.5">مبلغ الحساب (remaining)</label>
+                <input
+                  type="text" readOnly
+                  className="w-full border rounded px-2 py-1 text-sm bg-emerald-50 dark:bg-emerald-900/20 font-mono font-semibold"
+                  value={fmt(Math.max(0, computedTotal - (Number(withholdingAmt) || 0)))}
+                />
+              </div>
+            </div>
           </div>
 
-          <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+          {/* Tabs */}
+          <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
+            {[
+              { k: "alloc", l: "التوزيع" },
+              { k: "cheques", l: `الشيكات (${cheques.length})` },
+              { k: "notes", l: "الملاحظات" },
+              { k: "accounts", l: "الحسابات" },
+            ].map((t) => (
+              <button
+                key={t.k}
+                type="button"
+                onClick={() => setActiveTab(t.k as "alloc" | "cheques" | "notes" | "accounts")}
+                className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
+                  activeTab === t.k
+                    ? "border-emerald-600 text-emerald-700 dark:text-emerald-400"
+                    : "border-transparent text-gray-500"
+                }`}
+              >
+                {t.l}
+              </button>
+            ))}
+          </div>
+
+          {/* Cheques tab — AseelGrid for cheque lines */}
+          {activeTab === "cheques" && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-sm">تفاصيل الشيكات</h3>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      // N4-T4 (الجديد:29) تَعبئة شيكات متشابهة متكرّرة
+                      const last = cheques[cheques.length - 1];
+                      if (!last || !last.bank_name) {
+                        setError("أضف شيكاً واحداً بكل البيانات أولاً");
+                        return;
+                      }
+                      const months = Number(window.prompt("عدد الشيكات المتتالية (شهور)؟", "3") || "0");
+                      if (months <= 0) return;
+                      const baseDate = new Date(last.due_date || today);
+                      const extra: ChequeLine[] = [];
+                      for (let i = 1; i <= months; i++) {
+                        const d = new Date(baseDate);
+                        d.setMonth(d.getMonth() + i);
+                        extra.push({
+                          ...last,
+                          cheque_number: "",
+                          due_date: d.toISOString().split("T")[0],
+                        });
+                      }
+                      setCheques((cs) => [...cs, ...extra]);
+                      setError(null);
+                    }}
+                    className="flex items-center gap-1 text-xs px-2 py-1 border border-emerald-600 text-emerald-700 rounded"
+                    title="تعبئة شيكات بنفس البنك/المبلغ لشهور متتالية (الجديد:29)"
+                  >
+                    تعبئة متشابهة
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCheques((cs) => [...cs, newChequeLine()])}
+                    className="flex items-center gap-1 text-xs px-2 py-1 bg-emerald-600 text-white rounded"
+                  >
+                    <Plus className="w-3 h-3" /> شيك
+                  </button>
+                </div>
+              </div>
+              {cheques.length === 0 ? (
+                <div className="text-xs text-gray-500 text-center py-3 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded">
+                  لا شيكات — اضغط «شيك» للإضافة
+                </div>
+              ) : (
+                <table className="w-full text-xs">
+                  <thead className="bg-gray-50 dark:bg-gray-900/40">
+                    <tr>
+                      <th className="text-right p-1.5">#</th>
+                      <th className="text-right p-1.5">رقم</th>
+                      <th className="text-right p-1.5">صاحب الشيك</th>
+                      <th className="text-right p-1.5">الاستحقاق</th>
+                      <th className="text-right p-1.5">المبلغ</th>
+                      <th className="text-right p-1.5">البنك</th>
+                      <th className="text-right p-1.5">الفرع</th>
+                      <th className="w-8"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cheques.map((c, i) => (
+                      <tr key={i} className="border-t border-gray-100 dark:border-gray-700">
+                        <td className="p-1 text-center">{i + 1}</td>
+                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:bg-gray-900" value={c.cheque_number} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, cheque_number: e.target.value } : x))} /></td>
+                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:bg-gray-900" value={c.payee_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, payee_name: e.target.value } : x))} /></td>
+                        <td className="p-1"><input type="date" className="w-full border rounded px-1 py-0.5 text-xs dark:bg-gray-900" value={c.due_date} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, due_date: e.target.value } : x))} /></td>
+                        <td className="p-1"><input type="number" step="0.01" className="w-full border rounded px-1 py-0.5 text-xs font-mono dark:bg-gray-900" value={c.amount} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, amount: e.target.value } : x))} /></td>
+                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:bg-gray-900" value={c.bank_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, bank_name: e.target.value } : x))} /></td>
+                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:bg-gray-900" value={c.branch} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, branch: e.target.value } : x))} /></td>
+                        <td className="p-1 text-center">
+                          <button type="button" onClick={() => setCheques((cs) => cs.filter((_, j) => j !== i))} className="text-rose-600">
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          {/* Notes tab */}
+          {activeTab === "notes" && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">ملاحظات السند</label>
+              <textarea
+                rows={4}
+                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+            </div>
+          )}
+
+          {/* Accounts tab — journal preview placeholder */}
+          {activeTab === "accounts" && (
+            <div className="text-xs text-gray-600 dark:text-gray-400 p-3 bg-gray-50 dark:bg-gray-900/40 rounded">
+              معاينة القيد المحاسبي ستَظهر هنا بعد الترحيل. حالياً: Dr {(() => {
+                const a = accounts.find((x) => x.id === cashAccountId);
+                return a ? `${a.code} ${a.name}` : "—";
+              })()} / Cr ذمم العميل {(partners.find((p) => p.id === partnerId)?.name) || "—"}.
+            </div>
+          )}
+
+          {/* Alloc tab (default) — existing UI */}
+          {activeTab === "alloc" && (
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-semibold text-sm">توزيع على الفواتير</h3>
               <button
@@ -709,6 +933,7 @@ const NewPaymentModal: React.FC<{
               </table>
             )}
           </div>
+          )}
 
           {error && (
             <div className="p-2 rounded bg-red-50 dark:bg-red-900/20 text-red-700 text-sm">

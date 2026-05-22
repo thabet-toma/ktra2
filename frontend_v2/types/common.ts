@@ -66,7 +66,10 @@ export type AppView =
     | "clearance"
     | "accounting-balance-sheet"
     | "accounting-income-statement"
-    | "accounting-vat-statements";
+    | "accounting-vat-statements"
+    | "sales-return"
+    | "purchase-return"
+    | "supplier-payments";
 
 export interface Attachment {
     id: string;

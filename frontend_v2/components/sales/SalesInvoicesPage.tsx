@@ -1,31 +1,48 @@
+/**
+ * N4-T1 — SalesInvoicesPage (L7) Aseel inside-out
+ * AseelDocumentShell + AseelDenseTable + شريط فلاتر + useAseelIndexKeymap
+ * Ref: task5.md:673-676 + الفواتير.txt
+ *
+ * أعمدة (per spec): رقم / تاريخ / العميل / النوع / الحالة /
+ *                    الإجمالي / المدفوع / المتبقي / الكشف / إجراءات
+ * Ctrl+Ins = يَفتح SalesInvoiceEditor مسودة جديدة
+ * F2 = drill (تعديل المسودة المختارة)
+ * F6 = focus search
+ */
 import React, { useCallback, useEffect, useState } from "react";
 import {
   listSalesInvoices,
   postSalesInvoice,
   createDeliveryOrder,
   deliverOrder,
-  suggestFifoAllocations,
   duplicateSalesInvoice,
   deleteSalesInvoice,
   getSalesSettings,
   type SalesInvoiceRow,
-  type FifoAllocationRow,
   type SalesSettings,
 } from "../../services/salesApi";
 import { apiGetList } from "../../services/restApi";
 import {
   Loader2,
   RefreshCw,
-  Receipt,
   Send,
   Truck,
   Pencil,
   Copy,
   Trash2,
+  Plus,
+  Printer,
 } from "lucide-react";
 import { SalesInvoiceEditor, type PartnerRow, type ProductRow } from "./SalesInvoiceEditor";
 import { resolveTenantId } from "../../utils/tenantContext";
-import { DataGrid, Toolbar, Badge } from "../../components/ui";
+import {
+  AseelDocumentShell,
+  AseelDenseTable,
+  useAseelIndexKeymap,
+  type DenseColumn,
+  type AseelToolbarAction,
+  type AseelTab,
+} from "../aseel";
 
 type CurrOpt = { CurrencyID: number; Code: string };
 type AccountOpt = {
@@ -35,9 +52,28 @@ type AccountOpt = {
   account_type?: string | null;
 };
 
-/** فواتير المبيعات — محرر متعدد الأسطر، مخزون، عملات، ترحيل محاسبي */
+type ExtRow = SalesInvoiceRow & { vat_statement_no?: string | null };
+
+const STATUS_OPTIONS = [
+  { v: "", l: "الكل" },
+  { v: "draft", l: "مسودة" },
+  { v: "posted", l: "مرحَّلة" },
+];
+
+const TYPE_OPTIONS = [
+  { v: "", l: "الكل" },
+  { v: "cash", l: "نقدي" },
+  { v: "credit", l: "آجل" },
+];
+
+const fmtNum = (s: string | number | undefined | null) => {
+  const n = Number(s);
+  if (!isFinite(n)) return "—";
+  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+};
+
 export const SalesInvoicesPage: React.FC = () => {
-  const [rows, setRows] = useState<SalesInvoiceRow[]>([]);
+  const [rows, setRows] = useState<ExtRow[]>([]);
   const [partners, setPartners] = useState<PartnerRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [currencies, setCurrencies] = useState<CurrOpt[]>([]);
@@ -59,11 +95,15 @@ export const SalesInvoicesPage: React.FC = () => {
   const [msg, setMsg] = useState<string | null>(null);
 
   const [draftToEditId, setDraftToEditId] = useState<number | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
 
-  const [fifoCustomerId, setFifoCustomerId] = useState<number | "">("");
-  const [fifoAmount, setFifoAmount] = useState("");
-  const [fifoRows, setFifoRows] = useState<FifoAllocationRow[]>([]);
+  // filters
   const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterType, setFilterType] = useState("");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [selectedKey, setSelectedKey] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -79,7 +119,7 @@ export const SalesInvoicesPage: React.FC = () => {
     ] as const;
     const settled = await Promise.allSettled([
       listSalesInvoices(),
-        apiGetList<PartnerRow>("partners/", { tenantId }),
+      apiGetList<PartnerRow>("partners/", { tenantId }),
       apiGetList<ProductRow>("inventory/products/", { tenantId }),
       apiGetList<CurrOpt>("accounting/currencies/", { tenantId }),
       apiGetList<AccountOpt>("accounting/accounts/", { tenantId }),
@@ -96,12 +136,11 @@ export const SalesInvoicesPage: React.FC = () => {
     const errs: string[] = [];
     settled.forEach((r, i) => {
       if (r.status === "rejected") {
-        const msg =
-          r.reason instanceof Error ? r.reason.message : String(r.reason ?? "خطأ");
-        errs.push(`${parts[i]}: ${msg}`);
+        const m = r.reason instanceof Error ? r.reason.message : String(r.reason ?? "خطأ");
+        errs.push(`${parts[i]}: ${m}`);
       }
     });
-    if (settled[0].status === "fulfilled") setRows(settled[0].value);
+    if (settled[0].status === "fulfilled") setRows(settled[0].value as ExtRow[]);
     if (settled[1].status === "fulfilled") setPartners(settled[1].value);
     if (settled[2].status === "fulfilled") setProducts(settled[2].value);
     if (settled[3].status === "fulfilled") setCurrencies(settled[3].value);
@@ -112,7 +151,7 @@ export const SalesInvoicesPage: React.FC = () => {
       const s = await getSalesSettings();
       setSalesSettings(s);
     } catch {
-      // الإعدادات اختيارية — إن لم تكن موجودة نستمر بالقيم الافتراضية
+      // optional
     }
     if (errs.length) {
       setErr(
@@ -129,26 +168,48 @@ export const SalesInvoicesPage: React.FC = () => {
     load();
   }, [load]);
 
-  const fmt = (s: string | undefined) =>
-    s ? Number(s).toLocaleString("en-US", { minimumFractionDigits: 2 }) : "—";
+  const filteredRows = rows.filter((r) => {
+    if (search) {
+      const s = search.toLowerCase();
+      const hay = `${r.invoice_number || ""} ${r.customer_name || ""} ${r.customer || ""}`.toLowerCase();
+      if (!hay.includes(s)) return false;
+    }
+    if (filterStatus && r.status !== filterStatus) return false;
+    if (filterType && r.invoice_type !== filterType) return false;
+    if (filterFrom && r.invoice_date && r.invoice_date < filterFrom) return false;
+    if (filterTo && r.invoice_date && r.invoice_date > filterTo) return false;
+    return true;
+  });
 
-  const handleFifoSuggest = async () => {
-    setErr(null);
-    setFifoRows([]);
-    if (fifoCustomerId === "" || !fifoAmount) {
-      setErr("اختر العميل وأدخل مبلغ الدفعة لاقتراح FIFO.");
-      return;
-    }
-    try {
-      const rows = await suggestFifoAllocations({
-        partner: Number(fifoCustomerId),
-        amount: fifoAmount,
-      });
-      setFifoRows(rows);
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل الاقتراح");
-    }
+  const openNew = () => {
+    setDraftToEditId(null);
+    setEditorOpen(true);
   };
+
+  const openEdit = (id: number) => {
+    setDraftToEditId(id);
+    setEditorOpen(true);
+  };
+
+  useAseelIndexKeymap({
+    F2: () => {
+      if (selectedKey != null) {
+        const row = rows.find((r) => r.id === selectedKey);
+        if (row && row.status === "draft") openEdit(row.id);
+      }
+    },
+    F6: () => {
+      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      el?.focus();
+    },
+    CtrlIns: openNew,
+    Enter: () => {
+      if (selectedKey != null) {
+        const row = rows.find((r) => r.id === selectedKey);
+        if (row && row.status === "draft") openEdit(row.id);
+      }
+    },
+  });
 
   const handlePostRow = async (id: number) => {
     setErr(null);
@@ -169,11 +230,9 @@ export const SalesInvoicesPage: React.FC = () => {
       const created = await createDeliveryOrder(invoiceId);
       if (deliverNow && created && typeof created.id === "number") {
         await deliverOrder(created.id);
-        setMsg(
-          `تم إنشاء أمر إخراج #${created.id} وتسليمه — خُصم المخزون وسُجِّل قيد COGS`,
-        );
+        setMsg(`أمر إخراج #${created.id} — تسليم + COGS`);
       } else {
-        setMsg(`تم إنشاء أمر إخراج #${created.id} (قيد التنفيذ)`);
+        setMsg(`أمر إخراج #${created.id} (قيد التنفيذ)`);
       }
       await load();
     } catch (e: unknown) {
@@ -186,8 +245,9 @@ export const SalesInvoicesPage: React.FC = () => {
     setMsg(null);
     try {
       const d = await duplicateSalesInvoice(id);
-      setMsg(`تم إنشاء نسخة مسودة ${d.invoice_number}`);
+      setMsg(`نسخة مسودة ${d.invoice_number}`);
       setDraftToEditId(d.id);
+      setEditorOpen(true);
       await load();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل النسخ");
@@ -207,135 +267,336 @@ export const SalesInvoicesPage: React.FC = () => {
     }
   };
 
-  const fifoCustomers = partners.filter((p) => p.partner_type === "Customer");
+  const columns: DenseColumn<ExtRow>[] = [
+    {
+      key: "invoice_number",
+      header: "رقم",
+      width: "100px",
+      render: (r) => <span className="font-mono text-xs">{r.invoice_number}</span>,
+    },
+    {
+      key: "invoice_date",
+      header: "التاريخ",
+      width: "100px",
+      align: "center",
+      render: (r) => <span className="text-xs">{r.invoice_date || "—"}</span>,
+    },
+    {
+      key: "customer",
+      header: "العميل",
+      render: (r) => <span className="text-xs">{r.customer_name || `#${r.customer}`}</span>,
+    },
+    {
+      key: "invoice_type",
+      header: "النوع",
+      width: "60px",
+      align: "center",
+      render: (r) => (
+        <span style={{ fontSize: "11px" }}>{r.invoice_type === "cash" ? "نقدي" : "آجل"}</span>
+      ),
+    },
+    {
+      key: "status",
+      header: "الحالة",
+      width: "80px",
+      align: "center",
+      render: (r) => (
+        <span
+          style={{
+            fontSize: "11px",
+            fontWeight: 600,
+            color:
+              r.status === "posted"
+                ? "var(--aseel-ok, #2d7d46)"
+                : r.status === "draft"
+                ? "var(--aseel-warn, #b06800)"
+                : "var(--aseel-ink-soft, #777)",
+          }}
+        >
+          {r.status === "posted" ? "مرحَّلة" : r.status === "draft" ? "مسودة" : r.status}
+        </span>
+      ),
+    },
+    {
+      key: "grand_total",
+      header: "الإجمالي",
+      width: "110px",
+      align: "left",
+      numeric: true,
+      render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmtNum(r.grand_total)}</span>,
+    },
+    {
+      key: "amount_paid",
+      header: "المدفوع",
+      width: "100px",
+      align: "left",
+      numeric: true,
+      render: (r) => <span className="aseel-num font-mono text-xs">{fmtNum(r.amount_paid)}</span>,
+    },
+    {
+      key: "balance",
+      header: "المتبقي",
+      width: "100px",
+      align: "left",
+      numeric: true,
+      render: (r) => {
+        const bal = Number(r.grand_total || 0) - Number(r.amount_paid || 0);
+        return (
+          <span
+            className="aseel-num font-mono text-xs font-semibold"
+            style={{
+              color: bal > 0 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ok, #2d7d46)",
+            }}
+          >
+            {fmtNum(bal)}
+          </span>
+        );
+      },
+    },
+    {
+      key: "vat_statement",
+      header: "الكشف",
+      width: "80px",
+      align: "center",
+      render: (r) => (
+        <span className="text-xs" style={{ color: "var(--aseel-ink-soft)" }}>
+          {r.vat_statement_no || "—"}
+        </span>
+      ),
+    },
+    {
+      key: "actions",
+      header: "إجراءات",
+      width: "200px",
+      align: "center",
+      render: (r) => (
+        <div style={{ display: "flex", gap: "3px", flexWrap: "wrap", justifyContent: "center" }}>
+          {r.status === "draft" && (
+            <>
+              <button
+                type="button"
+                className="aseel-toolbtn"
+                style={{ fontSize: "10px", padding: "2px 6px" }}
+                onClick={(e) => { e.stopPropagation(); openEdit(r.id); }}
+                title="تعديل"
+              >
+                <Pencil className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                className="aseel-toolbtn"
+                style={{ fontSize: "10px", padding: "2px 6px" }}
+                onClick={(e) => { e.stopPropagation(); handlePostRow(r.id); }}
+                title="ترحيل"
+              >
+                <Send className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                className="aseel-toolbtn"
+                style={{ fontSize: "10px", padding: "2px 6px" }}
+                onClick={(e) => { e.stopPropagation(); handleDuplicate(r.id); }}
+                title="نسخ"
+              >
+                <Copy className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                className="aseel-toolbtn aseel-toolbtn--danger"
+                style={{ fontSize: "10px", padding: "2px 6px" }}
+                onClick={(e) => { e.stopPropagation(); handleDeleteDraft(r.id); }}
+                title="حذف"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            </>
+          )}
+          {r.status === "posted" && (
+            <>
+              {!r.stock_on_post && (
+                <button
+                  type="button"
+                  className="aseel-toolbtn"
+                  style={{ fontSize: "10px", padding: "2px 6px" }}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm("تسليم الآن؟ خصم مخزون + قيد COGS.")) {
+                      handleDelivery(r.id, true);
+                    }
+                  }}
+                  title="تسليم"
+                >
+                  <Truck className="w-3 h-3" /> تسليم
+                </button>
+              )}
+              <button
+                type="button"
+                className="aseel-toolbtn"
+                style={{ fontSize: "10px", padding: "2px 6px" }}
+                onClick={(e) => { e.stopPropagation(); handleDelivery(r.id, false); }}
+                title="أمر إخراج"
+              >
+                <Truck className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                className="aseel-toolbtn"
+                style={{ fontSize: "10px", padding: "2px 6px" }}
+                onClick={(e) => { e.stopPropagation(); handleDuplicate(r.id); }}
+                title="نسخ"
+              >
+                <Copy className="w-3 h-3" />
+              </button>
+            </>
+          )}
+        </div>
+      ),
+    },
+  ];
+
+  const filterBar = (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
+      <label className="aseel-field" style={{ flex: 1, minWidth: "200px" }}>
+        <span className="aseel-field-label">بحث (رقم / عميل)</span>
+        <input
+          className="aseel-input"
+          data-aseel-field="search"
+          placeholder="بحث... (F6)"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+      </label>
+      <label className="aseel-field" style={{ minWidth: "100px" }}>
+        <span className="aseel-field-label">النوع</span>
+        <select className="aseel-input" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+          {TYPE_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+        </select>
+      </label>
+      <label className="aseel-field" style={{ minWidth: "100px" }}>
+        <span className="aseel-field-label">الحالة</span>
+        <select className="aseel-input" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          {STATUS_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+        </select>
+      </label>
+      <label className="aseel-field">
+        <span className="aseel-field-label">من تاريخ</span>
+        <input type="date" className="aseel-input" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
+      </label>
+      <label className="aseel-field">
+        <span className="aseel-field-label">إلى تاريخ</span>
+        <input type="date" className="aseel-input" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} />
+      </label>
+    </div>
+  );
+
+  const toolbarActions: AseelToolbarAction[] = [
+    { key: "new", label: "فاتورة جديدة (Ctrl+Ins)", icon: <Plus />, onClick: openNew },
+    {
+      key: "refresh",
+      label: "تحديث",
+      icon: loading ? <Loader2 className="animate-spin" /> : <RefreshCw />,
+      onClick: () => void load(),
+      separatorBefore: true,
+    },
+    { key: "print", label: "طباعة", icon: <Printer />, onClick: () => window.print() },
+  ];
+
+  // Sum totals on filtered set
+  const totalSum = filteredRows.reduce((s, r) => s + Number(r.grand_total || 0), 0);
+  const paidSum = filteredRows.reduce((s, r) => s + Number(r.amount_paid || 0), 0);
+  const balanceSum = totalSum - paidSum;
+
+  const tabs: AseelTab[] = [
+    {
+      key: "list",
+      label: "قائمة الفواتير",
+      content: (
+        <div style={{ padding: "8px" }}>
+          {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+          {msg && <div className="aseel-banner" style={{ marginBottom: "8px", color: "var(--aseel-ok, #2d7d46)" }}>{msg}</div>}
+          <AseelDenseTable<ExtRow>
+            columns={columns}
+            rows={filteredRows}
+            getRowKey={(r) => r.id}
+            loading={loading}
+            emptyHint="لا توجد فواتير — اضغط Ctrl+Ins للإضافة"
+            selectable
+            selectedKey={selectedKey}
+            onSelect={(k) => setSelectedKey(k as number | null)}
+            onRowDoubleClick={(r) => {
+              if (r.status === "draft") openEdit(r.id);
+            }}
+          />
+        </div>
+      ),
+    },
+  ];
 
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6" dir="rtl">
-      <div className="flex items-center gap-3">
-        <Receipt className="h-8 w-8 text-[var(--color-success)]" />
-        <div>
-          <h1 className="text-[var(--font-size-xl)] font-bold text-[var(--color-text)]">فواتير المبيعات</h1>
-          <p className="text-[var(--font-size-sm)] text-[var(--color-text-muted)]">
-            مسودة متعددة الأسطر → ترحيل محاسبي ومخزون — مرتبطة بالأصناف والعملات والعملاء
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={load}
-          className="mr-auto inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-[var(--color-border)]"
-        >
-          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-          تحديث
-        </button>
-      </div>
-
-      <Toolbar
-        search={search}
-        onSearch={setSearch}
-        searchPlaceholder="بحث في الفواتير..."
-      />
-
-      {err && (
-        <div className="p-4 rounded-lg bg-[var(--color-danger-light)] text-[var(--color-danger)]">{err}</div>
-      )}
-      {msg && (
-        <div className="p-4 rounded-lg bg-[var(--color-success-light)] text-[var(--color-success)]">
-          {msg}
-        </div>
-      )}
-
-      <SalesInvoiceEditor
-        products={products}
-        partners={partners}
-        currencies={currencies}
-        accounts={accounts}
-        taxRates={taxRates}
-        draftToEditId={draftToEditId}
-        onDraftEditConsumed={() => setDraftToEditId(null)}
-        onInvoiceSaved={load}
-        invoiceList={rows}
-        salesSettings={salesSettings}
-      />
-
-      <section className="border border-dashed border-[var(--color-border)] rounded-xl p-4 space-y-3 bg-[var(--color-surface-2)]">
-        <h2 className="font-semibold text-[var(--color-text)]">توزيع دفعة (FIFO)</h2>
-        <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">
-          اقتراح تلقائي على الفواتير غير المسددة من الأقدم — يُنسخ لاحقاً عند تسجيل دفعة في الـ API.
-        </p>
-        <div className="flex flex-wrap gap-2 items-end">
-          <label className="flex flex-col gap-1 text-[var(--font-size-sm)]">
-            <span>العميل</span>
-            <select
-              value={fifoCustomerId}
-              onChange={(e) => setFifoCustomerId(e.target.value ? Number(e.target.value) : "")}
-              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2 min-w-[200px]"
+    <div data-skin="aseel" style={{ height: "calc(100vh - 5rem)" }}>
+      <AseelDocumentShell
+        title="فواتير المبيعات"
+        state={loading ? "جاري التحميل…" : `${filteredRows.length} من ${rows.length}`}
+        actions={toolbarActions}
+        header={filterBar}
+        tabs={tabs}
+        status={
+          <>
+            <span className="aseel-status-item">العدد <b>{filteredRows.length}</b></span>
+            <span className="aseel-status-item">الإجمالي <b className="aseel-num">{fmtNum(totalSum)}</b></span>
+            <span className="aseel-status-item">المدفوع <b className="aseel-num">{fmtNum(paidSum)}</b></span>
+            <span
+              className="aseel-status-item"
+              style={{ color: balanceSum > 0 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ok, #2d7d46)" }}
             >
-              <option value="">—</option>
-              {fifoCustomers.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-[var(--font-size-sm)]">
-            <span>مبلغ الدفعة</span>
-            <input
-              value={fifoAmount}
-              onChange={(e) => setFifoAmount(e.target.value)}
-              className="rounded border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-2 w-40"
-              placeholder="0.00"
-            />
-          </label>
-          <button
-            type="button"
-            onClick={handleFifoSuggest}
-            className="px-3 py-2 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--font-size-sm)]"
-          >
-            اقتراح FIFO
-          </button>
-        </div>
-        {fifoRows.length > 0 && (
-          <ul className="text-[var(--font-size-sm)] space-y-1 font-mono">
-            {fifoRows.map((r) => (
-              <li key={r.invoice}>{r.invoice_number}: {r.amount}</li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <DataGrid
-        columns={[
-          { key: "invoice_number", header: "رقم", render: (r) => <span className="font-mono">{r.invoice_number}</span> },
-          { key: "customer", header: "العميل", render: (r) => r.customer_name || r.customer },
-          { key: "invoice_date", header: "التاريخ" },
-          { key: "invoice_type", header: "النوع", render: (r) => r.invoice_type === "cash" ? "نقدي" : "آجل" },
-          { key: "status", header: "الحالة", render: (r) => <Badge variant={r.status === "posted" ? "success" : r.status === "draft" ? "warning" : "muted"}>{r.status === "posted" ? "مرحّلة" : r.status === "draft" ? "مسودة" : r.status}</Badge> },
-          { key: "grand_total", header: "الإجمالي", render: (r) => <span className="font-mono">{fmt(r.grand_total)}</span> },
-          { key: "amount_paid", header: "مدفوع", render: (r) => <span className="font-mono">{fmt(r.amount_paid)}</span> },
-          { key: "balance", header: "متبقي", render: (r) => { const bal = Number(r.grand_total || 0) - Number(r.amount_paid || 0); return <span className={bal > 0 ? "text-[var(--color-danger)]" : "text-[var(--color-success)]"}>{bal.toLocaleString("en-US", { minimumFractionDigits: 2 })}</span>; } },
-          { key: "actions", header: "إجراءات", align: "end", render: (r) => (
-            <div className="flex flex-wrap gap-2 justify-end">
-              {r.status === "draft" && (
-                <>
-                  <button type="button" onClick={() => setDraftToEditId(r.id)} className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--color-border)] text-[var(--font-size-xs)]" title="تعديل المسودة"><Pencil className="h-3 w-3" />تعديل</button>
-                  <button type="button" onClick={() => handlePostRow(r.id)} className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--color-primary)] text-white text-[var(--font-size-xs)]"><Send className="h-3 w-3" />ترحيل</button>
-                  <button type="button" onClick={() => handleDuplicate(r.id)} className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--color-success)] text-[var(--color-success)] text-[var(--font-size-xs)]" title="نسخ إلى مسودة جديدة"><Copy className="h-3 w-3" />نسخ</button>
-                  <button type="button" onClick={() => handleDeleteDraft(r.id)} className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--color-danger)] text-[var(--color-danger)] text-[var(--font-size-xs)]"><Trash2 className="h-3 w-3" />حذف</button>
-                </>
-              )}
-              {r.status === "posted" && (
-                <>
-                  {!r.stock_on_post && <button type="button" onClick={() => { if (window.confirm("إصدار أمر إخراج وتسليم الآن؟ سيتم خصم المخزون وتسجيل قيد COGS.")) { handleDelivery(r.id, true); } }} className="inline-flex items-center gap-1 px-2 py-1 rounded bg-[var(--color-primary)] text-white text-[var(--font-size-xs)]" title="إصدار أمر إخراج وتسليمه فوراً"><Truck className="h-3 w-3" />تسليم</button>}
-                  <button type="button" onClick={() => handleDelivery(r.id, false)} className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--color-border)] text-[var(--font-size-xs)]" title="إنشاء أمر إخراج بدون تسليم"><Truck className="h-3 w-3" />أمر إخراج</button>
-                  <button type="button" onClick={() => handleDuplicate(r.id)} className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[var(--color-success)] text-[var(--color-success)] text-[var(--font-size-xs)]" title="نسخ إلى مسودة جديدة"><Copy className="h-3 w-3" />نسخ</button>
-                </>
-              )}
-            </div>
-          )},
-        ]}
-        data={rows.filter(r => !search || r.invoice_number?.includes(search) || r.customer_name?.includes(search) || r.customer?.includes(search))}
-        loading={loading}
-        emptyMessage={<div className="py-8 text-[var(--color-text-muted)]">لا توجد فواتير</div>}
+              المتبقي <b className="aseel-num">{fmtNum(balanceSum)}</b>
+            </span>
+          </>
+        }
       />
+
+      {/* Editor overlay — fullscreen modal */}
+      {editorOpen && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/40"
+          style={{ display: "flex", alignItems: "stretch", justifyContent: "stretch" }}
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setEditorOpen(false);
+          }}
+        >
+          <div
+            style={{
+              background: "var(--aseel-bg, #fffbf5)",
+              width: "100%",
+              maxHeight: "100vh",
+              overflow: "auto",
+              position: "relative",
+            }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="aseel-toolbtn aseel-toolbtn--danger"
+              onClick={() => setEditorOpen(false)}
+              style={{ position: "absolute", top: "8px", left: "8px", zIndex: 5 }}
+            >
+              ✕ إغلاق
+            </button>
+            <SalesInvoiceEditor
+              products={products}
+              partners={partners}
+              currencies={currencies}
+              accounts={accounts}
+              taxRates={taxRates}
+              draftToEditId={draftToEditId}
+              onDraftEditConsumed={() => setDraftToEditId(null)}
+              onInvoiceSaved={() => { setEditorOpen(false); load(); }}
+              invoiceList={rows}
+              salesSettings={salesSettings}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
