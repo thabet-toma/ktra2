@@ -48,6 +48,14 @@ class Account(models.Model):
         help_text='طبيعة الحساب: مدين فقط / دائن فقط / مدين ودائن. تُفرَض على القيود.',
     )
     is_active = models.BooleanField(default=True, db_column='IsActive')
+    default_cost_center = models.ForeignKey(
+        'CostCenter', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='DefaultCostCenterID', related_name='accounts_with_default',
+        help_text='مركز التكلفة الافتراضي للحساب — يُملأ تلقائياً في القيود',
+    )
+    notes = models.TextField(null=True, blank=True, db_column='Notes',
+        help_text='ملاحظات الحساب — تُعرض عند F4 drill-down',
+    )
 
     class Meta:
         db_table = 'chartofaccounts'
