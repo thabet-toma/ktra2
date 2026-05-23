@@ -1458,3 +1458,59 @@ def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNo
 
     return note
 
+
+# ── N8-T12: Supplier Payment ──────────────────────────────────
+
+def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'SupplierPayment':
+    """ترحيل سند صرف لمورد: Dr AP / Cr Cash."""
+    from sales.models import SupplierPayment as SP
+    if payment.is_posted:
+        raise ValidationError("سند الصرف مرحّل مسبقاً.")
+    if payment.partner.tenant_id != payment.tenant_id:
+        raise ValidationError("المورد لا يتبع نفس الشركة.")
+    validate_fiscal_period(payment.tenant_id, payment.payment_date)
+
+    ap_account = payment.partner.linked_account
+    if not ap_account:
+        raise ValidationError(f"المورد «{payment.partner.name}» ليس لديه حساب ذمم دائنة (linked_account).")
+
+    with transaction.atomic():
+        jh = post_journal(
+            tenant_id=payment.tenant_id,
+            transaction_date=payment.payment_date,
+            reference_type='SUPPLIER_PAYMENT',
+            reference_id=payment.id,
+            description=f"سند صرف — {payment.partner.name} ({payment.amount})",
+            lines_data=[
+                {
+                    "account": ap_account.id,
+                    "partner": payment.partner_id,
+                    "debit": Decimal(str(payment.amount)),
+                    "credit": Decimal("0"),
+                    "description": f"دفع مورد — {payment.partner.name}",
+                },
+                {
+                    "account": payment.cash_or_bank_account_id,
+                    "partner": payment.partner_id,
+                    "debit": Decimal("0"),
+                    "credit": Decimal(str(payment.amount)),
+                    "description": f"من الصندوق — {payment.partner.name}",
+                },
+            ],
+            currency=payment.currency,
+            exchange_rate=payment.exchange_rate,
+            user=user,
+        )
+        payment.journal = jh
+        payment.is_posted = True
+        payment.save(update_fields=["journal", "is_posted"])
+        create_audit_log(
+            tenant=payment.tenant,
+            user=user,
+            action="POST",
+            model_name="SupplierPayment",
+            object_id=payment.id,
+            change_details=f"Posted supplier payment journal={jh.id}",
+        )
+    return payment
+

@@ -567,6 +567,48 @@ class CustomerPayment(models.Model):
         managed = True
 
 
+class SupplierPayment(models.Model):
+    """N8-T12: سند صرف للموردين — مرآة CustomerPayment لكن للموردين.
+
+    الترحيل: Dr AP / Cr Cash (عكس CustomerPayment حيث Dr Cash / Cr AR).
+    """
+    id = models.AutoField(primary_key=True, db_column="SupplierPaymentID")
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column="TenantID", to_field="TenantID",
+    )
+    partner = models.ForeignKey(
+        'partners.Partner', on_delete=models.PROTECT,
+        db_column="PartnerID", related_name="supplier_payments",
+    )
+    payment_date = models.DateField(db_column="PaymentDate")
+    amount = models.DecimalField(max_digits=18, decimal_places=2, db_column="Amount")
+    currency = models.ForeignKey(
+        Currency, on_delete=models.PROTECT, db_column="CurrencyID", to_field="CurrencyID",
+    )
+    exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, default=1.0, db_column="ExchangeRate",
+    )
+    cash_or_bank_account = models.ForeignKey(
+        Account, on_delete=models.PROTECT,
+        db_column="CashAccountID", related_name="supplier_payments_cash",
+        help_text="الصندوق أو البنك (دائن)",
+    )
+    journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column="JournalID", related_name="supplier_payments",
+    )
+    is_posted = models.BooleanField(default=False, db_column="IsPosted")
+    notes = models.TextField(null=True, blank=True, db_column="Notes")
+    created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
+
+    class Meta:
+        db_table = "sales_module_supplier_payments"
+        managed = True
+
+    def __str__(self):
+        return f"SupplierPayment #{self.id} — {self.partner_id} ({self.amount})"
+
+
 class PaymentAllocation(models.Model):
     id = models.AutoField(primary_key=True, db_column="PaymentAllocationID")
     tenant = models.ForeignKey(
