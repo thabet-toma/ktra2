@@ -149,3 +149,36 @@ class StockMovement(models.Model):
     def __str__(self):
         return f"{self.get_movement_type_display()} | {self.product} | {self.quantity}"
 
+
+class ProductPriceTier(models.Model):
+    """N8-T9: 5 أسعار بيع + 5 أسعار شراء لكل صنف."""
+    TIER_TYPE_SALE = 'sale'
+    TIER_TYPE_PURCHASE = 'purchase'
+    TIER_TYPE_CHOICES = [
+        (TIER_TYPE_SALE, 'بيع'),
+        (TIER_TYPE_PURCHASE, 'شراء'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='PriceTierID')
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, db_column='ProductID',
+        related_name='price_tiers',
+    )
+    tier_type = models.CharField(
+        max_length=10, choices=TIER_TYPE_CHOICES, db_column='TierType',
+    )
+    tier_number = models.PositiveSmallIntegerField(db_column='TierNumber')
+    price = models.DecimalField(max_digits=18, decimal_places=4, db_column='Price')
+    currency = models.ForeignKey(
+        'tenants.Currency', on_delete=models.PROTECT, db_column='CurrencyID',
+    )
+    tax_inclusive = models.BooleanField(default=False, db_column='TaxInclusive')
+
+    class Meta:
+        db_table = 'product_price_tiers'
+        managed = True
+        unique_together = [['product', 'tier_type', 'tier_number']]
+
+    def __str__(self):
+        return f"{self.product} — {self.tier_type} #{self.tier_number}: {self.price}"
+
