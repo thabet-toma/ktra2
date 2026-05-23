@@ -497,9 +497,9 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
 
         {/* النقل المحلي */}
         {loadingLocalShipments ? (
-          <p className="text-gray-500" style={{ padding: 8 }}>جاري التحميل...</p>
+          <p className="aseel-text-soft" style={{ padding: 8 }}>جاري التحميل...</p>
         ) : localShipments.length === 0 ? (
-          <p className="text-gray-400 text-sm" style={{ padding: 8 }}>لا توجد سجلات نقل محلي مرتبطة بهذه الشحنة</p>
+          <p className="aseel-text-soft text-sm" style={{ padding: 8 }}>لا توجد سجلات نقل محلي مرتبطة بهذه الشحنة</p>
         ) : (
           <div style={{ overflowX: 'auto', padding: 8 }}>
             <table className="aseel-grid" style={{ width: '100%' }}>
@@ -517,11 +517,11 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
                     <td>{ls.vehicle_number || '-'}</td>
                     <td>{Number(ls.amount).toLocaleString()} {ls.currency_code || ''}</td>
                     <td>
-                      <span className={`px-2 py-0.5 rounded text-xs ${ls.status === 'delivered' ? 'bg-green-100 text-green-700' : ls.status === 'in_transit' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'}`}>
+                      <span className={`px-2 py-0.5 rounded text-xs ${ls.status === 'delivered' ? 'bg-green-100 text-green-700' : ls.status === 'in_transit' ? 'aseel-bg-accent-bg aseel-text-accent' : 'aseel-bg-panel aseel-text-ink'}`}>
                         {ls.status === 'delivered' ? 'تم التسليم' : ls.status === 'in_transit' ? 'في الطريق' : ls.status === 'pending' ? 'معلق' : ls.status}
                       </span>
                     </td>
-                    <td>{ls.is_posted ? <span className="text-green-600">✓ #{ls.journal}</span> : <span className="text-gray-400">—</span>}</td>
+                    <td>{ls.is_posted ? <span className="text-green-600">✓ #{ls.journal}</span> : <span className="aseel-text-soft">—</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -576,7 +576,7 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
                 readOnly={formData.status === "delivered" || formData.status === "cancelled"}
               />
             ) : (
-              <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 rounded-xl flex items-center gap-2 border border-yellow-100 dark:border-yellow-800">
+              <div className="p-4 aseel-bg-panel dark:aseel-bg-panel/20 aseel-text-ink dark:aseel-text-soft rounded-xl flex items-center gap-2 border aseel-border-soft dark:aseel-border-soft">
                 <AlertCircle className="w-5 h-5" />
                 <span>يرجى حفظ الشحنة أولاً للبدء في إجراء عمليات الدفع.</span>
               </div>
@@ -588,7 +588,7 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
         {formData.id && (formData as any).shipment_type !== 'transport' && (
           <button
             onClick={() => window.open(`/purchase-invoices/new?shipment=${formData.id}`, '_blank')}
-            className="flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700"
+            className="flex items-center gap-2 px-5 py-2.5 aseel-bg-panel text-white font-bold rounded-xl hover:aseel-bg-panel"
             style={{ marginTop: 12 }}
             title="تكوين فاتورة شراء من بيانات الإرسالية"
           >

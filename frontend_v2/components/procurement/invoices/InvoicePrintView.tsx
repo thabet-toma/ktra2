@@ -64,7 +64,7 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
     const totals = calculateTotals();
 
     return (
-        <div className="fixed inset-0 z-50 bg-gray-100 flex justify-center overflow-auto py-8 print:p-0 print:bg-white print:static print:block" dir="rtl">
+        <div className="fixed inset-0 z-50 aseel-bg-panel flex justify-center overflow-auto py-8 print:p-0 print:aseel-bg-field print:static print:block" dir="rtl">
             <style>
                 {`
                     @media print {
@@ -84,18 +84,18 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
 
             {/* Print Controls */}
             <div className="fixed top-4 right-4 flex gap-2 no-print z-[60]">
-                <button onClick={handlePrint} className="flex items-center gap-2 bg-blue-900 text-white px-4 py-2 rounded-full shadow-lg hover:bg-blue-800 font-bold text-sm">
+                <button onClick={handlePrint} className="flex items-center gap-2 aseel-bg-panel text-white px-4 py-2 rounded-full shadow-lg hover:aseel-bg-panel font-bold text-sm">
                     <Printer size={16} /> طباعة الفاتورة
                 </button>
 
                 {onEdit && (
-                    <button onClick={onEdit} className="flex items-center gap-2 bg-amber-500 text-white px-4 py-2 rounded-full shadow-lg hover:bg-amber-600 font-bold text-sm">
+                    <button onClick={onEdit} className="flex items-center gap-2 aseel-bg-panel text-white px-4 py-2 rounded-full shadow-lg hover:aseel-bg-panel font-bold text-sm">
                         <Edit size={16} /> تعديل البيانات
                     </button>
                 )}
 
                 {onClose && (
-                    <button onClick={onClose} className="flex items-center gap-2 bg-white text-gray-700 px-4 py-2 rounded-full shadow-lg hover:bg-gray-100 border border-gray-200 font-bold text-sm">
+                    <button onClick={onClose} className="flex items-center gap-2 aseel-bg-field aseel-text-ink px-4 py-2 rounded-full shadow-lg hover:aseel-bg-panel border aseel-border-soft font-bold text-sm">
                         <X size={16} /> إغلاق
                     </button>
                 )}
@@ -104,37 +104,37 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
             <div
                 id="print-portal"
                 ref={componentRef}
-                className="w-[210mm] min-h-[297mm] bg-white shadow-2xl p-8 relative flex flex-col text-gray-900 print:shadow-none print:w-full print:h-auto font-sans"
+                className="w-[210mm] min-h-[297mm] aseel-bg-field shadow-2xl p-8 relative flex flex-col aseel-text-ink print:shadow-none print:w-full print:h-auto font-sans"
             >
                 {/* 1. Header */}
-                <div className="flex justify-between items-center border-b-2 border-gray-800 pb-4 mb-4">
+                <div className="flex justify-between items-center border-b-2 aseel-border-soft pb-4 mb-4">
                     <div className="flex gap-4 items-center">
-                        <div className="bg-gray-900 text-white p-3 rounded-xl">
+                        <div className="aseel-bg-panel text-white p-3 rounded-xl">
                             <FileText size={28} />
                         </div>
                         <div>
-                            <h1 className="text-2xl font-black text-gray-900 leading-none">فاتورة مشتريات</h1>
-                            <p className="text-xs font-bold text-gray-500 mt-1">PURCHASE INVOICE - {invoice.currency === 'ILS' ? 'NIS' : 'USD'}</p>
+                            <h1 className="text-2xl font-black aseel-text-ink leading-none">فاتورة مشتريات</h1>
+                            <p className="text-xs font-bold aseel-text-soft mt-1">PURCHASE INVOICE - {invoice.currency === 'ILS' ? 'NIS' : 'USD'}</p>
                         </div>
                     </div>
 
                     <div className="text-left text-xs space-y-1">
-                        <div className="flex gap-2 justify-end"><span className="font-bold text-gray-900 text-sm">{invoice.invoiceNumber}</span> <span className="text-gray-500">REF:</span></div>
-                        <div className="flex gap-2 justify-end"><span className="font-medium text-gray-800">{formatDate(invoice.invoiceDate || invoice.createdAt)}</span> <span className="text-gray-500">DATE:</span></div>
-                        <div className="flex gap-2 justify-end"><span className="font-medium text-gray-800">{currentUser.name}</span> <span className="text-gray-500">USER:</span></div>
+                        <div className="flex gap-2 justify-end"><span className="font-bold aseel-text-ink text-sm">{invoice.invoiceNumber}</span> <span className="aseel-text-soft">REF:</span></div>
+                        <div className="flex gap-2 justify-end"><span className="font-medium aseel-text-ink">{formatDate(invoice.invoiceDate || invoice.createdAt)}</span> <span className="aseel-text-soft">DATE:</span></div>
+                        <div className="flex gap-2 justify-end"><span className="font-medium aseel-text-ink">{currentUser.name}</span> <span className="aseel-text-soft">USER:</span></div>
                     </div>
                 </div>
 
                 {/* 2. Key Metrics Grid */}
                 <div className="grid grid-cols-4 gap-3 mb-4">
                     {[
-                        { label: 'الحالة', value: invoice.status === 'completed' ? 'مكتملة' : 'قيد المعالجة', color: invoice.status === 'completed' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800' },
+                        { label: 'الحالة', value: invoice.status === 'completed' ? 'مكتملة' : 'قيد المعالجة', color: invoice.status === 'completed' ? 'bg-green-100 text-green-800' : 'aseel-bg-accent-bg aseel-text-ink' },
                         { label: 'التاريخ', value: formatDate(invoice.invoiceDate), mono: true },
                         { label: 'رقم الصفقة', value: invoice.dealNumber || '-', mono: true },
                         { label: 'الإجمالي', value: formatCurrency(totals.grandTotal), color: 'text-green-700 font-black', mono: true }
                     ].map((item, i) => (
-                        <div key={i} className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                            <span className="text-[10px] text-gray-500 font-bold uppercase block mb-1">{item.label}</span>
+                        <div key={i} className="border aseel-border-soft rounded-lg p-3 aseel-bg-panel">
+                            <span className="text-[10px] aseel-text-soft font-bold uppercase block mb-1">{item.label}</span>
                             <span className={`text-sm font-bold ${item.color || ''} ${item.mono ? 'font-mono' : ''}`}>{item.value}</span>
                         </div>
                     ))}
@@ -142,28 +142,28 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
 
                 {/* 3. Detailed Info Grid */}
                 <div className="grid grid-cols-2 gap-4 mb-4 text-[11px]">
-                    <div className="border border-gray-300 rounded-lg overflow-hidden">
-                        <div className="bg-gray-100 px-3 py-2 border-b border-gray-300 flex justify-between items-center">
+                    <div className="border aseel-border-soft rounded-lg overflow-hidden">
+                        <div className="aseel-bg-panel px-3 py-2 border-b aseel-border-soft flex justify-between items-center">
                             <span className="font-bold flex items-center gap-1.5"><Building2 size={14} /> بيانات المورد</span>
                         </div>
                         <div className="p-3 space-y-2">
-                            <div className="flex justify-between"><span className="text-gray-500">الاسم:</span> <span className="font-bold text-sm">{getSupplierName()}</span></div>
-                            <div className="flex justify-between"><span className="text-gray-500">العنوان:</span> <span className="text-left">{getSupplierAddress()}</span></div>
-                            <div className="flex justify-between"><span className="text-gray-500">مندوب المبيعات:</span> <span className="font-medium">{invoice.supplierSnapshot?.salesRepName || '-'}</span></div>
-                            <div className="flex justify-between"><span className="text-gray-500">الهاتف:</span> <span className="dir-ltr font-medium">{invoice.supplierSnapshot?.salesRepPhone || supplier?.phone || '-'}</span></div>
+                            <div className="flex justify-between"><span className="aseel-text-soft">الاسم:</span> <span className="font-bold text-sm">{getSupplierName()}</span></div>
+                            <div className="flex justify-between"><span className="aseel-text-soft">العنوان:</span> <span className="text-left">{getSupplierAddress()}</span></div>
+                            <div className="flex justify-between"><span className="aseel-text-soft">مندوب المبيعات:</span> <span className="font-medium">{invoice.supplierSnapshot?.salesRepName || '-'}</span></div>
+                            <div className="flex justify-between"><span className="aseel-text-soft">الهاتف:</span> <span className="dir-ltr font-medium">{invoice.supplierSnapshot?.salesRepPhone || supplier?.phone || '-'}</span></div>
                         </div>
                     </div>
 
-                    <div className="border border-gray-300 rounded-lg overflow-hidden">
-                        <div className="bg-gray-100 px-3 py-2 border-b border-gray-300 flex justify-between items-center">
+                    <div className="border aseel-border-soft rounded-lg overflow-hidden">
+                        <div className="aseel-bg-panel px-3 py-2 border-b aseel-border-soft flex justify-between items-center">
                             <span className="font-bold flex items-center gap-1.5"><Truck size={14} /> الشحن واللوجستيات</span>
                         </div>
                         <div className="p-3 grid grid-cols-2 gap-x-6 gap-y-2">
-                            <div className="flex justify-between"><span className="text-gray-500">طريقة الشحن:</span> <span className="font-bold">{invoice.dealInfo?.shippingMethod || '-'}</span></div>
-                            <div className="flex justify-between"><span className="text-gray-500">الوزن الإجمالي:</span> <span className="dir-ltr font-bold">{invoice.totalWeight ? `${invoice.totalWeight} KG` : '-'}</span></div>
-                            <div className="flex justify-between"><span className="text-gray-500">الحجم الإجمالي:</span> <span className="dir-ltr font-bold">{invoice.totalVolume ? `${invoice.totalVolume} CBM` : '-'}</span></div>
-                            <div className="col-span-2 flex justify-between border-t border-gray-100 pt-2 mt-1">
-                                <span className="text-gray-500">ملاحظات الصفقة:</span>
+                            <div className="flex justify-between"><span className="aseel-text-soft">طريقة الشحن:</span> <span className="font-bold">{invoice.dealInfo?.shippingMethod || '-'}</span></div>
+                            <div className="flex justify-between"><span className="aseel-text-soft">الوزن الإجمالي:</span> <span className="dir-ltr font-bold">{invoice.totalWeight ? `${invoice.totalWeight} KG` : '-'}</span></div>
+                            <div className="flex justify-between"><span className="aseel-text-soft">الحجم الإجمالي:</span> <span className="dir-ltr font-bold">{invoice.totalVolume ? `${invoice.totalVolume} CBM` : '-'}</span></div>
+                            <div className="col-span-2 flex justify-between border-t aseel-border-soft pt-2 mt-1">
+                                <span className="aseel-text-soft">ملاحظات الصفقة:</span>
                                 <span className="italic font-medium">{invoice.dealInfo?.internalNotes || '-'}</span>
                             </div>
                         </div>
@@ -171,60 +171,60 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                 </div>
 
                 {/* 4. Items Table */}
-                <div className="mb-4 border border-gray-300 rounded-lg overflow-hidden shadow-sm">
+                <div className="mb-4 border aseel-border-soft rounded-lg overflow-hidden shadow-sm">
                     <table className="w-full text-right border-collapse">
-                        <thead className="bg-gray-800 text-white text-[10px] font-bold">
+                        <thead className="aseel-bg-panel text-white text-[10px] font-bold">
                             <tr>
-                                <th className="py-2 px-2 w-8 text-center border-r border-gray-600">#</th>
-                                <th className="py-2 px-2 text-center w-12 border-r border-gray-600">صورة</th>
-                                <th className="py-2 px-3 border-r border-gray-600">الصنف والمواصفات</th>
-                                <th className="py-2 px-2 w-24 border-r border-gray-600">التصنيف</th>
-                                <th className="py-2 px-2 w-14 text-center border-r border-gray-600">الكمية</th>
-                                <th className="py-2 px-2 w-24 text-left border-r border-gray-600">سعر الوحدة</th>
+                                <th className="py-2 px-2 w-8 text-center border-r aseel-border-soft">#</th>
+                                <th className="py-2 px-2 text-center w-12 border-r aseel-border-soft">صورة</th>
+                                <th className="py-2 px-3 border-r aseel-border-soft">الصنف والمواصفات</th>
+                                <th className="py-2 px-2 w-24 border-r aseel-border-soft">التصنيف</th>
+                                <th className="py-2 px-2 w-14 text-center border-r aseel-border-soft">الكمية</th>
+                                <th className="py-2 px-2 w-24 text-left border-r aseel-border-soft">سعر الوحدة</th>
                                 {printLanded && (
-                                    <th className="py-2 px-2 w-28 text-left border-r border-gray-600 bg-amber-900/90">نهائي / وحدة</th>
+                                    <th className="py-2 px-2 w-28 text-left border-r aseel-border-soft aseel-bg-panel/90">نهائي / وحدة</th>
                                 )}
-                                <th className="py-2 px-2 w-24 text-left border-r border-gray-600">الإجمالي</th>
+                                <th className="py-2 px-2 w-24 text-left border-r aseel-border-soft">الإجمالي</th>
                                 {printLanded && (
-                                    <th className="py-2 px-2 w-28 text-left bg-amber-900/90">إجمالي نهائي</th>
+                                    <th className="py-2 px-2 w-28 text-left aseel-bg-panel/90">إجمالي نهائي</th>
                                 )}
                             </tr>
                         </thead>
                         <tbody className="text-[11px]">
                             {invoice.items.map((item, index) => (
-                                <tr key={index} className="border-b border-gray-200 last:border-0 hover:bg-gray-50">
-                                    <td className="py-2 px-2 text-center border-l border-gray-200 text-gray-500">{index + 1}</td>
-                                    <td className="py-2 px-2 text-center border-l border-gray-200">
+                                <tr key={index} className="border-b aseel-border-soft last:border-0 hover:aseel-bg-panel">
+                                    <td className="py-2 px-2 text-center border-l aseel-border-soft aseel-text-soft">{index + 1}</td>
+                                    <td className="py-2 px-2 text-center border-l aseel-border-soft">
                                         {(item.imageUrls?.[0] || item.factoryImageUrl) && (
                                             <a href={item.imageUrls?.[0] || item.factoryImageUrl} target="_blank" rel="noreferrer">
-                                                <img src={item.imageUrls?.[0] || item.factoryImageUrl} className="w-10 h-10 object-cover border border-gray-200 rounded shadow-sm mx-auto" alt="" />
+                                                <img src={item.imageUrls?.[0] || item.factoryImageUrl} className="w-10 h-10 object-cover border aseel-border-soft rounded shadow-sm mx-auto" alt="" />
                                             </a>
                                         )}
                                     </td>
-                                    <td className="py-2 px-3 border-l border-gray-200">
-                                        <p className="font-bold text-gray-900 text-[12px]">{item.name}</p>
-                                        <p className="text-[10px] text-gray-500 leading-relaxed mt-1">{item.specifications}</p>
+                                    <td className="py-2 px-3 border-l aseel-border-soft">
+                                        <p className="font-bold aseel-text-ink text-[12px]">{item.name}</p>
+                                        <p className="text-[10px] aseel-text-soft leading-relaxed mt-1">{item.specifications}</p>
                                         {item.notes && (
-                                            <div className="mt-1 p-1 bg-yellow-50 border border-yellow-100 rounded text-[9px] text-amber-700 italic">
+                                            <div className="mt-1 p-1 aseel-bg-panel border aseel-border-soft rounded text-[9px] aseel-text-ink italic">
                                                 ملاحظة: {item.notes}
                                             </div>
                                         )}
-                                        <div className="flex gap-3 mt-1 text-[9px] text-gray-400 font-mono">
+                                        <div className="flex gap-3 mt-1 text-[9px] aseel-text-soft font-mono">
                                             <span>HS: {item.hsCodePrimary || '-'}</span>
-                                            {item.modelNumber && <span>MODEL: <span className="text-gray-700 font-bold">{item.modelNumber}</span></span>}
+                                            {item.modelNumber && <span>MODEL: <span className="aseel-text-ink font-bold">{item.modelNumber}</span></span>}
                                         </div>
                                     </td>
-                                    <td className="py-2 px-2 border-l border-gray-200 text-gray-600">{item.categoryName}</td>
-                                    <td className="py-2 px-2 text-center font-bold border-l border-gray-200 text-sm">{item.quantity}</td>
-                                    <td className="py-2 px-2 text-left font-mono border-l border-gray-200" dir="ltr">{formatCurrency(item.unitPrice)}</td>
+                                    <td className="py-2 px-2 border-l aseel-border-soft aseel-text-soft">{item.categoryName}</td>
+                                    <td className="py-2 px-2 text-center font-bold border-l aseel-border-soft text-sm">{item.quantity}</td>
+                                    <td className="py-2 px-2 text-left font-mono border-l aseel-border-soft" dir="ltr">{formatCurrency(item.unitPrice)}</td>
                                     {printLanded && (
-                                        <td className="py-2 px-2 text-left font-mono border-l border-gray-200 bg-amber-50" dir="ltr">
+                                        <td className="py-2 px-2 text-left font-mono border-l aseel-border-soft aseel-bg-panel" dir="ltr">
                                             {item.landedUnitPriceIls != null ? formatCurrency(item.landedUnitPriceIls) : "—"}
                                         </td>
                                     )}
-                                    <td className="py-2 px-2 text-left font-bold font-mono bg-gray-50 text-sm border-l border-gray-200" dir="ltr">{formatCurrency(item.totalPrice)}</td>
+                                    <td className="py-2 px-2 text-left font-bold font-mono aseel-bg-panel text-sm border-l aseel-border-soft" dir="ltr">{formatCurrency(item.totalPrice)}</td>
                                     {printLanded && (
-                                        <td className="py-2 px-2 text-left font-bold font-mono bg-amber-50 text-sm" dir="ltr">
+                                        <td className="py-2 px-2 text-left font-bold font-mono aseel-bg-panel text-sm" dir="ltr">
                                             {item.landedLineTotalIls != null ? formatCurrency(item.landedLineTotalIls) : "—"}
                                         </td>
                                     )}
@@ -236,30 +236,30 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
 
                 {/* 5. Financial Summary Row */}
                 <div className="flex justify-end mb-4">
-                    <div className="w-64 border border-gray-300 rounded-lg overflow-hidden h-fit shadow-sm">
-                        <div className="bg-gray-800 text-white px-3 py-2 text-center font-bold">ملخص مالي</div>
+                    <div className="w-64 border aseel-border-soft rounded-lg overflow-hidden h-fit shadow-sm">
+                        <div className="aseel-bg-panel text-white px-3 py-2 text-center font-bold">ملخص مالي</div>
                         <div className="p-3 space-y-2.5 text-[11px]">
-                            <div className="flex justify-between border-b border-gray-100 pb-1.5">
-                                <span className="text-gray-500">المجموع الفرعي:</span>
+                            <div className="flex justify-between border-b aseel-border-soft pb-1.5">
+                                <span className="aseel-text-soft">المجموع الفرعي:</span>
                                 <span className="font-mono font-bold" dir="ltr">{formatCurrency(totals.subtotal)}</span>
                             </div>
                             {totals.discountAmount > 0 && (
-                                <div className="flex justify-between border-b border-gray-100 pb-1.5 text-green-600">
+                                <div className="flex justify-between border-b aseel-border-soft pb-1.5 text-green-600">
                                     <span>الخصم:</span>
                                     <span className="font-mono font-bold" dir="ltr">- {formatCurrency(totals.discountAmount)}</span>
                                 </div>
                             )}
                             {totals.taxAmount > 0 && (
-                                <div className="flex justify-between border-b border-gray-100 pb-1.5">
+                                <div className="flex justify-between border-b aseel-border-soft pb-1.5">
                                     <span>الضرائب ({formatTaxPercentLabel(invoice.taxRate)}%):</span>
                                     <span className="font-mono font-bold" dir="ltr">{formatCurrency(totals.taxAmount)}</span>
                                 </div>
                             )}
-                            <div className="flex justify-between border-b border-gray-100 pb-1.5">
-                                <span className="text-gray-500">تكلفة الشحن:</span>
+                            <div className="flex justify-between border-b aseel-border-soft pb-1.5">
+                                <span className="aseel-text-soft">تكلفة الشحن:</span>
                                 <span className="font-mono font-bold" dir="ltr">{formatCurrency(totals.shippingCost)}</span>
                             </div>
-                            <div className="flex justify-between pt-2 font-black text-lg bg-gray-50 -mx-3 px-3 border-t border-gray-200">
+                            <div className="flex justify-between pt-2 font-black text-lg aseel-bg-panel -mx-3 px-3 border-t aseel-border-soft">
                                 <span>الإجمالي:</span>
                                 <span className="font-mono" dir="ltr">{formatCurrency(totals.grandTotal)}</span>
                             </div>
@@ -268,8 +268,8 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                 </div>
 
                 {/* 6. Attachments Section */}
-                <div className="mt-4 border border-gray-200 rounded-lg p-3 bg-white no-print">
-                    <div className="font-bold text-[11px] text-gray-500 mb-2 flex items-center gap-1.5">
+                <div className="mt-4 border aseel-border-soft rounded-lg p-3 aseel-bg-field no-print">
+                    <div className="font-bold text-[11px] aseel-text-soft mb-2 flex items-center gap-1.5">
                         <FileText size={14} /> المرفقات والملفات الرقمية (انقر للفتح):
                     </div>
 
@@ -278,7 +278,7 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                         const images = invoice.quoteImages || invoice.dealInfo?.quoteImages || [];
                         const hasAttachments = pdfs.length > 0 || images.length > 0;
 
-                        if (!hasAttachments) return <span className="text-[10px] text-gray-400 italic px-2">لا توجد مرفقات مرتبطة.</span>;
+                        if (!hasAttachments) return <span className="text-[10px] aseel-text-soft italic px-2">لا توجد مرفقات مرتبطة.</span>;
 
                         return (
                             <div className="flex flex-wrap gap-3">
@@ -289,12 +289,12 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                                         href={pdf.url}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="flex items-center gap-2 bg-white border border-red-200 rounded-md px-3 py-2 hover:bg-red-50 hover:border-red-400 transition-all group"
+                                        className="flex items-center gap-2 aseel-bg-field border aseel-border-soft rounded-md px-3 py-2 hover:aseel-bg-panel hover:aseel-border-soft transition-all group"
                                     >
-                                        <FileText size={18} className="text-red-500" />
+                                        <FileText size={18} className="aseel-text-soft" />
                                         <div className="flex flex-col">
-                                            <span className="text-[10px] font-bold text-gray-700 truncate max-w-[120px]">{pdf.name}</span>
-                                            <span className="text-[8px] text-red-400 font-bold uppercase flex items-center gap-1">Open PDF <ExternalLink size={8} /></span>
+                                            <span className="text-[10px] font-bold aseel-text-ink truncate max-w-[120px]">{pdf.name}</span>
+                                            <span className="text-[8px] aseel-text-soft font-bold uppercase flex items-center gap-1">Open PDF <ExternalLink size={8} /></span>
                                         </div>
                                     </a>
                                 ))}
@@ -306,7 +306,7 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                                         href={img}
                                         target="_blank"
                                         rel="noopener noreferrer"
-                                        className="relative w-14 h-14 rounded-md border-2 border-gray-100 overflow-hidden hover:border-blue-400 transition-all shadow-sm group"
+                                        className="relative w-14 h-14 rounded-md border-2 aseel-border-soft overflow-hidden hover:aseel-border-soft transition-all shadow-sm group"
                                     >
                                         <img src={img} alt="" className="w-full h-full object-cover group-hover:scale-110 transition-transform" />
                                         <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
@@ -319,7 +319,7 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                     })()}
                 </div>
 
-                <div className="mt-auto pt-4 border-t border-gray-200 flex justify-between text-[10px] text-gray-400 font-medium">
+                <div className="mt-auto pt-4 border-t aseel-border-soft flex justify-between text-[10px] aseel-text-soft font-medium">
                     <p>Internal Secure Document - Unauthorized sharing is prohibited</p>
                     <p>Generated: {new Date().toLocaleString('en-GB')}</p>
                 </div>

@@ -76,14 +76,14 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
 
     const getStatusColor = (status: Shipment['status']) => {
         switch (status) {
-            case 'draft': return 'bg-gray-100 text-gray-700';
-            case 'payment_pending': return 'bg-yellow-100 text-yellow-700';
-            case 'partially_paid': return 'bg-blue-100 text-blue-700';
+            case 'draft': return 'aseel-bg-panel aseel-text-ink';
+            case 'payment_pending': return 'aseel-bg-panel aseel-text-ink';
+            case 'partially_paid': return 'aseel-bg-accent-bg aseel-text-accent';
             case 'paid': return 'bg-green-100 text-green-700';
             case 'shipped': return 'bg-[var(--color-surface-2)] text-[var(--color-primary)]';
             case 'delivered': return 'bg-[var(--color-surface-2)] text-[var(--color-primary)]';
-            case 'cancelled': return 'bg-red-100 text-red-700';
-            default: return 'bg-gray-100 text-gray-700';
+            case 'cancelled': return 'aseel-bg-panel aseel-text-state';
+            default: return 'aseel-bg-panel aseel-text-ink';
         }
     };
 
@@ -177,32 +177,32 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
 
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 print:p-0">
-            <div className="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col print:max-h-none print:max-w-none print:rounded-none print:shadow-none print:bg-white">
+            <div className="aseel-bg-field dark:aseel-bg-panel rounded-2xl w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col print:max-h-none print:max-w-none print:rounded-none print:shadow-none print:aseel-bg-field">
                 {/* Header */}
-                <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700 print:hidden">
+                <div className="flex items-center justify-between p-6 border-b aseel-border-soft dark:aseel-border-soft print:hidden">
                     <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-xl ${isSea ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' : 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/30 text-[var(--color-primary)] dark:text-[var(--color-primary)]'}`}>
+                        <div className={`p-2 rounded-xl ${isSea ? 'aseel-bg-accent-bg dark:aseel-bg-panel/30 aseel-text-accent dark:aseel-text-soft' : 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/30 text-[var(--color-primary)] dark:text-[var(--color-primary)]'}`}>
                             {isSea ? <Ship className="w-6 h-6" /> : <Plane className="w-6 h-6" />}
                         </div>
                         <div>
-                            <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                            <h2 className="text-xl font-bold aseel-text-ink dark:text-white">
                                 {shipment.shipmentName || `شحنة ${shipmentNumber}`}
                             </h2>
-                            <p className="text-sm text-gray-500">تفاصيل الشحنة #{shipmentNumber}</p>
+                            <p className="text-sm aseel-text-soft">تفاصيل الشحنة #{shipmentNumber}</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={handlePrint}
                             disabled={isPrinting}
-                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                            className="flex items-center gap-2 px-4 py-2 aseel-btn-primary transition-colors disabled:opacity-50"
                         >
                             <Printer className="w-4 h-4" />
                             {isPrinting ? 'جاري الطباعة...' : 'طباعة'}
                         </button>
                         <button
                             onClick={onClose}
-                            className="px-4 py-2 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+                            className="px-4 py-2 aseel-bg-panel dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft rounded-lg hover:aseel-bg-grid-head dark:hover:aseel-bg-panel transition-colors"
                         >
                             إغلاق
                         </button>
@@ -215,14 +215,14 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                     <div className="hidden print:block mb-8 border-b pb-4">
                         <div className="flex justify-between items-start">
                             <div>
-                                <h1 className="text-2xl font-bold text-gray-900">
+                                <h1 className="text-2xl font-bold aseel-text-ink">
                                     {shipment.shipmentName || `شحنة ${shipmentNumber}`}
                                 </h1>
-                                <p className="text-gray-600">تقرير تفصيلي للشحنة #{shipmentNumber}</p>
+                                <p className="aseel-text-soft">تقرير تفصيلي للشحنة #{shipmentNumber}</p>
                             </div>
                             <div className="text-right">
-                                <div className="text-sm text-gray-500">تاريخ الطباعة: {formatDate(new Date().toISOString())}</div>
-                                <div className="text-sm text-gray-500">الوقت: {format(new Date(), 'HH:mm')}</div>
+                                <div className="text-sm aseel-text-soft">تاريخ الطباعة: {formatDate(new Date().toISOString())}</div>
+                                <div className="text-sm aseel-text-soft">الوقت: {format(new Date(), 'HH:mm')}</div>
                             </div>
                         </div>
                     </div>
@@ -232,32 +232,32 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                         {/* Column 1: Basic Info */}
                         <div className="space-y-6">
                             {/* Shipment Type Card */}
-                            <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4">
-                                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                            <div className="aseel-bg-panel dark:aseel-bg-panel rounded-xl p-4">
+                                <h3 className="text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-3 flex items-center gap-2">
                                     <Truck className="w-4 h-4" />
                                     معلومات الشحنة الأساسية
                                 </h3>
                                 <div className="space-y-3">
                                     <div className="flex items-center justify-between">
-                                        <span className="text-gray-600 dark:text-gray-400">رقم الشحنة:</span>
-                                        <span className="font-bold text-gray-900 dark:text-white font-mono">{shipmentNumber}</span>
+                                        <span className="aseel-text-soft dark:aseel-text-soft">رقم الشحنة:</span>
+                                        <span className="font-bold aseel-text-ink dark:text-white font-mono">{shipmentNumber}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                        <span className="text-gray-600 dark:text-gray-400">نوع الشحن:</span>
-                                        <span className={`flex items-center gap-1 px-2 py-1 rounded ${isSea ? 'bg-blue-100 text-blue-700' : 'bg-[var(--color-surface-2)] text-[var(--color-primary)]'}`}>
+                                        <span className="aseel-text-soft dark:aseel-text-soft">نوع الشحن:</span>
+                                        <span className={`flex items-center gap-1 px-2 py-1 rounded ${isSea ? 'aseel-bg-accent-bg aseel-text-accent' : 'bg-[var(--color-surface-2)] text-[var(--color-primary)]'}`}>
                                             {isSea ? <Ship className="w-3 h-3" /> : <Plane className="w-3 h-3" />}
                                             {isSea ? 'بحري' : 'جوي'}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                        <span className="text-gray-600 dark:text-gray-400">الحالة:</span>
+                                        <span className="aseel-text-soft dark:aseel-text-soft">الحالة:</span>
                                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(shipment.status)}`}>
                                             {getStatusLabel(shipment.status)}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                        <span className="text-gray-600 dark:text-gray-400">تاريخ الإنشاء:</span>
-                                        <span className="font-medium text-gray-900 dark:text-white">
+                                        <span className="aseel-text-soft dark:aseel-text-soft">تاريخ الإنشاء:</span>
+                                        <span className="font-medium aseel-text-ink dark:text-white">
                                             {formatDateTime(shipment.createdAt)}
                                         </span>
                                     </div>
@@ -265,17 +265,17 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                             </div>
 
                             {/* Shipping Agent Card */}
-                            <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4">
-                                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                            <div className="aseel-bg-panel dark:aseel-bg-panel rounded-xl p-4">
+                                <h3 className="text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-3 flex items-center gap-2">
                                     <Building className="w-4 h-4" />
                                     وكيل الشحن
                                 </h3>
                                 <div className="space-y-2">
                                     <div className="flex items-center gap-2">
-                                        <User className="w-4 h-4 text-gray-400" />
-                                        <span className="font-medium text-gray-900 dark:text-white">{shipment.shippingAgentName}</span>
+                                        <User className="w-4 h-4 aseel-text-soft" />
+                                        <span className="font-medium aseel-text-ink dark:text-white">{shipment.shippingAgentName}</span>
                                     </div>
-                                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                                    <div className="text-sm aseel-text-soft dark:aseel-text-soft">
                                         المعرف: <span className="font-mono">{shipment.shippingAgentId}</span>
                                     </div>
                                 </div>
@@ -285,34 +285,34 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                         {/* Column 2: Dates & Schedule */}
                         <div className="space-y-6">
                             {/* Schedule Card */}
-                            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-100 dark:border-blue-800">
-                                <h3 className="text-sm font-semibold text-blue-700 dark:text-blue-300 mb-3 flex items-center gap-2">
+                            <div className="aseel-bg-accent-bg dark:aseel-bg-panel/20 rounded-xl p-4 border aseel-border-soft dark:aseel-border-soft">
+                                <h3 className="text-sm font-semibold aseel-text-accent dark:aseel-text-soft mb-3 flex items-center gap-2">
                                     <Calendar className="w-4 h-4" />
                                     الجدول الزمني
                                 </h3>
                                 <div className="space-y-4">
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
-                                            <TrendingUp className="w-4 h-4 text-blue-500" />
-                                            <span className="text-gray-600 dark:text-gray-400">تاريخ المغادرة:</span>
+                                            <TrendingUp className="w-4 h-4 aseel-text-soft" />
+                                            <span className="aseel-text-soft dark:aseel-text-soft">تاريخ المغادرة:</span>
                                         </div>
-                                        <span className="font-bold text-blue-700 dark:text-blue-300">
+                                        <span className="font-bold aseel-text-accent dark:aseel-text-soft">
                                             {shippingInfo.departureDate ? formatDate(shippingInfo.departureDate) : 'غير محدد'}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">
                                         <div className="flex items-center gap-2">
                                             <MapPin className="w-4 h-4 text-green-500" />
-                                            <span className="text-gray-600 dark:text-gray-400">تاريخ الوصول المتوقع:</span>
+                                            <span className="aseel-text-soft dark:aseel-text-soft">تاريخ الوصول المتوقع:</span>
                                         </div>
                                         <span className="font-bold text-green-700 dark:text-green-300">
                                             {shippingInfo.arrivalDate ? formatDate(shippingInfo.arrivalDate) : 'غير محدد'}
                                         </span>
                                     </div>
-                                    <div className="pt-2 border-t border-blue-100 dark:border-blue-800">
-                                        <div className="text-xs text-blue-600 dark:text-blue-400 font-medium mb-1">مدة الشحن المتوقعة</div>
+                                    <div className="pt-2 border-t aseel-border-soft dark:aseel-border-soft">
+                                        <div className="text-xs aseel-text-accent dark:aseel-text-soft font-medium mb-1">مدة الشحن المتوقعة</div>
                                         {shippingInfo.departureDate && shippingInfo.arrivalDate ? (
-                                            <div className="text-sm text-gray-700 dark:text-gray-300">
+                                            <div className="text-sm aseel-text-ink dark:aseel-text-soft">
                                                 {(() => {
                                                     const dep = new Date(shippingInfo.departureDate);
                                                     const arr = new Date(shippingInfo.arrivalDate);
@@ -322,37 +322,37 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                                 })()}
                                             </div>
                                         ) : (
-                                            <div className="text-sm text-gray-500">غير محددة</div>
+                                            <div className="text-sm aseel-text-soft">غير محددة</div>
                                         )}
                                     </div>
                                 </div>
                             </div>
 
                             {/* Current Status Card */}
-                            <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4">
-                                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                            <div className="aseel-bg-panel dark:aseel-bg-panel rounded-xl p-4">
+                                <h3 className="text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-3 flex items-center gap-2">
                                     <Clock className="w-4 h-4" />
                                     الحالة الحالية
                                 </h3>
                                 <div className="space-y-3">
                                     <div className="flex items-center justify-between">
-                                        <span className="text-gray-600 dark:text-gray-400">حالة الشحنة:</span>
-                                        <span className="font-medium text-gray-900 dark:text-white">
+                                        <span className="aseel-text-soft dark:aseel-text-soft">حالة الشحنة:</span>
+                                        <span className="font-medium aseel-text-ink dark:text-white">
                                             {getShipmentStatusText()}
                                         </span>
                                     </div>
                                     {shippingInfo.shipmentStatus?.statusDate && (
                                         <div className="flex items-center justify-between">
-                                            <span className="text-gray-600 dark:text-gray-400">تاريخ التحديث:</span>
-                                            <span className="text-sm text-gray-500">
+                                            <span className="aseel-text-soft dark:aseel-text-soft">تاريخ التحديث:</span>
+                                            <span className="text-sm aseel-text-soft">
                                                 {formatDate(shippingInfo.shipmentStatus.statusDate)}
                                             </span>
                                         </div>
                                     )}
                                     {shippingInfo.shipmentStatus?.notes && (
-                                        <div className="bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded-lg">
-                                            <div className="text-xs text-yellow-700 dark:text-yellow-300 font-medium mb-1">ملاحظات:</div>
-                                            <div className="text-sm text-gray-700 dark:text-gray-300">{shippingInfo.shipmentStatus.notes}</div>
+                                        <div className="aseel-bg-panel dark:aseel-bg-panel/20 p-2 rounded-lg">
+                                            <div className="text-xs aseel-text-ink dark:aseel-text-soft font-medium mb-1">ملاحظات:</div>
+                                            <div className="text-sm aseel-text-ink dark:aseel-text-soft">{shippingInfo.shipmentStatus.notes}</div>
                                         </div>
                                     )}
                                 </div>
@@ -362,31 +362,31 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                         {/* Column 3: Metrics */}
                         <div className="space-y-6">
                             {/* Financial Summary */}
-                            <div className="bg-emerald-50 dark:bg-emerald-900/20 rounded-xl p-4 border border-emerald-100 dark:border-emerald-800">
-                                <h3 className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 mb-3 flex items-center gap-2">
+                            <div className="aseel-bg-panel dark:aseel-bg-panel/20 rounded-xl p-4 border aseel-border-soft dark:aseel-border-soft">
+                                <h3 className="text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-3 flex items-center gap-2">
                                     <DollarSign className="w-4 h-4" />
                                     الملخص المالي
                                 </h3>
                                 <div className="space-y-3">
                                     <div className="flex items-center justify-between">
-                                        <span className="text-gray-600 dark:text-gray-400">التكلفة الإجمالية:</span>
-                                        <span className="font-bold text-lg text-emerald-700 dark:text-emerald-300">
+                                        <span className="aseel-text-soft dark:aseel-text-soft">التكلفة الإجمالية:</span>
+                                        <span className="font-bold text-lg aseel-text-ink dark:aseel-text-soft">
                                             ${totalCost.toLocaleString()}
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                        <span className="text-gray-600 dark:text-gray-400">عدد الصفقات:</span>
-                                        <span className="font-bold text-gray-900 dark:text-white">{totalDeals}</span>
+                                        <span className="aseel-text-soft dark:aseel-text-soft">عدد الصفقات:</span>
+                                        <span className="font-bold aseel-text-ink dark:text-white">{totalDeals}</span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                        <span className="text-gray-600 dark:text-gray-400">الحجم الإجمالي:</span>
-                                        <span className="font-bold text-gray-900 dark:text-white">
+                                        <span className="aseel-text-soft dark:aseel-text-soft">الحجم الإجمالي:</span>
+                                        <span className="font-bold aseel-text-ink dark:text-white">
                                             {totalVolume.toFixed(1)} م³
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">
-                                        <span className="text-gray-600 dark:text-gray-400">الوزن الإجمالي:</span>
-                                        <span className="font-bold text-gray-900 dark:text-white">
+                                        <span className="aseel-text-soft dark:aseel-text-soft">الوزن الإجمالي:</span>
+                                        <span className="font-bold aseel-text-ink dark:text-white">
                                             {totalWeight.toLocaleString()} كجم
                                         </span>
                                     </div>
@@ -394,8 +394,8 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                             </div>
 
                             {/* Progress Bars */}
-                            <div className="bg-gray-50 dark:bg-gray-800 rounded-xl p-4">
-                                <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3 flex items-center gap-2">
+                            <div className="aseel-bg-panel dark:aseel-bg-panel rounded-xl p-4">
+                                <h3 className="text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-3 flex items-center gap-2">
                                     <TrendingUp className="w-4 h-4" />
                                     تقدم التنفيذ
                                 </h3>
@@ -403,12 +403,12 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                     {/* Shipment Progress */}
                                     <div>
                                         <div className="flex justify-between items-center mb-1">
-                                            <span className="text-xs text-gray-600 dark:text-gray-400">تقدم الشحنة</span>
+                                            <span className="text-xs aseel-text-soft dark:aseel-text-soft">تقدم الشحنة</span>
                                             <span className="text-xs font-medium">{calculateProgress()}%</span>
                                         </div>
-                                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                        <div className="w-full aseel-bg-grid-head dark:aseel-bg-panel rounded-full h-2">
                                             <div
-                                                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                                                className="aseel-bg-accent h-2 rounded-full transition-all duration-300"
                                                 style={{ width: `${calculateProgress()}%` }}
                                             ></div>
                                         </div>
@@ -417,10 +417,10 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                     {/* Payment Progress */}
                                     <div>
                                         <div className="flex justify-between items-center mb-1">
-                                            <span className="text-xs text-gray-600 dark:text-gray-400">تقدم الدفع</span>
+                                            <span className="text-xs aseel-text-soft dark:aseel-text-soft">تقدم الدفع</span>
                                             <span className="text-xs font-medium">{calculatePaymentProgress()}%</span>
                                         </div>
-                                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                        <div className="w-full aseel-bg-grid-head dark:aseel-bg-panel rounded-full h-2">
                                             <div
                                                 className="bg-green-600 h-2 rounded-full transition-all duration-300"
                                                 style={{ width: `${calculatePaymentProgress()}%` }}
@@ -435,9 +435,9 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                     {/* Detailed Information Sections */}
                     <div className="space-y-6">
                         {/* Shipping Details Section */}
-                        <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-                            <div className="border-b border-gray-200 dark:border-gray-700 p-4">
-                                <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                        <div className="aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl overflow-hidden">
+                            <div className="border-b aseel-border-soft dark:aseel-border-soft p-4">
+                                <h3 className="text-lg font-semibold aseel-text-ink dark:text-white flex items-center gap-2">
                                     <Globe className="w-5 h-5" />
                                     تفاصيل الشحن
                                 </h3>
@@ -446,46 +446,46 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {/* Shipping Company Info */}
                                     <div className="space-y-3">
-                                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                                        <h4 className="text-sm font-medium aseel-text-ink dark:aseel-text-soft flex items-center gap-2">
                                             <Building className="w-4 h-4" />
                                             شركة الشحن الدولية
                                         </h4>
-                                        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                                            <div className="text-gray-900 dark:text-white font-medium">{shippingInfo?.internationalShippingCompany || 'غير محدد'}</div>
+                                        <div className="aseel-bg-panel dark:aseel-bg-panel/50 rounded-lg p-3">
+                                            <div className="aseel-text-ink dark:text-white font-medium">{shippingInfo?.internationalShippingCompany || 'غير محدد'}</div>
                                         </div>
                                     </div>
 
                                     {/* Ship/Flight Info */}
                                     <div className="space-y-3">
-                                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                                        <h4 className="text-sm font-medium aseel-text-ink dark:aseel-text-soft flex items-center gap-2">
                                             {isSea ? <Ship className="w-4 h-4" /> : <Plane className="w-4 h-4" />}
                                             {isSea ? 'معلومات السفينة' : 'معلومات الرحلة'}
                                         </h4>
-                                        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+                                        <div className="aseel-bg-panel dark:aseel-bg-panel/50 rounded-lg p-3">
                                             {isSea ? (
                                                 <>
                                                     <div className="mb-2">
-                                                        <span className="text-gray-600 dark:text-gray-400 text-xs">اسم السفينة:</span>
-                                                        <div className="font-medium text-gray-900 dark:text-white">{shippingInfo?.shipName || 'غير محدد'}</div>
+                                                        <span className="aseel-text-soft dark:aseel-text-soft text-xs">اسم السفينة:</span>
+                                                        <div className="font-medium aseel-text-ink dark:text-white">{shippingInfo?.shipName || 'غير محدد'}</div>
                                                     </div>
                                                     <div className="mb-2">
-                                                        <span className="text-gray-600 dark:text-gray-400 text-xs">رقم IMO:</span>
-                                                        <div className="font-mono text-gray-900 dark:text-white">{shippingInfo?.imoNumber || 'غير محدد'}</div>
+                                                        <span className="aseel-text-soft dark:aseel-text-soft text-xs">رقم IMO:</span>
+                                                        <div className="font-mono aseel-text-ink dark:text-white">{shippingInfo?.imoNumber || 'غير محدد'}</div>
                                                     </div>
                                                     <div>
-                                                        <span className="text-gray-600 dark:text-gray-400 text-xs">رقم الكونتينر:</span>
-                                                        <div className="font-mono text-gray-900 dark:text-white">{shippingInfo?.containerNumber || 'غير محدد'}</div>
+                                                        <span className="aseel-text-soft dark:aseel-text-soft text-xs">رقم الكونتينر:</span>
+                                                        <div className="font-mono aseel-text-ink dark:text-white">{shippingInfo?.containerNumber || 'غير محدد'}</div>
                                                     </div>
                                                 </>
                                             ) : (
                                                 <>
                                                     <div className="mb-2">
-                                                        <span className="text-gray-600 dark:text-gray-400 text-xs">رقم الرحلة:</span>
-                                                        <div className="font-mono text-gray-900 dark:text-white">{shippingInfo?.flightNumber || 'غير محدد'}</div>
+                                                        <span className="aseel-text-soft dark:aseel-text-soft text-xs">رقم الرحلة:</span>
+                                                        <div className="font-mono aseel-text-ink dark:text-white">{shippingInfo?.flightNumber || 'غير محدد'}</div>
                                                     </div>
                                                     <div>
-                                                        <span className="text-gray-600 dark:text-gray-400 text-xs">رقم البوليصة الجوية:</span>
-                                                        <div className="font-mono text-gray-900 dark:text-white">{shippingInfo?.airwayBillNumber || 'غير محدد'}</div>
+                                                        <span className="aseel-text-soft dark:aseel-text-soft text-xs">رقم البوليصة الجوية:</span>
+                                                        <div className="font-mono aseel-text-ink dark:text-white">{shippingInfo?.airwayBillNumber || 'غير محدد'}</div>
                                                     </div>
                                                 </>
                                             )}
@@ -494,23 +494,23 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
 
                                     {/* Document Numbers */}
                                     <div className="space-y-3">
-                                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                                        <h4 className="text-sm font-medium aseel-text-ink dark:aseel-text-soft flex items-center gap-2">
                                             <FileText className="w-4 h-4" />
                                             المستندات والأرقام
                                         </h4>
-                                        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+                                        <div className="aseel-bg-panel dark:aseel-bg-panel/50 rounded-lg p-3">
                                             {isSea ? (
                                                 <>
                                                     <div className="mb-2">
-                                                        <span className="text-gray-600 dark:text-gray-400 text-xs">رقم البوليصة (B/L):</span>
-                                                        <div className="font-mono text-gray-900 dark:text-white">{shippingInfo?.billOfLadingNumber || 'غير محدد'}</div>
+                                                        <span className="aseel-text-soft dark:aseel-text-soft text-xs">رقم البوليصة (B/L):</span>
+                                                        <div className="font-mono aseel-text-ink dark:text-white">{shippingInfo?.billOfLadingNumber || 'غير محدد'}</div>
                                                     </div>
                                                     {shippingInfo?.billOfLadingFile && (
                                                         <a
                                                             href={shippingInfo.billOfLadingFile}
                                                             target="_blank"
                                                             rel="noopener noreferrer"
-                                                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 text-sm"
+                                                            className="inline-flex items-center gap-1 aseel-text-accent hover:aseel-text-accent text-sm"
                                                         >
                                                             <ExternalLink className="w-3 h-3" />
                                                             عرض بوليصة الشحن
@@ -520,15 +520,15 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                             ) : (
                                                 <>
                                                     <div className="mb-2">
-                                                        <span className="text-gray-600 dark:text-gray-400 text-xs">رقم البوليصة الجوية:</span>
-                                                        <div className="font-mono text-gray-900 dark:text-white">{shippingInfo?.airwayBillNumber || 'غير محدد'}</div>
+                                                        <span className="aseel-text-soft dark:aseel-text-soft text-xs">رقم البوليصة الجوية:</span>
+                                                        <div className="font-mono aseel-text-ink dark:text-white">{shippingInfo?.airwayBillNumber || 'غير محدد'}</div>
                                                     </div>
                                                     {shippingInfo?.airwayBillFile && (
                                                         <a
                                                             href={shippingInfo.airwayBillFile}
                                                             target="_blank"
                                                             rel="noopener noreferrer"
-                                                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 text-sm"
+                                                            className="inline-flex items-center gap-1 aseel-text-accent hover:aseel-text-accent text-sm"
                                                         >
                                                             <ExternalLink className="w-3 h-3" />
                                                             عرض بوليصة الشحن الجوي
@@ -541,18 +541,18 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
 
                                     {/* Tracking Section */}
                                     <div className="space-y-3">
-                                        <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center gap-2">
+                                        <h4 className="text-sm font-medium aseel-text-ink dark:aseel-text-soft flex items-center gap-2">
                                             <Navigation className="w-4 h-4" />
                                             التتبع
                                         </h4>
-                                        <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
+                                        <div className="aseel-bg-panel dark:aseel-bg-panel/50 rounded-lg p-3">
                                             <div className="space-y-2">
                                                 {shippingInfo?.trackingLink && (
                                                     <a
                                                         href={shippingInfo.trackingLink}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        className="flex items-center gap-2 text-emerald-600 hover:text-emerald-700 font-medium"
+                                                        className="flex items-center gap-2 aseel-text-soft hover:aseel-text-ink font-medium"
                                                     >
                                                         <Navigation className="w-4 h-4" />
                                                         رابط التتبع المباشر
@@ -567,7 +567,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                                                         href={`https://www.marinetraffic.com/en/ais/details/ships/imo:${shippingInfo.imoNumber}`}
                                                                         target="_blank"
                                                                         rel="noopener noreferrer"
-                                                                        className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-sm hover:bg-blue-200 transition-colors"
+                                                                        className="inline-flex items-center gap-1 px-3 py-1 aseel-bg-accent-bg aseel-text-accent rounded-lg text-sm hover:aseel-bg-grid-head transition-colors"
                                                                     >
                                                                         <Ship className="w-3 h-3" />
                                                                         MarineTraffic
@@ -578,7 +578,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                                                         href={`https://www.vesselfinder.com/vessels?name=${encodeURIComponent(shippingInfo.shipName)}`}
                                                                         target="_blank"
                                                                         rel="noopener noreferrer"
-                                                                        className="inline-flex items-center gap-1 px-3 py-1 bg-blue-100 text-blue-700 rounded-lg text-sm hover:bg-blue-200 transition-colors"
+                                                                        className="inline-flex items-center gap-1 px-3 py-1 aseel-bg-accent-bg aseel-text-accent rounded-lg text-sm hover:aseel-bg-grid-head transition-colors"
                                                                     >
                                                                         <Ship className="w-3 h-3" />
                                                                         VesselFinder
@@ -589,7 +589,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                                                         href={`https://www.track-trace.com/container/item/${shippingInfo.containerNumber}`}
                                                                         target="_blank"
                                                                         rel="noopener noreferrer"
-                                                                        className="inline-flex items-center gap-1 px-3 py-1 bg-emerald-100 text-emerald-700 rounded-lg text-sm hover:bg-emerald-200 transition-colors"
+                                                                        className="inline-flex items-center gap-1 px-3 py-1 aseel-bg-panel aseel-text-ink rounded-lg text-sm hover:aseel-bg-grid-head transition-colors"
                                                                     >
                                                                         <Box className="w-3 h-3" />
                                                                         تتبع الحاوية
@@ -620,9 +620,9 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
 
                         {/* Deals Summary */}
                         {resolvedShipmentDeals.length > 0 && (
-                            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-                                <div className="border-b border-gray-200 dark:border-gray-700 p-4">
-                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                            <div className="aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl overflow-hidden">
+                                <div className="border-b aseel-border-soft dark:aseel-border-soft p-4">
+                                    <h3 className="text-lg font-semibold aseel-text-ink dark:text-white flex items-center gap-2">
                                         <Package className="w-5 h-5" />
                                         ملخص الصفقات ({totalDeals})
                                     </h3>
@@ -630,8 +630,8 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                 <div className="p-4">
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-sm">
-                                            <thead className="bg-gray-50 dark:bg-gray-700">
-                                                <tr className="text-right text-gray-600 dark:text-gray-300">
+                                            <thead className="aseel-bg-panel dark:aseel-bg-panel">
+                                                <tr className="text-right aseel-text-soft dark:aseel-text-soft">
                                                     <th className="px-3 py-2">رقم الصفقة</th>
                                                     <th className="px-3 py-2">رقم العرض</th>
                                                     <th className="px-3 py-2">الحجم</th>
@@ -643,13 +643,13 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                             </thead>
                                             <tbody>
                                                 {resolvedShipmentDeals.map((deal) => (
-                                                    <tr key={deal.dealId} className="border-b border-gray-100 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                                                    <tr key={deal.dealId} className="border-b aseel-border-soft dark:aseel-border-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel/50">
                                                         <td className="px-3 py-2">
-                                                            <div className="font-medium text-gray-900 dark:text-white leading-snug">
+                                                            <div className="font-medium aseel-text-ink dark:text-white leading-snug">
                                                                 {deal.displayTitle && deal.displayTitle !== deal.dealNumber ? (
                                                                     <>
                                                                         <span className="block">{deal.displayTitle}</span>
-                                                                        <span className="text-xs font-mono text-gray-500 dark:text-gray-400">
+                                                                        <span className="text-xs font-mono aseel-text-soft dark:aseel-text-soft">
                                                                             {deal.dealNumber}
                                                                         </span>
                                                                     </>
@@ -659,42 +659,42 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                                             </div>
                                                         </td>
                                                         <td className="px-3 py-2">
-                                                            <div className="font-mono text-gray-700 dark:text-gray-300">{deal.originalOfferNumber}</div>
+                                                            <div className="font-mono aseel-text-ink dark:aseel-text-soft">{deal.originalOfferNumber}</div>
                                                         </td>
                                                         <td className="px-3 py-2 text-center">
-                                                            <div className="text-gray-700 dark:text-gray-300">{(deal.totalVolume || 0).toFixed(1)} م³</div>
+                                                            <div className="aseel-text-ink dark:aseel-text-soft">{(deal.totalVolume || 0).toFixed(1)} م³</div>
                                                         </td>
                                                         <td className="px-3 py-2 text-center">
-                                                            <div className="text-gray-700 dark:text-gray-300">{(deal.totalWeightKg || 0).toLocaleString()} كجم</div>
+                                                            <div className="aseel-text-ink dark:aseel-text-soft">{(deal.totalWeightKg || 0).toLocaleString()} كجم</div>
                                                         </td>
                                                         <td className="px-3 py-2 text-center">
-                                                            <div className="font-medium text-blue-600 dark:text-blue-400">
+                                                            <div className="font-medium aseel-text-accent dark:aseel-text-soft">
                                                                 ${(deal.distributedCost || 0).toLocaleString()}
                                                             </div>
                                                         </td>
                                                         <td className="px-3 py-2 text-center">
-                                                            <div className="text-red-600 dark:text-red-400">
+                                                            <div className="aseel-text-state dark:aseel-text-soft">
                                                                 ${(deal.extraCosts || 0).toLocaleString()}
                                                             </div>
                                                         </td>
                                                         <td className="px-3 py-2 text-center">
-                                                            <div className="font-bold text-gray-900 dark:text-white">
+                                                            <div className="font-bold aseel-text-ink dark:text-white">
                                                                 ${((deal.distributedCost || 0) + (deal.extraCosts || 0)).toLocaleString()}
                                                             </div>
                                                         </td>
                                                     </tr>
                                                 ))}
-                                                <tr className="bg-gray-50 dark:bg-gray-700 font-bold">
+                                                <tr className="aseel-bg-panel dark:aseel-bg-panel font-bold">
                                                     <td colSpan={4} className="px-3 py-3 text-left">
                                                         المجاميع
                                                     </td>
-                                                    <td className="px-3 py-3 text-center text-blue-600 dark:text-blue-400">
+                                                    <td className="px-3 py-3 text-center aseel-text-accent dark:aseel-text-soft">
                                                         ${resolvedShipmentDeals.reduce((sum, d) => sum + (d.distributedCost || 0), 0).toLocaleString()}
                                                     </td>
-                                                    <td className="px-3 py-3 text-center text-red-600 dark:text-red-400">
+                                                    <td className="px-3 py-3 text-center aseel-text-state dark:aseel-text-soft">
                                                         ${resolvedShipmentDeals.reduce((sum, d) => sum + (d.extraCosts || 0), 0).toLocaleString()}
                                                     </td>
-                                                    <td className="px-3 py-3 text-center text-gray-900 dark:text-white">
+                                                    <td className="px-3 py-3 text-center aseel-text-ink dark:text-white">
                                                         ${resolvedShipmentDeals.reduce((sum, d) => sum + (d.distributedCost || 0) + (d.extraCosts || 0), 0).toLocaleString()}
                                                     </td>
                                                 </tr>
@@ -707,9 +707,9 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
 
                         {/* Payment Information */}
                         {shipment.installments && shipment.installments.length > 0 && (
-                            <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden">
-                                <div className="border-b border-gray-200 dark:border-gray-700 p-4">
-                                    <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                            <div className="aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl overflow-hidden">
+                                <div className="border-b aseel-border-soft dark:aseel-border-soft p-4">
+                                    <h3 className="text-lg font-semibold aseel-text-ink dark:text-white flex items-center gap-2">
                                         <CreditCard className="w-5 h-5" />
                                         خطة الدفعات ({shipment.installments.length} دفعة)
                                     </h3>
@@ -717,32 +717,32 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                 <div className="p-4">
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                         {shipment.installments.map((installment, index) => (
-                                            <div key={installment.id} className={`border rounded-lg p-3 ${installment.status === 'paid' ? 'border-green-200 bg-green-50 dark:bg-green-900/20' : 'border-gray-200 bg-gray-50 dark:bg-gray-700/50'}`}>
+                                            <div key={installment.id} className={`border rounded-lg p-3 ${installment.status === 'paid' ? 'aseel-border-soft bg-green-50 dark:bg-green-900/20' : 'aseel-border-soft aseel-bg-panel dark:aseel-bg-panel/50'}`}>
                                                 <div className="flex justify-between items-start mb-2">
                                                     <div className="flex items-center gap-2">
-                                                        <div className={`w-2 h-2 rounded-full ${installment.status === 'paid' ? 'bg-green-500' : 'bg-gray-400'}`}></div>
-                                                        <span className="font-medium text-gray-900 dark:text-white">دفعة #{installment.installmentNumber}</span>
+                                                        <div className={`w-2 h-2 rounded-full ${installment.status === 'paid' ? 'bg-green-500' : 'aseel-bg-panel'}`}></div>
+                                                        <span className="font-medium aseel-text-ink dark:text-white">دفعة #{installment.installmentNumber}</span>
                                                     </div>
-                                                    <span className={`px-2 py-0.5 rounded-full text-xs ${installment.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-700'}`}>
+                                                    <span className={`px-2 py-0.5 rounded-full text-xs ${installment.status === 'paid' ? 'bg-green-100 text-green-700' : 'aseel-bg-panel aseel-text-ink'}`}>
                                                         {installment.status === 'paid' ? 'مدفوعة' : 'غير مدفوعة'}
                                                     </span>
                                                 </div>
                                                 <div className="space-y-1">
                                                     <div className="flex justify-between text-sm">
-                                                        <span className="text-gray-600 dark:text-gray-400">المبلغ:</span>
-                                                        <span className="font-bold text-gray-900 dark:text-white">${installment.amount?.toLocaleString()}</span>
+                                                        <span className="aseel-text-soft dark:aseel-text-soft">المبلغ:</span>
+                                                        <span className="font-bold aseel-text-ink dark:text-white">${installment.amount?.toLocaleString()}</span>
                                                     </div>
                                                     <div className="flex justify-between text-sm">
-                                                        <span className="text-gray-600 dark:text-gray-400">النسبة:</span>
-                                                        <span className="text-gray-700 dark:text-gray-300">{installment.percentage}%</span>
+                                                        <span className="aseel-text-soft dark:aseel-text-soft">النسبة:</span>
+                                                        <span className="aseel-text-ink dark:aseel-text-soft">{installment.percentage}%</span>
                                                     </div>
                                                     {installment.notes && (
-                                                        <div className="text-xs text-gray-500 mt-1">
+                                                        <div className="text-xs aseel-text-soft mt-1">
                                                             ملاحظات: {installment.notes}
                                                         </div>
                                                     )}
                                                     {installment.dueDate && (
-                                                        <div className="text-xs text-gray-500">
+                                                        <div className="text-xs aseel-text-soft">
                                                             تاريخ الاستحقاق: {formatDate(installment.dueDate)}
                                                         </div>
                                                     )}
@@ -756,8 +756,8 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                     </div>
 
                     {/* Footer Notes */}
-                    <div className="mt-8 p-4 bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 print:hidden">
-                        <div className="text-sm text-gray-600 dark:text-gray-400">
+                    <div className="mt-8 p-4 aseel-bg-panel dark:aseel-bg-panel rounded-xl border aseel-border-soft dark:aseel-border-soft print:hidden">
+                        <div className="text-sm aseel-text-soft dark:aseel-text-soft">
                             <div className="flex items-center gap-2 mb-2">
                                 <AlertCircle className="w-4 h-4" />
                                 <span className="font-medium">ملاحظات:</span>

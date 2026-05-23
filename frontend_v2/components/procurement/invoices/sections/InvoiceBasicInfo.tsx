@@ -102,9 +102,9 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-start">
         {/* 1. المورد */}
         <div className="md:col-span-5 space-y-1">
-          <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
-            <Building className="w-3 h-3 text-blue-500" />
-            المورد / المصنع <span className="text-red-500">*</span>
+          <label className="text-xs font-semibold aseel-text-soft dark:aseel-text-soft flex items-center gap-1">
+            <Building className="w-3 h-3 aseel-text-soft" />
+            المورد / المصنع <span className="aseel-text-soft">*</span>
           </label>
           <div className="h-10">
             <SupplierSearch
@@ -121,8 +121,8 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
 
         {/* 2. التاريخ */}
         <div className="md:col-span-4 space-y-1">
-          <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
-            <Calendar className="w-3 h-3 text-orange-500" />
+          <label className="text-xs font-semibold aseel-text-soft dark:aseel-text-soft flex items-center gap-1">
+            <Calendar className="w-3 h-3 aseel-text-soft" />
             التاريخ
           </label>
           <input
@@ -130,13 +130,13 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
             value={data.invoiceDate ? data.invoiceDate.split("T")[0] : new Date().toISOString().split("T")[0]}
             onChange={(e) => setData({ ...data, invoiceDate: e.target.value })}
             disabled={readOnly}
-            className="w-full h-10 px-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-1 focus:ring-orange-500"
+            className="w-full h-10 px-3 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel text-sm focus:ring-1 focus:ring-orange-500"
           />
         </div>
 
         {/* 3. الحالة */}
         <div className="md:col-span-3 space-y-1">
-          <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
+          <label className="text-xs font-semibold aseel-text-soft dark:aseel-text-soft flex items-center gap-1">
             <CheckCircle className="w-3 h-3 text-green-500" />
             الحالة
           </label>
@@ -145,8 +145,8 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
             onChange={(e) => setData({ ...data, status: e.target.value as any })}
             disabled={readOnly}
             className={`w-full h-10 px-3 border rounded-lg text-sm font-medium focus:ring-1 focus:ring-blue-500 ${data.status === 'completed'
-              ? 'bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:border-green-800'
-              : 'bg-gray-50 text-gray-700 border-gray-300 dark:bg-gray-700 dark:border-gray-600'
+              ? 'bg-green-50 text-green-700 aseel-border-soft dark:bg-green-900/20 dark:border-green-800'
+              : 'aseel-bg-panel aseel-text-ink aseel-border-soft dark:aseel-bg-panel dark:aseel-border-soft'
               }`}
           >
             <option value="incomplete">غير مكتملة</option>
@@ -156,7 +156,7 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
 
         {/* 4. وصف الفاتورة — حقل متعدد الأسطر مثل وصف الصفقة */}
         <div className="md:col-span-12 space-y-1">
-          <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
+          <label className="text-xs font-semibold aseel-text-soft dark:aseel-text-soft flex items-center gap-1">
             <Tag className="w-3 h-3 text-[var(--color-primary)]" />
             وصف الفاتورة (عنوان عربي / ملخص)
           </label>
@@ -165,16 +165,16 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
             onChange={(e) => setData({ ...data, invoiceName: e.target.value })}
             disabled={readOnly}
             rows={4}
-            className="w-full min-h-[5.5rem] px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm leading-relaxed focus:ring-1 focus:ring-[var(--color-primary)] placeholder-gray-400 resize-y"
+            className="w-full min-h-[5.5rem] px-3 py-2 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel text-sm leading-relaxed focus:ring-1 focus:ring-[var(--color-primary)] placeholder-gray-400 resize-y"
             placeholder="مثال: مجموعة إنفيرتر — نفس أسلوب وصف الصفقة بالعربي"
           />
         </div>
       </div>
 
       {/* ================= زر التفاصيل ================= */}
-      <div className="flex items-center justify-between border-t border-gray-100 dark:border-gray-700 pt-2">
-        <div className="text-sm font-bold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-          <span className="text-gray-500 font-normal">الإجمالي:</span>
+      <div className="flex items-center justify-between border-t aseel-border-soft dark:aseel-border-soft pt-2">
+        <div className="text-sm font-bold aseel-text-ink dark:aseel-text-soft flex items-center gap-2">
+          <span className="aseel-text-soft font-normal">الإجمالي:</span>
           <span className="text-lg text-green-600">
             {data.currency === 'ILS' ? '₪' : '$'}
             {grandTotal.toLocaleString()}
@@ -183,7 +183,7 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
 
         <button
           onClick={() => setShowDetails(!showDetails)}
-          className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 transition-colors bg-blue-50 dark:bg-blue-900/30 px-3 py-1.5 rounded-full"
+          className="flex items-center gap-1.5 text-xs font-medium aseel-text-accent hover:aseel-text-accent dark:aseel-text-soft transition-colors aseel-bg-accent-bg dark:aseel-bg-panel/30 px-3 py-1.5 rounded-full"
         >
           {showDetails ? (
             <>إخفاء التفاصيل الإضافية <ChevronUp className="w-3.5 h-3.5" /></>
@@ -195,18 +195,18 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
 
       {/* ================= التفاصيل المخفية ================= */}
       {showDetails && (
-        <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-100 dark:border-gray-700 animate-in fade-in slide-in-from-top-2 duration-200 space-y-4">
+        <div className="aseel-bg-panel dark:aseel-bg-panel/50 rounded-xl p-4 border aseel-border-soft dark:aseel-border-soft animate-in fade-in slide-in-from-top-2 duration-200 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* رقم الفاتورة */}
             <div className="space-y-1">
-              <label className="text-xs text-gray-500 block">رقم الفاتورة (النظام)</label>
+              <label className="text-xs aseel-text-soft block">رقم الفاتورة (النظام)</label>
               <div className="relative">
-                <Hash className="absolute right-3 top-2.5 w-4 h-4 text-gray-400" />
+                <Hash className="absolute right-3 top-2.5 w-4 h-4 aseel-text-soft" />
                 <input
                   type="text"
                   value={data.invoiceNumber || ""}
                   readOnly
-                  className="w-full h-9 pr-9 pl-3 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded text-xs text-gray-500 font-mono"
+                  className="w-full h-9 pr-9 pl-3 aseel-bg-panel dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded text-xs aseel-text-soft font-mono"
                   placeholder="تلقائي"
                 />
               </div>
@@ -214,14 +214,14 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
 
             {/* رقم فاتورة المورد */}
             <div className="space-y-1">
-              <label className="text-xs text-gray-500 block">رقم فاتورة المورد (PI)</label>
+              <label className="text-xs aseel-text-soft block">رقم فاتورة المورد (PI)</label>
               <div className="relative">
-                <FileText className="absolute right-3 top-2.5 w-4 h-4 text-gray-400" />
+                <FileText className="absolute right-3 top-2.5 w-4 h-4 aseel-text-soft" />
                 <input
                   type="text"
                   value={data.supplierInvoiceNumber || ""}
                   onChange={(e) => setData({ ...data, supplierInvoiceNumber: e.target.value })}
-                  className="w-full h-9 pr-9 pl-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  className="w-full h-9 pr-9 pl-3 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded text-sm focus:aseel-border-soft focus:ring-1 focus:ring-blue-500"
                   placeholder="مثال: PI-2025-001"
                 />
               </div>
@@ -229,10 +229,10 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
 
             {/* رابط علي بابا */}
             <div className="space-y-1">
-              <label className="text-xs text-gray-500 block">رابط الطلبية (علي بابا)</label>
+              <label className="text-xs aseel-text-soft block">رابط الطلبية (علي بابا)</label>
               <div className="relative flex gap-2">
                 <div className="relative w-full">
-                  <LinkIcon className="absolute right-3 top-2.5 w-4 h-4 text-orange-400" />
+                  <LinkIcon className="absolute right-3 top-2.5 w-4 h-4 aseel-text-soft" />
                   <input
                     type="url"
                     value={getDealInfo().alibabaOrderLink || data.alibabaOrderLink || ""}
@@ -245,14 +245,14 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
                         dealInfo: { ...currentDealInfo, alibabaOrderLink: val } as DealInvoiceInfo,
                       });
                     }}
-                    className="w-full h-9 pr-9 pl-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm focus:border-orange-500 focus:ring-1 focus:ring-orange-500 text-left ltr"
+                    className="w-full h-9 pr-9 pl-3 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded text-sm focus:aseel-border-soft focus:ring-1 focus:ring-orange-500 text-left ltr"
                     placeholder="https://..."
                   />
                 </div>
                 {(getDealInfo().alibabaOrderLink || data.alibabaOrderLink) && (
                   <button
                     onClick={() => window.open(getDealInfo().alibabaOrderLink || data.alibabaOrderLink, "_blank")}
-                    className="h-9 w-9 flex items-center justify-center bg-orange-100 text-orange-600 rounded hover:bg-orange-200"
+                    className="h-9 w-9 flex items-center justify-center aseel-bg-panel aseel-text-soft rounded hover:aseel-bg-grid-head"
                     title="فتح الرابط"
                   >
                     <ExternalLink className="w-4 h-4" />
@@ -264,7 +264,7 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
 
           {/* الملاحظات الداخلية - التعديل الجوهري هنا */}
           <div className="space-y-1">
-            <label className="text-xs text-gray-500 flex items-center gap-1">
+            <label className="text-xs aseel-text-soft flex items-center gap-1">
               <AlignLeft className="w-3 h-3" />
               ملاحظات داخلية
             </label>
@@ -281,7 +281,7 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
                 });
               }}
               rows={2}
-              className="w-full p-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="w-full p-2 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-lg text-sm focus:aseel-border-soft focus:ring-1 focus:ring-blue-500"
               placeholder="اكتب أي ملاحظات خاصة هنا..."
             />
           </div>

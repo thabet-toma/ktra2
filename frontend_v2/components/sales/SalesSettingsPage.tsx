@@ -38,13 +38,13 @@ const Section: React.FC<{
   description?: string;
   children: React.ReactNode;
 }> = ({ title, description, children }) => (
-  <div className="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-5 space-y-3">
+  <div className="rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel p-5 space-y-3">
     <div>
-      <h3 className="text-base font-semibold text-slate-800 dark:text-slate-100">
+      <h3 className="text-base font-semibold aseel-text-ink dark:aseel-text-soft">
         {title}
       </h3>
       {description && (
-        <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+        <p className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
           {description}
         </p>
       )}
@@ -58,7 +58,7 @@ const FieldLabel: React.FC<{ label: string; children: React.ReactNode }> = ({
   children,
 }) => (
   <label className="block">
-    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+    <span className="text-xs font-medium aseel-text-soft dark:aseel-text-soft">
       {label}
     </span>
     <div className="mt-1">{children}</div>
@@ -66,7 +66,7 @@ const FieldLabel: React.FC<{ label: string; children: React.ReactNode }> = ({
 );
 
 const input =
-  "w-full rounded-md border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-2.5 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50";
+  "w-full rounded-md border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel px-2.5 py-1.5 text-sm aseel-text-ink dark:aseel-text-soft focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/50";
 
 export const SalesSettingsPage: React.FC = () => {
   const [settings, setSettings] = useState<SalesSettings | null>(null);
@@ -157,7 +157,7 @@ export const SalesSettingsPage: React.FC = () => {
 
   if (loading && !settings) {
     return (
-      <div className="flex items-center justify-center p-10 text-slate-500">
+      <div className="flex items-center justify-center p-10 aseel-text-soft">
         <Loader2 className="w-6 h-6 animate-spin me-2" /> تحميل الإعدادات...
       </div>
     );
@@ -165,7 +165,7 @@ export const SalesSettingsPage: React.FC = () => {
 
   if (!settings) {
     return (
-      <div className="p-6 text-red-600 dark:text-red-400">
+      <div className="p-6 aseel-text-state dark:aseel-text-soft">
         تعذّر تحميل الإعدادات. {err}
       </div>
     );
@@ -211,12 +211,12 @@ export const SalesSettingsPage: React.FC = () => {
       </div>
 
       {msg && (
-        <div className="rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 text-sm px-3 py-2">
+        <div className="rounded aseel-bg-panel aseel-text-ink dark:aseel-bg-panel/30 dark:aseel-text-soft text-sm px-3 py-2">
           {msg}
         </div>
       )}
       {err && (
-        <div className="rounded bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 text-sm px-3 py-2">
+        <div className="rounded aseel-bg-panel aseel-text-state dark:aseel-bg-panel/30 dark:aseel-text-soft text-sm px-3 py-2">
           {err}
         </div>
       )}
@@ -244,7 +244,7 @@ export const SalesSettingsPage: React.FC = () => {
             ))}
           </select>
           {settings.default_customer_name && (
-            <div className="text-[11px] text-slate-500 mt-1">
+            <div className="text-[11px] aseel-text-soft mt-1">
               الحالي: {settings.default_customer_name}
             </div>
           )}
@@ -271,7 +271,7 @@ export const SalesSettingsPage: React.FC = () => {
             ))}
           </select>
           {settings.default_currency_code && (
-            <div className="text-[11px] text-slate-500 mt-1">
+            <div className="text-[11px] aseel-text-soft mt-1">
               الحالي: {settings.default_currency_code}
             </div>
           )}
@@ -357,7 +357,7 @@ export const SalesSettingsPage: React.FC = () => {
             ))}
           </select>
           {settings.default_revenue_account_product_name && (
-            <div className="text-[11px] text-slate-500 mt-1">
+            <div className="text-[11px] aseel-text-soft mt-1">
               الحالي: {settings.default_revenue_account_product_name}
             </div>
           )}
@@ -382,7 +382,7 @@ export const SalesSettingsPage: React.FC = () => {
             ))}
           </select>
           {settings.default_revenue_account_service_name && (
-            <div className="text-[11px] text-slate-500 mt-1">
+            <div className="text-[11px] aseel-text-soft mt-1">
               الحالي: {settings.default_revenue_account_service_name}
             </div>
           )}

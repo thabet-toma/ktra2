@@ -7,33 +7,33 @@ export const StatusBadge: React.FC<{ status: PriceOfferStatus }> = ({ status }) 
         initial: {
             label: "أولية",
             icon: Clock,
-            bg: "bg-gray-100 dark:bg-gray-700",
-            text: "text-gray-800 dark:text-gray-300",
-            border: "border-gray-200 dark:border-gray-600",
-            iconColor: "text-gray-500 dark:text-gray-400"
+            bg: "aseel-bg-panel dark:aseel-bg-panel",
+            text: "aseel-text-ink dark:aseel-text-soft",
+            border: "aseel-border-soft dark:aseel-border-soft",
+            iconColor: "aseel-text-soft dark:aseel-text-soft"
         },
         pending_info: {
             label: "بانتظار المعلومات",
             icon: AlertCircle,
-            bg: "bg-yellow-100 dark:bg-yellow-900/30",
-            text: "text-yellow-800 dark:text-yellow-300",
-            border: "border-yellow-200 dark:border-yellow-800",
-            iconColor: "text-yellow-500 dark:text-yellow-400"
+            bg: "aseel-bg-panel dark:aseel-bg-panel/30",
+            text: "aseel-text-ink dark:aseel-text-soft",
+            border: "aseel-border-soft dark:aseel-border-soft",
+            iconColor: "aseel-text-soft dark:aseel-text-soft"
         },
         under_discussion: {
             label: "تحت المناقشة",
             icon: MessageSquare,
-            bg: "bg-blue-100 dark:bg-blue-900/30",
-            text: "text-blue-800 dark:text-blue-300",
-            border: "border-blue-200 dark:border-blue-800",
-            iconColor: "text-blue-500 dark:text-blue-400"
+            bg: "aseel-bg-accent-bg dark:aseel-bg-panel/30",
+            text: "aseel-text-ink dark:aseel-text-soft",
+            border: "aseel-border-accent dark:aseel-border-soft",
+            iconColor: "aseel-text-soft dark:aseel-text-soft"
         },
         approved_for_shipping: {
             label: "معتمدة للشراء ",
             icon: CheckSquare,
             bg: "bg-green-100 dark:bg-green-900/30",
             text: "text-green-800 dark:text-green-300",
-            border: "border-green-200 dark:border-green-800",
+            border: "aseel-border-soft dark:border-green-800",
             iconColor: "text-green-500 dark:text-green-400"
         }
     };

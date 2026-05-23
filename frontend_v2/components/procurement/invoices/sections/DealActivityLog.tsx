@@ -11,30 +11,30 @@ export const DealActivityLog: React.FC<DealActivityLogProps> = ({ activities }) 
   const getActivityIcon = (type: string) => {
     switch (type) {
       case 'status_change':
-        return <CheckCircle className="w-4 h-4 text-blue-500" />;
+        return <CheckCircle className="w-4 h-4 aseel-text-soft" />;
       case 'payment':
         return <DollarSign className="w-4 h-4 text-green-500" />;
       case 'note':
-        return <FileText className="w-4 h-4 text-gray-500" />;
+        return <FileText className="w-4 h-4 aseel-text-soft" />;
       case 'attachment':
         return <FileText className="w-4 h-4 text-[var(--color-primary)]" />;
       default:
-        return <Clock className="w-4 h-4 text-gray-500" />;
+        return <Clock className="w-4 h-4 aseel-text-soft" />;
     }
   };
 
   const getActivityColor = (type: string) => {
     switch (type) {
       case 'status_change':
-        return 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/10';
+        return 'aseel-border-accent dark:aseel-border-soft aseel-bg-accent-bg dark:aseel-bg-panel/10';
       case 'payment':
-        return 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/10';
+        return 'aseel-border-soft dark:border-green-800 bg-green-50 dark:bg-green-900/10';
       case 'note':
-        return 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/10';
+        return 'aseel-border-soft dark:aseel-border-soft aseel-bg-panel dark:aseel-bg-panel/10';
       case 'attachment':
         return 'border-[var(--color-border)] dark:border-[var(--color-border)] bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/10';
       default:
-        return 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/10';
+        return 'aseel-border-soft dark:aseel-border-soft aseel-bg-panel dark:aseel-bg-panel/10';
     }
   };
 
@@ -43,11 +43,11 @@ export const DealActivityLog: React.FC<DealActivityLogProps> = ({ activities }) 
       title="سجل نشاطات الصفقة"
       icon={History}
       defaultOpen={false}
-      className="border-gray-200 dark:border-gray-700"
+      className="aseel-border-soft dark:aseel-border-soft"
     >
       <div className="space-y-3">
         {activities.length === 0 ? (
-          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+          <div className="text-center py-8 aseel-text-soft dark:aseel-text-soft">
             <History className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>لا توجد نشاطات مسجلة</p>
           </div>
@@ -63,22 +63,22 @@ export const DealActivityLog: React.FC<DealActivityLogProps> = ({ activities }) 
                     {getActivityIcon(activity.type)}
                   </div>
                   <div className="flex-1">
-                    <p className="font-medium text-gray-900 dark:text-white">
+                    <p className="font-medium aseel-text-ink dark:text-white">
                       {activity.action}
                     </p>
                     {activity.details && (
-                      <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                      <p className="text-sm aseel-text-soft dark:aseel-text-soft mt-1">
                         {activity.details}
                       </p>
                     )}
-                    <div className="flex items-center gap-4 mt-2 text-xs text-gray-500">
+                    <div className="flex items-center gap-4 mt-2 text-xs aseel-text-soft">
                       <span>بواسطة: {activity.userName}</span>
                       <span>الدور: {activity.userRole}</span>
                     </div>
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm text-gray-500">
+                  <p className="text-sm aseel-text-soft">
                     {new Date(activity.timestamp).toLocaleString('ar-SA', {
                       dateStyle: 'short',
                       timeStyle: 'short'

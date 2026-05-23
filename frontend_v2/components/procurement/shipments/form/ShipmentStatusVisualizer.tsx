@@ -50,11 +50,11 @@ export const ShipmentStatusVisualizer: React.FC<ShipmentStatusVisualizerProps> =
             <div className="relative min-w-[700px]">
 
                 {/* خط الخلفية الرمادي */}
-                <div className="absolute top-1/2 left-0 right-0 h-1 bg-gray-200 dark:bg-gray-700 -translate-y-1/2 rounded-full z-0"></div>
+                <div className="absolute top-1/2 left-0 right-0 h-1 aseel-bg-grid-head dark:aseel-bg-panel -translate-y-1/2 rounded-full z-0"></div>
 
                 {/* خط التقدم الملون */}
                 <div
-                    className="absolute top-1/2 h-1 bg-blue-600 -translate-y-1/2 rounded-full z-0 transition-all duration-700 ease-out"
+                    className="absolute top-1/2 h-1 aseel-bg-accent -translate-y-1/2 rounded-full z-0 transition-all duration-700 ease-out"
                     style={{
                         right: 0, // RTL
                         width: `${progressPercent}%`
@@ -73,12 +73,12 @@ export const ShipmentStatusVisualizer: React.FC<ShipmentStatusVisualizerProps> =
                                 {/* الدائرة والأيقونة */}
                                 <div
                                     className={`
-                                        w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-300 relative bg-white dark:bg-gray-800
+                                        w-10 h-10 rounded-full flex items-center justify-center border-2 transition-all duration-300 relative aseel-bg-field dark:aseel-bg-panel
                                         ${isCurrent
-                                            ? 'border-blue-600 text-blue-600 scale-110 shadow-lg ring-4 ring-blue-50 dark:ring-blue-900/30 z-20'
+                                            ? 'aseel-border-accent aseel-text-accent scale-110 shadow-lg ring-4 ring-blue-50 dark:ring-blue-900/30 z-20'
                                             : isCompleted
-                                                ? 'border-blue-600 text-blue-600'
-                                                : 'border-gray-300 text-gray-400 dark:border-gray-600'
+                                                ? 'aseel-border-accent aseel-text-accent'
+                                                : 'aseel-border-soft aseel-text-soft dark:aseel-border-soft'
                                         }
                                     `}
                                 >
@@ -89,10 +89,10 @@ export const ShipmentStatusVisualizer: React.FC<ShipmentStatusVisualizerProps> =
                                 <div className={`
                                     absolute top-12 text-[10px] font-bold text-center w-20 transition-all
                                     ${isCurrent
-                                        ? 'text-blue-700 dark:text-blue-400 scale-110'
+                                        ? 'aseel-text-accent dark:aseel-text-soft scale-110'
                                         : isCompleted
-                                            ? 'text-gray-700 dark:text-gray-300'
-                                            : 'text-gray-400 dark:text-gray-600'
+                                            ? 'aseel-text-ink dark:aseel-text-soft'
+                                            : 'aseel-text-soft dark:aseel-text-soft'
                                     }
                                 `}>
                                     {step.label}

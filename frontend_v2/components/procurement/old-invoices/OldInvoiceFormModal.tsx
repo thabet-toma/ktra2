@@ -384,24 +384,24 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
 
     return (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-6xl my-8 flex flex-col relative">
+            <div className="aseel-bg-field dark:aseel-bg-panel rounded-2xl shadow-2xl w-full max-w-6xl my-8 flex flex-col relative">
                 {/* Header */}
-                <div className="sticky top-0 bg-white dark:bg-gray-800 p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center z-20 rounded-t-2xl">
+                <div className="sticky top-0 aseel-bg-field dark:aseel-bg-panel p-6 border-b aseel-border-soft dark:aseel-border-soft flex justify-between items-center z-20 rounded-t-2xl">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                            <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                        <div className="p-2 aseel-bg-accent-bg dark:aseel-bg-panel/30 rounded-lg">
+                            <FileText className="w-6 h-6 aseel-text-accent dark:aseel-text-soft" />
                         </div>
                         <div>
-                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
+                            <h2 className="text-2xl font-bold aseel-text-ink dark:text-white">
                                 {initialData ? 'تعديل فاتورة مؤرشفة' : 'إضافة فاتورة قديمة للأرشيف'}
                             </h2>
-                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                            <p className="text-sm aseel-text-soft dark:aseel-text-soft">
                                 {initialData ? `رقم الفاتورة: ${initialData.invoiceNumber}` : 'إدخال بيانات فاتورة سابقة لغرض الأرشفة ومتابعة الأسعار'}
                             </p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-                        <X className="w-6 h-6 text-gray-500" />
+                    <button onClick={onClose} className="p-2 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg">
+                        <X className="w-6 h-6 aseel-text-soft" />
                     </button>
                 </div>
 
@@ -413,18 +413,18 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                         <div className="space-y-6">
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                    <label className="block text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-2">
                                         تاريخ الفاتورة *
                                     </label>
                                     <input
                                         type="date"
                                         value={invoiceDate}
                                         onChange={(e) => setInvoiceDate(e.target.value)}
-                                        className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-4 py-3 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white focus:ring-2 focus:ring-blue-500"
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                    <label className="block text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-2">
                                         رقم الفاتورة *
                                     </label>
                                     <input
@@ -432,22 +432,22 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                         value={invoiceNumber}
                                         onChange={(e) => setInvoiceNumber(e.target.value)}
                                         placeholder="مثال: 00123"
-                                        className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-4 py-3 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white focus:ring-2 focus:ring-blue-500"
                                     />
                                 </div>
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                <label className="block text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-2">
                                     رابط الفاتورة (اختياري)
                                 </label>
                                 <div className="relative">
-                                    <ExternalLink className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                                    <ExternalLink className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 aseel-text-soft" />
                                     <input
                                         type="url"
                                         value={invoiceLink}
                                         onChange={(e) => setInvoiceLink(e.target.value)}
                                         placeholder="https://example.com/invoice/123"
-                                        className="w-full pr-10 pl-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 text-left"
+                                        className="w-full pr-10 pl-4 py-3 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white focus:ring-2 focus:ring-blue-500 text-left"
                                         dir="ltr"
                                     />
                                 </div>
@@ -456,9 +456,9 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
 
                         {/* ✅ قسم اختيار المورد بالتنسيق الجديد */}
                         <div className="space-y-1.5">
-                            <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
-                                <Building className="w-3.5 h-3.5 text-blue-600" />
-                                المورد / المصنع <span className="text-red-500">*</span>
+                            <label className="block text-xs font-semibold aseel-text-ink dark:aseel-text-soft flex items-center gap-1.5">
+                                <Building className="w-3.5 h-3.5 aseel-text-accent" />
+                                المورد / المصنع <span className="aseel-text-soft">*</span>
                             </label>
                             <SupplierSearch
                                 suppliers={suppliers}
@@ -528,32 +528,32 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                         <div className="lg:col-span-2 space-y-6">
                             {/* Notes */}
                             <div>
-                                <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                                <label className="block text-sm font-semibold aseel-text-ink dark:aseel-text-soft mb-2">
                                     ملاحظات
                                 </label>
                                 <textarea
                                     rows={3}
                                     value={notes}
                                     onChange={(e) => setNotes(e.target.value)}
-                                    className="w-full px-4 py-3 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-blue-500"
+                                    className="w-full px-4 py-3 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel focus:ring-2 focus:ring-blue-500"
                                     placeholder="ملاحظات إضافية..."
                                 />
                             </div>
 
                             {/* Attachments */}
-                            <div className="bg-gray-50 dark:bg-gray-900/30 p-6 rounded-xl border border-gray-200 dark:border-gray-700">
-                                <h4 className="font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                                    <Paperclip className="w-5 h-5 text-gray-500" /> المرفقات
+                            <div className="aseel-bg-panel dark:aseel-bg-panel/30 p-6 rounded-xl border aseel-border-soft dark:aseel-border-soft">
+                                <h4 className="font-bold aseel-text-ink dark:text-white mb-4 flex items-center gap-2">
+                                    <Paperclip className="w-5 h-5 aseel-text-soft" /> المرفقات
                                 </h4>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                                     {/* Image Upload */}
                                     <label className={`
                                         flex flex-col items-center justify-center p-4 border-2 border-dashed rounded-xl cursor-pointer transition-all
-                                        ${uploadingImages ? 'border-green-400 bg-green-50' : 'border-gray-300 hover:border-green-500 hover:bg-green-50 dark:border-gray-600 dark:hover:bg-gray-800'}
+                                        ${uploadingImages ? 'border-green-400 bg-green-50' : 'aseel-border-soft hover:border-green-500 hover:bg-green-50 dark:aseel-border-soft dark:hover:aseel-bg-panel'}
                                      `}>
-                                        <ImageIcon className={`w-8 h-8 mb-2 ${uploadingImages ? 'text-green-500 animate-pulse' : 'text-gray-400'}`} />
-                                        <span className="text-sm font-medium text-gray-600 dark:text-gray-300">
+                                        <ImageIcon className={`w-8 h-8 mb-2 ${uploadingImages ? 'text-green-500 animate-pulse' : 'aseel-text-soft'}`} />
+                                        <span className="text-sm font-medium aseel-text-soft dark:aseel-text-soft">
                                             {uploadingImages ? 'جاري الرفع...' : 'رفع صور'}
                                         </span>
                                         <input type="file" multiple accept="image/*" className="hidden" onChange={handleImageUpload} disabled={uploadingImages} />
@@ -562,10 +562,10 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                     {/* PDF Upload */}
                                     <label className={`
                                         flex flex-col items-center justify-center p-4 border-2 border-dashed rounded-xl cursor-pointer transition-all
-                                        ${uploadingPdfs ? 'border-blue-400 bg-blue-50' : 'border-gray-300 hover:border-blue-500 hover:bg-blue-50 dark:border-gray-600 dark:hover:bg-gray-800'}
+                                        ${uploadingPdfs ? 'aseel-border-soft aseel-bg-accent-bg' : 'aseel-border-soft hover:aseel-border-soft hover:aseel-bg-accent-bg dark:aseel-border-soft dark:hover:aseel-bg-panel'}
                                      `}>
-                                        <FileText className={`w-8 h-8 mb-2 ${uploadingPdfs ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
-                                        <span className="text-sm font-medium text-gray-600 dark:text-gray-300">
+                                        <FileText className={`w-8 h-8 mb-2 ${uploadingPdfs ? 'aseel-text-soft animate-pulse' : 'aseel-text-soft'}`} />
+                                        <span className="text-sm font-medium aseel-text-soft dark:aseel-text-soft">
                                             {uploadingPdfs ? 'جاري الرفع...' : 'رفع PDF'}
                                         </span>
                                         <input type="file" multiple accept=".pdf,application/pdf" className="hidden" onChange={handlePdfUpload} disabled={uploadingPdfs} />
@@ -575,26 +575,26 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                 {/* File List */}
                                 <div className="space-y-3">
                                     {imageUrls.map((url, i) => (
-                                        <div key={i} className="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
+                                        <div key={i} className="flex items-center justify-between p-2 aseel-bg-field dark:aseel-bg-panel rounded border aseel-border-soft dark:aseel-border-soft">
                                             <div className="flex items-center gap-3">
                                                 <img src={url} alt="Attachment" className="w-10 h-10 rounded object-cover" />
                                                 <span className="text-sm truncate max-w-[150px]">Image {i + 1}</span>
                                             </div>
-                                            <button onClick={() => setImageUrls(prev => prev.filter((_, idx) => idx !== i))} className="text-red-500 hover:bg-red-50 p-1 rounded">
+                                            <button onClick={() => setImageUrls(prev => prev.filter((_, idx) => idx !== i))} className="aseel-text-soft hover:aseel-bg-panel p-1 rounded">
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
                                         </div>
                                     ))}
                                     {pdfFiles.map((file, i) => (
-                                        <div key={i} className="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded border border-gray-200 dark:border-gray-700">
+                                        <div key={i} className="flex items-center justify-between p-2 aseel-bg-field dark:aseel-bg-panel rounded border aseel-border-soft dark:aseel-border-soft">
                                             <div className="flex items-center gap-3">
-                                                <FileText className="w-8 h-8 text-red-500" />
+                                                <FileText className="w-8 h-8 aseel-text-soft" />
                                                 <div className="text-sm">
                                                     <div className="font-medium truncate max-w-[150px]">{file.name}</div>
-                                                    <div className="text-xs text-gray-400">{(file.size / 1024).toFixed(1)} KB</div>
+                                                    <div className="text-xs aseel-text-soft">{(file.size / 1024).toFixed(1)} KB</div>
                                                 </div>
                                             </div>
-                                            <button onClick={() => setPdfFiles(prev => prev.filter((_, idx) => idx !== i))} className="text-red-500 hover:bg-red-50 p-1 rounded">
+                                            <button onClick={() => setPdfFiles(prev => prev.filter((_, idx) => idx !== i))} className="aseel-text-soft hover:aseel-bg-panel p-1 rounded">
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
                                         </div>
@@ -604,27 +604,27 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                         </div>
 
                         {/* Totals Box */}
-                        <div className="bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800 p-6 rounded-xl border border-gray-200 dark:border-gray-700 shadow-lg h-fit">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 flex items-center gap-2">
-                                <Calculator className="w-6 h-6 text-blue-600" /> ملخص الفاتورة
+                        <div className="bg-gradient-to-b aseel-bg-panel to-white dark:aseel-bg-panel dark:aseel-bg-panel p-6 rounded-xl border aseel-border-soft dark:aseel-border-soft shadow-lg h-fit">
+                            <h3 className="text-xl font-bold aseel-text-ink dark:text-white mb-6 flex items-center gap-2">
+                                <Calculator className="w-6 h-6 aseel-text-accent" /> ملخص الفاتورة
                             </h3>
 
                             <div className="space-y-4">
-                                <div className="flex justify-between py-2 border-b dark:border-gray-700">
-                                    <span className="text-gray-600 dark:text-gray-400">المجموع الفرعي</span>
+                                <div className="flex justify-between py-2 border-b dark:aseel-border-soft">
+                                    <span className="aseel-text-soft dark:aseel-text-soft">المجموع الفرعي</span>
                                     <span className="font-bold">{subtotal.toLocaleString()} $</span>
                                 </div>
-                                <div className="flex justify-between items-center py-2 border-b dark:border-gray-700">
-                                    <label className="text-sm text-gray-600 dark:text-gray-400">خصم ($)</label>
+                                <div className="flex justify-between items-center py-2 border-b dark:aseel-border-soft">
+                                    <label className="text-sm aseel-text-soft dark:aseel-text-soft">خصم ($)</label>
                                     <input
                                         type="number"
                                         value={discount}
                                         onChange={e => setDiscount(parseFloat(e.target.value) || 0)}
-                                        className="w-24 px-2 py-1 text-right border rounded bg-white dark:bg-gray-700"
+                                        className="w-24 px-2 py-1 text-right border rounded aseel-bg-field dark:aseel-bg-panel"
                                     />
                                 </div>
-                                <div className="flex justify-between items-center py-2 border-b dark:border-gray-700">
-                                    <label className="text-sm text-gray-600 dark:text-gray-400">الضريبة ({taxType === 'amount' ? '$' : '%'})</label>
+                                <div className="flex justify-between items-center py-2 border-b dark:aseel-border-soft">
+                                    <label className="text-sm aseel-text-soft dark:aseel-text-soft">الضريبة ({taxType === 'amount' ? '$' : '%'})</label>
                                     <div className="flex items-center gap-2">
                                         <input
                                             type="number"
@@ -634,9 +634,9 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                                 if (taxType === 'amount') setTaxAmountState(val);
                                                 else setTaxRate(val);
                                             }}
-                                            className="w-16 px-2 py-1 text-right border rounded bg-white dark:bg-gray-700"
+                                            className="w-16 px-2 py-1 text-right border rounded aseel-bg-field dark:aseel-bg-panel"
                                         />
-                                        <span className="text-xs text-gray-500">
+                                        <span className="text-xs aseel-text-soft">
                                             {taxType === 'percentage' ? `(${taxAmount.toLocaleString()} $)` : `(${taxRate} %)`}
                                         </span>
                                     </div>
@@ -644,14 +644,14 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                             </div>
                             <div className="pt-4 flex justify-between items-center text-xl font-bold">
                                 <span>الإجمالي</span>
-                                <span className="text-blue-600 dark:text-blue-400">{grandTotal.toLocaleString()} $</span>
+                                <span className="aseel-text-accent dark:aseel-text-soft">{grandTotal.toLocaleString()} $</span>
                             </div>
                         </div>
 
                         <button
                             onClick={handleSubmit}
                             disabled={isSaving}
-                            className="w-full mt-6 flex items-center justify-center gap-2 px-6 py-4 bg-gradient-to-r from-blue-600 to-[var(--color-primary)] text-white rounded-xl hover:shadow-lg disabled:opacity-50 transition-all font-bold"
+                            className="w-full mt-6 flex items-center justify-center gap-2 px-6 py-4 bg-gradient-to-r aseel-bg-panel to-[var(--color-primary)] text-white rounded-xl hover:shadow-lg disabled:opacity-50 transition-all font-bold"
                         >
                             {isSaving ? <div className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" /> : <Save className="w-5 h-5" />}
                             {initialData ? 'حفظ التعديلات' : 'أرشفة الفاتورة'}

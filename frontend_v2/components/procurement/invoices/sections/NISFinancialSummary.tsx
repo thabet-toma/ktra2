@@ -60,18 +60,18 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
         (lp.palestinianTaxCustoms || 0);
 
     return (
-        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
-            <div className="px-4 py-2.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/50 flex items-center justify-between">
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                    <Calculator className="w-4 h-4 text-emerald-500" />
+        <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl border aseel-border-soft dark:aseel-border-soft shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b aseel-border-soft dark:aseel-border-soft aseel-bg-panel/50 dark:aseel-bg-panel/50 flex items-center justify-between">
+                <h3 className="text-sm font-bold aseel-text-ink dark:text-white flex items-center gap-2">
+                    <Calculator className="w-4 h-4 aseel-text-soft" />
                     ملخص
                 </h3>
-                <span className="text-[10px] font-semibold text-gray-500">ILS</span>
+                <span className="text-[10px] font-semibold aseel-text-soft">ILS</span>
             </div>
 
             <div className="p-4 space-y-2.5 text-sm">
                 <div className="flex justify-between">
-                    <span className="text-gray-500 flex items-center gap-1.5 text-xs">
+                    <span className="aseel-text-soft flex items-center gap-1.5 text-xs">
                         <CreditCard className="w-3.5 h-3.5" /> أساس البضاعة
                     </span>
                     <span className="font-bold tabular-nums">
@@ -81,7 +81,7 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                 </div>
 
                 {discountAmount > 0 && (
-                    <div className="flex justify-between text-rose-600 dark:text-rose-400 text-xs">
+                    <div className="flex justify-between aseel-text-soft dark:aseel-text-soft text-xs">
                         <span className="flex items-center gap-1.5">
                             <TrendingDown className="w-3.5 h-3.5" /> خصم
                         </span>
@@ -93,7 +93,7 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                 )}
 
                 <div className="flex justify-between">
-                    <span className="text-gray-500 flex items-center gap-1.5 text-xs">
+                    <span className="aseel-text-soft flex items-center gap-1.5 text-xs">
                         <Percent className="w-3.5 h-3.5" /> ض.ق.م ({formatTaxPercentLabel(taxRate)}%)
                     </span>
                     <span className="font-bold tabular-nums">
@@ -104,10 +104,10 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
 
                 {extrasTotal > 0 && (
                     <div className="flex justify-between text-xs gap-2">
-                        <span className="text-gray-500">
+                        <span className="aseel-text-soft">
                             رسوم وضرائب إضافية
                             {hasAfterMainVatPercentageLines(lp) ? (
-                                <span className="block text-[9px] text-gray-400 mt-0.5">
+                                <span className="block text-[9px] aseel-text-soft mt-0.5">
                                     (تشمل نسبة بعد ض.ق.م الفاتورة)
                                 </span>
                             ) : null}
@@ -123,7 +123,7 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
 
                 {!hideShippingRow && shippingCost > 0 && (
                     <div className="flex justify-between">
-                        <span className="text-gray-500 flex items-center gap-1.5 text-xs">
+                        <span className="aseel-text-soft flex items-center gap-1.5 text-xs">
                             <Ship className="w-3.5 h-3.5" /> شحن
                         </span>
                         <span className="font-bold tabular-nums">
@@ -134,35 +134,35 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                 )}
 
                 {hasLocalPayments && (
-                    <div className="pt-2 border-t border-gray-100 dark:border-gray-800 space-y-1">
-                        <div className="text-[10px] font-bold text-gray-500">تخليص</div>
+                    <div className="pt-2 border-t aseel-border-soft dark:aseel-border-soft space-y-1">
+                        <div className="text-[10px] font-bold aseel-text-soft">تخليص</div>
                         <div className="grid grid-cols-1 gap-0.5 text-[10px]">
                             {lp.customsClearanceFees ? (
                                 <div className="flex justify-between">
-                                    <span className="text-gray-500">مخلص</span>
+                                    <span className="aseel-text-soft">مخلص</span>
                                     <span className="font-mono font-bold">₪{lp.customsClearanceFees}</span>
                                 </div>
                             ) : null}
                             {lp.customsDuties ? (
                                 <div className="flex justify-between">
-                                    <span className="text-gray-500">جمارك</span>
+                                    <span className="aseel-text-soft">جمارك</span>
                                     <span className="font-mono font-bold">₪{lp.customsDuties}</span>
                                 </div>
                             ) : null}
                             {lp.portFees ? (
                                 <div className="flex justify-between">
-                                    <span className="text-gray-500">ميناء</span>
+                                    <span className="aseel-text-soft">ميناء</span>
                                     <span className="font-mono font-bold">₪{lp.portFees}</span>
                                 </div>
                             ) : null}
                             {lp.palestinianTaxCustoms ? (
                                 <div className="flex justify-between">
-                                    <span className="text-gray-500">جمركة ضرائب</span>
+                                    <span className="aseel-text-soft">جمركة ضرائب</span>
                                     <span className="font-mono font-bold">₪{lp.palestinianTaxCustoms}</span>
                                 </div>
                             ) : null}
                         </div>
-                        <div className="flex justify-between text-[10px] font-bold text-emerald-700 dark:text-emerald-400 pt-1">
+                        <div className="flex justify-between text-[10px] font-bold aseel-text-ink dark:aseel-text-soft pt-1">
                             <span>مجموع التخليص</span>
                             <span className="tabular-nums">₪{localSum.toLocaleString()}</span>
                         </div>
@@ -171,10 +171,10 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
             </div>
 
             <div className="p-4 pt-0">
-                <div className="bg-emerald-600 p-3 rounded-lg">
+                <div className="aseel-bg-panel p-3 rounded-lg">
                     <div className="flex justify-between items-center">
                         <div>
-                            <span className="text-emerald-100 text-[10px] block">الإجمالي</span>
+                            <span className="aseel-text-soft text-[10px] block">الإجمالي</span>
                             <div className="flex items-baseline gap-1 text-white">
                                 <span className="text-2xl font-black tabular-nums">
                                     {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -182,7 +182,7 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                                 <span className="text-sm font-bold opacity-80">{symbol}</span>
                             </div>
                         </div>
-                        <div className="p-2 bg-white/20 rounded-lg">
+                        <div className="p-2 aseel-bg-field/20 rounded-lg">
                             <Wallet className="w-6 h-6 text-white" />
                         </div>
                     </div>

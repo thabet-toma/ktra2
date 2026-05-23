@@ -10,20 +10,20 @@ interface RelatedInvoicesProps {
 
 export const RelatedInvoices: React.FC<RelatedInvoicesProps> = ({ item, invoices, onBack }) => {
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6 space-y-6">
-      <div className="flex items-center gap-4 border-b border-gray-200 dark:border-gray-700 pb-4">
-        <button onClick={onBack} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
-          <ArrowRight className="w-6 h-6 text-gray-500" />
+    <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl shadow-sm p-6 space-y-6">
+      <div className="flex items-center gap-4 border-b aseel-border-soft dark:aseel-border-soft pb-4">
+        <button onClick={onBack} className="p-2 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-full transition-colors">
+          <ArrowRight className="w-6 h-6 aseel-text-soft" />
         </button>
         <div>
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white">سجل فواتير الشراء</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">للصنف: {item.name}</p>
+          <h2 className="text-xl font-bold aseel-text-ink dark:text-white">سجل فواتير الشراء</h2>
+          <p className="text-sm aseel-text-soft dark:aseel-text-soft">للصنف: {item.name}</p>
         </div>
       </div>
 
-      <div className="overflow-x-auto border border-gray-200 dark:border-gray-700 rounded-lg">
+      <div className="overflow-x-auto border aseel-border-soft dark:aseel-border-soft rounded-lg">
         <table className="w-full text-right text-sm">
-          <thead className="bg-gray-50 dark:bg-gray-900/50 text-gray-700 dark:text-gray-300 border-b border-gray-200 dark:border-gray-700">
+          <thead className="aseel-bg-panel dark:aseel-bg-panel/50 aseel-text-ink dark:aseel-text-soft border-b aseel-border-soft dark:aseel-border-soft">
             <tr>
               <th className="px-6 py-4 w-16">#</th>
               <th className="px-6 py-4">رقم الفاتورة</th>
@@ -38,23 +38,23 @@ export const RelatedInvoices: React.FC<RelatedInvoicesProps> = ({ item, invoices
             {invoices.map((inv, index) => {
               const invoiceItem = inv.items.find(i => i.itemId === item.id);
               return (
-                <tr key={inv.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
-                  <td className="px-6 py-4 text-gray-500">{index + 1}</td>
+                <tr key={inv.id} className="hover:aseel-bg-panel dark:hover:aseel-bg-panel/30">
+                  <td className="px-6 py-4 aseel-text-soft">{index + 1}</td>
                   <td className="px-6 py-4 font-medium flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-blue-500" />
+                    <FileText className="w-4 h-4 aseel-text-soft" />
                     {inv.invoiceNumber}
                   </td>
-                  <td className="px-6 py-4 text-gray-600 dark:text-gray-300">
+                  <td className="px-6 py-4 aseel-text-soft dark:aseel-text-soft">
                     {inv.factoryName || 'مورد غير محدد'}
                   </td>
-                  <td className="px-6 py-4 text-gray-500">
+                  <td className="px-6 py-4 aseel-text-soft">
                     <div className="flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
                       {new Date(inv.createdAt).toLocaleDateString('en-GB')}
                     </div>
                   </td>
                   <td className="px-6 py-4">
-                    <span className="bg-blue-50 text-blue-700 px-2 py-1 rounded-lg text-xs font-bold">
+                    <span className="aseel-bg-accent-bg aseel-text-accent px-2 py-1 rounded-lg text-xs font-bold">
                        {invoiceItem?.quantity}
                     </span>
                   </td>
@@ -70,7 +70,7 @@ export const RelatedInvoices: React.FC<RelatedInvoicesProps> = ({ item, invoices
           </tbody>
         </table>
         {invoices.length === 0 && (
-          <div className="text-center py-12 text-gray-500">
+          <div className="text-center py-12 aseel-text-soft">
             <Package className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>لا توجد فواتير شراء لهذا الصنف</p>
           </div>

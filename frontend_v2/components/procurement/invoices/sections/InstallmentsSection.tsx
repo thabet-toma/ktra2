@@ -172,28 +172,28 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
       title="خطة الدفع والتحصيل"
       icon={CreditCard}
       defaultOpen={false}
-      className="border-blue-100 dark:border-blue-900/30 overflow-hidden"
+      className="aseel-border-soft dark:aseel-border-soft/30 overflow-hidden"
     >
       <div className="space-y-5">
         {/* Header: Toggle & Quick Summary */}
-        <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-gradient-to-r from-blue-50 to-[var(--color-primary)] dark:from-blue-900/10 dark:to-[var(--color-primary)]/10 border border-blue-100 dark:border-blue-800/30">
+        <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-2xl bg-gradient-to-r aseel-bg-panel to-[var(--color-primary)] dark:aseel-bg-panel/10 dark:to-[var(--color-primary)]/10 border aseel-border-soft dark:aseel-border-soft/30">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 flex items-center justify-center rounded-xl bg-white dark:bg-gray-800 shadow-sm border border-blue-200 dark:border-blue-700">
-              <CreditCard className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+            <div className="w-12 h-12 flex items-center justify-center rounded-xl aseel-bg-field dark:aseel-bg-panel shadow-sm border aseel-border-accent dark:aseel-border-soft">
+              <CreditCard className="w-6 h-6 aseel-text-accent dark:aseel-text-soft" />
             </div>
             <div>
-              <h4 className="font-bold text-gray-900 dark:text-white">نظام الدفعات</h4>
-              <p className="text-xs text-gray-500 dark:text-gray-400">إدارة الجدولة والتحصيل المالي</p>
+              <h4 className="font-bold aseel-text-ink dark:text-white">نظام الدفعات</h4>
+              <p className="text-xs aseel-text-soft dark:aseel-text-soft">إدارة الجدولة والتحصيل المالي</p>
               {/* إظهار تلميح عن الشحن والمدفوعات المحلية */}
               {(shippingCost > 0 || totalLocalPayments > 0) && (
                 <div className="flex flex-wrap gap-2 mt-1">
                   {shippingCost > 0 && !shippingIncluded && (
-                    <span className="text-xs text-gray-600 dark:text-gray-400">
+                    <span className="text-xs aseel-text-soft dark:aseel-text-soft">
                       يشمل الشحن: {symbol}{shippingCost.toLocaleString()}
                     </span>
                   )}
                   {totalLocalPayments > 0 && !localPayments.includedInPrice && (
-                    <span className="text-xs text-gray-600 dark:text-gray-400">
+                    <span className="text-xs aseel-text-soft dark:aseel-text-soft">
                       ومدفوعات محلية: {symbol}{totalLocalPayments.toLocaleString()}
                     </span>
                   )}
@@ -204,8 +204,8 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
 
           <div className="flex items-center gap-6">
             <div className="hidden sm:flex flex-col items-end">
-              <span className="text-xs text-gray-500 uppercase tracking-wider font-semibold">نسبة التحصيل</span>
-              <span className="text-lg font-black text-blue-600 dark:text-blue-400">{progressPercentage}%</span>
+              <span className="text-xs aseel-text-soft uppercase tracking-wider font-semibold">نسبة التحصيل</span>
+              <span className="text-lg font-black aseel-text-accent dark:aseel-text-soft">{progressPercentage}%</span>
             </div>
             <label className="relative inline-flex items-center cursor-pointer scale-110">
               <input
@@ -215,7 +215,7 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
                 className="sr-only peer"
                 disabled={readOnly}
               />
-              <div className="w-12 h-6 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:bg-blue-600 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
+              <div className="w-12 h-6 aseel-bg-grid-head dark:aseel-bg-panel peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:aseel-bg-accent after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:aseel-bg-field after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
             </label>
           </div>
         </div>
@@ -226,18 +226,18 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
             {/* 3-Cards Summary */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {[
-                { label: 'إجمالي الفاتورة', value: grandTotal, color: 'text-gray-900', bg: 'bg-white', icon: Calculator },
+                { label: 'إجمالي الفاتورة', value: grandTotal, color: 'aseel-text-ink', bg: 'aseel-bg-field', icon: Calculator },
                 { label: 'المبلغ المحصل', value: totalPaidAmount, color: 'text-green-600', bg: 'bg-green-50/50', icon: CheckCircle2 },
-                { label: 'المتبقي', value: remainingAmount, color: 'text-amber-600', bg: 'bg-amber-50/50', icon: AlertCircle },
+                { label: 'المتبقي', value: remainingAmount, color: 'aseel-text-soft', bg: 'aseel-bg-panel/50', icon: AlertCircle },
               ].map((card, i) => (
-                <div key={i} className={`${card.bg} dark:bg-gray-800/40 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm flex items-center justify-between`}>
+                <div key={i} className={`${card.bg} dark:aseel-bg-panel/40 p-4 rounded-xl border aseel-border-soft dark:aseel-border-soft shadow-sm flex items-center justify-between`}>
                   <div>
-                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">{card.label}</p>
+                    <p className="text-xs font-medium aseel-text-soft dark:aseel-text-soft mb-1">{card.label}</p>
                     <p className={`text-xl font-black ${card.color} dark:text-white`}>
                       {symbol}{card.value.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                     </p>
                     {card.label === 'إجمالي الفاتورة' && (
-                      <p className="text-xs text-gray-500 mt-1">
+                      <p className="text-xs aseel-text-soft mt-1">
                         {shippingCost > 0 && !shippingIncluded && `يشمل الشحن`}
                         {totalLocalPayments > 0 && !localPayments.includedInPrice && ` ومدفوعات محلية`}
                       </p>
@@ -249,14 +249,14 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
             </div>
 
             {/* List Header */}
-            <div className="flex items-center justify-between border-b border-gray-100 dark:border-gray-800 pb-2">
-              <h5 className="flex items-center gap-2 font-bold text-gray-800 dark:text-gray-200 text-sm">
-                <ChevronRight className="w-4 h-4 text-blue-500" /> جدولة الدفعات
+            <div className="flex items-center justify-between border-b aseel-border-soft dark:aseel-border-soft pb-2">
+              <h5 className="flex items-center gap-2 font-bold aseel-text-ink dark:aseel-text-soft text-sm">
+                <ChevronRight className="w-4 h-4 aseel-text-soft" /> جدولة الدفعات
               </h5>
               {!readOnly && (
                 <button
                   onClick={onAddInstallment}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95"
+                  className="flex items-center gap-1.5 px-3 py-1.5 aseel-bg-accent hover:aseel-bg-accent text-white rounded-lg text-xs font-bold transition-all shadow-sm active:scale-95"
                 >
                   <Plus className="w-3.5 h-3.5" /> إضافة دفعة
                 </button>
@@ -266,33 +266,33 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
             {/* Installments Rows */}
             <div className="space-y-3">
               {installments.length === 0 ? (
-                <div className="text-center py-10 bg-gray-50/50 dark:bg-gray-800/20 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700">
-                  <Calculator className="w-10 h-10 text-gray-300 mx-auto mb-2" />
-                  <p className="text-gray-400 text-sm">لا توجد دفعات مجدولة حالياً</p>
+                <div className="text-center py-10 aseel-bg-panel/50 dark:aseel-bg-panel/20 rounded-2xl border-2 border-dashed aseel-border-soft dark:aseel-border-soft">
+                  <Calculator className="w-10 h-10 aseel-text-soft mx-auto mb-2" />
+                  <p className="aseel-text-soft text-sm">لا توجد دفعات مجدولة حالياً</p>
                 </div>
               ) : (
                 installments.map((inst, idx) => (
                   <div
                     key={inst.id}
-                    className="group flex flex-col gap-3 p-3 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-xl hover:shadow-md hover:border-blue-200 dark:hover:border-blue-900/50 transition-all"
+                    className="group flex flex-col gap-3 p-3 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl hover:shadow-md hover:aseel-border-accent dark:hover:aseel-border-soft/50 transition-all"
                   >
                     {/* الصف الأول: المعلومات الأساسية */}
                     <div className="flex flex-col md:flex-row items-center gap-3">
                       {/* Number */}
-                      <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-gray-100 dark:bg-gray-700 text-xs font-black text-gray-500 dark:text-gray-400">
+                      <div className="flex items-center justify-center w-8 h-8 rounded-lg aseel-bg-panel dark:aseel-bg-panel text-xs font-black aseel-text-soft dark:aseel-text-soft">
                         {inst.installmentNumber}
                       </div>
 
                       {/* Amount Input */}
                       <div className="relative flex-1 min-w-[140px] w-full">
-                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400 flex items-center justify-center font-bold text-xs">{symbol}</span>
+                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 aseel-text-soft flex items-center justify-center font-bold text-xs">{symbol}</span>
                         <input
                           type="number"
                           value={inst.amount || ''}
                           onChange={(e) => onUpdateInstallment(idx, 'amount', parseFloat(e.target.value) || 0)}
                           placeholder="المبلغ"
                           disabled={readOnly}
-                          className="w-full pr-8 pl-3 py-2 bg-gray-50 dark:bg-gray-900 border-none rounded-lg text-sm font-bold focus:ring-2 focus:ring-blue-500 dark:text-white"
+                          className="w-full pr-8 pl-3 py-2 aseel-bg-panel dark:aseel-bg-panel border-none rounded-lg text-sm font-bold focus:ring-2 focus:ring-blue-500 dark:text-white"
                         />
                       </div>
 
@@ -304,7 +304,7 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
                           disabled={readOnly}
                           className={`w-full py-2 px-3 rounded-lg text-xs font-bold border-none appearance-none cursor-pointer transition-colors ${inst.status === 'paid'
                             ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                            : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'
+                            : 'aseel-bg-panel aseel-text-ink dark:aseel-bg-panel/30 dark:aseel-text-soft'
                             }`}
                         >
                           <option value="unpaid">⏳ غير مدفوعة</option>
@@ -316,7 +316,7 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
                       {!readOnly && (
                         <button
                           onClick={() => onRemoveInstallment(idx)}
-                          className="hidden md:block p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                          className="hidden md:block p-2 aseel-text-soft hover:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel/20 rounded-lg transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -324,30 +324,30 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
                     </div>
 
                     {/* الصف الثاني: الملاحظات، التاريخ، الصورة */}
-                    <div className="flex flex-col md:flex-row gap-3 pt-2 border-t border-gray-50 dark:border-gray-700/50">
+                    <div className="flex flex-col md:flex-row gap-3 pt-2 border-t aseel-border-soft dark:aseel-border-soft/50">
 
                       {/* Notes Input */}
                       <div className="relative flex-[2]">
-                        <FileText className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                        <FileText className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 aseel-text-soft" />
                         <input
                           type="text"
                           value={inst.notes || ''}
                           onChange={(e) => onUpdateInstallment(idx, 'notes', e.target.value)}
                           placeholder="ملاحظات الدفعة..."
                           disabled={readOnly}
-                          className="w-full pr-8 pl-3 py-1.5 bg-gray-50 dark:bg-gray-900 border-none rounded-lg text-xs focus:ring-1 focus:ring-blue-500 dark:text-white"
+                          className="w-full pr-8 pl-3 py-1.5 aseel-bg-panel dark:aseel-bg-panel border-none rounded-lg text-xs focus:ring-1 focus:ring-blue-500 dark:text-white"
                         />
                       </div>
 
                       {/* Payment Date Input */}
                       <div className="relative flex-1 min-w-[130px]">
-                        <Calendar className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                        <Calendar className="absolute right-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 aseel-text-soft" />
                         <input
                           type="date"
                           value={inst.paymentDate ? inst.paymentDate.split('T')[0] : ''}
                           onChange={(e) => onUpdateInstallment(idx, 'paymentDate', e.target.value)}
                           disabled={readOnly}
-                          className="w-full pr-8 pl-2 py-1.5 bg-gray-50 dark:bg-gray-900 border-none rounded-lg text-xs focus:ring-1 focus:ring-blue-500 dark:text-white"
+                          className="w-full pr-8 pl-2 py-1.5 aseel-bg-panel dark:aseel-bg-panel border-none rounded-lg text-xs focus:ring-1 focus:ring-blue-500 dark:text-white"
                           title="تاريخ الدفع"
                         />
                       </div>
@@ -374,10 +374,10 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
                             {!readOnly && (
                               <button
                                 onClick={() => onUpdateInstallment(idx, 'bankSlipUrl', '')}
-                                className="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 rounded transition"
+                                className="p-1 hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded transition"
                                 title="حذف الصورة"
                               >
-                                <X className="w-3.5 h-3.5 text-red-500" />
+                                <X className="w-3.5 h-3.5 aseel-text-soft" />
                               </button>
                             )}
                           </div>
@@ -395,8 +395,8 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
                               htmlFor={`slip-upload-${idx}`}
                               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all
                                  ${uploadingIndex === idx
-                                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                  : 'bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800'
+                                  ? 'aseel-bg-panel aseel-text-soft cursor-not-allowed'
+                                  : 'aseel-bg-accent-bg aseel-text-accent hover:aseel-bg-accent-bg border aseel-border-accent dark:aseel-bg-panel/20 dark:aseel-text-soft dark:aseel-border-soft'
                                 }
                                `}
                             >
@@ -415,7 +415,7 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
                       {!readOnly && (
                         <button
                           onClick={() => onRemoveInstallment(idx)}
-                          className="md:hidden p-2 text-red-500 bg-red-50 rounded-lg self-end"
+                          className="md:hidden p-2 aseel-text-soft aseel-bg-panel rounded-lg self-end"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -428,19 +428,19 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
 
             {/* Progress Bar Section */}
             {grandTotal > 0 && (
-              <div className="mt-2 p-4 rounded-xl bg-gray-50 dark:bg-gray-800/30 border border-gray-100 dark:border-gray-700">
+              <div className="mt-2 p-4 rounded-xl aseel-bg-panel dark:aseel-bg-panel/30 border aseel-border-soft dark:aseel-border-soft">
                 <div className="flex justify-between items-end mb-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-tighter">حالة التحصيل</span>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${progressPercentage === 100 ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>
+                    <span className="text-xs font-bold aseel-text-soft dark:aseel-text-soft uppercase tracking-tighter">حالة التحصيل</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full ${progressPercentage === 100 ? 'bg-green-100 text-green-700' : 'aseel-bg-accent-bg aseel-text-accent'}`}>
                       {progressPercentage === 100 ? 'مكتمل' : 'قيد التحصيل'}
                     </span>
                   </div>
-                  <span className="text-sm font-black text-blue-600 dark:text-blue-400">{progressPercentage}%</span>
+                  <span className="text-sm font-black aseel-text-accent dark:aseel-text-soft">{progressPercentage}%</span>
                 </div>
-                <div className="h-2.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden shadow-inner">
+                <div className="h-2.5 aseel-bg-grid-head dark:aseel-bg-panel rounded-full overflow-hidden shadow-inner">
                   <div
-                    className="h-full bg-gradient-to-r from-blue-500 to-[var(--color-primary)] transition-all duration-700 ease-out"
+                    className="h-full bg-gradient-to-r aseel-bg-panel to-[var(--color-primary)] transition-all duration-700 ease-out"
                     style={{ width: `${Math.min(100, progressPercentage)}%` }}
                   />
                 </div>

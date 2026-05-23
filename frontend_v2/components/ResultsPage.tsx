@@ -127,7 +127,7 @@ export const ResultsPage: React.FC<ResultsPageProps> = ({ products, onBack, isTa
                 <AseelDenseTable<Product>
                     columns={columns}
                     rows={filteredProducts}
-                    getRowKey={(p, i) => `${p.name}-${i}`}
+                    getRowKey={(p) => `${p.name}-${p.price}-${p.similarity}`}
                     onRowDoubleClick={(p) => p.url && setPreviewUrl(p.url)}
                     emptyHint="لا توجد نتائج — جرب توسيع نطاق البحث"
                 />

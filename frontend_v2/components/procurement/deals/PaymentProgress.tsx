@@ -277,19 +277,19 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
         return (
             <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 z-50">
                 {/* استخدمنا max-w-5xl لعرض أكبر واستغلال العرض بدلاً من الطول */}
-                <div className="bg-white dark:bg-[var(--color-surface)] rounded-xl shadow-2xl w-full max-w-6xl overflow-hidden border border-gray-200 dark:border-gray-700 flex flex-col max-h-[95vh]">
+                <div className="aseel-bg-field dark:bg-[var(--color-surface)] rounded-xl shadow-2xl w-full max-w-6xl overflow-hidden border aseel-border-soft dark:aseel-border-soft flex flex-col max-h-[95vh]">
 
                     {/* Header: Compact & Includes Exchange Rate */}
-                    <div className="px-5 py-3 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-gray-50 dark:bg-[var(--color-surface-2)]">
+                    <div className="px-5 py-3 border-b aseel-border-soft dark:aseel-border-soft flex items-center justify-between aseel-bg-panel dark:bg-[var(--color-surface-2)]">
                         <div className="flex items-center gap-4">
-                            <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400">
+                            <div className="p-2 aseel-bg-accent-bg dark:aseel-bg-panel/30 rounded-lg aseel-text-accent dark:aseel-text-soft">
                                 <FileText className="w-5 h-5" />
                             </div>
                             <div>
-                                <h3 className="font-bold text-gray-900 dark:text-white text-lg leading-tight">
+                                <h3 className="font-bold aseel-text-ink dark:text-white text-lg leading-tight">
                                     تفاصيل الدفعة {selectedInstallment.installmentNumber}
                                 </h3>
-                                <div className="text-xs text-gray-500 flex gap-2">
+                                <div className="text-xs aseel-text-soft flex gap-2">
                                     <span>بواسطة: {currentUser.name}</span>
                                     {payment?.paymentConfirmationDate && (
                                         <span className="text-green-600 dark:text-green-400 flex items-center gap-1">
@@ -302,9 +302,9 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
 
                         {/* Exchange Rate moved to Header */}
                         {payment && (
-                            <div className="flex items-center gap-4 bg-white dark:bg-black/20 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700">
-                                <span className="text-xs text-gray-500 dark:text-gray-400">سعر التحويل:</span>
-                                <span className="font-mono font-bold text-blue-600 dark:text-blue-400 text-sm dir-ltr">
+                            <div className="flex items-center gap-4 aseel-bg-field dark:bg-black/20 px-3 py-1.5 rounded-lg border aseel-border-soft dark:aseel-border-soft">
+                                <span className="text-xs aseel-text-soft dark:aseel-text-soft">سعر التحويل:</span>
+                                <span className="font-mono font-bold aseel-text-accent dark:aseel-text-soft text-sm dir-ltr">
                                     1 USD = {payment.usdToIls || '-'} ILS
                                 </span>
                             </div>
@@ -315,7 +315,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 <button
                                     type="button"
                                     onClick={() => openJournalForPayment(payment)}
-                                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-slate-200 bg-white text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors"
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border aseel-border-soft aseel-bg-field aseel-text-ink dark:aseel-border-soft dark:aseel-bg-panel dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel transition-colors"
                                 >
                                     <BookOpen className="w-4 h-4" />
                                     فتح القيد
@@ -324,7 +324,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                             <button
                                 type="button"
                                 onClick={() => { setShowDetailsModal(false); setSelectedInstallment(null); }}
-                                className="p-1.5 hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20 rounded-lg text-gray-400 transition-colors"
+                                className="p-1.5 hover:aseel-bg-panel hover:aseel-text-soft dark:hover:aseel-bg-panel/20 rounded-lg aseel-text-soft transition-colors"
                             >
                                 <X className="w-5 h-5" />
                             </button>
@@ -332,7 +332,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                     </div>
 
                     {/* Content: Grid Layout to reduce height */}
-                    <div className="p-4 overflow-y-auto custom-scrollbar bg-white dark:bg-[var(--color-surface)]">
+                    <div className="p-4 overflow-y-auto custom-scrollbar aseel-bg-field dark:bg-[var(--color-surface)]">
                         {payment ? (
                             <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-full">
 
@@ -340,23 +340,23 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 <div className="lg:col-span-4 flex flex-col gap-3">
 
                                     {/* Financial Card */}
-                                    <div className="bg-gradient-to-br from-gray-50 to-white dark:from-[var(--color-surface-2)] dark:to-[var(--color-surface-2)] rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm">
-                                        <h4 className="text-gray-900 dark:text-gray-200 font-bold text-sm mb-3 flex items-center gap-2">
-                                            <Wallet className="w-4 h-4 text-emerald-500" />
+                                    <div className="bg-gradient-to-br aseel-bg-panel to-white dark:from-[var(--color-surface-2)] dark:to-[var(--color-surface-2)] rounded-xl border aseel-border-soft dark:aseel-border-soft p-4 shadow-sm">
+                                        <h4 className="aseel-text-ink dark:aseel-text-soft font-bold text-sm mb-3 flex items-center gap-2">
+                                            <Wallet className="w-4 h-4 aseel-text-soft" />
                                             البيانات المالية
                                         </h4>
                                         <div className="space-y-2">
-                                            <div className="flex justify-between items-center p-2 bg-white dark:bg-black/20 rounded-lg border border-gray-100 dark:border-gray-800">
-                                                <span className="text-xs text-gray-500 dark:text-gray-400">مبلغ الدفعة</span>
-                                                <span className="font-bold text-gray-900 dark:text-white">${payment.amount?.toLocaleString()}</span>
+                                            <div className="flex justify-between items-center p-2 aseel-bg-field dark:bg-black/20 rounded-lg border aseel-border-soft dark:aseel-border-soft">
+                                                <span className="text-xs aseel-text-soft dark:aseel-text-soft">مبلغ الدفعة</span>
+                                                <span className="font-bold aseel-text-ink dark:text-white">${payment.amount?.toLocaleString()}</span>
                                             </div>
-                                            <div className="flex justify-between items-center p-2 bg-white dark:bg-black/20 rounded-lg border border-gray-100 dark:border-gray-800">
-                                                <span className="text-xs text-gray-500 dark:text-gray-400">تكلفة الحوالة</span>
-                                                <span className="font-bold text-slate-700 dark:text-slate-300">${payment.transferCost?.toLocaleString() || '0'}</span>
+                                            <div className="flex justify-between items-center p-2 aseel-bg-field dark:bg-black/20 rounded-lg border aseel-border-soft dark:aseel-border-soft">
+                                                <span className="text-xs aseel-text-soft dark:aseel-text-soft">تكلفة الحوالة</span>
+                                                <span className="font-bold aseel-text-ink dark:aseel-text-soft">${payment.transferCost?.toLocaleString() || '0'}</span>
                                             </div>
-                                            <div className="flex justify-between items-center p-2 bg-emerald-50 dark:bg-emerald-900/20 rounded-lg border border-emerald-100 dark:border-emerald-800">
-                                                <span className="text-xs text-emerald-700 dark:text-emerald-400 font-bold">الإجمالي الكلي</span>
-                                                <span className="font-bold text-emerald-700 dark:text-emerald-400 text-lg">
+                                            <div className="flex justify-between items-center p-2 aseel-bg-panel dark:aseel-bg-panel/20 rounded-lg border aseel-border-soft dark:aseel-border-soft">
+                                                <span className="text-xs aseel-text-ink dark:aseel-text-soft font-bold">الإجمالي الكلي</span>
+                                                <span className="font-bold aseel-text-ink dark:aseel-text-soft text-lg">
                                                     ${((payment.amount || 0) + (payment.transferCost || 0)).toLocaleString()}
                                                 </span>
                                             </div>
@@ -364,26 +364,26 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                     </div>
 
                                     {/* Dates Card */}
-                                    <div className="bg-white dark:bg-[var(--color-surface-2)] rounded-xl border border-gray-200 dark:border-gray-700 p-4 shadow-sm flex-1">
-                                        <h4 className="text-gray-900 dark:text-gray-200 font-bold text-sm mb-3 flex items-center gap-2">
-                                            <Calendar className="w-4 h-4 text-blue-500" />
+                                    <div className="aseel-bg-field dark:bg-[var(--color-surface-2)] rounded-xl border aseel-border-soft dark:aseel-border-soft p-4 shadow-sm flex-1">
+                                        <h4 className="aseel-text-ink dark:aseel-text-soft font-bold text-sm mb-3 flex items-center gap-2">
+                                            <Calendar className="w-4 h-4 aseel-text-soft" />
                                             التواريخ
                                         </h4>
                                         <div className="space-y-3 text-sm">
-                                            <div className="flex justify-between border-b border-gray-100 dark:border-gray-700 pb-2 last:border-0 last:pb-0">
-                                                <span className="text-gray-500 dark:text-gray-400 text-xs">تاريخ التحويل</span>
-                                                <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{formatDate(payment.paymentDate)}</span>
+                                            <div className="flex justify-between border-b aseel-border-soft dark:aseel-border-soft pb-2 last:border-0 last:pb-0">
+                                                <span className="aseel-text-soft dark:aseel-text-soft text-xs">تاريخ التحويل</span>
+                                                <span className="font-mono font-medium aseel-text-ink dark:aseel-text-soft">{formatDate(payment.paymentDate)}</span>
                                             </div>
-                                            <div className="flex justify-between border-b border-gray-100 dark:border-gray-700 pb-2 last:border-0 last:pb-0">
-                                                <span className="text-gray-500 dark:text-gray-400 text-xs">تاريخ التأكيد</span>
-                                                <span className="font-mono font-medium text-gray-800 dark:text-gray-200">{formatDate(payment.paymentConfirmationDate)}</span>
+                                            <div className="flex justify-between border-b aseel-border-soft dark:aseel-border-soft pb-2 last:border-0 last:pb-0">
+                                                <span className="aseel-text-soft dark:aseel-text-soft text-xs">تاريخ التأكيد</span>
+                                                <span className="font-mono font-medium aseel-text-ink dark:aseel-text-soft">{formatDate(payment.paymentConfirmationDate)}</span>
                                             </div>
                                         </div>
 
                                         {/* Compact Notes */}
-                                        <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700">
-                                            <span className="text-xs text-gray-400 block mb-1">الملاحظات:</span>
-                                            <p className="text-xs text-gray-600 dark:text-gray-300 line-clamp-3 leading-relaxed">
+                                        <div className="mt-4 pt-3 border-t aseel-border-soft dark:aseel-border-soft">
+                                            <span className="text-xs aseel-text-soft block mb-1">الملاحظات:</span>
+                                            <p className="text-xs aseel-text-soft dark:aseel-text-soft line-clamp-3 leading-relaxed">
                                                 {payment.notes || payment.supplierNotes || "لا توجد ملاحظات."}
                                             </p>
                                         </div>
@@ -392,19 +392,19 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
 
                                 {/* Left Column: Documents (70% width) */}
                                 <div className="lg:col-span-8 flex flex-col h-full">
-                                    <h4 className="text-gray-900 dark:text-gray-200 font-bold text-sm mb-3 flex items-center gap-2">
+                                    <h4 className="aseel-text-ink dark:aseel-text-soft font-bold text-sm mb-3 flex items-center gap-2">
                                         <ImageIcon className="w-4 h-4 text-[var(--color-primary)]" />
                                         المستندات المرفقة
                                     </h4>
 
                                     <div className="grid grid-cols-2 gap-3 h-full min-h-[250px]">
                                         {/* Claim Image */}
-                                        <div className="relative group border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-gray-50 dark:bg-black/20 flex flex-col">
+                                        <div className="relative group border aseel-border-soft dark:aseel-border-soft rounded-xl overflow-hidden aseel-bg-panel dark:bg-black/20 flex flex-col">
                                             <div className="absolute top-2 right-2 left-2 z-10 flex justify-between items-start opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <span className="bg-slate-200/90 text-slate-800 text-[10px] px-2 py-0.5 rounded backdrop-blur-sm font-bold shadow-sm dark:bg-slate-700/90 dark:text-slate-100">المطالبة (Claim)</span>
+                                                <span className="aseel-bg-grid-head/90 aseel-text-ink text-[10px] px-2 py-0.5 rounded backdrop-blur-sm font-bold shadow-sm dark:aseel-bg-panel/90 dark:aseel-text-soft">المطالبة (Claim)</span>
                                                 <div className="flex gap-1">
-                                                    <button onClick={() => downloadImage(payment.alibabaClaimImage || '', 'claim.jpg')} className="p-1.5 bg-white/90 text-gray-700 rounded hover:text-blue-600 shadow-sm"><Download className="w-3 h-3" /></button>
-                                                    <button onClick={() => openImageInPopup(payment.alibabaClaimImage || '')} className="p-1.5 bg-white/90 text-gray-700 rounded hover:text-blue-600 shadow-sm"><Eye className="w-3 h-3" /></button>
+                                                    <button onClick={() => downloadImage(payment.alibabaClaimImage || '', 'claim.jpg')} className="p-1.5 aseel-bg-field/90 aseel-text-ink rounded hover:aseel-text-accent shadow-sm"><Download className="w-3 h-3" /></button>
+                                                    <button onClick={() => openImageInPopup(payment.alibabaClaimImage || '')} className="p-1.5 aseel-bg-field/90 aseel-text-ink rounded hover:aseel-text-accent shadow-sm"><Eye className="w-3 h-3" /></button>
                                                 </div>
                                             </div>
                                             {payment.alibabaClaimImage ? (
@@ -416,7 +416,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                                     />
                                                 </div>
                                             ) : (
-                                                <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+                                                <div className="flex-1 flex flex-col items-center justify-center aseel-text-soft">
                                                     <ImageIcon className="w-8 h-8 mb-2 opacity-20" />
                                                     <span className="text-xs">لا توجد صورة</span>
                                                 </div>
@@ -424,12 +424,12 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                         </div>
 
                                         {/* Swift Image */}
-                                        <div className="relative group border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-gray-50 dark:bg-black/20 flex flex-col">
+                                        <div className="relative group border aseel-border-soft dark:aseel-border-soft rounded-xl overflow-hidden aseel-bg-panel dark:bg-black/20 flex flex-col">
                                             <div className="absolute top-2 right-2 left-2 z-10 flex justify-between items-start opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <span className="bg-blue-100/90 text-blue-700 text-[10px] px-2 py-0.5 rounded backdrop-blur-sm font-bold shadow-sm">السليب (Swift)</span>
+                                                <span className="aseel-bg-accent-bg/90 aseel-text-accent text-[10px] px-2 py-0.5 rounded backdrop-blur-sm font-bold shadow-sm">السليب (Swift)</span>
                                                 <div className="flex gap-1">
-                                                    <button onClick={() => downloadImage(payment.bankSwiftImage || '', 'swift.jpg')} className="p-1.5 bg-white/90 text-gray-700 rounded hover:text-blue-600 shadow-sm"><Download className="w-3 h-3" /></button>
-                                                    <button onClick={() => openImageInPopup(payment.bankSwiftImage || '')} className="p-1.5 bg-white/90 text-gray-700 rounded hover:text-blue-600 shadow-sm"><Eye className="w-3 h-3" /></button>
+                                                    <button onClick={() => downloadImage(payment.bankSwiftImage || '', 'swift.jpg')} className="p-1.5 aseel-bg-field/90 aseel-text-ink rounded hover:aseel-text-accent shadow-sm"><Download className="w-3 h-3" /></button>
+                                                    <button onClick={() => openImageInPopup(payment.bankSwiftImage || '')} className="p-1.5 aseel-bg-field/90 aseel-text-ink rounded hover:aseel-text-accent shadow-sm"><Eye className="w-3 h-3" /></button>
                                                 </div>
                                             </div>
                                             {payment.bankSwiftImage ? (
@@ -441,7 +441,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                                     />
                                                 </div>
                                             ) : (
-                                                <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+                                                <div className="flex-1 flex flex-col items-center justify-center aseel-text-soft">
                                                     <ImageIcon className="w-8 h-8 mb-2 opacity-20" />
                                                     <span className="text-xs">لا توجد صورة</span>
                                                 </div>
@@ -451,7 +451,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 </div>
                             </div>
                         ) : (
-                            <div className="flex flex-col items-center justify-center h-48 text-gray-400">
+                            <div className="flex flex-col items-center justify-center h-48 aseel-text-soft">
                                 <AlertCircle className="w-10 h-10 mb-2 opacity-50" />
                                 <p className="text-sm">لا توجد بيانات</p>
                             </div>
@@ -463,45 +463,45 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
     };
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 p-5 shadow-sm" key={refreshKey}>
+        <div className="aseel-bg-field dark:aseel-bg-panel rounded-2xl border aseel-border-soft dark:aseel-border-soft p-5 shadow-sm" key={refreshKey}>
             {/* Header Area */}
-            <div className="mb-6 border-b border-gray-100 dark:border-gray-700 pb-5">
+            <div className="mb-6 border-b aseel-border-soft dark:aseel-border-soft pb-5">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
-                        <div className="p-3 bg-blue-600 rounded-xl text-white shadow-lg shadow-blue-500/20">
+                        <div className="p-3 aseel-bg-accent rounded-xl text-white shadow-lg shadow-blue-500/20">
                             <Banknote className="w-6 h-6" />
                         </div>
                         <div>
                             <div className="flex items-center gap-2">
-                                <h3 className="font-bold text-gray-900 dark:text-white text-lg">
+                                <h3 className="font-bold aseel-text-ink dark:text-white text-lg">
                                     {variant === 'shipment' ? 'دفعات الشحنة' : 'دفعات الصفقة'}
                                 </h3>
                                 <button
                                     onClick={handleRefresh}
-                                    className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full text-gray-400 transition-colors"
+                                    className="p-1.5 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-full aseel-text-soft transition-colors"
                                 >
                                     <RefreshCw className="w-3.5 h-3.5" />
                                 </button>
                             </div>
-                            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                            <div className="flex items-center gap-2 text-sm aseel-text-soft dark:aseel-text-soft">
                                 <span>المدفوع:</span>
-                                <span className="text-blue-600 dark:text-blue-400 font-bold">${totalPaid.toLocaleString()}</span>
-                                <span className="text-gray-300">|</span>
+                                <span className="aseel-text-accent dark:aseel-text-soft font-bold">${totalPaid.toLocaleString()}</span>
+                                <span className="aseel-text-soft">|</span>
                                 <span>المتبقي:</span>
-                                <span className="text-red-500 font-bold">${(grandTotal - totalPaid).toLocaleString()}</span>
+                                <span className="aseel-text-soft font-bold">${(grandTotal - totalPaid).toLocaleString()}</span>
                             </div>
                         </div>
                     </div>
 
                     <div className="flex items-center gap-3">
                         <div className="text-right">
-                            <span className="text-xs text-gray-500 dark:text-gray-400 block">نسبة الإنجاز</span>
-                            <span className="text-lg font-bold text-gray-900 dark:text-white">{progressPercentage.toFixed(1)}%</span>
+                            <span className="text-xs aseel-text-soft dark:aseel-text-soft block">نسبة الإنجاز</span>
+                            <span className="text-lg font-bold aseel-text-ink dark:text-white">{progressPercentage.toFixed(1)}%</span>
                         </div>
                         <div className="w-16 h-16 relative flex items-center justify-center">
                             <svg className="w-full h-full transform -rotate-90">
-                                <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="4" fill="transparent" className="text-gray-100 dark:text-gray-700" />
-                                <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="4" fill="transparent" strokeDasharray={175.9} strokeDashoffset={175.9 - (progressRingPercent / 100) * 175.9} className="text-blue-500 transition-all duration-1000 ease-out" />
+                                <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="4" fill="transparent" className="aseel-text-soft dark:aseel-text-ink" />
+                                <circle cx="32" cy="32" r="28" stroke="currentColor" strokeWidth="4" fill="transparent" strokeDasharray={175.9} strokeDashoffset={175.9 - (progressRingPercent / 100) * 175.9} className="aseel-text-soft transition-all duration-1000 ease-out" />
                             </svg>
                         </div>
                     </div>
@@ -533,12 +533,12 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                             className={`
                                 group relative p-4 rounded-xl border transition-all duration-200 
                                 ${isFullyFinished
-                                    ? 'bg-green-50/40 dark:bg-green-900/10 border-green-200 dark:border-green-800/30'
+                                    ? 'bg-green-50/40 dark:bg-green-900/10 aseel-border-soft dark:border-green-800/30'
                                     : hasPaidProgress
-                                        ? 'bg-blue-50/40 dark:bg-blue-900/10 border-blue-200 dark:border-blue-800/30'
+                                        ? 'aseel-bg-accent-bg/40 dark:aseel-bg-panel/10 aseel-border-accent dark:aseel-border-soft/30'
                                         : unlocked
-                                            ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-blue-300'
-                                            : 'bg-gray-50 dark:bg-gray-900 border-gray-100 dark:border-gray-800 opacity-60'
+                                            ? 'aseel-bg-field dark:aseel-bg-panel aseel-border-soft dark:aseel-border-soft hover:aseel-border-soft'
+                                            : 'aseel-bg-panel dark:aseel-bg-panel aseel-border-soft dark:aseel-border-soft opacity-60'
                                 }
                             `}
                         >
@@ -546,10 +546,10 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 <div className="flex items-center gap-4">
                                     <div className={`
                                         w-10 h-10 rounded-full flex items-center justify-center border shadow-sm
-                                        ${isFullyFinished ? 'bg-green-100 border-green-200 text-green-600 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400' :
-                                            hasPaidProgress ? 'bg-blue-100 border-blue-200 text-blue-600 dark:bg-blue-900/30 dark:border-blue-800 dark:text-blue-400' :
-                                                unlocked ? 'bg-white border-gray-200 text-gray-500 dark:bg-gray-800 dark:border-gray-600' :
-                                                    'bg-gray-100 border-gray-200 text-gray-400 dark:bg-gray-800 dark:border-gray-700'}
+                                        ${isFullyFinished ? 'bg-green-100 aseel-border-soft text-green-600 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400' :
+                                            hasPaidProgress ? 'aseel-bg-accent-bg aseel-border-accent aseel-text-accent dark:aseel-bg-panel/30 dark:aseel-border-soft dark:aseel-text-soft' :
+                                                unlocked ? 'aseel-bg-field aseel-border-soft aseel-text-soft dark:aseel-bg-panel dark:aseel-border-soft' :
+                                                    'aseel-bg-panel aseel-border-soft aseel-text-soft dark:aseel-bg-panel dark:aseel-border-soft'}
                                     `}>
                                         {isFullyFinished ? <CheckCircle2 className="w-5 h-5" /> :
                                             hasPaidProgress ? <DollarSign className="w-5 h-5" /> :
@@ -559,17 +559,17 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
 
                                     <div>
                                         <div className="flex items-center gap-2">
-                                            <h4 className="font-bold text-gray-900 dark:text-white text-base">
+                                            <h4 className="font-bold aseel-text-ink dark:text-white text-base">
                                                 الدفعة {installment.installmentNumber}
                                             </h4>
-                                            <span className="text-xs text-gray-500 dark:text-gray-400 font-normal bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-full">
+                                            <span className="text-xs aseel-text-soft dark:aseel-text-soft font-normal aseel-bg-panel dark:aseel-bg-panel px-2 py-0.5 rounded-full">
                                                 {installment.percentage}%
                                             </span>
                                         </div>
                                         <div className="flex items-center gap-3 mt-1 text-sm">
-                                            <span className="font-bold text-gray-800 dark:text-gray-200">${installment.amount.toLocaleString()}</span>
-                                            <span className="text-gray-300 dark:text-gray-600">|</span>
-                                            <span className={`text-xs ${isFullyFinished ? 'text-green-600' : hasPaidProgress ? 'text-blue-600' : 'text-gray-500'}`}>
+                                            <span className="font-bold aseel-text-ink dark:aseel-text-soft">${installment.amount.toLocaleString()}</span>
+                                            <span className="aseel-text-soft dark:aseel-text-soft">|</span>
+                                            <span className={`text-xs ${isFullyFinished ? 'text-green-600' : hasPaidProgress ? 'aseel-text-accent' : 'aseel-text-soft'}`}>
                                                 {getInstallmentStatusText(installment)}
                                             </span>
                                         </div>
@@ -582,7 +582,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                             type="button"
                                             title="فتح القيد في المحاسبة"
                                             onClick={() => openJournalForPayment(payment)}
-                                            className="p-2 text-gray-500 hover:text-[var(--color-primary-hover)] hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/20 rounded-lg transition-colors"
+                                            className="p-2 aseel-text-soft hover:text-[var(--color-primary-hover)] hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/20 rounded-lg transition-colors"
                                         >
                                             <BookOpen className="w-5 h-5" />
                                         </button>
@@ -616,7 +616,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                                 );
                                                 setRefreshKey((k) => k + 1);
                                             }}
-                                            className="shrink-0 rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+                                            className="shrink-0 rounded-md border aseel-border-soft aseel-bg-field px-2 py-1.5 text-xs font-semibold aseel-text-ink hover:aseel-bg-panel dark:aseel-border-soft dark:aseel-bg-panel dark:aseel-text-soft dark:hover:aseel-bg-panel"
                                         >
                                             ربط قيد
                                         </button>
@@ -626,7 +626,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                             type="button"
                                             title="تفاصيل الدفعة والمستندات"
                                             onClick={() => { setSelectedInstallment(installment); setShowDetailsModal(true); }}
-                                            className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
+                                            className="p-2 aseel-text-soft hover:aseel-text-accent hover:aseel-bg-accent-bg dark:hover:aseel-bg-panel/20 rounded-lg transition-colors"
                                         >
                                             <Eye className="w-5 h-5" />
                                         </button>
@@ -658,7 +658,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                                 );
                                                 setRefreshKey((k) => k + 1);
                                             }}
-                                            className="p-2 text-gray-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition-colors"
+                                            className="p-2 aseel-text-soft hover:aseel-text-state hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded-lg transition-colors"
                                         >
                                             <Trash2 className="w-5 h-5" />
                                         </button>
@@ -672,10 +672,10 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                             ${isFullyFinished
                                                 ? 'bg-transparent text-green-600 cursor-default'
                                                 : awaitingSupplier
-                                                    ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-500/30'
+                                                    ? 'aseel-bg-accent text-white hover:aseel-bg-accent shadow-sm shadow-blue-500/30'
                                                     : unlocked
-                                                        ? 'bg-gray-900 text-white hover:bg-gray-800 dark:bg-white dark:text-black dark:hover:bg-gray-200'
-                                                        : 'bg-gray-100 text-gray-400 cursor-not-allowed dark:bg-gray-800 dark:text-gray-600'}
+                                                        ? 'aseel-bg-panel text-white hover:aseel-bg-panel dark:aseel-bg-field dark:text-black dark:hover:aseel-bg-grid-head'
+                                                        : 'aseel-bg-panel aseel-text-soft cursor-not-allowed dark:aseel-bg-panel dark:aseel-text-soft'}
                                         `}
                                     >
                                         {isFullyFinished ? 'تمت بنجاح' : awaitingSupplier ? 'تأكيد المورد' : 'إجراء الدفع'}
@@ -694,15 +694,15 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                 const confirmOnlyModal = isAwaitingSupplierConfirmation(modalPayment);
                 return (
                 <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-gray-700">
+                    <div className="aseel-bg-field dark:aseel-bg-panel rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto border aseel-border-soft dark:aseel-border-soft">
                         <div className="p-6">
                             <div className="flex justify-between items-center mb-6">
-                                <h3 className="font-bold text-xl text-gray-900 dark:text-white">
+                                <h3 className="font-bold text-xl aseel-text-ink dark:text-white">
                                     {confirmOnlyModal
                                         ? `تأكيد المورد — الدفعة ${selectedInstallment.installmentNumber}`
                                         : `تسجيل الدفعة ${selectedInstallment.installmentNumber}`}
                                 </h3>
-                                <button onClick={() => setShowPaymentModal(false)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full text-gray-500">✕</button>
+                                <button onClick={() => setShowPaymentModal(false)} className="p-2 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-full aseel-text-soft">✕</button>
                             </div>
                             <PaymentRegistration
                                 title={`الدفعة ${selectedInstallment.installmentNumber}`}

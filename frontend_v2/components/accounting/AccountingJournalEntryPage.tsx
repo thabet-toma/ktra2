@@ -554,7 +554,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   const renderDebitCell = (row: GridLine) => {
     const isDebit = parseFloat(row.debit) > 0;
     if (posted) return (
-      <span className={`block text-center text-xs font-mono font-semibold ${isDebit ? 'text-blue-700' : 'text-gray-300'}`}>
+      <span className={`block text-center text-xs font-mono font-semibold ${isDebit ? 'aseel-text-accent' : 'aseel-text-soft'}`}>
         {isDebit ? fmtAmount(row.debit) : ''}
       </span>
     );
@@ -577,7 +577,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   const renderCreditCell = (row: GridLine) => {
     const isCredit = parseFloat(row.credit) > 0;
     if (posted) return (
-      <span className={`block text-center text-xs font-mono font-semibold ${isCredit ? 'text-rose-700' : 'text-gray-300'}`}>
+      <span className={`block text-center text-xs font-mono font-semibold ${isCredit ? 'aseel-text-ink' : 'aseel-text-soft'}`}>
         {isCredit ? fmtAmount(row.credit) : ''}
       </span>
     );

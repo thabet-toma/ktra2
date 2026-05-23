@@ -1244,7 +1244,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     {previewImage && (
       <div className="fixed inset-0 z-[60] bg-black/90 flex items-center justify-center p-4" onClick={() => setPreviewImage(null)}>
         <img src={previewImage} alt="Preview" className="max-w-full max-h-full rounded-lg" />
-        <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 text-white p-2 bg-gray-800 rounded-full">
+        <button onClick={() => setPreviewImage(null)} className="absolute top-4 right-4 text-white p-2 aseel-bg-panel rounded-full">
           <ArrowRight className="w-6 h-6 rotate-180" />
         </button>
       </div>

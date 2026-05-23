@@ -37,14 +37,14 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
     const getStatusStyle = (status: Shipment['status']) => {
         const baseClass = "px-2 py-1 rounded-full text-[10px] font-medium border flex items-center gap-1 w-fit";
         switch (status) {
-            case 'draft': return `${baseClass} bg-gray-50 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-700`;
-            case 'payment_pending': return `${baseClass} bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-300 dark:border-yellow-800`;
-            case 'partially_paid': return `${baseClass} bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-800`;
-            case 'paid': return `${baseClass} bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800`;
+            case 'draft': return `${baseClass} aseel-bg-panel aseel-text-soft aseel-border-soft dark:aseel-bg-panel dark:aseel-text-soft dark:aseel-border-soft`;
+            case 'payment_pending': return `${baseClass} aseel-bg-panel aseel-text-ink aseel-border-soft dark:aseel-bg-panel/20 dark:aseel-text-soft dark:aseel-border-soft`;
+            case 'partially_paid': return `${baseClass} aseel-bg-accent-bg aseel-text-accent aseel-border-accent dark:aseel-bg-panel/20 dark:aseel-text-soft dark:aseel-border-soft`;
+            case 'paid': return `${baseClass} bg-green-50 text-green-700 aseel-border-soft dark:bg-green-900/20 dark:text-green-300 dark:border-green-800`;
             case 'shipped': return `${baseClass} bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)] dark:bg-[var(--color-surface-2)]/20 dark:text-[var(--color-primary)] dark:border-[var(--color-border)]`;
             case 'delivered': return `${baseClass} bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)] dark:bg-[var(--color-surface-2)]/20 dark:text-[var(--color-primary)] dark:border-[var(--color-border)]`;
-            case 'cancelled': return `${baseClass} bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-800`;
-            default: return `${baseClass} bg-gray-50 text-gray-600`;
+            case 'cancelled': return `${baseClass} aseel-bg-panel aseel-text-state aseel-border-soft dark:aseel-bg-panel/20 dark:aseel-text-soft dark:aseel-border-soft`;
+            default: return `${baseClass} aseel-bg-panel aseel-text-soft`;
         }
     };
 
@@ -175,12 +175,12 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
     // --- Empty State ---
     if (shipments.length === 0) {
         return (
-            <div className="flex flex-col items-center justify-center py-24 bg-gray-50/50 dark:bg-gray-900/50 rounded-3xl border-2 border-dashed border-gray-200 dark:border-gray-800">
-                <div className="p-4 bg-white dark:bg-gray-800 rounded-full shadow-sm mb-4">
-                    <Truck className="w-12 h-12 text-blue-500/50" />
+            <div className="flex flex-col items-center justify-center py-24 aseel-bg-panel/50 dark:aseel-bg-panel/50 rounded-3xl border-2 border-dashed aseel-border-soft dark:aseel-border-soft">
+                <div className="p-4 aseel-bg-field dark:aseel-bg-panel rounded-full shadow-sm mb-4">
+                    <Truck className="w-12 h-12 aseel-text-soft/50" />
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 dark:text-white">لا توجد شحنات حالياً</h3>
-                <p className="text-gray-500 dark:text-gray-400 mt-2 max-w-sm text-center">
+                <h3 className="text-xl font-bold aseel-text-ink dark:text-white">لا توجد شحنات حالياً</h3>
+                <p className="aseel-text-soft dark:aseel-text-soft mt-2 max-w-sm text-center">
                     ابدأ بإنشاء شحنة جديدة لتجميع الصفقات وتوزيع التكاليف بشكل منظم.
                 </p>
             </div>
@@ -193,7 +193,7 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
             <div className="overflow-x-auto pb-4">
                 <table className="w-full text-right">
                     <thead>
-                        <tr className="text-gray-400 dark:text-gray-500 text-[10px] font-semibold uppercase tracking-wider border-b border-gray-200 dark:border-gray-700">
+                        <tr className="aseel-text-soft dark:aseel-text-soft text-[10px] font-semibold uppercase tracking-wider border-b aseel-border-soft dark:aseel-border-soft">
                             <th className="px-3 py-3">الشحنة</th>
                             <th className="px-2 py-3">التواريخ</th>
                             <th className="px-2 py-3">الوكيل</th>
@@ -214,12 +214,12 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                             return (
                                 <tr
                                     key={shipment.id}
-                                    className="bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-all duration-150"
+                                    className="aseel-bg-field dark:aseel-bg-panel border-b aseel-border-soft dark:aseel-border-soft/50 hover:aseel-bg-panel dark:hover:aseel-bg-panel/50 transition-all duration-150"
                                 >
                                     {/* اسم الشحنة */}
                                     <td className="px-3 py-3">
                                         <div className="flex items-start gap-3">
-                                            <div className={`p-2 rounded-lg mt-1 ${shippingType === 'sea' ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400' : 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20 text-[var(--color-primary)] dark:text-[var(--color-primary)]'}`}>
+                                            <div className={`p-2 rounded-lg mt-1 ${shippingType === 'sea' ? 'aseel-bg-accent-bg dark:aseel-bg-panel/20 aseel-text-accent dark:aseel-text-soft' : 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20 text-[var(--color-primary)] dark:text-[var(--color-primary)]'}`}>
                                                 {shippingType === 'sea' ?
                                                     <Ship className="w-4 h-4" /> :
                                                     <Plane className="w-4 h-4" />
@@ -227,8 +227,8 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                             </div>
                                             <div className="flex-1 min-w-0">
                                                 {/* اسم الشحنة - الجزء الرئيسي */}
-                                                <div className="font-bold text-gray-900 dark:text-white mb-1 flex items-center gap-2">
-                                                    <Truck className="w-3 h-3 text-gray-400 flex-shrink-0" />
+                                                <div className="font-bold aseel-text-ink dark:text-white mb-1 flex items-center gap-2">
+                                                    <Truck className="w-3 h-3 aseel-text-soft flex-shrink-0" />
                                                     <span className="truncate" title={buildShipmentOptionLabelCamel(shipment)}>
                                                         {buildShipmentOptionLabelCamel(shipment)}
                                                     </span>
@@ -237,13 +237,13 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                                 {/* معلومات إضافية */}
                                                 <div className="flex flex-wrap gap-2">
                                                     {/* رقم الشحنة */}
-                                                    <div className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-50 dark:bg-gray-800 px-2 py-0.5 rounded">
+                                                    <div className="flex items-center gap-1 text-[10px] aseel-text-soft aseel-bg-panel dark:aseel-bg-panel px-2 py-0.5 rounded">
                                                         <Hash className="w-2.5 h-2.5" />
                                                         <span>{shipment.shipmentNumber}</span>
                                                     </div>
 
                                                     {/* عدد الصفقات */}
-                                                    <div className="flex items-center gap-1 text-[10px] text-gray-500 bg-gray-50 dark:bg-gray-800 px-2 py-0.5 rounded">
+                                                    <div className="flex items-center gap-1 text-[10px] aseel-text-soft aseel-bg-panel dark:aseel-bg-panel px-2 py-0.5 rounded">
                                                         <Layers className="w-2.5 h-2.5" />
                                                         <span>{shipment.deals?.length || 0} صفقة</span>
                                                     </div>
@@ -262,8 +262,8 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                         <div className="space-y-2">
                                             {/* تاريخ الإنشاء */}
                                             <div className="flex items-center gap-1">
-                                                <Calendar className="w-3 h-3 text-gray-400 flex-shrink-0" />
-                                                <span className="text-[11px] text-gray-600 dark:text-gray-300" title="تاريخ الإنشاء">
+                                                <Calendar className="w-3 h-3 aseel-text-soft flex-shrink-0" />
+                                                <span className="text-[11px] aseel-text-soft dark:aseel-text-soft" title="تاريخ الإنشاء">
                                                     {createdAt ? formatDate(createdAt.toISOString()) : '-'}
                                                 </span>
                                             </div>
@@ -271,8 +271,8 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                             {/* تاريخ المغادرة */}
                                             {departureDate && (
                                                 <div className="flex items-center gap-1">
-                                                    <TrendingUp className="w-3 h-3 text-blue-400 flex-shrink-0" />
-                                                    <span className="text-[11px] text-gray-600 dark:text-gray-300" title="تاريخ المغادرة">
+                                                    <TrendingUp className="w-3 h-3 aseel-text-soft flex-shrink-0" />
+                                                    <span className="text-[11px] aseel-text-soft dark:aseel-text-soft" title="تاريخ المغادرة">
                                                         {formatDate(departureDate.toISOString())}
                                                     </span>
                                                 </div>
@@ -282,7 +282,7 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                             {arrivalDate && (
                                                 <div className="flex items-center gap-1">
                                                     <MapPin className="w-3 h-3 text-green-400 flex-shrink-0" />
-                                                    <span className="text-[11px] text-gray-600 dark:text-gray-300" title="تاريخ الوصول المتوقع">
+                                                    <span className="text-[11px] aseel-text-soft dark:aseel-text-soft" title="تاريخ الوصول المتوقع">
                                                         {formatDate(arrivalDate.toISOString())}
                                                     </span>
                                                 </div>
@@ -294,18 +294,18 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                     <td className="px-2 py-3">
                                         <button
                                             onClick={() => handleOpenSupplier(shipment.shippingAgentId)}
-                                            className="group/agent flex items-center gap-1 px-2 py-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700/70 transition-colors w-full text-right"
+                                            className="group/agent flex items-center gap-1 px-2 py-1.5 rounded-lg hover:aseel-bg-panel dark:hover:aseel-bg-panel/70 transition-colors w-full text-right"
                                             title={shipment.shippingAgentName}
                                         >
                                             <div className="flex-1 min-w-0">
-                                                <div className="text-xs text-gray-700 dark:text-gray-200 truncate group-hover/agent:text-blue-600 dark:group-hover/agent:text-blue-400 transition-colors">
+                                                <div className="text-xs aseel-text-ink dark:aseel-text-soft truncate group-hover/agent:aseel-text-accent dark:group-hover/agent:aseel-text-soft transition-colors">
                                                     {shipment.shippingAgentName}
                                                 </div>
-                                                <div className="text-[10px] text-gray-400 truncate">
+                                                <div className="text-[10px] aseel-text-soft truncate">
                                                     وكيل شحن
                                                 </div>
                                             </div>
-                                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                                            <div className="w-1.5 h-1.5 rounded-full aseel-bg-panel flex-shrink-0" />
                                         </button>
                                     </td>
 
@@ -313,24 +313,24 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                     <td className="px-2 py-3">
                                         <div className="flex flex-col gap-1 items-center">
                                             <div className="flex items-center gap-1" title="الحجم">
-                                                <Box className="w-3 h-3 text-blue-500" />
-                                                <span className="font-mono font-bold text-sm text-gray-700 dark:text-gray-200">
+                                                <Box className="w-3 h-3 aseel-text-soft" />
+                                                <span className="font-mono font-bold text-sm aseel-text-ink dark:aseel-text-soft">
                                                     {(shipment.deals && shipment.deals.length > 0
                                                         ? shipment.deals.reduce((sum, d) => sum + (Number(d.totalVolume) || 0), 0)
                                                         : Number(shipment.totalVolume) || 0
                                                     ).toFixed(1)}
                                                 </span>
-                                                <span className="text-[10px] text-gray-400">م³</span>
+                                                <span className="text-[10px] aseel-text-soft">م³</span>
                                             </div>
                                             <div className="flex items-center gap-1" title="الوزن">
                                                 <Scale className="w-3 h-3 text-[var(--color-primary)]" />
-                                                <span className="font-mono font-bold text-sm text-gray-700 dark:text-gray-200">
+                                                <span className="font-mono font-bold text-sm aseel-text-ink dark:aseel-text-soft">
                                                     {(shipment.deals && shipment.deals.length > 0
                                                         ? shipment.deals.reduce((sum, d) => sum + (Number(d.totalWeightKg) || 0), 0)
                                                         : Number(shipment.totalWeightKg) || 0
                                                     ).toFixed(0)}
                                                 </span>
-                                                <span className="text-[10px] text-gray-400">كجم</span>
+                                                <span className="text-[10px] aseel-text-soft">كجم</span>
                                             </div>
                                         </div>
                                     </td>
@@ -339,12 +339,12 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                     <td className="px-2 py-3">
                                         <div className="flex items-center gap-0.5 justify-end">
                                             <DollarSign className="w-3 h-3 text-green-500" />
-                                            <span className="font-bold text-lg text-gray-900 dark:text-white">
+                                            <span className="font-bold text-lg aseel-text-ink dark:text-white">
                                                 {(shipment.totalShippingCostUsd || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
                                             </span>
                                         </div>
                                         {shipment.installmentPlanEnabled && shipment.installments && shipment.installments.length > 0 && (
-                                            <div className="text-[10px] text-gray-400 text-right mt-0.5">
+                                            <div className="text-[10px] aseel-text-soft text-right mt-0.5">
                                                 {shipment.installments.filter(i => i.status === 'paid').length}/{shipment.installments.length} دفعة
                                             </div>
                                         )}
@@ -353,15 +353,15 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                     {/* حالة الشحنة */}
                                     <td className="px-2 py-3">
                                         <div className="flex items-center gap-2">
-                                            <div className={`p-1.5 rounded-lg ${shippingType === 'sea' ? 'bg-blue-50 dark:bg-blue-900/20' : 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20'}`}>
+                                            <div className={`p-1.5 rounded-lg ${shippingType === 'sea' ? 'aseel-bg-accent-bg dark:aseel-bg-panel/20' : 'bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20'}`}>
                                                 {getShipmentStatusIcon(shipment)}
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="text-xs font-medium text-gray-700 dark:text-gray-200 truncate">
+                                                <div className="text-xs font-medium aseel-text-ink dark:aseel-text-soft truncate">
                                                     {getShipmentStatusText(shipment)}
                                                 </div>
                                                 {shipment.shippingInfo?.shipmentStatus?.statusDate && (
-                                                    <div className="text-[10px] text-gray-400">
+                                                    <div className="text-[10px] aseel-text-soft">
                                                         {formatDate(shipment.shippingInfo.shipmentStatus.statusDate)}
                                                     </div>
                                                 )}
@@ -389,7 +389,7 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                                         }
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        className="p-2 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/40 rounded-lg transition-colors"
+                                                        className="p-2 aseel-text-soft hover:aseel-text-ink aseel-bg-panel hover:aseel-bg-panel dark:aseel-bg-panel/20 dark:aseel-text-soft dark:hover:aseel-bg-panel/40 rounded-lg transition-colors"
                                                         title="تتبع الشحنة"
                                                     >
                                                         <Navigation className="w-4 h-4" />
@@ -401,7 +401,7 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                                         href={`https://www.track-trace.com/aircargo/item/${shipment.shippingInfo.airwayBillNumber}`}
                                                         target="_blank"
                                                         rel="noopener noreferrer"
-                                                        className="p-2 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/40 rounded-lg transition-colors"
+                                                        className="p-2 aseel-text-soft hover:aseel-text-ink aseel-bg-panel hover:aseel-bg-panel dark:aseel-bg-panel/20 dark:aseel-text-soft dark:hover:aseel-bg-panel/40 rounded-lg transition-colors"
                                                         title="تتبع الشحنة"
                                                     >
                                                         <Navigation className="w-4 h-4" />
@@ -412,7 +412,7 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                             {/* زر التفاصيل */}
                                             <button
                                                 onClick={() => onView(shipment)}
-                                                className="p-2 text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:hover:bg-emerald-900/40 rounded-lg transition-colors"
+                                                className="p-2 aseel-text-soft hover:aseel-text-ink aseel-bg-panel hover:aseel-bg-panel dark:aseel-bg-panel/20 dark:aseel-text-soft dark:hover:aseel-bg-panel/40 rounded-lg transition-colors"
                                                 title="عرض التفاصيل"
                                             >
                                                 <Eye className="w-4 h-4" />
@@ -421,7 +421,7 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                             {/* زر التعديل */}
                                             <button
                                                 onClick={() => onEdit(shipment)}
-                                                className="p-2 text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/40 rounded-lg transition-colors"
+                                                className="p-2 aseel-text-accent hover:aseel-text-accent aseel-bg-accent-bg hover:aseel-bg-accent-bg dark:aseel-bg-panel/20 dark:aseel-text-soft dark:hover:aseel-bg-panel/40 rounded-lg transition-colors"
                                                 title="تعديل الشحنة"
                                             >
                                                 <Edit className="w-4 h-4" />

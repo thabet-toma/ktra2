@@ -107,7 +107,7 @@ export const DealList: React.FC<DealListProps> = ({
     return "not_paid";
   };
 
-  const getPayStyles = (status: PaymentStatus) => { const styles: any = { not_paid: "bg-red-50 text-red-700 border-red-200 dark:bg-red-900/20 dark:text-red-300", claim_raised: "bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-300", payment_pending_confirmation: "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300", partially_paid: "bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-900/20 dark:text-orange-300", paid: "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300", }; return styles[status] || styles["not_paid"]; };
+  const getPayStyles = (status: PaymentStatus) => { const styles: any = { not_paid: "aseel-bg-panel aseel-text-state aseel-border-soft dark:aseel-bg-panel/20 dark:aseel-text-soft", claim_raised: "aseel-bg-panel aseel-text-ink aseel-border-soft dark:aseel-bg-panel/20 dark:aseel-text-soft", payment_pending_confirmation: "aseel-bg-accent-bg aseel-text-accent aseel-border-accent dark:aseel-bg-panel/20 dark:aseel-text-soft", partially_paid: "aseel-bg-panel aseel-text-ink aseel-border-soft dark:aseel-bg-panel/20 dark:aseel-text-soft", paid: "bg-green-50 text-green-700 aseel-border-soft dark:bg-green-900/20 dark:text-green-300", }; return styles[status] || styles["not_paid"]; };
   const getPayText = (status: PaymentStatus) => { const map: any = { not_paid: "غير مدفوعة", claim_raised: "رفع مطالبة", payment_pending_confirmation: "بانتظار تأكيد", partially_paid: "مدفوعة جزئياً", paid: "مدفوعة كلياً" }; return map[status] || status; };
   const getPayIcon = (status: PaymentStatus) => { const icons: any = { not_paid: <AlertCircle className="w-3 h-3" />, claim_raised: <AlertTriangle className="w-3 h-3" />, payment_pending_confirmation: <Clock className="w-3 h-3" />, partially_paid: <DollarSign className="w-3 h-3" />, paid: <CheckCircle className="w-3 h-3" />, }; return icons[status]; };
 
@@ -209,13 +209,13 @@ export const DealList: React.FC<DealListProps> = ({
   return (
     <div className="space-y-3">
       {/* --- Filter Bar --- */}
-      <div className="bg-white dark:bg-gray-800 p-2 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm">
+      <div className="aseel-bg-field dark:aseel-bg-panel p-2 rounded-lg border aseel-border-soft dark:aseel-border-soft shadow-sm">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2 mb-2">
           {/* ... (نفس كود الفلاتر العلوية) ... */}
           <div className="flex items-center gap-1.5">
-            <Filter className="w-3.5 h-3.5 text-gray-500" />
-            <span className="font-medium text-gray-700 dark:text-gray-300 text-xs">فلاتر البحث</span>
-            <span className="text-xs bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
+            <Filter className="w-3.5 h-3.5 aseel-text-soft" />
+            <span className="font-medium aseel-text-ink dark:aseel-text-soft text-xs">فلاتر البحث</span>
+            <span className="text-xs aseel-bg-accent-bg aseel-text-accent dark:aseel-bg-panel/30 dark:aseel-text-soft px-1.5 py-0.5 rounded-full">
               {filteredDeals.length} صفقة
             </span>
           </div>
@@ -223,23 +223,23 @@ export const DealList: React.FC<DealListProps> = ({
             <button
               onClick={() => setShowDateFilter(!showDateFilter)}
               className={`px-2 py-1 rounded-lg flex items-center gap-1 text-xs transition-colors ${showDateFilter
-                ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"
+                ? "aseel-bg-accent-bg aseel-text-accent dark:aseel-bg-panel/30 dark:aseel-text-soft"
+                : "aseel-bg-panel aseel-text-ink dark:aseel-bg-panel dark:aseel-text-soft"
                 }`}
               title="فلترة بالتاريخ"
             >
               <Calendar className="w-3 h-3" />
               <span>التاريخ</span>
-              {(dateFrom || dateTo) && <span className="w-1.5 h-1.5 bg-blue-500 rounded-full" />}
+              {(dateFrom || dateTo) && <span className="w-1.5 h-1.5 aseel-bg-accent-bg rounded-full" />}
             </button>
 
-            <button onClick={() => setSortField("date")} className={`px-2 py-1 rounded-lg flex items-center gap-0.5 text-xs ${sortField === "date" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"}`}>
+            <button onClick={() => setSortField("date")} className={`px-2 py-1 rounded-lg flex items-center gap-0.5 text-xs ${sortField === "date" ? "aseel-bg-accent-bg aseel-text-accent dark:aseel-bg-panel/30 dark:aseel-text-soft" : "aseel-bg-panel aseel-text-ink dark:aseel-bg-panel dark:aseel-text-soft"}`}>
               {sortField === "date" && sortDirection === "desc" ? <SortDesc className="w-3 h-3" /> : <SortAsc className="w-3 h-3" />} التاريخ
             </button>
-            <button onClick={() => setSortField("amount")} className={`px-2 py-1 rounded-lg text-xs ${sortField === "amount" ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300" : "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300"}`}>
+            <button onClick={() => setSortField("amount")} className={`px-2 py-1 rounded-lg text-xs ${sortField === "amount" ? "aseel-bg-accent-bg aseel-text-accent dark:aseel-bg-panel/30 dark:aseel-text-soft" : "aseel-bg-panel aseel-text-ink dark:aseel-bg-panel dark:aseel-text-soft"}`}>
               المبلغ
             </button>
-            <button onClick={() => setSortDirection(prev => prev === "asc" ? "desc" : "asc")} className="px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-xs">
+            <button onClick={() => setSortDirection(prev => prev === "asc" ? "desc" : "asc")} className="px-2 py-1 aseel-bg-panel dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft rounded-lg text-xs">
               {sortDirection === "desc" ? "تنازلي" : "تصاعدي"}
             </button>
           </div>
@@ -248,10 +248,10 @@ export const DealList: React.FC<DealListProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-4 gap-1.5">
           {/* ... (نفس كود حقول البحث) ... */}
           <div className="relative">
-            <Search className="absolute right-2 top-1/2 transform -translate-y-1/2 w-3 h-3 text-gray-400" />
-            <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ابحث (رقم الصفقة، الفاتورة، المورد)..." className="w-full p-1.5 pr-7 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-900 dark:text-white placeholder-gray-400" />
+            <Search className="absolute right-2 top-1/2 transform -translate-y-1/2 w-3 h-3 aseel-text-soft" />
+            <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ابحث (رقم الصفقة، الفاتورة، المورد)..." className="w-full p-1.5 pr-7 text-xs border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel rounded-lg aseel-text-ink dark:text-white placeholder-gray-400" />
           </div>
-          <select value={selectedShippingWorkflow} onChange={(e) => setSelectedShippingWorkflow(e.target.value)} className="p-1.5 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-900 dark:text-white">
+          <select value={selectedShippingWorkflow} onChange={(e) => setSelectedShippingWorkflow(e.target.value)} className="p-1.5 text-xs border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel rounded-lg aseel-text-ink dark:text-white">
             <option value="all">كل أوضاع الشحنة</option>
             <option value="unset">لم يُحدد وضع الشحنة</option>
             {(Object.keys(SHIPPING_WORKFLOW_LABELS) as ShippingWorkflowStatus[]).map((code) => (
@@ -260,7 +260,7 @@ export const DealList: React.FC<DealListProps> = ({
               </option>
             ))}
           </select>
-          <select value={selectedPaymentStatus} onChange={(e) => setSelectedPaymentStatus(e.target.value)} className="p-1.5 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg text-gray-900 dark:text-white">
+          <select value={selectedPaymentStatus} onChange={(e) => setSelectedPaymentStatus(e.target.value)} className="p-1.5 text-xs border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel rounded-lg aseel-text-ink dark:text-white">
             <option value="all">كل الدفعات</option>
             <option value="not_paid">غير مدفوعة</option>
             <option value="claim_raised">رفع مطالبة</option>
@@ -268,36 +268,36 @@ export const DealList: React.FC<DealListProps> = ({
             <option value="partially_paid">مدفوعة جزئياً</option>
             <option value="paid">مدفوعة كلياً</option>
           </select>
-          <button onClick={resetAllFilters} className="p-1.5 text-xs bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg transition-colors">
+          <button onClick={resetAllFilters} className="p-1.5 text-xs aseel-bg-panel hover:aseel-bg-panel dark:aseel-bg-panel/20 dark:hover:aseel-bg-panel/30 aseel-text-state dark:aseel-text-soft rounded-lg transition-colors">
             إعادة تعيين
           </button>
         </div>
 
         {showDateFilter && (
-          <div className="flex items-center gap-2 mt-2 pt-2 border-t border-gray-100 dark:border-gray-700 animate-in fade-in slide-in-from-top-1">
+          <div className="flex items-center gap-2 mt-2 pt-2 border-t aseel-border-soft dark:aseel-border-soft animate-in fade-in slide-in-from-top-1">
             {/* ... (نفس كود فلاتر التاريخ) ... */}
-            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-900/50 p-1.5 rounded-lg border border-gray-200 dark:border-gray-600">
-              <span className="text-xs text-gray-500 font-medium">من:</span>
+            <div className="flex items-center gap-1.5 aseel-bg-panel dark:aseel-bg-panel/50 p-1.5 rounded-lg border aseel-border-soft dark:aseel-border-soft">
+              <span className="text-xs aseel-text-soft font-medium">من:</span>
               <input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="p-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-gray-700 dark:text-gray-200 outline-none focus:ring-1 focus:ring-blue-500"
+                className="p-1 text-xs border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel rounded aseel-text-ink dark:aseel-text-soft outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
-            <div className="flex items-center gap-1.5 bg-gray-50 dark:bg-gray-900/50 p-1.5 rounded-lg border border-gray-200 dark:border-gray-600">
-              <span className="text-xs text-gray-500 font-medium">إلى:</span>
+            <div className="flex items-center gap-1.5 aseel-bg-panel dark:aseel-bg-panel/50 p-1.5 rounded-lg border aseel-border-soft dark:aseel-border-soft">
+              <span className="text-xs aseel-text-soft font-medium">إلى:</span>
               <input
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="p-1 text-xs border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded text-gray-700 dark:text-gray-200 outline-none focus:ring-1 focus:ring-blue-500"
+                className="p-1 text-xs border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel rounded aseel-text-ink dark:aseel-text-soft outline-none focus:ring-1 focus:ring-blue-500"
               />
             </div>
             {(dateFrom || dateTo) && (
               <button
                 onClick={() => { setDateFrom(""); setDateTo(""); }}
-                className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                className="p-1.5 aseel-text-soft hover:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg transition-colors"
                 title="مسح التاريخ"
               >
                 <X className="w-3.5 h-3.5" />
@@ -319,7 +319,7 @@ export const DealList: React.FC<DealListProps> = ({
           const isExpanded = expandedDeals.has(deal.id);
 
           return (
-            <div key={deal.id} className="relative group rounded-lg border transition-all duration-200 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:shadow-md hover:z-20 hover:border-blue-400 dark:hover:border-blue-500 hover:bg-blue-50/50 dark:hover:bg-gray-700/50">
+            <div key={deal.id} className="relative group rounded-lg border transition-all duration-200 aseel-bg-field dark:aseel-bg-panel aseel-border-soft dark:aseel-border-soft hover:shadow-md hover:z-20 hover:aseel-border-soft dark:hover:aseel-border-soft hover:aseel-bg-accent-bg/50 dark:hover:aseel-bg-panel/50">
               {/* Main Compact Row */}
               <div className="flex items-center justify-between p-3 cursor-pointer" onClick={() => toggleDealExpand(deal.id)}>
                 {/* Left Side: Images & Info */}
@@ -333,12 +333,12 @@ export const DealList: React.FC<DealListProps> = ({
                           const itemName = item?.name || "منتج";
                           return (
                             <div key={idx} className="relative group/image" onMouseEnter={() => setHoveredImage({ dealId: deal.id, index: idx })} onMouseLeave={() => setHoveredImage(null)}>
-                              <div className="w-9 h-9 rounded-md border-2 border-white dark:border-gray-800 shadow-sm overflow-hidden hover:scale-110 transition-transform duration-200">
+                              <div className="w-9 h-9 rounded-md border-2 border-white dark:aseel-border-soft shadow-sm overflow-hidden hover:scale-110 transition-transform duration-200">
                                 <img src={img} alt="" className="w-full h-full object-cover" />
                               </div>
                               {hoveredImage?.dealId === deal.id && hoveredImage?.index === idx && (
                                 <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50">
-                                  <div className="bg-gray-900 text-white text-xs px-2 py-1 rounded shadow-lg whitespace-nowrap">
+                                  <div className="aseel-bg-panel text-white text-xs px-2 py-1 rounded shadow-lg whitespace-nowrap">
                                     {itemName}
                                     <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-900"></div>
                                   </div>
@@ -348,7 +348,7 @@ export const DealList: React.FC<DealListProps> = ({
                           );
                         })}
                         {images.length > 2 && (
-                          <div className="w-9 h-9 rounded-md border-2 border-white dark:border-gray-800 bg-gray-100 dark:bg-gray-700 flex items-center justify-center text-[10px] font-bold text-gray-500 dark:text-gray-400 z-0">
+                          <div className="w-9 h-9 rounded-md border-2 border-white dark:aseel-border-soft aseel-bg-panel dark:aseel-bg-panel flex items-center justify-center text-[10px] font-bold aseel-text-soft dark:aseel-text-soft z-0">
                             +{images.length - 2}
                           </div>
                         )}
@@ -358,28 +358,28 @@ export const DealList: React.FC<DealListProps> = ({
 
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-[10px] font-bold text-gray-900 dark:text-white text-sm truncate">{deal.dealNumber}</span>
+                      <span className="text-[10px] font-bold aseel-text-ink dark:text-white text-sm truncate">{deal.dealNumber}</span>
                       {deal.originalOfferNumber && (
                         <span
                           title={deal.originalOfferNumber}
-                          className="font-bold text-gray-900 dark:text-white text-sm truncate max-w-[240px] bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 rounded border border-blue-100 dark:border-blue-800 flex-shrink-0"
+                          className="font-bold aseel-text-ink dark:text-white text-sm truncate max-w-[240px] aseel-bg-accent-bg dark:aseel-bg-panel/40 px-1.5 py-0.5 rounded border aseel-border-soft dark:aseel-border-soft flex-shrink-0"
                         >
                           {deal.originalOfferNumber}
                         </span>
                       )}
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <div className="flex items-center gap-2 text-xs aseel-text-soft dark:aseel-text-soft">
                       {/* 🟢 زر فتح المورد (عرض) */}
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           if (deal.supplierId) setViewSupplierId(deal.supplierId);
                         }}
-                        className="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:underline transition-colors text-left"
+                        className="font-medium aseel-text-accent hover:aseel-text-ink dark:aseel-text-soft dark:hover:aseel-text-soft hover:underline transition-colors text-left"
                       >
                         {supplierDisplayName}
                       </button>
-                      <span className="w-1 h-1 bg-gray-300 rounded-full"></span>
+                      <span className="w-1 h-1 aseel-bg-grid-head rounded-full"></span>
                       <span className="flex-shrink-0">{deal.items?.length || 0} منتج</span>
                     </div>
                   </div>
@@ -402,8 +402,8 @@ export const DealList: React.FC<DealListProps> = ({
 
                 <div className="flex items-center gap-4">
                   <div className="text-right">
-                    <div className="font-bold text-gray-900 dark:text-white text-sm">${grandTotal.toLocaleString()}</div>
-                    <div className="text-[10px] text-gray-400">{formatDate(deal.dealDate)}</div>
+                    <div className="font-bold aseel-text-ink dark:text-white text-sm">${grandTotal.toLocaleString()}</div>
+                    <div className="text-[10px] aseel-text-soft">{formatDate(deal.dealDate)}</div>
                   </div>
                   <div className="flex items-center gap-1 pl-1">
                     {/* New Tab Button */}
@@ -412,33 +412,33 @@ export const DealList: React.FC<DealListProps> = ({
                         e.stopPropagation();
                         window.open(`${window.location.origin}/deals/${encodeURIComponent(deal.id)}`, '_blank', 'noopener,noreferrer');
                       }}
-                      className="p-1.5 hover:bg-white dark:hover:bg-gray-700 rounded-full text-gray-400 hover:text-blue-600 transition-colors"
+                      className="p-1.5 hover:aseel-bg-field dark:hover:aseel-bg-panel rounded-full aseel-text-soft hover:aseel-text-accent transition-colors"
                       title="فتح في نافذة جديدة"
                     >
                       <ArrowUpRight className="w-4 h-4" />
                     </button>
-                    <button onClick={(e) => { e.stopPropagation(); onPrint(deal); }} className="p-1.5 hover:bg-white dark:hover:bg-gray-700 rounded-full text-gray-400 hover:text-blue-600 transition-colors" title="طباعة"><Printer className="w-4 h-4" /></button>
-                    <button onClick={(e) => { e.stopPropagation(); onEdit(deal); }} className="p-1.5 hover:bg-white dark:hover:bg-gray-700 rounded-full text-gray-400 hover:text-blue-600 transition-colors" title="تعديل"><Edit className="w-4 h-4" /></button>
-                    <div className={`p-1 rounded-full transition-transform duration-200 ${isExpanded ? 'rotate-180 bg-gray-100 dark:bg-gray-700' : ''}`}><ChevronDown className="w-4 h-4 text-gray-500" /></div>
+                    <button onClick={(e) => { e.stopPropagation(); onPrint(deal); }} className="p-1.5 hover:aseel-bg-field dark:hover:aseel-bg-panel rounded-full aseel-text-soft hover:aseel-text-accent transition-colors" title="طباعة"><Printer className="w-4 h-4" /></button>
+                    <button onClick={(e) => { e.stopPropagation(); onEdit(deal); }} className="p-1.5 hover:aseel-bg-field dark:hover:aseel-bg-panel rounded-full aseel-text-soft hover:aseel-text-accent transition-colors" title="تعديل"><Edit className="w-4 h-4" /></button>
+                    <div className={`p-1 rounded-full transition-transform duration-200 ${isExpanded ? 'rotate-180 aseel-bg-panel dark:aseel-bg-panel' : ''}`}><ChevronDown className="w-4 h-4 aseel-text-soft" /></div>
                   </div>
                 </div>
               </div>
 
               {/* Expanded Details Section */}
               {isExpanded && (
-                <div className="border-t border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-black/20 p-3 rounded-b-lg">
+                <div className="border-t aseel-border-soft dark:aseel-border-soft aseel-bg-panel/50 dark:bg-black/20 p-3 rounded-b-lg">
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     <div className="space-y-2">
                       <div className="flex items-center gap-2 text-xs">
-                        <User className="w-3.5 h-3.5 text-gray-400" />
-                        <span className="text-gray-500">المورد:</span>
+                        <User className="w-3.5 h-3.5 aseel-text-soft" />
+                        <span className="aseel-text-soft">المورد:</span>
                         {/* 🟢 زر فتح المورد (عرض) أيضاً في القسم الموسع */}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             if (deal.supplierId) setViewSupplierId(deal.supplierId);
                           }}
-                          className="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 hover:underline transition-colors text-left"
+                          className="font-medium aseel-text-accent hover:aseel-text-ink dark:aseel-text-soft dark:hover:aseel-text-soft hover:underline transition-colors text-left"
                         >
                           {supplierDisplayName}
                         </button>
@@ -453,38 +453,38 @@ export const DealList: React.FC<DealListProps> = ({
                     </div>
                     {/* ... باقي الأعمدة (Financials, Products, Footer Actions) ... */}
                     <div className="grid grid-cols-3 gap-2">
-                      <div className="bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700 text-center">
-                        <div className="text-[10px] text-gray-500 mb-0.5">المدفوع</div>
-                        <div className="text-sm font-bold text-emerald-600">${paidAmount.toLocaleString()}</div>
+                      <div className="aseel-bg-field dark:aseel-bg-panel p-2 rounded border aseel-border-soft dark:aseel-border-soft text-center">
+                        <div className="text-[10px] aseel-text-soft mb-0.5">المدفوع</div>
+                        <div className="text-sm font-bold aseel-text-soft">${paidAmount.toLocaleString()}</div>
                       </div>
-                      <div className="bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700 text-center">
-                        <div className="text-[10px] text-gray-500 mb-0.5">المتبقي</div>
-                        <div className="text-sm font-bold text-amber-600">${remainingAmount.toLocaleString()}</div>
+                      <div className="aseel-bg-field dark:aseel-bg-panel p-2 rounded border aseel-border-soft dark:aseel-border-soft text-center">
+                        <div className="text-[10px] aseel-text-soft mb-0.5">المتبقي</div>
+                        <div className="text-sm font-bold aseel-text-soft">${remainingAmount.toLocaleString()}</div>
                       </div>
-                      <div className="bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700 text-center">
-                        <div className="text-[10px] text-gray-500 mb-0.5">الإجمالي</div>
-                        <div className="text-sm font-bold text-blue-600">${grandTotal.toLocaleString()}</div>
+                      <div className="aseel-bg-field dark:aseel-bg-panel p-2 rounded border aseel-border-soft dark:aseel-border-soft text-center">
+                        <div className="text-[10px] aseel-text-soft mb-0.5">الإجمالي</div>
+                        <div className="text-sm font-bold aseel-text-accent">${grandTotal.toLocaleString()}</div>
                       </div>
                     </div>
                     <div className="lg:col-span-1">
-                      <div className="text-xs font-medium text-gray-500 mb-1.5">أبرز المنتجات</div>
+                      <div className="text-xs font-medium aseel-text-soft mb-1.5">أبرز المنتجات</div>
                       <div className="flex flex-wrap gap-1">
                         {deal.items?.slice(0, 3).map((item, i) => (
-                          <span key={i} className="px-2 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded text-[10px] text-gray-700 dark:text-gray-300">
-                            {item.name} <span className="text-gray-400 mx-1">x{item.quantity}</span>
+                          <span key={i} className="px-2 py-1 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded text-[10px] aseel-text-ink dark:aseel-text-soft">
+                            {item.name} <span className="aseel-text-soft mx-1">x{item.quantity}</span>
                           </span>
                         ))}
                         {(deal.items?.length || 0) > 3 && (
-                          <span className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded text-[10px] text-gray-500">
+                          <span className="px-2 py-1 aseel-bg-panel dark:aseel-bg-panel rounded text-[10px] aseel-text-soft">
                             +{(deal.items?.length || 0) - 3}
                           </span>
                         )}
                       </div>
                     </div>
-                    <div className="md:col-span-2 lg:col-span-3 flex justify-end gap-2 pt-2 mt-2 border-t border-gray-200 dark:border-gray-700">
-                      <button onClick={() => onEdit(deal)} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-200 rounded text-xs hover:bg-gray-50 transition-colors">سجل النشاطات</button>
-                      <button onClick={() => { if (confirm('حذف؟')) onDelete(deal.id) }} className="px-3 py-1.5 bg-white dark:bg-gray-700 border border-red-200 dark:border-red-900/50 text-red-600 dark:text-red-400 rounded text-xs hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">حذف</button>
-                      <button onClick={() => onEdit(deal)} className="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-medium shadow-sm transition-colors">إدارة الصفقة الكاملة</button>
+                    <div className="md:col-span-2 lg:col-span-3 flex justify-end gap-2 pt-2 mt-2 border-t aseel-border-soft dark:aseel-border-soft">
+                      <button onClick={() => onEdit(deal)} className="px-3 py-1.5 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft aseel-text-ink dark:aseel-text-soft rounded text-xs hover:aseel-bg-panel transition-colors">سجل النشاطات</button>
+                      <button onClick={() => { if (confirm('حذف؟')) onDelete(deal.id) }} className="px-3 py-1.5 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft/50 aseel-text-state dark:aseel-text-soft rounded text-xs hover:aseel-bg-panel dark:hover:aseel-bg-panel/20 transition-colors">حذف</button>
+                      <button onClick={() => onEdit(deal)} className="px-4 py-1.5 aseel-bg-accent hover:aseel-bg-accent text-white rounded text-xs font-medium shadow-sm transition-colors">إدارة الصفقة الكاملة</button>
                     </div>
                   </div>
                 </div>
@@ -497,9 +497,9 @@ export const DealList: React.FC<DealListProps> = ({
       {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex justify-center gap-2 mt-4">
-          <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 disabled:opacity-50 transition-colors dark:text-white">السابقة</button>
-          <span className="px-3 py-1.5 text-xs text-gray-600 dark:text-gray-400 flex items-center">{currentPage} / {totalPages}</span>
-          <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages} className="px-3 py-1.5 text-xs bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded hover:bg-gray-50 disabled:opacity-50 transition-colors dark:text-white">التالية</button>
+          <button onClick={() => goToPage(currentPage - 1)} disabled={currentPage === 1} className="px-3 py-1.5 text-xs aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded hover:aseel-bg-panel disabled:opacity-50 transition-colors dark:text-white">السابقة</button>
+          <span className="px-3 py-1.5 text-xs aseel-text-soft dark:aseel-text-soft flex items-center">{currentPage} / {totalPages}</span>
+          <button onClick={() => goToPage(currentPage + 1)} disabled={currentPage === totalPages} className="px-3 py-1.5 text-xs aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded hover:aseel-bg-panel disabled:opacity-50 transition-colors dark:text-white">التالية</button>
         </div>
       )}
 

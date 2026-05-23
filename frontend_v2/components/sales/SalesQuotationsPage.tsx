@@ -15,6 +15,7 @@ import {
   ArrowRight,
   RefreshCw,
 } from "lucide-react";
+import { AseelSpinner } from "../aseel/AseelStates";
 import {
   listQuotations,
   getQuotation,
@@ -477,7 +478,7 @@ export const SalesQuotationsPage: React.FC = () => {
                       <td className="p-2"><input type="number" value={l.discount} onChange={(e) => handleLineChange(idx, "discount", e.target.value)} className="w-full border rounded p-1 text-sm" /></td>
                       <td className="p-2"><input type="number" value={l.tax_rate} onChange={(e) => handleLineChange(idx, "tax_rate", e.target.value)} className="w-full border rounded p-1 text-sm" /></td>
                       <td className="p-2 font-mono">{Number(l.total).toLocaleString()}</td>
-                      <td className="p-2"><button onClick={() => handleRemoveLine(idx)} className="aseel-text-soft0 hover:aseel-text-state"><Trash2 className="w-4 h-4" /></button></td>
+                      <td className="p-2"><button onClick={() => handleRemoveLine(idx)} className="aseel-text-soft hover:aseel-text-state"><Trash2 className="w-4 h-4" /></button></td>
                     </tr>
                   ))}
                 </tbody>

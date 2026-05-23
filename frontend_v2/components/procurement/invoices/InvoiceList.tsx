@@ -180,19 +180,19 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   const getStatusStyles = (status: string): string => {
     const styles: Record<string, string> = {
       incomplete:
-        "bg-yellow-50 text-yellow-700 border-yellow-200 dark:bg-yellow-900/20 dark:text-yellow-300 dark:border-yellow-800/50",
+        "aseel-bg-panel aseel-text-ink aseel-border-soft dark:aseel-bg-panel/20 dark:aseel-text-soft dark:aseel-border-soft/50",
       completed:
-        "bg-green-50 text-green-700 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-800/50",
+        "bg-green-50 text-green-700 aseel-border-soft dark:bg-green-900/20 dark:text-green-300 dark:border-green-800/50",
     };
     return styles[status] || styles["incomplete"];
   };
 
   const getStatusIcon = (status: string): React.ReactNode => {
     const icons: Record<string, React.ReactNode> = {
-      incomplete: <AlertCircle className="w-4 h-4 text-yellow-500" />,
+      incomplete: <AlertCircle className="w-4 h-4 aseel-text-soft" />,
       completed: <CheckCircle2 className="w-4 h-4 text-green-500" />,
     };
-    return icons[status] || <AlertCircle className="w-4 h-4 text-yellow-500" />;
+    return icons[status] || <AlertCircle className="w-4 h-4 aseel-text-soft" />;
   };
 
   const filteredInvoices = useMemo(() => {
@@ -326,11 +326,11 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   return (
     <div className="space-y-6">
       {/* لوحة الفلاتر */}
-      <div className="bg-white dark:bg-slate-900 p-4 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm">
+      <div className="aseel-bg-field dark:aseel-bg-panel p-4 rounded-xl border aseel-border-soft dark:aseel-border-soft shadow-sm">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 mb-4">
           <div className="flex items-center gap-2">
-            <Filter className="w-5 h-5 text-slate-500" />
-            <span className="font-medium text-slate-700 dark:text-slate-300">
+            <Filter className="w-5 h-5 aseel-text-soft" />
+            <span className="font-medium aseel-text-ink dark:aseel-text-soft">
               فلاتر البحث:
             </span>
           </div>
@@ -339,8 +339,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             <button
               onClick={() => setSortField("date")}
               className={`px-3 py-1.5 rounded-lg flex items-center gap-2 text-sm ${sortField === "date"
-                ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                ? "aseel-bg-accent-bg aseel-text-accent dark:aseel-bg-panel/30 dark:aseel-text-soft"
+                : "aseel-bg-panel aseel-text-ink dark:aseel-bg-panel dark:aseel-text-soft"
                 }`}
             >
               {sortField === "date" && sortDirection === "desc" ? (
@@ -353,8 +353,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             <button
               onClick={() => setSortField("amount")}
               className={`px-3 py-1.5 rounded-lg flex items-center gap-2 text-sm ${sortField === "amount"
-                ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300"
-                : "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+                ? "aseel-bg-accent-bg aseel-text-accent dark:aseel-bg-panel/30 dark:aseel-text-soft"
+                : "aseel-bg-panel aseel-text-ink dark:aseel-bg-panel dark:aseel-text-soft"
                 }`}
             >
               حسب المبلغ
@@ -363,7 +363,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
               onClick={() =>
                 setSortDirection(sortDirection === "asc" ? "desc" : "asc")
               }
-              className="px-3 py-1.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-lg"
+              className="px-3 py-1.5 aseel-bg-panel dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft rounded-lg"
               title={sortDirection === "desc" ? "تنازلي" : "تصاعدي"}
             >
               {sortDirection === "desc" ? (
@@ -378,49 +378,49 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         {/* فلاتر الجزء الأول */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
           <div>
-            <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">
+            <label className="block text-xs aseel-text-soft dark:aseel-text-soft mb-1">
               بحث سريع
             </label>
             <div className="relative">
-              <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
+              <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 w-4 h-4 aseel-text-soft" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="ابحث برقم الفاتورة، الاسم، المورد..."
-                className="w-full p-2 pr-10 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+                className="w-full p-2 pr-10 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">
+            <label className="block text-xs aseel-text-soft dark:aseel-text-soft mb-1">
               من تاريخ
             </label>
             <input
               type="date"
               value={dateFrom}
               onChange={(e) => setDateFrom(e.target.value)}
-              className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full p-2 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft"
             />
           </div>
 
           <div>
-            <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">
+            <label className="block text-xs aseel-text-soft dark:aseel-text-soft mb-1">
               إلى تاريخ
             </label>
             <input
               type="date"
               value={dateTo}
               onChange={(e) => setDateTo(e.target.value)}
-              className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full p-2 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft"
             />
           </div>
 
           <div className="flex items-end">
             <button
               onClick={resetAllFilters}
-              className="w-full py-2 bg-red-50 hover:bg-red-100 dark:bg-red-900/20 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg font-medium"
+              className="w-full py-2 aseel-bg-panel hover:aseel-bg-panel dark:aseel-bg-panel/20 dark:hover:aseel-bg-panel/30 aseel-text-state dark:aseel-text-soft rounded-lg font-medium"
             >
               إعادة تعيين جميع الفلاتر
             </button>
@@ -430,13 +430,13 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         {/* فلاتر الجزء الثاني */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">
+            <label className="block text-xs aseel-text-soft dark:aseel-text-soft mb-1">
               حالة الفاتورة
             </label>
             <select
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
-              className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full p-2 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft"
             >
               <option value="all">جميع الحالات</option>
               <option value="incomplete">غير مكتملة</option>
@@ -445,11 +445,11 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           </div>
 
           <div>
-            <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1">
+            <label className="block text-xs aseel-text-soft dark:aseel-text-soft mb-1">
               المورد
             </label>
             <select
-              className="w-full p-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-800 text-slate-900 dark:text-slate-100"
+              className="w-full p-2 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft"
               disabled
             >
               <option value="all">جميع الموردين</option>
@@ -459,19 +459,19 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
         {/* إحصائيات */}
         <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="bg-blue-50 dark:bg-blue-900/10 p-3 rounded-lg border border-blue-100 dark:border-blue-800">
-            <p className="text-xs text-blue-700 dark:text-blue-300 font-medium">
+          <div className="aseel-bg-accent-bg dark:aseel-bg-panel/10 p-3 rounded-lg border aseel-border-soft dark:aseel-border-soft">
+            <p className="text-xs aseel-text-accent dark:aseel-text-soft font-medium">
               عدد الفواتير
             </p>
-            <p className="text-xl font-bold text-blue-900 dark:text-blue-100">
+            <p className="text-xl font-bold aseel-text-ink dark:aseel-text-soft">
               {sortedInvoices.length}
             </p>
           </div>
-          <div className="bg-yellow-50 dark:bg-yellow-900/10 p-3 rounded-lg border border-yellow-100 dark:border-yellow-800">
-            <p className="text-xs text-yellow-700 dark:text-yellow-300 font-medium">
+          <div className="aseel-bg-panel dark:aseel-bg-panel/10 p-3 rounded-lg border aseel-border-soft dark:aseel-border-soft">
+            <p className="text-xs aseel-text-ink dark:aseel-text-soft font-medium">
               غير مكتملة
             </p>
-            <p className="text-xl font-bold text-yellow-900 dark:text-yellow-100">
+            <p className="text-xl font-bold aseel-text-ink dark:aseel-text-soft">
               {stats.incompleteCount}
             </p>
           </div>
@@ -488,17 +488,17 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
       {/* معلومات العرض */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div className="text-sm text-slate-500 dark:text-slate-400">
+        <div className="text-sm aseel-text-soft dark:aseel-text-soft">
           عرض {paginatedInvoices.length} فاتورة من أصل {sortedInvoices.length}
           {(dateFrom || dateTo || selectedStatus !== "all" || searchTerm) && (
-            <span className="text-blue-600 dark:text-blue-400 font-medium">
+            <span className="aseel-text-accent dark:aseel-text-soft font-medium">
               {" "}
               (مع فلاتر مطبقة)
             </span>
           )}
         </div>
 
-        <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+        <div className="flex items-center gap-2 text-sm aseel-text-soft dark:aseel-text-soft">
           <span>مرتبة حسب:</span>
           <span className="font-medium">
             {sortField === "date"
@@ -525,22 +525,22 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           return (
             <div
               key={invoice.id}
-              className="group relative bg-white dark:bg-slate-900 rounded-xl border border-slate-200 dark:border-slate-700/60 hover:border-blue-300 dark:hover:border-blue-700 transition-all duration-300 overflow-hidden"
+              className="group relative aseel-bg-field dark:aseel-bg-panel rounded-xl border aseel-border-soft dark:aseel-border-soft/60 hover:aseel-border-soft dark:hover:aseel-border-soft transition-all duration-300 overflow-hidden"
             >
               {/* Header */}
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center p-3 gap-3 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/50 dark:bg-slate-800/30">
+              <div className="flex flex-col md:flex-row justify-between items-start md:items-center p-3 gap-3 border-b aseel-border-soft dark:aseel-border-soft/80 aseel-bg-panel/50 dark:aseel-bg-panel/30">
                 <div className="flex items-center justify-between w-full">
 
                   <div className="flex flex-col">
                     <div className="flex items-center gap-3 mb-1">
-                      <span className="text-sm font-bold text-slate-700 dark:text-slate-300">
+                      <span className="text-sm font-bold aseel-text-ink dark:aseel-text-soft">
                         رقم الفاتورة:
                       </span>
-                      <span className="text-xs px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50">
+                      <span className="text-xs px-2 py-1 rounded-full aseel-bg-accent-bg dark:aseel-bg-panel/30 aseel-text-accent dark:aseel-text-soft border aseel-border-accent dark:aseel-border-soft/50">
                         {invoice.invoiceNumber || "غير معروف"}
                       </span>
                       {invoice.invoiceName && (
-                        <span className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                        <span className="text-sm font-bold aseel-text-ink dark:aseel-text-soft">
                           {invoice.invoiceName}
                         </span>
                       )}
@@ -550,13 +550,13 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                         <Truck className="w-3.5 h-3.5 shrink-0" />
                         <span>{formatInvoiceImportLogisticsLine(invoice.importLogistics)}</span>
                         {invoice.dealNumber ? (
-                          <span className="text-slate-500 dark:text-slate-400 font-mono">
+                          <span className="aseel-text-soft dark:aseel-text-soft font-mono">
                             · {invoice.dealNumber}
                           </span>
                         ) : null}
                       </div>
                     ) : invoice.dealNumber ? (
-                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400 font-mono">
+                      <div className="mt-1 text-xs aseel-text-soft dark:aseel-text-soft font-mono">
                         صفقة {invoice.dealNumber}
                       </div>
                     ) : null}
@@ -568,17 +568,17 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                           <span>{getStatusText(status)}</span>
                         </div>
                       </div>
-                      <span className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                      <span className="text-sm aseel-text-soft dark:aseel-text-soft flex items-center gap-1">
                         <Calendar className="w-3 h-3" />
                         {new Date(invoice.invoiceDate || "").toLocaleDateString("ar-EG")}
                       </span>
-                      <span className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                      <span className="text-sm aseel-text-soft dark:aseel-text-soft flex items-center gap-1">
                         <Coins className="w-3 h-3" />
                         {invoice.currency === 'ILS' ? '₪' : '$'}
                         {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                       </span>
                       {invoice.currency === 'ILS' && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-600 border border-green-200 dark:bg-green-900/20 dark:border-green-800 flex items-center gap-1 font-bold">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-green-50 text-green-600 border aseel-border-soft dark:bg-green-900/20 dark:border-green-800 flex items-center gap-1 font-bold">
                           <ArrowRightLeft className="w-2.5 h-2.5" />
                           محول للشيقل
                         </span>
@@ -597,7 +597,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                           "_blank"
                         )
                       }
-                      className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                      className="p-2 aseel-text-soft hover:aseel-text-accent hover:aseel-bg-accent-bg dark:aseel-text-soft dark:hover:aseel-text-soft dark:hover:aseel-bg-panel/30 rounded-lg transition-colors"
                       title="فتح في نافذة جديدة"
                     >
                       <ArrowRightLeft className="w-5 h-5 rotate-45" />
@@ -607,7 +607,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                     {/* ⭐ زر التحويل إلى صفقة */}
                     <button
                       onClick={() => handleConvertClick(invoice)}
-                      className="p-2 text-slate-500 hover:text-orange-600 hover:bg-orange-50 dark:text-slate-400 dark:hover:text-orange-400 dark:hover:bg-orange-900/30 rounded-lg transition-colors"
+                      className="p-2 aseel-text-soft hover:aseel-text-soft hover:aseel-bg-panel dark:aseel-text-soft dark:hover:aseel-text-soft dark:hover:aseel-bg-panel/30 rounded-lg transition-colors"
                       title="تحويل إلى صفقة شراء"
                     >
                       <ArrowRightLeft className="w-5 h-5" />
@@ -615,7 +615,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
                     <button
                       onClick={() => onView(invoice)}
-                      className="p-2 text-slate-500 hover:text-[var(--color-primary-hover)] hover:bg-[var(--color-primary-hover)] dark:text-slate-400 dark:hover:text-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/30 rounded-lg transition-colors"
+                      className="p-2 aseel-text-soft hover:text-[var(--color-primary-hover)] hover:bg-[var(--color-primary-hover)] dark:aseel-text-soft dark:hover:text-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/30 rounded-lg transition-colors"
                       title="عرض التفاصيل"
                     >
                       <Eye className="w-5 h-5" />
@@ -623,7 +623,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
                     <button
                       onClick={() => onPrint(invoice)}
-                      className="p-2 text-slate-500 hover:text-blue-900 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-300 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                      className="p-2 aseel-text-soft hover:aseel-text-ink hover:aseel-bg-accent-bg dark:aseel-text-soft dark:hover:aseel-text-soft dark:hover:aseel-bg-panel/30 rounded-lg transition-colors"
                       title="طباعة الفاتورة"
                     >
                       <Printer className="w-5 h-5" />
@@ -631,7 +631,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
                     <button
                       onClick={() => onEdit(invoice)}
-                      className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 dark:text-slate-400 dark:hover:text-blue-400 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                      className="p-2 aseel-text-soft hover:aseel-text-accent hover:aseel-bg-accent-bg dark:aseel-text-soft dark:hover:aseel-text-soft dark:hover:aseel-bg-panel/30 rounded-lg transition-colors"
                       title="تعديل الفاتورة"
                     >
                       <Edit className="w-5 h-5" />
@@ -639,7 +639,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
                     <button
                       onClick={() => handleDeleteClick(invoice.id, invoice.invoiceNumber)}
-                      className="p-2 text-slate-500 hover:text-red-600 hover:bg-red-50 dark:text-slate-400 dark:hover:text-red-400 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                      className="p-2 aseel-text-soft hover:aseel-text-state hover:aseel-bg-panel dark:aseel-text-soft dark:hover:aseel-text-soft dark:hover:aseel-bg-panel/30 rounded-lg transition-colors"
                       title="حذف نهائي"
                     >
                       <Trash2 className="w-5 h-5" />
@@ -647,7 +647,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
                     <button
                       onClick={() => toggleInvoiceExpand(invoice.id)}
-                      className="p-2 text-slate-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-gray-200 rounded-lg transition-colors border-r border-gray-200 dark:border-gray-700 pr-2 mr-1"
+                      className="p-2 aseel-text-soft hover:aseel-text-ink dark:aseel-text-soft dark:hover:aseel-text-soft rounded-lg transition-colors border-r aseel-border-soft dark:aseel-border-soft pr-2 mr-1"
                     >
                       {isExpanded ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                     </button>
@@ -657,11 +657,11 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
               {/* المحتوى الموسع */}
               {isExpanded && (
-                <div className="p-3 border-t border-slate-100 dark:border-slate-800/80">
+                <div className="p-3 border-t aseel-border-soft dark:aseel-border-soft/80">
                   <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
                     {/* معلومات المورد والصور */}
                     <div className="lg:col-span-7">
-                      <div className="relative w-full sm:w-24 sm:h-24 h-40 bg-slate-100 dark:bg-slate-800 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 flex-shrink-0">
+                      <div className="relative w-full sm:w-24 sm:h-24 h-40 aseel-bg-panel dark:aseel-bg-panel rounded-lg overflow-hidden border aseel-border-soft dark:aseel-border-soft flex-shrink-0">
                         {mainImage ? (
                           <img
                             src={mainImage}
@@ -669,7 +669,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                             className="w-full h-full object-cover"
                           />
                         ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 dark:text-slate-500">
+                          <div className="w-full h-full flex flex-col items-center justify-center aseel-text-soft dark:aseel-text-soft">
                             <Box className="w-6 h-6 mb-2 opacity-50" />
                             <span className="text-xs">لا توجد صورة</span>
                           </div>
@@ -678,8 +678,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
 
                       <div className="flex-1 space-y-2 mt-2">
                         <div>
-                          <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                            <User className="w-3 h-3 text-slate-400" />
+                          <h4 className="text-sm font-bold aseel-text-ink dark:text-white flex items-center gap-2">
+                            <User className="w-3 h-3 aseel-text-soft" />
                             {supplierDisplayName}
                           </h4>
                         </div>
@@ -690,7 +690,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                     {/* الإحصائيات المالية */}
                     <div className="lg:col-span-5">
                       <div className="grid grid-cols-3 gap-2">
-                        <div className="p-3 rounded-xl border bg-slate-50 dark:bg-slate-800/50 border-slate-100 dark:border-slate-700 text-slate-900 dark:text-slate-100 flex flex-col items-center justify-center text-center h-full">
+                        <div className="p-3 rounded-xl border aseel-bg-panel dark:aseel-bg-panel/50 aseel-border-soft dark:aseel-border-soft aseel-text-ink dark:aseel-text-soft flex flex-col items-center justify-center text-center h-full">
                           <span className="text-xs opacity-80 mb-1 flex items-center gap-1.5 font-medium">
                             <FileText className="w-3 h-3" /> الإجمالي
                           </span>
@@ -699,7 +699,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                             {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                           </span>
                         </div>
-                        <div className="p-3 rounded-xl border bg-blue-50 dark:bg-blue-900/10 border-blue-100 dark:border-blue-800/30 text-blue-700 dark:text-blue-400 flex flex-col items-center justify-center text-center h-full">
+                        <div className="p-3 rounded-xl border aseel-bg-accent-bg dark:aseel-bg-panel/10 aseel-border-soft dark:aseel-border-soft/30 aseel-text-accent dark:aseel-text-soft flex flex-col items-center justify-center text-center h-full">
                           <span className="text-xs opacity-80 mb-1 flex items-center gap-1.5 font-medium">
                             <Package className="w-3 h-3" /> المنتجات
                           </span>
@@ -708,7 +708,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                             {subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
                           </span>
                         </div>
-                        <div className="p-3 rounded-xl border bg-amber-50 dark:bg-amber-900/10 border-amber-100 dark:border-amber-800/30 text-amber-700 dark:text-amber-400 flex flex-col items-center justify-center text-center h-full">
+                        <div className="p-3 rounded-xl border aseel-bg-panel dark:aseel-bg-panel/10 aseel-border-soft dark:aseel-border-soft/30 aseel-text-ink dark:aseel-text-soft flex flex-col items-center justify-center text-center h-full">
                           <span className="text-xs opacity-80 mb-1 flex items-center gap-1.5 font-medium">
                             <Percent className="w-3 h-3" /> الضريبة
                           </span>
@@ -726,9 +726,9 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           );
         })
       ) : (
-        <div className="flex flex-col items-center justify-center py-16 px-4 text-center bg-white dark:bg-slate-800 rounded-xl border border-dashed border-slate-300 dark:border-slate-700">
+        <div className="flex flex-col items-center justify-center py-16 px-4 text-center aseel-bg-field dark:aseel-bg-panel rounded-xl border border-dashed aseel-border-soft dark:aseel-border-soft">
           {/* Empty State */}
-          <h3 className="text-lg font-bold text-slate-900 dark:text-white mb-1">
+          <h3 className="text-lg font-bold aseel-text-ink dark:text-white mb-1">
             لا توجد فواتير مطابقة
           </h3>
         </div>
@@ -737,9 +737,9 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       {/* Pagination Controls ... (نفس الكود السابق) */}
       {sortedInvoices.length > 0 && (
         <div className="flex justify-center mt-6 gap-2">
-          <button onClick={() => goToPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1} className="px-3 py-1 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 border rounded">السابقة</button>
+          <button onClick={() => goToPage(Math.max(1, currentPage - 1))} disabled={currentPage === 1} className="px-3 py-1 aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft aseel-border-soft dark:aseel-border-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel border rounded">السابقة</button>
           <span className="px-3 py-1">صفحة {currentPage} من {totalPages}</span>
-          <button onClick={() => goToPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} className="px-3 py-1 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 border rounded">التالية</button>
+          <button onClick={() => goToPage(Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} className="px-3 py-1 aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:aseel-text-soft aseel-border-soft dark:aseel-border-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel border rounded">التالية</button>
         </div>
       )}
     </div>

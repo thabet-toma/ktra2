@@ -72,35 +72,35 @@ export const SalesProductPickerModal: React.FC<Props> = ({
       dir="rtl"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col border border-gray-200 dark:border-gray-700">
-        <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex justify-between items-start gap-3 bg-emerald-50/80 dark:bg-emerald-950/40 rounded-t-2xl">
+      <div className="aseel-bg-field dark:aseel-bg-panel rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col border aseel-border-soft dark:aseel-border-soft">
+        <div className="p-4 border-b aseel-border-soft dark:aseel-border-soft flex justify-between items-start gap-3 aseel-bg-panel/80 dark:aseel-bg-panel/40 rounded-t-2xl">
           <div>
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-              <Package className="w-5 h-5 text-emerald-600" />
+            <h3 className="text-lg font-bold aseel-text-ink dark:text-white flex items-center gap-2">
+              <Package className="w-5 h-5 aseel-text-soft" />
               اختيار الصنف
             </h3>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
               ابحث بالاسم أو SKU أو الباركود، ثم اضغط على البطاقة لاختيار الصنف.
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 hover:bg-gray-200/80 dark:hover:bg-gray-700 rounded-full transition-colors"
+            className="p-2 hover:aseel-bg-grid-head/80 dark:hover:aseel-bg-panel rounded-full transition-colors"
             aria-label="إغلاق"
           >
-            <X className="w-5 h-5 text-gray-500" />
+            <X className="w-5 h-5 aseel-text-soft" />
           </button>
         </div>
 
-        <div className="p-3 border-b border-gray-100 dark:border-gray-800">
+        <div className="p-3 border-b aseel-border-soft dark:aseel-border-soft">
           <div className="relative">
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 aseel-text-soft" />
             <input
               type="text"
               autoFocus
               placeholder="بحث: اسم، SKU، باركود..."
-              className="w-full pl-3 pr-10 py-2.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+              className="w-full pl-3 pr-10 py-2.5 aseel-bg-panel dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               onKeyDown={(e) => {
@@ -110,9 +110,9 @@ export const SalesProductPickerModal: React.FC<Props> = ({
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 bg-gray-50/50 dark:bg-black/20 min-h-[200px]">
+        <div className="flex-1 overflow-y-auto p-3 aseel-bg-panel/50 dark:bg-black/20 min-h-[200px]">
           {filtered.length === 0 ? (
-            <div className="text-center py-12 text-gray-400 text-sm">لا توجد نتائج. جرّب كلمات أخرى.</div>
+            <div className="text-center py-12 aseel-text-soft text-sm">لا توجد نتائج. جرّب كلمات أخرى.</div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {filtered.map((p) => {
@@ -126,22 +126,22 @@ export const SalesProductPickerModal: React.FC<Props> = ({
                       onSelect(p.id);
                       onClose();
                     }}
-                    className="text-right rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 p-3 hover:border-emerald-400 hover:shadow-md dark:hover:border-emerald-600 transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="text-right rounded-xl border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel p-3 hover:aseel-border-soft hover:shadow-md dark:hover:aseel-border-soft transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    <div className="font-semibold text-gray-900 dark:text-white text-sm leading-snug line-clamp-2">
+                    <div className="font-semibold aseel-text-ink dark:text-white text-sm leading-snug line-clamp-2">
                       {formatProductPrimaryName(p)}
                     </div>
                     {formatProductMeta(p) && (
-                      <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 font-mono line-clamp-1">
+                      <div className="text-[11px] aseel-text-soft dark:aseel-text-soft mt-1 font-mono line-clamp-1">
                         {formatProductMeta(p)}
                       </div>
                     )}
-                    <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-100 dark:border-gray-700">
+                    <div className="flex justify-between items-center mt-2 pt-2 border-t aseel-border-soft dark:aseel-border-soft">
                       <span
                         className={`text-xs font-mono px-2 py-0.5 rounded ${
                           low
-                            ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300"
-                            : "bg-emerald-50 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200"
+                            ? "aseel-bg-panel aseel-text-state dark:aseel-bg-panel/30 dark:aseel-text-soft"
+                            : "aseel-bg-panel aseel-text-ink dark:aseel-bg-panel/30 dark:aseel-text-soft"
                         }`}
                       >
                         متاح: {qty.toLocaleString("en-US", { maximumFractionDigits: 2 })}
@@ -153,17 +153,17 @@ export const SalesProductPickerModal: React.FC<Props> = ({
             </div>
           )}
           {products.length > 400 && searchTerm.trim() === "" && (
-            <p className="text-center text-xs text-amber-700 dark:text-amber-300 py-2">
+            <p className="text-center text-xs aseel-text-ink dark:aseel-text-soft py-2">
               يُعرض أول 400 صنف — استخدم البحث لضيق النتائج.
             </p>
           )}
         </div>
 
-        <div className="p-3 border-t border-gray-100 dark:border-gray-800 flex justify-end rounded-b-2xl bg-white dark:bg-gray-900">
+        <div className="p-3 border-t aseel-border-soft dark:aseel-border-soft flex justify-end rounded-b-2xl aseel-bg-field dark:aseel-bg-panel">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+            className="px-4 py-2 text-sm aseel-text-soft dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg"
           >
             إلغاء
           </button>

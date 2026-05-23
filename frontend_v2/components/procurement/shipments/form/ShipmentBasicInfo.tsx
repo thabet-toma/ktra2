@@ -26,56 +26,56 @@ export const ShipmentBasicInfo: React.FC<ShipmentBasicInfoProps> = ({
     }, [formData.unitType, formData.pricingMethod]);
 
     return (
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 space-y-4">
+        <div className="aseel-bg-field dark:aseel-bg-panel p-6 rounded-2xl shadow-sm border aseel-border-soft dark:aseel-border-soft space-y-4">
             {/* ... (الحقول العلوية: الرقم التسلسلي، رقم الشحنة، الطرف الإسرائيلي... تبقى كما هي) ... */}
             {formData.id && (
-                <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded-xl flex justify-between items-center border border-dashed border-gray-300 dark:border-gray-700">
-                    <span className="text-sm text-gray-500">الرقم التسلسلي:</span>
-                    <span className="font-mono font-bold text-gray-700 dark:text-gray-300">{formData.shipmentNumber}</span>
+                <div className="p-3 aseel-bg-panel dark:aseel-bg-panel rounded-xl flex justify-between items-center border border-dashed aseel-border-soft dark:aseel-border-soft">
+                    <span className="text-sm aseel-text-soft">الرقم التسلسلي:</span>
+                    <span className="font-mono font-bold aseel-text-ink dark:aseel-text-soft">{formData.shipmentNumber}</span>
                 </div>
             )}
 
             <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">رقم الشحنة (لدى الوكيل / البوليصة)</label>
+                <label className="block text-sm font-medium aseel-text-ink dark:aseel-text-soft mb-1">رقم الشحنة (لدى الوكيل / البوليصة)</label>
                 <div className="relative">
-                    <Hash className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                    <Hash className="absolute left-3 top-1/2 -translate-y-1/2 aseel-text-soft w-4 h-4" />
                     <input
                         type="text"
                         value={formData.agentShipmentNumber || ''}
                         onChange={(e) => setFormData((prev: any) => ({ ...prev, agentShipmentNumber: e.target.value }))}
-                        className="w-full p-3 pl-10 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                        className="w-full p-3 pl-10 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl font-mono focus:ring-2 focus:ring-blue-500 outline-none"
                         placeholder="Ref Number..."
                     />
                 </div>
             </div>
 
             <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">الطرف الإسرائيلي</label>
+                <label className="block text-sm font-medium aseel-text-ink dark:aseel-text-soft mb-1">الطرف الإسرائيلي</label>
                 <div className="relative">
-                    <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
+                    <UserCircle className="absolute left-3 top-1/2 -translate-y-1/2 aseel-text-soft w-5 h-5" />
                     <input
                         type="text"
                         value={formData.israeliSideName || ''}
                         onChange={(e) => setFormData((prev: any) => ({ ...prev, israeliSideName: e.target.value }))}
-                        className="w-full p-3 pl-10 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl"
+                        className="w-full p-3 pl-10 aseel-bg-panel dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl"
                         placeholder="الاسم..."
                     />
                 </div>
             </div>
 
             <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">اسم تعريفي (اختياري)</label>
+                <label className="block text-sm font-medium aseel-text-ink dark:aseel-text-soft mb-1">اسم تعريفي (اختياري)</label>
                 <input
                     type="text"
                     value={formData.shipmentName || ''}
                     onChange={(e) => setFormData((prev: any) => ({ ...prev, shipmentName: e.target.value }))}
-                    className="w-full p-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl"
+                    className="w-full p-3 aseel-bg-panel dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl"
                     placeholder="مثال: حاوية إلكترونيات - دفعة 1"
                 />
             </div>
 
             <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">وكيل الشحن <span className="text-red-500">*</span></label>
+                <label className="block text-sm font-medium aseel-text-ink dark:aseel-text-soft mb-1">وكيل الشحن <span className="aseel-text-soft">*</span></label>
                 <div className="flex gap-2">
                     <select
                         required
@@ -84,30 +84,30 @@ export const ShipmentBasicInfo: React.FC<ShipmentBasicInfoProps> = ({
                             const agent = allSuppliers.find(s => s.id === e.target.value);
                             setFormData((prev: any) => ({ ...prev, shippingAgentId: e.target.value, shippingAgentName: agent?.tradeName || '' }));
                         }}
-                        className="w-full p-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl"
+                        className="w-full p-3 aseel-bg-panel dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl"
                     >
                         <option value="">اختر وكيل شحن</option>
                         {allSuppliers.map(s => <option key={s.id} value={s.id}>{s.tradeName}</option>)}
                     </select>
                     {formData.shippingAgentId && (
-                        <button type="button" onClick={() => onOpenSupplier(formData.shippingAgentId)} className="p-3 bg-blue-50 hover:bg-blue-100 rounded-xl text-blue-600">
+                        <button type="button" onClick={() => onOpenSupplier(formData.shippingAgentId)} className="p-3 aseel-bg-accent-bg hover:aseel-bg-accent-bg rounded-xl aseel-text-accent">
                             <Eye className="w-5 h-5" />
                         </button>
                     )}
                 </div>
             </div>
 
-            <hr className="border-gray-200 dark:border-gray-700" />
+            <hr className="aseel-border-soft dark:aseel-border-soft" />
 
             {/* Pricing Section */}
-            <div className="bg-blue-50 dark:bg-blue-900/10 p-4 rounded-xl border border-blue-100 dark:border-blue-800">
+            <div className="aseel-bg-accent-bg dark:aseel-bg-panel/10 p-4 rounded-xl border aseel-border-soft dark:aseel-border-soft">
                 <div className="flex gap-2 mb-3">
                     <button type="button" onClick={() => setFormData((prev: any) => ({ ...prev, pricingMethod: 'total' }))}
-                        className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${formData.pricingMethod === 'total' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-600 bg-white/50 dark:bg-gray-800'}`}>
+                        className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${formData.pricingMethod === 'total' ? 'aseel-bg-accent text-white shadow-md' : 'aseel-text-accent aseel-bg-field/50 dark:aseel-bg-panel'}`}>
                         إجمالي
                     </button>
                     <button type="button" onClick={() => setFormData((prev: any) => ({ ...prev, pricingMethod: 'unit' }))}
-                        className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${formData.pricingMethod === 'unit' ? 'bg-blue-600 text-white shadow-md' : 'text-blue-600 bg-white/50 dark:bg-gray-800'}`}>
+                        className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition-all ${formData.pricingMethod === 'unit' ? 'aseel-bg-accent text-white shadow-md' : 'aseel-text-accent aseel-bg-field/50 dark:aseel-bg-panel'}`}>
                         بالوحدة
                     </button>
                 </div>
@@ -115,7 +115,7 @@ export const ShipmentBasicInfo: React.FC<ShipmentBasicInfoProps> = ({
                 {formData.pricingMethod === 'unit' && (
                     <div className="grid grid-cols-2 gap-3 mb-2">
                         <div>
-                            <label className="text-[10px] text-gray-500 mb-1 block">نوع الوحدة</label>
+                            <label className="text-[10px] aseel-text-soft mb-1 block">نوع الوحدة</label>
                             <select
                                 value={formData.unitType || 'cbm'} // 🟢 ضمان قيمة افتراضية
                                 onChange={(e) => {
@@ -124,7 +124,7 @@ export const ShipmentBasicInfo: React.FC<ShipmentBasicInfoProps> = ({
                                     // إعادة الحساب فوراً عند التغيير
                                     handleUnitPriceChange(formData.pricePerUnit, newUnitType);
                                 }}
-                                className="w-full p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg text-sm"
+                                className="w-full p-2 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-lg text-sm"
                             >
                                 <option value="cbm">حجم (CBM)</option>
                                 <option value="weight">وزن (KG)</option>
@@ -132,7 +132,7 @@ export const ShipmentBasicInfo: React.FC<ShipmentBasicInfoProps> = ({
                             </select>
                         </div>
                         <div>
-                            <label className="text-[10px] text-gray-500 mb-1 block">سعر الوحدة ($)</label>
+                            <label className="text-[10px] aseel-text-soft mb-1 block">سعر الوحدة ($)</label>
                             <input
                                 type="number" min="0" step="0.01"
                                 value={formData.pricePerUnit || ''}
@@ -141,30 +141,30 @@ export const ShipmentBasicInfo: React.FC<ShipmentBasicInfoProps> = ({
                                     // 🟢 تمرير نوع الوحدة الحالي صراحةً لضمان عدم ضياعه
                                     handleUnitPriceChange(val, formData.unitType);
                                 }}
-                                className="w-full p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg text-sm font-bold text-blue-600"
+                                className="w-full p-2 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-lg text-sm font-bold aseel-text-accent"
                             />
                         </div>
                     </div>
                 )}
 
                 <div>
-                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
+                    <label className="block text-xs font-medium aseel-text-soft dark:aseel-text-soft mb-1">
                         تكلفة الشحن الأساسية (بدون إضافات)
                     </label>
                     <div className="relative">
-                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                        <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 aseel-text-soft w-4 h-4" />
                         <input
                             required type="number" min="0" step="0.01"
                             value={formData.totalShippingCostUsd || ''}
                             onChange={(e) => handleTotalChange(parseFloat(e.target.value) || 0)}
-                            className="w-full p-2 pl-9 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg font-bold text-lg"
+                            className="w-full p-2 pl-9 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-lg font-bold text-lg"
                             placeholder="0.00"
                         />
                     </div>
                 </div>
 
                 {/* 🟢 تم تصحيح أماكن الوزن والحجم كانت معكوسة في الكود السابق */}
-                <div className="pt-2 mt-2 border-t border-blue-200 dark:border-blue-800 flex justify-between items-center text-xs text-blue-800 dark:text-blue-300">
+                <div className="pt-2 mt-2 border-t aseel-border-accent dark:aseel-border-soft flex justify-between items-center text-xs aseel-text-ink dark:aseel-text-soft">
                     <span>الوزن الكلي: {totals.weight.toLocaleString()} kg</span>
                     <span>الحجم الكلي: {totals.volume.toLocaleString()} cbm</span>
                 </div>

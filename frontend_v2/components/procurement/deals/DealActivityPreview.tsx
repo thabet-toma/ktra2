@@ -80,26 +80,26 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
             return {
                 bg: 'bg-green-50 dark:bg-green-900/20',
                 text: 'text-green-700 dark:text-green-300',
-                border: 'border-green-200 dark:border-green-800',
+                border: 'aseel-border-soft dark:border-green-800',
                 icon: 'text-green-600 dark:text-green-400'
             };
         }
 
         if (actionLower.includes('cancelled') || actionLower.includes('rejected') || actionLower.includes('failed')) {
             return {
-                bg: 'bg-red-50 dark:bg-red-900/20',
-                text: 'text-red-700 dark:text-red-300',
-                border: 'border-red-200 dark:border-red-800',
-                icon: 'text-red-600 dark:text-red-400'
+                bg: 'aseel-bg-panel dark:aseel-bg-panel/20',
+                text: 'aseel-text-state dark:aseel-text-soft',
+                border: 'aseel-border-soft dark:aseel-border-soft',
+                icon: 'aseel-text-state dark:aseel-text-soft'
             };
         }
 
         if (actionLower.includes('pending') || actionLower.includes('waiting')) {
             return {
-                bg: 'bg-amber-50 dark:bg-amber-900/20',
-                text: 'text-amber-700 dark:text-amber-300',
-                border: 'border-amber-200 dark:border-amber-800',
-                icon: 'text-amber-600 dark:text-amber-400'
+                bg: 'aseel-bg-panel dark:aseel-bg-panel/20',
+                text: 'aseel-text-ink dark:aseel-text-soft',
+                border: 'aseel-border-soft dark:aseel-border-soft',
+                icon: 'aseel-text-soft dark:aseel-text-soft'
             };
         }
 
@@ -107,10 +107,10 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
         switch (type) {
             case 'payment':
                 return {
-                    bg: 'bg-blue-50 dark:bg-blue-900/20',
-                    text: 'text-blue-700 dark:text-blue-300',
-                    border: 'border-blue-200 dark:border-blue-800',
-                    icon: 'text-blue-600 dark:text-blue-400'
+                    bg: 'aseel-bg-accent-bg dark:aseel-bg-panel/20',
+                    text: 'aseel-text-accent dark:aseel-text-soft',
+                    border: 'aseel-border-accent dark:aseel-border-soft',
+                    icon: 'aseel-text-accent dark:aseel-text-soft'
                 };
 
             case 'item_update':
@@ -131,10 +131,10 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
 
             default:
                 return {
-                    bg: 'bg-gray-50 dark:bg-gray-800/30',
-                    text: 'text-gray-700 dark:text-gray-300',
-                    border: 'border-gray-200 dark:border-gray-700',
-                    icon: 'text-gray-600 dark:text-gray-400'
+                    bg: 'aseel-bg-panel dark:aseel-bg-panel/30',
+                    text: 'aseel-text-ink dark:aseel-text-soft',
+                    border: 'aseel-border-soft dark:aseel-border-soft',
+                    icon: 'aseel-text-soft dark:aseel-text-soft'
                 };
         }
     };
@@ -175,26 +175,26 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 bg-gray-900/90 dark:bg-black/95 flex items-start justify-center p-0 z-[9999] overflow-y-auto">
-            <div className="bg-white dark:bg-gray-900 w-full min-h-screen">
+        <div className="fixed inset-0 aseel-bg-panel/90 dark:bg-black/95 flex items-start justify-center p-0 z-[9999] overflow-y-auto">
+            <div className="aseel-bg-field dark:aseel-bg-panel w-full min-h-screen">
                 {/* Header - Fixed */}
-                <div className="sticky top-0 z-50 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 shadow-sm">
+                <div className="sticky top-0 z-50 aseel-bg-field dark:aseel-bg-panel border-b aseel-border-soft dark:aseel-border-soft shadow-sm">
                     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
-                                <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-lg">
-                                    <History className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                                <div className="p-2 aseel-bg-accent-bg dark:aseel-bg-panel/40 rounded-lg">
+                                    <History className="w-6 h-6 aseel-text-accent dark:aseel-text-soft" />
                                 </div>
                                 <div>
-                                    <h1 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white">
+                                    <h1 className="text-xl sm:text-2xl font-bold aseel-text-ink dark:text-white">
                                         سجل النشاطات
                                         {dealNumber && (
-                                            <span className="text-blue-600 dark:text-blue-400 ml-2">
+                                            <span className="aseel-text-accent dark:aseel-text-soft ml-2">
                                                 #{dealNumber}
                                             </span>
                                         )}
                                     </h1>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                    <p className="text-sm aseel-text-soft dark:aseel-text-soft mt-1">
                                         {activities.length} نشاط مسجل
                                     </p>
                                 </div>
@@ -204,14 +204,14 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
                                 <button
                                     onClick={loadActivities}
                                     disabled={loading}
-                                    className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                                    className="p-2 aseel-text-soft dark:aseel-text-soft hover:aseel-text-ink dark:hover:text-white hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg transition-colors"
                                     title="تحديث"
                                 >
                                     <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
                                 </button>
                                 <button
                                     onClick={onClose}
-                                    className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                                    className="p-2 aseel-text-soft dark:aseel-text-soft hover:aseel-text-ink dark:hover:text-white hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg transition-colors"
                                     title="إغلاق"
                                 >
                                     <X className="w-5 h-5" />
@@ -225,35 +225,35 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
                     {loading ? (
                         <div className="flex flex-col items-center justify-center py-20">
-                            <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                            <p className="mt-4 text-gray-600 dark:text-gray-400">جاري تحميل النشاطات...</p>
+                            <div className="w-16 h-16 border-4 aseel-border-accent border-t-transparent rounded-full animate-spin"></div>
+                            <p className="mt-4 aseel-text-soft dark:aseel-text-soft">جاري تحميل النشاطات...</p>
                         </div>
                     ) : activities.length === 0 ? (
                         <div className="text-center py-20">
-                            <div className="w-24 h-24 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-6">
-                                <History className="w-12 h-12 text-gray-400 dark:text-gray-500" />
+                            <div className="w-24 h-24 aseel-bg-panel dark:aseel-bg-panel rounded-full flex items-center justify-center mx-auto mb-6">
+                                <History className="w-12 h-12 aseel-text-soft dark:aseel-text-soft" />
                             </div>
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                            <h3 className="text-xl font-bold aseel-text-ink dark:text-white mb-2">
                                 لا توجد نشاطات
                             </h3>
-                            <p className="text-gray-600 dark:text-gray-400">
+                            <p className="aseel-text-soft dark:aseel-text-soft">
                                 لم يتم تسجيل أي نشاطات على هذه الصفقة بعد
                             </p>
                         </div>
                     ) : (
                         <div className="space-y-6">
                             {/* Summary */}
-                            <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-4 border border-blue-200 dark:border-blue-800">
+                            <div className="aseel-bg-accent-bg dark:aseel-bg-panel/20 rounded-xl p-4 border aseel-border-accent dark:aseel-border-soft">
                                 <div className="flex flex-wrap items-center gap-4 text-sm">
                                     <div className="flex items-center gap-2">
-                                        <Calendar className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                                        <span className="text-gray-700 dark:text-gray-300">
+                                        <Calendar className="w-4 h-4 aseel-text-accent dark:aseel-text-soft" />
+                                        <span className="aseel-text-ink dark:aseel-text-soft">
                                             أول نشاط: {activities.length > 0 ? formatFullDate(activities[activities.length - 1].timestamp) : '-'}
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                        <Eye className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                                        <span className="text-gray-700 dark:text-gray-300">
+                                        <Eye className="w-4 h-4 aseel-text-accent dark:aseel-text-soft" />
+                                        <span className="aseel-text-ink dark:aseel-text-soft">
                                             آخر نشاط: {activities.length > 0 ? formatDateTime(activities[0].timestamp) : '-'}
                                         </span>
                                     </div>
@@ -288,26 +288,26 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
                                                                 {activity.action}
                                                             </h3>
                                                             {activity.details && (
-                                                                <p className="text-gray-700 dark:text-gray-300 text-sm">
+                                                                <p className="aseel-text-ink dark:aseel-text-soft text-sm">
                                                                     {activity.details}
                                                                 </p>
                                                             )}
                                                         </div>
 
-                                                        <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                                                        <div className="flex items-center gap-2 text-sm aseel-text-soft dark:aseel-text-soft">
                                                             <Clock className="w-4 h-4" />
                                                             <span>{formatDateTime(activity.timestamp)}</span>
                                                         </div>
                                                     </div>
 
                                                     {/* User Info */}
-                                                    <div className="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                                    <div className="flex flex-wrap items-center gap-4 mt-4 pt-4 border-t aseel-border-soft dark:aseel-border-soft">
                                                         <div className="flex items-center gap-2">
-                                                            <User className="w-4 h-4 text-gray-500" />
-                                                            <span className="font-medium text-gray-700 dark:text-gray-300">
+                                                            <User className="w-4 h-4 aseel-text-soft" />
+                                                            <span className="font-medium aseel-text-ink dark:aseel-text-soft">
                                                                 {activity.userName}
                                                             </span>
-                                                            <span className="text-sm text-gray-500 dark:text-gray-500 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+                                                            <span className="text-sm aseel-text-soft dark:aseel-text-soft aseel-bg-panel dark:aseel-bg-panel px-2 py-1 rounded">
                                                                 {activity.userRole}
                                                             </span>
                                                         </div>
@@ -326,18 +326,18 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
                                                     {/* Metadata */}
                                                     {activity.metadata && Object.keys(activity.metadata).length > 0 && (
                                                         <details className="mt-4">
-                                                            <summary className="cursor-pointer text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-1">
+                                                            <summary className="cursor-pointer text-sm aseel-text-accent dark:aseel-text-soft hover:aseel-text-accent dark:hover:aseel-text-soft flex items-center gap-1">
                                                                 <Eye className="w-4 h-4" />
                                                                 <span>عرض التفاصيل</span>
                                                             </summary>
-                                                            <div className="mt-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                                                            <div className="mt-3 p-3 aseel-bg-panel dark:aseel-bg-panel/50 rounded-lg border aseel-border-soft dark:aseel-border-soft">
                                                                 <div className="space-y-2">
                                                                     {Object.entries(activity.metadata).map(([key, value]) => (
                                                                         <div key={key} className="flex justify-between text-sm">
-                                                                            <span className="text-gray-600 dark:text-gray-400">
+                                                                            <span className="aseel-text-soft dark:aseel-text-soft">
                                                                                 {key}:
                                                                             </span>
-                                                                            <span className="font-medium text-gray-800 dark:text-gray-200">
+                                                                            <span className="font-medium aseel-text-ink dark:aseel-text-soft">
                                                                                 {typeof value === 'object'
                                                                                     ? JSON.stringify(value)
                                                                                     : String(value)
@@ -357,27 +357,27 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
                             </div>
 
                             {/* Stats */}
-                            <div className="bg-gray-50 dark:bg-gray-800/30 rounded-xl p-4 border border-gray-200 dark:border-gray-700">
-                                <h3 className="font-bold text-gray-900 dark:text-white mb-3">إحصائيات النشاطات</h3>
+                            <div className="aseel-bg-panel dark:aseel-bg-panel/30 rounded-xl p-4 border aseel-border-soft dark:aseel-border-soft">
+                                <h3 className="font-bold aseel-text-ink dark:text-white mb-3">إحصائيات النشاطات</h3>
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                    <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
-                                        <div className="text-sm text-gray-500 dark:text-gray-400">المجموع</div>
-                                        <div className="text-xl font-bold text-gray-900 dark:text-white">{activities.length}</div>
+                                    <div className="aseel-bg-field dark:aseel-bg-panel p-3 rounded-lg border aseel-border-soft dark:aseel-border-soft">
+                                        <div className="text-sm aseel-text-soft dark:aseel-text-soft">المجموع</div>
+                                        <div className="text-xl font-bold aseel-text-ink dark:text-white">{activities.length}</div>
                                     </div>
-                                    <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
-                                        <div className="text-sm text-gray-500 dark:text-gray-400">تغييرات الحالة</div>
-                                        <div className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                                    <div className="aseel-bg-field dark:aseel-bg-panel p-3 rounded-lg border aseel-border-soft dark:aseel-border-soft">
+                                        <div className="text-sm aseel-text-soft dark:aseel-text-soft">تغييرات الحالة</div>
+                                        <div className="text-xl font-bold aseel-text-accent dark:aseel-text-soft">
                                             {activities.filter(a => a.type === 'status_change').length}
                                         </div>
                                     </div>
-                                    <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
-                                        <div className="text-sm text-gray-500 dark:text-gray-400">المدفوعات</div>
+                                    <div className="aseel-bg-field dark:aseel-bg-panel p-3 rounded-lg border aseel-border-soft dark:aseel-border-soft">
+                                        <div className="text-sm aseel-text-soft dark:aseel-text-soft">المدفوعات</div>
                                         <div className="text-xl font-bold text-green-600 dark:text-green-400">
                                             {activities.filter(a => a.type === 'payment').length}
                                         </div>
                                     </div>
-                                    <div className="bg-white dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
-                                        <div className="text-sm text-gray-500 dark:text-gray-400">آخر 7 أيام</div>
+                                    <div className="aseel-bg-field dark:aseel-bg-panel p-3 rounded-lg border aseel-border-soft dark:aseel-border-soft">
+                                        <div className="text-sm aseel-text-soft dark:aseel-text-soft">آخر 7 أيام</div>
                                         <div className="text-xl font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                                             {activities.filter(a => {
                                                 const activityDate = new Date(a.timestamp);
@@ -394,24 +394,24 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
                 </div>
 
                 {/* Footer */}
-                <div className="border-t border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 py-4">
+                <div className="border-t aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel py-4">
                     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                         <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                            <div className="text-sm text-gray-500 dark:text-gray-400">
+                            <div className="text-sm aseel-text-soft dark:aseel-text-soft">
                                 يتم تحديث النشاطات تلقائياً عند حدوث تغييرات
                             </div>
                             <div className="flex items-center gap-3">
                                 <button
                                     onClick={loadActivities}
                                     disabled={loading}
-                                    className="px-4 py-2 bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+                                    className="px-4 py-2 aseel-bg-grid-head dark:aseel-bg-panel hover:aseel-bg-grid-head dark:hover:aseel-bg-panel aseel-text-ink dark:aseel-text-soft rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
                                 >
                                     <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
                                     تحديث
                                 </button>
                                 <button
                                     onClick={onClose}
-                                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2"
+                                    className="px-4 py-2 aseel-bg-accent hover:aseel-bg-accent text-white rounded-lg transition-colors flex items-center gap-2"
                                 >
                                     <X className="w-4 h-4" />
                                     إغلاق

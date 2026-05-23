@@ -10,17 +10,17 @@ export function SqlDataPageShell(props: {
     <div className="p-4 md:p-6">
       <div className="flex items-start justify-between gap-3 mb-4">
         <div>
-          <h1 className="text-xl md:text-2xl font-bold text-gray-900">
+          <h1 className="text-xl md:text-2xl font-bold aseel-text-ink">
             {props.title}
           </h1>
           {props.subtitle ? (
-            <div className="text-sm text-gray-600 mt-1">{props.subtitle}</div>
+            <div className="text-sm aseel-text-soft mt-1">{props.subtitle}</div>
           ) : null}
         </div>
         {props.actions ? <div className="shrink-0">{props.actions}</div> : null}
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+      <div className="aseel-bg-field border aseel-border-soft rounded-xl shadow-sm overflow-hidden">
         {props.children}
       </div>
     </div>

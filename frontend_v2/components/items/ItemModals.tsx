@@ -34,10 +34,10 @@ export const CategoryModal: React.FC<ModalProps> = ({ isOpen, onClose, onSuccess
 
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[101] p-4" onClick={onClose}>
-            <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
-                <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+            <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+                <div className="p-6 border-b aseel-border-soft dark:aseel-border-soft flex justify-between items-center">
                     <h2 className="text-xl font-bold dark:text-white">إضافة فئة رئيسية</h2>
-                    <button onClick={onClose}><X className="w-6 h-6 text-gray-500" /></button>
+                    <button onClick={onClose}><X className="w-6 h-6 aseel-text-soft" /></button>
                 </div>
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
                     <input
@@ -46,9 +46,9 @@ export const CategoryModal: React.FC<ModalProps> = ({ isOpen, onClose, onSuccess
                         placeholder="اسم الفئة الرئيسية"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                        className="w-full px-3 py-2 rounded-lg border dark:aseel-bg-panel dark:aseel-border-soft dark:text-white"
                     />
-                    <button type="submit" className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">إضافة</button>
+                    <button type="submit" className="w-full py-2 aseel-btn-primary">إضافة</button>
                 </form>
             </div>
         </div>
@@ -93,18 +93,18 @@ export const SubCategoryModal: React.FC<SubCategoryModalProps> = ({ isOpen, onCl
 
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[101] p-4" onClick={onClose}>
-            <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
-                <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+            <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+                <div className="p-6 border-b aseel-border-soft dark:aseel-border-soft flex justify-between items-center">
                     <h2 className="text-xl font-bold dark:text-white">إضافة فئة فرعية</h2>
-                    <button onClick={onClose}><X className="w-6 h-6 text-gray-500" /></button>
+                    <button onClick={onClose}><X className="w-6 h-6 aseel-text-soft" /></button>
                 </div>
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
                     <div>
-                        <label className="block text-sm mb-1 dark:text-gray-300">تابع للفئة الرئيسية</label>
+                        <label className="block text-sm mb-1 dark:aseel-text-soft">تابع للفئة الرئيسية</label>
                         <select
                             value={categoryId}
                             onChange={(e) => setCategoryId(e.target.value)}
-                            className="w-full px-3 py-2 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            className="w-full px-3 py-2 rounded-lg border dark:aseel-bg-panel dark:aseel-border-soft dark:text-white"
                             required
                         >
                             <option value="">اختر فئة رئيسية...</option>
@@ -112,16 +112,16 @@ export const SubCategoryModal: React.FC<SubCategoryModalProps> = ({ isOpen, onCl
                         </select>
                     </div>
                     <div>
-                        <label className="block text-sm mb-1 dark:text-gray-300">اسم الفئة الفرعية</label>
+                        <label className="block text-sm mb-1 dark:aseel-text-soft">اسم الفئة الفرعية</label>
                         <input
                             type="text"
                             required
                             value={name}
                             onChange={(e) => setName(e.target.value)}
-                            className="w-full px-3 py-2 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            className="w-full px-3 py-2 rounded-lg border dark:aseel-bg-panel dark:aseel-border-soft dark:text-white"
                         />
                     </div>
-                    <button type="submit" className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">إضافة</button>
+                    <button type="submit" className="w-full py-2 aseel-btn-primary">إضافة</button>
                 </form>
             </div>
         </div>
@@ -152,10 +152,10 @@ export const BrandModal: React.FC<ModalProps> = ({ isOpen, onClose, onSuccess })
 
     return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[101] p-4" onClick={onClose}>
-            <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
-                <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+            <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+                <div className="p-6 border-b aseel-border-soft dark:aseel-border-soft flex justify-between items-center">
                     <h2 className="text-xl font-bold dark:text-white">إضافة ماركة جديدة</h2>
-                    <button onClick={onClose}><X className="w-6 h-6 text-gray-500" /></button>
+                    <button onClick={onClose}><X className="w-6 h-6 aseel-text-soft" /></button>
                 </div>
                 <form onSubmit={handleSubmit} className="p-6 space-y-4">
                     <input
@@ -164,9 +164,9 @@ export const BrandModal: React.FC<ModalProps> = ({ isOpen, onClose, onSuccess })
                         placeholder="اسم الماركة"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
-                        className="w-full px-3 py-2 rounded-lg border dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                        className="w-full px-3 py-2 rounded-lg border dark:aseel-bg-panel dark:aseel-border-soft dark:text-white"
                     />
-                    <button type="submit" className="w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">إضافة</button>
+                    <button type="submit" className="w-full py-2 aseel-btn-primary">إضافة</button>
                 </form>
             </div>
         </div>

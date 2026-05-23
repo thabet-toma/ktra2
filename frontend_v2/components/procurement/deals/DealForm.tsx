@@ -623,7 +623,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   };
 
   const getOperationalStatusStyles = (status: OperationalStatus): string => {
-    const s: Record<OperationalStatus, string> = { initial: "bg-gray-100 text-gray-700 border-gray-200", manufacturing_started: "bg-blue-50 text-blue-700 border-blue-200", production_completed: "bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]", shipping_preparation: "bg-amber-50 text-amber-700 border-amber-200", shipping_in_progress: "bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]", shipped: "bg-green-50 text-green-700 border-green-200", cancelled: "bg-red-50 text-red-700 border-red-200" };
+    const s: Record<OperationalStatus, string> = { initial: "aseel-bg-panel aseel-text-ink aseel-border-soft", manufacturing_started: "aseel-bg-accent-bg aseel-text-accent aseel-border-accent", production_completed: "bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]", shipping_preparation: "aseel-bg-panel aseel-text-ink aseel-border-soft", shipping_in_progress: "bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]", shipped: "bg-green-50 text-green-700 aseel-border-soft", cancelled: "aseel-bg-panel aseel-text-state aseel-border-soft" };
     return s[status] || s["initial"];
   };
 
@@ -651,7 +651,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   };
 
   const getPaymentStatusStyles = (status: PaymentStatus): string => {
-    const s: Record<PaymentStatus, string> = { not_paid: "bg-red-50 text-red-700 border-red-200", claim_raised: "bg-yellow-50 text-yellow-700 border-yellow-200", payment_pending_confirmation: "bg-blue-50 text-blue-700 border-blue-200", partially_paid: "bg-amber-50 text-amber-700 border-amber-200", paid: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+    const s: Record<PaymentStatus, string> = { not_paid: "aseel-bg-panel aseel-text-state aseel-border-soft", claim_raised: "aseel-bg-panel aseel-text-ink aseel-border-soft", payment_pending_confirmation: "aseel-bg-accent-bg aseel-text-accent aseel-border-accent", partially_paid: "aseel-bg-panel aseel-text-ink aseel-border-soft", paid: "aseel-bg-panel aseel-text-ink aseel-border-soft" };
     return s[status] || s["not_paid"];
   };
 
@@ -1023,7 +1023,7 @@ export const DealForm: React.FC<DealFormProps> = ({
       <SupplierViewModal isOpen={!!viewSupplierId} supplierId={viewSupplierId} onClose={() => setViewSupplierId(null)} />
 
       {showPrintView && (
-        <div className="fixed inset-0 z-[100] bg-white overflow-y-auto">
+        <div className="fixed inset-0 z-[100] aseel-bg-field overflow-y-auto">
           <DealPrintView deal={formData as Deal} currentUser={currentUser} supplier={selectedSupplier} onClose={() => setShowPrintView(false)} onEdit={() => setShowPrintView(false)} />
         </div>
       )}

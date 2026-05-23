@@ -32,24 +32,24 @@ export const InvoiceDetailsModal: React.FC<InvoiceDetailsModalProps> = ({
 
     return (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-5xl my-8 flex flex-col relative animate-in fade-in zoom-in duration-200">
+            <div className="aseel-bg-field dark:aseel-bg-panel rounded-2xl shadow-2xl w-full max-w-5xl my-8 flex flex-col relative animate-in fade-in zoom-in duration-200">
                 {/* Header */}
-                <div className="sticky top-0 bg-white dark:bg-gray-800 p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center z-20 rounded-t-2xl">
+                <div className="sticky top-0 aseel-bg-field dark:aseel-bg-panel p-6 border-b aseel-border-soft dark:aseel-border-soft flex justify-between items-center z-20 rounded-t-2xl">
                     <div className="flex items-center gap-3">
-                        <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                            <FileText className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                        <div className="p-2 aseel-bg-accent-bg dark:aseel-bg-panel/30 rounded-lg">
+                            <FileText className="w-6 h-6 aseel-text-accent dark:aseel-text-soft" />
                         </div>
                         <div>
-                            <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+                            <h2 className="text-xl font-bold aseel-text-ink dark:text-white">
                                 تفاصيل الفاتورة
                             </h2>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 font-mono">
+                            <p className="text-sm aseel-text-soft dark:aseel-text-soft font-mono">
                                 #{invoice.invoiceNumber}
                             </p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
-                        <X className="w-6 h-6 text-gray-500" />
+                    <button onClick={onClose} className="p-2 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg transition-colors">
+                        <X className="w-6 h-6 aseel-text-soft" />
                     </button>
                 </div>
 
@@ -58,30 +58,30 @@ export const InvoiceDetailsModal: React.FC<InvoiceDetailsModalProps> = ({
 
                     {/* Basic Info Grid */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700">
-                            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 mb-1">
+                        <div className="p-4 aseel-bg-panel dark:aseel-bg-panel/50 rounded-xl border aseel-border-soft dark:aseel-border-soft">
+                            <div className="flex items-center gap-2 aseel-text-soft dark:aseel-text-soft mb-1">
                                 <Calendar className="w-4 h-4" />
                                 <span className="text-xs font-medium">تاريخ الفاتورة</span>
                             </div>
-                            <div className="font-semibold text-gray-900 dark:text-white text-lg">
+                            <div className="font-semibold aseel-text-ink dark:text-white text-lg">
                                 {invoice.invoiceDate}
                             </div>
                         </div>
-                        <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700">
-                            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 mb-1">
+                        <div className="p-4 aseel-bg-panel dark:aseel-bg-panel/50 rounded-xl border aseel-border-soft dark:aseel-border-soft">
+                            <div className="flex items-center gap-2 aseel-text-soft dark:aseel-text-soft mb-1">
                                 <Building className="w-4 h-4" />
                                 <span className="text-xs font-medium">المورد</span>
                             </div>
-                            <div className="font-semibold text-gray-900 dark:text-white text-lg truncate">
+                            <div className="font-semibold aseel-text-ink dark:text-white text-lg truncate">
                                 {invoice.factoryName || '-'}
                             </div>
                         </div>
-                        <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700">
-                            <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400 mb-1">
+                        <div className="p-4 aseel-bg-panel dark:aseel-bg-panel/50 rounded-xl border aseel-border-soft dark:aseel-border-soft">
+                            <div className="flex items-center gap-2 aseel-text-soft dark:aseel-text-soft mb-1">
                                 <Tag className="w-4 h-4" />
                                 <span className="text-xs font-medium">الحالة</span>
                             </div>
-                            <div className="font-semibold text-gray-900 dark:text-white text-lg">
+                            <div className="font-semibold aseel-text-ink dark:text-white text-lg">
                                 {invoice.isHistorical ? 'أرشيف' : 'نشطة'}
                             </div>
                         </div>
@@ -93,7 +93,7 @@ export const InvoiceDetailsModal: React.FC<InvoiceDetailsModalProps> = ({
                             href={invoice.invoiceLink}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex items-center justify-center gap-2 w-full p-4 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-xl border border-blue-200 dark:border-blue-800 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors font-semibold"
+                            className="flex items-center justify-center gap-2 w-full p-4 aseel-bg-accent-bg dark:aseel-bg-panel/20 aseel-text-accent dark:aseel-text-soft rounded-xl border aseel-border-accent dark:aseel-border-soft hover:aseel-bg-accent-bg dark:hover:aseel-bg-panel/30 transition-colors font-semibold"
                         >
                             <ExternalLink className="w-5 h-5" />
                             فتح رابط الفاتورة
@@ -129,8 +129,8 @@ export const InvoiceDetailsModal: React.FC<InvoiceDetailsModalProps> = ({
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
                         {/* Attachments */}
                         <div className="space-y-4">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                                <FileText className="w-5 h-5 text-gray-500" />
+                            <h3 className="text-lg font-bold aseel-text-ink dark:text-white flex items-center gap-2">
+                                <FileText className="w-5 h-5 aseel-text-soft" />
                                 الملفات المرفقة
                             </h3>
 
@@ -138,19 +138,19 @@ export const InvoiceDetailsModal: React.FC<InvoiceDetailsModalProps> = ({
                             {invoice.pdfFiles && invoice.pdfFiles.length > 0 ? (
                                 <div className="space-y-2">
                                     {invoice.pdfFiles.map((file, idx) => (
-                                        <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700 transition-colors">
+                                        <div key={idx} className="flex items-center justify-between p-3 aseel-bg-panel dark:aseel-bg-panel/50 rounded-xl border aseel-border-soft dark:aseel-border-soft hover:aseel-border-soft dark:hover:aseel-border-soft transition-colors">
                                             <div className="flex items-center gap-3 overflow-hidden">
-                                                <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-lg">
-                                                    <FileText className="w-5 h-5 text-red-600 dark:text-red-400" />
+                                                <div className="p-2 aseel-bg-panel dark:aseel-bg-panel/30 rounded-lg">
+                                                    <FileText className="w-5 h-5 aseel-text-state dark:aseel-text-soft" />
                                                 </div>
                                                 <div className="min-w-0">
-                                                    <div className="font-medium text-gray-900 dark:text-white truncate">{file.name}</div>
-                                                    <div className="text-xs text-gray-500">{(file.size / 1024).toFixed(1)} KB</div>
+                                                    <div className="font-medium aseel-text-ink dark:text-white truncate">{file.name}</div>
+                                                    <div className="text-xs aseel-text-soft">{(file.size / 1024).toFixed(1)} KB</div>
                                                 </div>
                                             </div>
                                             <button
                                                 onClick={() => handleDownloadPdf(file)}
-                                                className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors flex items-center gap-2 text-sm font-medium"
+                                                className="p-2 aseel-text-accent dark:aseel-text-soft hover:aseel-bg-accent-bg dark:hover:aseel-bg-panel/30 rounded-lg transition-colors flex items-center gap-2 text-sm font-medium"
                                                 title="تحميل الملف"
                                             >
                                                 <Download className="w-4 h-4" />
@@ -160,7 +160,7 @@ export const InvoiceDetailsModal: React.FC<InvoiceDetailsModalProps> = ({
                                     ))}
                                 </div>
                             ) : (
-                                <div className="p-4 text-center text-sm text-gray-500 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-dashed border-gray-200 dark:border-gray-700">
+                                <div className="p-4 text-center text-sm aseel-text-soft aseel-bg-panel dark:aseel-bg-panel/50 rounded-xl border border-dashed aseel-border-soft dark:aseel-border-soft">
                                     لا توجد ملفات PDF مرفقة
                                 </div>
                             )}
@@ -169,7 +169,7 @@ export const InvoiceDetailsModal: React.FC<InvoiceDetailsModalProps> = ({
                             {invoice.imageUrls && invoice.imageUrls.length > 0 && (
                                 <div className="mt-4 grid grid-cols-4 gap-2">
                                     {invoice.imageUrls.map((url, idx) => (
-                                        <a key={idx} href={url} target="_blank" rel="noopener noreferrer" className="block aspect-square rounded-lg overflow-hidden border border-gray-200 dark:border-gray-700 hover:ring-2 ring-blue-500 transition-all">
+                                        <a key={idx} href={url} target="_blank" rel="noopener noreferrer" className="block aspect-square rounded-lg overflow-hidden border aseel-border-soft dark:aseel-border-soft hover:ring-2 ring-blue-500 transition-all">
                                             <img src={url} alt={`Attachment ${idx}`} className="w-full h-full object-cover" />
                                         </a>
                                     ))}
@@ -181,9 +181,9 @@ export const InvoiceDetailsModal: React.FC<InvoiceDetailsModalProps> = ({
 
                     {/* Notes */}
                     {invoice.notes && (
-                        <div className="bg-yellow-50 dark:bg-yellow-900/10 p-4 rounded-xl border border-yellow-200 dark:border-yellow-900/30">
-                            <h4 className="font-bold text-yellow-800 dark:text-yellow-500 text-sm mb-2">ملاحظات:</h4>
-                            <p className="text-gray-700 dark:text-gray-300 text-sm whitespace-pre-line">{invoice.notes}</p>
+                        <div className="aseel-bg-panel dark:aseel-bg-panel/10 p-4 rounded-xl border aseel-border-soft dark:aseel-border-soft/30">
+                            <h4 className="font-bold aseel-text-ink dark:aseel-text-soft text-sm mb-2">ملاحظات:</h4>
+                            <p className="aseel-text-ink dark:aseel-text-soft text-sm whitespace-pre-line">{invoice.notes}</p>
                         </div>
                     )}
                 </div>

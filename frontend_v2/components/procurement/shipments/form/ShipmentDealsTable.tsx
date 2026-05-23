@@ -22,13 +22,13 @@ export const ShipmentDealsTable: React.FC<ShipmentDealsTableProps> = ({
         0
     );
     return (
-        <div className="bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+        <div className="aseel-bg-field dark:aseel-bg-panel p-6 rounded-2xl shadow-sm border aseel-border-soft dark:aseel-border-soft overflow-hidden">
             <div className="flex justify-between items-center mb-6">
                 <div>
                     <h3 className="text-lg font-bold dark:text-white flex items-center gap-2">
                         <Package className="w-5 h-5 text-[var(--color-primary)]" /> الصفقات وتوزيع التكلفة
                     </h3>
-                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 max-w-3xl leading-relaxed">
+                    <p className="text-[11px] aseel-text-soft dark:aseel-text-soft mt-1 max-w-3xl leading-relaxed">
                         عمود «حصة الشحن + إضافي» يعرض فقط نصيب الصفقة من تكلفة الشحن الدولي للشحنة (بالدولار)، وليس
                         إجمالي سعر البضاعة. سعر الصفقة المعروض في قائمة الصفقات يطابق «إجمالي الصفقة» أدناه عند توفر
                         بيانات الصفقة كاملة.
@@ -36,7 +36,7 @@ export const ShipmentDealsTable: React.FC<ShipmentDealsTableProps> = ({
                 </div>
                 <button
                     onClick={onOpenSelector}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-sm font-bold shadow-md shadow-blue-500/20 transition-all"
+                    className="flex items-center gap-2 px-4 py-2 aseel-bg-accent hover:aseel-bg-accent text-white rounded-xl text-sm font-bold shadow-md shadow-blue-500/20 transition-all"
                 >
                     <PlusCircle className="w-4 h-4" />
                     إضافة صفقات
@@ -46,11 +46,11 @@ export const ShipmentDealsTable: React.FC<ShipmentDealsTableProps> = ({
             {deals && deals.length > 0 ? (
                 <div className="overflow-x-auto">
                     <table className="w-full text-right border-separate border-spacing-y-2">
-                        <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 text-xs uppercase">
+                        <thead className="aseel-bg-panel dark:aseel-bg-panel aseel-text-soft dark:aseel-text-soft text-xs uppercase">
                             <tr>
                                 <th className="px-3 py-3 rounded-r-xl">الصفقة</th>
                                 <th className="px-2 py-3 text-center">الوزن/الحجم</th>
-                                <th className="px-3 py-3 text-blue-600">التكلفة الموزعة</th>
+                                <th className="px-3 py-3 aseel-text-accent">التكلفة الموزعة</th>
                                 <th className="px-2 py-3 w-32">تكاليف إضافية</th>
                                 <th className="px-2 py-3 w-40">ملاحظات</th>
                                 <th className="px-2 py-3">حصة الشحن + إضافي</th>
@@ -97,15 +97,15 @@ export const ShipmentDealsTable: React.FC<ShipmentDealsTableProps> = ({
                                 const dealTotalCost = (dealInfo.distributedCost || 0) + (dealInfo.extraCosts || 0);
 
                                 return (
-                                    <tr key={dealInfo.dealId} className="bg-gray-50/50 dark:bg-gray-900/50 hover:bg-white dark:hover:bg-gray-800 transition-colors shadow-sm">
+                                    <tr key={dealInfo.dealId} className="aseel-bg-panel/50 dark:aseel-bg-panel/50 hover:aseel-bg-field dark:hover:aseel-bg-panel transition-colors shadow-sm">
                                         <td className="px-3 py-3 rounded-r-xl">
                                             <div className="font-bold dark:text-white">{title}</div>
                                             {subLine && subLine !== title ? (
-                                                <div className="text-xs text-gray-500 font-mono">{subLine}</div>
+                                                <div className="text-xs aseel-text-soft font-mono">{subLine}</div>
                                             ) : null}
-                                            <div className="text-xs text-gray-600 dark:text-gray-300 space-y-0.5">
+                                            <div className="text-xs aseel-text-soft dark:aseel-text-soft space-y-0.5">
                                                 <div>
-                                                    <span className="text-gray-500 dark:text-gray-400">
+                                                    <span className="aseel-text-soft dark:aseel-text-soft">
                                                         إجمالي الصفقة:{" "}
                                                     </span>
                                                     <span className="font-semibold tabular-nums">
@@ -115,7 +115,7 @@ export const ShipmentDealsTable: React.FC<ShipmentDealsTableProps> = ({
                                                     </span>
                                                 </div>
                                                 {showBothTotals ? (
-                                                    <div className="text-[10px] text-gray-400 dark:text-gray-500">
+                                                    <div className="text-[10px] aseel-text-soft dark:aseel-text-soft">
                                                         حقل الإجمالي المسجّل: $
                                                         {contractTotal.toLocaleString(undefined, {
                                                             maximumFractionDigits: 0,
@@ -124,17 +124,17 @@ export const ShipmentDealsTable: React.FC<ShipmentDealsTableProps> = ({
                                                 ) : null}
                                             </div>
                                         </td>
-                                        <td className="px-2 py-3 text-center font-mono text-xs dark:text-gray-300">
+                                        <td className="px-2 py-3 text-center font-mono text-xs dark:aseel-text-soft">
                                             <div>{Number(weightKg).toLocaleString()} kg</div>
-                                            <div className="text-gray-400">{Number(volume).toLocaleString()} cbm</div>
+                                            <div className="aseel-text-soft">{Number(volume).toLocaleString()} cbm</div>
                                         </td>
-                                        <td className="px-3 py-3 font-bold text-blue-600 dark:text-blue-400">
+                                        <td className="px-3 py-3 font-bold aseel-text-accent dark:aseel-text-soft">
                                             ${dealInfo.distributedCost.toLocaleString(undefined, { maximumFractionDigits: 1 })}
                                         </td>
                                         <td className="px-2 py-3">
                                             <input
                                                 type="number" min="0"
-                                                className="w-full p-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg dark:bg-gray-800 focus:ring-2 outline-none"
+                                                className="w-full p-1.5 text-sm border aseel-border-soft dark:aseel-border-soft rounded-lg dark:aseel-bg-panel focus:ring-2 outline-none"
                                                 value={dealInfo.extraCosts || ''}
                                                 onChange={(e) => onUpdateDeal(dealInfo.dealId, 'extraCosts', parseFloat(e.target.value) || 0)}
                                             />
@@ -142,7 +142,7 @@ export const ShipmentDealsTable: React.FC<ShipmentDealsTableProps> = ({
                                         <td className="px-2 py-3">
                                             <input
                                                 type="text"
-                                                className="w-full p-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg dark:bg-gray-800 outline-none"
+                                                className="w-full p-1.5 text-xs border aseel-border-soft dark:aseel-border-soft rounded-lg dark:aseel-bg-panel outline-none"
                                                 value={dealInfo.notes || ''}
                                                 onChange={(e) => onUpdateDeal(dealInfo.dealId, 'notes', e.target.value)}
                                             />
@@ -151,21 +151,21 @@ export const ShipmentDealsTable: React.FC<ShipmentDealsTableProps> = ({
                                             ${dealTotalCost.toLocaleString(undefined, { maximumFractionDigits: 1 })}
                                         </td>
                                         <td className="px-2 py-3 rounded-l-xl text-left">
-                                            <button onClick={() => onRemoveDeal(dealInfo.dealId)} className="text-red-400 hover:text-red-600 p-1">
+                                            <button onClick={() => onRemoveDeal(dealInfo.dealId)} className="aseel-text-soft hover:aseel-text-state p-1">
                                                 <X className="w-4 h-4" />
                                             </button>
                                         </td>
                                     </tr>
                                 );
                             })}
-                            <tr className="bg-gray-100 dark:bg-gray-800 border-t-2 border-gray-200 dark:border-gray-700">
-                                <td colSpan={2} className="px-4 py-4 font-bold text-gray-700 dark:text-gray-300 text-left">
+                            <tr className="aseel-bg-panel dark:aseel-bg-panel border-t-2 aseel-border-soft dark:aseel-border-soft">
+                                <td colSpan={2} className="px-4 py-4 font-bold aseel-text-ink dark:aseel-text-soft text-left">
                                     مجموع توزيع الشحن (+ إضافي):
                                 </td>
-                                <td className="px-3 py-4 font-bold text-blue-600 dark:text-blue-400">
+                                <td className="px-3 py-4 font-bold aseel-text-accent dark:aseel-text-soft">
                                     ${sumDistributed.toLocaleString(undefined, { maximumFractionDigits: 2 })}
                                 </td>
-                                <td className="px-2 py-4 font-bold text-red-600 dark:text-red-400">+ ${totalExtra.toLocaleString()}</td>
+                                <td className="px-2 py-4 font-bold aseel-text-state dark:aseel-text-soft">+ ${totalExtra.toLocaleString()}</td>
                                 <td></td>
                                 <td className="px-2 py-4 font-black text-lg dark:text-white">= ${grandTotal.toLocaleString()}</td>
                                 <td></td>
@@ -174,8 +174,8 @@ export const ShipmentDealsTable: React.FC<ShipmentDealsTableProps> = ({
                     </table>
                 </div>
             ) : (
-                <div className="text-center py-12 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border-2 border-dashed border-gray-200 dark:border-gray-700">
-                    <p className="text-gray-500 dark:text-gray-400">أضف صفقات لحساب التكلفة</p>
+                <div className="text-center py-12 aseel-bg-panel dark:aseel-bg-panel/50 rounded-2xl border-2 border-dashed aseel-border-soft dark:aseel-border-soft">
+                    <p className="aseel-text-soft dark:aseel-text-soft">أضف صفقات لحساب التكلفة</p>
                 </div>
             )}
         </div>

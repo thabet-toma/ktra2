@@ -9,7 +9,7 @@ export const ImagePreviewModal = ({ url, onClose }: { url: string | null, onClos
             onClick={onClose}
         >
             <button
-                className="absolute top-4 right-4 text-white p-2 hover:bg-white/20 rounded-full transition-colors"
+                className="absolute top-4 right-4 text-white p-2 hover:aseel-bg-field/20 rounded-full transition-colors"
                 onClick={onClose}
             >
                 <X className="w-8 h-8" />

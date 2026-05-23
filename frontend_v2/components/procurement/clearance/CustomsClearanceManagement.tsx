@@ -301,7 +301,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
   };
 
   if (currentUser.role !== "manager" && currentUser.role !== "procurement") {
-    return <div className="p-8 text-center text-gray-500 dark:text-gray-400">لا تملك صلاحية عرض التخليص الجمركي.</div>;
+    return <div className="p-8 text-center aseel-text-soft dark:aseel-text-soft">لا تملك صلاحية عرض التخليص الجمركي.</div>;
   }
 
   const fmt = (v: number) => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -402,7 +402,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
               {fld("الشحنة", <input className="aseel-input" readOnly value={clearanceShipmentTitle(selected)} />)}
             </>
           ) : (
-            <p className="text-gray-500 text-sm" style={{ padding: 8 }}>اختر سجلاً من القائمة أو أضف تخليص جديد</p>
+            <p className="aseel-text-soft text-sm" style={{ padding: 8 }}>اختر سجلاً من القائمة أو أضف تخليص جديد</p>
           )
         }
         tabs={selected ? [
@@ -429,7 +429,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
         }
       >
         {err && (
-          <div className="p-4 rounded-xl bg-red-50 text-red-700 text-sm border border-red-200" style={{ marginBottom: 8 }}>
+          <div className="p-4 rounded-xl aseel-bg-panel aseel-text-state text-sm border aseel-border-soft" style={{ marginBottom: 8 }}>
             {err}
           </div>
         )}
@@ -571,25 +571,25 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
       {/* نافذة إنشاء تخليص جديد */}
       {newOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl max-w-xl w-full p-6 border border-gray-200 dark:border-gray-700 space-y-4">
-            <h3 className="font-bold text-lg text-gray-900 dark:text-white">تخليص جديد من شحنة</h3>
-            <p className="text-xs text-gray-500">عند الإنشاء تُحدَّث مرحلة الصفقات المرتبطة بالشحنة.</p>
+          <div className="aseel-bg-field dark:aseel-bg-panel rounded-2xl shadow-2xl max-w-xl w-full p-6 border aseel-border-soft dark:aseel-border-soft space-y-4">
+            <h3 className="font-bold text-lg aseel-text-ink dark:text-white">تخليص جديد من شحنة</h3>
+            <p className="text-xs aseel-text-soft">عند الإنشاء تُحدَّث مرحلة الصفقات المرتبطة بالشحنة.</p>
             <label className="block text-sm space-y-1">
               <span>الشحنة</span>
-              <button type="button" onClick={() => setShipmentPickerOpen(true)} className="w-full rounded-xl border border-gray-200 dark:border-gray-600 px-3 py-2 bg-white dark:bg-gray-800 text-right hover:border-amber-400">
+              <button type="button" onClick={() => setShipmentPickerOpen(true)} className="w-full rounded-xl border aseel-border-soft dark:aseel-border-soft px-3 py-2 aseel-bg-field dark:aseel-bg-panel text-right hover:aseel-border-soft">
                 {newShipmentId === "" ? "اختر…" : buildShipmentOptionLabel(availableShipments.find((s) => s.id === newShipmentId) || shipments.find((s) => s.id === newShipmentId) || { id: Number(newShipmentId), shipment_number: `S-${newShipmentId}` })}
               </button>
             </label>
             <label className="block text-sm space-y-1">
               <span>المخلص (اختياري)</span>
-              <select value={newBrokerId === "" ? "" : String(newBrokerId)} onChange={(e) => setNewBrokerId(e.target.value === "" ? "" : Number(e.target.value))} className="w-full rounded-xl border border-gray-200 dark:border-gray-600 px-3 py-2 bg-white dark:bg-gray-800">
+              <select value={newBrokerId === "" ? "" : String(newBrokerId)} onChange={(e) => setNewBrokerId(e.target.value === "" ? "" : Number(e.target.value))} className="w-full rounded-xl border aseel-border-soft dark:aseel-border-soft px-3 py-2 aseel-bg-field dark:aseel-bg-panel">
                 <option value="">— لاحقاً —</option>
                 {brokers.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </label>
             <div className="flex gap-2 justify-end pt-2">
-              <button type="button" onClick={() => setNewOpen(false)} className="px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200">إلغاء</button>
-              <button type="button" onClick={handleCreate} disabled={saving || newShipmentId === ""} className="px-5 py-2 rounded-xl bg-amber-600 text-white font-bold disabled:opacity-50">إنشاء</button>
+              <button type="button" onClick={() => setNewOpen(false)} className="px-4 py-2 rounded-xl border aseel-border-soft dark:aseel-border-soft aseel-text-ink dark:aseel-text-soft">إلغاء</button>
+              <button type="button" onClick={handleCreate} disabled={saving || newShipmentId === ""} className="px-5 py-2 rounded-xl aseel-bg-panel text-white font-bold disabled:opacity-50">إنشاء</button>
             </div>
           </div>
         </div>
@@ -598,30 +598,30 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
       {/* فهرس الشاحنات */}
       {newOpen && shipmentPickerOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col border border-gray-200 dark:border-gray-700">
-            <div className="p-4 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
-              <h4 className="font-bold text-gray-900 dark:text-white">اختر الشحنة للتخليص</h4>
-              <button type="button" onClick={() => setShipmentPickerOpen(false)} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500"><X className="w-4 h-4" /></button>
+          <div className="aseel-bg-field dark:aseel-bg-panel rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col border aseel-border-soft dark:aseel-border-soft">
+            <div className="p-4 border-b aseel-border-soft dark:aseel-border-soft flex items-center justify-between">
+              <h4 className="font-bold aseel-text-ink dark:text-white">اختر الشحنة للتخليص</h4>
+              <button type="button" onClick={() => setShipmentPickerOpen(false)} className="p-2 rounded-full hover:aseel-bg-panel dark:hover:aseel-bg-panel aseel-text-soft"><X className="w-4 h-4" /></button>
             </div>
-            <div className="p-4 border-b border-gray-100 dark:border-gray-800">
+            <div className="p-4 border-b aseel-border-soft dark:aseel-border-soft">
               <div className="relative">
-                <Search className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2" />
-                <input value={shipmentSearch} onChange={(e) => setShipmentSearch(e.target.value)} placeholder="ابحث بالاسم أو رقم الشحنة أو المرجع..." className="w-full rounded-xl border border-gray-200 dark:border-gray-600 pr-9 pl-3 py-2 bg-white dark:bg-gray-800 text-sm" />
+                <Search className="w-4 h-4 aseel-text-soft absolute right-3 top-1/2 -translate-y-1/2" />
+                <input value={shipmentSearch} onChange={(e) => setShipmentSearch(e.target.value)} placeholder="ابحث بالاسم أو رقم الشحنة أو المرجع..." className="w-full rounded-xl border aseel-border-soft dark:aseel-border-soft pr-9 pl-3 py-2 aseel-bg-field dark:aseel-bg-panel text-sm" />
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-gray-50/50 dark:bg-black/20">
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 aseel-bg-panel/50 dark:bg-black/20">
               {filteredAvailableShipments.length === 0 ? (
-                <div className="text-center text-sm text-gray-500 py-12">لا توجد شحنات متاحة تطابق البحث</div>
+                <div className="text-center text-sm aseel-text-soft py-12">لا توجد شحنات متاحة تطابق البحث</div>
               ) : (
                 filteredAvailableShipments.map((s) => {
                   const selectedRow = newShipmentId === s.id;
                   return (
-                    <button key={s.id} type="button" onClick={() => { setNewShipmentId(s.id); setShipmentPickerOpen(false); }} className={`w-full text-right p-3 rounded-xl border transition-all ${selectedRow ? "bg-amber-50 border-amber-400 dark:bg-amber-900/20 dark:border-amber-700" : "bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 hover:border-amber-300"}`}>
+                    <button key={s.id} type="button" onClick={() => { setNewShipmentId(s.id); setShipmentPickerOpen(false); }} className={`w-full text-right p-3 rounded-xl border transition-all ${selectedRow ? "aseel-bg-panel aseel-border-soft dark:aseel-bg-panel/20 dark:aseel-border-soft" : "aseel-bg-field dark:aseel-bg-panel aseel-border-soft dark:aseel-border-soft hover:aseel-border-soft"}`}>
                       <div className="flex items-center gap-2">
-                        <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${selectedRow ? "border-amber-500 text-amber-600" : "border-gray-300 text-transparent"}`}>
+                        <div className={`w-5 h-5 rounded-full border flex items-center justify-center ${selectedRow ? "aseel-border-soft aseel-text-soft" : "aseel-border-soft text-transparent"}`}>
                           <CheckCircle2 className="w-4 h-4" />
                         </div>
-                        <span className="font-semibold text-gray-900 dark:text-white leading-snug">{buildShipmentOptionLabel(s)}</span>
+                        <span className="font-semibold aseel-text-ink dark:text-white leading-snug">{buildShipmentOptionLabel(s)}</span>
                       </div>
                     </button>
                   );

@@ -49,11 +49,11 @@ export const ShipmentStatusTimeline: React.FC<ShipmentStatusTimelineProps> = ({ 
             <div className="relative min-w-[800px]"> {/* min-w لضمان عدم انضغاط العناصر في الشاشات الصغيرة جداً */}
 
                 {/* خط الخلفية الرمادي */}
-                <div className="absolute top-1/2 left-0 right-0 h-1.5 bg-gray-200 dark:bg-gray-700 -translate-y-1/2 rounded-full z-0"></div>
+                <div className="absolute top-1/2 left-0 right-0 h-1.5 aseel-bg-grid-head dark:aseel-bg-panel -translate-y-1/2 rounded-full z-0"></div>
 
                 {/* خط التقدم الملون */}
                 <div
-                    className="absolute top-1/2 h-1.5 bg-gradient-to-l from-blue-500 to-green-500 -translate-y-1/2 rounded-full z-0 transition-all duration-700 ease-out"
+                    className="absolute top-1/2 h-1.5 bg-gradient-to-l aseel-bg-panel to-green-500 -translate-y-1/2 rounded-full z-0 transition-all duration-700 ease-out"
                     style={{
                         right: 0, // لأننا في وضع RTL
                         width: `${progressPercent}%`
@@ -74,10 +74,10 @@ export const ShipmentStatusTimeline: React.FC<ShipmentStatusTimelineProps> = ({ 
                                     className={`
                                         w-12 h-12 rounded-full flex items-center justify-center border-4 transition-all duration-300 relative
                                         ${isCurrent
-                                            ? 'bg-blue-600 border-blue-100 dark:border-blue-900 text-white scale-125 shadow-lg shadow-blue-500/30'
+                                            ? 'aseel-bg-accent aseel-border-soft dark:aseel-border-soft text-white scale-125 shadow-lg shadow-blue-500/30'
                                             : isCompleted
-                                                ? 'bg-green-500 border-white dark:border-gray-800 text-white shadow-md'
-                                                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-600 text-gray-400'
+                                                ? 'bg-green-500 border-white dark:aseel-border-soft text-white shadow-md'
+                                                : 'aseel-bg-field dark:aseel-bg-panel aseel-border-soft dark:aseel-border-soft aseel-text-soft'
                                         }
                                     `}
                                 >
@@ -85,7 +85,7 @@ export const ShipmentStatusTimeline: React.FC<ShipmentStatusTimelineProps> = ({ 
 
                                     {/* تأثير النبض للحالة الحالية */}
                                     {isCurrent && (
-                                        <span className="absolute inset-0 rounded-full border-2 border-blue-500 animate-ping opacity-75"></span>
+                                        <span className="absolute inset-0 rounded-full border-2 aseel-border-soft animate-ping opacity-75"></span>
                                     )}
                                 </div>
 
@@ -93,10 +93,10 @@ export const ShipmentStatusTimeline: React.FC<ShipmentStatusTimelineProps> = ({ 
                                 <div className={`
                                     mt-4 text-xs font-bold text-center w-24 px-1 py-1 rounded-lg transition-all
                                     ${isCurrent
-                                        ? 'text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/30 scale-110'
+                                        ? 'aseel-text-accent dark:aseel-text-soft aseel-bg-accent-bg dark:aseel-bg-panel/30 scale-110'
                                         : isCompleted
                                             ? 'text-green-700 dark:text-green-400'
-                                            : 'text-gray-400 dark:text-gray-500'
+                                            : 'aseel-text-soft dark:aseel-text-soft'
                                     }
                                 `}>
                                     {step.label}

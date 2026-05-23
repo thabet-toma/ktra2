@@ -281,12 +281,12 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
 
     if (invoices.length === 0) {
         return (
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-12 text-center">
+            <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl shadow-sm border aseel-border-soft dark:aseel-border-soft p-12 text-center">
                 <div className="flex flex-col items-center justify-center gap-4">
-                    <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center">
-                        <History className="w-8 h-8 text-gray-400" />
+                    <div className="w-16 h-16 aseel-bg-panel dark:aseel-bg-panel rounded-full flex items-center justify-center">
+                        <History className="w-8 h-8 aseel-text-soft" />
                     </div>
-                    <div className="text-gray-400 dark:text-gray-500">
+                    <div className="aseel-text-soft dark:aseel-text-soft">
                         <div className="font-medium text-lg">لا توجد فواتير مؤرشفة</div>
                         <div className="text-sm mt-1">جرب تغيير معايير البحث أو أضف فاتورة جديدة</div>
                     </div>
@@ -298,24 +298,24 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
     return (
         <div className="space-y-4">
             {/* شريط البحث والتحكم */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+            <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl shadow-sm border aseel-border-soft dark:aseel-border-soft p-4">
                 <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
                     <div className="flex items-center gap-4 w-full md:w-auto">
                         <div className="relative flex-1 md:flex-none md:w-64">
-                            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500" />
+                            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 aseel-text-soft dark:aseel-text-soft" />
                             <input
                                 type="text"
                                 placeholder="ابحث برقم الفاتورة، المورد، أو التاريخ..."
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
-                                className="w-full pr-9 pl-4 py-2.5 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent transition-all text-sm"
+                                className="w-full pr-9 pl-4 py-2.5 border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent transition-all text-sm"
                             />
                         </div>
 
                         {hasActiveFilters && (
                             <button
                                 onClick={clearAllFilters}
-                                className="px-3 py-2.5 text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg flex items-center gap-2 transition-colors"
+                                className="px-3 py-2.5 text-sm aseel-text-soft dark:aseel-text-soft hover:aseel-text-ink dark:hover:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg flex items-center gap-2 transition-colors"
                             >
                                 <X className="w-4 h-4" />
                                 مسح جميع الفلاتر
@@ -323,10 +323,10 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                         )}
                     </div>
 
-                    <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+                    <div className="flex items-center gap-2 text-sm aseel-text-soft dark:aseel-text-soft">
                         <Filter className="w-4 h-4" />
                         <span>تم العثور على</span>
-                        <span className="font-bold text-blue-600 dark:text-blue-400">
+                        <span className="font-bold aseel-text-accent dark:aseel-text-soft">
                             {filteredInvoices.length}
                         </span>
                         <span>من أصل</span>
@@ -339,18 +339,18 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
             {/* الجدول مع الفلترة المدمجة */}
             <div
                 ref={tableRef}
-                className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden relative"
+                className="aseel-bg-field dark:aseel-bg-panel rounded-xl shadow-sm border aseel-border-soft dark:aseel-border-soft overflow-hidden relative"
             >
                 <div className="overflow-x-auto">
                     <table className="w-full text-right">
-                        <thead className="bg-gray-50 dark:bg-gray-900/50 text-gray-700 dark:text-gray-300 text-sm sticky top-0 z-20">
+                        <thead className="aseel-bg-panel dark:aseel-bg-panel/50 aseel-text-ink dark:aseel-text-soft text-sm sticky top-0 z-20">
                             <tr>
                                 {/* عمود التاريخ */}
-                                <th className="px-6 py-4 font-semibold border-b dark:border-gray-700">
+                                <th className="px-6 py-4 font-semibold border-b dark:aseel-border-soft">
                                     <div className="flex items-center justify-between gap-2">
                                         <button
                                             onClick={() => handleSort('invoiceDate')}
-                                            className="flex items-center gap-2 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                                            className="flex items-center gap-2 hover:aseel-text-accent dark:hover:aseel-text-soft transition-colors"
                                         >
                                             <Calendar className="w-4 h-4" />
                                             تاريخ الفاتورة
@@ -360,20 +360,20 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                             <button
                                                 onClick={() => setActiveColumnFilter(activeColumnFilter === 'invoiceDate' ? null : 'invoiceDate')}
                                                 className={`p-1 rounded ${activeColumnFilter === 'invoiceDate' || columnFilters.invoiceDate !== ''
-                                                    ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
-                                                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                                    ? 'aseel-text-accent dark:aseel-text-soft aseel-bg-accent-bg dark:aseel-bg-panel/20'
+                                                    : 'aseel-text-soft hover:aseel-text-soft dark:hover:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel'
                                                     }`}
                                             >
                                                 <Filter className="w-3 h-3" />
                                             </button>
                                             {activeColumnFilter === 'invoiceDate' && (
-                                                <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-3 min-w-[220px]">
+                                                <div className="absolute left-0 top-full mt-1 z-50 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-lg shadow-xl p-3 min-w-[220px]">
                                                     <div className="flex flex-col gap-2">
                                                         <div className="flex items-center justify-between mb-1">
-                                                            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">فلترة التاريخ</span>
+                                                            <span className="text-xs font-medium aseel-text-soft dark:aseel-text-soft">فلترة التاريخ</span>
                                                             <button
                                                                 onClick={() => clearColumnFilter('invoiceDate')}
-                                                                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                                                                className="p-1 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded"
                                                             >
                                                                 <X className="w-3 h-3" />
                                                             </button>
@@ -383,11 +383,11 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                                                 type="date"
                                                                 value={columnFilters.invoiceDate}
                                                                 onChange={(e) => handleColumnFilter('invoiceDate', e.target.value)}
-                                                                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                                className="w-full px-3 py-2 text-sm border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                                                 autoFocus
                                                             />
                                                         </div>
-                                                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                                        <div className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
                                                             اختر تاريخاً محدداً للفلترة
                                                         </div>
                                                     </div>
@@ -398,11 +398,11 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                 </th>
 
                                 {/* عمود رقم الفاتورة */}
-                                <th className="px-6 py-4 font-semibold border-b dark:border-gray-700">
+                                <th className="px-6 py-4 font-semibold border-b dark:aseel-border-soft">
                                     <div className="flex items-center justify-between gap-2">
                                         <button
                                             onClick={() => handleSort('invoiceNumber')}
-                                            className="flex items-center gap-2 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                                            className="flex items-center gap-2 hover:aseel-text-accent dark:hover:aseel-text-soft transition-colors"
                                         >
                                             <Hash className="w-4 h-4" />
                                             رقم الفاتورة
@@ -412,20 +412,20 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                             <button
                                                 onClick={() => setActiveColumnFilter(activeColumnFilter === 'invoiceNumber' ? null : 'invoiceNumber')}
                                                 className={`p-1 rounded ${activeColumnFilter === 'invoiceNumber' || columnFilters.invoiceNumber !== ''
-                                                    ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
-                                                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                                    ? 'aseel-text-accent dark:aseel-text-soft aseel-bg-accent-bg dark:aseel-bg-panel/20'
+                                                    : 'aseel-text-soft hover:aseel-text-soft dark:hover:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel'
                                                     }`}
                                             >
                                                 <Filter className="w-3 h-3" />
                                             </button>
                                             {activeColumnFilter === 'invoiceNumber' && (
-                                                <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-3 min-w-[220px]">
+                                                <div className="absolute left-0 top-full mt-1 z-50 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-lg shadow-xl p-3 min-w-[220px]">
                                                     <div className="flex flex-col gap-2">
                                                         <div className="flex items-center justify-between mb-1">
-                                                            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">فلترة الرقم</span>
+                                                            <span className="text-xs font-medium aseel-text-soft dark:aseel-text-soft">فلترة الرقم</span>
                                                             <button
                                                                 onClick={() => clearColumnFilter('invoiceNumber')}
-                                                                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                                                                className="p-1 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded"
                                                             >
                                                                 <X className="w-3 h-3" />
                                                             </button>
@@ -436,7 +436,7 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                                                 placeholder="أدخل رقم الفاتورة..."
                                                                 value={columnFilters.invoiceNumber}
                                                                 onChange={(e) => handleColumnFilter('invoiceNumber', e.target.value)}
-                                                                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                                className="w-full px-3 py-2 text-sm border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                                                 autoFocus
                                                             />
                                                         </div>
@@ -448,11 +448,11 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                 </th>
 
                                 {/* عمود المورد */}
-                                <th className="px-6 py-4 font-semibold border-b dark:border-gray-700">
+                                <th className="px-6 py-4 font-semibold border-b dark:aseel-border-soft">
                                     <div className="flex items-center justify-between gap-2">
                                         <button
                                             onClick={() => handleSort('factoryName')}
-                                            className="flex items-center gap-2 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                                            className="flex items-center gap-2 hover:aseel-text-accent dark:hover:aseel-text-soft transition-colors"
                                         >
                                             <Building className="w-4 h-4" />
                                             المورد
@@ -462,20 +462,20 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                             <button
                                                 onClick={() => setActiveColumnFilter(activeColumnFilter === 'factoryName' ? null : 'factoryName')}
                                                 className={`p-1 rounded ${activeColumnFilter === 'factoryName' || columnFilters.factoryName !== ''
-                                                    ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
-                                                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                                    ? 'aseel-text-accent dark:aseel-text-soft aseel-bg-accent-bg dark:aseel-bg-panel/20'
+                                                    : 'aseel-text-soft hover:aseel-text-soft dark:hover:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel'
                                                     }`}
                                             >
                                                 <Filter className="w-3 h-3" />
                                             </button>
                                             {activeColumnFilter === 'factoryName' && (
-                                                <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-3 min-w-[220px]">
+                                                <div className="absolute left-0 top-full mt-1 z-50 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-lg shadow-xl p-3 min-w-[220px]">
                                                     <div className="flex flex-col gap-2">
                                                         <div className="flex items-center justify-between mb-1">
-                                                            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">فلترة المورد</span>
+                                                            <span className="text-xs font-medium aseel-text-soft dark:aseel-text-soft">فلترة المورد</span>
                                                             <button
                                                                 onClick={() => clearColumnFilter('factoryName')}
-                                                                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                                                                className="p-1 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded"
                                                             >
                                                                 <X className="w-3 h-3" />
                                                             </button>
@@ -486,11 +486,11 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                                                 placeholder="أدخل اسم المورد..."
                                                                 value={columnFilters.factoryName}
                                                                 onChange={(e) => handleColumnFilter('factoryName', e.target.value)}
-                                                                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                                className="w-full px-3 py-2 text-sm border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                                                 autoFocus
                                                             />
                                                         </div>
-                                                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                                        <div className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
                                                             اكتب أول حرف أو كلمة كاملة
                                                         </div>
                                                     </div>
@@ -501,7 +501,7 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                 </th>
 
                                 {/* عمود المنتجات الرئيسية */}
-                                <th className="px-6 py-4 font-semibold border-b dark:border-gray-700">
+                                <th className="px-6 py-4 font-semibold border-b dark:aseel-border-soft">
                                     <div className="flex items-center gap-2">
                                         <Package className="w-4 h-4 text-[var(--color-primary)]" />
                                         المنتجات الرئيسية
@@ -509,11 +509,11 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                 </th>
 
                                 {/* عمود الإجمالي */}
-                                <th className="px-6 py-4 font-semibold border-b dark:border-gray-700 text-center">
+                                <th className="px-6 py-4 font-semibold border-b dark:aseel-border-soft text-center">
                                     <div className="flex items-center justify-center gap-2">
                                         <button
                                             onClick={() => handleSort('grandTotal')}
-                                            className="flex items-center gap-2 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                                            className="flex items-center gap-2 hover:aseel-text-accent dark:hover:aseel-text-soft transition-colors"
                                         >
                                             <DollarSign className="w-4 h-4" />
                                             الإجمالي
@@ -523,20 +523,20 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                             <button
                                                 onClick={() => setActiveColumnFilter(activeColumnFilter === 'grandTotal' ? null : 'grandTotal')}
                                                 className={`p-1 rounded ${activeColumnFilter === 'grandTotal' || columnFilters.grandTotal !== ''
-                                                    ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20'
-                                                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                                    ? 'aseel-text-accent dark:aseel-text-soft aseel-bg-accent-bg dark:aseel-bg-panel/20'
+                                                    : 'aseel-text-soft hover:aseel-text-soft dark:hover:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel'
                                                     }`}
                                             >
                                                 <Filter className="w-3 h-3" />
                                             </button>
                                             {activeColumnFilter === 'grandTotal' && (
-                                                <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl p-3 min-w-[220px]">
+                                                <div className="absolute left-0 top-full mt-1 z-50 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-lg shadow-xl p-3 min-w-[220px]">
                                                     <div className="flex flex-col gap-2">
                                                         <div className="flex items-center justify-between mb-1">
-                                                            <span className="text-xs font-medium text-gray-600 dark:text-gray-400">فلترة المبلغ</span>
+                                                            <span className="text-xs font-medium aseel-text-soft dark:aseel-text-soft">فلترة المبلغ</span>
                                                             <button
                                                                 onClick={() => clearColumnFilter('grandTotal')}
-                                                                className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                                                                className="p-1 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded"
                                                             >
                                                                 <X className="w-3 h-3" />
                                                             </button>
@@ -547,7 +547,7 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                                                 placeholder="أدخل المبلغ..."
                                                                 value={columnFilters.grandTotal}
                                                                 onChange={(e) => handleColumnFilter('grandTotal', e.target.value)}
-                                                                className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                                                className="w-full px-3 py-2 text-sm border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                                                                 autoFocus
                                                             />
                                                         </div>
@@ -564,24 +564,24 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                 <tr
                                     key={inv.id}
                                     onClick={(e) => handleRowClick(inv, e)}
-                                    className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors cursor-pointer group"
+                                    className="hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 transition-colors cursor-pointer group"
                                 >
-                                    <td className="px-6 py-4 font-medium text-gray-900 dark:text-white">
+                                    <td className="px-6 py-4 font-medium aseel-text-ink dark:text-white">
                                         <div className="flex items-center gap-2">
-                                            <Calendar className="w-4 h-4 text-gray-400" />
+                                            <Calendar className="w-4 h-4 aseel-text-soft" />
                                             {inv.invoiceDate}
                                         </div>
-                                        <div className="text-xs text-gray-500 mt-1">
+                                        <div className="text-xs aseel-text-soft mt-1">
                                             أرشفت: {new Date(inv.createdAt).toLocaleDateString('ar-EG')}
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <span className="font-mono bg-gray-100 dark:bg-gray-700 px-2 py-1 rounded text-sm font-semibold text-gray-700 dark:text-gray-300">
+                                        <span className="font-mono aseel-bg-panel dark:aseel-bg-panel px-2 py-1 rounded text-sm font-semibold aseel-text-ink dark:aseel-text-soft">
                                             {inv.invoiceNumber}
                                         </span>
                                     </td>
                                     <td className="px-6 py-4">
-                                        <div className="font-medium text-gray-900 dark:text-white truncate max-w-[200px]">
+                                        <div className="font-medium aseel-text-ink dark:text-white truncate max-w-[200px]">
                                             {(() => {
                                                 const supplier = suppliers.find(s => s.id === inv.supplierId);
                                                 return supplier?.alias || supplier?.tradeName || inv.factoryName || '-';
@@ -595,32 +595,32 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                                 const topProducts = getTopProductsByQuantity(inv);
                                                 if (topProducts.length === 0) {
                                                     return (
-                                                        <div className="text-xs text-gray-400 dark:text-gray-500">لا توجد منتجات</div>
+                                                        <div className="text-xs aseel-text-soft dark:aseel-text-soft">لا توجد منتجات</div>
                                                     );
                                                 }
                                                 return (
                                                     <div className="flex flex-col gap-1.5">
                                                         {topProducts.map((item, idx) => (
-                                                            <div key={idx} className="flex items-center gap-2 bg-gray-50 dark:bg-gray-700/50 p-1 rounded-md border border-gray-100 dark:border-gray-700">
-                                                                <div className="relative w-6 h-6 shrink-0 rounded overflow-hidden bg-gray-200 dark:bg-gray-600">
+                                                            <div key={idx} className="flex items-center gap-2 aseel-bg-panel dark:aseel-bg-panel/50 p-1 rounded-md border aseel-border-soft dark:aseel-border-soft">
+                                                                <div className="relative w-6 h-6 shrink-0 rounded overflow-hidden aseel-bg-grid-head dark:aseel-bg-panel">
                                                                     {item.imageUrls && item.imageUrls.length > 0 ? (
                                                                         <img src={item.imageUrls[0]} alt={item.name} className="w-full h-full object-cover" />
                                                                     ) : (
-                                                                        <div className="flex items-center justify-center w-full h-full text-[8px] font-bold text-gray-400">
+                                                                        <div className="flex items-center justify-center w-full h-full text-[8px] font-bold aseel-text-soft">
                                                                             {item.name.charAt(0)}
                                                                         </div>
                                                                     )}
                                                                 </div>
                                                                 <div className="flex flex-col min-w-0">
                                                                     <div className="flex items-center gap-2">
-                                                                        <span className="text-xs font-medium text-gray-700 dark:text-gray-200 truncate max-w-[120px]" title={item.name}>
+                                                                        <span className="text-xs font-medium aseel-text-ink dark:aseel-text-soft truncate max-w-[120px]" title={item.name}>
                                                                             {item.name}
                                                                         </span>
-                                                                        <span className="text-[10px] bg-white dark:bg-gray-600 px-1 rounded text-gray-500 dark:text-gray-300 border border-gray-200 dark:border-gray-500 shrink-0">
+                                                                        <span className="text-[10px] aseel-bg-field dark:aseel-bg-panel px-1 rounded aseel-text-soft dark:aseel-text-soft border aseel-border-soft dark:aseel-border-soft shrink-0">
                                                                             x{item.quantity}
                                                                         </span>
                                                                     </div>
-                                                                    <span className="text-[10px] text-blue-600 dark:text-blue-400 font-mono flex items-center gap-1">
+                                                                    <span className="text-[10px] aseel-text-accent dark:aseel-text-soft font-mono flex items-center gap-1">
                                                                         HS: {(() => {
                                                                             const dbItem = allDbItems?.find(d => d.id === item.itemId || d.id === item.id);
                                                                             return item.hsCodePrimary || dbItem?.hsCodePrimary || "—";
@@ -630,7 +630,7 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                                             </div>
                                                         ))}
                                                         {inv.items.length > 3 && (
-                                                            <span className="text-[10px] text-gray-400 pr-1">
+                                                            <span className="text-[10px] aseel-text-soft pr-1">
                                                                 +{inv.items.length - 3} المزيد
                                                             </span>
                                                         )}
@@ -653,7 +653,7 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                 {/* القائمة المنبثقة عند النقر على الصف */}
                 {selectedInvoice && menuPosition && (
                     <div
-                        className="context-menu absolute z-50 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-2xl min-w-[240px] animate-in fade-in zoom-in duration-200"
+                        className="context-menu absolute z-50 aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl shadow-2xl min-w-[240px] animate-in fade-in zoom-in duration-200"
                         style={{
                             top: `${menuPosition.top}px`,
                             left: `${menuPosition.left}px`,
@@ -663,14 +663,14 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                         <div className="p-4">
                             <div className="flex items-center justify-between mb-4">
                                 <div className="flex items-center gap-2">
-                                    <FileText className="w-5 h-5 text-blue-500" />
-                                    <span className="font-bold text-gray-900 dark:text-white">
+                                    <FileText className="w-5 h-5 aseel-text-soft" />
+                                    <span className="font-bold aseel-text-ink dark:text-white">
                                         {selectedInvoice.invoiceNumber}
                                     </span>
                                 </div>
                                 <button
                                     onClick={closeContextMenu}
-                                    className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                                    className="p-1 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg"
                                 >
                                     <X className="w-4 h-4" />
                                 </button>
@@ -682,11 +682,11 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                         onViewDetails(selectedInvoice);
                                         closeContextMenu();
                                     }}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:text-blue-600 dark:hover:text-blue-400 rounded-lg transition-colors"
+                                    className="w-full flex items-center gap-3 px-4 py-3 aseel-text-ink dark:aseel-text-soft hover:aseel-bg-accent-bg dark:hover:aseel-bg-panel/20 hover:aseel-text-accent dark:hover:aseel-text-soft rounded-lg transition-colors"
                                 >
-                                    <Eye className="w-4 h-4 text-blue-500" />
+                                    <Eye className="w-4 h-4 aseel-text-soft" />
                                     <span className="font-medium">عرض الفاتورة</span>
-                                    <span className="text-xs text-gray-400 ml-auto">للقراءة فقط</span>
+                                    <span className="text-xs aseel-text-soft ml-auto">للقراءة فقط</span>
                                 </button>
 
                                 <button
@@ -694,7 +694,7 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                         onEdit(selectedInvoice);
                                         closeContextMenu();
                                     }}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-green-50 dark:hover:bg-green-900/20 hover:text-green-600 dark:hover:text-green-400 rounded-lg transition-colors"
+                                    className="w-full flex items-center gap-3 px-4 py-3 aseel-text-ink dark:aseel-text-soft hover:bg-green-50 dark:hover:bg-green-900/20 hover:text-green-600 dark:hover:text-green-400 rounded-lg transition-colors"
                                 >
                                     <Edit2 className="w-4 h-4 text-green-500" />
                                     <span className="font-medium">تعديل الفاتورة</span>
@@ -705,27 +705,27 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                         if (onConvertToMain) onConvertToMain(selectedInvoice);
                                         closeContextMenu();
                                     }}
-                                    className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/20 hover:text-[var(--color-primary-hover)] dark:hover:text-[var(--color-primary-hover)] rounded-lg transition-colors"
+                                    className="w-full flex items-center gap-3 px-4 py-3 aseel-text-ink dark:aseel-text-soft hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/20 hover:text-[var(--color-primary-hover)] dark:hover:text-[var(--color-primary-hover)] rounded-lg transition-colors"
                                 >
                                     <ArrowRight className="w-4 h-4 text-[var(--color-primary)]" />
                                     <span className="font-medium">تحويل إلى فاتورة رئيسية</span>
                                 </button>
 
-                                <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                                <div className="mt-4 pt-4 border-t aseel-border-soft dark:aseel-border-soft">
                                     <button
                                         onClick={() => {
                                             if (onDelete) onDelete(selectedInvoice);
                                             closeContextMenu();
                                         }}
-                                        className="w-full flex items-center gap-3 px-4 py-3 text-gray-700 dark:text-gray-300 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-400 rounded-lg transition-colors"
+                                        className="w-full flex items-center gap-3 px-4 py-3 aseel-text-ink dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel/20 hover:aseel-text-state dark:hover:aseel-text-soft rounded-lg transition-colors"
                                     >
-                                        <Trash2 className="w-4 h-4 text-red-500" />
+                                        <Trash2 className="w-4 h-4 aseel-text-soft" />
                                         <span className="font-medium">حذف نهائي</span>
                                     </button>
                                 </div>
 
-                                <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                                    <div className="text-xs text-gray-500 dark:text-gray-400 text-center">
+                                <div className="mt-4 pt-4 border-t aseel-border-soft dark:aseel-border-soft">
+                                    <div className="text-xs aseel-text-soft dark:aseel-text-soft text-center">
                                         انقر خارج القائمة للإغلاق
                                     </div>
                                 </div>
@@ -736,18 +736,18 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
 
                 {/* معلومات وأدوات التصفح */}
                 {sortedInvoices.length === 0 ? (
-                    <div className="text-center py-12 border-t border-gray-200 dark:border-gray-700">
+                    <div className="text-center py-12 border-t aseel-border-soft dark:aseel-border-soft">
                         <div className="flex flex-col items-center justify-center gap-4">
-                            <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center">
-                                <Search className="w-8 h-8 text-gray-400" />
+                            <div className="w-16 h-16 aseel-bg-panel dark:aseel-bg-panel rounded-full flex items-center justify-center">
+                                <Search className="w-8 h-8 aseel-text-soft" />
                             </div>
-                            <div className="text-gray-400 dark:text-gray-500">
+                            <div className="aseel-text-soft dark:aseel-text-soft">
                                 <div className="font-medium text-lg">لم يتم العثور على نتائج</div>
                                 <div className="text-sm mt-1">جرب تعديل معايير البحث أو الفلترة</div>
                             </div>
                             <button
                                 onClick={clearAllFilters}
-                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white rounded-lg flex items-center gap-2 transition-colors"
+                                className="px-4 py-2 aseel-bg-accent hover:aseel-bg-accent dark:aseel-bg-accent-bg dark:hover:aseel-bg-accent text-white rounded-lg flex items-center gap-2 transition-colors"
                             >
                                 <X className="w-4 h-4" />
                                 مسح جميع الفلاتر
@@ -758,16 +758,16 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                     <>
                         {/* تفاصيل الفلترة النشطة */}
                         {hasActiveFilters && (
-                            <div className="px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                            <div className="px-6 py-3 border-t aseel-border-soft dark:aseel-border-soft aseel-bg-panel dark:aseel-bg-panel/50">
                                 <div className="flex flex-wrap items-center gap-2 text-sm">
-                                    <span className="text-gray-600 dark:text-gray-400">فلاتر نشطة:</span>
+                                    <span className="aseel-text-soft dark:aseel-text-soft">فلاتر نشطة:</span>
 
                                     {searchTerm && (
-                                        <span className="inline-flex items-center gap-1 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-2 py-1 rounded-full text-xs">
+                                        <span className="inline-flex items-center gap-1 aseel-bg-accent-bg dark:aseel-bg-panel/30 aseel-text-accent dark:aseel-text-soft px-2 py-1 rounded-full text-xs">
                                             بحث: "{searchTerm}"
                                             <button
                                                 onClick={() => setSearchTerm('')}
-                                                className="p-0.5 hover:bg-blue-200 dark:hover:bg-blue-900/50 rounded-full"
+                                                className="p-0.5 hover:aseel-bg-grid-head dark:hover:aseel-bg-panel/50 rounded-full"
                                             >
                                                 <X className="w-3 h-3" />
                                             </button>
@@ -796,10 +796,10 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                         )}
 
                         {/* التصفح */}
-                        <div className="px-6 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+                        <div className="px-6 py-3 border-t aseel-border-soft dark:aseel-border-soft aseel-bg-panel dark:aseel-bg-panel/50">
                             <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-                                <div className="text-sm text-gray-600 dark:text-gray-400">
-                                    عرض <span className="font-bold text-blue-600 dark:text-blue-400">{startIndex + 1}</span> إلى <span className="font-bold text-blue-600 dark:text-blue-400">{Math.min(endIndex, sortedInvoices.length)}</span> من أصل <span className="font-bold">{sortedInvoices.length}</span> فاتورة
+                                <div className="text-sm aseel-text-soft dark:aseel-text-soft">
+                                    عرض <span className="font-bold aseel-text-accent dark:aseel-text-soft">{startIndex + 1}</span> إلى <span className="font-bold aseel-text-accent dark:aseel-text-soft">{Math.min(endIndex, sortedInvoices.length)}</span> من أصل <span className="font-bold">{sortedInvoices.length}</span> فاتورة
                                     {sortedInvoices.length !== invoices.length && (
                                         <span className="text-xs"> (مفلترة من {invoices.length})</span>
                                     )}
@@ -811,7 +811,7 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                         <button
                                             onClick={() => goToPage(currentPage - 1)}
                                             disabled={currentPage === 1}
-                                            className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                            className="p-2 aseel-text-soft dark:aseel-text-soft hover:aseel-text-ink dark:hover:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             <ChevronRight className="w-4 h-4" />
                                         </button>
@@ -824,14 +824,14 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                                         key={idx}
                                                         onClick={() => goToPage(page)}
                                                         className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${currentPage === page
-                                                            ? 'bg-blue-600 text-white'
-                                                            : 'bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
+                                                            ? 'aseel-bg-accent text-white'
+                                                            : 'aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft aseel-text-ink dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel'
                                                             }`}
                                                     >
                                                         {page}
                                                     </button>
                                                 ) : (
-                                                    <span key={idx} className="px-2 text-gray-400">...</span>
+                                                    <span key={idx} className="px-2 aseel-text-soft">...</span>
                                                 )
                                             ))}
                                         </div>
@@ -840,7 +840,7 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                         <button
                                             onClick={() => goToPage(currentPage + 1)}
                                             disabled={currentPage === totalPages}
-                                            className="p-2 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                            className="p-2 aseel-text-soft dark:aseel-text-soft hover:aseel-text-ink dark:hover:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
                                             <ChevronLeft className="w-4 h-4" />
                                         </button>
