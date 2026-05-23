@@ -64,6 +64,11 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
     payment_date = models.DateField(null=True, blank=True, db_column='payment_date')
     started_production_at = models.DateField(null=True, blank=True, db_column='started_production_at')
 
+    book_number = models.PositiveIntegerField(
+        default=0, db_column='BookNumber',
+        help_text='رقم الدفتر. 0 = يدوي. >0 = مسلسل لكل دفتر مستقل.',
+    )
+
     # V2 Overhaul Fields
     payment_status = models.CharField(
         max_length=20, 
@@ -433,6 +438,10 @@ class LogisticsClearance(models.Model):
     id = models.AutoField(primary_key=True, db_column='ClearanceID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
     shipment = models.OneToOneField(LogisticsShipment, on_delete=models.CASCADE, db_column='ShipmentID', related_name='clearance')
+    book_number = models.PositiveIntegerField(
+        default=0, db_column='BookNumber',
+        help_text='رقم الدفتر. 0 = يدوي. >0 = مسلسل لكل دفتر مستقل.',
+    )
     customs_broker = models.ForeignKey(Partner, on_delete=models.SET_NULL, null=True, db_column='CustomsBrokerID', related_name='clearances_as_broker')
     declaration_number = models.CharField(max_length=100, null=True, blank=True, db_column='DeclarationNumber')
     clearance_date = models.DateField(null=True, blank=True, db_column='ClearanceDate')

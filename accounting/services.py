@@ -52,6 +52,20 @@ def next_document_number(
         return next_num
 
 
+# ── N8-T5: Thin wrappers للـDeal/Shipment/Clearance ────────────
+
+def next_deal_number(tenant_id: int, book_number: int = 0) -> int:
+    return next_document_number(tenant_id, 'deal', book_number=book_number)
+
+
+def next_shipment_number(tenant_id: int, book_number: int = 0) -> int:
+    return next_document_number(tenant_id, 'shipment', book_number=book_number)
+
+
+def next_clearance_number(tenant_id: int, book_number: int = 0) -> int:
+    return next_document_number(tenant_id, 'clearance', book_number=book_number)
+
+
 # ─────────────────────────────────────────────────────────
 #  Currency Conversion Utilities
 # ─────────────────────────────────────────────────────────
@@ -430,6 +444,25 @@ def post_journal(
             currency=currency,
             exchange_rate=exchange_rate,
         )
+
+        # N8-T6: التحقق من طبيعة الحساب (مدين فقط/دائن فقط)
+        account_ids = {r["account"] for r in lines_data}
+        nature_map = {
+            a.id: a.nature
+            for a in Account.objects.filter(id__in=account_ids).only("id", "nature")
+        }
+        for row in lines_data:
+            nature = nature_map.get(row["account"])
+            debit = Decimal(str(row.get("debit", 0)))
+            credit = Decimal(str(row.get("credit", 0)))
+            if nature == Account.NATURE_DEBIT_ONLY and credit > 0:
+                raise ValidationError(
+                    f"الحساب #{row['account']} طبيعته «مدين فقط» — لا يمكن إضافة مبلغ دائن."
+                )
+            if nature == Account.NATURE_CREDIT_ONLY and debit > 0:
+                raise ValidationError(
+                    f"الحساب #{row['account']} طبيعته «دائن فقط» — لا يمكن إضافة مبلغ مدين."
+                )
 
         for row in lines_data:
             JournalLine.objects.create(
