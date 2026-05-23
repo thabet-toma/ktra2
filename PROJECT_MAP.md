@@ -529,7 +529,31 @@ System-wide cleanup — 8 tasks.
 ### Updated [ORPHANS & PENDING] post-N9
 - **N0..N9 complete:** Foundation (N0), primitives (N1), procurement forms inside-out (N2, 4 forms), accounting suite (N3, 13 tasks), sales suite (N4, 9 + 3 new), inventory/items/suppliers (N5, 8 + 1 new), procurement managements (N6, 3 lists), HR/Admin/Dashboard/SQL (N7, 9 tasks), backend hardening (N8, 11 models/services), system cleanup (N9, 8 tasks) = **68 frontend + 11 backend tasks delivered**.
 - **DataGrid → AseelDenseTable migration progress:** L1-L5/L7-L8/L10-L12/L14-L15/L17-L18 + H1-H5/H8 + SQL×4 done (22/22 + HR/SQL). L13 (realestate, out of scope) + L16 (CoA tree, done via N3-T3) = **complete**.
-- **Pending:** N10 (final review + verification + push to main).
+- **Pending:** P-C through P-K (task6 data normalization, multi-tenancy hardening, UI density redesign).
 - **Git hygiene (improved):** `sales/` app now fully tracked. All N8 migrations applied. No schema drift.
 - **Disjoint payment models:** still unresolved (deal-level Firestore vs SQL CustomerPayment). `core/payments.py` foundation layer (I4-09) available but not wired.
 - **`frontend/` Next.js app:** still unrelated to ERP; keep separate or move out of repo.
+
+## [TASK6 — P-A + P-B DONE 2026-05-24]
+
+> **Status:** P-A + P-B completed on branch `claude/task6`. Commit `04b0696`.
+
+### P-A — Foundation: Baseline + Safety Net
+- **P-A-1:** Baseline metrics recorded in `task6_baseline.md` (tsc=41, vite=success, manage.py check=0, 16 `:any`, console.log=0)
+- **P-A-2:** Branch `claude/task6` created
+- **P-A-3:** `eslint-plugin-react-hooks` installed as devDependency, `eslint.config.js` created with react-hooks recommended rules
+- **P-A-4:** PDF error scenarios documented in baseline
+
+### P-B — Critical Runtime Hotfixes
+- **P-B-1 (VII-1):** Moved `showAccountBalance` useCallback from after early return (line 444) to before loading guard in `AccountingJournalEntryPage.tsx:327`
+- **P-B-2 (VII-4):** Created `core/exception_handler.py` — converts `Django ValidationError` to `DRF ValidationError` (400 instead of 500), logs unhandled exceptions. Registered in `REST_FRAMEWORK.EXCEPTION_HANDLER`
+- **P-B-3 (VII-2):** `autoDisableScheduler.ts` replaced with no-op (start/stop do nothing, public API preserved)
+- **P-B-4 (VII-3):** Removed missing 192x192 icon reference from `site.webmanifest`
+- **P-B-5 (VII-6):** Created `seed_minimum_tenant.py` management command — creates Tenant + ILS/USD currencies + basic account tree (1000-5000) + current FiscalPeriod. Idempotent.
+- **P-B-6 (VII-5):** Replaced `console.error` + `alert` with `setWorkflowError` state + red error banner in `DealForm.tsx`
+
+### Verified
+- `manage.py check` = 0 issues
+- `makemigrations --check` = no drift
+- `vite build` = success (3395 modules)
+- No new migrations required
