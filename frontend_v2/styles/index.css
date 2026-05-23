@@ -964,6 +964,27 @@ tbody td {
 [data-skin="aseel"] .aseel-date-cal__day--today { border-color: var(--aseel-accent); font-weight: bold; }
 [data-skin="aseel"] .aseel-date-cal__day--sel { background: var(--aseel-accent); color: var(--aseel-on-accent, #fff); }
 
+/* ── N9-T3: Dark Aseel (data-theme="dark") ───────────────────────────── */
+[data-skin="aseel"][data-theme="dark"] {
+  --aseel-bg: #2b2b1c;
+  --aseel-panel: #363626;
+  --aseel-field: #404030;
+  --aseel-field-hl: #3a4a5a;
+  --aseel-field-focus: #4a4a3a;
+  --aseel-border: #6a6a4e;
+  --aseel-border-soft: #5a5a42;
+  --aseel-line: #4a4a34;
+  --aseel-ink: #e8e4d0;
+  --aseel-ink-soft: #a8a490;
+  --aseel-accent: #6a9fc8;
+  --aseel-accent-bg: #2a4a6a;
+  --aseel-accent-bd: #4a7aaa;
+  --aseel-state: #e06050;
+  --aseel-grid-head: #3a3a2a;
+  --aseel-row-alt: #323226;
+  --aseel-row-sel: #2a4a5a;
+}
+
 /* ── N9-T1: Aseel utility tokens (replace Tailwind named colors in screens) ── */
 [data-skin="aseel"] .aseel-bg-panel { background: var(--aseel-panel); }
 [data-skin="aseel"] .aseel-bg-field { background: var(--aseel-field); }
@@ -983,3 +1004,62 @@ tbody td {
 [data-skin="aseel"] .aseel-badge-state { background: #fce4e4; color: var(--aseel-state); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
 [data-skin="aseel"] .aseel-badge-ok { background: #e4f0e4; color: #2e7d32; padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
 [data-skin="aseel"] .aseel-badge-neutral { background: var(--aseel-panel); color: var(--aseel-ink-soft); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
+
+/* ── N9-T4: Mobile RTL — headband single col <640px, toolbar 2 rows ── */
+@media (max-width: 640px) {
+  [data-skin="aseel"] .aseel-headband {
+    grid-template-columns: 1fr !important;
+    gap: 2px !important;
+    padding: 4px !important;
+  }
+  [data-skin="aseel"] .aseel-headband .aseel-field-row {
+    grid-template-columns: 1fr !important;
+  }
+  [data-skin="aseel"] .aseel-toolbar {
+    flex-wrap: wrap !important;
+    gap: 2px !important;
+  }
+  [data-skin="aseel"] .aseel-toolbar .aseel-toolbar-group {
+    flex: 1 1 45% !important;
+    min-width: 0 !important;
+  }
+  [data-skin="aseel"] .aseel-grid {
+    font-size: 10px !important;
+  }
+  [data-skin="aseel"] .aseel-doc {
+    padding: 2px !important;
+  }
+}
+
+/* ── N9-T5: Print CSS ─────────────────────────────────── */
+@media print {
+  [data-skin="aseel"] .aseel-sidebar,
+  [data-skin="aseel"] .aseel-toolbar,
+  [data-skin="aseel"] .aseel-statusbar-global,
+  [data-skin="aseel"] .aseel-doc-statusbar,
+  [data-skin="aseel"] .aseel-pagination {
+    display: none !important;
+  }
+  [data-skin="aseel"] .aseel-grid {
+    width: 100% !important;
+    font-size: 9pt !important;
+    border-collapse: collapse !important;
+  }
+  [data-skin="aseel"] .aseel-grid th,
+  [data-skin="aseel"] .aseel-grid td {
+    border: 1px solid #000 !important;
+    padding: 3px 4px !important;
+  }
+  [data-skin="aseel"] .aseel-doc {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #000 !important;
+  }
+  [data-skin="aseel"] .aseel-doc-titlebar h2:after {
+    content: " — مطبوع";
+    font-size: 10pt;
+    color: #666;
+  }
+}

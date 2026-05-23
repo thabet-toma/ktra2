@@ -52,3 +52,6 @@ export type { AseelDateInputProps } from './AseelDateInput';
 // N9-T2
 export { AseelSpinner, AseelEmptyState, AseelErrorState } from './AseelStates';
 export type { AseelSpinnerProps, AseelEmptyStateProps, AseelErrorStateProps } from './AseelStates';
+// N9-T7
+export { AseelContextMenu } from './AseelContextMenu';
+export type { AseelContextMenuAction, AseelContextMenuProps } from './AseelContextMenu';

@@ -51,9 +51,13 @@ export type AseelDenseTableProps<T> = {
   emptyHint?: React.ReactNode;
   /** Show "جاري التحميل…" instead of empty hint while data is loading. */
   loading?: boolean;
+  /** Show export CSV button in top-right. */
+  exportable?: boolean;
+  /** Filename for CSV export (without .csv). */
+  exportFilename?: string;
 };
 
-export function AseelDenseTable<T>({
+export function AseelDenseTable<T extends Record<string, any>>({
   columns,
   rows,
   getRowKey,
@@ -70,6 +74,8 @@ export function AseelDenseTable<T>({
   className = '',
   emptyHint = 'لا توجد سجلات',
   loading = false,
+  exportable = false,
+  exportFilename = 'export',
 }: AseelDenseTableProps<T>) {
   const totalCols = columns.length + (selectable ? 1 : 0);
   const [hoveredKey, setHoveredKey] = useState<string | number | null>(null);
@@ -86,8 +92,41 @@ export function AseelDenseTable<T>({
     return 'left';
   };
 
+  const handleExport = () => {
+    const headers = columns.map((c) => c.header);
+    const csvRows = [
+      headers.join(','),
+      ...rows.map((row) =>
+        columns
+          .map((col) => {
+            const val = col.render ? String(col.render(row, 0)) : String(row[col.key] ?? '');
+            return `"${val.replace(/"/g, '""')}"`;
+          })
+          .join(',')
+      ),
+    ];
+    if (footer && typeof footer === 'string') {
+      csvRows.push(`"${footer}"`);
+    }
+    const bom = '\uFEFF';
+    const blob = new Blob([bom + csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${exportFilename}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className={`aseel-dense-table ${className}`}>
+      {exportable && rows.length > 0 && (
+        <div className="aseel-dense-toolbar">
+          <button className="aseel-btn" onClick={handleExport} title="تصدير CSV" style={{ marginRight: 'auto' }}>
+            تصدير
+          </button>
+        </div>
+      )}
       <table className="aseel-grid" data-variant="list">
         <thead>
           <tr>
