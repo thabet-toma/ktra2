@@ -63,6 +63,24 @@ class Partner(models.Model):
     currency = models.ForeignKey(Currency, on_delete=models.SET_NULL, null=True, blank=True, related_name='partners', db_column='CurrencyID')
     linked_account = models.ForeignKey('accounting.Account', on_delete=models.SET_NULL, null=True, blank=True, related_name='linked_partners', db_column='LinkedAccountID')
     image_path = models.CharField(max_length=512, blank=True, null=True, db_column='ImagePath')
+    # ── N8-T8: Partner enrichment fields ────────────────────────
+    default_cost_center = models.ForeignKey(
+        'accounting.CostCenter', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='DefaultCostCenterID', related_name='partners_with_default',
+        help_text='مركز التكلفة الافتراضي للشريك',
+    )
+    end_of_dealing_date = models.DateField(
+        null=True, blank=True, db_column='EndOfDealingDate',
+        help_text='تاريخ انتهاء التعامل — تحذير عند إضافة معاملات بعد هذا التاريخ',
+    )
+    assigned_price_tier = models.PositiveSmallIntegerField(
+        null=True, blank=True, db_column='AssignedPriceTier',
+        help_text='شريحة الأسعار المخصصة (1-5) — تُستخدم في فواتير المبيعات',
+    )
+    password_for_invoices = models.CharField(
+        max_length=50, null=True, blank=True, db_column='PasswordForInvoices',
+        help_text='كلمة مرور للفاتورة — يُتحقَّق منها عند إنشاء فاتورة',
+    )
     
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
 
