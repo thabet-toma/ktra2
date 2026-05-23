@@ -4,8 +4,8 @@
  */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Deal, DealItem, PriceOffer, User, DealStatus, Item, Supplier } from '../../types';
-import { priceOffersService, itemsService, suppliersService } from '../../services/firestoreService';
+import { Deal, DealItem, PriceOffer, User, Supplier } from '../../types';
+import { priceOffersService, suppliersService } from '../../services/firestoreService';
 import { dealsService } from '../../services/dealsService';
 import { DealForm } from './deals/DealForm';
 import { DealPrintView } from './deals/DealPrintView';
@@ -13,6 +13,7 @@ import { Plus, FileInput, Printer, Edit2, Trash2, RefreshCw } from 'lucide-react
 import { LoadingSpinner } from '../LoadingSpinner';
 import { PriceOfferSelectionModal } from './price-offers/PriceOfferSelectionModal';
 import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
+import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
 
 interface DealManagementProps {
     currentUser: User;
@@ -86,7 +87,6 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
     const [deals, setDeals] = useState<Deal[]>([]);
     const [priceOffers, setPriceOffers] = useState<PriceOffer[]>([]);
-    const [items, setItems] = useState<Item[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
     const [currentDeal, setCurrentDeal] = useState<Partial<Deal> | null>(null);
     const [dealToPrint, setDealToPrint] = useState<Deal | null>(null);
@@ -94,6 +94,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
+    const searchInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
         const path = (location.pathname || '/').replace(/\/$/, '') || '/';
@@ -112,9 +113,8 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 o.status === 'approved_for_shipping' || o.status === 'under_discussion'
             ));
         });
-        const unsubItems = itemsService.subscribeToItems(setItems);
         const unsubSuppliers = suppliersService.subscribeToSuppliers(setSuppliers);
-        return () => { unsubDeals(); unsubOffers(); unsubItems(); unsubSuppliers(); };
+        return () => { unsubDeals(); unsubOffers(); unsubSuppliers(); };
     }, []);
 
     const dealRefFromQuery = useMemo(() => {
@@ -265,7 +265,12 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     };
 
     const handleEdit = (deal: Deal) => {
-        navigate(`/deals/${encodeURIComponent(deal.id)}`);
+        // الأصل: يفتح في تاب جديد كي لا يفقد المستخدم سياق القائمة
+        window.open(
+            `${window.location.origin}/deals/${encodeURIComponent(deal.id)}`,
+            '_blank',
+            'noopener,noreferrer',
+        );
     };
 
     const handleSave = () => {
@@ -383,6 +388,16 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         },
     ];
 
+    // N0-T7 — keymap على قائمة الصفقات (list mode فقط)
+    useAseelIndexKeymap(
+        {
+            CtrlIns: handleCreateNew,
+            F6: () => searchInputRef.current?.focus(),
+            Escape: () => { setSearch(''); setStatusFilter('all'); },
+        },
+        { enabled: viewMode === 'list' && !dealToPrint && !isOfferModalOpen },
+    );
+
     if (loading) return <LoadingSpinner />;
 
     // وضع النموذج
@@ -416,11 +431,12 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 <span className="aseel-status-item">مكتمل: <b>{stats.completed}</b></span>
                 <span className="aseel-status-item">القيمة: <b>${(stats.totalValue / 1000).toFixed(1)}K</b></span>
                 <div style={{ flex: 1 }} />
-                {/* بحث */}
+                {/* بحث (F6 = focus) */}
                 <input
+                    ref={searchInputRef}
                     className="aseel-input"
                     style={{ width: 200 }}
-                    placeholder="بحث برقم الصفقة، المورد، المنتج…"
+                    placeholder="بحث برقم الصفقة، المورد، المنتج… (F6)"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />

@@ -4,15 +4,15 @@
  */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Shipment, User, Supplier, Deal } from '../../../types';
+import { Shipment, User, Supplier } from '../../../types';
 import { shipmentsService } from '../../../services/shipmentsService';
 import { suppliersService } from '../../../services/firestoreService';
-import { dealsService } from '../../../services/dealsService';
 import { Plus, Eye, Edit, Trash2, RefreshCw } from 'lucide-react';
 import { LoadingSpinner } from '../../LoadingSpinner';
 import { ShipmentForm } from './ShipmentForm';
 import { ShipmentDetailView } from './ShipmentDetailView';
 import { AseelDenseTable, type DenseColumn } from '../../aseel/AseelDenseTable';
+import { useAseelIndexKeymap } from '../../aseel/useAseelIndexKeymap';
 
 interface ShipmentManagementProps {
     currentUser: User;
@@ -72,13 +72,13 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
     const [shipments, setShipments] = useState<Shipment[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-    const [deals, setDeals] = useState<Deal[]>([]);
     const [currentShipment, setCurrentShipment] = useState<Partial<Shipment> | null>(null);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [typeFilter, setTypeFilter] = useState<'all' | 'sea' | 'air'>('all');
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [viewingShipment, setViewingShipment] = useState<Shipment | null>(null);
+    const searchInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
         const path = (location.pathname || '/').replace(/\/$/, '') || '/';
@@ -95,10 +95,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
         const unsubSuppliers = suppliersService.subscribeToSuppliers((all) => {
             setSuppliers(all.filter(s => s.type === 'shipping_agent'));
         });
-        const unsubDeals = dealsService.subscribeToDeals((all) => {
-            setDeals(all.filter(d => d.status === 'completed'));
-        });
-        return () => { unsubShipments(); unsubSuppliers(); unsubDeals(); };
+        return () => { unsubShipments(); unsubSuppliers(); };
     }, []);
 
     useEffect(() => {
@@ -297,6 +294,16 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
         },
     ];
 
+    // N0-T7 — keymap على قائمة الشحنات (list mode فقط)
+    useAseelIndexKeymap(
+        {
+            CtrlIns: handleCreateNew,
+            F6: () => searchInputRef.current?.focus(),
+            Escape: () => { setSearch(''); setTypeFilter('all'); setStatusFilter('all'); },
+        },
+        { enabled: viewMode === 'list' && !viewingShipment },
+    );
+
     if (loading) return <LoadingSpinner />;
 
     if (viewMode === 'form' && currentShipment) {
@@ -330,9 +337,10 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                 <span className="aseel-status-item">إجمالي التكلفة: <b>${fmtAmt(stats.totalCost)}</b></span>
                 <div style={{ flex: 1 }} />
                 <input
+                    ref={searchInputRef}
                     className="aseel-input"
                     style={{ width: 190 }}
-                    placeholder="بحث برقم الشحنة، الوكيل…"
+                    placeholder="بحث برقم الشحنة، الوكيل… (F6)"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />
