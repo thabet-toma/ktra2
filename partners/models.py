@@ -81,6 +81,11 @@ class Partner(models.Model):
         max_length=50, null=True, blank=True, db_column='PasswordForInvoices',
         help_text='كلمة مرور للفاتورة — يُتحقَّق منها عند إنشاء فاتورة',
     )
+    # ── N9-T8: Row color ──
+    row_color = models.CharField(
+        max_length=7, null=True, blank=True, db_column='RowColor',
+        help_text='لون HEX (مثل #ff0000) لتلوين صف الشريك في الجداول',
+    )
     
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
 

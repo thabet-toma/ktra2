@@ -51,6 +51,8 @@ export type AseelDenseTableProps<T> = {
   emptyHint?: React.ReactNode;
   /** Show "جاري التحميل…" instead of empty hint while data is loading. */
   loading?: boolean;
+  /** Key on each row that holds a HEX color string for row-level text-color override. */
+  rowColorKey?: string;
   /** Show export CSV button in top-right. */
   exportable?: boolean;
   /** Filename for CSV export (without .csv). */
@@ -74,6 +76,7 @@ export function AseelDenseTable<T extends Record<string, any>>({
   className = '',
   emptyHint = 'لا توجد سجلات',
   loading = false,
+  rowColorKey,
   exportable = false,
   exportFilename = 'export',
 }: AseelDenseTableProps<T>) {
@@ -168,6 +171,7 @@ export function AseelDenseTable<T extends Record<string, any>>({
                   isSelected ? 'aseel-row--selected' : '',
                   isHovered ? 'aseel-row--hover' : '',
                 ].filter(Boolean).join(' ')}
+                style={rowColorKey && row[rowColorKey] ? { color: row[rowColorKey] } : undefined}
                 onClick={() => onRowClick?.(row)}
                 onDoubleClick={() => onRowDoubleClick?.(row)}
                 onMouseEnter={() => setHoveredKey(key)}
