@@ -633,3 +633,53 @@ def year_end_close(*, tenant_id: int, fiscal_year: int, retained_earnings_accoun
         "rows_count": len(lines_data),
     }
 
+
+# ── N8-T14: Cheque movements ─────────────────────────────────
+
+VALID_TRANSITIONS = {
+    'Draft':           {'deposit', 'withdraw'},
+    'Under_Collection': {'collect', 'bounce'},
+    'Collected':        set(),
+    'Bounced':          {'return_to_customer', 'settle'},
+    'Returned':         set(),
+    'Settled':          set(),
+}
+
+STATUS_MAP = {
+    'deposit':            'Under_Collection',
+    'withdraw':           'Collected',
+    'collect':            'Collected',
+    'bounce':             'Bounced',
+    'return_to_customer': 'Returned',
+    'settle':             'Settled',
+}
+
+
+def transfer_cheque(cheque_id, movement_type, *, user=None, notes=''):
+    from .models import Cheque, ChequeMovement
+    cheque = Cheque.objects.select_related('tenant').get(pk=cheque_id)
+    allowed = VALID_TRANSITIONS.get(cheque.status, set())
+    if movement_type not in allowed:
+        raise ValidationError(
+            f"لا يمكن تنفيذ «{movement_type}» على شيك بحالة «{cheque.status}»."
+        )
+    next_status = STATUS_MAP[movement_type]
+    with transaction.atomic():
+        ChequeMovement.objects.create(
+            cheque=cheque,
+            movement_type=movement_type,
+            notes=notes,
+            created_by=user,
+        )
+        cheque.status = next_status
+        cheque.save(update_fields=['status'])
+        create_audit_log(
+            tenant=cheque.tenant,
+            user=user,
+            action='UPDATE',
+            model_name='Cheque',
+            object_id=cheque.id,
+            change_details=f"Cheque status → {next_status} via {movement_type}",
+        )
+    return cheque
+

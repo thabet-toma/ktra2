@@ -232,6 +232,36 @@ class Cheque(models.Model):
         return f"Cheque {self.cheque_number} - {self.amount}"
 
 
+class ChequeMovement(models.Model):
+    """N8-T14: سجل حركة الشيك (إيداع، صرف، رفض، إرجاع، تسوية)."""
+    MOVEMENT_TYPES = [
+        ('deposit', 'إيداع'),
+        ('withdraw', 'صرف'),
+        ('bounce', 'رفض'),
+        ('return_to_customer', 'إرجاع للعميل'),
+        ('settle', 'تسوية'),
+    ]
+    id = models.AutoField(primary_key=True, db_column='ChequeMovementID')
+    cheque = models.ForeignKey(
+        Cheque, on_delete=models.CASCADE, db_column='ChequeID',
+        related_name='movements',
+    )
+    movement_type = models.CharField(max_length=30, choices=MOVEMENT_TYPES, db_column='MovementType')
+    notes = models.TextField(null=True, blank=True, db_column='Notes')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy_UserID',
+    )
+
+    class Meta:
+        db_table = 'cheque_movements'
+        managed = True
+        verbose_name = 'Cheque Movement'
+        verbose_name_plural = 'Cheque Movements'
+
+    def __str__(self):
+        return f"{self.movement_type} — Cheque #{self.cheque_id}"
 
 
 class AccountingAuditLog(models.Model):
