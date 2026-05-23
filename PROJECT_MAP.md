@@ -365,3 +365,95 @@ Reviewed the external model's T3-01..03 + T4-01/02/03/05. **Bugs fixed:**
 - **N1-T6** `aseel/index.ts`: Barrel exports all 6 primitives. `AseelKitStory.tsx`: Live demos for all primitives with Arabic labels.
 
 **Verified:** `tsc --noEmit` = **78 ≤ 78** · `manage.py check` = 0 issues · All primitives exported + demoed on `/aseel-kit`.
+
+## [TASK5 N2 — DONE & VERIFIED 2026-05-22]
+
+Procurement forms inside-out conversion (4 forms; "shell-only" → full Aseel inside-out per M1 golden template).
+
+- **N2-T1** `procurement/deals/DealForm.tsx`: inside-out rebuild. Aseel header band (16+ fields: رقم/تاريخ/الساعة/تاريخ ثاني/المورد + فهرس/الاسم/العنوان/مشتغل مرخص/طريقة شحن/الحالة/...). `AseelGrid` items variant. Tabs: ملاحظات / الحسابات (journal preview) / أقساط (InstallmentManager wrapped) / الشحنة / بيانات أخرى. Totals dock: مجموع/خصم/قبل الضريبة/الضريبة/المبلغ الإجمالي/المدفوع/المتبقي. Status bar: المستخدم/رقم القيد/المرحلة/السجل n/N/آخر مفتاح. Toolbar: إضافة (Ctrl+Ins) · تخزين (F12) · حذف (Ctrl+Del) · إلغاء · طباعة (F2) · مراجعة الإرسالية (F4) · ترتيب (F5) · بحث (F6). API `dealsService.*` unchanged.
+- **N2-T2** `procurement/shipments/ShipmentForm.tsx`: inside-out rebuild. Aseel header band (18+ fields incl. نوع الإرسالية فاتورة/نقل + رقم البوليصة/الحاوية + المغادرة/الوصول). When `shipment_type='transport'`, shows AseelFormSection "بيانات النقل المحلي" (السائق + فهرس / رقم السيارة / أجرة نقل الوحدة/الكمية / حساب أجرة النقل + فهرس / رقم القيد). Tabs: الصفقات المرفقة (`ShipmentDealsTable` wrapped) / تفاصيل الشحن / النقل المحلي (AseelDenseTable) / الدفعات / الحسابات. Totals dock: تكلفة الشحن/الحجم/الوزن/أجرة النقل/المدفوع/المتبقي. زر «تكوين فاتورة» مقيَّد بـ`shipment_type !== 'transport'`.
+- **N2-T3** `procurement/clearance/CustomsClearanceManagement.tsx`: inside-out rebuild. Aseel header band (12+ fields: رقم البيان/تاريخ/الساعة/تاريخ ثاني/رقم القيد/كشف الضريبة/المخلِّص + فهرس/...). `AseelGrid` variant=`journal` columns (seq/account_no/account_name/desc/debit/credit/vat_percent/cost_center). Tabs: الإرساليات المرافقة (AseelDenseTable select-mode) / الحسابات / بيانات أخرى. Totals: المجموع بدون ضريبة / مجموع الضريبة / مبلغ البيان الإجمالي. زر ترحيل مسار landed-cost موجود بلا تغيير.
+- **N2-T4** `procurement/invoices/InvoiceForm.tsx` (purchase): inside-out rebuild. Aseel header band (15+ fields: رقم الفاتورة (manual)/دفتر/تاريخ/الساعة/تاريخ ثاني/تاريخ الاستحقاق/المورد + فهرس/اسم/عنوان/مشتغل مرخص/رقم المستند/عملة/سعر العملة/يشمل ض.ق.م/المخزن). `AseelGrid` items: مسلسل/رقم الصنف + فهرس/كتلوج/اسم/بيان/الوحدة/المخزن/الكمية/إضافي/سعر الوحدة/خصم سطر/الضريبة/السعر الإجمالي. Tabs: الملاحظات / الحسابات / بيانات أخرى / المرفقات. Totals: مجموع البنود/خصم/قبل الضريبة/الضريبة/مدفوع نقدا/مدفوع شيكات/مبلغ الفاتورة/متبقي. F3 = سند الصرف المرفق (placeholder until N8-T12).
+- **N2 review** `e04e2ab`: restored legacy inputs lost in inside-out rebuild (4 forms).
+
+**Verified:** all 4 forms DOM-match Aseel original; no API change in `services/*Api.ts`. `manage.py check` clean.
+
+## [TASK5 N3 — DONE & VERIFIED 2026-05-22]
+
+Accounting suite — 13 tasks: 1 form inside-out · 6 list pages (DenseTable) · 4 reports (ReportTable) · 3 new pages.
+
+### Forms & Lists
+- **N3-T1** `accounting/AccountingJournalEntryPage.tsx` (F7): inside-out form. Aseel header (رقم القيد/تاريخ/الساعة/تاريخ ثاني/البيان الإجمالي/المرجع/العملة/السعر). `AseelGrid` variant=`journal`. Field shortcuts: Space on debit/credit → auto-balance; `*` on account number → balance tooltip; `+` → AseelIndexPicker. Footer: مدين/دائن/فرق. F12 = ترحيل عبر `post_journal()`. Fixed in `df66a15`: actual render of AseelGrid + AseelIndexPicker (was dead-code).
+- **N3-T2** `AccountingJournalListPage.tsx` (L15): AseelDenseTable. Columns per spec: رقم القيد/تاريخ/الساعة/مبلغ/عملة/بيان إجمالي/المستخدم. Filter bar: من-إلى تاريخ/دفتر/حساب/مستخدم. `useAseelIndexKeymap`: F2=drillToLedger, F6=search, Ctrl+Ins=new.
+- **N3-T3** `AccountingCoaPage.tsx` (L16): tree-style table. Columns: كود/الاسم/النوع/الطبيعة (N8-T6)/مدين/دائن/الصافي. Foldable to 3 levels by default. `useAseelIndexKeymap`: F2=drillToLedger, F4=showNotes.
+- **N3-T4** `AccountingChequesPage.tsx` (L14): AseelDenseTable per L14 spec. Columns: رقم الشيك/البنك/الفرع/المبلغ/استحقاق/إصدار/الشريك/الحساب/الحالة/الاتجاه. Filter bar: حالة/استحقاق من-إلى/شريك/اتجاه. Cheque transfer dialog (`N-F9` ChequeTransferDialog) — modal for transferring cheque status; logs `ChequeMovement` (pending N8-T14).
+- **N3-T5** `accounting/FiscalPeriodsPage.tsx` (L17): AseelDenseTable + إقفال/إعادة فتح toolbar.
+- **N3-T6** `accounting/ExchangeRatesPage.tsx` (L18): AseelDenseTable + currency filter.
+
+### Reports (AseelReportTable)
+- **N3-T7** `AccountingGeneralLedgerPage.tsx` (R1): filterBar (account/from-to date/book/currency). Columns: التاريخ/رقم القيد/البيان/المدين/الدائن/الرصيد التراكمي/رقم القيد المرجعي. Footer: مدين/دائن/الرصيد النهائي. Export CSV.
+- **N3-T8** `AccountingTrialBalancePage.tsx` (R2): filterBar (date/branch). Columns: كود/اسم/النوع/مدين/دائن. Footer validates مدين = دائن.
+- **N3-T9** `AccountingVatReportPage.tsx` (R3): 2-section (ضريبة مخرجات / ضريبة مدخلات / الصافي). Filter: period.
+- **N3-T10** `AccountingLandedCostPage.tsx` (R4): per item allocation share of shipping/clearance. Filters: shipment/deal/period.
+
+### New Pages
+- **N3-T11** `BalanceSheetPage.tsx` (R5، N-F6): الميزانية العمومية + accompanying statements (مدينون، دائنون، تشغيل، متاجرة، أرباح/خسائر، إيرادات/مصروفات). Filters: as-of date + currency + branch.
+- **N3-T12** `IncomeStatementPage.tsx` (R6، N-F7): كشف الإيرادات والمصروفات (periodic).
+- **N3-T13** `VatStatementsPage.tsx` (N-F5): periodic VAT statements list + creation form. DenseTable for past statements; new statement aggregates invoices in period with `vat_statement IS NULL`.
+
+### Wiring
+- `App.tsx` + sidebar updated with routes for 3 new pages. `AppView` types extended.
+
+**Verified:** `manage.py check` = 0 issues · `tsc --noEmit` within budget · all pages DOM-match Aseel spec. 6 audit fixes applied (`d6c5739`).
+
+## [TASK5 N4 — DONE & VERIFIED 2026-05-22]
+
+Sales sub-pages — 9 tasks: 3 lists · 3 form inside-out · 3 new documents.
+
+### Lists & Forms (existing)
+- **N4-T1** `sales/SalesInvoicesPage.tsx` (L7): AseelDocumentShell + AseelDenseTable per spec. Columns: رقم/تاريخ/العميل/النوع/الحالة/الإجمالي/المدفوع/المتبقي/الكشف/إجراءات. Ctrl+Ins opens SalesInvoiceEditor. F2=drill, F6=focus search.
+- **N4-T2** `sales/SalesCustomersPage.tsx` (L8): AseelDenseTable + Partner N8-T8 fields (default_cost_center, end_of_dealing_date, assigned_price_tier).
+- **N4-T3** `sales/SalesSettingsPage.tsx` (L9): AseelDocumentShell wrap + pointer to GroupConstantsPage for moved fields.
+- **N4-T4** `sales/SalesCustomerPaymentsPage.tsx` (F9): financial fields + cheque AseelGrid + tabs. Aseel header (دفتر/رقم السند/التاريخ/الساعة/تاريخ ثاني/العملة/السعر/العميل + فهرس/الصندوق + فهرس). Source discount in voucher itself. AseelGrid for cheques with full columns. Tabs: ملاحظات / الحسابات / بيانات أخرى. زر «اقتراح FIFO» + زر «تعبئة شيكات متشابهة متكرّرة».
+- **N4-T5** `sales/CreditDebitNotesPage.tsx` (F10): tax fields + رقم فاتورة المقاصة + tabs. Aseel header (دفتر/رقم الإشعار/التاريخ/الساعة/تاريخ ثاني/رقم القيد/كشف الضريبة/الحساب + فهرس/رقم فاتورة المقاصة/حساب الإشعار + فهرس/عملة/السعر/النوع مدين/دائن). VAT calc fields. Tabs: ملاحظات / الحسابات.
+- **N4-T6** `sales/SalesQuotationsPage.tsx` (F11): additional fields per spec (فعال حتى تاريخ + فعال checkbox + per-line تاريخ ثاني). Toolbar: «تحويل لفاتورة» (uses `convertQuotationToInvoice`).
+
+### New Documents
+- **N4-T7** `sales/SalesReturnEditor.tsx` (N-F2، جديد): «مرجع البيع» — full document, same structure as SalesInvoiceEditor with `invoice_kind='sale_return'` + `original_invoice` FK. Post reverses original (Dr Sales Return Revenue / Cr AR). Depends on N8-T11 backend.
+- **N4-T8** `sales/PurchaseReturnEditor.tsx` (N-F3، جديد): «مرجع الشراء» — same pattern for Purchase. Depends on N8-T11.
+- **N4-T9** `sales/SupplierPaymentsPage.tsx` (N-F4، جديد): «سند صرف» — mirrors CustomerPayment for suppliers. Depends on N8-T12.
+
+### Wiring
+- `App.tsx` + sidebar links + routes for 3 new pages. `AppView` types extended.
+
+**Verified:** all 9 sales pages DOM-match Aseel; zero API change.
+
+## [TASK5 N5 — DONE & VERIFIED 2026-05-23]
+
+Inventory + Items + Suppliers + Price Offers — 8 tasks.
+
+- **N5-T1** `inventory/StockLevelsPage.tsx` (L11): AseelDenseTable + status/category filters + total inventory value footer. Fix `bfb3b14`: footer span (HTML invalid) + فلتر فئة + فوق الحد الأقصى.
+- **N5-T2** `inventory/StockMovementsPage.tsx` (L12): AseelDenseTable + filters + modal لإضافة حركة.
+- **N5-T3** `items/ItemsManagement.tsx` (L4): SQL products + AseelDenseTable + CRUD helpers.
+- **N5-T4** `items/ItemFormAseel.tsx` (F6): Aseel-style 6-page form per المخازن.txt:11-25 — بيانات عامة / الأرصدة والحركات / أسعار البيع والشراء (5+5 tiers) / بيانات المتاجرة (account overrides) / بيانات أخرى / معادلات التصنيع. Fix `d75acc2`: pending-N8 banners + payload cleanup for supported fields only.
+- **N5-T5** `suppliers/SupplierManagement.tsx` (L5): accountingApi partners + AseelDenseTable + **deleted L6 duplicate** `components/SupplierManagement.tsx` (354 lines removed).
+- **N5-T6** `procurement/PriceOfferManagement.tsx` (L3): AseelDenseTable + فلاتر الحالة. Fix `6ee2d0b`: ربط priceOffersService الصحيح + createdAt.
+- **N5-T7** `procurement/price-offers/PriceOfferForm.tsx` (F5): AseelDocumentShell + 4 offer types + AseelGrid items. Fix `78f1253`: حقول LineItem الصحيحة + حفظ offerType/validUntil/currency.
+- **N5-T8** `inventory/InventoryValuationPage.tsx` (N-F8، جديد): قيمة البضاعة بطرق متعدّدة (FIFO/LIFO/avg-purchase/avg-sale/selected-price). Filters: warehouse/branch/as-of date. Fix `1fb513b`: تَفعيل asOfDate + computeUnitPrice حقيقي + bonus من الحركات.
+
+**Verified:** all 8 inventory/items/suppliers pages on AseelDenseTable. L6 duplicate removed. `services/inventoryApi.ts` extended with helpers. `types/offer.ts` enriched.
+
+## [TASK5 N6 — DONE & VERIFIED 2026-05-23]
+
+Procurement managements — 3 list pages on AseelDenseTable.
+
+- **N6-T1** `procurement/DealManagement.tsx` (L1): AseelDenseTable. Columns: رقم الصفقة (mono) / المورد / الوصف / الحالة (ملوَّنة بـSTATUS_COLORS aseel tokens) / المبلغ / المتبقي (warn/ok by sign) / التاريخ / إجراءات (طباعة/تعديل/حذف). Search includes suppliers lookup. Filter: الحالة (14 status options). Footer: إجمالي + متبقي مجاميع للصفوف المفلترة. Stats band: الإجمالي/نشطة/مكتمل/القيمة. Print overlay via `DealPrintView` preserved. DealForm integration preserved. **− 592 lines, + 273 lines**.
+- **N6-T2** `procurement/shipments/ShipmentManagement.tsx` (L2): AseelDenseTable. Columns: رقم الشحنة (🚢/✈ + mono + صفقات count) / وكيل الشحن / النوع / الحالة (ملوَّنة) / المغادرة / الوصول / التكلفة / إجراءات (عرض/تعديل/حذف). Dual filters: نوع الشحن (بحري/جوي/كل) + الحالة. Stats band: الإجمالي/في الشحن/تم التسليم/إجمالي التكلفة. ShipmentDetailView modal preserved.
+- **N6-T3** `logistics/LocalShippingPage.tsx` (L10): AseelDenseTable. Columns: رقم الشحنة / التاريخ / الناقل (+driver/vehicle) / التخليص / المسار من←إلى / المبلغ (with currency) / الحالة (ملوَّنة) / الترحيل (مرحَّلة/فاتورة) / إجراءات (تعديل/ترحيل/استيراد/إلغاء ترحيل/حذف بحسب الحالة). Filter: الحالة. Stats band per status. **Drawers internal preserved** (`LocalShipmentFormDrawer` + `ImportToInvoiceDrawer`) — كل منطق الـAPI بلا تغيير (يَبقى المصدر المستقل T1-01).
+
+**Verified:** `tsc --noEmit` = **39 errors** (↓ من 67 قبل N5) · `manage.py check` = 0 issues · 0 new migrations (frontend-only) · 3 management pages now Aseel-native.
+
+### Updated [ORPHANS & PENDING] post-N6
+- **N0..N6 complete:** Foundation, primitives, procurement forms inside-out, accounting suite (13), sales suite (9 + 3 new), inventory/items (8 + 1 new), procurement managements (3) = **42 frontend tasks delivered + 3 new docs (Sales Return / Purchase Return / Supplier Payment) wait on N8 backend models**.
+- **Pending:** N7 (HR/Admin/Dashboard/SQL — 9 tasks), N8 (12 backend models: TenantSettings ✓ N0 / TenantBook ✓ N0 / Account.nature / Partner enrichment / Product 5+5 tiers + account_overrides / SalesInvoice.invoice_kind / SupplierPayment / VatStatement / ChequeMovement / audit), N9 (system cleanup: hex grep, dark mode, mobile RTL, print CSS, CSV export, «أخرى» menu), N10 (final review + push).
+- **DataGrid → AseelDenseTable migration progress:** L1/L2/L3/L4/L5/L7/L8/L10/L11/L12/L14/L15/L17/L18 done (14/22 lists). L13 (realestate) + L16 (CoA tree) + L19-L22 (sql) remain.
