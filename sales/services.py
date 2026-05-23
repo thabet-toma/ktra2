@@ -498,11 +498,20 @@ def post_sales_invoice(
     *,
     user=None,
 ) -> SalesInvoice:
-    """ترحيل فاتورة: قيد محاسبي + (اختياري) خصم مخزون."""
+    """ترحيل فاتورة: قيد محاسبي + (اختياري) خصم مخزون.
+
+    N8-T11: يَدعم الآن 4 أنواع (فاتورة بيع/مرجع بيع/فاتورة شراء/مرجع شراء)
+    عبر حقل `invoice_kind`. للمراجيع، تُعكس إشارات القيد والمخزون.
+    """
     if invoice.status == SalesInvoice.STATUS_POSTED:
         raise ValidationError("الفاتورة مرحّلة مسبقاً.")
     if invoice.status == SalesInvoice.STATUS_CANCELLED:
         raise ValidationError("لا يمكن ترحيل فاتورة ملغاة.")
+
+    # N8-T11: sign multiplier للمراجيع
+    kind = invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE
+    is_return = kind in (SalesInvoice.INVOICE_KIND_SALE_RETURN, SalesInvoice.INVOICE_KIND_PURCHASE_RETURN)
+    sign = -1 if is_return else 1
 
     lines = list(
         invoice.lines.select_related("product", "tax_rate", "tax_rate__tax_account", "product__tenant")
@@ -777,10 +786,17 @@ def post_sales_invoice(
             cust_name = (invoice.customer.name or "").strip()
         except AttributeError:
             cust_name = ""
+        # N8-T11: عكس إشارات القيد للمراجيع
+        if is_return:
+            kind_label = dict(SalesInvoice.INVOICE_KIND_CHOICES).get(kind, kind)
+            for jl in journal_lines:
+                jl["debit"], jl["credit"] = jl["credit"], jl["debit"]
+
         desc_parts = []
         if tenant_name:
             desc_parts.append(f"[{tenant_name}]")
-        desc_parts.append(f"فاتورة مبيعات {invoice.invoice_number}")
+        kind_label = dict(SalesInvoice.INVOICE_KIND_CHOICES).get(kind, "فاتورة")
+        desc_parts.append(f"{kind_label} {invoice.invoice_number}")
         if cust_name:
             desc_parts.append(f"— {cust_name}")
         if invoice.notes:
@@ -821,7 +837,24 @@ def post_sales_invoice(
             ).update(status="Under_Collection")
 
         if invoice.stock_on_post:
-            _post_stock_out_for_invoice(invoice, lines, user=user)
+            if is_return:
+                # N8-T11: عكس حركة المخزون للمراجيع (إرجاع للمخزون)
+                for line in lines:
+                    if getattr(line.product, "is_service", False):
+                        continue
+                    record_stock_movement(
+                        product=line.product,
+                        movement_type="RETURN_IN",
+                        quantity=line.quantity,
+                        reference_type="SALE",
+                        reference_id=invoice.id,
+                        partner=invoice.customer,
+                        movement_date=invoice.invoice_date,
+                        notes=f"مرجع {invoice.invoice_number}",
+                        tenant=invoice.tenant,
+                    )
+            else:
+                _post_stock_out_for_invoice(invoice, lines, user=user)
 
         create_audit_log(
             tenant=invoice.tenant,

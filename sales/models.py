@@ -209,6 +209,18 @@ class SalesInvoice(models.Model):
         (INVOICE_CREDIT, "آجل"),
     ]
 
+    # N8-T11: unified invoice_kind — replaces separate models for each type
+    INVOICE_KIND_SALE = 'sale'
+    INVOICE_KIND_SALE_RETURN = 'sale_return'
+    INVOICE_KIND_PURCHASE = 'purchase'
+    INVOICE_KIND_PURCHASE_RETURN = 'purchase_return'
+    INVOICE_KIND_CHOICES = [
+        (INVOICE_KIND_SALE, 'فاتورة بيع'),
+        (INVOICE_KIND_SALE_RETURN, 'مرجع بيع'),
+        (INVOICE_KIND_PURCHASE, 'فاتورة شراء'),
+        (INVOICE_KIND_PURCHASE_RETURN, 'مرجع شراء'),
+    ]
+
     id = models.AutoField(primary_key=True, db_column="SalesInvoiceID")
     tenant = models.ForeignKey(
         Tenant,
@@ -225,6 +237,16 @@ class SalesInvoice(models.Model):
     )
     invoice_date = models.DateField(db_column="InvoiceDate")
     due_date = models.DateField(null=True, blank=True, db_column="DueDate")
+    invoice_kind = models.CharField(
+        max_length=20, choices=INVOICE_KIND_CHOICES,
+        default=INVOICE_KIND_SALE, db_column="InvoiceKind",
+        help_text='نوع الفاتورة: بيع / مرجع بيع / شراء / مرجع شراء',
+    )
+    original_invoice = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='OriginalInvoiceID', related_name='return_invoices',
+        help_text='الفاتورة الأصلية (للمراجيع) — يربط مرجع البيع/الشراء بأصلها',
+    )
     invoice_type = models.CharField(
         max_length=20,
         choices=INVOICE_TYPE_CHOICES,
