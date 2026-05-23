@@ -1,8 +1,13 @@
-import React, { useState, useMemo } from 'react';
+/**
+ * N7-T2 — TaskManagement (H2) — AseelDenseTable لإدارة المهام
+ */
+import React, { useState, useMemo, useRef } from 'react';
 import { Task, User, TaskPriority } from '../types';
 import { CreateTaskModal } from './CreateTaskModal';
-import { List, Eye, Users, FileText, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { List, Eye, CheckCircle, XCircle, Clock, FileText, RefreshCw, Plus } from 'lucide-react';
 import { AllSubmissionsView } from './tasks/AllSubmissionsView';
+import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
+import { useAseelIndexKeymap } from './aseel/useAseelIndexKeymap';
 
 interface TaskManagementProps {
     allTasks: Task[];
@@ -17,146 +22,33 @@ interface TaskManagementProps {
     ) => void;
 }
 
-const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
-     const style = {
-        'not_started': 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300',
-        'in_progress': 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300',
-        'submitted': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300',
-        'completed': 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300',
-        'rejected': 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300',
-    }[status] || 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300';
-    
-    const text = {
-        'not_started': 'لم تبدأ',
-        'in_progress': 'قيد التنفيذ',
-        'submitted': 'مسلمة',
-        'completed': 'مكتملة',
-        'rejected': 'مرفوضة',
-    }[status] || status;
-    
-    return <span className={`px-3 py-1 text-sm font-semibold rounded-full ${style}`}>{text}</span>;
-}
-
-const PriorityIndicator: React.FC<{ priority: TaskPriority }> = ({ priority }) => {
-    const getPriorityInfo = (p: TaskPriority) => {
-        switch (p) {
-            case 'low':
-                return { text: 'منخفضة', color: 'text-green-600 dark:text-green-400', bg: 'bg-green-100 dark:bg-green-900/30' };
-            case 'medium':
-                return { text: 'متوسطة', color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-100 dark:bg-yellow-900/30' };
-            case 'high':
-                return { text: 'عالية', color: 'text-orange-600 dark:text-orange-400', bg: 'bg-orange-100 dark:bg-orange-900/30' };
-            case 'urgent':
-                return { text: 'عاجلة', color: 'text-red-600 dark:text-red-400', bg: 'bg-red-100 dark:bg-red-900/30' };
-            default:
-                return { text: p, color: 'text-gray-600 dark:text-gray-400', bg: 'bg-gray-100 dark:bg-gray-700' };
-        }
-    };
-    
-    const info = getPriorityInfo(priority);
-    return (
-        <span className={`px-3 py-1 rounded-full text-xs font-medium ${info.bg} ${info.color}`}>
-            {info.text}
-        </span>
-    );
-}
-
-// مكون لعرض حالة الموظفين بشكل مختصر مع أيقونات
-const EmployeeStatusSummary: React.FC<{ 
-    assignedTo: string[]; 
-    usersMap: Record<string, string>;
-    userStatuses?: { [userId: string]: { status: string } };
-}> = ({ assignedTo, usersMap, userStatuses }) => {
-    const statusCounts = useMemo(() => {
-        const counts = {
-            'not_started': 0,
-            'in_progress': 0,
-            'submitted': 0,
-            'completed': 0,
-            'rejected': 0
-        };
-        
-        assignedTo.forEach(userId => {
-            const status = userStatuses?.[userId]?.status || 'not_started';
-            counts[status as keyof typeof counts]++;
-        });
-        
-        return counts;
-    }, [assignedTo, userStatuses]);
-
-    if (assignedTo.length === 0) {
-        return <span className="text-gray-500 text-sm">غير معين</span>;
-    }
-
-    const total = assignedTo.length;
-    const completed = statusCounts.completed;
-    const submitted = statusCounts.submitted;
-    const inProgress = statusCounts.in_progress;
-
-    return (
-        <div className="flex items-center gap-3">
-            <div className="flex -space-x-2">
-                {assignedTo.slice(0, 3).map(userId => {
-                    const status = userStatuses?.[userId]?.status || 'not_started';
-                    let color = 'bg-gray-300 dark:bg-gray-600';
-                    if (status === 'completed') color = 'bg-green-500';
-                    else if (status === 'submitted') color = 'bg-yellow-500';
-                    else if (status === 'in_progress') color = 'bg-blue-500';
-                    else if (status === 'rejected') color = 'bg-red-500';
-                    
-                    return (
-                        <div 
-                            key={userId}
-                            className={`w-8 h-8 rounded-full border-2 border-white dark:border-gray-800 ${color} flex items-center justify-center text-white text-xs`}
-                            title={`${usersMap[userId] || 'غير معروف'}: ${status}`}
-                        >
-                            {usersMap[userId]?.charAt(0) || '?'}
-                        </div>
-                    );
-                })}
-                {assignedTo.length > 3 && (
-                    <div className="w-8 h-8 rounded-full border-2 border-white dark:border-gray-800 bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-700 dark:text-gray-300 text-xs">
-                        +{assignedTo.length - 3}
-                    </div>
-                )}
-            </div>
-            
-            <div className="flex items-center gap-4">
-                {completed > 0 && (
-                    <div className="flex items-center gap-1" title={`${completed} مكتمل`}>
-                        <CheckCircle className="w-4 h-4 text-green-500" />
-                        <span className="text-xs font-medium text-green-700 dark:text-green-400">{completed}</span>
-                    </div>
-                )}
-                {submitted > 0 && (
-                    <div className="flex items-center gap-1" title={`${submitted} مسلم`}>
-                        <FileText className="w-4 h-4 text-yellow-500" />
-                        <span className="text-xs font-medium text-yellow-700 dark:text-yellow-400">{submitted}</span>
-                    </div>
-                )}
-                {inProgress > 0 && (
-                    <div className="flex items-center gap-1" title={`${inProgress} قيد التنفيذ`}>
-                        <Clock className="w-4 h-4 text-blue-500" />
-                        <span className="text-xs font-medium text-blue-700 dark:text-blue-400">{inProgress}</span>
-                    </div>
-                )}
-                {statusCounts.rejected > 0 && (
-                    <div className="flex items-center gap-1" title={`${statusCounts.rejected} مرفوض`}>
-                        <XCircle className="w-4 h-4 text-red-500" />
-                        <span className="text-xs font-medium text-red-700 dark:text-red-400">{statusCounts.rejected}</span>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
+const PRIORITY_LABELS: Record<string, string> = { low: 'منخفضة', medium: 'متوسطة', high: 'عالية', urgent: 'عاجلة' };
+const PRIORITY_COLORS: Record<string, string> = {
+    low:    'var(--aseel-ok, #267346)',
+    medium: 'var(--aseel-warn, #b8800a)',
+    high:   'var(--aseel-warn, #b8800a)',
+    urgent: 'var(--aseel-danger, #c00)',
+};
+const STATUS_LABELS: Record<string, string> = {
+    not_started: 'لم تبدأ',
+    in_progress: 'قيد التنفيذ',
+    submitted:   'مسلمة',
+    completed:   'مكتملة',
+    rejected:    'مرفوضة',
 };
 
-export const TaskManagement: React.FC<TaskManagementProps> = ({ 
-    allTasks, 
-    users, 
-    onCreateTask, 
+const getTaskCompletionRate = (task: Task): number => {
+    const assignedCount = Array.isArray(task.assignedTo) ? task.assignedTo.length : 1;
+    const completedCount = Object.values(task.userStatuses || {}).filter((s: any) => s.status === 'completed').length;
+    return assignedCount > 0 ? Math.round((completedCount / assignedCount) * 100) : 0;
+};
+
+export const TaskManagement: React.FC<TaskManagementProps> = ({
+    allTasks,
+    users,
+    onCreateTask,
     onSelectTask,
-    onUpdateSubmissionStatus 
+    onUpdateSubmissionStatus,
 }) => {
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [statusFilter, setStatusFilter] = useState('All');
@@ -164,448 +56,196 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
     const [priorityFilter, setPriorityFilter] = useState('All');
     const [viewMode, setViewMode] = useState<'list' | 'submissions'>('list');
     const [selectedTaskForSubmissions, setSelectedTaskForSubmissions] = useState<Task | null>(null);
+    const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-    const usersMap = useMemo(() => {
-        return users.reduce((acc, user) => {
-            acc[user.id] = user.name;
-            return acc;
-        }, {} as Record<string, string>);
-    }, [users]);
-
-    const employees = useMemo(() => users.filter(u => (u.role === 'employee' || u.role === 'procurement')), [users]);
+    const usersMap = useMemo(() => users.reduce((acc, u) => { acc[u.id] = u.name; return acc; }, {} as Record<string, string>), [users]);
+    const employees = useMemo(() => users.filter(u => u.role === 'employee' || u.role === 'procurement'), [users]);
 
     const filteredTasks = useMemo(() => {
         return allTasks.filter(task => {
-            // فلتر الموظفين
             const employeeMatch = employeeFilter === 'All' || task.assignedTo.includes(employeeFilter);
             if (!employeeMatch) return false;
-            
-            // فلتر الأولوية
             const priorityMatch = priorityFilter === 'All' || task.priority === priorityFilter;
             if (!priorityMatch) return false;
-            
-            // فلتر الحالة
             if (statusFilter === 'All') return true;
-            
+            const statusMap: Record<string, string[]> = {
+                'Not Started': ['not_started'], 'In Progress': ['in_progress'],
+                'Submitted': ['submitted'], 'Completed': ['completed'], 'Rejected': ['rejected'],
+            };
             if (employeeFilter !== 'All') {
-                // إذا كان هناك موظف محدد، نفحص حالته فقط
-                const userStatus = task.userStatuses?.[employeeFilter];
-                const status = userStatus?.status || 'not_started';
-                
-                const statusMap: Record<string, string[]> = {
-                    'Not Started': ['not_started'],
-                    'In Progress': ['in_progress'],
-                    'Submitted': ['submitted'],
-                    'Completed': ['completed'],
-                    'Rejected': ['rejected'],
-                };
-                
-                return statusMap[statusFilter]?.includes(status) || false;
-            } else {
-                // إذا لم يكن هناك موظف محدد، نفحص إذا كانت هناك أي حالة مطابقة
-                const statusMap: Record<string, string[]> = {
-                    'Not Started': ['not_started'],
-                    'In Progress': ['in_progress'],
-                    'Submitted': ['submitted'],
-                    'Completed': ['completed'],
-                    'Rejected': ['rejected'],
-                };
-                
-                const targetStatuses = statusMap[statusFilter];
-                if (!targetStatuses) return false;
-                
-                // نتحقق إذا كان أي موظف لديه الحالة المطلوبة
-                return task.assignedTo.some(userId => {
-                    const userStatus = task.userStatuses?.[userId];
-                    const status = userStatus?.status || 'not_started';
-                    return targetStatuses.includes(status);
-                });
+                const userStatus = task.userStatuses?.[employeeFilter]?.status || 'not_started';
+                return statusMap[statusFilter]?.includes(userStatus) || false;
             }
+            const targets = statusMap[statusFilter];
+            if (!targets) return false;
+            return task.assignedTo.some(uid => targets.includes(task.userStatuses?.[uid]?.status || 'not_started'));
         });
     }, [allTasks, statusFilter, employeeFilter, priorityFilter]);
 
-    // إحصائيات عامة
-    const overallStats = useMemo(() => {
-        const stats = {
-            totalTasks: allTasks.length,
-            activeTasks: allTasks.filter(task => 
-                task.assignedTo.some(userId => {
-                    const status = task.userStatuses?.[userId]?.status || 'not_started';
-                    return status === 'in_progress' || status === 'submitted';
-                })
-            ).length,
-            completedTasks: allTasks.filter(task => 
-                task.assignedTo.some(userId => {
-                    const status = task.userStatuses?.[userId]?.status || 'not_started';
-                    return status === 'completed';
-                })
-            ).length,
-            urgentTasks: allTasks.filter(task => task.priority === 'urgent').length,
-            overdueTasks: allTasks.filter(task => new Date(task.dueDate) < new Date()).length,
-        };
-        
-        return stats;
-    }, [allTasks]);
+    const stats = useMemo(() => ({
+        total: allTasks.length,
+        active: allTasks.filter(t => t.assignedTo.some(uid => ['in_progress', 'submitted'].includes(t.userStatuses?.[uid]?.status || 'not_started'))).length,
+        completed: allTasks.filter(t => t.assignedTo.some(uid => (t.userStatuses?.[uid]?.status || '') === 'completed')).length,
+        urgent: allTasks.filter(t => t.priority === 'urgent').length,
+    }), [allTasks]);
 
-    // حساب نسبة الإنجاز للمهمة
-    const getTaskCompletionRate = (task: Task): number => {
-        const assignedCount = Array.isArray(task.assignedTo) ? task.assignedTo.length : 1;
-        const completedCount = Object.values(task.userStatuses || {}).filter(
-            (status: any) => status.status === 'completed'
-        ).length;
-        
-        return assignedCount > 0 ? Math.round((completedCount / assignedCount) * 100) : 0;
-    };
+    useAseelIndexKeymap(
+        { CtrlIns: () => setIsCreateModalOpen(true), Escape: () => { setStatusFilter('All'); setEmployeeFilter('All'); setPriorityFilter('All'); } },
+        { enabled: viewMode === 'list' && !isCreateModalOpen },
+    );
 
-    // التحقق إذا كانت المهمة متأخرة
-    const isTaskOverdue = (task: Task): boolean => {
-        return new Date(task.dueDate) < new Date();
-    };
-
-    const handleOpenSubmissionsView = (task: Task, e?: React.MouseEvent) => {
-        if (e) e.stopPropagation();
-        setSelectedTaskForSubmissions(task);
-        setViewMode('submissions');
-    };
-
-    const handleCloseSubmissionsView = () => {
-        setViewMode('list');
-        setSelectedTaskForSubmissions(null);
-    };
-
-    // عرض جميع التسليمات
     if (viewMode === 'submissions' && selectedTaskForSubmissions && onUpdateSubmissionStatus) {
         return (
-            <div className="animate-fade-in">
-                <div className="flex items-center justify-between mb-6">
-                    <div className="flex items-center gap-4">
-                        <button
-                            onClick={handleCloseSubmissionsView}
-                            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                        >
-                            <span className="text-xl">←</span>
-                        </button>
-                        <div>
-                            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-                                تسليمات المهمة: {selectedTaskForSubmissions.title}
-                            </h1>
-                            <p className="text-gray-600 dark:text-gray-400">
-                                عرض جميع تسليمات الموظفين في صفحة واحدة
-                            </p>
-                        </div>
-                    </div>
+            <div dir="rtl" data-skin="aseel" style={{ padding: '8px 12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <button className="aseel-toolbtn" onClick={() => { setViewMode('list'); setSelectedTaskForSubmissions(null); }}>← رجوع</button>
+                    <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>
+                        تسليمات: {selectedTaskForSubmissions.title}
+                    </strong>
                 </div>
-
                 <AllSubmissionsView
                     task={selectedTaskForSubmissions}
                     users={employees}
                     onUpdateSubmissionStatus={onUpdateSubmissionStatus}
-                    onOpenSubmissionDetail={(submission) => {
-                        // يمكنك فتح عرض تفصيلي للتسليم
-                        console.log('Open submission detail:', submission);
-                    }}
-                    onSendReminder={(userId) => {
-                        alert(`تم إرسال تذكير للموظف ${usersMap[userId] || userId}`);
-                    }}
+                    onOpenSubmissionDetail={(s) => console.log('submission detail', s)}
+                    onSendReminder={(uid) => alert(`تم إرسال تذكير للموظف ${usersMap[uid] || uid}`)}
                 />
             </div>
         );
     }
 
-    return (
-        <div className="animate-fade-in">
-            {/* Header */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-                <div>
-                    <h1 className="text-2xl md:text-3xl font-bold text-gray-800 dark:text-gray-100">إدارة المهام</h1>
-                    <p className="text-gray-600 dark:text-gray-400 mt-2">
-                        إجمالي المهام: <span className="font-bold">{overallStats.totalTasks}</span> | 
-                        نشطة: <span className="font-bold text-blue-600 dark:text-blue-400">{overallStats.activeTasks}</span> | 
-                        مكتملة: <span className="font-bold text-green-600 dark:text-green-400">{overallStats.completedTasks}</span>
-                        {overallStats.urgentTasks > 0 && (
-                            <span className="ml-4">
-                                عاجلة: <span className="font-bold text-red-600 dark:text-red-400">{overallStats.urgentTasks}</span>
-                            </span>
-                        )}
-                    </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
+    const columns: DenseColumn<Task>[] = [
+        {
+            key: 'title',
+            header: 'المهمة',
+            width: '240px',
+            render: (t) => {
+                const rate = getTaskCompletionRate(t);
+                const isOverdue = new Date(t.dueDate) < new Date();
+                return (
+                    <span>
+                        <b style={{ color: 'var(--aseel-ink)' }}>{t.title}</b>
+                        {isOverdue && <span style={{ marginRight: 4, fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-danger, #c00)' }}>متأخرة</span>}
+                        {rate > 0 && <span style={{ marginRight: 4, fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)' }}>{rate}%</span>}
+                    </span>
+                );
+            },
+        },
+        {
+            key: 'assignedTo',
+            header: 'الموظفون',
+            width: '160px',
+            render: (t) => {
+                const assigned = Array.isArray(t.assignedTo) ? t.assignedTo : [t.assignedTo];
+                const completed = Object.values(t.userStatuses || {}).filter((s: any) => s.status === 'completed').length;
+                const inProgress = Object.values(t.userStatuses || {}).filter((s: any) => s.status === 'in_progress' || s.status === 'submitted').length;
+                const rejected = Object.values(t.userStatuses || {}).filter((s: any) => s.status === 'rejected').length;
+                return (
+                    <span style={{ fontSize: 'var(--aseel-fs-sm)', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+                        <span style={{ color: 'var(--aseel-ink-soft)' }}>{assigned.length} موظف</span>
+                        {completed > 0 && <span style={{ color: 'var(--aseel-ok, #267346)' }}><CheckCircle style={{ width: 11, height: 11, display: 'inline' }} />{completed}</span>}
+                        {inProgress > 0 && <span style={{ color: 'var(--aseel-accent, #1857a4)' }}><Clock style={{ width: 11, height: 11, display: 'inline' }} />{inProgress}</span>}
+                        {rejected > 0 && <span style={{ color: 'var(--aseel-danger, #c00)' }}><XCircle style={{ width: 11, height: 11, display: 'inline' }} />{rejected}</span>}
+                    </span>
+                );
+            },
+        },
+        {
+            key: 'priority',
+            header: 'الأولوية',
+            width: '80px',
+            align: 'center',
+            render: (t) => (
+                <span style={{ color: PRIORITY_COLORS[t.priority] || 'inherit', fontWeight: 500, fontSize: 'var(--aseel-fs-sm)' }}>
+                    {PRIORITY_LABELS[t.priority] || t.priority}
+                </span>
+            ),
+        },
+        {
+            key: 'dueDate',
+            header: 'تاريخ التسليم',
+            width: '100px',
+            render: (t) => {
+                const isOverdue = new Date(t.dueDate) < new Date();
+                return <span style={{ color: isOverdue ? 'var(--aseel-danger, #c00)' : 'inherit' }}>{t.dueDate}</span>;
+            },
+        },
+        {
+            key: 'actions',
+            header: '',
+            width: '80px',
+            align: 'center',
+            render: (t) => (
+                <span style={{ display: 'inline-flex', gap: 2 }}>
                     <button
-                        onClick={() => setIsCreateModalOpen(true)}
-                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 md:px-6 rounded-lg text-sm md:text-base transition"
+                        className="aseel-toolbtn"
+                        style={{ padding: '2px 4px' }}
+                        onClick={(e) => { e.stopPropagation(); onSelectTask(t); }}
+                        title="عرض التفاصيل"
                     >
-                        <span className="text-lg">+</span>
-                        مهمة جديدة
+                        <Eye style={{ width: 13, height: 13 }} />
                     </button>
-                </div>
-            </div>
-
-            {/* Filters */}
-            <div className="mb-6 bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                        <label htmlFor="statusFilter" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            حالة الموظفين
-                        </label>
-                        <select
-                            id="statusFilter"
-                            value={statusFilter}
-                            onChange={e => setStatusFilter(e.target.value)}
-                            className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200"
+                    {onUpdateSubmissionStatus && (
+                        <button
+                            className="aseel-toolbtn"
+                            style={{ padding: '2px 4px' }}
+                            onClick={(e) => { e.stopPropagation(); setSelectedTaskForSubmissions(t); setViewMode('submissions'); }}
+                            title="التسليمات"
                         >
-                            <option value="All">جميع الحالات</option>
-                            <option value="Not Started">لم تبدأ</option>
-                            <option value="In Progress">قيد التنفيذ</option>
-                            <option value="Submitted">مسلمة</option>
-                            <option value="Completed">مكتملة</option>
-                            <option value="Rejected">مرفوضة</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label htmlFor="employeeFilter" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            الموظف
-                        </label>
-                        <select
-                            id="employeeFilter"
-                            value={employeeFilter}
-                            onChange={e => setEmployeeFilter(e.target.value)}
-                            className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200"
-                        >
-                            <option value="All">كل الموظفين</option>
-                            {employees.map(emp => (
-                                <option key={emp.id} value={emp.id}>{emp.name}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div>
-                        <label htmlFor="priorityFilter" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            الأولوية
-                        </label>
-                        <select
-                            id="priorityFilter"
-                            value={priorityFilter}
-                            onChange={e => setPriorityFilter(e.target.value)}
-                            className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-200"
-                        >
-                            <option value="All">جميع الأولويات</option>
-                            <option value="low">منخفضة</option>
-                            <option value="medium">متوسطة</option>
-                            <option value="high">عالية</option>
-                            <option value="urgent">عاجلة</option>
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            {/* Tasks List */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-right">
-                        <thead className="bg-gray-50 dark:bg-gray-700/50">
-                            <tr>
-                                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300 min-w-[250px]">المهمة</th>
-                                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300 min-w-[200px]">حالة الموظفين</th>
-                                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">الأولوية</th>
-                                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">تاريخ التسليم</th>
-                                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">الإجراءات</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                            {filteredTasks.map(task => {
-                                const completionRate = getTaskCompletionRate(task);
-                                const isOverdue = isTaskOverdue(task);
-                                
-                                return (
-                                    <tr 
-                                        key={task.id}
-                                        onClick={() => onSelectTask(task)}
-                                        className={`hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors ${
-                                            isOverdue ? 'border-l-4 border-l-red-500' : ''
-                                        }`}
-                                    >
-                                        <td className="p-4">
-                                            <div className="flex flex-col gap-1">
-                                                <div className="flex items-start justify-between">
-                                                    <h3 className="font-bold text-gray-900 dark:text-white text-sm md:text-base">
-                                                        {task.title}
-                                                    </h3>
-                                                    {isOverdue && (
-                                                        <span className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded">
-                                                            متأخرة
-                                                        </span>
-                                                    )}
-                                                </div>
-                                                <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
-                                                    {task.description}
-                                                </p>
-                                                {completionRate > 0 && (
-                                                    <div className="mt-2">
-                                                        <div className="flex justify-between text-xs mb-1">
-                                                            <span className="text-gray-600 dark:text-gray-400">نسبة الإنجاز</span>
-                                                            <span className="font-medium">{completionRate}%</span>
-                                                        </div>
-                                                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                                                            <div 
-                                                                className={`h-2 rounded-full ${
-                                                                    completionRate >= 100 ? 'bg-green-500' :
-                                                                    completionRate >= 70 ? 'bg-blue-500' :
-                                                                    completionRate >= 30 ? 'bg-yellow-500' :
-                                                                    'bg-gray-400'
-                                                                }`}
-                                                                style={{ width: `${completionRate}%` }}
-                                                            />
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="p-4">
-                                            <EmployeeStatusSummary 
-                                                assignedTo={Array.isArray(task.assignedTo) ? task.assignedTo : [task.assignedTo]}
-                                                usersMap={usersMap}
-                                                userStatuses={task.userStatuses}
-                                            />
-                                        </td>
-                                        <td className="p-4">
-                                            <div className="flex justify-center">
-                                                <PriorityIndicator priority={task.priority} />
-                                            </div>
-                                        </td>
-                                        <td className="p-4">
-                                            <div className="flex flex-col items-center">
-                                                <span className="text-gray-900 dark:text-white text-sm">
-                                                    {task.dueDate}
-                                                </span>
-                                                {isOverdue && (
-                                                    <span className="text-xs text-red-600 dark:text-red-400 mt-1">
-                                                        منذ {Math.floor((new Date().getTime() - new Date(task.dueDate).getTime()) / (1000 * 60 * 60 * 24))} يوم
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="p-4">
-                                            <div className="flex gap-2 justify-center">
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        onSelectTask(task);
-                                                    }}
-                                                    className="p-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
-                                                    title="عرض التفاصيل"
-                                                >
-                                                    <Eye className="w-4 h-4" />
-                                                </button>
-                                                
-                                                {onUpdateSubmissionStatus && (
-                                                    <button
-                                                        onClick={(e) => handleOpenSubmissionsView(task, e)}
-                                                        className="flex items-center gap-1 px-3 py-1.5 bg-[var(--color-surface-2)] text-[var(--color-primary)] dark:bg-[var(--color-surface-2)]/30 dark:text-[var(--color-primary)] rounded-lg hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]/50 transition-colors text-sm"
-                                                        title="عرض جميع التسليمات"
-                                                    >
-                                                        <List className="w-3 h-3" />
-                                                        <span className="hidden md:inline">التسليمات</span>
-                                                        <span className="bg-white dark:bg-[var(--color-surface-2)] text-[var(--color-primary)] dark:text-[var(--color-primary)] text-xs px-1.5 py-0.5 rounded-full">
-                                                            {Array.isArray(task.assignedTo) ? task.assignedTo.length : 1}
-                                                        </span>
-                                                    </button>
-                                                )}
-                                            </div>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                        </tbody>
-                    </table>
-                    
-                    {filteredTasks.length === 0 && (
-                        <div className="text-center py-12">
-                            <div className="w-16 h-16 mx-auto mb-4 bg-gray-100 dark:bg-gray-700 rounded-full flex items-center justify-center">
-                                <FileText className="w-8 h-8 text-gray-400" />
-                            </div>
-                            <p className="text-gray-500 dark:text-gray-400 text-lg">لا توجد مهام مطابقة للبحث</p>
-                            <p className="text-gray-400 dark:text-gray-500 text-sm mt-2">حاول تغيير الفلاتر المحددة</p>
-                        </div>
+                            <List style={{ width: 13, height: 13 }} />
+                        </button>
                     )}
-                </div>
+                </span>
+            ),
+        },
+    ];
+
+    return (
+        <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
+            {/* شريط العنوان */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
+                <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>إدارة المهام</strong>
+                <span className="aseel-status-item">الإجمالي: <b>{stats.total}</b></span>
+                <span className="aseel-status-item">نشطة: <b style={{ color: 'var(--aseel-accent, #1857a4)' }}>{stats.active}</b></span>
+                <span className="aseel-status-item">مكتملة: <b style={{ color: 'var(--aseel-ok, #267346)' }}>{stats.completed}</b></span>
+                {stats.urgent > 0 && <span className="aseel-status-item">عاجلة: <b style={{ color: 'var(--aseel-danger, #c00)' }}>{stats.urgent}</b></span>}
+                <div style={{ flex: 1 }} />
+                <select className="aseel-input" style={{ width: 130 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                    <option value="All">جميع الحالات</option>
+                    {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k === 'not_started' ? 'Not Started' : k === 'in_progress' ? 'In Progress' : k === 'submitted' ? 'Submitted' : k === 'completed' ? 'Completed' : 'Rejected'}>{v}</option>)}
+                </select>
+                <select className="aseel-input" style={{ width: 130 }} value={employeeFilter} onChange={e => setEmployeeFilter(e.target.value)}>
+                    <option value="All">كل الموظفين</option>
+                    {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+                </select>
+                <select className="aseel-input" style={{ width: 110 }} value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)}>
+                    <option value="All">جميع الأولويات</option>
+                    {Object.entries(PRIORITY_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                </select>
+                <button className="aseel-toolbtn" onClick={() => { setStatusFilter('All'); setEmployeeFilter('All'); setPriorityFilter('All'); }} title="إعادة تعيين"><RefreshCw style={{ width: 14, height: 14 }} /></button>
+                <button className="aseel-toolbtn" onClick={() => setIsCreateModalOpen(true)} title="مهمة جديدة (Ctrl+Ins)">
+                    <Plus style={{ width: 14, height: 14 }} /> مهمة جديدة
+                </button>
             </div>
 
-            {/* إحصائيات سريعة في الأسفل */}
-            {filteredTasks.length > 0 && (
-                <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
-                                <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                            </div>
-                            <div>
-                                <p className="text-sm text-gray-500 dark:text-gray-400">إجمالي المعينين</p>
-                                <p className="text-lg font-bold text-gray-900 dark:text-white">
-                                    {filteredTasks.reduce((sum, task) => sum + (Array.isArray(task.assignedTo) ? task.assignedTo.length : 1), 0)}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-green-100 dark:bg-green-900/30 rounded-lg flex items-center justify-center">
-                                <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400" />
-                            </div>
-                            <div>
-                                <p className="text-sm text-gray-500 dark:text-gray-400">مكتملة</p>
-                                <p className="text-lg font-bold text-gray-900 dark:text-white">
-                                    {filteredTasks.reduce((sum, task) => {
-                                        const completedCount = Object.values(task.userStatuses || {}).filter(
-                                            (status: any) => status.status === 'completed'
-                                        ).length;
-                                        return sum + completedCount;
-                                    }, 0)}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg flex items-center justify-center">
-                                <Clock className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
-                            </div>
-                            <div>
-                                <p className="text-sm text-gray-500 dark:text-gray-400">قيد التنفيذ</p>
-                                <p className="text-lg font-bold text-gray-900 dark:text-white">
-                                    {filteredTasks.reduce((sum, task) => {
-                                        const inProgressCount = Object.values(task.userStatuses || {}).filter(
-                                            (status: any) => status.status === 'in_progress' || status.status === 'submitted'
-                                        ).length;
-                                        return sum + inProgressCount;
-                                    }, 0)}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="bg-white dark:bg-gray-800 p-4 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                        <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
-                                <XCircle className="w-5 h-5 text-red-600 dark:text-red-400" />
-                            </div>
-                            <div>
-                                <p className="text-sm text-gray-500 dark:text-gray-400">مرفوضة</p>
-                                <p className="text-lg font-bold text-gray-900 dark:text-white">
-                                    {filteredTasks.reduce((sum, task) => {
-                                        const rejectedCount = Object.values(task.userStatuses || {}).filter(
-                                            (status: any) => status.status === 'rejected'
-                                        ).length;
-                                        return sum + rejectedCount;
-                                    }, 0)}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
+            <AseelDenseTable<Task>
+                columns={columns}
+                rows={filteredTasks}
+                getRowKey={t => t.id}
+                onRowDoubleClick={onSelectTask}
+                emptyHint="لا توجد مهام — اضغط «مهمة جديدة»"
+                footer={
+                    filteredTasks.length > 0 ? (
+                        <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>
+                            المُعيَّنون: <b>{filteredTasks.reduce((s, t) => s + (Array.isArray(t.assignedTo) ? t.assignedTo.length : 1), 0)}</b>
+                        </span>
+                    ) : undefined
+                }
+            />
 
-            {/* Modals */}
-            <CreateTaskModal 
-                isOpen={isCreateModalOpen} 
-                onClose={() => setIsCreateModalOpen(false)} 
+            <CreateTaskModal
+                isOpen={isCreateModalOpen}
+                onClose={() => setIsCreateModalOpen(false)}
                 onSubmit={onCreateTask}
                 employees={employees}
             />
