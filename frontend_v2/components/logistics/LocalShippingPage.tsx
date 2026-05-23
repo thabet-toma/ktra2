@@ -3,7 +3,7 @@
  * المرجع: task5.md:797 + الإرساليات.txt:91-109
  * يَبقى المصدر المستقل (T1-01) — كل منطق الـAPI بلا تغيير.
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Plus,
   Pencil,
@@ -38,6 +38,7 @@ import { getSalesSettings, type SalesSettings } from "@/services/salesApi";
 import { validatePaymentInput } from "@/utils/usePaymentForm";
 import { Drawer } from "../../components/ui";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
+import { useAseelIndexKeymap } from "../aseel/useAseelIndexKeymap";
 
 type Partner = { id: number; name: string; partner_type?: string };
 type Account = { id: number; code: string; name: string; account_type?: string };
@@ -85,6 +86,7 @@ export const LocalShippingPage: React.FC = () => {
   const [importFor, setImportFor] = useState<LocalShipmentRow | null>(null);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<LocalShipmentStatus | "all">("all");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -349,6 +351,17 @@ export const LocalShippingPage: React.FC = () => {
     },
   ];
 
+  // N0-T7 — keymap لقائمة الشحن المحلي
+  useAseelIndexKeymap(
+    {
+      CtrlIns: () => { setEditing(null); setShowForm(true); },
+      F6: () => searchInputRef.current?.focus(),
+      F5: () => void load(),
+      Escape: () => { setSearch(""); setStatusFilter("all"); },
+    },
+    { enabled: !showForm && !importFor },
+  );
+
   return (
     <div dir="rtl" data-skin="aseel" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 6, padding: "8px 12px" }}>
       {/* شريط العنوان */}
@@ -363,9 +376,10 @@ export const LocalShippingPage: React.FC = () => {
         ))}
         <div style={{ flex: 1 }} />
         <input
+          ref={searchInputRef}
           className="aseel-input"
           style={{ width: 190 }}
-          placeholder="بحث في الشحنات…"
+          placeholder="بحث في الشحنات… (F6)"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
