@@ -16,7 +16,7 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
     ]
 
     id = models.AutoField(primary_key=True, db_column='DealID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     ref_number = models.CharField(max_length=50, db_column='RefNumber')
     partner = models.ForeignKey(Partner, on_delete=models.PROTECT, db_column='PartnerID')
     order_date = models.DateField(db_column='OrderDate')
@@ -258,7 +258,7 @@ class LogisticsShipment(SoftDeleteMixin, models.Model):
     ]
 
     id = models.AutoField(primary_key=True, db_column='ShipmentID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     shipment_number = models.CharField(max_length=50, db_column='ShipmentNumber', default='')
     shipping_agent = models.ForeignKey(Partner, on_delete=models.SET_NULL, null=True, db_column='ShippingAgentID', related_name='shipments_as_agent')
     bill_of_lading = models.CharField(max_length=100, null=True, blank=True, db_column='BillOfLading')
@@ -436,7 +436,7 @@ class LogisticsClearance(models.Model):
     ]
 
     id = models.AutoField(primary_key=True, db_column='ClearanceID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     shipment = models.OneToOneField(LogisticsShipment, on_delete=models.CASCADE, db_column='ShipmentID', related_name='clearance')
     book_number = models.PositiveIntegerField(
         default=0, db_column='BookNumber',
@@ -462,7 +462,7 @@ class LogisticsClearancePayment(models.Model):
     """دفعة تخليص: قيد مباشر بين حساب المخلّص وحساب الصندوق."""
 
     id = models.AutoField(primary_key=True, db_column='ClearancePaymentID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     clearance = models.ForeignKey(
         LogisticsClearance,
         on_delete=models.CASCADE,
@@ -510,7 +510,7 @@ class LogisticsExpense(models.Model):
     ]
 
     id = models.AutoField(primary_key=True, db_column='ExpenseID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     related_type = models.CharField(max_length=20, choices=RELATED_TYPE_CHOICES, db_column='RelatedType')
     related_id = models.IntegerField(db_column='RelatedID')
     
@@ -520,7 +520,7 @@ class LogisticsExpense(models.Model):
     
     description = models.CharField(max_length=255, db_column='Description')
     amount = models.DecimalField(max_digits=18, decimal_places=2, db_column='Amount')
-    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, default=1, db_column='CurrencyID')
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, db_column='CurrencyID')
     invoice_number = models.CharField(max_length=100, null=True, blank=True, db_column='InvoiceNumber')
     invoice_date = models.DateField(null=True, blank=True, db_column='InvoiceDate')
     
@@ -560,7 +560,7 @@ class LocalShipment(models.Model):
     ]
 
     id = models.AutoField(primary_key=True, db_column='LocalShipmentID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
 
     shipment_number = models.CharField(
         max_length=50, db_column='ShipmentNumber', default='',
@@ -622,7 +622,6 @@ class LocalShipment(models.Model):
     currency = models.ForeignKey(
         Currency,
         on_delete=models.PROTECT,
-        default=1,
         db_column='CurrencyID',
         related_name='local_shipments',
     )
@@ -726,7 +725,7 @@ class PurchaseInvoice(models.Model):
     ]
 
     id = models.AutoField(primary_key=True, db_column='PurchaseInvoiceID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     invoice_number = models.CharField(max_length=50, db_column='InvoiceNumber')
     invoice_name = models.CharField(max_length=255, null=True, blank=True, db_column='InvoiceName')
     invoice_date = models.DateField(null=True, blank=True, db_column='InvoiceDate')
@@ -753,7 +752,7 @@ class PurchaseInvoice(models.Model):
     )
 
     currency = models.ForeignKey(
-        Currency, on_delete=models.PROTECT, default=1,
+        Currency, on_delete=models.PROTECT,
         db_column='CurrencyID',
     )
     exchange_rate = models.DecimalField(max_digits=18, decimal_places=6, default=1.0, db_column='ExchangeRate')
@@ -878,7 +877,7 @@ class PurchaseInvoiceFee(models.Model):
     """
 
     id = models.AutoField(primary_key=True, db_column='FeeID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     invoice = models.ForeignKey(
         PurchaseInvoice, on_delete=models.CASCADE,
         db_column='PurchaseInvoiceID', related_name='fees',
