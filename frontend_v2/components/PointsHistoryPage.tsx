@@ -1,6 +1,10 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * N7-T5 — PointsHistoryPage (H5) — AseelDenseTable لسجل النقاط
+ */
+import React, { useState, useEffect, useMemo } from 'react';
 import { User, DailyPoints } from '../types';
 import { pointsHistoryService } from '../services/firestoreService';
+import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
 
 interface PointsHistoryPageProps {
     user: User;
@@ -12,290 +16,114 @@ export const PointsHistoryPage: React.FC<PointsHistoryPageProps> = ({ user }) =>
     const [selectedPeriod, setSelectedPeriod] = useState<'week' | 'month' | 'all'>('week');
     const [todayPoints, setTodayPoints] = useState<DailyPoints | null>(null);
 
-    useEffect(() => {
-        loadPointsHistory();
-        loadTodayPoints();
-    }, [selectedPeriod]);
+    useEffect(() => { loadPointsHistory(); }, [selectedPeriod]);
+    useEffect(() => { pointsHistoryService.subscribeToDailyPoints(user.id, setTodayPoints); }, [user.id]);
 
     const loadPointsHistory = async () => {
         setLoading(true);
         try {
             const endDate = new Date().toISOString().split('T')[0];
-            let startDate = new Date();
-            
-            switch (selectedPeriod) {
-                case 'week':
-                    startDate.setDate(startDate.getDate() - 7);
-                    break;
-                case 'month':
-                    startDate.setDate(startDate.getDate() - 30);
-                    break;
-                case 'all':
-                    startDate = new Date('2024-01-01');
-                    break;
-            }
-            
-            const startDateStr = startDate.toISOString().split('T')[0];
-            const history = await pointsHistoryService.getPointsHistory(user.id, startDateStr, endDate);
-            
+            const startDate = new Date();
+            if (selectedPeriod === 'week') startDate.setDate(startDate.getDate() - 7);
+            else if (selectedPeriod === 'month') startDate.setDate(startDate.getDate() - 30);
+            else startDate.setFullYear(2024, 0, 1);
+            const history = await pointsHistoryService.getPointsHistory(user.id, startDate.toISOString().split('T')[0], endDate);
             setPointsHistory(history.sort((a, b) => b.date.localeCompare(a.date)));
-        } catch (error) {
-            console.error('Error loading points history:', error);
-        } finally {
-            setLoading(false);
-        }
+        } catch (e) { console.error(e); } finally { setLoading(false); }
     };
 
-    const loadTodayPoints = () => {
-        pointsHistoryService.subscribeToDailyPoints(user.id, setTodayPoints);
-    };
+    const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', calendar: 'gregory' });
 
-    const formatDate = (dateStr: string) => {
-        const date = new Date(dateStr);
-        return date.toLocaleDateString('ar-SA', {
-            weekday: 'long',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric',
-            calendar: 'gregory'
-        });
-    };
+    const totalStats = useMemo(() => ({
+        totalPoints: pointsHistory.reduce((s, d) => s + d.totalPoints, 0),
+        totalActivityPoints: pointsHistory.reduce((s, d) => s + d.activityPoints, 0),
+        totalTaskPoints: pointsHistory.reduce((s, d) => s + d.taskPoints, 0),
+        totalAttendancePoints: pointsHistory.reduce((s, d) => s + (d.attendancePoints || 0), 0),
+        totalCheckins: pointsHistory.reduce((s, d) => s + d.checkinClicks, 0),
+        totalTasks: pointsHistory.reduce((s, d) => s + d.completedTasks, 0),
+        attendanceDays: pointsHistory.filter(d => d.attended).length,
+    }), [pointsHistory]);
 
-    const getTotalStats = () => {
-        const totalPoints = pointsHistory.reduce((sum, day) => sum + day.totalPoints, 0);
-        const totalActivityPoints = pointsHistory.reduce((sum, day) => sum + day.activityPoints, 0);
-        const totalTaskPoints = pointsHistory.reduce((sum, day) => sum + day.taskPoints, 0);
-        const totalAttendancePoints = pointsHistory.reduce((sum, day) => sum + (day.attendancePoints || 0), 0); // جديد
-        const totalCheckins = pointsHistory.reduce((sum, day) => sum + day.checkinClicks, 0);
-        const totalTasks = pointsHistory.reduce((sum, day) => sum + day.completedTasks, 0);
-        const attendanceDays = pointsHistory.filter(day => day.attended).length; // جديد
-
-        return { 
-            totalPoints, 
-            totalActivityPoints, 
-            totalTaskPoints, 
-            totalAttendancePoints, // جديد
-            totalCheckins, 
-            totalTasks,
-            attendanceDays // جديد
-        };
-    };
-
-    const totalStats = getTotalStats();
-
-    if (loading) {
-        return (
-            <div className="animate-fade-in">
-                <div className="flex items-center justify-center h-64">
-                    <div className="text-lg text-gray-500">جاري تحميل سجل النقاط...</div>
-                </div>
-            </div>
-        );
-    }
+    const columns: DenseColumn<DailyPoints>[] = [
+        { key: 'date', header: 'التاريخ', width: '200px', sortable: true, render: (d) => <span>{formatDate(d.date)}</span> },
+        { key: 'activityPoints', header: 'نقاط النشاط', width: '100px', align: 'center', numeric: true, sortable: true, render: (d) => <b style={{ color: 'var(--aseel-ok, #267346)' }}>{d.activityPoints}</b> },
+        { key: 'checkinClicks', header: 'ضغطات النشاط', width: '110px', align: 'center', render: (d) => <>{d.checkinClicks} ضغطة</> },
+        { key: 'taskPoints', header: 'نقاط المهام', width: '100px', align: 'center', numeric: true, render: (d) => <b style={{ color: 'var(--aseel-accent, #1857a4)' }}>{d.taskPoints}</b> },
+        {
+            key: 'attendancePoints',
+            header: 'نقاط الحضور',
+            width: '100px',
+            align: 'center',
+            render: (d) => (
+                <span style={{ color: (d.attendancePoints || 0) > 0 ? 'var(--aseel-warn, #b8800a)' : 'var(--aseel-ink-soft)' }}>
+                    {d.attendancePoints || 0}
+                    {d.attended && <span style={{ marginRight: 3 }}>✅</span>}
+                </span>
+            ),
+        },
+        { key: 'completedTasks', header: 'مهام مكتملة', width: '100px', align: 'center', render: (d) => <>{d.completedTasks} مهمة</> },
+        { key: 'totalPoints', header: 'الإجمالي', width: '90px', align: 'center', numeric: true, sortable: true, render: (d) => <b style={{ color: 'var(--aseel-accent, #1857a4)', fontSize: 'var(--aseel-fs-base)' }}>{d.totalPoints}</b> },
+    ];
 
     return (
-        <div className="animate-fade-in">
-            <div className="flex flex-col lg:flex-row gap-6 mb-6">
-                {/* العنوان والتحكم */}
-                <div className="flex-1">
-                    <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-100 mb-2">
-                        سجل نقاطي
-                    </h1>
-                    <p className="text-gray-600 dark:text-gray-400 mb-4">
-                        تتبع أدائك ونقاطك اليومية
-                    </p>
-                    
-                    <div className="flex gap-2">
-                        {['week', 'month', 'all'].map((period) => (
-                            <button
-                                key={period}
-                                onClick={() => setSelectedPeriod(period as any)}
-                                className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                                    selectedPeriod === period
-                                        ? 'bg-blue-600 text-white'
-                                        : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
-                                }`}
-                            >
-                                {period === 'week' && 'أسبوع'}
-                                {period === 'month' && 'شهر'}
-                                {period === 'all' && 'الكامل'}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-
-                {/* إحصائيات اليوم */}
+        <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 8, padding: '8px 12px' }}>
+            {/* شريط العنوان */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
+                <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>سجل نقاطي</strong>
+                <span className="aseel-status-item">الإجمالي: <b>{totalStats.totalPoints}</b></span>
+                <span className="aseel-status-item">نشاط: <b style={{ color: 'var(--aseel-ok, #267346)' }}>{totalStats.totalActivityPoints}</b></span>
+                <span className="aseel-status-item">مهام: <b style={{ color: 'var(--aseel-accent, #1857a4)' }}>{totalStats.totalTaskPoints}</b></span>
+                <span className="aseel-status-item">حضور: <b style={{ color: 'var(--aseel-warn, #b8800a)' }}>{totalStats.attendanceDays} يوم</b></span>
+                <div style={{ flex: 1 }} />
                 {todayPoints && (
-                    <div className="bg-gradient-to-r from-green-500 to-emerald-600 rounded-2xl p-6 text-white shadow-lg">
-                        <h3 className="text-lg font-bold mb-4">نقاط اليوم</h3>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="text-center">
-                                <div className="text-2xl font-bold">{todayPoints.totalPoints}</div>
-                                <div className="text-sm opacity-90">إجمالي النقاط</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-2xl font-bold">{todayPoints.checkinClicks}</div>
-                                <div className="text-sm opacity-90">ضغطات النشاط</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-2xl font-bold">{todayPoints.activityPoints}</div>
-                                <div className="text-sm opacity-90">نقاط النشاط</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-2xl font-bold">{todayPoints.taskPoints}</div>
-                                <div className="text-sm opacity-90">نقاط المهام</div>
-                            </div>
-                            {/* جديد: نقاط الحضور */}
-                            <div className="text-center">
-                                <div className="text-2xl font-bold">{todayPoints.attendancePoints || 0}</div>
-                                <div className="text-sm opacity-90">نقاط الحضور</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-2xl font-bold">{todayPoints.attended ? '✅' : '❌'}</div>
-                                <div className="text-sm opacity-90">الحضور</div>
-                            </div>
-                        </div>
-                    </div>
+                    <span className="aseel-status-item">اليوم: <b>{todayPoints.totalPoints} نقطة</b></span>
                 )}
+                {(['week', 'month', 'all'] as const).map(p => (
+                    <button
+                        key={p}
+                        className="aseel-toolbtn"
+                        style={{ fontWeight: selectedPeriod === p ? 700 : undefined, background: selectedPeriod === p ? 'var(--aseel-accent, #1857a4)' : undefined, color: selectedPeriod === p ? '#fff' : undefined }}
+                        onClick={() => setSelectedPeriod(p)}
+                    >
+                        {p === 'week' ? 'أسبوع' : p === 'month' ? 'شهر' : 'الكامل'}
+                    </button>
+                ))}
             </div>
 
-            {/* الإحصائيات الإجمالية */}
-            <div className="grid grid-cols-2 md:grid-cols-5 lg:grid-cols-7 gap-4 mb-6">
-                <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-md border border-gray-200 dark:border-gray-700 text-center">
-                    <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">{totalStats.totalPoints}</div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">إجمالي النقاط</div>
-                </div>
-                <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-md border border-gray-200 dark:border-gray-700 text-center">
-                    <div className="text-2xl font-bold text-green-600 dark:text-green-400">{totalStats.totalActivityPoints}</div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">نقاط النشاط</div>
-                </div>
-                <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-md border border-gray-200 dark:border-gray-700 text-center">
-                    <div className="text-2xl font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">{totalStats.totalTaskPoints}</div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">نقاط المهام</div>
-                </div>
-                {/* جديد: نقاط الحضور */}
-                <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-md border border-gray-200 dark:border-gray-700 text-center">
-                    <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">{totalStats.totalAttendancePoints}</div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">نقاط الحضور</div>
-                </div>
-                <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-md border border-gray-200 dark:border-gray-700 text-center">
-                    <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">{totalStats.totalCheckins}</div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">ضغطات النشاط</div>
-                </div>
-                <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-md border border-gray-200 dark:border-gray-700 text-center">
-                    <div className="text-2xl font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">{totalStats.totalTasks}</div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">مهام مكتملة</div>
-                </div>
-                {/* جديد: أيام الحضور */}
-                <div className="bg-white dark:bg-gray-800 rounded-xl p-4 shadow-md border border-gray-200 dark:border-gray-700 text-center">
-                    <div className="text-2xl font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">{totalStats.attendanceDays}</div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">أيام حضور</div>
-                </div>
-            </div>
-
-            {/* جدول النقاط اليومية */}
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full text-right">
-                        <thead className="bg-gray-50 dark:bg-gray-700/50">
-                            <tr>
-                                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">التاريخ</th>
-                                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">نقاط النشاط</th>
-                                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">ضغطات النشاط</th>
-                                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">نقاط المهام</th>
-                                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">نقاط الحضور</th>
-                                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">مهام مكتملة</th>
-                                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">الإجمالي</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                            {pointsHistory.length === 0 ? (
-                                <tr>
-                                    <td colSpan={7} className="p-8 text-center text-gray-500 dark:text-gray-400">
-                                        لا توجد بيانات للنقاط في الفترة المحددة
-                                    </td>
-                                </tr>
-                            ) : (
-                                pointsHistory.map((day) => (
-                                    <tr key={day.date} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
-                                        <td className="p-4 font-medium text-gray-800 dark:text-gray-100">
-                                            {formatDate(day.date)}
-                                        </td>
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-green-600 dark:text-green-400 font-bold">
-                                                    {day.activityPoints}
-                                                </span>
-                                                <span className="text-xs text-gray-500">نقطة</span>
-                                            </div>
-                                        </td>
-                                        <td className="p-4 text-gray-600 dark:text-gray-300">
-                                            {day.checkinClicks} ضغطة
-                                        </td>
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-2">
-                                                <span className="text-[var(--color-primary)] dark:text-[var(--color-primary)] font-bold">
-                                                    {day.taskPoints}
-                                                </span>
-                                                <span className="text-xs text-gray-500">نقطة</span>
-                                            </div>
-                                        </td>
-                                        {/* جديد: نقاط الحضور */}
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-2">
-                                                <span className={`font-bold ${
-                                                    (day.attendancePoints || 0) > 0 
-                                                        ? 'text-orange-600 dark:text-orange-400' 
-                                                        : 'text-gray-400'
-                                                }`}>
-                                                    {day.attendancePoints || 0}
-                                                </span>
-                                                <span className="text-xs text-gray-500">نقطة</span>
-                                                {day.attended && (
-                                                    <span className="text-xs text-green-600">✅</span>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="p-4 text-gray-600 dark:text-gray-300">
-                                            {day.completedTasks} مهمة
-                                        </td>
-                                        <td className="p-4">
-                                            <div className="flex items-center gap-2 justify-end">
-                                                <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                                                    {day.totalPoints}
-                                                </span>
-                                                <span className="text-xs text-gray-500">نقطة</span>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
+            <AseelDenseTable<DailyPoints>
+                columns={columns}
+                rows={pointsHistory}
+                getRowKey={d => d.date}
+                loading={loading}
+                emptyHint="لا توجد بيانات للنقاط في الفترة المحددة"
+                footer={
+                    pointsHistory.length > 0 ? (
+                        <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>
+                            مجموع: <b>{totalStats.totalPoints}</b> نقطة | ضغطات: <b>{totalStats.totalCheckins}</b> | مهام: <b>{totalStats.totalTasks}</b>
+                        </span>
+                    ) : undefined
+                }
+            />
 
             {/* معلومات إضافية */}
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-xl border border-blue-200 dark:border-blue-800">
-                    <h4 className="font-bold text-blue-800 dark:text-blue-200 mb-2">كيفية كسب النقاط؟</h4>
-                    <ul className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
-                        <li>• كل ضغطة على زر "تأكيد الاستمرار" = 1 نقطة</li>
-                        <li>• إكمال المهمة في أقل من 30 دقيقة = 10 نقاط</li>
-                        <li>• إكمال المهمة في أكثر من 30 دقيقة = 5 نقاط</li>
-                        <li>• <strong>الحضور اليومي = 10 نقاط كاملة ✅</strong></li>
-                        <li>• الحد الأقصى للنقاط اليومية = 50 نقطة</li>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 4 }}>
+                <div style={{ border: '1px solid var(--aseel-accent, #1857a4)', borderRadius: 6, padding: '8px 12px', background: 'rgba(24,87,164,0.04)', fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>
+                    <b style={{ display: 'block', marginBottom: 6, color: 'var(--aseel-accent, #1857a4)' }}>كيفية كسب النقاط؟</b>
+                    <ul style={{ margin: 0, padding: 0, listStyle: 'none', lineHeight: 1.8 }}>
+                        <li>• كل ضغطة على «تأكيد الاستمرار» = 1 نقطة</li>
+                        <li>• إكمال المهمة أقل 30 دقيقة = 10 نقاط</li>
+                        <li>• إكمال المهمة أكثر 30 دقيقة = 5 نقاط</li>
+                        <li>• الحضور اليومي = 10 نقاط</li>
+                        <li>• الحد الأقصى اليومي = 50 نقطة</li>
                     </ul>
                 </div>
-                
-                <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-xl border border-green-200 dark:border-green-800">
-                    <h4 className="font-bold text-green-800 dark:text-green-200 mb-2">نصائح لزيادة النقاط</h4>
-                    <ul className="text-sm text-green-700 dark:text-green-300 space-y-1">
-                        <li>• <strong>احرص على الحضور اليومي لتحصل على 10 نقاط مجانية</strong></li>
-                        <li>• اضغط زر التأكيد كل 10 دقائق للحفاظ على النشاط</li>
-                        <li>• ركز على إكمال المهام بسرعة وجودة عالية</li>
-                        <li>• خطط لمهامك مسبقاً لتقليل الوقت المستغرق</li>
-                        <li>• حافظ على استمرارية العمل لتجميع نقاط النشاط</li>
+                <div style={{ border: '1px solid var(--aseel-ok, #267346)', borderRadius: 6, padding: '8px 12px', background: 'rgba(38,115,70,0.04)', fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>
+                    <b style={{ display: 'block', marginBottom: 6, color: 'var(--aseel-ok, #267346)' }}>نصائح لزيادة النقاط</b>
+                    <ul style={{ margin: 0, padding: 0, listStyle: 'none', lineHeight: 1.8 }}>
+                        <li>• احرص على الحضور اليومي لتحصل على 10 نقاط</li>
+                        <li>• اضغط زر التأكيد كل 10 دقائق</li>
+                        <li>• ركز على إكمال المهام بسرعة وجودة</li>
+                        <li>• خطط لمهامك مسبقاً</li>
                     </ul>
                 </div>
             </div>
