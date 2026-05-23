@@ -91,6 +91,37 @@ class Product(models.Model):
         max_digits=18, decimal_places=4, default=0, db_column='AvgCost',
         help_text='Weighted average cost per unit (base currency)',
     )
+    # ── N8-T10: Account overrides (6 FKs) ──────────────────────
+    sale_account_override = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='SaleAccountOverrideID', related_name='products_sale_override',
+        help_text='حساب البيع البديل — يتجاوز حساب البيع في ثوابت المجموعة',
+    )
+    sale_return_account_override = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='SaleReturnAccountOverrideID', related_name='products_sale_return_override',
+        help_text='حساب مرجع البيع البديل',
+    )
+    purchase_account_override = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='PurchaseAccountOverrideID', related_name='products_purchase_override',
+        help_text='حساب الشراء البديل',
+    )
+    purchase_return_account_override = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='PurchaseReturnAccountOverrideID', related_name='products_purchase_return_override',
+        help_text='حساب مرجع الشراء البديل',
+    )
+    supplier_account_override = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='SupplierAccountOverrideID', related_name='products_supplier_override',
+        help_text='حساب المورد البديل',
+    )
+    ending_inventory_account_override = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='EndingInventoryAccountOverrideID', related_name='products_ending_inventory_override',
+        help_text='حساب بضاعة آخر المدة البديل',
+    )
 
     class Meta:
         db_table = 'products'
