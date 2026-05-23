@@ -557,3 +557,24 @@ System-wide cleanup — 8 tasks.
 - `makemigrations --check` = no drift
 - `vite build` = success (3395 modules)
 - No new migrations required
+
+## [TASK6 — P-C DONE 2026-05-24]
+
+> **Status:** P-C completed on branch `claude/task6`. Commit `cc267d4`.
+
+### P-C — Multi-Tenancy Hardening
+- **P-C-1:** `default=1` removed from `tenant` FK on 8 logistics models (LogisticsDeal, LogisticsShipment, LogisticsClearance, LogisticsClearancePayment, LogisticsExpense, LocalShipment, PurchaseInvoice, PurchaseInvoiceFee). Help text added: "tenant مطلوب — لا fallback"
+- **P-C-2:** `default=1` removed from `currency` FK on 3 logistics models (LogisticsExpense, LocalShipment, PurchaseInvoice)
+- **P-C-3:** Audited logistics/views.py — all 8 ViewSets extend `BaseTenantViewSet` from core/mixins. No `tenant_id=1` fallback found. All `serializer.save(tenant=...)` use resolved tenant from `self._get_tenant()`
+- **P-C-4:** Created `logistics/tests/test_tenant_isolation.py` with 3 tests:
+  1. `test_list_returns_only_own_tenant_deals` — Tenant A's list only shows A's deals
+  2. `test_create_without_tenant_header_returns_400` — missing header → 400
+  3. `test_cannot_access_other_tenant_deal` — Tenant A gets 404 on Tenant B's deal
+  - Note: pre-existing test infra issue (accounting migration 0003 fails on SQLite test DB) prevents running TestCase-requiring tests. Verified via `manage.py check` and `makemigrations --check` = no drift.
+
+### Migration
+- `logistics/migrations/0027_alter_localshipment_currency_and_more.py` — auto-generated, covers all 11 AlterField operations (8 tenant + 3 currency)
+- No schema change (Python-level defaults only)
+
+### Orphans Update
+- Logistics `default=1` on tenant/currency: **eliminated**
