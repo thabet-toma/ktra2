@@ -1,7 +1,7 @@
 # PROJECT_MAP.md — KTRA Import/Trading ERP
 
 > الذاكرة الخارجية للمشروع. حدّث هذا الملف عند أي تغيير معماري.
-> Last audited: 2026-05-18.
+> Last audited: 2026-05-23.
 > Phase 1 completed: 2026-05-17 — 18/18 catastrophic fixes applied.
 > Phase 2 completed: 2026-05-17 — 14/14 medium fixes applied.
 > Phase 3 completed: 2026-05-18 — 10/10 minor fixes applied (m3-10 done in Phase 4 pass).
@@ -45,11 +45,11 @@ Django apps (LOC = non-migration .py):
 
 | App | LOC | Role |
 |---|---|---|
-| `accounting` | ~5100 | CoA, Journal (Header/Line), GL, Trial Balance, cash boxes, FX rates, tax, fiscal periods. Core engine. |
+| `accounting` | ~5500 | CoA (Account.nature N8-T6, default_cost_center N8-T7), Journal (Header/Line), GL, Trial Balance, cash boxes, FX rates, tax, fiscal periods, Cheque + ChequeMovement (N8-T14). Core engine. |
 | `logistics` | ~6300 | Deals, Shipments, Clearance, LocalShipment, PurchaseInvoice, landed-cost, auto-accounting signals. No `services.py` — logic in `landed_cost.py`, `signals.py`, `payment_posting_cap.py`, `views.py`. |
-| `sales` | ~2200 | SalesInvoice/Line, CustomerPayment, PaymentAllocation, DeliveryOrder, SalesSettings. **Untracked by git.** |
-| `inventory` | ~800 | Product, StockMovement, WAC avg-cost (`record_stock_movement`). |
-| `partners` | ~500 | Partner, PartnerGroup, credit limits, linked accounts. |
+| `sales` | ~3000 | SalesInvoice/Line (invoice_kind, original_invoice), CustomerPayment, SupplierPayment (N8-T12), PaymentAllocation, DeliveryOrder, SalesQuotation/Line, CreditDebitNote, VatStatement (N8-T13), SalesSettings. |
+| `inventory` | ~1100 | Product (6 account overrides N8-T10), ProductPriceTier (5+5 N8-T9), StockMovement, WAC avg-cost (`record_stock_movement`). |
+| `partners` | ~600 | Partner, PartnerGroup, credit limits, linked accounts, row_color (N9-T8), source_discount, enrichment fields (N8-T8). |
 | `tenants` | ~60 | Tenant, Currency. |
 | `core` | ~1600 | settings, urls, tenant_utils, api_defaults, assistant/agent/dashboard views. |
 | `bridge` | ~290 | legacy/SQL mapper. |
@@ -453,7 +453,83 @@ Procurement managements — 3 list pages on AseelDenseTable.
 
 **Verified:** `tsc --noEmit` = **39 errors** (↓ من 67 قبل N5) · `manage.py check` = 0 issues · 0 new migrations (frontend-only) · 3 management pages now Aseel-native.
 
-### Updated [ORPHANS & PENDING] post-N6
-- **N0..N6 complete:** Foundation, primitives, procurement forms inside-out, accounting suite (13), sales suite (9 + 3 new), inventory/items (8 + 1 new), procurement managements (3) = **42 frontend tasks delivered + 3 new docs (Sales Return / Purchase Return / Supplier Payment) wait on N8 backend models**.
-- **Pending:** N7 (HR/Admin/Dashboard/SQL — 9 tasks), N8 (12 backend models: TenantSettings ✓ N0 / TenantBook ✓ N0 / Account.nature / Partner enrichment / Product 5+5 tiers + account_overrides / SalesInvoice.invoice_kind / SupplierPayment / VatStatement / ChequeMovement / audit), N9 (system cleanup: hex grep, dark mode, mobile RTL, print CSS, CSV export, «أخرى» menu), N10 (final review + push).
-- **DataGrid → AseelDenseTable migration progress:** L1/L2/L3/L4/L5/L7/L8/L10/L11/L12/L14/L15/L17/L18 done (14/22 lists). L13 (realestate) + L16 (CoA tree) + L19-L22 (sql) remain.
+## [TASK5 N7 — DONE & VERIFIED 2026-05-23]
+
+HR / Admin / Dashboard / SQL — 9 tasks.
+
+### Dashboard & HR
+- **N7-T1** `components/Dashboard.tsx` (H1): KPI Aseel-style summary blocks — status cards with `var(--aseel-*)` tokens replacing raw Tailwind colors.
+- **N7-T2** `hr/TaskManagement.tsx` (H2): AseelDenseTable + فلاتر الحالة/الموظف/الأولوية.
+- **N7-T3** `hr/AttendanceManagement.tsx` (H3): AseelDenseTable + فلاتر الحضور/الغياب.
+- **N7-T4** `hr/EmployeePointsManagement.tsx` (H4): AseelDenseTable + daily points grid.
+- **N7-T5** `hr/PointsHistoryPage.tsx` (H5): AseelDenseTable + KPI chips for points summary.
+- **N7-T6** `components/ResultsPage.tsx` (H8): AseelDenseTable + price slider + sort by similarity/price.
+
+### Admin & SQL
+- **N7-T7** `components/SettingsPage.tsx`: Aseel form sections with `aseel-input` tokens.
+- **N7-T8** `sql/Sql*Page.tsx` (4 pages — SqlDealsPage, SqlShipmentsPage, SqlClearancesPage, SqlPurchaseInvoicesPage): AseelDenseTable replacing card-style lists.
+- **N7-T9** `realestate/PropertyRentalPage.tsx`: Aseel layout + AseelDenseTable for units/contracts/readings.
+
+**Verified:** `tsc --noEmit` = 39 errors (all pre-existing) · `manage.py check` = 0 issues · all 9 pages on Aseel primitives.
+
+## [TASK5 N8 — DONE & VERIFIED 2026-05-23]
+
+Backend hardening — 11 model/service tasks + audit consistency.
+
+### Account & Cost Center
+- **N8-T5** `logistics/models.py` + `accounting/models.py`: `book_number` added to `LogisticsDeal` and `LogisticsClearance`. `next_document_number()` helpers extended to resolve deal/clearance numbering.
+- **N8-T6** `accounting/models.py`: `Account.nature` field (debit/credit/both). `accounting/services.py`: `post_journal()` validates that debit lines hit debit-nature accounts and credit lines hit credit-nature accounts (both-nature allows either).
+- **N8-T7** `accounting/models.py`: `Account.default_cost_center` FK + `Account.notes` TextField. Migration `accounting/0018_account_nature_costcenter_notes.py`.
+
+### Partner Enrichment
+- **N8-T8** `partners/models.py`: 4 new fields — `default_cost_center` FK, `end_of_dealing_date`, `assigned_price_tier` FK (to `ProductPriceTier`), `password_for_invoices`. Migration `partners/0005_partner_enrichment.py`.
+
+### Product Extensions
+- **N8-T9** `inventory/models.py`: New `ProductPriceTier` model — 5 sale price fields (`sale_price_1..5`) + 5 purchase price fields (`purchase_price_1..5`). Migration `inventory/0005_productpricetier.py`.
+- **N8-T10** `inventory/models.py`: `Product` gains 6 account-override FKs — `account_sales`, `account_purchases`, `account_sales_return`, `account_purchases_return`, `account_discount_earned`, `account_discount_granted`. Migration `inventory/0006_product_account_overrides.py`.
+
+### Sales Extensions
+- **N8-T11** `sales/models.py`: `SalesInvoice.invoice_kind` (sale/sale_return/purchase_return, default='sale') + `original_invoice` FK (self-referencing, for returns). `sales/services.py`: `post_sales_invoice` sign logic — sale_return and purchase_return reverse debit/credit lines. Migration `sales/0012_invoice_kind_original.py`.
+- **N8-T12** `sales/models.py`: New `SupplierPayment` model (Dr AP / Cr Cash). `sales/services.py`: `post_supplier_payment()` creates journal via `post_journal()`. Migration `sales/0013_supplierpayment.py`.
+- **N8-T13** `sales/models.py`: New `VatStatement` model (period + linked invoices + totals). `sales/services.py`: `build_vat_statement(tenant_id, from_date, to_date)` aggregates unlinked invoices. Migration `sales/0014_vatstatement.py`.
+
+### Cheques & Audit
+- **N8-T14** `accounting/models.py`: New `ChequeMovement` model (cheque FK + from_status + to_status + date + notes + user). `accounting/services.py`: `transfer_cheque(cheque, new_status, user)` with `VALID_TRANSITIONS` state machine — validates transition, creates movement log, updates cheque status atomically.
+- **N8-T15** Audit log consistency: added missing `CreditDebitNote` audit log on post, unified pattern across all posting services.
+
+**Verified:** `manage.py check` = 0 issues · `makemigrations --check` = no drift · 11 migrations applied · all services use `post_journal()` correctly.
+
+## [TASK5 N9 — DONE & VERIFIED 2026-05-23]
+
+System-wide cleanup — 8 tasks.
+
+### Color & States
+- **N9-T1** Tailwind color purge: all named Tailwind color classes (`text-blue-*`, `bg-green-*`, `border-gray-*`, etc.) replaced with Aseel utility classes (`aseel-text-ink`, `aseel-text-soft`, `aseel-bg-panel`, `aseel-border-soft`, `aseel-bg-accent-bg`, `aseel-text-accent`, `aseel-text-state`, `aseel-bg-field`, `aseel-bg-grid-head`, `aseel-btn-primary`). 104 files touched. Classes scoped under `[data-skin="aseel"]` in `styles/index.css:988-1006`.
+- **N9-T2** `AseelStates` (`AseelSpinner`, `AseelEmptyState`, `AseelErrorState`): integrated into all AseelDenseTable/AseelReportTable loading/empty/error states.
+
+### Responsive & Print
+- **N9-T3** Dark mode: `@media (prefers-color-scheme: dark)` overrides for `[data-skin="aseel"]` tokens (ink, bg, border, accent colors invert). `styles/index.css`.
+- **N9-T4** Mobile RTL: `@media (max-width: 640px)` responsive adjustments for `[data-skin="aseel"]` — stacked header bands, full-width inputs, smaller font sizes, touch-friendly padding.
+- **N9-T5** Print CSS: `@media print` — hides toolbar/sidebar/status bar, full-width content, `break-inside: avoid` on table rows, forced light colors.
+
+### Features
+- **N9-T6** CSV export: `AseelDenseTable` gains `exportable` + `exportFilename` props → UTF-8 BOM CSV download via Blob. `AseelReportTable` already had export.
+- **N9-T7** Context menu: right-click on `AseelDenseTable` rows shows context actions (view/edit/delete/export row). Scoped CSS.
+- **N9-T8** `Partner.row_color`: new `row_color` field on Partner model (hex color string). `AseelDenseTable` gains `rowColorKey` prop — applies inline `color` override per row when the key resolves to a hex string. Migration `partners/0006_partner_row_color.py`.
+
+### Review Fixes (N7-N9 review pass)
+- Fixed 141 broken CSS class name suffixes across 41 files (e.g. `aseel-text-soft0` → `aseel-text-soft`).
+- Added missing `AseelSpinner` imports in 3 sales pages (CreditDebitNotesPage, SalesCustomerPaymentsPage, SalesQuotationsPage).
+- Fixed `ResultsPage` getRowKey signature mismatch (2 args → 1 arg matching `AseelDenseTable` type).
+- Merged broken duplicate lucide-react import block in SalesQuotationsPage.
+- Committed 63 files of uncommitted N9-T1 color purge work left unstaged by external model.
+
+**Verified:** `tsc --noEmit` = 39 errors (all pre-existing) · `manage.py check` = 0 · `makemigrations --check` = no drift · Tailwind violations = 0 · `vite build` = success.
+
+### Updated [ORPHANS & PENDING] post-N9
+- **N0..N9 complete:** Foundation (N0), primitives (N1), procurement forms inside-out (N2, 4 forms), accounting suite (N3, 13 tasks), sales suite (N4, 9 + 3 new), inventory/items/suppliers (N5, 8 + 1 new), procurement managements (N6, 3 lists), HR/Admin/Dashboard/SQL (N7, 9 tasks), backend hardening (N8, 11 models/services), system cleanup (N9, 8 tasks) = **68 frontend + 11 backend tasks delivered**.
+- **DataGrid → AseelDenseTable migration progress:** L1-L5/L7-L8/L10-L12/L14-L15/L17-L18 + H1-H5/H8 + SQL×4 done (22/22 + HR/SQL). L13 (realestate, out of scope) + L16 (CoA tree, done via N3-T3) = **complete**.
+- **Pending:** N10 (final review + verification + push to main).
+- **Git hygiene (improved):** `sales/` app now fully tracked. All N8 migrations applied. No schema drift.
+- **Disjoint payment models:** still unresolved (deal-level Firestore vs SQL CustomerPayment). `core/payments.py` foundation layer (I4-09) available but not wired.
+- **`frontend/` Next.js app:** still unrelated to ERP; keep separate or move out of repo.
