@@ -27,12 +27,26 @@ class Account(models.Model):
         ('Expense', 'Expense'),
     ]
 
+    NATURE_DEBIT_ONLY = 'debit_only'
+    NATURE_CREDIT_ONLY = 'credit_only'
+    NATURE_BOTH = 'both'
+    NATURE_CHOICES = [
+        (NATURE_DEBIT_ONLY, 'مدين فقط'),
+        (NATURE_CREDIT_ONLY, 'دائن فقط'),
+        (NATURE_BOTH, 'مدين/دائن'),
+    ]
+
     id = models.AutoField(primary_key=True, db_column='AccountID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     code = models.CharField(max_length=20, null=True, blank=True, db_column='Code')
     name = models.CharField(max_length=100, null=True, blank=True, db_column='Name')
     parent = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, db_column='ParentID', related_name='children')
     account_type = models.CharField(max_length=20, choices=ACCOUNT_TYPES, null=True, blank=True, db_column='Type')
+    nature = models.CharField(
+        max_length=20, choices=NATURE_CHOICES, null=True, blank=True,
+        db_column='Nature',
+        help_text='طبيعة الحساب: مدين فقط / دائن فقط / مدين ودائن. تُفرَض على القيود.',
+    )
     is_active = models.BooleanField(default=True, db_column='IsActive')
 
     class Meta:
