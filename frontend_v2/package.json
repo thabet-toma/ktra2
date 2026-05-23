@@ -24,6 +24,8 @@
     "@types/node": "^22.14.0",
     "@vitejs/plugin-react": "^5.0.0",
     "baseline-browser-mapping": "^2.10.18",
+    "eslint": "^10.4.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "jszip": "^3.10.1",
     "tailwindcss": "^4.3.0",
     "typescript": "~5.8.2",

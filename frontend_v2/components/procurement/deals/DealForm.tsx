@@ -157,6 +157,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   const [loading, setLoading] = useState(false);
   const [dealsList, setDealsList] = useState<Deal[]>([]);
   const [showSupplierPicker, setShowSupplierPicker] = useState(false);
+  const [workflowError, setWorkflowError] = useState<string | null>(null);
 
   const nav = useRecordNavigation<Deal>({
     items: dealsList,
@@ -501,12 +502,13 @@ export const DealForm: React.FC<DealFormProps> = ({
 
   const handleShippingWorkflowChange = async (code: ShippingWorkflowStatus) => {
     if (!formData.id) return;
+    setWorkflowError(null);
     try {
       setLoading(true);
       await dealsService.patchShippingWorkflow(formData.id, code);
       await loadAndSetDealData(formData.id); await loadActivities();
       alert("تم حفظ مرحلة الشحن والتصنيع");
-    } catch (error) { console.error("shipping workflow:", error); alert("تعذر حفظ مرحلة الشحن"); }
+    } catch (error: unknown) { setWorkflowError(error instanceof Error ? error.message : "تعذر حفظ مرحلة الشحن"); }
     finally { setLoading(false); }
   };
 
@@ -804,6 +806,11 @@ export const DealForm: React.FC<DealFormProps> = ({
           onOpenAccountingJournal={onOpenAccountingJournal}
         />
       ) : null}
+      {workflowError && (
+        <div style={{ color: 'var(--aseel-err, #c0392b)', fontSize: '12px', padding: '4px 8px', marginBottom: '4px', background: 'var(--aseel-err-bg, #fde8e8)', borderRadius: '4px' }}>
+          {workflowError}
+        </div>
+      )}
       <DealStageControl
         data={formData}
         setData={setFormData}

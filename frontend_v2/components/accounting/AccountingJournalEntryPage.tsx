@@ -324,6 +324,29 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
 
   useEffect(() => { void load(); }, [load]);
 
+  /* ── N3-T1: account balance lookup helper (يَستخدم getGeneralLedger مع YTD) ── */
+  const showAccountBalance = useCallback(async (lineIdx: number, accountId: string) => {
+    if (!accountId) return;
+    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
+    setBalanceTooltip({ lineIdx, balance: '...' });
+    try {
+      const today = new Date();
+      const ledger = await accountingApi.getGeneralLedger({
+        account_id: accountId,
+        start_date: `${today.getFullYear()}-01-01`,
+        end_date: today.toISOString().split('T')[0],
+      });
+      const closing = Number((ledger as { closing_balance?: number | string })?.closing_balance ?? 0);
+      const fmt = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const label = `الرصيد: ${fmt(Math.abs(closing))} ${closing >= 0 ? 'مدين' : 'دائن'}`;
+      setBalanceTooltip({ lineIdx, balance: label });
+      tooltipTimerRef.current = setTimeout(() => setBalanceTooltip(null), 4000);
+    } catch {
+      setBalanceTooltip({ lineIdx, balance: 'تعذّر جلب الرصيد' });
+      tooltipTimerRef.current = setTimeout(() => setBalanceTooltip(null), 3000);
+    }
+  }, []);
+
   /* ── line helpers ── */
   const updateLine = (i: number, patch: Partial<LineState>) => {
     if (posted) return;
@@ -439,29 +462,6 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       </div>
     );
   }
-
-  /* ── N3-T1: account balance lookup helper (يَستخدم getGeneralLedger مع YTD) ── */
-  const showAccountBalance = useCallback(async (lineIdx: number, accountId: string) => {
-    if (!accountId) return;
-    if (tooltipTimerRef.current) clearTimeout(tooltipTimerRef.current);
-    setBalanceTooltip({ lineIdx, balance: '...' });
-    try {
-      const today = new Date();
-      const ledger = await accountingApi.getGeneralLedger({
-        account_id: accountId,
-        start_date: `${today.getFullYear()}-01-01`,
-        end_date: today.toISOString().split('T')[0],
-      });
-      const closing = Number((ledger as { closing_balance?: number | string })?.closing_balance ?? 0);
-      const fmt = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-      const label = `الرصيد: ${fmt(Math.abs(closing))} ${closing >= 0 ? 'مدين' : 'دائن'}`;
-      setBalanceTooltip({ lineIdx, balance: label });
-      tooltipTimerRef.current = setTimeout(() => setBalanceTooltip(null), 4000);
-    } catch {
-      setBalanceTooltip({ lineIdx, balance: 'تعذّر جلب الرصيد' });
-      tooltipTimerRef.current = setTimeout(() => setBalanceTooltip(null), 3000);
-    }
-  }, []);
 
   /* ── N3-T1: AseelGrid columns for journal lines ── */
   const journalGridColumns: AseelGridColumn<LineState & { _idx: number }>[] = [
