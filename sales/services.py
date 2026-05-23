@@ -1456,6 +1456,15 @@ def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNo
         note.status = CreditDebitNote.STATUS_POSTED
         note.save(update_fields=["journal", "status"])
 
+        create_audit_log(
+            tenant=note.tenant,
+            user=user,
+            action="POST",
+            model_name="CreditDebitNote",
+            object_id=note.id,
+            change_details=f"Posted {note.get_note_type_display()} — journal={jh.id}",
+        )
+
     return note
 
 
@@ -1568,7 +1577,7 @@ def build_vat_statement(
     ).update(vat_statement=stmt)
 
     create_audit_log(
-        tenant=Tenant.objects.get(pk=tenant_id),
+        tenant=stmt.tenant,
         user=user,
         action="CREATE",
         model_name="VatStatement",
