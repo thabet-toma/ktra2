@@ -1,582 +1,365 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { apiGetList, apiGetObject, apiPostObject } from "../../services/restApi";
-import { SqlDataPageShell } from "./SqlDataPageShell";
-import {
-  Handshake,
-  DollarSign,
-  Clock3,
-  CheckCircle2,
-  Eye,
-  ChevronDown,
-  Calendar,
-  Package,
-  FileText,
-} from "lucide-react";
+/**
+ * N7-T8 — SqlDealsPage — AseelDenseTable للصفقات (SQL)
+ */
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { apiGetList, apiGetObject, apiPostObject } from '../../services/restApi';
+import { SqlDataPageShell } from './SqlDataPageShell';
+import { Eye, RefreshCw, Plus } from 'lucide-react';
+import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
+import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
 
 type DealRow = {
-  id: number;
-  ref_number?: string;
-  order_date?: string;
-  total_amount?: string | number;
-  status?: string;
-  partner?: any;
-  partner_name?: string;
-  description?: string | null;
-  payment_status?: string;
-  items?: Array<{ id: number; product_name?: string; quantity?: string | number; unit_price?: string | number; total_price?: string | number; notes?: string | null }>;
-  payments?: Array<{ id: number; title?: string; amount?: string | number; status?: string; due_date?: string | null; transfer_date?: string | null }>;
+    id: number;
+    ref_number?: string;
+    order_date?: string;
+    total_amount?: string | number;
+    status?: string;
+    partner?: any;
+    partner_name?: string;
+    description?: string | null;
+    payment_status?: string;
+    items?: Array<{ id: number; product_name?: string; quantity?: string | number; unit_price?: string | number; total_price?: string | number; notes?: string | null }>;
+    payments?: Array<{ id: number; title?: string; amount?: string | number; status?: string; due_date?: string | null; transfer_date?: string | null }>;
 };
 type PartnerOption = { id: number; name?: string; partner_type?: string };
 
+const statusLabel = (s?: string) => {
+    const v = (s || '').toLowerCase();
+    if (v.includes('open')) return 'نشطة';
+    if (v.includes('close')) return 'مغلقة';
+    if (v.includes('cancel')) return 'ملغاة';
+    if (v.includes('ship')) return 'قيد الشحن';
+    if (v.includes('complete')) return 'مكتملة';
+    return s || '—';
+};
+
+const paymentStatusLabel = (s?: string) => {
+    const v = (s || '').toLowerCase();
+    if (v.includes('fully')) return 'مدفوعة كلياً';
+    if (v.includes('part')) return 'مدفوعة جزئياً';
+    if (v.includes('unpaid')) return 'غير مدفوعة';
+    if (v.includes('paid')) return 'مدفوعة';
+    if (v.includes('confirm')) return 'بانتظار التأكيد';
+    return s || '—';
+};
+
+const statusColor = (s?: string) => {
+    const v = (s || '').toLowerCase();
+    if (v.includes('open')) return 'var(--aseel-warn, #b8800a)';
+    if (v.includes('close') || v.includes('complete')) return 'var(--aseel-ok, #267346)';
+    if (v.includes('cancel')) return 'var(--aseel-danger, #c00)';
+    if (v.includes('ship')) return 'var(--aseel-accent, #1857a4)';
+    return 'inherit';
+};
+
+const fmtDate = (d?: string | null) => { if (!d) return '—'; const dt = new Date(d); return Number.isNaN(dt.getTime()) ? String(d) : dt.toLocaleDateString('en-GB'); };
+const fmtMoney = (v: any) => { const n = Number(v || 0); return Number.isFinite(n) ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(v ?? '—'); };
+
 export function SqlDealsPage() {
-  const [rows, setRows] = useState<DealRow[]>([]);
-  const [partners, setPartners] = useState<PartnerOption[]>([]);
-  const [err, setErr] = useState<string | null>(null);
-  const [q, setQ] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<DealRow | null>(null);
-  const [loadingDetail, setLoadingDetail] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
-  const [savingCreate, setSavingCreate] = useState(false);
-  const [createForm, setCreateForm] = useState({
-    ref_number: "",
-    partner: "",
-    order_date: new Date().toISOString().slice(0, 10),
-    status: "Open",
-    description: "",
-  });
+    const [rows, setRows] = useState<DealRow[]>([]);
+    const [partners, setPartners] = useState<PartnerOption[]>([]);
+    const [err, setErr] = useState<string | null>(null);
+    const [q, setQ] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [selected, setSelected] = useState<DealRow | null>(null);
+    const [loadingDetail, setLoadingDetail] = useState(false);
+    const [detailsOpen, setDetailsOpen] = useState(false);
+    const [statusFilter, setStatusFilter] = useState<string>('all');
+    const [createOpen, setCreateOpen] = useState(false);
+    const [savingCreate, setSavingCreate] = useState(false);
+    const [createForm, setCreateForm] = useState({ ref_number: '', partner: '', order_date: new Date().toISOString().slice(0, 10), status: 'Open', description: '' });
+    const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
-    setLoading(true);
-    setErr(null);
-    apiGetList<DealRow>("logistics/deals/", { tenantId: 1 })
-      .then((data) => mounted && setRows(data))
-      .catch((e) => mounted && setErr(e instanceof Error ? e.message : String(e)))
-      .finally(() => mounted && setLoading(false));
-    return () => {
-      mounted = false;
+    useEffect(() => {
+        let mounted = true;
+        setLoading(true); setErr(null);
+        apiGetList<DealRow>('logistics/deals/', { tenantId: 1 })
+            .then(d => mounted && setRows(d))
+            .catch(e => mounted && setErr(e instanceof Error ? e.message : String(e)))
+            .finally(() => mounted && setLoading(false));
+        return () => { mounted = false; };
+    }, []);
+
+    useEffect(() => {
+        apiGetList<PartnerOption>('partners/', { tenantId: 1 }).then(setPartners).catch(() => setPartners([]));
+    }, []);
+
+    const filtered = useMemo(() => {
+        const s = q.trim().toLowerCase();
+        return rows.filter(r => {
+            if (statusFilter !== 'all' && (r.status || '') !== statusFilter) return false;
+            if (!s) return true;
+            const pn = r.partner?.name || r.partner_name || '';
+            return `${r.ref_number || ''} ${pn} ${r.status || ''} ${r.payment_status || ''} ${r.description || ''}`.toLowerCase().includes(s);
+        });
+    }, [rows, q, statusFilter]);
+
+    const stats = useMemo(() => ({
+        total: rows.length,
+        totalAmount: rows.reduce((s, r) => s + Number(r.total_amount || 0), 0),
+        active: rows.filter(r => !['closed', 'cancelled'].some(x => (r.status || '').toLowerCase().includes(x))).length,
+    }), [rows]);
+
+    const statuses = useMemo(() => Array.from(new Set(rows.map(r => r.status).filter(Boolean) as string[])), [rows]);
+
+    const openDeal = async (row: DealRow) => {
+        setSelected(row); setDetailsOpen(true); setLoadingDetail(true);
+        try { setSelected(await apiGetObject<DealRow>(`logistics/deals/${row.id}/`, { tenantId: 1 })); }
+        catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+        finally { setLoadingDetail(false); }
     };
-  }, []);
 
-  useEffect(() => {
-    apiGetList<PartnerOption>("partners/", { tenantId: 1 })
-      .then((list) => setPartners(list))
-      .catch(() => setPartners([]));
-  }, []);
+    const refreshDeals = async () => {
+        setLoading(true);
+        try { setRows(await apiGetList<DealRow>('logistics/deals/', { tenantId: 1 })); }
+        catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+        finally { setLoading(false); }
+    };
 
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (statusFilter !== "all" && (r.status || "") !== statusFilter) return false;
-      if (!s) return true;
-      const partnerName = r.partner?.name || r.partner_name || "";
-      const txt = `${r.ref_number || ""} ${partnerName} ${r.status || ""} ${r.payment_status || ""} ${r.description || ""}`.toLowerCase();
-      return txt.includes(s);
-    });
-  }, [rows, q, statusFilter]);
+    const handleCreateDeal = async () => {
+        if (!createForm.ref_number.trim()) { setErr('رقم الصفقة مطلوب.'); return; }
+        if (!createForm.partner) { setErr('اختر المورد أولاً.'); return; }
+        setSavingCreate(true); setErr(null);
+        try {
+            await apiPostObject('logistics/deals/', { ref_number: createForm.ref_number.trim(), partner: Number(createForm.partner), order_date: createForm.order_date, status: createForm.status, description: createForm.description || null, currency: 1, items: [], payments: [] }, { tenantId: 1 });
+            setCreateOpen(false);
+            setCreateForm({ ref_number: '', partner: '', order_date: new Date().toISOString().slice(0, 10), status: 'Open', description: '' });
+            await refreshDeals();
+        } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+        finally { setSavingCreate(false); }
+    };
 
-  const stats = useMemo(() => {
-    const total = rows.length;
-    const totalAmount = rows.reduce((sum, r) => sum + Number(r.total_amount || 0), 0);
-    const active = rows.filter((r) => {
-      const s = (r.status || "").toLowerCase();
-      return !s.includes("closed") && !s.includes("cancel");
-    }).length;
-    const paid = rows.filter((r) => (r.payment_status || "").toLowerCase().includes("paid")).length;
-    return { total, totalAmount, active, paid };
-  }, [rows]);
+    useAseelIndexKeymap(
+        { CtrlIns: () => setCreateOpen(true), F6: () => searchInputRef.current?.focus(), Escape: () => { setQ(''); setStatusFilter('all'); } },
+        { enabled: !detailsOpen && !createOpen },
+    );
 
-  const statuses = useMemo(() => {
-    const s = Array.from(new Set(rows.map((r) => r.status).filter(Boolean) as string[]));
-    return s;
-  }, [rows]);
-
-  const statusClass = (status?: string) => {
-    const s = (status || "").toLowerCase();
-    if (s.includes("open")) return "bg-amber-50 text-amber-700 border-amber-200";
-    if (s.includes("close")) return "bg-emerald-50 text-emerald-700 border-emerald-200";
-    if (s.includes("ship")) return "bg-blue-50 text-blue-700 border-blue-200";
-    return "bg-gray-50 text-gray-700 border-gray-200";
-  };
-
-  const paymentStatusClass = (status?: string) => {
-    const s = (status || "").toLowerCase();
-    if (s.includes("fully")) return "bg-emerald-50 text-emerald-700 border-emerald-200";
-    if (s.includes("part")) return "bg-orange-50 text-orange-700 border-orange-200";
-    if (s.includes("unpaid")) return "bg-red-50 text-red-700 border-red-200";
-    return "bg-gray-50 text-gray-700 border-gray-200";
-  };
-
-  const statusLabel = (status?: string) => {
-    const s = (status || "").toLowerCase();
-    if (!s) return "-";
-    if (s.includes("open")) return "نشطة";
-    if (s.includes("close")) return "مغلقة";
-    if (s.includes("cancel")) return "ملغاة";
-    if (s.includes("ship")) return "قيد الشحن";
-    if (s.includes("complete")) return "مكتملة";
-    return status || "-";
-  };
-
-  const paymentStatusLabel = (status?: string) => {
-    const s = (status || "").toLowerCase();
-    if (!s) return "-";
-    if (s.includes("fully")) return "مدفوعة كلياً";
-    if (s.includes("part")) return "مدفوعة جزئياً";
-    if (s.includes("unpaid")) return "غير مدفوعة";
-    if (s.includes("paid")) return "مدفوعة";
-    if (s.includes("confirm")) return "بانتظار التأكيد";
-    return status || "-";
-  };
-
-  const openDeal = async (row: DealRow) => {
-    setSelected(row);
-    setDetailsOpen(true);
-    setLoadingDetail(true);
-    try {
-      const data = await apiGetObject<DealRow>(`logistics/deals/${row.id}/`, { tenantId: 1 });
-      setSelected(data);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoadingDetail(false);
-    }
-  };
-
-  const refreshDeals = async () => {
-    setLoading(true);
-    try {
-      const data = await apiGetList<DealRow>("logistics/deals/", { tenantId: 1 });
-      setRows(data);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCreateDeal = async () => {
-    if (!createForm.ref_number.trim()) {
-      setErr("رقم الصفقة مطلوب.");
-      return;
-    }
-    if (!createForm.partner) {
-      setErr("اختر المورد أولاً.");
-      return;
-    }
-    setSavingCreate(true);
-    setErr(null);
-    try {
-      await apiPostObject("logistics/deals/", {
-        ref_number: createForm.ref_number.trim(),
-        partner: Number(createForm.partner),
-        order_date: createForm.order_date,
-        status: createForm.status,
-        description: createForm.description || null,
-        currency: 1,
-        items: [],
-        payments: [],
-      }, { tenantId: 1 });
-      setCreateOpen(false);
-      setCreateForm({
-        ref_number: "",
-        partner: "",
-        order_date: new Date().toISOString().slice(0, 10),
-        status: "Open",
-        description: "",
-      });
-      await refreshDeals();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSavingCreate(false);
-    }
-  };
-
-  const formatDate = (dateString?: string | null) => {
-    if (!dateString) return "-";
-    const d = new Date(dateString);
-    if (Number.isNaN(d.getTime())) return String(dateString);
-    return d.toLocaleDateString("en-GB");
-  };
-
-  const formatMoney = (amount: any) => {
-    const n = Number(amount || 0);
-    if (!Number.isFinite(n)) return String(amount ?? "-");
-    return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  };
-
-  return (
-    <>
-    <SqlDataPageShell
-      title="إدارة الصفقات"
-      subtitle="اضغط على أي صفقة لرؤية التفاصيل الكاملة."
-      actions={
-        <div className="flex gap-2">
-          <button
-            onClick={() => setCreateOpen(true)}
-            className="px-3 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"
-          >
-            + صفقة جديدة
-          </button>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="بحث برقم/مورد/حالة..."
-            className="w-72 max-w-[70vw] px-3 py-2 border rounded-lg text-sm"
-          />
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 border rounded-lg text-sm"
-          >
-            <option value="all">كل الحالات</option>
-            {statuses.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </div>
-      }
-    >
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 border-b bg-gray-50/70">
-        <div className="bg-white border rounded-lg p-3">
-          <div className="text-xs text-gray-500">إجمالي الصفقات</div>
-          <div className="text-xl font-bold flex items-center gap-2"><Handshake className="w-4 h-4 text-blue-600" />{stats.total}</div>
-        </div>
-        <div className="bg-white border rounded-lg p-3">
-          <div className="text-xs text-gray-500">القيمة الإجمالية</div>
-          <div className="text-xl font-bold flex items-center gap-2"><DollarSign className="w-4 h-4 text-emerald-600" />{stats.totalAmount.toLocaleString()}</div>
-        </div>
-        <div className="bg-white border rounded-lg p-3">
-          <div className="text-xs text-gray-500">الصفقات النشطة</div>
-          <div className="text-xl font-bold flex items-center gap-2"><Clock3 className="w-4 h-4 text-amber-600" />{stats.active}</div>
-        </div>
-        <div className="bg-white border rounded-lg p-3">
-          <div className="text-xs text-gray-500">صفقات بها دفعات</div>
-          <div className="text-xl font-bold flex items-center gap-2"><CheckCircle2 className="w-4 h-4 text-green-600" />{stats.paid}</div>
-        </div>
-      </div>
-
-      {err ? (
-        <div className="p-4 text-sm text-red-700 bg-red-50 border-b border-red-100">
-          {err}
-        </div>
-      ) : null}
-
-      <div className="p-3 space-y-2">
-        {loading ? (
-          <div className="p-4 text-gray-500 text-sm">جارِ التحميل...</div>
-        ) : filtered.length === 0 ? (
-          <div className="p-4 text-gray-500 text-sm">لا يوجد بيانات.</div>
-        ) : (
-          filtered.map((r) => (
-            <div
-              key={r.id}
-              className="border rounded-xl p-3 bg-white hover:bg-gray-50 transition shadow-sm"
-            >
-              <div
-                className="flex items-center justify-between gap-3 cursor-pointer"
-                onClick={() => setExpandedId((prev) => (prev === r.id ? null : r.id))}
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <div className="font-bold text-sm">{r.ref_number || "-"}</div>
-                    <span className={`px-2 py-1 rounded-full text-[11px] border ${statusClass(r.status)}`}>
-                      {statusLabel(r.status)}
-                    </span>
-                    <span className={`px-2 py-1 rounded-full text-[11px] border ${paymentStatusClass(r.payment_status)}`}>
-                      {paymentStatusLabel(r.payment_status)}
-                    </span>
-                  </div>
-                  <div className="text-xs text-gray-500 mt-1 flex items-center gap-3">
-                    <span className="inline-flex items-center gap-1">
-                      <Calendar className="w-3 h-3" />
-                      {r.order_date || "-"}
-                    </span>
-                    <span>{r.partner?.name || r.partner_name || "-"}</span>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="font-semibold text-sm">{String(r.total_amount ?? "-")}</div>
-                  <div className="text-xs text-gray-500">USD</div>
-                </div>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    openDeal(r);
-                  }}
-                  className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border text-sm hover:bg-gray-100"
-                >
-                  <Eye className="w-4 h-4" />
-                  إدارة كاملة
+    const columns: DenseColumn<DealRow>[] = [
+        {
+            key: 'ref_number', header: 'رقم الصفقة', width: '120px',
+            render: r => <b style={{ fontFamily: 'monospace' }}>{r.ref_number || '—'}</b>,
+        },
+        {
+            key: 'partner', header: 'المورد', width: '160px',
+            render: r => <>{r.partner?.name || r.partner_name || '—'}</>,
+        },
+        {
+            key: 'status', header: 'الحالة', width: '100px',
+            render: r => <span style={{ color: statusColor(r.status), fontWeight: 500, fontSize: 'var(--aseel-fs-sm)' }}>{statusLabel(r.status)}</span>,
+        },
+        {
+            key: 'payment_status', header: 'الدفع', width: '120px',
+            render: r => <span style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)' }}>{paymentStatusLabel(r.payment_status)}</span>,
+        },
+        {
+            key: 'order_date', header: 'التاريخ', width: '90px',
+            render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{fmtDate(r.order_date)}</span>,
+        },
+        {
+            key: 'total_amount', header: 'الإجمالي', width: '110px', align: 'right', numeric: true,
+            render: r => <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{fmtMoney(r.total_amount)}</span>,
+        },
+        {
+            key: 'actions', header: '', width: '60px', align: 'center',
+            render: r => (
+                <button className="aseel-toolbtn" style={{ padding: '2px 4px' }} onClick={e => { e.stopPropagation(); void openDeal(r); }} title="إدارة كاملة">
+                    <Eye style={{ width: 13, height: 13 }} />
                 </button>
-                <ChevronDown
-                  className={`w-4 h-4 text-gray-500 transition-transform ${expandedId === r.id ? "rotate-180" : ""}`}
-                />
-              </div>
-              {expandedId === r.id && (
-                <div className="mt-3 pt-3 border-t grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-                  <div className="bg-gray-50 rounded-lg p-3">
-                    <div className="text-xs text-gray-500 mb-1">المورد</div>
-                    <div className="font-medium">{r.partner?.name || r.partner_name || "-"}</div>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg p-3">
-                    <div className="text-xs text-gray-500 mb-1">الوصف</div>
-                    <div className="font-medium line-clamp-2">{r.description || "-"}</div>
-                  </div>
-                  <div className="bg-gray-50 rounded-lg p-3">
-                    <div className="text-xs text-gray-500 mb-1">الإجمالي</div>
-                    <div className="font-bold text-blue-700">{String(r.total_amount ?? "-")}</div>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))
-        )}
-      </div>
-    </SqlDataPageShell>
-    {detailsOpen && (
-      <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3" onClick={() => setDetailsOpen(false)}>
-        <div className="bg-gray-100 rounded-xl w-full max-w-6xl max-h-[92vh] overflow-auto" onClick={(e) => e.stopPropagation()} dir="rtl">
-          <div className="sticky top-0 z-10 bg-white border-b px-4 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-2 font-bold text-gray-900">
-              <FileText className="w-4 h-4 text-blue-700" />
-              تفاصيل الصفقة
-            </div>
-            <button className="px-3 py-1 text-sm rounded border bg-white hover:bg-gray-50" onClick={() => setDetailsOpen(false)}>إغلاق</button>
-          </div>
+            ),
+        },
+    ];
 
-          <div className="p-4">
-            {loadingDetail ? (
-              <div className="text-sm text-gray-500">جار تحميل تفاصيل الصفقة...</div>
-            ) : !selected ? (
-              <div className="text-sm text-gray-500">تعذر تحميل التفاصيل.</div>
-            ) : (
-              (() => {
-                const paidTotal = (selected.payments || []).reduce((sum, p) => sum + Number(p.amount || 0), 0);
-                const total = Number(selected.total_amount || 0);
-                const remaining = Math.max(0, total - paidTotal);
-                return (
-                  <div className="w-full bg-white border rounded-xl shadow-sm p-4 space-y-4">
-                    <div className="flex justify-between items-center border-b-2 border-gray-800 pb-3">
-                      <div className="flex gap-3 items-center">
-                        <div className="bg-gray-900 text-white p-2 rounded-lg">
-                          <FileText className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-black text-gray-900">تقرير صفقة شامل</h3>
-                          <p className="text-[11px] font-bold text-gray-500">INTERNAL DEAL REPORT</p>
-                        </div>
-                      </div>
-                      <div className="text-left text-xs space-y-1">
-                        <div className="flex gap-2 justify-end"><span className="font-bold text-gray-900">{selected.ref_number || "-"}</span> <span className="text-gray-500">REF:</span></div>
-                        <div className="flex gap-2 justify-end"><span className="font-medium text-gray-800">{formatDate(selected.order_date)}</span> <span className="text-gray-500">DATE:</span></div>
-                      </div>
+    return (
+        <>
+            <SqlDataPageShell
+                title="إدارة الصفقات"
+                subtitle="اضغط على أي صفقة لرؤية التفاصيل الكاملة."
+                actions={
+                    <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="aseel-toolbtn" style={{ padding: '4px 10px', color: 'var(--aseel-accent, #1857a4)', fontWeight: 700 }} onClick={() => setCreateOpen(true)} title="صفقة جديدة (Ctrl+Ins)">
+                            <Plus style={{ width: 14, height: 14, display: 'inline', marginLeft: 4 }} />صفقة جديدة
+                        </button>
+                        <input ref={searchInputRef} value={q} onChange={e => setQ(e.target.value)} placeholder="بحث برقم/مورد/حالة… (F6)" className="aseel-input" style={{ width: 220 }} />
+                        <select className="aseel-input" style={{ width: 130 }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                            <option value="all">كل الحالات</option>
+                            {statuses.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                        <button className="aseel-toolbtn" onClick={() => { setQ(''); setStatusFilter('all'); }} title="إعادة تعيين"><RefreshCw style={{ width: 14, height: 14 }} /></button>
                     </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                        <span className="text-[10px] text-gray-500 font-bold block mb-1">الحالة</span>
-                        <span className="text-sm font-bold">{statusLabel(selected.status)}</span>
-                      </div>
-                      <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                        <span className="text-[10px] text-gray-500 font-bold block mb-1">التاريخ</span>
-                        <span className="text-sm font-bold">{formatDate(selected.order_date)}</span>
-                      </div>
-                      <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                        <span className="text-[10px] text-gray-500 font-bold block mb-1">المورد</span>
-                        <span className="text-sm font-bold truncate">{selected.partner_name || selected.partner?.name || "-"}</span>
-                      </div>
-                      <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
-                        <span className="text-[10px] text-gray-500 font-bold block mb-1">الإجمالي</span>
-                        <span className="text-sm font-black text-green-700">{formatMoney(selected.total_amount)}</span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                      <div className="lg:col-span-2 border border-gray-300 rounded-lg overflow-hidden">
-                        <div className="bg-gray-100 px-3 py-2 border-b border-gray-300 font-bold">بنود المنتجات</div>
-                        <div className="overflow-auto">
-                          <table className="min-w-[820px] w-full text-sm">
-                            <thead className="bg-gray-800 text-white text-[11px]">
-                              <tr>
-                                <th className="text-right px-3 py-2 border-b">الصنف</th>
-                                <th className="text-right px-3 py-2 border-b">الكمية</th>
-                                <th className="text-right px-3 py-2 border-b">سعر الوحدة</th>
-                                <th className="text-right px-3 py-2 border-b">الإجمالي</th>
-                                <th className="text-right px-3 py-2 border-b">ملاحظات</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {(selected.items || []).length === 0 ? (
-                                <tr><td className="px-3 py-4 text-gray-500" colSpan={5}>لا توجد بنود.</td></tr>
-                              ) : (
-                                (selected.items || []).map((it) => (
-                                  <tr key={it.id} className="hover:bg-gray-50">
-                                    <td className="px-3 py-2 border-b">{it.product_name || "-"}</td>
-                                    <td className="px-3 py-2 border-b">{String(it.quantity ?? "-")}</td>
-                                    <td className="px-3 py-2 border-b">{formatMoney(it.unit_price)}</td>
-                                    <td className="px-3 py-2 border-b font-bold">{formatMoney(it.total_price)}</td>
-                                    <td className="px-3 py-2 border-b text-gray-600">{it.notes || "-"}</td>
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-
-                      <div className="border border-gray-300 rounded-lg overflow-hidden h-fit shadow-sm">
-                        <div className="bg-gray-800 text-white px-3 py-2 text-center font-bold">الملخص المالي النهائي</div>
-                        <div className="p-3 space-y-2 text-sm">
-                          <div className="flex justify-between border-b border-gray-100 pb-1">
-                            <span className="text-gray-500">إجمالي المدفوعات:</span>
-                            <span className="font-mono font-bold text-emerald-700">{formatMoney(paidTotal)}</span>
-                          </div>
-                          <div className="flex justify-between border-b border-gray-100 pb-1">
-                            <span className="text-gray-500">الإجمالي:</span>
-                            <span className="font-mono font-bold">{formatMoney(total)}</span>
-                          </div>
-                          <div className="flex justify-between pt-1 text-red-600 font-bold">
-                            <span>المبلغ المتبقي:</span>
-                            <span className="font-mono">{formatMoney(remaining)}</span>
-                          </div>
-                          <div className="flex justify-between pt-1 text-blue-700 font-bold">
-                            <span>حالة الدفع:</span>
-                            <span>{paymentStatusLabel(selected.payment_status)}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="border border-gray-300 rounded-lg overflow-hidden">
-                      <div className="bg-gray-100 px-3 py-2 border-b border-gray-300 font-bold flex justify-between items-center">
-                        <span>الدفعات</span>
-                        <span className="text-[11px] bg-white px-2 py-0.5 rounded border border-gray-200">{(selected.payments || []).length} دفعة</span>
-                      </div>
-                      <div className="overflow-auto">
-                        <table className="min-w-[820px] w-full text-sm">
-                          <thead className="bg-gray-50 text-gray-700">
-                            <tr>
-                              <th className="text-right px-3 py-2 border-b">العنوان</th>
-                              <th className="text-right px-3 py-2 border-b">المبلغ</th>
-                              <th className="text-right px-3 py-2 border-b">الحالة</th>
-                              <th className="text-right px-3 py-2 border-b">الاستحقاق</th>
-                              <th className="text-right px-3 py-2 border-b">تاريخ التحويل</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(selected.payments || []).length === 0 ? (
-                              <tr><td className="px-3 py-4 text-gray-500" colSpan={5}>لا توجد دفعات.</td></tr>
-                            ) : (
-                              (selected.payments || []).map((p) => (
-                                <tr key={p.id} className="hover:bg-gray-50">
-                                  <td className="px-3 py-2 border-b">{p.title || "-"}</td>
-                                  <td className="px-3 py-2 border-b font-bold">{formatMoney(p.amount)}</td>
-                                  <td className="px-3 py-2 border-b">{paymentStatusLabel(p.status)}</td>
-                                  <td className="px-3 py-2 border-b">{formatDate(p.due_date)}</td>
-                                  <td className="px-3 py-2 border-b">{formatDate(p.transfer_date)}</td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()
-            )}
-          </div>
-        </div>
-      </div>
-    )}
-    {createOpen && (
-      <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3" onClick={() => setCreateOpen(false)}>
-        <div className="bg-white rounded-xl w-full max-w-xl" onClick={(e) => e.stopPropagation()}>
-          <div className="px-4 py-3 border-b flex items-center justify-between">
-            <div className="font-bold">إضافة صفقة جديدة</div>
-            <button className="px-3 py-1 text-sm rounded border" onClick={() => setCreateOpen(false)}>إغلاق</button>
-          </div>
-          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">رقم الصفقة</label>
-              <input
-                value={createForm.ref_number}
-                onChange={(e) => setCreateForm((s) => ({ ...s, ref_number: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg text-sm"
-                placeholder="D-0104"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">التاريخ</label>
-              <input
-                type="date"
-                value={createForm.order_date}
-                onChange={(e) => setCreateForm((s) => ({ ...s, order_date: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">المورد</label>
-              <select
-                value={createForm.partner}
-                onChange={(e) => setCreateForm((s) => ({ ...s, partner: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg text-sm"
-              >
-                <option value="">اختر المورد</option>
-                {partners.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name || `#${p.id}`}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs text-gray-600 mb-1">الحالة</label>
-              <select
-                value={createForm.status}
-                onChange={(e) => setCreateForm((s) => ({ ...s, status: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg text-sm"
-              >
-                <option value="Open">Open</option>
-                <option value="Shipped">Shipped</option>
-                <option value="Closed">Closed</option>
-                <option value="Cancelled">Cancelled</option>
-              </select>
-            </div>
-            <div className="md:col-span-2">
-              <label className="block text-xs text-gray-600 mb-1">الوصف</label>
-              <textarea
-                value={createForm.description}
-                onChange={(e) => setCreateForm((s) => ({ ...s, description: e.target.value }))}
-                className="w-full px-3 py-2 border rounded-lg text-sm min-h-[90px]"
-                placeholder="وصف مختصر للصفقة"
-              />
-            </div>
-          </div>
-          <div className="px-4 py-3 border-t flex justify-end gap-2">
-            <button className="px-4 py-2 text-sm rounded border" onClick={() => setCreateOpen(false)}>
-              إلغاء
-            </button>
-            <button
-              className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
-              onClick={handleCreateDeal}
-              disabled={savingCreate}
+                }
             >
-              {savingCreate ? "جارٍ الحفظ..." : "حفظ الصفقة"}
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
-    </>
-  );
-}
+                {err && <div style={{ padding: '6px 12px', fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-danger, #c00)', borderBottom: '1px solid var(--aseel-border)' }}>{err}</div>}
+                <div style={{ padding: '4px 12px 4px', display: 'flex', gap: 8 }}>
+                    <span className="aseel-status-item">الإجمالي: <b>{stats.total}</b></span>
+                    <span className="aseel-status-item">نشطة: <b style={{ color: 'var(--aseel-warn, #b8800a)' }}>{stats.active}</b></span>
+                    <span className="aseel-status-item">القيمة الكلية: <b style={{ fontFamily: 'monospace' }}>{stats.totalAmount.toLocaleString()}</b></span>
+                    {filtered.length !== rows.length && <span className="aseel-status-item">المفلتر: <b>{filtered.length}</b></span>}
+                </div>
+                <AseelDenseTable<DealRow>
+                    columns={columns}
+                    rows={filtered}
+                    getRowKey={r => r.id}
+                    loading={loading}
+                    emptyHint="لا يوجد بيانات"
+                    onRowDoubleClick={r => void openDeal(r)}
+                    footer={
+                        filtered.length > 0 ? (
+                            <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>
+                                إجمالي: <b>{fmtMoney(filtered.reduce((s, r) => s + Number(r.total_amount || 0), 0))}</b>
+                            </span>
+                        ) : undefined
+                    }
+                />
+            </SqlDataPageShell>
 
+            {/* مودال التفاصيل الكاملة */}
+            {detailsOpen && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }} onClick={() => setDetailsOpen(false)}>
+                    <div dir="rtl" style={{ background: '#f3f4f6', borderRadius: 12, width: '100%', maxWidth: '92vw', maxHeight: '92vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ position: 'sticky', top: 0, background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 10 }}>
+                            <strong style={{ fontSize: 14 }}>تفاصيل الصفقة</strong>
+                            <button onClick={() => setDetailsOpen(false)} style={{ padding: '3px 10px', border: '1px solid #d1d5db', borderRadius: 6, fontSize: 13, cursor: 'pointer' }}>إغلاق</button>
+                        </div>
+                        <div style={{ padding: 16 }}>
+                            {loadingDetail ? (
+                                <div style={{ color: '#6b7280', fontSize: 13 }}>جار تحميل تفاصيل الصفقة...</div>
+                            ) : !selected ? (
+                                <div style={{ color: '#6b7280', fontSize: 13 }}>تعذر تحميل التفاصيل.</div>
+                            ) : (() => {
+                                const paidTotal = (selected.payments || []).reduce((s, p) => s + Number(p.amount || 0), 0);
+                                const total = Number(selected.total_amount || 0);
+                                const remaining = Math.max(0, total - paidTotal);
+                                return (
+                                    <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 10, padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '2px solid #1f2937', paddingBottom: 12 }}>
+                                            <strong style={{ fontSize: 15 }}>تقرير صفقة شامل</strong>
+                                            <div style={{ textAlign: 'left', fontSize: 12 }}>
+                                                <div><span style={{ color: '#6b7280' }}>REF: </span><b>{selected.ref_number || '—'}</b></div>
+                                                <div><span style={{ color: '#6b7280' }}>DATE: </span><b>{fmtDate(selected.order_date)}</b></div>
+                                            </div>
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, fontSize: 12 }}>
+                                            {[['الحالة', statusLabel(selected.status)], ['التاريخ', fmtDate(selected.order_date)], ['المورد', selected.partner_name || selected.partner?.name || '—'], ['الإجمالي', fmtMoney(selected.total_amount)]].map(([k, v]) => (
+                                                <div key={k} style={{ border: '1px solid #e5e7eb', borderRadius: 6, padding: '8px 10px', background: '#f9fafb' }}>
+                                                    <div style={{ color: '#9ca3af', fontSize: 10, marginBottom: 4 }}>{k}</div>
+                                                    <b>{v}</b>
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12 }}>
+                                            <div style={{ border: '1px solid #d1d5db', borderRadius: 8, overflow: 'hidden' }}>
+                                                <div style={{ background: '#f3f4f6', padding: '6px 12px', borderBottom: '1px solid #d1d5db', fontWeight: 700, fontSize: 12 }}>بنود المنتجات</div>
+                                                <div style={{ overflowX: 'auto' }}>
+                                                    <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }} dir="rtl">
+                                                        <thead style={{ background: '#1f2937', color: '#fff' }}>
+                                                            <tr>{['الصنف', 'الكمية', 'سعر الوحدة', 'الإجمالي', 'ملاحظات'].map(h => <th key={h} style={{ padding: '6px 10px', textAlign: 'right', borderBottom: '1px solid #374151' }}>{h}</th>)}</tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {(selected.items || []).length === 0 ? <tr><td colSpan={5} style={{ padding: '10px', color: '#9ca3af' }}>لا توجد بنود.</td></tr> :
+                                                                (selected.items || []).map(it => (
+                                                                    <tr key={it.id} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                                                                        <td style={{ padding: '6px 10px' }}>{it.product_name || '—'}</td>
+                                                                        <td style={{ padding: '6px 10px' }}>{String(it.quantity ?? '—')}</td>
+                                                                        <td style={{ padding: '6px 10px' }}>{fmtMoney(it.unit_price)}</td>
+                                                                        <td style={{ padding: '6px 10px', fontWeight: 700 }}>{fmtMoney(it.total_price)}</td>
+                                                                        <td style={{ padding: '6px 10px', color: '#6b7280' }}>{it.notes || '—'}</td>
+                                                                    </tr>
+                                                                ))}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                            <div style={{ border: '1px solid #d1d5db', borderRadius: 8, overflow: 'hidden', height: 'fit-content' }}>
+                                                <div style={{ background: '#1f2937', color: '#fff', padding: '6px 12px', textAlign: 'center', fontWeight: 700, fontSize: 12 }}>الملخص المالي</div>
+                                                <div style={{ padding: '10px 12px', fontSize: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                                    {[['إجمالي المدفوعات', fmtMoney(paidTotal), '#059669'], ['الإجمالي', fmtMoney(total), '#1f2937'], ['المتبقي', fmtMoney(remaining), '#dc2626']].map(([k, v, c]) => (
+                                                        <div key={k} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6', paddingBottom: 6 }}>
+                                                            <span style={{ color: '#6b7280' }}>{k}:</span>
+                                                            <b style={{ fontFamily: 'monospace', color: c }}>{v}</b>
+                                                        </div>
+                                                    ))}
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span style={{ color: '#6b7280' }}>الدفع:</span><b>{paymentStatusLabel(selected.payment_status)}</b></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div style={{ border: '1px solid #d1d5db', borderRadius: 8, overflow: 'hidden' }}>
+                                            <div style={{ background: '#f3f4f6', padding: '6px 12px', borderBottom: '1px solid #d1d5db', fontWeight: 700, fontSize: 12, display: 'flex', justifyContent: 'space-between' }}>
+                                                <span>الدفعات</span>
+                                                <span style={{ fontSize: 11, background: '#fff', padding: '1px 6px', borderRadius: 4, border: '1px solid #e5e7eb' }}>{(selected.payments || []).length} دفعة</span>
+                                            </div>
+                                            <div style={{ overflowX: 'auto' }}>
+                                                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }} dir="rtl">
+                                                    <thead style={{ background: '#f9fafb' }}>
+                                                        <tr>{['العنوان', 'المبلغ', 'الحالة', 'الاستحقاق', 'تاريخ التحويل'].map(h => <th key={h} style={{ padding: '6px 10px', textAlign: 'right', borderBottom: '1px solid #e5e7eb', color: '#374151' }}>{h}</th>)}</tr>
+                                                    </thead>
+                                                    <tbody>
+                                                        {(selected.payments || []).length === 0 ? <tr><td colSpan={5} style={{ padding: '10px', color: '#9ca3af' }}>لا توجد دفعات.</td></tr> :
+                                                            (selected.payments || []).map(p => (
+                                                                <tr key={p.id} style={{ borderBottom: '1px solid #f9fafb' }}>
+                                                                    <td style={{ padding: '6px 10px' }}>{p.title || '—'}</td>
+                                                                    <td style={{ padding: '6px 10px', fontWeight: 700, fontFamily: 'monospace' }}>{fmtMoney(p.amount)}</td>
+                                                                    <td style={{ padding: '6px 10px' }}>{paymentStatusLabel(p.status)}</td>
+                                                                    <td style={{ padding: '6px 10px', fontFamily: 'monospace' }}>{fmtDate(p.due_date)}</td>
+                                                                    <td style={{ padding: '6px 10px', fontFamily: 'monospace' }}>{fmtDate(p.transfer_date)}</td>
+                                                                </tr>
+                                                            ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* مودال إضافة صفقة */}
+            {createOpen && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }} onClick={() => setCreateOpen(false)}>
+                    <div dir="rtl" data-skin="aseel" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+                        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--aseel-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>إضافة صفقة جديدة</strong>
+                            <button className="aseel-toolbtn" onClick={() => setCreateOpen(false)}>إغلاق</button>
+                        </div>
+                        <div style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                            {[['رقم الصفقة', 'text', 'ref_number', 'D-0104'], ['التاريخ', 'date', 'order_date', '']].map(([label, type, key, placeholder]) => (
+                                <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                    <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>{label}</label>
+                                    <input type={type} className="aseel-input" placeholder={placeholder} value={(createForm as any)[key]} onChange={e => setCreateForm(p => ({ ...p, [key]: e.target.value }))} />
+                                </div>
+                            ))}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>المورد</label>
+                                <select className="aseel-input" value={createForm.partner} onChange={e => setCreateForm(p => ({ ...p, partner: e.target.value }))}>
+                                    <option value="">اختر المورد</option>
+                                    {partners.map(p => <option key={p.id} value={p.id}>{p.name || `#${p.id}`}</option>)}
+                                </select>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>الحالة</label>
+                                <select className="aseel-input" value={createForm.status} onChange={e => setCreateForm(p => ({ ...p, status: e.target.value }))}>
+                                    <option value="Open">Open</option>
+                                    <option value="Shipped">Shipped</option>
+                                    <option value="Closed">Closed</option>
+                                    <option value="Cancelled">Cancelled</option>
+                                </select>
+                            </div>
+                            <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                <label style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>الوصف</label>
+                                <textarea className="aseel-input" rows={3} style={{ resize: 'vertical' }} placeholder="وصف مختصر للصفقة" value={createForm.description} onChange={e => setCreateForm(p => ({ ...p, description: e.target.value }))} />
+                            </div>
+                        </div>
+                        <div style={{ padding: '10px 14px', borderTop: '1px solid var(--aseel-border)', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                            <button className="aseel-toolbtn" onClick={() => setCreateOpen(false)}>إلغاء</button>
+                            <button className="aseel-toolbtn" style={{ color: 'var(--aseel-accent, #1857a4)', fontWeight: 700 }} onClick={handleCreateDeal} disabled={savingCreate}>
+                                {savingCreate ? 'جارٍ الحفظ...' : 'حفظ الصفقة'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
+    );
+}

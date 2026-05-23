@@ -1,134 +1,125 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { apiGetList } from "../../services/restApi";
-import { SqlDataPageShell } from "./SqlDataPageShell";
-import { Package, Eye, Hash, Tag } from "lucide-react";
+/**
+ * N7-T8 — SqlProductsPage — AseelDenseTable للأصناف
+ */
+import React, { useEffect, useMemo, useState, useRef } from 'react';
+import { apiGetList } from '../../services/restApi';
+import { SqlDataPageShell } from './SqlDataPageShell';
+import { Eye, RefreshCw } from 'lucide-react';
+import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
+import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
 
 type ProductRow = {
-  id: number;
-  sku?: string;
-  name_ar?: string;
-  hs_code?: string | null;
-  category?: any;
-  is_active?: boolean;
+    id: number;
+    sku?: string;
+    name_ar?: string;
+    hs_code?: string | null;
+    category?: any;
+    is_active?: boolean;
 };
 
 export function SqlProductsPage() {
-  const [rows, setRows] = useState<ProductRow[]>([]);
-  const [err, setErr] = useState<string | null>(null);
-  const [q, setQ] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState<ProductRow | null>(null);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+    const [rows, setRows] = useState<ProductRow[]>([]);
+    const [err, setErr] = useState<string | null>(null);
+    const [q, setQ] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [selected, setSelected] = useState<ProductRow | null>(null);
+    const [detailsOpen, setDetailsOpen] = useState(false);
+    const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
-    setLoading(true);
-    setErr(null);
-    apiGetList<ProductRow>("inventory/products/", { tenantId: 1 })
-      .then((data) => {
-        if (!mounted) return;
-        setRows(data);
-      })
-      .catch((e) => {
-        if (!mounted) return;
-        setErr(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => mounted && setLoading(false));
-    return () => {
-      mounted = false;
-    };
-  }, []);
+    useEffect(() => {
+        let mounted = true;
+        setLoading(true); setErr(null);
+        apiGetList<ProductRow>('inventory/products/', { tenantId: 1 })
+            .then(d => mounted && setRows(d))
+            .catch(e => mounted && setErr(e instanceof Error ? e.message : String(e)))
+            .finally(() => mounted && setLoading(false));
+        return () => { mounted = false; };
+    }, []);
 
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return rows;
-    return rows.filter((r) => {
-      const txt = `${r.sku || ""} ${r.name_ar || ""} ${r.hs_code || ""}`.toLowerCase();
-      return txt.includes(s);
-    });
-  }, [rows, q]);
+    const filtered = useMemo(() => {
+        const s = q.trim().toLowerCase();
+        if (!s) return rows;
+        return rows.filter(r => `${r.sku || ''} ${r.name_ar || ''} ${r.hs_code || ''}`.toLowerCase().includes(s));
+    }, [rows, q]);
 
-  return (
-    <>
-    <SqlDataPageShell
-      title="الأصناف"
-      subtitle="بيانات الأصناف من قاعدة البيانات."
-      actions={
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="بحث بالاسم/sku/HS..."
-          className="w-72 max-w-[70vw] px-3 py-2 border rounded-lg text-sm"
-        />
-      }
-    >
-      {err ? (
-        <div className="p-4 text-sm text-red-700 bg-red-50 border-b border-red-100">
-          {err}
-        </div>
-      ) : null}
+    useAseelIndexKeymap(
+        { F6: () => searchInputRef.current?.focus(), Escape: () => setQ('') },
+        { enabled: !detailsOpen },
+    );
 
-      <div className="p-4 border-b bg-gray-50/70 grid grid-cols-2 md:grid-cols-4 gap-3">
-        <div className="bg-white border rounded-lg p-3">
-          <div className="text-xs text-gray-500">إجمالي الأصناف</div>
-          <div className="text-xl font-bold flex items-center gap-2"><Package className="w-4 h-4 text-blue-600" />{rows.length}</div>
-        </div>
-        <div className="bg-white border rounded-lg p-3">
-          <div className="text-xs text-gray-500">فعالة</div>
-          <div className="text-xl font-bold">{rows.filter((x) => x.is_active !== false).length}</div>
-        </div>
-      </div>
-
-      <div className="p-3 space-y-2">
-        {loading ? (
-          <div className="p-4 text-gray-500 text-sm">جارِ التحميل...</div>
-        ) : filtered.length === 0 ? (
-          <div className="p-4 text-gray-500 text-sm">لا يوجد بيانات.</div>
-        ) : (
-          filtered.map((r) => (
-            <div key={r.id} className="border rounded-xl p-3 bg-white hover:bg-gray-50 transition">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-bold text-sm truncate">{r.name_ar || "-"}</div>
-                  <div className="text-xs text-gray-500 mt-1 flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1"><Hash className="w-3 h-3" />{r.sku || "-"}</span>
-                    <span className="inline-flex items-center gap-1"><Tag className="w-3 h-3" />HS: {r.hs_code || "-"}</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => {
-                    setSelected(r);
-                    setDetailsOpen(true);
-                  }}
-                  className="inline-flex items-center gap-1 px-3 py-2 rounded-lg border text-sm hover:bg-gray-100"
-                >
-                  <Eye className="w-4 h-4" />
-                  عرض التفاصيل
+    const columns: DenseColumn<ProductRow>[] = [
+        { key: 'id', header: 'ID', width: '50px', align: 'center', render: r => <span style={{ fontFamily: 'monospace', color: 'var(--aseel-ink-soft)' }}>{r.id}</span> },
+        { key: 'sku', header: 'SKU', width: '110px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{r.sku || '—'}</span> },
+        { key: 'name_ar', header: 'الاسم', render: r => <b>{r.name_ar || '—'}</b> },
+        { key: 'hs_code', header: 'HS Code', width: '110px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{r.hs_code || '—'}</span> },
+        {
+            key: 'is_active', header: 'الحالة', width: '70px', align: 'center',
+            render: r => <span style={{ fontSize: 'var(--aseel-fs-sm)', color: r.is_active === false ? 'var(--aseel-danger, #c00)' : 'var(--aseel-ok, #267346)', fontWeight: 600 }}>
+                {r.is_active === false ? 'غير نشط' : 'نشط'}
+            </span>,
+        },
+        {
+            key: 'actions', header: '', width: '60px', align: 'center',
+            render: r => (
+                <button className="aseel-toolbtn" style={{ padding: '2px 4px' }} onClick={e => { e.stopPropagation(); setSelected(r); setDetailsOpen(true); }} title="عرض التفاصيل">
+                    <Eye style={{ width: 13, height: 13 }} />
                 </button>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </SqlDataPageShell>
-    {detailsOpen && (
-      <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-3" onClick={() => setDetailsOpen(false)}>
-        <div className="bg-white rounded-xl w-full max-w-2xl max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-          <div className="sticky top-0 bg-white border-b px-4 py-3 flex items-center justify-between">
-            <div className="font-bold">تفاصيل الصنف</div>
-            <button className="px-3 py-1 text-sm rounded border" onClick={() => setDetailsOpen(false)}>إغلاق</button>
-          </div>
-          <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-            <div><span className="text-gray-500">ID:</span> {selected?.id || "-"}</div>
-            <div><span className="text-gray-500">SKU:</span> {selected?.sku || "-"}</div>
-            <div><span className="text-gray-500">الاسم:</span> {selected?.name_ar || "-"}</div>
-            <div><span className="text-gray-500">HS Code:</span> {selected?.hs_code || "-"}</div>
-            <div><span className="text-gray-500">الحالة:</span> {selected?.is_active === false ? "غير نشط" : "نشط"}</div>
-          </div>
-        </div>
-      </div>
-    )}
-    </>
-  );
-}
+            ),
+        },
+    ];
 
+    return (
+        <>
+            <SqlDataPageShell
+                title="الأصناف"
+                subtitle="بيانات الأصناف من قاعدة البيانات."
+                actions={
+                    <div style={{ display: 'flex', gap: 6 }}>
+                        <input
+                            ref={searchInputRef}
+                            value={q}
+                            onChange={e => setQ(e.target.value)}
+                            placeholder="بحث بالاسم/SKU/HS… (F6)"
+                            className="aseel-input"
+                            style={{ width: 220 }}
+                        />
+                        <button className="aseel-toolbtn" onClick={() => setQ('')} title="مسح"><RefreshCw style={{ width: 14, height: 14 }} /></button>
+                    </div>
+                }
+            >
+                {err && <div style={{ padding: '6px 12px', fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-danger, #c00)', borderBottom: '1px solid var(--aseel-border)' }}>{err}</div>}
+                <div style={{ padding: '4px 0' }}>
+                    <div style={{ padding: '4px 12px', display: 'flex', gap: 8 }}>
+                        <span className="aseel-status-item">الإجمالي: <b>{rows.length}</b></span>
+                        <span className="aseel-status-item">فعالة: <b style={{ color: 'var(--aseel-ok, #267346)' }}>{rows.filter(r => r.is_active !== false).length}</b></span>
+                        {filtered.length !== rows.length && <span className="aseel-status-item">المفلتر: <b>{filtered.length}</b></span>}
+                    </div>
+                    <AseelDenseTable<ProductRow>
+                        columns={columns}
+                        rows={filtered}
+                        getRowKey={r => r.id}
+                        loading={loading}
+                        emptyHint="لا يوجد بيانات"
+                        onRowDoubleClick={r => { setSelected(r); setDetailsOpen(true); }}
+                    />
+                </div>
+            </SqlDataPageShell>
+
+            {detailsOpen && selected && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }} onClick={() => setDetailsOpen(false)}>
+                    <div dir="rtl" data-skin="aseel" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, width: '100%', maxWidth: 520, maxHeight: '90vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--aseel-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>تفاصيل الصنف</strong>
+                            <button className="aseel-toolbtn" onClick={() => setDetailsOpen(false)}>إغلاق</button>
+                        </div>
+                        <div style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 'var(--aseel-fs-sm)' }}>
+                            {[['ID', selected.id], ['SKU', selected.sku || '—'], ['الاسم', selected.name_ar || '—'], ['HS Code', selected.hs_code || '—'], ['الحالة', selected.is_active === false ? 'غير نشط' : 'نشط']].map(([k, v]) => (
+                                <div key={k as string}><span style={{ color: 'var(--aseel-ink-soft)' }}>{k}:</span> <b>{v as string}</b></div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+        </>
+    );
+}
