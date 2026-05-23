@@ -394,6 +394,13 @@ class SalesInvoice(models.Model):
         help_text="مبلغ خصم مصدر — تجاوز على مستوى الفاتورة (null = احسب من النسبة أو افتراضي العميل)",
     )
 
+    # N8-T13: ربط كشف ض.ق.م
+    vat_statement = models.ForeignKey(
+        'VatStatement', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='VatStatementID', related_name='invoices',
+        help_text='كشف ضريبة القيمة المضافة الدوري',
+    )
+
     notes = models.TextField(null=True, blank=True, db_column="Notes")
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
     updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
@@ -901,4 +908,47 @@ class CreditDebitNote(models.Model):
 
     def __str__(self):
         return f"{self.note_number} ({self.note_type})"
+
+
+class VatStatement(models.Model):
+    """N8-T13: كشف ضريبة القيمة المضافة الدوري."""
+    STATUS_DRAFT = 'draft'
+    STATUS_FINAL = 'final'
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, 'مسودة'),
+        (STATUS_FINAL, 'نهائي'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='VatStatementID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID', to_field='TenantID',
+    )
+    statement_number = models.CharField(max_length=50, db_column='StatementNumber')
+    period_from = models.DateField(db_column='PeriodFrom')
+    period_to = models.DateField(db_column='PeriodTo')
+    total_sales_vat = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='TotalSalesVat',
+    )
+    total_purchase_vat = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='TotalPurchaseVat',
+    )
+    net_vat = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='NetVat',
+    )
+    status = models.CharField(
+        max_length=10, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_column='Status',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy_UserID',
+    )
+
+    class Meta:
+        db_table = 'sales_module_vat_statements'
+        managed = True
+        unique_together = [('tenant', 'statement_number')]
+
+    def __str__(self):
+        return f"{self.statement_number} ({self.period_from} → {self.period_to})"
 

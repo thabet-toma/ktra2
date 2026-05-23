@@ -1514,3 +1514,66 @@ def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'Supplier
         )
     return payment
 
+
+# ── N8-T13: VatStatement builder ─────────────────────────────
+
+def build_vat_statement(
+    tenant_id: int,
+    period_from,
+    period_to,
+    *,
+    user=None,
+):
+    """يُولّد كشف ض.ق.م دوري — يَجمع الفواتير المرحَّلة في الفترة بـvat_statement IS NULL."""
+    from sales.models import VatStatement
+    from accounting.services import next_document_number
+
+    invoices = SalesInvoice.objects.filter(
+        tenant_id=tenant_id,
+        status=SalesInvoice.STATUS_POSTED,
+        invoice_date__gte=period_from,
+        invoice_date__lte=period_to,
+        vat_statement__isnull=True,
+    ).select_related('currency')
+
+    total_sales_vat = Decimal('0.00')
+    total_purchase_vat = Decimal('0.00')
+
+    for inv in invoices:
+        if inv.invoice_kind in (SalesInvoice.INVOICE_KIND_SALE, SalesInvoice.INVOICE_KIND_SALE_RETURN):
+            total_sales_vat += Decimal(str(inv.tax_amount or 0))
+        else:
+            total_purchase_vat += Decimal(str(inv.tax_amount or 0))
+
+    net_vat = (total_sales_vat - total_purchase_vat).quantize(Decimal('0.01'))
+    stmt_no = f"VAT-{next_document_number(tenant_id, 'vat_statement')}"
+
+    stmt = VatStatement.objects.create(
+        tenant_id=tenant_id,
+        statement_number=stmt_no,
+        period_from=period_from,
+        period_to=period_to,
+        total_sales_vat=total_sales_vat.quantize(Decimal('0.01')),
+        total_purchase_vat=total_purchase_vat.quantize(Decimal('0.01')),
+        net_vat=net_vat,
+        created_by=user,
+    )
+
+    updated = SalesInvoice.objects.filter(
+        tenant_id=tenant_id,
+        status=SalesInvoice.STATUS_POSTED,
+        invoice_date__gte=period_from,
+        invoice_date__lte=period_to,
+        vat_statement__isnull=True,
+    ).update(vat_statement=stmt)
+
+    create_audit_log(
+        tenant=Tenant.objects.get(pk=tenant_id),
+        user=user,
+        action="CREATE",
+        model_name="VatStatement",
+        object_id=stmt.id,
+        change_details=f"Created VAT statement {stmt_no}: {updated} invoices linked, net={net_vat}",
+    )
+    return stmt
+
