@@ -4,6 +4,7 @@
  * Reference: docs/aseel_reference/reports.txt 1–30.
  */
 import React from 'react';
+import { AseelSpinner, AseelEmptyState } from './AseelStates';
 
 export type ReportColumn<T> = {
   key: string;
@@ -105,11 +106,14 @@ export function AseelReportTable<T>({
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 && (
+          {loading && rows.length === 0 && (
             <tr className="aseel-row--empty">
-              <td colSpan={columns.length} style={{ textAlign: 'center', padding: '16px 8px', color: 'var(--aseel-ink-soft)' }}>
-                {loading ? 'جاري التحميل…' : emptyHint}
-              </td>
+              <td colSpan={columns.length}><AseelSpinner /></td>
+            </tr>
+          )}
+          {!loading && rows.length === 0 && (
+            <tr className="aseel-row--empty">
+              <td colSpan={columns.length}><AseelEmptyState hint={typeof emptyHint === 'string' ? emptyHint : undefined} /></td>
             </tr>
           )}
           {rows.map((row, idx) => (

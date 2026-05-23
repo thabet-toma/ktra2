@@ -211,18 +211,18 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
       }
     >
     <div className="space-y-4" dir="rtl" style={{ height: '100%', overflow: 'auto', padding: '12px', background: '#ffffff' }}>
-      <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l from-emerald-900 to-slate-900 text-white rounded-xl">
-        <Banknote className="w-8 h-8 text-emerald-300" />
+      <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l aseel-bg-panel aseel-bg-panel text-white rounded-xl">
+        <Banknote className="w-8 h-8 aseel-text-soft" />
         <div className="flex-1">
           <h1 className="text-lg font-bold">دفعات العملاء</h1>
-          <p className="text-xs text-emerald-200">
+          <p className="text-xs aseel-text-soft">
             تحصيل من الذمم المدينة مع توزيع FIFO وترحيل محاسبي
           </p>
         </div>
         <button
           type="button"
           onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg text-sm font-medium"
+          className="flex items-center gap-2 px-4 py-2 aseel-bg-panel hover:aseel-bg-panel rounded-lg text-sm font-medium"
         >
           <Plus className="w-4 h-4" />
           دفعة جديدة
@@ -230,37 +230,37 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
       </div>
 
       {err && (
-        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 text-sm flex gap-2 items-center">
+        <div className="p-3 rounded-lg aseel-bg-panel dark:aseel-bg-panel/20 aseel-text-state text-sm flex gap-2 items-center">
           <AlertCircle className="w-4 h-4" />
           {err}
         </div>
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/40 bg-emerald-50/60 dark:bg-emerald-900/10 p-4">
-          <div className="text-xs text-emerald-700 dark:text-emerald-300 font-semibold">
+        <div className="rounded-xl border aseel-border-soft dark:aseel-border-soft/40 aseel-bg-panel/60 dark:aseel-bg-panel/10 p-4">
+          <div className="text-xs aseel-text-ink dark:aseel-text-soft font-semibold">
             إجمالي مرحّل
           </div>
-          <div className="text-2xl font-bold text-emerald-900 dark:text-emerald-200">
+          <div className="text-2xl font-bold aseel-text-ink dark:aseel-text-soft">
             {fmt(totalPosted)}
           </div>
         </div>
-        <div className="rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/60 dark:bg-amber-900/10 p-4">
-          <div className="text-xs text-amber-700 dark:text-amber-300 font-semibold">
+        <div className="rounded-xl border aseel-border-soft dark:aseel-border-soft/40 aseel-bg-panel/60 dark:aseel-bg-panel/10 p-4">
+          <div className="text-xs aseel-text-ink dark:aseel-text-soft font-semibold">
             بانتظار الترحيل
           </div>
-          <div className="text-2xl font-bold text-amber-900 dark:text-amber-200">
+          <div className="text-2xl font-bold aseel-text-ink dark:aseel-text-soft">
             {fmt(totalPending)}
           </div>
         </div>
-        <div className="rounded-xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/60 dark:bg-rose-900/10 p-4">
-          <div className="text-xs text-rose-700 dark:text-rose-300 font-semibold">
+        <div className="rounded-xl border aseel-border-soft dark:aseel-border-soft/40 aseel-bg-panel/60 dark:aseel-bg-panel/10 p-4">
+          <div className="text-xs aseel-text-ink dark:aseel-text-soft font-semibold">
             فواتير مفتوحة (AR)
           </div>
-          <div className="text-2xl font-bold text-rose-900 dark:text-rose-200">
+          <div className="text-2xl font-bold aseel-text-ink dark:aseel-text-soft">
             {aging.length}
           </div>
-          <div className="text-[11px] text-rose-700/70 mt-1">
+          <div className="text-[11px] aseel-text-ink/70 mt-1">
             {fmt(aging.reduce((s, a) => s + Number(a.remaining), 0))} متبقي
           </div>
         </div>
@@ -268,23 +268,23 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
 
       <div className="flex items-center gap-3">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 aseel-text-soft" />
           <input
             type="text"
             placeholder="بحث..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full pr-9 pl-3 py-2 border rounded-lg dark:bg-gray-900 dark:border-gray-600"
+            className="w-full pr-9 pl-3 py-2 border rounded-lg dark:aseel-bg-panel dark:aseel-border-soft"
           />
         </div>
       </div>
 
       {loading ? (
-        <div className="py-16 text-center text-gray-500">جاري التحميل…</div>
+        <AseelSpinner />
       ) : (
-        <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+        <div className="overflow-x-auto aseel-bg-field dark:aseel-bg-panel rounded-xl border aseel-border-soft dark:aseel-border-soft">
           <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 dark:bg-gray-900/50">
+            <thead className="aseel-bg-panel dark:aseel-bg-panel/50">
               <tr>
                 <th className="text-right p-3">#</th>
                 <th className="text-right p-3">التاريخ</th>
@@ -300,7 +300,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
               {filtered.map((p) => (
                 <tr
                   key={p.id}
-                  className="border-t border-gray-100 dark:border-gray-700"
+                  className="border-t aseel-border-soft dark:aseel-border-soft"
                 >
                   <td className="p-2 font-mono">#{p.id}</td>
                   <td className="p-2">{p.payment_date}</td>
@@ -318,17 +318,17 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
                           </div>
                         ))
                       ) : (
-                        <span className="text-gray-500">بدون توزيع</span>
+                        <span className="aseel-text-soft">بدون توزيع</span>
                       )}
                     </div>
                   </td>
                   <td className="p-2 text-center">
                     {p.is_posted ? (
-                      <span className="text-xs px-2 py-1 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300 rounded-full">
+                      <span className="text-xs px-2 py-1 aseel-bg-panel dark:aseel-bg-panel/30 aseel-text-ink dark:aseel-text-soft rounded-full">
                         مرحّلة {p.journal ? `#${p.journal}` : ""}
                       </span>
                     ) : (
-                      <span className="text-xs px-2 py-1 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full">
+                      <span className="text-xs px-2 py-1 aseel-bg-panel dark:aseel-bg-panel/30 aseel-text-ink dark:aseel-text-soft rounded-full">
                         مسودة
                       </span>
                     )}
@@ -339,7 +339,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => handlePost(p.id)}
-                          className="p-1.5 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30 rounded"
+                          className="p-1.5 aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded"
                           title="ترحيل"
                         >
                           <Check className="w-4 h-4" />
@@ -348,7 +348,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => handleDelete(p.id, p.is_posted)}
-                        className="p-1.5 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded disabled:opacity-40"
+                        className="p-1.5 aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded disabled:opacity-40"
                         disabled={p.is_posted}
                         title="حذف"
                       >
@@ -361,7 +361,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
             </tbody>
           </table>
           {filtered.length === 0 && (
-            <p className="p-8 text-center text-gray-500">لا توجد دفعات</p>
+            <p className="p-8 text-center aseel-text-soft">لا توجد دفعات</p>
           )}
         </div>
       )}
@@ -566,10 +566,10 @@ const NewPaymentModal: React.FC<{
       className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-auto"
       dir="rtl"
     >
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-3xl mt-8">
-        <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+      <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl shadow-xl w-full max-w-3xl mt-8">
+        <div className="flex items-center justify-between p-4 border-b aseel-border-soft dark:aseel-border-soft">
           <h2 className="text-lg font-bold">دفعة عميل جديدة</h2>
-          <button type="button" onClick={onClose} className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+          <button type="button" onClick={onClose} className="p-1 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -577,9 +577,9 @@ const NewPaymentModal: React.FC<{
         <div className="p-4 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-gray-500 mb-1">العميل *</label>
+              <label className="block text-xs aseel-text-soft mb-1">العميل *</label>
               <select
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
+                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
                 value={partnerId}
                 onChange={(e) => {
                   setPartnerId(e.target.value ? Number(e.target.value) : "");
@@ -596,30 +596,30 @@ const NewPaymentModal: React.FC<{
             </div>
 
             <div>
-              <label className="block text-xs text-gray-500 mb-1">التاريخ *</label>
+              <label className="block text-xs aseel-text-soft mb-1">التاريخ *</label>
               <input
                 type="date"
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
+                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
               />
             </div>
 
             <div>
-              <label className="block text-xs text-gray-500 mb-1">المبلغ *</label>
+              <label className="block text-xs aseel-text-soft mb-1">المبلغ *</label>
               <input
                 type="number"
                 step="0.01"
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
+                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
               />
             </div>
 
             <div>
-              <label className="block text-xs text-gray-500 mb-1">العملة *</label>
+              <label className="block text-xs aseel-text-soft mb-1">العملة *</label>
               <select
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
+                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
                 value={currencyId}
                 onChange={(e) =>
                   setCurrencyId(e.target.value ? Number(e.target.value) : "")
@@ -634,20 +634,20 @@ const NewPaymentModal: React.FC<{
             </div>
 
             <div>
-              <label className="block text-xs text-gray-500 mb-1">سعر الصرف</label>
+              <label className="block text-xs aseel-text-soft mb-1">سعر الصرف</label>
               <input
                 type="number"
                 step="0.000001"
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
+                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
                 value={exchangeRate}
                 onChange={(e) => setExchangeRate(e.target.value)}
               />
             </div>
 
             <div>
-              <label className="block text-xs text-gray-500 mb-1">الصندوق / البنك *</label>
+              <label className="block text-xs aseel-text-soft mb-1">الصندوق / البنك *</label>
               <select
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
+                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
                 value={cashAccountId}
                 onChange={(e) =>
                   setCashAccountId(e.target.value ? Number(e.target.value) : "")
@@ -664,41 +664,41 @@ const NewPaymentModal: React.FC<{
           </div>
 
           {/* N4-T4: حقول مالية: نقدا + شيكات + المجموع + خصم المصدر */}
-          <div className="bg-amber-50/40 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-900/40 rounded-lg p-3">
-            <h3 className="text-xs font-semibold text-amber-900 dark:text-amber-200 mb-2">حقول الدفع (N4-T4)</h3>
+          <div className="aseel-bg-panel/40 dark:aseel-bg-panel/10 border aseel-border-soft dark:aseel-border-soft/40 rounded-lg p-3">
+            <h3 className="text-xs font-semibold aseel-text-ink dark:aseel-text-soft mb-2">حقول الدفع (N4-T4)</h3>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               <div>
-                <label className="block text-[11px] text-gray-600 mb-0.5">نقدا (Space = remaining)</label>
+                <label className="block text-[11px] aseel-text-soft mb-0.5">نقدا (Space = remaining)</label>
                 <input
                   type="number" step="0.01"
                   data-aseel-field="remaining-amount"
-                  className="w-full border rounded px-2 py-1 text-sm dark:bg-gray-900 dark:border-gray-600 font-mono"
+                  className="w-full border rounded px-2 py-1 text-sm dark:aseel-bg-panel dark:aseel-border-soft font-mono"
                   value={cashAmount}
                   onChange={(e) => setCashAmount(e.target.value)}
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-gray-600 mb-0.5">مجموع الشيكات (auto)</label>
-                <input type="text" readOnly className="w-full border rounded px-2 py-1 text-sm bg-gray-50 dark:bg-gray-800 font-mono" value={fmt(totalCheques)} />
+                <label className="block text-[11px] aseel-text-soft mb-0.5">مجموع الشيكات (auto)</label>
+                <input type="text" readOnly className="w-full border rounded px-2 py-1 text-sm aseel-bg-panel dark:aseel-bg-panel font-mono" value={fmt(totalCheques)} />
               </div>
               <div>
-                <label className="block text-[11px] text-gray-600 mb-0.5">المجموع</label>
-                <input type="text" readOnly className="w-full border rounded px-2 py-1 text-sm bg-gray-50 dark:bg-gray-800 font-mono font-semibold" value={fmt(computedTotal)} />
+                <label className="block text-[11px] aseel-text-soft mb-0.5">المجموع</label>
+                <input type="text" readOnly className="w-full border rounded px-2 py-1 text-sm aseel-bg-panel dark:aseel-bg-panel font-mono font-semibold" value={fmt(computedTotal)} />
               </div>
               <div>
-                <label className="block text-[11px] text-gray-600 mb-0.5">نسبة خصم المصدر %</label>
+                <label className="block text-[11px] aseel-text-soft mb-0.5">نسبة خصم المصدر %</label>
                 <input
                   type="number" step="0.01"
-                  className="w-full border rounded px-2 py-1 text-sm dark:bg-gray-900 dark:border-gray-600 font-mono"
+                  className="w-full border rounded px-2 py-1 text-sm dark:aseel-bg-panel dark:aseel-border-soft font-mono"
                   value={withholdingPct}
                   onChange={(e) => setWithholdingPct(e.target.value)}
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-gray-600 mb-0.5">مبلغ خصم المصدر</label>
+                <label className="block text-[11px] aseel-text-soft mb-0.5">مبلغ خصم المصدر</label>
                 <input
                   type="number" step="0.01"
-                  className="w-full border rounded px-2 py-1 text-sm dark:bg-gray-900 dark:border-gray-600 font-mono"
+                  className="w-full border rounded px-2 py-1 text-sm dark:aseel-bg-panel dark:aseel-border-soft font-mono"
                   value={withholdingAmt}
                   onChange={(e) => {
                     setWithholdingAmt(e.target.value);
@@ -709,10 +709,10 @@ const NewPaymentModal: React.FC<{
                 />
               </div>
               <div>
-                <label className="block text-[11px] text-gray-600 mb-0.5">مبلغ الحساب (remaining)</label>
+                <label className="block text-[11px] aseel-text-soft mb-0.5">مبلغ الحساب (remaining)</label>
                 <input
                   type="text" readOnly
-                  className="w-full border rounded px-2 py-1 text-sm bg-emerald-50 dark:bg-emerald-900/20 font-mono font-semibold"
+                  className="w-full border rounded px-2 py-1 text-sm aseel-bg-panel dark:aseel-bg-panel/20 font-mono font-semibold"
                   value={fmt(Math.max(0, computedTotal - (Number(withholdingAmt) || 0)))}
                 />
               </div>
@@ -720,7 +720,7 @@ const NewPaymentModal: React.FC<{
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-1 border-b border-gray-200 dark:border-gray-700">
+          <div className="flex gap-1 border-b aseel-border-soft dark:aseel-border-soft">
             {[
               { k: "alloc", l: "التوزيع" },
               { k: "cheques", l: `الشيكات (${cheques.length})` },
@@ -733,8 +733,8 @@ const NewPaymentModal: React.FC<{
                 onClick={() => setActiveTab(t.k as "alloc" | "cheques" | "notes" | "accounts")}
                 className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
                   activeTab === t.k
-                    ? "border-emerald-600 text-emerald-700 dark:text-emerald-400"
-                    : "border-transparent text-gray-500"
+                    ? "aseel-border-soft aseel-text-ink dark:aseel-text-soft"
+                    : "border-transparent aseel-text-soft"
                 }`}
               >
                 {t.l}
@@ -773,7 +773,7 @@ const NewPaymentModal: React.FC<{
                       setCheques((cs) => [...cs, ...extra]);
                       setError(null);
                     }}
-                    className="flex items-center gap-1 text-xs px-2 py-1 border border-emerald-600 text-emerald-700 rounded"
+                    className="flex items-center gap-1 text-xs px-2 py-1 border aseel-border-soft aseel-text-ink rounded"
                     title="تعبئة شيكات بنفس البنك/المبلغ لشهور متتالية (الجديد:29)"
                   >
                     تعبئة متشابهة
@@ -781,19 +781,19 @@ const NewPaymentModal: React.FC<{
                   <button
                     type="button"
                     onClick={() => setCheques((cs) => [...cs, newChequeLine()])}
-                    className="flex items-center gap-1 text-xs px-2 py-1 bg-emerald-600 text-white rounded"
+                    className="flex items-center gap-1 text-xs px-2 py-1 aseel-bg-panel text-white rounded"
                   >
                     <Plus className="w-3 h-3" /> شيك
                   </button>
                 </div>
               </div>
               {cheques.length === 0 ? (
-                <div className="text-xs text-gray-500 text-center py-3 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded">
+                <div className="text-xs aseel-text-soft text-center py-3 border-2 border-dashed aseel-border-soft dark:aseel-border-soft rounded">
                   لا شيكات — اضغط «شيك» للإضافة
                 </div>
               ) : (
                 <table className="w-full text-xs">
-                  <thead className="bg-gray-50 dark:bg-gray-900/40">
+                  <thead className="aseel-bg-panel dark:aseel-bg-panel/40">
                     <tr>
                       <th className="text-right p-1.5">#</th>
                       <th className="text-right p-1.5">رقم</th>
@@ -807,16 +807,16 @@ const NewPaymentModal: React.FC<{
                   </thead>
                   <tbody>
                     {cheques.map((c, i) => (
-                      <tr key={i} className="border-t border-gray-100 dark:border-gray-700">
+                      <tr key={i} className="border-t aseel-border-soft dark:aseel-border-soft">
                         <td className="p-1 text-center">{i + 1}</td>
-                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:bg-gray-900" value={c.cheque_number} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, cheque_number: e.target.value } : x))} /></td>
-                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:bg-gray-900" value={c.payee_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, payee_name: e.target.value } : x))} /></td>
-                        <td className="p-1"><input type="date" className="w-full border rounded px-1 py-0.5 text-xs dark:bg-gray-900" value={c.due_date} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, due_date: e.target.value } : x))} /></td>
-                        <td className="p-1"><input type="number" step="0.01" className="w-full border rounded px-1 py-0.5 text-xs font-mono dark:bg-gray-900" value={c.amount} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, amount: e.target.value } : x))} /></td>
-                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:bg-gray-900" value={c.bank_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, bank_name: e.target.value } : x))} /></td>
-                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:bg-gray-900" value={c.branch} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, branch: e.target.value } : x))} /></td>
+                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.cheque_number} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, cheque_number: e.target.value } : x))} /></td>
+                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.payee_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, payee_name: e.target.value } : x))} /></td>
+                        <td className="p-1"><input type="date" className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.due_date} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, due_date: e.target.value } : x))} /></td>
+                        <td className="p-1"><input type="number" step="0.01" className="w-full border rounded px-1 py-0.5 text-xs font-mono dark:aseel-bg-panel" value={c.amount} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, amount: e.target.value } : x))} /></td>
+                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.bank_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, bank_name: e.target.value } : x))} /></td>
+                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.branch} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, branch: e.target.value } : x))} /></td>
                         <td className="p-1 text-center">
-                          <button type="button" onClick={() => setCheques((cs) => cs.filter((_, j) => j !== i))} className="text-rose-600">
+                          <button type="button" onClick={() => setCheques((cs) => cs.filter((_, j) => j !== i))} className="aseel-text-soft">
                             <Trash2 className="w-3 h-3" />
                           </button>
                         </td>
@@ -831,10 +831,10 @@ const NewPaymentModal: React.FC<{
           {/* Notes tab */}
           {activeTab === "notes" && (
             <div>
-              <label className="block text-xs text-gray-500 mb-1">ملاحظات السند</label>
+              <label className="block text-xs aseel-text-soft mb-1">ملاحظات السند</label>
               <textarea
                 rows={4}
-                className="w-full border rounded-lg px-3 py-2 dark:bg-gray-900 dark:border-gray-600"
+                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
               />
@@ -843,7 +843,7 @@ const NewPaymentModal: React.FC<{
 
           {/* Accounts tab — journal preview placeholder */}
           {activeTab === "accounts" && (
-            <div className="text-xs text-gray-600 dark:text-gray-400 p-3 bg-gray-50 dark:bg-gray-900/40 rounded">
+            <div className="text-xs aseel-text-soft dark:aseel-text-soft p-3 aseel-bg-panel dark:aseel-bg-panel/40 rounded">
               معاينة القيد المحاسبي ستَظهر هنا بعد الترحيل. حالياً: Dr {(() => {
                 const a = accounts.find((x) => x.id === cashAccountId);
                 return a ? `${a.code} ${a.name}` : "—";
@@ -853,7 +853,7 @@ const NewPaymentModal: React.FC<{
 
           {/* Alloc tab (default) — existing UI */}
           {activeTab === "alloc" && (
-            <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
+            <div className="border-t aseel-border-soft dark:aseel-border-soft pt-3">
             <div className="flex items-center justify-between mb-2">
               <h3 className="font-semibold text-sm">توزيع على الفواتير</h3>
               <button
@@ -868,19 +868,19 @@ const NewPaymentModal: React.FC<{
             </div>
 
             {partnerAging.length > 0 && allocations.length === 0 && (
-              <div className="mb-2 p-2 rounded bg-amber-50 dark:bg-amber-900/20 text-xs text-amber-700">
+              <div className="mb-2 p-2 rounded aseel-bg-panel dark:aseel-bg-panel/20 text-xs aseel-text-ink">
                 {partnerAging.length} فاتورة مفتوحة للعميل — اضغط "اقتراح FIFO" للتوزيع
                 التلقائي أو أضف يدوياً.
               </div>
             )}
 
             {allocations.length === 0 ? (
-              <div className="text-xs text-gray-500 text-center py-3 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded">
+              <div className="text-xs aseel-text-soft text-center py-3 border-2 border-dashed aseel-border-soft dark:aseel-border-soft rounded">
                 لا توزيعات بعد
               </div>
             ) : (
               <table className="w-full text-sm">
-                <thead className="bg-gray-50 dark:bg-gray-900/40">
+                <thead className="aseel-bg-panel dark:aseel-bg-panel/40">
                   <tr>
                     <th className="text-right p-2">الفاتورة</th>
                     <th className="text-right p-2">المبلغ</th>
@@ -889,7 +889,7 @@ const NewPaymentModal: React.FC<{
                 </thead>
                 <tbody>
                   {allocations.map((a, idx) => (
-                    <tr key={idx} className="border-t border-gray-100 dark:border-gray-700">
+                    <tr key={idx} className="border-t aseel-border-soft dark:aseel-border-soft">
                       <td className="p-2">
                         {a.invoice_number || `#${a.invoice}`}
                       </td>
@@ -897,7 +897,7 @@ const NewPaymentModal: React.FC<{
                         <input
                           type="number"
                           step="0.01"
-                          className="w-full border rounded px-2 py-1 dark:bg-gray-900 dark:border-gray-600"
+                          className="w-full border rounded px-2 py-1 dark:aseel-bg-panel dark:aseel-border-soft"
                           value={a.amount}
                           onChange={(e) => updateAlloc(idx, e.target.value)}
                         />
@@ -906,7 +906,7 @@ const NewPaymentModal: React.FC<{
                         <button
                           type="button"
                           onClick={() => removeAlloc(idx)}
-                          className="p-1 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/30 rounded"
+                          className="p-1 aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -914,12 +914,12 @@ const NewPaymentModal: React.FC<{
                     </tr>
                   ))}
                 </tbody>
-                <tfoot className="bg-gray-100 dark:bg-gray-900/40 font-semibold text-sm">
+                <tfoot className="aseel-bg-panel dark:aseel-bg-panel/40 font-semibold text-sm">
                   <tr>
                     <td className="p-2">الإجمالي / المطلوب {fmt(amtNum)}</td>
                     <td
                       className={`p-2 ${
-                        Math.abs(diff) < 0.02 ? "text-emerald-700" : "text-rose-700"
+                        Math.abs(diff) < 0.02 ? "aseel-text-ink" : "aseel-text-ink"
                       }`}
                     >
                       {fmt(totalAlloc)}
@@ -936,17 +936,17 @@ const NewPaymentModal: React.FC<{
           )}
 
           {error && (
-            <div className="p-2 rounded bg-red-50 dark:bg-red-900/20 text-red-700 text-sm">
+            <div className="p-2 rounded aseel-bg-panel dark:aseel-bg-panel/20 aseel-text-state text-sm">
               {error}
             </div>
           )}
         </div>
 
-        <div className="flex items-center justify-end gap-2 p-4 border-t border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-end gap-2 p-4 border-t aseel-border-soft dark:aseel-border-soft">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600"
+            className="px-4 py-2 text-sm rounded-lg border aseel-border-soft dark:aseel-border-soft"
           >
             إلغاء
           </button>
@@ -954,7 +954,7 @@ const NewPaymentModal: React.FC<{
             type="button"
             onClick={submit}
             disabled={!canSubmit || submitting}
-            className="px-4 py-2 text-sm rounded-lg bg-emerald-600 text-white font-medium disabled:opacity-40"
+            className="px-4 py-2 text-sm rounded-lg aseel-bg-panel text-white font-medium disabled:opacity-40"
           >
             {submitting ? "جاري الحفظ..." : "حفظ"}
           </button>

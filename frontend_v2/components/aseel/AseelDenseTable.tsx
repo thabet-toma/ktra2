@@ -13,6 +13,7 @@
  * Reference: docs/aseel_reference/accounting.txt 48–69.
  */
 import React, { useState } from 'react';
+import { AseelSpinner, AseelEmptyState } from './AseelStates';
 
 export type DenseColumn<T> = {
   key: string;
@@ -107,11 +108,14 @@ export function AseelDenseTable<T>({
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 && (
+          {loading && rows.length === 0 && (
             <tr className="aseel-row--empty">
-              <td colSpan={totalCols} style={{ textAlign: 'center', padding: '16px 8px', color: 'var(--aseel-ink-soft)' }}>
-                {loading ? 'جاري التحميل…' : emptyHint}
-              </td>
+              <td colSpan={totalCols}><AseelSpinner /></td>
+            </tr>
+          )}
+          {!loading && rows.length === 0 && (
+            <tr className="aseel-row--empty">
+              <td colSpan={totalCols}><AseelEmptyState hint={typeof emptyHint === 'string' ? emptyHint : undefined} /></td>
             </tr>
           )}
           {rows.map((row, idx) => {

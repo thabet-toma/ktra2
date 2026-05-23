@@ -963,3 +963,23 @@ tbody td {
 [data-skin="aseel"] .aseel-date-cal__day:hover { background: var(--aseel-accent-bg); }
 [data-skin="aseel"] .aseel-date-cal__day--today { border-color: var(--aseel-accent); font-weight: bold; }
 [data-skin="aseel"] .aseel-date-cal__day--sel { background: var(--aseel-accent); color: var(--aseel-on-accent, #fff); }
+
+/* ── N9-T1: Aseel utility tokens (replace Tailwind named colors in screens) ── */
+[data-skin="aseel"] .aseel-bg-panel { background: var(--aseel-panel); }
+[data-skin="aseel"] .aseel-bg-field { background: var(--aseel-field); }
+[data-skin="aseel"] .aseel-bg-accent { background: var(--aseel-accent); }
+[data-skin="aseel"] .aseel-bg-accent-bg { background: var(--aseel-accent-bg); }
+[data-skin="aseel"] .aseel-bg-grid-head { background: var(--aseel-grid-head); }
+[data-skin="aseel"] .aseel-bg-row-alt { background: var(--aseel-row-alt); }
+[data-skin="aseel"] .aseel-text-ink { color: var(--aseel-ink); }
+[data-skin="aseel"] .aseel-text-soft { color: var(--aseel-ink-soft); }
+[data-skin="aseel"] .aseel-text-accent { color: var(--aseel-accent); }
+[data-skin="aseel"] .aseel-text-state { color: var(--aseel-state); }
+[data-skin="aseel"] .aseel-border-soft { border-color: var(--aseel-border-soft); }
+[data-skin="aseel"] .aseel-border-line { border-color: var(--aseel-line); }
+[data-skin="aseel"] .aseel-border-accent { border-color: var(--aseel-accent-bd); }
+[data-skin="aseel"] .aseel-btn-primary { background: var(--aseel-accent); color: #fff; border: 1px solid var(--aseel-accent-bd); border-radius: var(--aseel-radius); }
+[data-skin="aseel"] .aseel-btn-primary:hover { background: #1e4a75; }
+[data-skin="aseel"] .aseel-badge-state { background: #fce4e4; color: var(--aseel-state); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
+[data-skin="aseel"] .aseel-badge-ok { background: #e4f0e4; color: #2e7d32; padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
+[data-skin="aseel"] .aseel-badge-neutral { background: var(--aseel-panel); color: var(--aseel-ink-soft); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }

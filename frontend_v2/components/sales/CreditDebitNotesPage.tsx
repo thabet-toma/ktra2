@@ -206,11 +206,11 @@ export const CreditDebitNotesPage: React.FC = () => {
 
   const statusColor = (s: string) => {
     const map: Record<string, string> = {
-      draft: "bg-gray-100 text-gray-700",
+      draft: "aseel-bg-panel aseel-text-ink",
       posted: "bg-green-100 text-green-700",
-      cancelled: "bg-red-100 text-red-700",
+      cancelled: "aseel-bg-panel aseel-text-state",
     };
-    return map[s] || "bg-gray-100 text-gray-700";
+    return map[s] || "aseel-bg-panel aseel-text-ink";
   };
 
   return (
@@ -256,20 +256,20 @@ export const CreditDebitNotesPage: React.FC = () => {
         <h2 className="text-xl font-bold">الإشعارات المدينة/الدائنة</h2>
         <button
           onClick={() => { resetForm(); setShowForm(true); }}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          className="flex items-center gap-2 px-4 py-2 aseel-btn-primary"
         >
           <Plus className="w-4 h-4" /> إشعار جديد
         </button>
       </div>
 
-      {err && <div className="p-3 bg-red-50 text-red-700 rounded-lg">{err}</div>}
+      {err && <div className="p-3 aseel-bg-panel aseel-text-state rounded-lg">{err}</div>}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-gray-500"><Loader2 className="w-4 h-4 animate-spin" /> جاري التحميل...</div>
+        <AseelSpinner />
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <div className="aseel-bg-field rounded-lg shadow overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50">
+            <thead className="aseel-bg-panel">
               <tr>
                 <th className="text-right p-3">رقم الإشعار</th>
                 <th className="text-right p-3">النوع</th>
@@ -282,12 +282,12 @@ export const CreditDebitNotesPage: React.FC = () => {
             </thead>
             <tbody>
               {notes.length === 0 ? (
-                <tr><td colSpan={7} className="p-6 text-center text-gray-400">لا توجد إشعارات</td></tr>
+                <tr><td colSpan={7} className="p-6 text-center aseel-text-soft">لا توجد إشعارات</td></tr>
               ) : notes.map((n) => (
-                <tr key={n.id} className="border-t hover:bg-gray-50">
+                <tr key={n.id} className="border-t hover:aseel-bg-panel">
                   <td className="p-3 font-mono">{n.note_number}</td>
                   <td className="p-3">
-                    <span className={`px-2 py-0.5 rounded text-xs ${n.note_type === "credit" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                    <span className={`px-2 py-0.5 rounded text-xs ${n.note_type === "credit" ? "bg-green-100 text-green-700" : "aseel-bg-panel aseel-text-state"}`}>
                       {n.note_type === "credit" ? "دائن" : "مدين"}
                     </span>
                   </td>
@@ -302,11 +302,11 @@ export const CreditDebitNotesPage: React.FC = () => {
                   <td className="p-3 flex gap-2">
                     {n.status === "draft" && (
                       <>
-                        <button onClick={() => { setSelectedId(n.id); }} className="text-blue-600 hover:underline text-xs">تعديل</button>
+                        <button onClick={() => { setSelectedId(n.id); }} className="aseel-text-accent hover:underline text-xs">تعديل</button>
                         <button onClick={() => handlePost(n.id)} className="text-green-600 hover:underline text-xs">ترحيل</button>
                       </>
                     )}
-                    {n.journal && <span className="text-gray-400 text-xs">قيد #{n.journal}</span>}
+                    {n.journal && <span className="aseel-text-soft text-xs">قيد #{n.journal}</span>}
                   </td>
                 </tr>
               ))}
@@ -317,14 +317,14 @@ export const CreditDebitNotesPage: React.FC = () => {
 
       {showForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-lg p-6">
+          <div className="aseel-bg-field rounded-xl shadow-lg w-full max-w-lg p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold">{selectedId ? "تعديل الإشعار" : "إشعار جديد"}</h3>
-              <button onClick={() => setShowForm(false)} className="p-1 hover:bg-gray-100 rounded"><FileDown className="w-5 h-5" /></button>
+              <button onClick={() => setShowForm(false)} className="p-1 hover:aseel-bg-panel rounded"><FileDown className="w-5 h-5" /></button>
             </div>
 
             {/* N4-T5 tabs */}
-            <div className="flex gap-1 border-b border-gray-200 mb-3">
+            <div className="flex gap-1 border-b aseel-border-soft mb-3">
               {[
                 { k: "main", l: "الرئيسية" },
                 { k: "notes", l: "الملاحظات" },
@@ -332,7 +332,7 @@ export const CreditDebitNotesPage: React.FC = () => {
               ].map((t) => (
                 <button key={t.k} type="button"
                   onClick={() => setActiveTab(t.k as "main" | "notes" | "accounts")}
-                  className={`px-3 py-1.5 text-xs font-medium border-b-2 ${activeTab === t.k ? "border-blue-600 text-blue-700" : "border-transparent text-gray-500"}`}>
+                  className={`px-3 py-1.5 text-xs font-medium border-b-2 ${activeTab === t.k ? "aseel-border-accent aseel-text-accent" : "border-transparent aseel-text-soft"}`}>
                   {t.l}
                 </button>
               ))}
@@ -368,7 +368,7 @@ export const CreditDebitNotesPage: React.FC = () => {
                 </div>
 
                 {/* المبلغ + ضريبة */}
-                <div className="col-span-2 bg-amber-50 border border-amber-200 rounded p-2 mt-2">
+                <div className="col-span-2 aseel-bg-panel border aseel-border-soft rounded p-2 mt-2">
                   <label className="flex items-center gap-2 text-xs mb-2">
                     <input type="checkbox" checked={formIncludesTax} onChange={(e) => setFormIncludesTax(e.target.checked)} />
                     المبلغ يشمل قيمة الضريبة المضافة
@@ -390,15 +390,15 @@ export const CreditDebitNotesPage: React.FC = () => {
                     </div>
                     <div>
                       <label className="block text-[11px] mb-0.5">المبلغ بدون ضريبة</label>
-                      <input type="text" readOnly value={amountExcl.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono bg-gray-100" />
+                      <input type="text" readOnly value={amountExcl.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono aseel-bg-panel" />
                     </div>
                     <div>
                       <label className="block text-[11px] mb-0.5">مبلغ الضريبة</label>
-                      <input type="text" readOnly value={taxAmount.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono bg-gray-100" />
+                      <input type="text" readOnly value={taxAmount.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono aseel-bg-panel" />
                     </div>
                     <div className="col-span-2">
                       <label className="block text-[11px] mb-0.5">مبلغ الإشعار الإجمالي</label>
-                      <input type="text" readOnly value={totalAmount.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono font-bold bg-emerald-50" />
+                      <input type="text" readOnly value={totalAmount.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono font-bold aseel-bg-panel" />
                     </div>
                   </div>
                 </div>
@@ -413,15 +413,15 @@ export const CreditDebitNotesPage: React.FC = () => {
             )}
 
             {activeTab === "accounts" && (
-              <div className="text-xs text-gray-600 p-3 bg-gray-50 rounded">
+              <div className="text-xs aseel-text-soft p-3 aseel-bg-panel rounded">
                 معاينة القيد المحاسبي: {formType === "credit" ? "Dr إيراد مرتجعات / Cr ذمم" : "Dr ذمم / Cr إيراد إضافي"} —
                 المبلغ: {totalAmount.toFixed(2)} (ضمنه ض.ق.م {taxAmount.toFixed(2)}).
               </div>
             )}
 
             <div className="flex justify-end gap-3 mt-4">
-              <button onClick={() => setShowForm(false)} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">إلغاء</button>
-              <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              <button onClick={() => setShowForm(false)} className="px-4 py-2 aseel-bg-panel rounded-lg hover:aseel-bg-grid-head">إلغاء</button>
+              <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-4 py-2 aseel-btn-primary disabled:opacity-50">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 {saving ? "جاري الحفظ..." : "حفظ"}
               </button>

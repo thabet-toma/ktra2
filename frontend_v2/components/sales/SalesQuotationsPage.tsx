@@ -269,13 +269,13 @@ export const SalesQuotationsPage: React.FC = () => {
 
   const statusColor = (s: string) => {
     const map: Record<string, string> = {
-      draft: "bg-gray-100 text-gray-700",
-      sent: "bg-blue-100 text-blue-700",
+      draft: "aseel-bg-panel aseel-text-ink",
+      sent: "aseel-bg-accent-bg aseel-text-accent",
       accepted: "bg-green-100 text-green-700",
-      rejected: "bg-red-100 text-red-700",
-      converted: "bg-purple-100 text-purple-700",
+      rejected: "aseel-bg-panel aseel-text-state",
+      converted: "aseel-bg-panel aseel-text-ink",
     };
-    return map[s] || "bg-gray-100 text-gray-700";
+    return map[s] || "aseel-bg-panel aseel-text-ink";
   };
 
   const subtotal = formLines.reduce((s, l) => s + (Number(l.total) || 0), 0);
@@ -323,20 +323,20 @@ export const SalesQuotationsPage: React.FC = () => {
         <h2 className="text-xl font-bold">العروض والطلبيات</h2>
         <button
           onClick={() => { resetForm(); setShowForm(true); }}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+          className="flex items-center gap-2 px-4 py-2 aseel-btn-primary"
         >
           <Plus className="w-4 h-4" /> عرض جديد
         </button>
       </div>
 
-      {err && <div className="p-3 bg-red-50 text-red-700 rounded-lg">{err}</div>}
+      {err && <div className="p-3 aseel-bg-panel aseel-text-state rounded-lg">{err}</div>}
 
       {loading ? (
-        <div className="flex items-center gap-2 text-gray-500"><Loader2 className="w-4 h-4 animate-spin" /> جاري التحميل...</div>
+        <AseelSpinner />
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <div className="aseel-bg-field rounded-lg shadow overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-gray-50">
+            <thead className="aseel-bg-panel">
               <tr>
                 <th className="text-right p-3">رقم العرض</th>
                 <th className="text-right p-3">العميل</th>
@@ -349,9 +349,9 @@ export const SalesQuotationsPage: React.FC = () => {
             </thead>
             <tbody>
               {quotations.length === 0 ? (
-                <tr><td colSpan={7} className="p-6 text-center text-gray-400">لا توجد عروض</td></tr>
+                <tr><td colSpan={7} className="p-6 text-center aseel-text-soft">لا توجد عروض</td></tr>
               ) : quotations.map((q) => (
-                <tr key={q.id} className="border-t hover:bg-gray-50">
+                <tr key={q.id} className="border-t hover:aseel-bg-panel">
                   <td className="p-3 font-mono">{q.quotation_number}</td>
                   <td className="p-3">{q.customer_name || "-"}</td>
                   <td className="p-3">{q.quotation_date}</td>
@@ -363,11 +363,11 @@ export const SalesQuotationsPage: React.FC = () => {
                     </span>
                   </td>
                   <td className="p-3 flex gap-2">
-                    <button onClick={() => { setSelectedId(q.id); }} className="text-blue-600 hover:underline text-xs">تعديل</button>
+                    <button onClick={() => { setSelectedId(q.id); }} className="aseel-text-accent hover:underline text-xs">تعديل</button>
                     {q.status !== "converted" && (
                       <button onClick={() => handleConvert(q.id)} className="text-green-600 hover:underline text-xs">تحويل</button>
                     )}
-                    <button onClick={() => handleDelete(q.id)} className="text-red-600 hover:underline text-xs">حذف</button>
+                    <button onClick={() => handleDelete(q.id)} className="aseel-text-state hover:underline text-xs">حذف</button>
                   </td>
                 </tr>
               ))}
@@ -379,10 +379,10 @@ export const SalesQuotationsPage: React.FC = () => {
       {/* Form Modal */}
       {showForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
+          <div className="aseel-bg-field rounded-xl shadow-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto p-6">
             <div className="flex justify-between items-center mb-4">
               <h3 className="text-lg font-bold">{selectedId ? "تعديل العرض" : "عرض جديد"}</h3>
-              <button onClick={() => setShowForm(false)} className="p-1 hover:bg-gray-100 rounded"><FileDown className="w-5 h-5" /></button>
+              <button onClick={() => setShowForm(false)} className="p-1 hover:aseel-bg-panel rounded"><FileDown className="w-5 h-5" /></button>
             </div>
 
             <div className="grid grid-cols-2 gap-4 mb-4">
@@ -407,7 +407,7 @@ export const SalesQuotationsPage: React.FC = () => {
                 <input type="date" value={formValidUntil} onChange={(e) => setFormValidUntil(e.target.value)} className="w-full border rounded-lg p-2" />
               </div>
               {/* N4-T6: فعال + الأسعار تشمل ض.ق.م + الاسم/العنوان/الضريبي */}
-              <div className="col-span-2 flex flex-wrap gap-4 items-center bg-amber-50 border border-amber-200 rounded p-2">
+              <div className="col-span-2 flex flex-wrap gap-4 items-center aseel-bg-panel border aseel-border-soft rounded p-2">
                 <label className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={formIsActive} onChange={(e) => setFormIsActive(e.target.checked)} />
                   العرض فعّال
@@ -417,7 +417,7 @@ export const SalesQuotationsPage: React.FC = () => {
                   الأسعار تشمل ض.ق.م
                 </label>
                 {formValidUntil && new Date(formValidUntil) < new Date() && (
-                  <span className="text-xs text-red-600 font-semibold">⚠️ منتهي الصلاحية</span>
+                  <span className="text-xs aseel-text-state font-semibold">⚠️ منتهي الصلاحية</span>
                 )}
               </div>
               <div>
@@ -437,10 +437,10 @@ export const SalesQuotationsPage: React.FC = () => {
             <div className="mb-4">
               <div className="flex justify-between items-center mb-2">
                 <h4 className="font-medium">البنود</h4>
-                <button onClick={handleAddLine} className="text-blue-600 text-sm hover:underline">+ إضافة بند</button>
+                <button onClick={handleAddLine} className="aseel-text-accent text-sm hover:underline">+ إضافة بند</button>
               </div>
               <table className="w-full text-sm border">
-                <thead className="bg-gray-50">
+                <thead className="aseel-bg-panel">
                   <tr>
                     <th className="text-right p-2">المنتج</th>
                     <th className="text-right p-2">الكمية</th>
@@ -477,7 +477,7 @@ export const SalesQuotationsPage: React.FC = () => {
                       <td className="p-2"><input type="number" value={l.discount} onChange={(e) => handleLineChange(idx, "discount", e.target.value)} className="w-full border rounded p-1 text-sm" /></td>
                       <td className="p-2"><input type="number" value={l.tax_rate} onChange={(e) => handleLineChange(idx, "tax_rate", e.target.value)} className="w-full border rounded p-1 text-sm" /></td>
                       <td className="p-2 font-mono">{Number(l.total).toLocaleString()}</td>
-                      <td className="p-2"><button onClick={() => handleRemoveLine(idx)} className="text-red-500 hover:text-red-700"><Trash2 className="w-4 h-4" /></button></td>
+                      <td className="p-2"><button onClick={() => handleRemoveLine(idx)} className="aseel-text-soft0 hover:aseel-text-state"><Trash2 className="w-4 h-4" /></button></td>
                     </tr>
                   ))}
                 </tbody>
@@ -486,8 +486,8 @@ export const SalesQuotationsPage: React.FC = () => {
             </div>
 
             <div className="flex justify-end gap-3">
-              <button onClick={() => setShowForm(false)} className="px-4 py-2 bg-gray-100 rounded-lg hover:bg-gray-200">إلغاء</button>
-              <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              <button onClick={() => setShowForm(false)} className="px-4 py-2 aseel-bg-panel rounded-lg hover:aseel-bg-grid-head">إلغاء</button>
+              <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-4 py-2 aseel-btn-primary disabled:opacity-50">
                 {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 {saving ? "جاري الحفظ..." : "حفظ"}
               </button>
