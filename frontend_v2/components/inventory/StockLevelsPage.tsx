@@ -1,22 +1,22 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
-import type { StockSummaryItem, StockSummaryResponse, SqlProduct } from "../../types/inventory";
-import {
-  BarChart3,
-  Loader2,
-  AlertTriangle,
-  RefreshCw,
-  Package,
-  ArrowDown,
-  Search,
-} from "lucide-react";
+import type { SqlProduct, StockSummaryResponse } from "../../types/inventory";
+import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
+import { RefreshCw } from "lucide-react";
+
+const fmt = (n: number | string) =>
+  Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export const StockLevelsPage: React.FC = () => {
   const [products, setProducts] = useState<SqlProduct[]>([]);
   const [summary, setSummary] = useState<StockSummaryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // فلاتر
   const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState<"" | "low" | "out" | "over">("");
+  const [filterCategory, setFilterCategory] = useState<string>("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -29,211 +29,136 @@ export const StockLevelsPage: React.FC = () => {
       setProducts(prods as SqlProduct[]);
       setSummary(sum as StockSummaryResponse);
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "خطأ");
+      setErr(e instanceof Error ? e.message : "خطأ في التحميل");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
+
+  const categories = Array.from(
+    new Set(products.map((p) => p.category_name || "").filter(Boolean))
+  ).sort();
 
   const filtered = products.filter((p) => {
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return (
-      p.sku.toLowerCase().includes(s) ||
-      (p.name_ar || "").toLowerCase().includes(s) ||
-      (p.name_en || "").toLowerCase().includes(s)
-    );
+    if (search) {
+      const s = search.toLowerCase();
+      if (
+        !p.sku.toLowerCase().includes(s) &&
+        !(p.name_ar || "").toLowerCase().includes(s) &&
+        !(p.name_en || "").toLowerCase().includes(s)
+      ) return false;
+    }
+    if (filterCategory && p.category_name !== filterCategory) return false;
+    const qty = Number(p.quantity_on_hand);
+    const min = Number(p.min_stock_level ?? 0);
+    if (filterStatus === "out") return qty <= 0;
+    if (filterStatus === "low") return qty > 0 && min > 0 && qty <= min;
+    if (filterStatus === "over") return min > 0 && qty > min * 3;
+    return true;
   });
 
-  const fmt = (n: number | string) =>
-    Number(n).toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
-
-  const statusBadge = (s: SqlProduct["stock_status"], minLvl?: number | null) => {
-    if (s === "out_of_stock")
-      return (
-        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300">
-          نفذ
-        </span>
-      );
-    if (s === "low_stock")
-      return (
-        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
-          منخفض
-        </span>
-      );
-    return (
-      <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-        متوفر
-      </span>
-    );
+  const statusCell = (p: SqlProduct) => {
+    if (p.stock_status === "out_of_stock")
+      return <span style={{ color: "var(--aseel-danger, #c00)" }}>نفذ</span>;
+    if (p.stock_status === "low_stock")
+      return <span style={{ color: "var(--aseel-warn, #b8800a)" }}>منخفض</span>;
+    return <span style={{ color: "var(--aseel-ok, #267346)" }}>متوفر</span>;
   };
 
+  const columns: DenseColumn<SqlProduct>[] = [
+    { key: "sku", header: "SKU", width: "110px" },
+    { key: "name", header: "الصنف", render: (p) => <>{p.name_ar || p.name_en || "—"}</> },
+    { key: "cat", header: "التصنيف", width: "130px", render: (p) => <>{p.category_name || "—"}</> },
+    { key: "qty", header: "المتاح", width: "90px", align: "center", numeric: true,
+      render: (p) => {
+        const qty = Number(p.quantity_on_hand);
+        const low = qty <= (p.min_stock_level || 0);
+        return <span style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{fmt(qty)}</span>;
+      }
+    },
+    { key: "min", header: "الحد الأدنى", width: "90px", align: "center", numeric: true,
+      render: (p) => <>{p.min_stock_level ?? "—"}</> },
+    { key: "status", header: "الحالة", width: "80px", align: "center", render: statusCell },
+    { key: "avgcost", header: "متوسط التكلفة", width: "110px", align: "center", numeric: true,
+      render: (p) => <>{fmt(Number(p.avg_cost))}</> },
+    { key: "val", header: "القيمة", width: "110px", align: "center", numeric: true,
+      render: (p) => <>{fmt(Number(p.quantity_on_hand) * Number(p.avg_cost))}</> },
+  ];
+
+  // footer: مجاميع
+  const totalVal = filtered.reduce(
+    (s, p) => s + Number(p.quantity_on_hand) * Number(p.avg_cost), 0
+  );
+
   return (
-    <div className="p-6 max-w-6xl mx-auto space-y-6" dir="rtl">
-      <div className="flex items-center gap-3">
-        <BarChart3 className="w-7 h-7 text-[var(--color-primary)] dark:text-[var(--color-primary)]" />
-        <h1 className="text-2xl font-bold text-slate-800 dark:text-slate-100">
+    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }} data-skin="aseel">
+      {/* شريط العنوان والفلاتر */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
           أرصدة المخزون
-        </h1>
-      </div>
-
-      {err && (
-        <div className="p-3 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg border border-red-200 dark:border-red-800 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 shrink-0" />
-          {err}
-        </div>
-      )}
-
-      {/* KPIs */}
-      {summary && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
-            <div className="text-sm text-slate-500 dark:text-slate-400 mb-1">
-              إجمالي المنتجات
-            </div>
-            <p className="text-2xl font-bold text-slate-800 dark:text-slate-100">
-              {products.length}
-            </p>
-          </div>
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
-            <div className="text-sm text-slate-500 dark:text-slate-400 mb-1">
-              منتجات بمخزون
-            </div>
-            <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-              {summary.total_products_in_stock}
-            </p>
-          </div>
-          <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
-            <div className="text-sm text-slate-500 dark:text-slate-400 mb-1">
-              قيمة المخزون الكلية
-            </div>
-            <p className="text-2xl font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
-              {fmt(summary.total_inventory_value)} ₪
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Search + refresh */}
-      <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 flex items-center gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
-            type="text"
-            placeholder="بحث بالاسم أو SKU..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pr-9 pl-4 py-2 border border-slate-300 dark:border-slate-600 rounded-lg bg-white dark:bg-slate-700 text-sm text-slate-800 dark:text-slate-100"
-          />
-        </div>
-        <button
-          onClick={load}
-          className="flex items-center gap-1 px-3 py-2 rounded-lg bg-slate-700 text-white text-sm hover:bg-slate-600"
+        </strong>
+        {summary && (
+          <span className="aseel-status-item">
+            إجمالي الأصناف: <b>{summary.total_products_in_stock ?? products.length}</b>
+          </span>
+        )}
+        {summary && (
+          <span className="aseel-status-item">
+            قيمة المخزون: <b>{fmt(Number(summary.total_inventory_value ?? 0))}</b>
+          </span>
+        )}
+        <div style={{ flex: 1 }} />
+        <input
+          className="aseel-input"
+          style={{ width: 180 }}
+          placeholder="بحث SKU / الاسم…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select
+          className="aseel-input"
+          style={{ width: 140 }}
+          value={filterCategory}
+          onChange={(e) => setFilterCategory(e.target.value)}
         >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          تحديث
+          <option value="">كل التصنيفات</option>
+          {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select
+          className="aseel-input"
+          style={{ width: 140 }}
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value as "" | "low" | "out" | "over")}
+        >
+          <option value="">كل الحالات</option>
+          <option value="low">منخفض</option>
+          <option value="out">نفذ</option>
+          <option value="over">فوق الحد الأقصى</option>
+        </select>
+        <button className="aseel-toolbtn" onClick={load} title="تحديث">
+          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
       </div>
 
-      {/* Table */}
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <Loader2 className="w-8 h-8 animate-spin text-[var(--color-primary)]" />
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-12 text-slate-500 dark:text-slate-400">
-          <Package className="w-12 h-12 mx-auto mb-3 opacity-40" />
-          لا توجد منتجات
-        </div>
-      ) : (
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-slate-50 dark:bg-slate-700/50 border-b border-slate-200 dark:border-slate-600">
-                  <th className="text-right px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                    SKU
-                  </th>
-                  <th className="text-right px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                    المنتج
-                  </th>
-                  <th className="text-right px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                    التصنيف
-                  </th>
-                  <th className="text-center px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                    الكمية
-                  </th>
-                  <th className="text-center px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                    الحد الأدنى
-                  </th>
-                  <th className="text-center px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                    الحالة
-                  </th>
-                  <th className="text-center px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                    متوسط التكلفة
-                  </th>
-                  <th className="text-center px-4 py-3 font-semibold text-slate-600 dark:text-slate-300">
-                    القيمة
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((p) => {
-                  const qty = Number(p.quantity_on_hand);
-                  const avg = Number(p.avg_cost);
-                  const val = qty * avg;
-                  return (
-                    <tr
-                      key={p.id}
-                      className="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/30"
-                    >
-                      <td className="px-4 py-3 font-mono text-xs text-slate-500">
-                        {p.sku}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-slate-800 dark:text-slate-100">
-                        {p.name_ar || p.name_en || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-slate-600 dark:text-slate-300 text-xs">
-                        {p.category_name || "—"}
-                      </td>
-                      <td
-                        className={`px-4 py-3 text-center font-mono font-semibold ${
-                          qty <= 0
-                            ? "text-red-600"
-                            : qty <= (p.min_stock_level || 0)
-                            ? "text-amber-600"
-                            : "text-slate-800 dark:text-slate-100"
-                        }`}
-                      >
-                        {qty.toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3 text-center font-mono text-slate-500">
-                        {p.min_stock_level ?? "—"}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {statusBadge(p.stock_status, p.min_stock_level)}
-                      </td>
-                      <td className="px-4 py-3 text-center font-mono text-slate-600 dark:text-slate-300">
-                        {fmt(avg)}
-                      </td>
-                      <td className="px-4 py-3 text-center font-mono font-semibold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
-                        {fmt(val)}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+      {err && (
+        <div className="aseel-banner aseel-banner--err">{err}</div>
       )}
+
+      <AseelDenseTable<SqlProduct>
+        columns={columns}
+        rows={filtered}
+        getRowKey={(p) => p.id}
+        loading={loading}
+        emptyHint="لا توجد أصناف"
+        footer={
+          <span style={{ fontWeight: 700, color: "var(--aseel-ink)" }}>
+            إجمالي القيمة ({filtered.length} صنف):{" "}
+            <span style={{ color: "var(--aseel-accent, #1857a4)" }}>{fmt(totalVal)}</span>
+          </span>
+        }
+      />
     </div>
   );
 };

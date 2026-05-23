@@ -1,16 +1,18 @@
+/**
+ * N6-T2 — ShipmentManagement (L2) — AseelDenseTable لإدارة الشحنات
+ * المرجع: task5.md:796 + الإرساليات.txt:6-155
+ */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Shipment, User, Supplier, Deal } from '../../../types';
 import { shipmentsService } from '../../../services/shipmentsService';
 import { suppliersService } from '../../../services/firestoreService';
 import { dealsService } from '../../../services/dealsService';
-import {
-    Plus, Truck, Edit, Eye, Trash2
-} from 'lucide-react';
+import { Plus, Eye, Edit, Trash2, RefreshCw } from 'lucide-react';
 import { LoadingSpinner } from '../../LoadingSpinner';
 import { ShipmentForm } from './ShipmentForm';
 import { ShipmentDetailView } from './ShipmentDetailView';
-import { DataGrid, Toolbar, StatusBadge, Button } from '../../ui';
+import { AseelDenseTable, type DenseColumn } from '../../aseel/AseelDenseTable';
 
 interface ShipmentManagementProps {
     currentUser: User;
@@ -19,6 +21,34 @@ interface ShipmentManagementProps {
         dealRef?: { dealId: string; dealNumber: string; displayName: string }
     ) => void;
 }
+
+const STATUS_LABELS: Record<string, string> = {
+    draft:            'مسودة',
+    payment_pending:  'بانتظار الدفع',
+    partially_paid:   'مدفوع جزئياً',
+    paid:             'مدفوع بالكامل',
+    shipped:          'تم الشحن',
+    delivered:        'تم التسليم',
+    cancelled:        'ملغاة',
+};
+
+const STATUS_COLORS: Record<string, string> = {
+    draft:           'var(--aseel-ink-soft)',
+    payment_pending: 'var(--aseel-warn, #b8800a)',
+    partially_paid:  'var(--aseel-warn, #b8800a)',
+    paid:            'var(--aseel-ok, #267346)',
+    shipped:         'var(--aseel-accent, #1857a4)',
+    delivered:       'var(--aseel-ok, #267346)',
+    cancelled:       'var(--aseel-danger, #c00)',
+};
+
+const fmtAmt = (n: number | undefined) =>
+    (n ?? 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+
+const fmtDate = (s: string | undefined) => {
+    if (!s) return '—';
+    try { return new Date(s).toLocaleDateString('ar'); } catch { return s; }
+};
 
 export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     currentUser,
@@ -45,74 +75,32 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     const [deals, setDeals] = useState<Deal[]>([]);
     const [currentShipment, setCurrentShipment] = useState<Partial<Shipment> | null>(null);
     const [loading, setLoading] = useState(true);
-    const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState<string>('all');
+    const [search, setSearch] = useState('');
     const [typeFilter, setTypeFilter] = useState<'all' | 'sea' | 'air'>('all');
-    const [detailedStatusFilter, setDetailedStatusFilter] = useState<string>('all');
-    const [paymentFilter, setPaymentFilter] = useState<string>('all');
-    const [filteredShipments, setFilteredShipments] = useState<Shipment[]>([]);
+    const [statusFilter, setStatusFilter] = useState<string>('all');
     const [viewingShipment, setViewingShipment] = useState<Shipment | null>(null);
 
     useEffect(() => {
         const path = (location.pathname || '/').replace(/\/$/, '') || '/';
-        const onShipmentsRoute = path === '/shipments' || path.startsWith('/shipments/');
-        if (!onShipmentsRoute) {
+        if (path !== '/shipments' && !path.startsWith('/shipments/')) {
             navigate('/shipments', { replace: true });
         }
     }, [location.pathname, navigate]);
 
     useEffect(() => {
-        const unsubShipments = shipmentsService.subscribeToShipments(setShipments);
-
-        const unsubSuppliers = suppliersService.subscribeToSuppliers((allSuppliers) => {
-            setSuppliers(allSuppliers.filter(s => s.type === 'shipping_agent'));
+        const unsubShipments = shipmentsService.subscribeToShipments((s) => {
+            setShipments(s);
+            setLoading(false);
         });
-
-        const unsubDeals = dealsService.subscribeToDeals((allDeals) => {
-            setDeals(allDeals.filter(d => d.status === 'completed'));
+        const unsubSuppliers = suppliersService.subscribeToSuppliers((all) => {
+            setSuppliers(all.filter(s => s.type === 'shipping_agent'));
         });
-
-        setLoading(false);
-        return () => {
-            unsubShipments();
-            unsubSuppliers();
-            unsubDeals();
-        };
+        const unsubDeals = dealsService.subscribeToDeals((all) => {
+            setDeals(all.filter(d => d.status === 'completed'));
+        });
+        return () => { unsubShipments(); unsubSuppliers(); unsubDeals(); };
     }, []);
 
-    useEffect(() => {
-        let result = shipments;
-        if (searchTerm.trim()) {
-            const term = searchTerm.toLowerCase();
-            result = result.filter(s =>
-                s.shipmentNumber?.toLowerCase().includes(term) ||
-                s.shippingAgentName?.toLowerCase().includes(term) ||
-                s.agentShipmentNumber?.toLowerCase().includes(term)
-            );
-        }
-        if (statusFilter !== 'all') {
-            result = result.filter(s => s.status === statusFilter);
-        }
-        if (typeFilter !== 'all') {
-            result = result.filter(s => s.shippingInfo?.shippingType === typeFilter);
-        }
-        if (detailedStatusFilter !== 'all') {
-            result = result.filter(s => s.shippingInfo?.shipmentStatus?.status === detailedStatusFilter);
-        }
-        if (paymentFilter !== 'all') {
-            // تصفية بناءً على حالة الدفع (قد تكون جزءاً من الحالة العامة أو تعتمد على التفاصيل)
-            result = result.filter(s => {
-                if (paymentFilter === 'paid') return s.status === 'paid';
-                if (paymentFilter === 'partially_paid') return s.status === 'partially_paid';
-                if (paymentFilter === 'unpaid') return s.status === 'draft' || s.status === 'payment_pending';
-                if (paymentFilter === 'payment_pending') return s.status === 'payment_pending';
-                return true;
-            });
-        }
-        setFilteredShipments(result);
-    }, [shipments, searchTerm, statusFilter, typeFilter, detailedStatusFilter, paymentFilter]);
-
-    /** مزامنة قائمة/نموذج الشحنة مع الراوت `/shipments` و `/shipments/:id` و `/shipments/new` */
     useEffect(() => {
         if (!shipmentsPathMatch) return;
         if (shipmentsPathMatch.mode === 'list') {
@@ -154,6 +142,32 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
         })();
     }, [shipmentsPathMatch, shipments, navigate]);
 
+    const filteredShipments = useMemo(() => {
+        let result = shipments;
+        if (search.trim()) {
+            const term = search.toLowerCase();
+            result = result.filter(s =>
+                s.shipmentNumber?.toLowerCase().includes(term) ||
+                s.shippingAgentName?.toLowerCase().includes(term) ||
+                s.agentShipmentNumber?.toLowerCase().includes(term)
+            );
+        }
+        if (typeFilter !== 'all') {
+            result = result.filter(s => s.shippingInfo?.shippingType === typeFilter);
+        }
+        if (statusFilter !== 'all') {
+            result = result.filter(s => s.status === statusFilter);
+        }
+        return result;
+    }, [shipments, search, typeFilter, statusFilter]);
+
+    const stats = useMemo(() => ({
+        total: shipments.length,
+        inTransit: shipments.filter(s => ['shipped'].includes(s.status)).length,
+        delivered: shipments.filter(s => s.status === 'delivered').length,
+        totalCost: shipments.reduce((sum, s) => sum + (s.totalShippingCostUsd || 0), 0),
+    }), [shipments]);
+
     const handleCreateNew = () => {
         newFormInitRef.current = false;
         navigate('/shipments/new');
@@ -163,290 +177,225 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
         navigate(`/shipments/${encodeURIComponent(String(shipment.id))}`);
     };
 
-    const handleView = (shipment: Shipment) => {
-        setViewingShipment(shipment);
-    };
-
     const handleDelete = async (shipmentId: string) => {
-        if (window.confirm('هل أنت متأكد من حذف هذه الشحنة؟')) {
-            try {
-                await shipmentsService.deleteShipment(shipmentId);
-                const path = (location.pathname || '/').replace(/\/$/, '') || '/';
-                const m = path.match(/^\/shipments\/(.+)$/);
-                const seg = m ? decodeURIComponent(m[1]) : '';
-                if (seg && seg !== 'new' && String(seg) === String(shipmentId)) {
-                    navigate('/shipments', { replace: true });
-                }
-            } catch (error) {
-                console.error("Error deleting shipment:", error);
-                alert("حدث خطأ أثناء حذف الشحنة");
+        if (!window.confirm('هل أنت متأكد من حذف هذه الشحنة؟')) return;
+        try {
+            await shipmentsService.deleteShipment(shipmentId);
+            const path = (location.pathname || '/').replace(/\/$/, '') || '/';
+            const m = path.match(/^\/shipments\/(.+)$/);
+            const seg = m ? decodeURIComponent(m[1]) : '';
+            if (seg && seg !== 'new' && String(seg) === String(shipmentId)) {
+                navigate('/shipments', { replace: true });
             }
+        } catch (error) {
+            console.error('Error deleting shipment:', error);
+            alert('حدث خطأ أثناء حذف الشحنة');
         }
     };
 
+    const columns: DenseColumn<Shipment>[] = [
+        {
+            key: 'shipmentNumber',
+            header: 'رقم الشحنة',
+            width: '130px',
+            sortable: true,
+            render: (s) => (
+                <span>
+                    <span style={{ marginLeft: 4 }}>{s.shippingInfo?.shippingType === 'air' ? '✈' : '🚢'}</span>
+                    <b style={{ fontFamily: 'monospace' }}>{s.shipmentNumber}</b>
+                    {(s.deals?.length || 0) > 0 && (
+                        <span style={{ marginRight: 4, fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)' }}>
+                            ({s.deals?.length} صفقة)
+                        </span>
+                    )}
+                </span>
+            ),
+        },
+        {
+            key: 'shippingAgentName',
+            header: 'وكيل الشحن',
+            width: '150px',
+            render: (s) => <>{s.shippingAgentName || '—'}</>,
+        },
+        {
+            key: 'type',
+            header: 'النوع',
+            width: '70px',
+            align: 'center',
+            render: (s) => <>{s.shippingInfo?.shippingType === 'air' ? 'جوي' : 'بحري'}</>,
+        },
+        {
+            key: 'status',
+            header: 'الحالة',
+            width: '130px',
+            render: (s) => (
+                <span style={{ color: STATUS_COLORS[s.status] || 'inherit', fontWeight: 500 }}>
+                    {STATUS_LABELS[s.status] || s.status}
+                </span>
+            ),
+        },
+        {
+            key: 'departureDate',
+            header: 'المغادرة',
+            width: '90px',
+            sortable: true,
+            render: (s) => <>{fmtDate(s.shippingInfo?.departureDate)}</>,
+        },
+        {
+            key: 'arrivalDate',
+            header: 'الوصول',
+            width: '90px',
+            sortable: true,
+            render: (s) => <>{fmtDate(s.shippingInfo?.arrivalDate)}</>,
+        },
+        {
+            key: 'totalShippingCostUsd',
+            header: 'التكلفة',
+            width: '100px',
+            align: 'right',
+            numeric: true,
+            sortable: true,
+            render: (s) => (
+                <span style={{ fontFamily: 'monospace' }}>
+                    ${fmtAmt(s.totalShippingCostUsd)}
+                </span>
+            ),
+        },
+        {
+            key: 'actions',
+            header: '',
+            width: '80px',
+            align: 'center',
+            render: (s) => (
+                <span style={{ display: 'inline-flex', gap: 2 }}>
+                    <button
+                        className="aseel-toolbtn"
+                        style={{ padding: '2px 4px' }}
+                        onClick={(e) => { e.stopPropagation(); setViewingShipment(s); }}
+                        title="عرض التفاصيل"
+                    >
+                        <Eye style={{ width: 13, height: 13 }} />
+                    </button>
+                    <button
+                        className="aseel-toolbtn"
+                        style={{ padding: '2px 4px' }}
+                        onClick={(e) => { e.stopPropagation(); handleEdit(s); }}
+                        title="تعديل"
+                    >
+                        <Edit style={{ width: 13, height: 13 }} />
+                    </button>
+                    <button
+                        className="aseel-toolbtn"
+                        style={{ padding: '2px 4px', color: 'var(--aseel-danger, #c00)' }}
+                        onClick={(e) => { e.stopPropagation(); void handleDelete(String(s.id)); }}
+                        title="حذف"
+                    >
+                        <Trash2 style={{ width: 13, height: 13 }} />
+                    </button>
+                </span>
+            ),
+        },
+    ];
+
     if (loading) return <LoadingSpinner />;
 
+    if (viewMode === 'form' && currentShipment) {
+        return (
+            <ShipmentForm
+                shipment={currentShipment}
+                onCancel={() => {
+                    setViewMode('list');
+                    setCurrentShipment(null);
+                    navigate('/shipments');
+                }}
+                onSave={(shipmentId) => {
+                    navigate(`/shipments/${encodeURIComponent(shipmentId)}`, { replace: true });
+                }}
+                currentUser={currentUser}
+                onOpenAccountingJournal={onOpenAccountingJournal}
+            />
+        );
+    }
+
     return (
-        <div className="min-h-screen bg-transparent p-4 md:p-6">
-            <div className="max-w-[1600px] mx-auto space-y-6">
-                {viewMode === 'list' ? (
-                    <>
-                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[var(--color-surface)] p-6 rounded-2xl shadow-sm border border-[var(--color-border)]">
-                            <div>
-                                <h1 className="text-[var(--font-size-xl)] font-bold text-[var(--color-text)] flex items-center gap-3">
-                                    <Truck className="w-8 h-8 text-[var(--color-primary)]" />
-                                    إدارة الشحنات
-                                </h1>
-                                <p className="text-[var(--font-size-sm)] text-[var(--color-text-muted)] mt-1">تتبع توزيع تكاليف الشحن على الصفقات المكتملة</p>
-                            </div>
-                            <Button
-                                onClick={handleCreateNew}
-                                icon={<Plus className="w-5 h-5" />}
-                            >
-                                إنشاء شحنة جديدة
-                            </Button>
-                        </div>
-
-<div className="bg-[var(--color-surface)] rounded-2xl shadow-sm border border-[var(--color-border)]">
-                            <Toolbar
-                                search={searchTerm}
-                                onSearch={setSearchTerm}
-                                searchPlaceholder="بحث عن شحنة..."
-                                filters={
-                                    <>
-                                        <select
-                                            value={typeFilter}
-                                            onChange={(e) => {
-                                                setTypeFilter(e.target.value as 'all' | 'sea' | 'air');
-                                                setDetailedStatusFilter('all');
-                                            }}
-                                            className="h-7 px-2 text-[var(--font-size-sm)] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
-                                        >
-                                            <option value="all">كل أنواع الشحن</option>
-                                            <option value="sea">🚢 بحري</option>
-                                            <option value="air">✈️ جوي</option>
-                                        </select>
-
-                                        {typeFilter === 'sea' && (
-                                            <select
-                                                value={detailedStatusFilter}
-                                                onChange={(e) => setDetailedStatusFilter(e.target.value)}
-                                                className="h-7 px-2 text-[var(--font-size-sm)] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
-                                            >
-                                                <option value="all">حالة الشحنة (الكل)</option>
-                                                <option value="agent_warehouse">وكيل الشحن</option>
-                                                <option value="china_customs_clearance">جمارك الصين</option>
-                                                <option value="on_board">على السفينة</option>
-                                                <option value="at_sea">في البحر</option>
-                                                <option value="arrived_port">وصلت الميناء</option>
-                                                <option value="israel_customs_clearance">جمارك Israel</option>
-                                                <option value="released">مفرج عنها</option>
-                                                <option value="delivered_local">تم التسليم</option>
-                                            </select>
-                                        )}
-
-                                        {typeFilter === 'air' && (
-                                            <select
-                                                value={detailedStatusFilter}
-                                                onChange={(e) => setDetailedStatusFilter(e.target.value)}
-                                                className="h-7 px-2 text-[var(--font-size-sm)] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
-                                            >
-                                                <option value="all">حالة الشحنة (الكل)</option>
-                                                <option value="agent_warehouse">وكيل الشحن</option>
-                                                <option value="delivered_to_shipping_company">لشركة الشحن</option>
-                                                <option value="china_customs_clearance">جمارك الصين</option>
-                                                <option value="departed">انطلقت</option>
-                                                <option value="in_transit">في الطريق</option>
-                                                <option value="arrived_airport">وصلت المطار</option>
-                                                <option value="israel_customs_clearance">جمارك Israel</option>
-                                                <option value="released">مفرج عنها</option>
-                                                <option value="delivered_local">تم التسليم</option>
-                                            </select>
-                                        )}
-
-                                        <select
-                                            value={paymentFilter}
-                                            onChange={(e) => setPaymentFilter(e.target.value)}
-                                            className="h-7 px-2 text-[var(--font-size-sm)] rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] focus:outline-none focus:border-[var(--color-primary)]"
-                                        >
-                                            <option value="all">كل حالات الدفع</option>
-                                            <option value="unpaid">غير مدفوع</option>
-                                            <option value="payment_pending">بانتظار الدفع</option>
-                                            <option value="partially_paid">مدفوع جزئياً</option>
-                                            <option value="paid">مدفوع بالكامل</option>
-                                        </select>
-
-                                        {(statusFilter !== 'all' || typeFilter !== 'all' || detailedStatusFilter !== 'all' || paymentFilter !== 'all' || searchTerm !== '') && (
-                                            <button
-                                                onClick={() => {
-                                                    setStatusFilter('all');
-                                                    setTypeFilter('all');
-                                                    setDetailedStatusFilter('all');
-                                                    setPaymentFilter('all');
-                                                    setSearchTerm('');
-                                                }}
-                                                className="h-7 px-2 text-[var(--font-size-sm)] text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded-md transition-colors"
-                                            >
-                                                تفريغ الفلاتر
-                                            </button>
-                                        )}
-                                    </>
-                                }
-                                actions={
-                                    <div className="text-[var(--font-size-sm)] text-[var(--color-text-muted)]">
-                                        {filteredShipments.length} شحنة
-                                    </div>
-                                }
-                            />
-
-                            <DataGrid
-                                columns={[
-                                    {
-                                        key: 'shipmentNumber',
-                                        header: 'الشحنة',
-                                        width: '180px',
-                                        render: (row: Shipment) => {
-                                            const shippingType = row.shippingInfo?.shippingType || 'sea';
-                                            const dealsCount = row.deals?.length || 0;
-                                            return (
-                                                <div className="flex items-center gap-2 py-1">
-                                                    <div className={`p-1 rounded ${shippingType === 'sea' ? 'bg-[var(--color-primary)]/10' : 'bg-[var(--color-primary)]/10'}`}>
-                                                        <span className="text-[var(--font-size-xs)]">{shippingType === 'sea' ? '🚢' : '✈️'}</span>
-                                                    </div>
-                                                    <div className="flex flex-col">
-                                                        <span className="text-[var(--font-size-sm)] font-medium text-[var(--color-text)]">{row.shipmentNumber}</span>
-                                                        <span className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">{dealsCount} صفقة</span>
-                                                    </div>
-                                                </div>
-                                            );
-                                        }
-                                    },
-                                    {
-                                        key: 'shippingAgentName',
-                                        header: 'الوكيل',
-                                        width: '140px',
-                                        render: (row: Shipment) => (
-                                            <span className="text-[var(--font-size-sm)] text-[var(--color-text)]">{row.shippingAgentName || '-'}</span>
-                                        )
-                                    },
-                                    {
-                                        key: 'status',
-                                        header: 'الحالة',
-                                        width: '120px',
-                                        render: (row: Shipment) => {
-                                            const statusMap: Record<string, string> = {
-                                                draft: 'مسودة',
-                                                payment_pending: 'بانتظار الدفع',
-                                                partially_paid: 'مدفوع جزئياً',
-                                                paid: 'مدفوع بالكامل',
-                                                shipped: 'تم الشحن',
-                                                delivered: 'تم التسليم',
-                                                cancelled: 'ملغاة'
-                                            };
-                                            return <StatusBadge status={statusMap[row.status] || row.status} />;
-                                        }
-                                    },
-                                    {
-                                        key: 'departureDate',
-                                        header: 'تاريخ المغادرة',
-                                        width: '120px',
-                                        sortable: true,
-                                        render: (row: Shipment) => {
-                                            const date = row.shippingInfo?.departureDate
-                                                ? new Date(row.shippingInfo.departureDate).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' })
-                                                : '-';
-                                            return <span className="text-[var(--font-size-sm)] text-[var(--color-text)]">{date}</span>;
-                                        }
-                                    },
-                                    {
-                                        key: 'arrivalDate',
-                                        header: 'تاريخ الوصول',
-                                        width: '120px',
-                                        sortable: true,
-                                        render: (row: Shipment) => {
-                                            const date = row.shippingInfo?.arrivalDate
-                                                ? new Date(row.shippingInfo.arrivalDate).toLocaleDateString('ar-EG', { day: 'numeric', month: 'short' })
-                                                : '-';
-                                            return <span className="text-[var(--font-size-sm)] text-[var(--color-text)]">{date}</span>;
-                                        }
-                                    },
-                                    {
-                                        key: 'totalShippingCostUsd',
-                                        header: 'التكلفة',
-                                        width: '100px',
-                                        align: 'end' as const,
-                                        sortable: true,
-                                        render: (row: Shipment) => (
-                                            <span className="text-[var(--font-size-sm)] font-medium text-[var(--color-text)]">
-                                                ${(row.totalShippingCostUsd || 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                                            </span>
-                                        )
-                                    },
-                                    {
-                                        key: 'actions',
-                                        header: 'الإجراءات',
-                                        width: '120px',
-                                        align: 'center' as const,
-                                        render: (row: Shipment) => (
-                                            <div className="flex items-center justify-center gap-0.5 py-1">
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); handleView(row); }}
-                                                    className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 rounded transition-colors"
-                                                    title="عرض التفاصيل"
-                                                >
-                                                    <Eye className="w-3.5 h-3.5" />
-                                                </button>
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); handleEdit(row); }}
-                                                    className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 rounded transition-colors"
-                                                    title="تعديل"
-                                                >
-                                                    <Edit className="w-3.5 h-3.5" />
-                                                </button>
-                                                <button
-                                                    onClick={(e) => { e.stopPropagation(); handleDelete(String(row.id)); }}
-                                                    className="p-1 text-[var(--color-text-muted)] hover:text-[var(--color-danger)] hover:bg-[var(--color-danger)]/10 rounded transition-colors"
-                                                    title="حذف"
-                                                >
-                                                    <Trash2 className="w-3.5 h-3.5" />
-                                                </button>
-                                            </div>
-                                        )
-                                    }
-                                ]}
-                                data={filteredShipments}
-                                keyField="id"
-                                emptyMessage="لا توجد شحنات"
-                                onRowClick={(row) => handleView(row)}
-                                rowClassName={() => 'h-8'}
-                            />
-                        </div>
-
-                        {viewingShipment && (
-                            <ShipmentDetailView
-                                shipment={viewingShipment}
-                                onClose={() => setViewingShipment(null)}
-                            />
-                        )}
-                    </>
-                ) : (
-                    <ShipmentForm
-                        shipment={currentShipment}
-                        onCancel={() => {
-                            setViewMode('list');
-                            setCurrentShipment(null);
-                            navigate('/shipments');
-                        }}
-                        onSave={(shipmentId) => {
-                            navigate(`/shipments/${encodeURIComponent(shipmentId)}`, {
-                                replace: true,
-                            });
-                        }}
-                        currentUser={currentUser}
-                        onOpenAccountingJournal={onOpenAccountingJournal}
-                    />
-                )}
+        <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
+            {/* شريط العنوان */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
+                <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>
+                    إدارة الشحنات
+                </strong>
+                <span className="aseel-status-item">الإجمالي: <b>{stats.total}</b></span>
+                <span className="aseel-status-item">في الشحن: <b>{stats.inTransit}</b></span>
+                <span className="aseel-status-item">تم التسليم: <b>{stats.delivered}</b></span>
+                <span className="aseel-status-item">إجمالي التكلفة: <b>${fmtAmt(stats.totalCost)}</b></span>
+                <div style={{ flex: 1 }} />
+                <input
+                    className="aseel-input"
+                    style={{ width: 190 }}
+                    placeholder="بحث برقم الشحنة، الوكيل…"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                />
+                <select
+                    className="aseel-input"
+                    style={{ width: 120 }}
+                    value={typeFilter}
+                    onChange={(e) => setTypeFilter(e.target.value as 'all' | 'sea' | 'air')}
+                >
+                    <option value="all">كل الأنواع</option>
+                    <option value="sea">🚢 بحري</option>
+                    <option value="air">✈️ جوي</option>
+                </select>
+                <select
+                    className="aseel-input"
+                    style={{ width: 150 }}
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                >
+                    <option value="all">كل الحالات</option>
+                    {Object.entries(STATUS_LABELS).map(([k, v]) => (
+                        <option key={k} value={k}>{v}</option>
+                    ))}
+                </select>
+                <button
+                    className="aseel-toolbtn"
+                    onClick={() => { setSearch(''); setTypeFilter('all'); setStatusFilter('all'); }}
+                    title="إعادة تعيين الفلاتر"
+                >
+                    <RefreshCw style={{ width: 14, height: 14 }} />
+                </button>
+                <button
+                    className="aseel-toolbtn"
+                    onClick={handleCreateNew}
+                    title="شحنة جديدة (Ctrl+Ins)"
+                >
+                    <Plus style={{ width: 14, height: 14 }} /> شحنة جديدة
+                </button>
             </div>
+
+            {/* جدول الشحنات */}
+            <AseelDenseTable<Shipment>
+                columns={columns}
+                rows={filteredShipments}
+                getRowKey={(s) => s.id}
+                loading={loading}
+                emptyHint="لا توجد شحنات — اضغط «شحنة جديدة»"
+                onRowDoubleClick={(s) => handleEdit(s)}
+                footer={
+                    filteredShipments.length > 0 ? (
+                        <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>
+                            إجمالي التكلفة: <b>${fmtAmt(filteredShipments.reduce((s, r) => s + (r.totalShippingCostUsd || 0), 0))}</b>
+                        </span>
+                    ) : undefined
+                }
+            />
+
+            {viewingShipment && (
+                <ShipmentDetailView
+                    shipment={viewingShipment}
+                    onClose={() => setViewingShipment(null)}
+                />
+            )}
         </div>
     );
 };

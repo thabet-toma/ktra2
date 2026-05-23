@@ -1,3 +1,7 @@
+/**
+ * N5-T6 — PriceOfferManagement (L3) — AseelDenseTable لعروض الأسعار
+ * المرجع: العروض والطلبيات.txt:4-9
+ */
 import React, { useState, useEffect, useMemo } from "react";
 import { PriceOffer, Item, Supplier, PriceOfferStatus } from "../../types";
 import {
@@ -5,457 +9,216 @@ import {
   suppliersService,
   priceOffersService,
 } from "../../services/firestoreService";
-import { FileText, Plus, Package } from "lucide-react";
-import { LoadingSpinner } from "../LoadingSpinner";
-
-// استيراد المكونات الفرعية
+import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { PriceOfferForm } from "./price-offers/PriceOfferForm";
 import { StatusChangeModal } from "./price-offers/StatusChangeModal";
-import { PriceOfferList } from "./price-offers/PriceOfferListUpdated";
-import { PriceOfferFilters } from "./price-offers/PriceOfferFilters";
-import { StatisticsPanel } from "./price-offers/StatisticsPanel";
+import { Plus, RefreshCw } from "lucide-react";
+
+const STATUS_LABELS: Record<string, string> = {
+  initial: "مسودة",
+  pending_info: "بانتظار معلومات",
+  under_discussion: "قيد المناقشة",
+  approved_for_shipping: "معتمد للشحن",
+  rejected: "مرفوض",
+};
+
+const STATUS_COLORS: Record<string, string> = {
+  initial: "var(--aseel-ink-soft)",
+  pending_info: "var(--aseel-warn, #b8800a)",
+  under_discussion: "var(--aseel-accent, #1857a4)",
+  approved_for_shipping: "var(--aseel-ok, #267346)",
+  rejected: "var(--aseel-danger, #c00)",
+};
+
+const fmtDate = (d: string | undefined) => {
+  if (!d) return "—";
+  try { return new Date(d).toLocaleDateString("ar"); } catch { return d; }
+};
+
+const fmtAmt = (n: number | undefined) =>
+  (n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export const PriceOfferManagement: React.FC = () => {
-  // --- Data States ---
   const [viewMode, setViewMode] = useState<"list" | "form">("list");
   const [offers, setOffers] = useState<PriceOffer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // --- Filter States ---
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedSupplierId, setSelectedSupplierId] = useState("");
-  const [selectedItemIds, setSelectedItemIds] = useState<string[]>([]);
-  const [selectedStatus, setSelectedStatus] = useState<
-    PriceOfferStatus | "all"
-  >("all");
-  const [dateRange, setDateRange] = useState({ start: "", end: "" });
-
-  // --- Form States ---
-  const [currentOffer, setCurrentOffer] = useState<Partial<PriceOffer>>({
-    status: "initial",
-    items: [],
-    subtotal: 0,
-    discountAmount: 0,
-    taxRate: 0,
-    taxAmount: 0,
-    grandTotal: 0,
-    internalNotes: "",
-  });
-
-  // UI States
   const [saving, setSaving] = useState(false);
+
+  const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState<PriceOfferStatus | "all">("all");
+
+  const [currentOffer, setCurrentOffer] = useState<Partial<PriceOffer>>({
+    status: "initial", items: [], subtotal: 0, discountAmount: 0,
+    taxRate: 0, taxAmount: 0, grandTotal: 0, internalNotes: "",
+  });
   const [isReadOnly, setIsReadOnly] = useState(false);
-
-  // Status Change Modal State
   const [statusModalOpen, setStatusModalOpen] = useState(false);
-  const [targetStatusOffer, setTargetStatusOffer] = useState<PriceOffer | null>(
-    null
-  );
-  const [newStatusTarget, setNewStatusTarget] =
-    useState<PriceOfferStatus | null>(null);
+  const [targetStatusOffer, setTargetStatusOffer] = useState<PriceOffer | null>(null);
+  const [newStatusTarget, setNewStatusTarget] = useState<PriceOfferStatus | null>(null);
 
-  // --- Effects ---
   useEffect(() => {
-    const unsubscribeOffers =
-      priceOffersService.subscribeToPriceOffers(setOffers);
-    const unsubscribeItems = itemsService.subscribeToItems(setItems);
-    const unsubscribeSuppliers =
-      suppliersService.subscribeToSuppliers(setSuppliers);
+    const u1 = priceOffersService.subscribeToPriceOffers(setOffers);
+    const u2 = itemsService.subscribeToItems(setItems);
+    const u3 = suppliersService.subscribeToSuppliers(setSuppliers);
     setLoading(false);
-
-    return () => {
-      unsubscribeOffers();
-      unsubscribeItems();
-      unsubscribeSuppliers();
-    };
+    return () => { u1(); u2(); u3(); };
   }, []);
 
-  // --- Filtering Logic ---
-  const filteredOffers = useMemo(() => {
-    const lowerSearchTerm = searchTerm.toLowerCase().trim();
-
-    return offers.filter((offer) => {
-      // 1. Search filter
-      let matchesSearch = true;
-      if (lowerSearchTerm) {
-        const supplier = suppliers.find((s) => s.id === offer.supplierId);
-        const supplierMatch =
-          (supplier?.alias || "").toLowerCase().includes(lowerSearchTerm) ||
-          (supplier?.tradeName || "").toLowerCase().includes(lowerSearchTerm) ||
-          (supplier?.factoryName || "").toLowerCase().includes(lowerSearchTerm);
-
-        const shippingMatch =
-          (offer.shippingMethodId || "")
-            .toLowerCase()
-            .includes(lowerSearchTerm) ||
-          (offer.deliveryTime || "").toLowerCase().includes(lowerSearchTerm) ||
-          (offer.paymentMethod || "").toLowerCase().includes(lowerSearchTerm) ||
-          (offer.shipmentNotes || "").toLowerCase().includes(lowerSearchTerm);
-
-        // البحث في الملاحظات الداخلية أيضاً
-        const internalNotesMatch = (offer.internalNotes || "")
-          .toLowerCase()
-          .includes(lowerSearchTerm);
-
-        matchesSearch =
-          (offer.offerNumber || "").toLowerCase().includes(lowerSearchTerm) ||
-          internalNotesMatch ||
-          supplierMatch ||
-          shippingMatch ||
-          offer.items?.some(
-            (item) =>
-              (item.name || "").toLowerCase().includes(lowerSearchTerm) ||
-              (item.modelNumber || "")
-                .toLowerCase()
-                .includes(lowerSearchTerm) ||
-              (item.specifications || "")
-                .toLowerCase()
-                .includes(lowerSearchTerm)
-          );
+  const filtered = useMemo(() => {
+    const s = search.toLowerCase();
+    return offers.filter((o) => {
+      if (filterStatus !== "all" && o.status !== filterStatus) return false;
+      if (s) {
+        const sup = suppliers.find((x) => x.id === o.supplierId)?.name || "";
+        return (
+          sup.toLowerCase().includes(s) ||
+          (o.offerNumber || "").toLowerCase().includes(s)
+        );
       }
-
-      // 2. Supplier filter
-      const matchesSupplier = selectedSupplierId
-        ? offer.supplierId === selectedSupplierId
-        : true;
-
-      // 3. Items filter
-      const matchesItems =
-        selectedItemIds.length === 0
-          ? true
-          : selectedItemIds.some((itemId) =>
-            offer.items?.some((offerItem) => offerItem.itemId === itemId)
-          );
-
-      // 4. Status filter
-      const matchesStatus =
-        selectedStatus === "all" ? true : offer.status === selectedStatus;
-
-      // 5. Date range filter
-      let matchesDate = true;
-      if (dateRange.start) {
-        matchesDate = matchesDate && offer.createdAt >= dateRange.start;
-      }
-      if (dateRange.end) {
-        matchesDate = matchesDate && offer.createdAt <= dateRange.end;
-      }
-
-      return (
-        matchesSearch &&
-        matchesSupplier &&
-        matchesItems &&
-        matchesStatus &&
-        matchesDate
-      );
+      return true;
     });
-  }, [
-    offers,
-    suppliers,
-    searchTerm,
-    selectedSupplierId,
-    selectedItemIds,
-    selectedStatus,
-    dateRange,
-  ]);
+  }, [offers, suppliers, search, filterStatus]);
 
-  // الحصول على المنتجات المفلترة لاستخدامها في القوائم المنسدلة
-  const filteredItems = useMemo(() => {
-    const lowerSearchTerm = searchTerm.toLowerCase().trim();
-    return items.filter((item) => {
-      if (!lowerSearchTerm) return true;
-      return (
-        (item.name || "").toLowerCase().includes(lowerSearchTerm) ||
-        (item.modelNumber || "").toLowerCase().includes(lowerSearchTerm) ||
-        (item.categoryName || "").toLowerCase().includes(lowerSearchTerm)
-      );
-    });
-  }, [items, searchTerm]);
-
-  // اقتراحات البحث الذكي
-  const suggestedItems = useMemo(() => {
-    if (!searchTerm.trim()) return [];
-    const lowerSearchTerm = searchTerm.toLowerCase();
-    return items
-      .filter(
-        (item) =>
-          (item.name?.toLowerCase().includes(lowerSearchTerm) ||
-            item.modelNumber?.toLowerCase().includes(lowerSearchTerm)) &&
-          !selectedItemIds.includes(item.id)
-      )
-      .slice(0, 5);
-  }, [items, searchTerm, selectedItemIds]);
-
-  // --- Handlers ---
-  // في PriceOfferManagement - تحديث دالة handleCreateNew
-  const handleCreateNew = async () => {
-    // لا نستخدم getNextOfferNumber بعد الآن
+  const openNew = () => {
     setCurrentOffer({
-      id: crypto.randomUUID(),
-      offerNumber: "", // نص حر - المستخدم يدخله
-      status: "initial",
-      items: [],
-      subtotal: 0,
-      discountAmount: 0,
-      taxRate: 0,
-      taxAmount: 0,
-      grandTotal: 0,
-      internalNotes: "",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      createdBy: "current-user-id",
+      status: "initial", items: [], subtotal: 0, discountAmount: 0,
+      taxRate: 0, taxAmount: 0, grandTotal: 0, internalNotes: "",
     });
     setIsReadOnly(false);
     setViewMode("form");
   };
 
-  const handleEdit = (offer: PriceOffer) => {
-    setCurrentOffer(JSON.parse(JSON.stringify(offer)));
-    setIsReadOnly(false);
-    setViewMode('form');
-    // عند التعديل، العرض ليس جديداً لأنه له id
+  const openEdit = (offer: PriceOffer, readOnly = false) => {
+    setCurrentOffer(offer);
+    setIsReadOnly(readOnly);
+    setViewMode("form");
   };
 
-  const handleViewDetails = (offer: PriceOffer) => {
-    setCurrentOffer(JSON.parse(JSON.stringify(offer)));
-    setIsReadOnly(true);
-    setViewMode('form');
-    // عند العرض فقط، العرض ليس جديداً
-  };
-
-  const handleDelete = async (id: string) => {
-    if (confirm("هل أنت متأكد من حذف هذا العرض؟")) {
-      await priceOffersService.deletePriceOfferFromDb(id);
-    }
-  };
-
-  const handleSave = async () => {
-    // التحقق من اسم الفاتورة
-    if (!currentOffer.offerNumber || currentOffer.offerNumber.trim() === "") {
-      alert("يرجى إدخال اسم الفاتورة");
-      return;
-    }
-
-    if (!currentOffer.supplierId) {
-      alert("يرجى اختيار المورد");
-      return;
-    }
-
+  const handleSave = async (offerData: Partial<PriceOffer>) => {
     setSaving(true);
     try {
-      const now = new Date().toISOString();
-      const finalOffer: PriceOffer = {
-        ...(currentOffer as PriceOffer),
-        updatedAt: now,
-        createdAt: currentOffer.createdAt || now,
-        internalNotes: currentOffer.internalNotes || "",
-        offerNumber: currentOffer.offerNumber.trim(), // تنظيف النص
-      };
-
-      if (currentOffer.id && offers.find((o) => o.id === currentOffer.id)) {
-        await priceOffersService.updatePriceOfferInDb(finalOffer);
+      if (offerData.id) {
+        await priceOffersService.updatePriceOfferInDb(offerData as PriceOffer);
       } else {
-        await priceOffersService.addPriceOfferToDb(finalOffer);
+        const newOffer: PriceOffer = {
+          ...(offerData as PriceOffer),
+          id: `offer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          offerNumber: offerData.offerNumber || await priceOffersService.getNextOfferNumber(),
+          createdAt: offerData.createdAt || new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        await priceOffersService.addPriceOfferToDb(newOffer);
       }
-
       setViewMode("list");
-      alert("تم الحفظ بنجاح");
-    } catch (error) {
-      console.error("Save error:", error);
-      alert("حدث خطأ أثناء الحفظ");
+    } catch (e) {
+      console.error(e);
     } finally {
       setSaving(false);
     }
   };
 
-  // --- Status Change Logic ---
-  const initiateStatusChange = (
-    offerId: string,
-    newStatus: PriceOfferStatus
-  ) => {
-    const offer = offers.find((o) => o.id === offerId);
-    if (offer) {
-      setTargetStatusOffer(offer);
-      setNewStatusTarget(newStatus);
-      setStatusModalOpen(true);
-    }
+  const handleStatusChange = async (offerId: string, newStatus: PriceOfferStatus) => {
+    const target = offers.find((o) => o.id === offerId);
+    if (!target) { setStatusModalOpen(false); return; }
+    await priceOffersService.updatePriceOfferInDb({
+      ...target,
+      status: newStatus,
+      updatedAt: new Date().toISOString(),
+    });
+    setStatusModalOpen(false);
   };
 
-  const confirmStatusChange = async (
-    status: PriceOfferStatus,
-    notes: string
-  ) => {
-    if (!targetStatusOffer) return;
-    setSaving(true);
-    try {
-      // إنشاء ملاحظة الحالة الجديدة
-      const now = new Date();
-      const statusNote = `تم تغيير الحالة من ${targetStatusOffer.status
-        } إلى ${status} بتاريخ ${now.toLocaleDateString(
-          "ar-EG"
-        )} الساعة ${now.toLocaleTimeString("ar-EG")}${notes ? ` - ملاحظة: ${notes}` : ""
-        }`;
+  const columns: DenseColumn<PriceOffer>[] = [
+    { key: "offerNumber", header: "رقم العرض", width: "120px",
+      render: (o) => <b>{o.offerNumber || o.id.slice(0, 8)}</b> },
+    { key: "supplier", header: "المورد",
+      render: (o) => <>{suppliers.find((s) => s.id === o.supplierId)?.name || "—"}</> },
+    { key: "date", header: "التاريخ", width: "100px",
+      render: (o) => <>{fmtDate(o.createdAt)}</> },
+    { key: "items", header: "الأصناف", width: "70px", align: "center",
+      render: (o) => <>{(o.items || []).length}</> },
+    { key: "total", header: "الإجمالي", width: "120px", align: "center", numeric: true,
+      render: (o) => <>{fmtAmt(o.grandTotal)}</> },
+    { key: "status", header: "الحالة", width: "150px",
+      render: (o) => (
+        <span style={{ color: STATUS_COLORS[o.status] || "inherit" }}>
+          {STATUS_LABELS[o.status] || o.status}
+        </span>
+      )
+    },
+    { key: "actions", header: "", width: "60px", align: "center",
+      render: (o) => (
+        <button className="aseel-toolbtn" style={{ fontSize: "var(--aseel-fs-sm)", padding: "2px 6px" }}
+          onClick={(e) => { e.stopPropagation(); openEdit(o); }}>
+          تعديل
+        </button>
+      )
+    },
+  ];
 
-      // دمج الملاحظات القديمة مع الجديدة
-      const updatedInternalNotes = targetStatusOffer.internalNotes
-        ? `${targetStatusOffer.internalNotes}\n${statusNote}`
-        : statusNote;
+  if (viewMode === "form") {
+    return (
+      <PriceOfferForm
+        offer={currentOffer}
+        items={items}
+        suppliers={suppliers}
+        isReadOnly={isReadOnly}
+        saving={saving}
+        onSave={handleSave}
+        onCancel={() => setViewMode("list")}
+        onStatusChangeRequest={(offer, newStatus) => {
+          setTargetStatusOffer(offer as PriceOffer);
+          setNewStatusTarget(newStatus as PriceOfferStatus);
+          setStatusModalOpen(true);
+        }}
+      />
+    );
+  }
 
-      const updatedOffer: PriceOffer = {
-        ...targetStatusOffer,
-        status: status,
-        internalNotes: updatedInternalNotes, // استخدام internalNotes بدلاً من statusNotes
-        updatedAt: now.toISOString(),
-      };
-
-      await priceOffersService.updatePriceOfferInDb(updatedOffer);
-      setStatusModalOpen(false);
-      setTargetStatusOffer(null);
-      setNewStatusTarget(null);
-      alert("تم تحديث حالة العرض بنجاح");
-    } catch (error) {
-      console.error("Error updating status:", error);
-      alert("حدث خطأ أثناء تحديث الحالة");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (loading) return <LoadingSpinner />;
-
-  // ---------------- RENDER ----------------
   return (
-    <div className="p-6 md:p-8 max-w-[1600px] mx-auto space-y-6">
-      {/* 1. Header Section */}
-      {!isReadOnly && viewMode === "list" && (
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-3">
-              <FileText className="w-8 h-8 text-blue-600" />
-              إدارة عروض الأسعار
-            </h1>
-            <p className="text-gray-500 dark:text-gray-400 mt-2">
-              إدارة ومراقبة جميع عروض الأسعار وتتبع حالتها
-            </p>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="text-sm text-gray-600 dark:text-gray-400">
-              <span className="font-bold text-blue-600 dark:text-blue-400">
-                {filteredOffers.length}
-              </span>
-              من أصل <span className="font-bold">{offers.length}</span> عرض
-            </div>
-            <button
-              onClick={handleCreateNew}
-              className="flex items-center gap-2 px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors font-bold shadow-lg hover:shadow-blue-500/30"
-            >
-              <Plus className="w-5 h-5" />
-              عرض أسعار جديد
-            </button>
-          </div>
-        </div>
-      )}
+    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }} data-skin="aseel">
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
+          عروض الأسعار
+        </strong>
+        <span className="aseel-status-item">الإجمالي: <b>{offers.length}</b></span>
+        <div style={{ flex: 1 }} />
+        <input className="aseel-input" style={{ width: 180 }}
+          placeholder="بحث بالمورد / رقم العرض…"
+          value={search} onChange={(e) => setSearch(e.target.value)} />
+        <select className="aseel-input" style={{ width: 160 }}
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value as PriceOfferStatus | "all")}>
+          <option value="all">كل الحالات</option>
+          {Object.entries(STATUS_LABELS).map(([k, v]) => (
+            <option key={k} value={k}>{v}</option>
+          ))}
+        </select>
+        <button className="aseel-toolbtn" title="تحديث">
+          <RefreshCw className="h-4 w-4" />
+        </button>
+        <button className="aseel-toolbtn" onClick={openNew} title="عرض جديد (Ctrl+Ins)">
+          <Plus className="h-4 w-4" /> عرض جديد
+        </button>
+      </div>
 
-      {/* View Mode: FORM */}
-      {viewMode === "form" ? (
-        <PriceOfferForm
-          currentOffer={currentOffer}
-          setCurrentOffer={setCurrentOffer}
-          suppliers={suppliers}
-          items={items}
-          onSave={handleSave}
-          onCancel={() => setViewMode("list")}
-          saving={saving}
-          readOnly={isReadOnly}
-          isNew={!currentOffer.id} // هنا نقول: إذا كان جديداً (ليس له id)
-        />
-      ) : (
-        /* View Mode: LIST DASHBOARD */
-        <div className="space-y-6">
-          {/* 2. Statistics Panel */}
-          <StatisticsPanel offers={offers} suppliers={suppliers} />
+      <AseelDenseTable<PriceOffer>
+        columns={columns}
+        rows={filtered}
+        getRowKey={(o) => o.id}
+        loading={loading}
+        emptyHint="لا توجد عروض أسعار"
+        onRowDoubleClick={(o) => openEdit(o)}
+      />
 
-          {/* 3. Advanced Filters */}
-          <PriceOfferFilters
-            searchTerm={searchTerm}
-            onSearchChange={setSearchTerm}
-            selectedSupplierId={selectedSupplierId}
-            onSupplierChange={setSelectedSupplierId}
-            selectedItemIds={selectedItemIds}
-            onItemsChange={setSelectedItemIds}
-            selectedStatus={selectedStatus}
-            onStatusChange={setSelectedStatus}
-            dateRange={dateRange}
-            onDateRangeChange={setDateRange}
-            suppliers={suppliers}
-            items={filteredItems}
-            offersCount={offers.length}
-            filteredCount={filteredOffers.length}
-          />
-
-          {/* 4. Search Suggestions (Smart Chips) */}
-          {searchTerm.trim() && suggestedItems.length > 0 && (
-            <div className="bg-white dark:bg-gray-800 rounded-xl border border-blue-100 dark:border-blue-900/30 p-4 animate-in fade-in slide-in-from-top-2">
-              <div className="flex items-center gap-2 mb-3">
-                <Package className="w-4 h-4 text-blue-500" />
-                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                  هل تبحث عن هذه المنتجات؟
-                </span>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {suggestedItems.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => {
-                      if (!selectedItemIds.includes(item.id)) {
-                        setSelectedItemIds((prev) => [...prev, item.id]);
-                      }
-                    }}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-200 transition-all text-sm"
-                  >
-                    <span>{item.name}</span>
-                    <Plus className="w-3 h-3 text-blue-500" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 5. Main List Table */}
-          <PriceOfferList
-            offers={filteredOffers}
-            suppliers={suppliers}
-            activeFilter={selectedStatus}
-            searchQuery={searchTerm}
-            onFilterChange={setSelectedStatus}
-            onSearchChange={setSearchTerm}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-            onCreateNew={handleCreateNew}
-            onClearFilter={() => {
-              setSelectedStatus("all");
-              setSearchTerm("");
-              setSelectedSupplierId("");
-              setSelectedItemIds([]);
-              setDateRange({ start: "", end: "" });
-            }}
-            onViewDetails={handleViewDetails}
-            onChangeStatus={initiateStatusChange}
-            allDbItems={items}
-          />
-        </div>
-      )}
-
-      {/* Global Modals */}
-      {targetStatusOffer && newStatusTarget && (
+      {statusModalOpen && targetStatusOffer && newStatusTarget && (
         <StatusChangeModal
-          isOpen={statusModalOpen}
-          onClose={() => setStatusModalOpen(false)}
-          onConfirm={confirmStatusChange}
-          currentStatus={targetStatusOffer.status}
+          offer={targetStatusOffer}
           newStatus={newStatusTarget}
-          saving={saving}
+          onConfirm={(id, status) => void handleStatusChange(id, status as PriceOfferStatus)}
+          onCancel={() => setStatusModalOpen(false)}
         />
       )}
     </div>

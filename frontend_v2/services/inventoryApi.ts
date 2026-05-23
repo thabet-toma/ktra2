@@ -75,4 +75,34 @@ export const inventoryApi = {
     await handle(res, "getStockSummary");
     return res.json();
   },
+
+  // ─── Product CRUD helpers (N5) ───
+
+  createProduct: async (body: Record<string, unknown>) => {
+    const res = await fetch(`${INV}/products/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "createProduct");
+    return res.json();
+  },
+
+  updateProduct: async (id: number, body: Record<string, unknown>) => {
+    const res = await fetch(`${INV}/products/${id}/`, {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "updateProduct");
+    return res.json();
+  },
+
+  deleteProduct: async (id: number) => {
+    const res = await fetch(`${INV}/products/${id}/`, {
+      method: "DELETE",
+      headers: headers(),
+    });
+    await handle(res, "deleteProduct");
+  },
 };
