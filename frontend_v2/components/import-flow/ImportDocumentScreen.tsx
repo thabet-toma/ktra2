@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Save } from "lucide-react";
-import { apiGetObject, apiPatchObject, apiPostObject } from "@/services/restApi";
+import { apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
 import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance } from "@/services/clearanceApi";
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
@@ -241,14 +241,97 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     </div>
   ) : <p className="aseel-text-soft" style={{ padding: 8 }}>...جاري تحميل الحقول</p>;
 
+  const [shipmentDeals, setShipmentDeals] = useState<any[]>([]);
+  const [linkPickerOpen, setLinkPickerOpen] = useState(false);
+  const [availableDeals, setAvailableDeals] = useState<any[]>([]);
+
+  const loadDeals = useCallback(async () => {
+    if (!shipmentForm?.id) return;
+    try {
+      const s = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${shipmentForm.id}/`, { tenantId: tid() });
+      setShipmentDeals((s as any).shipment_deal_allocations || []);
+    } catch { /* ignore */ }
+  }, [shipmentForm?.id]);
+
+  const handleLinkDeal = useCallback(async (dealIds: number[]) => {
+    if (!shipment || dealIds.length === 0) return;
+    setSaving(true);
+    try {
+      for (const dealId of dealIds) {
+        await apiPostObject(`logistics/shipments/${shipment.id}/add_deal/`, { deal_id: dealId }, { tenantId: tid() });
+      }
+      await loadDeals();
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); setLinkPickerOpen(false); }
+  }, [shipment, loadDeals]);
+
+  const handleUnlinkDeal = useCallback(async (dealId: number) => {
+    // [QUESTION] لا يوجد remove_deal endpoint. سيُضاف لاحقاً.
+    setError("إلغاء ربط الصفقة غير متاح حالياً — لا يوجد endpoint remove_deal في الـbackend.");
+  }, []);
+
+  useEffect(() => {
+    if (s?.id && s.id > 0) {
+      const allocs = (s as any).shipment_deal_allocations || [];
+      setShipmentDeals(allocs);
+    }
+  }, [s]);
+
   const dealsContent = (
     <div style={{ padding: "4px 8px" }}>
-      <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600, marginBottom: 4 }}>
-        الصفقات المرتبطة ({s.deals_count || 0})
-      </h4>
-      <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)" }}>
-        {s.deals_preview || "لا توجد صفقات مرتبطة بهذه الإرسالية"}
-      </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>الصفقات المرتبطة ({shipmentDeals.length})</h4>
+        <button type="button" className="aseel-toolbtn" onClick={async () => {
+          if (!shipment) return;
+          setLinkPickerOpen(true);
+          try {
+            const rows = await apiGetList<any>("logistics/deals/", { tenantId: tid() });
+            const linkedIds = new Set(shipmentDeals.map((d: any) => d.deal));
+            setAvailableDeals(rows.filter((r: any) => !linkedIds.has(r.id)));
+          } catch { setAvailableDeals([]); }
+        }} disabled={!shipment}>+ ربط صفقة</button>
+      </div>
+      {linkPickerOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.3)" }}>
+          <div style={{ background: "#fff", borderRadius: 8, padding: 16, maxWidth: 500, width: "90%", maxHeight: "70vh", overflowY: "auto" }}>
+            <h4 style={{ fontWeight: 600, marginBottom: 8 }}>اختر صفقة للربط</h4>
+            {availableDeals.length === 0 && <p className="aseel-text-soft">لا توجد صفقات متاحة</p>}
+            {availableDeals.map((d) => (
+              <div key={d.id} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid #eee", cursor: "pointer" }}
+                onClick={() => handleLinkDeal([d.id])}>
+                <span>{d.deal_name || d.deal_number || `#${d.id}`}</span>
+                <span className="aseel-toolbtn">ربط</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 8, textAlign: "center" }}>
+              <button type="button" className="aseel-toolbtn" onClick={() => setLinkPickerOpen(false)}>إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)" }}>
+        <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
+          <th style={{ padding: "2px 4px", textAlign: "start" }}>رقم الصفقة</th>
+          <th style={{ padding: "2px 4px", textAlign: "start" }}>الاسم</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>حصة التكلفة</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 60 }}>إلغاء</th>
+        </tr></thead>
+        <tbody>
+          {shipmentDeals.map((d: any) => (
+            <tr key={d.id}>
+              <td style={{ padding: "2px 4px" }}>#{d.deal}</td>
+              <td style={{ padding: "2px 4px" }}>{d.deal_name || "—"}</td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(d.allocated_shipping_cost)}</td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>
+                <button type="button" className="aseel-toolbtn" onClick={() => handleUnlinkDeal(d.deal)} style={{ color: "var(--aseel-danger, #c0392b)", padding: "0 4px" }}>✕</button>
+              </td>
+            </tr>
+          ))}
+          {shipmentDeals.length === 0 && (
+            <tr><td colSpan={4} style={{ padding: "8px 4px", textAlign: "center", color: "#999" }}>لا توجد صفقات مرتبطة</td></tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 
