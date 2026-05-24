@@ -596,17 +596,16 @@ tbody td {
 /* ── Index picker modal ── */
 [data-skin="aseel"] .aseel-picker-mask {
   position: fixed; inset: 0; z-index: 70;
-  background: rgba(0,0,0,.35);
-  display: flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.2);
+  display: flex; align-items: stretch; justify-content: flex-end;
 }
 [data-skin="aseel"] .aseel-picker {
-  width: min(680px, 92vw);
-  max-height: 80vh;
+  width: 380px;
+  max-height: 100vh;
   display: flex; flex-direction: column;
   background: var(--aseel-panel);
-  border: 1px solid var(--aseel-border);
-  border-radius: var(--aseel-radius);
-  box-shadow: 0 8px 28px rgba(0,0,0,.3);
+  border-left: 1px solid var(--aseel-border);
+  box-shadow: -4px 0 16px rgba(0,0,0,.15);
   font-family: var(--aseel-font);
   direction: rtl;
 }

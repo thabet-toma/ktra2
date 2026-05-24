@@ -171,7 +171,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     };
 
     const handleEdit = (shipment: Shipment) => {
-        navigate(`/shipments/${encodeURIComponent(String(shipment.id))}`);
+        navigate(`/import-flow/${encodeURIComponent(String(shipment.id))}`);
     };
 
     const handleDelete = async (shipmentId: string) => {

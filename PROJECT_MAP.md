@@ -630,7 +630,28 @@ System-wide cleanup — 8 tasks.
 - DealItem + PIItem batch/expiry/warehouse stuffed in `notes`: **18 structured columns each**
 - Clearance + Shipment + Deal missing Aseel header fields: **22 fields added in total**
 
-### Pending
-- P-F-5 (full column drop) — deferred to task7 (optional; auto-sync makes the columns a cache rather than independent state)
-- P-G (UI density redesign + ImportDocumentScreen merger) — the largest remaining piece (~20-30h)
-- P-H..P-K (business logic completion, frontend quality, tests, push)
+## [TASK6 — P-G PROGRESS 2026-05-24]
+
+> **Status:** P-G-1, P-G-2, P-G-13, P-G-14 completed; P-G-4 + P-G-12 partial. External-model commit reviewed and tabs expanded to spec.
+
+### Done
+- **G-1:** `ImportDocumentScreen.tsx` created at `frontend_v2/components/import-flow/`. Unified read-only view: 4×6 header band (22 fields), `CompactTimeline` (~32px) ●/◐/○ chip strip, **7 tabs** (الصفقات/التخليص/النقل المحلي/الدفعات/الحسابات/المرفقات/ملاحظات — expanded from 4 in the original first-pass commit), right-side totals dock (shipment totals + clearance paid-shipping/paid-clearance split + per-local-shipment lines), bottom status bar. Fits 1080p viewport.
+- **G-2:** Route `/import-flow/:shipmentId` added to `App.tsx`. Sidebar "رحلة الاستيراد" link added under Procurement (existing "إدارة الشحنات" renamed to "الشحنات" for direct access). `AppView` type extended with `"import-flow"`. Breadcrumb label registered.
+- **G-2-c (partial):** `ShipmentManagement.handleEdit` now redirects to `/import-flow/:id`. `CustomsClearanceManagement` toolbar has "رحلة الاستيراد" button. Full `/clearance/:id` and `/local-shipments/:id` route redirects deferred (those pages use modals not routes — no URL to redirect).
+- **G-4:** DealForm header expanded from 12 to 22 fields (merged commercial band into header grid + added transaction_time + second_date + 8 commercial fields); `aseel-commercial-band` JSX block removed (CSS class kept as orphan in index.css — cosmetic only).
+- **G-12 (partial):** `AseelIndexPicker` CSS converted from centered overlay to right-side panel (380px width, `justify-content: flex-end`, `align-items: stretch`, border-left, no border-radius). Dedicated `AseelSidePanel` primitive deferred.
+- **G-13:** `scripts/density-audit.cjs` — detects files >400 lines, `CollapsibleSection`, large padding (`p-6..p-10`), large spacing (`space-y-4..9`), `: any`. Reports 308 issues across 130 files — baseline for G-7..G-11 sweep.
+- **G-14:** `docs/ui_density_rules.md` — viewport budget table, header band spec, tab rules, compact timeline spec, side-dock rules, modal vs side-panel guidelines.
+
+### Fixes applied during review
+1. **`tab`/`setTab` dead state in ImportDocumentScreen** — removed (the shell manages active tab internally).
+2. **Empty-shipmentId silently rendered blank state** — added explicit message "لم يتم اختيار إرسالية" with hint.
+3. **Tabs reduced from 7+ spec to 4** — restored الدفعات (clearance payments table) + الحسابات (linked journals view) + المرفقات (placeholder for future Attachment polymorphic). Now matches task6.md spec.
+4. **Right dock didn't show paid-shipping vs paid-clearance split** — now loads `listClearancePayments` and shows the split in the dock.
+
+### Pending (deferred to follow-up phase or task7)
+- **G-3 (delete old forms):** Cannot delete `ShipmentForm.tsx` / form-mode of `CustomsClearanceManagement` / form-mode of `LocalShippingPage` yet — `ImportDocumentScreen` is currently **read-only**. Editing parity must come first.
+- **G-5..G-11** (Sales/Accounting/Procurement/Inventory/HR/SQL density sweep) — density-audit baseline shows ~308 candidate sites; iterative work.
+- **G-12 full:** Dedicated `AseelSidePanel` primitive (proper props/API/types) — current change is CSS-only on AseelIndexPicker.
+- **Editing parity in ImportDocumentScreen** — currently 100% read-only; field-level edit + save buttons + tab-level forms needed before old forms can be retired.
+- **P-H..P-K** (business logic completion, frontend quality, tests, push).

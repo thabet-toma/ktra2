@@ -63,6 +63,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'sql-purchase-invoices': 'فواتير الشراء (SQL)',
   shipments: 'الشحنات',
   'shipment-management': 'إدارة الشحنات',
+  'import-flow': 'رحلة الاستيراد',
   clearance: 'التخليص الجمركي',
   'group-constants': 'ثوابت المجموعة',
 };

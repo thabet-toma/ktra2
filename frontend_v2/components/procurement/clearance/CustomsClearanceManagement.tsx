@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   FileText,
   Plus,
@@ -394,8 +395,11 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
     </div>
   );
 
+  const navigate = useNavigate();
+
   const toolbarActions: AseelToolbarAction[] = [
     { key: "new", label: "إضافة", icon: <Plus />, onClick: handleNewClearance },
+    { key: "import-flow", label: "رحلة الاستيراد", icon: <Truck />, onClick: () => { if (selected) navigate(`/import-flow/${selected.shipment}`); }, disabled: !selected, separatorBefore: true },
     { key: "reload", label: "تحديث (F5)", icon: <RefreshCw />, onClick: () => reload(), separatorBefore: true },
     { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => window.print(), separatorBefore: true },
   ];

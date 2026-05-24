@@ -69,7 +69,8 @@ export type AppView =
     | "accounting-vat-statements"
     | "sales-return"
     | "purchase-return"
-    | "supplier-payments";
+    | "supplier-payments"
+    | "import-flow";
 
 export interface Attachment {
     id: string;

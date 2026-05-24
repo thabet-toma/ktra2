@@ -858,8 +858,9 @@ export const DealForm: React.FC<DealFormProps> = ({
           <>
             {fld("رقم الصفقة", <input className="aseel-input" readOnly value={formData.id ? `#${formData.dealNumber || formData.id}` : "— جديدة —"} />)}
             {fld("التاريخ", <input className="aseel-input" type="date" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.dealDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, dealDate: e.target.value }))} />)}
+            {fld("الساعة", <input className="aseel-input" type="time" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).transactionTime || ""} onChange={(e) => setFormData(prev => ({ ...prev, transactionTime: e.target.value }) as any)} />)}
+            {fld("تاريخ ثاني", <input className="aseel-input" type="date" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).secondDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, secondDate: e.target.value }) as any)} />)}
             {fld("تاريخ الاستحقاق", <input className="aseel-input" type="date" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.dueDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, dueDate: e.target.value }))} />)}
-            {fld("رقم المستند", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.supplierInvoiceNumber || ""} onChange={(e) => setFormData(prev => ({ ...prev, supplierInvoiceNumber: e.target.value }))} placeholder="رقم فاتورة المورد" />)}
             {fld("المورد", <div className="aseel-pickfield">
               <input className="aseel-input aseel-input--hl" data-aseel-field="supplier" data-aseel-key="1" readOnly disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={selectedSupplier ? `#${selectedSupplier.id}` : ""} placeholder="+ للفهرس" onClick={() => { if (formData.status !== 'shipped' && formData.status !== 'cancelled') setShowSupplierPicker(true); }} />
               <button type="button" className="aseel-ellipsis" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} onClick={() => setShowSupplierPicker(true)} title="فهرس الموردين (+)">…</button>
@@ -869,7 +870,20 @@ export const DealForm: React.FC<DealFormProps> = ({
             {fld("مشتغل مرخص", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.licensedDealerNo || ""} onChange={(e) => setFormData(prev => ({ ...prev, licensedDealerNo: e.target.value }))} placeholder="رقم المشتغل المرخص" />)}
             {fld("وصف الصفقة", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.dealDescription || ""} onChange={(e) => setFormData(prev => ({ ...prev, dealDescription: e.target.value }))} placeholder="وصف مختصر" />)}
             {fld("رابط علي بابا", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.alibabaOrderLink || ""} onChange={(e) => setFormData(prev => ({ ...prev, alibabaOrderLink: e.target.value }))} placeholder="https://…" />)}
-            {fld("طريقة الشحن", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.shippingMethod || ""} onChange={(e) => setFormData(prev => ({ ...prev, shippingMethod: e.target.value }))} placeholder="بحري / جوي / بري" />)}
+            {fld("طريقة الشحن", <select className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.shippingMethod || ""} onChange={(e) => setFormData(prev => ({ ...prev, shippingMethod: e.target.value }))}>
+              <option value="">— اختر —</option>
+              <option value="sea">بحري</option>
+              <option value="air">جوي</option>
+              <option value="land">بري</option>
+              <option value="express">إكسبرس</option>
+            </select>)}
+            {fld("طريقة الدفع", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).paymentMethod || ""} onChange={(e) => setFormData(prev => ({ ...prev, paymentMethod: e.target.value }) as any)} placeholder="T/T / L/C / …" />)}
+            {fld("مدة الإنتاج", <input className="aseel-input" type="number" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).productionDays ?? ""} onChange={(e) => setFormData(prev => ({ ...prev, productionDays: e.target.value === "" ? null : Number(e.target.value) }) as any)} placeholder="أيام" />)}
+            {fld("مدة التوصيل", <input className="aseel-input" type="number" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).deliveryDays ?? ""} onChange={(e) => setFormData(prev => ({ ...prev, deliveryDays: e.target.value === "" ? null : Number(e.target.value) }) as any)} placeholder="أيام" />)}
+            {fld("الضمان", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).warrantyDuration || ""} onChange={(e) => setFormData(prev => ({ ...prev, warrantyDuration: e.target.value }) as any)} placeholder="مدة الضمان" />)}
+            {fld("الشهادات", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).certificates || ""} onChange={(e) => setFormData(prev => ({ ...prev, certificates: e.target.value }) as any)} placeholder="CE / FCC / ISO …" />)}
+            {fld("رابط الفاتورة", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).invoiceLink || ""} onChange={(e) => setFormData(prev => ({ ...prev, invoiceLink: e.target.value }) as any)} placeholder="الفاتورة الأصلية" />)}
+            {fld("رقم المستند", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.supplierInvoiceNumber || ""} onChange={(e) => setFormData(prev => ({ ...prev, supplierInvoiceNumber: e.target.value }))} placeholder="رقم فاتورة المورد" />)}
             <label className="aseel-field aseel-field--inline">
               <input type="checkbox" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} checked={formData.shippingIncluded || false} onChange={(e) => setFormData(prev => ({ ...prev, shippingIncluded: e.target.checked }))} />
               <span className="aseel-field-label" style={{ flex: "unset" }}>الأسعار تشمل الشحن</span>
@@ -907,90 +921,6 @@ export const DealForm: React.FC<DealFormProps> = ({
           </>
         }
       >
-        {/* تفاصيل تجارية ظاهرة دائماً — مضمونة الظهور بدون أي header overflow */}
-        <div className="aseel-commercial-band">
-          <div className="aseel-commercial-band__title">تفاصيل تجارية</div>
-          <div className="aseel-commercial-band__grid">
-            <label className="aseel-field">
-              <span className="aseel-field-label">وصف الصفقة</span>
-              <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'}
-                value={formData.dealDescription || ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, dealDescription: e.target.value }))}
-                placeholder="وصف مختصر للصفقة" />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">رابط علي بابا</span>
-              <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'}
-                value={formData.alibabaOrderLink || ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, alibabaOrderLink: e.target.value }))}
-                placeholder="https://alibaba.com/…" />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">طريقة الشحن</span>
-              <select className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'}
-                value={formData.shippingMethod || ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, shippingMethod: e.target.value }))}>
-                <option value="">— اختر —</option>
-                <option value="sea">بحري</option>
-                <option value="air">جوي</option>
-                <option value="land">بري</option>
-                <option value="express">إكسبرس</option>
-              </select>
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">رقم العرض</span>
-              <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'}
-                value={formData.originalOfferNumber || ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, originalOfferNumber: e.target.value }))}
-                placeholder="رقم العرض الأصلي" />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">طريقة الدفع</span>
-              <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'}
-                value={(formData as any).paymentMethod || ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, paymentMethod: e.target.value }) as any)}
-                placeholder="T/T / L/C / …" />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">مدة الإنتاج (أيام)</span>
-              <input className="aseel-input" type="number" disabled={formData.status === 'shipped' || formData.status === 'cancelled'}
-                value={(formData as any).productionDays ?? ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, productionDays: e.target.value === "" ? null : Number(e.target.value) }) as any)} />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">مدة التوصيل (أيام)</span>
-              <input className="aseel-input" type="number" disabled={formData.status === 'shipped' || formData.status === 'cancelled'}
-                value={(formData as any).deliveryDays ?? ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, deliveryDays: e.target.value === "" ? null : Number(e.target.value) }) as any)} />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">الضمان</span>
-              <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'}
-                value={(formData as any).warrantyDuration || ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, warrantyDuration: e.target.value }) as any)}
-                placeholder="مدة الضمان" />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">الشهادات</span>
-              <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'}
-                value={(formData as any).certificates || ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, certificates: e.target.value }) as any)}
-                placeholder="CE / FCC / ISO …" />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">رابط الفاتورة</span>
-              <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'}
-                value={(formData as any).invoiceLink || ""}
-                onChange={(e) => setFormData(prev => ({ ...prev, invoiceLink: e.target.value }) as any)}
-                placeholder="رابط أو رقم الفاتورة الأصلية" />
-            </label>
-          </div>
-          <p className="aseel-hint" style={{ marginTop: 6 }}>
-            هذه الحقول تُعرض هنا دائماً للوصول السريع — كما يَتم الحفظ على نفس الحقول
-            في تبويب «البيانات الأساسية» و«الشروط والشحن».
-          </p>
-        </div>
-
         <AseelGrid<DealItem>
           columns={itemColumns}
           rows={items}

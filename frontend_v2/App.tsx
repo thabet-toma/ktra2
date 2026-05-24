@@ -44,6 +44,7 @@ import { CreditDebitNotesPage } from "./components/sales/CreditDebitNotesPage";
 import { SalesReturnEditor } from "./components/sales/SalesReturnEditor";
 import { PurchaseReturnEditor } from "./components/sales/PurchaseReturnEditor";
 import { SupplierPaymentsPage } from "./components/sales/SupplierPaymentsPage";
+import { ImportDocumentScreen } from "./components/import-flow";
 import { TaskList } from "./components/TaskList";
 import { RejectReasonModal } from "./components/modals/RejectReasonModal";
 import {
@@ -143,6 +144,8 @@ const App: React.FC = () => {
         }
       } else if (view === "smart-assistant") {
         navigate("/assistant", { replace: false });
+      } else if (view === "import-flow") {
+        navigate(targetId ? `/import-flow/${encodeURIComponent(targetId)}` : "/import-flow", { replace: false });
       } else if (view === "customs-clearance") {
         navigate("/clearance", { replace: false });
       } else if (view === "purchase-invoices") {
@@ -332,6 +335,10 @@ const App: React.FC = () => {
     }
     if (path === "/clearance") {
       setAppView("customs-clearance");
+      return;
+    }
+    if (path.startsWith("/import-flow/")) {
+      setAppView("import-flow");
       return;
     }
     if (path === "/purchase-invoices" || path.startsWith("/purchase-invoices/")) {
@@ -1250,6 +1257,17 @@ const App: React.FC = () => {
           );
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
+      case "import-flow": {
+        const m = location.pathname.match(/^\/import-flow\/(.+)$/);
+        const shipmentId = m ? m[1] : null;
+        return (
+          <ImportDocumentScreen
+            shipmentId={shipmentId}
+            onClose={() => setViewAndSyncPath("shipments-management")}
+          />
+        );
+      }
 
       case "customs-clearance":
         if (
