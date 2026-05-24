@@ -297,6 +297,7 @@ from .models import (
     LogisticsDealItem,
     LogisticsShipment,
     LogisticsClearance,
+    LogisticsClearanceLine,
     LogisticsExpense,
     LogisticsShipmentDeal,
     LogisticsPayment,
@@ -304,8 +305,7 @@ from .models import (
     PurchaseInvoice,
     PurchaseInvoiceItem,
     PurchaseInvoiceFee,
-    LocalShipment,
-    default_clearance_cost_lines,
+    LocalShipment
 )
 from partners.serializers import PartnerSerializer
 from inventory.models import Product
@@ -328,6 +328,10 @@ class LogisticsDealItemSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'product', 'product_name', 'quantity', 'unit_price', 'total_price', 'notes',
             'image_urls',
+            'seq', 'catalog_number', 'name_snapshot', 'description_line', 'unit', 'warehouse',
+            'extra_qty', 'batch_number', 'serial_number', 'manufacture_number', 'expiry_date',
+            'line_currency', 'line_exchange_rate', 'second_date', 'is_taxable', 'vat_percent',
+            'discount_percent', 'discount_amount',
         ]
 
     def get_image_urls(self, obj):
@@ -639,6 +643,13 @@ class LogisticsShipmentSerializer(serializers.ModelSerializer):
             self._apply_deal_allocations(instance, deal_alloc)
         return instance
 
+class LogisticsClearanceLineSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LogisticsClearanceLine
+        fields = '__all__'
+        read_only_fields = ['id']
+
+
 class LogisticsClearanceSerializer(serializers.ModelSerializer):
     broker_name = serializers.CharField(source="customs_broker.name", read_only=True)
     shipment_number = serializers.CharField(
@@ -650,6 +661,11 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
     deals_count = serializers.SerializerMethodField()
     deals_preview = serializers.SerializerMethodField()
     local_shipments = serializers.SerializerMethodField()
+    lines = LogisticsClearanceLineSerializer(many=True, read_only=True)
+    # cost_lines: legacy JSON-shape kept for backwards-compat (write+read).
+    # On read it pulls from the @property on the model (which derives from
+    # `lines` rows). On write it triggers `_sync_lines_from_cost_lines`.
+    cost_lines = serializers.JSONField(required=False)
 
     class Meta:
         model = LogisticsClearance
@@ -704,9 +720,20 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
         except Exception:
             return None
 
+    @staticmethod
+    def _default_cost_lines():
+        return [
+            {"label": "ضريبة القيمة المضافة", "amount": 0},
+            {"label": "رسوم البيان الجمركي", "amount": 0},
+            {"label": "محطة الشحن", "amount": 0},
+            {"label": "معالجة التصاريح", "amount": 0},
+            {"label": "عمولة المخلص", "amount": 0},
+            {"label": 'نظام الجمارك «الجيل الجديد»', "amount": 0},
+        ]
+
     def validate_cost_lines(self, value):
         if value is None:
-            return default_clearance_cost_lines()
+            return self._default_cost_lines()
         if not isinstance(value, list):
             raise serializers.ValidationError("cost_lines يجب أن تكون قائمة")
         out = []
@@ -721,7 +748,7 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
             except (TypeError, ValueError):
                 amt = 0.0
             out.append({"label": label[:220], "amount": round(amt, 2)})
-        return out if out else default_clearance_cost_lines()
+        return out if out else self._default_cost_lines()
 
     def validate(self, attrs):
         request = self.context.get("request")
@@ -733,10 +760,47 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
                 )
         return attrs
 
+    LABEL_TO_LINE_TYPE = {
+        'ضريبة القيمة المضافة': 'vat',
+        'رسوم البيان الجمركي': 'declaration_fee',
+        'محطة الشحن': 'terminal',
+        'معالجة التصاريح': 'permits',
+        'عمولة المخلص': 'broker_commission',
+        'نظام الجمارك «الجيل الجديد»': 'customs_system',
+    }
+
+    def _sync_lines_from_cost_lines(self, instance, cost_lines):
+        instance.lines.all().delete()
+        for idx, item in enumerate(cost_lines):
+            label = str(item.get('label', '') or '')
+            amount_raw = item.get('amount', 0)
+            try:
+                amount = float(amount_raw) if amount_raw else 0
+            except (ValueError, TypeError):
+                amount = 0
+            debit = abs(amount) if amount > 0 else 0
+            credit = abs(amount) if amount < 0 else 0
+            line_type = self.LABEL_TO_LINE_TYPE.get(label, 'other')
+            instance.lines.create(
+                seq=idx + 1,
+                line_type=line_type,
+                description=label,
+                debit=debit,
+                credit=credit,
+            )
+
     def create(self, validated_data):
-        if not validated_data.get("cost_lines"):
-            validated_data["cost_lines"] = default_clearance_cost_lines()
-        return super().create(validated_data)
+        cost_lines = validated_data.pop('cost_lines', None) or self._default_cost_lines()
+        instance = super().create(validated_data)
+        self._sync_lines_from_cost_lines(instance, cost_lines)
+        return instance
+
+    def update(self, instance, validated_data):
+        cost_lines = validated_data.pop('cost_lines', None)
+        instance = super().update(instance, validated_data)
+        if cost_lines is not None:
+            self._sync_lines_from_cost_lines(instance, cost_lines)
+        return instance
 
 class LogisticsExpenseSerializer(serializers.ModelSerializer):
     expense_account_name = serializers.CharField(source='expense_account.name', read_only=True)
@@ -780,6 +844,10 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
             'quantity', 'unit_price', 'total_price',
             'notes', 'hs_code',
             'landed_unit_price_ils', 'landed_line_total_ils',
+            'seq', 'catalog_number', 'name_snapshot', 'description_line', 'unit', 'warehouse',
+            'extra_qty', 'batch_number', 'serial_number', 'manufacture_number', 'expiry_date',
+            'line_currency', 'line_exchange_rate', 'second_date', 'is_taxable', 'vat_percent',
+            'discount_percent', 'discount_amount',
         ]
         read_only_fields = ['id']
 

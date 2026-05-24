@@ -578,3 +578,57 @@ System-wide cleanup — 8 tasks.
 
 ### Orphans Update
 - Logistics `default=1` on tenant/currency: **eliminated**
+
+## [TASK6 — P-D + P-E + P-F-1..F-3 DONE 2026-05-24]
+
+> **Status:** Data normalization waves 1+2 + clearance/shipment/deal header enrichment completed on `claude/task6`. External-model commit reviewed and corrected for ORM-breaking issues.
+
+### P-D — Data normalization wave 1 (clearance + PI payments)
+- **P-D-1:** `LogisticsClearanceLine` model (clearance/seq/line_type/account FK/description/debit/credit/vat_percent/cost_center FK). Migration `0028_clearance_line_model`.
+- **P-D-2:** Migration `0029_backfill_clearance_lines` — JSON `cost_lines` → rows. Idempotent (skips clearances that already have lines). Maps Arabic label → `line_type` via lookup table.
+- **P-D-3:** `LogisticsClearanceSerializer` now exposes `lines` (NestedSerializer) + `cost_lines` (JSONField — backwards-compat read+write, syncs via `_sync_lines_from_cost_lines`). Frontend `CustomsClearanceManagement.tsx` switched payment-classification from `notesMeanShippingPayment` regex to `payment_purpose === 'shipping'`.
+- **P-D-4:** Migration `0030_drop_cost_lines_json` drops the legacy JSONField. **`LogisticsClearance.cost_lines` kept as backwards-compat `@property`** returning `[{label, amount}]` from `lines` rows — required because `logistics/views.py` and `logistics/landed_cost.py` still read it as a list (would have crashed otherwise).
+- **P-D-5:** `LogisticsClearancePayment.payment_purpose` choice (`clearance_fee/shipping/broker_fee/customs/vat/other`). Migration `0031_add_payment_purpose` + `0032_backfill_payment_purpose` (parses `[شحن]`/`[تخليص]`/`عمولة` prefixes from `notes`). `LogisticsClearanceViewSet.pay_from_cashbox` writes `payment_purpose` instead of `[شحن]` prefix.
+- **P-D-6:** `PurchaseInvoicePayment` model (mirror of `CustomerPayment`). Migration `0033_pi_payment_model`.
+- **P-D-7:** Migration `0034_backfill_pi_payments` — `local_payments_json` → rows. Defaults currency to ILS when missing; idempotent on `pi.payments.exists()`.
+- **P-D-8:** Migration `0035_drop_pi_json_fields` drops `local_payments_json` + `conversion_metadata_json`; adds `converted_from_shipment` FK + `converted_at` + `converted_by` FK (User).
+
+### P-E — Data normalization wave 2 (line-level fields)
+- **P-E-1:** `LogisticsDealItem` enrichment — 18 fields (seq/catalog_number/name_snapshot/description_line/unit/warehouse/extra_qty/batch_number/serial_number/manufacture_number/expiry_date/line_currency FK/line_exchange_rate/second_date/is_taxable/vat_percent/discount_percent/discount_amount). Migration `0036_deal_item_enrichment`. All nullable.
+- **P-E-2:** `PurchaseInvoiceItem` mirror enrichment (same 18 fields). Migration `0037_pi_item_enrichment`.
+- **P-E-3:** Migration `0038_backfill_line_fields` extracts `batch:`/`expiry:`/`lot:` patterns from `notes` regex → respective columns.
+- **P-E-4/5:** Serializers `LogisticsDealItemSerializer` + `PurchaseInvoiceItemSerializer` expose the new fields. UI advanced-toggle deferred to P-G.
+- **P-E-6:** `accounting/views.py:PurchaseReceiptViewSet` — if PI items carry `vat_percent`, compute per-line VAT and emit separate VAT lines in the journal; else fall back to header-level VAT.
+
+### P-F (partial: header enrichment for Clearance + Shipment + Deal)
+- **P-F-1:** `LogisticsClearance` header enrichment — 11 new fields (transaction_time/second_date/licensed_dealer_no/settlement_invoice_number/currency FK/exchange_rate/vat_statement FK/subtotal_no_vat/vat_total/grand_total/journal FK/editable). Migration `0039_clearance_header_enrichment`.
+- **P-F-2:** `LogisticsShipment` header enrichment — 7 new fields (transaction_time/transit_journal FK/editable/vat_statement FK/journal_no_display/subtotal/vat_total/grand_total).
+- **P-F-3:** `LogisticsDeal` header enrichment — 4 new fields (transaction_time/second_date/licensed_dealer_no/editable).
+- **P-F-4:** **Deferred to task7.** External model attempted to convert `status`/`order_status`/`payment_status` to `@property`, but: (1) Python class body makes `@property` shadow the same-named Field, so Django ORM stopped seeing them as fields and `manage.py makemigrations` wanted to drop the columns; (2) `logistics/signals.py:54` and `core/dashboard_api.py:174` use `.filter()/.update()` on these fields and would silently break. The task itself marks P-F-5 (drop columns) as optional/deferred, so we reverted the properties and added a `compute_status_from_workflow()` helper as a non-shadowing read-only derivation.
+- **P-F-5:** **Deferred to task7** (column drop — optional per task6.md).
+- **P-F-6:** Frontend `CustomsClearanceManagement.tsx` — 9 new header inputs (التوقيت/تاريخ ثاني/مشتغل مرخص/رقم فاتورة المقاصة/العملة/سعر العملة/صافي بدون ضريبة/مجموع الضريبة/الإجمالي).
+
+### Errors found in external-model commit & corrected
+1. **`@property status/order_status/payment_status` shadowed Django fields** → reverted; helper `compute_status_from_workflow()` retained instead. Drift eliminated.
+2. **`LogisticsClearanceSerializer._default_cost_lines`** was defined as a regular method but without `self` parameter → would `TypeError` when called as `self._default_cost_lines()`. Fixed with `@staticmethod`.
+3. **Dropped `cost_lines` JSONField, but 7 callsites in `views.py` + `landed_cost.py` still read `clearance.cost_lines`** as a list → added `@property cost_lines` on `LogisticsClearance` returning `[{label, amount}]` from `lines` rows for backwards-compat. All legacy callsites work unchanged.
+4. **`cost_lines = SerializerMethodField`** was read-only → frontend writes (`updateClearance({cost_lines})`) silently dropped. Changed to `JSONField(required=False)` so writes flow into `validate_cost_lines` + `_sync_lines_from_cost_lines`.
+
+### Verified
+- `manage.py check` = 0 issues
+- `makemigrations --check` = no drift (after corrections)
+- All 12 new migrations 0028-0039 applied successfully
+- `tsc --noEmit` = 41 errors (no regression vs baseline)
+- Model import sanity test passes; `LogisticsClearance.cost_lines` is now a property exposing the same shape
+
+### Orphans Update
+- JSONField `cost_lines` on clearance: **dropped + replaced by structured `LogisticsClearanceLine` table** (with backwards-compat property)
+- JSONField `local_payments_json` + `conversion_metadata_json` on PurchaseInvoice: **dropped + replaced by `PurchaseInvoicePayment` + 3 conversion FKs**
+- `notesMeanShippingPayment` Arabic-prefix parsing: **eliminated** → `payment_purpose` choice column
+- DealItem + PIItem batch/expiry/warehouse stuffed in `notes`: **18 structured columns each**
+- Clearance + Shipment + Deal missing Aseel header fields: **22 fields added in total**
+
+### Pending
+- P-F-4/5 (status field unification + column drop) — deferred to task7
+- P-G (UI density redesign + ImportDocumentScreen merger) — the largest remaining piece (~20-30h)
+- P-H..P-K (business logic completion, frontend quality, tests, push)

@@ -4,7 +4,7 @@ import {
   apiPostObject,
   apiPatchObject,
 } from "./restApi";
-import type { ClearanceCostLine } from "@/constants/clearanceDefaults";
+import type { ClearanceCostLine, ClearanceLine } from "@/constants/clearanceDefaults";
 import { resolveTenantId } from "@/utils/tenantContext";
 
 const tid = () => resolveTenantId();
@@ -21,7 +21,21 @@ export type ClearanceRow = {
   clearance_date?: string | null;
   status: string;
   notes?: string | null;
+  transaction_time?: string | null;
+  second_date?: string | null;
+  licensed_dealer_no?: string;
+  settlement_invoice_number?: string;
+  currency?: number | null;
+  exchange_rate?: number | null;
+  vat_statement?: number | null;
+  subtotal_no_vat?: number | null;
+  vat_total?: number | null;
+  grand_total?: number | null;
+  journal?: number | null;
+  editable?: boolean;
   cost_lines?: ClearanceCostLine[];
+  /** البنود المهيكلة (P-D-1: LogisticsClearanceLine) */
+  lines?: ClearanceLine[];
   /** عدد صفقات الشحنة المرتبطة */
   deals_count?: number;
   /** معاينة عناوين الصفقات (من description / رقم الصفقة) */
@@ -58,6 +72,7 @@ export type ClearancePaymentRow = {
   payment_date?: string | null;
   cash_box_external_id: string;
   notes?: string | null;
+  payment_purpose?: string;
   is_posted: boolean;
   journal?: number | null;
   journal_id_display?: number | null;
@@ -99,6 +114,15 @@ export async function updateClearance(
     clearance_date: string | null;
     status: string;
     notes: string;
+    transaction_time: string | null;
+    second_date: string | null;
+    licensed_dealer_no: string | null;
+    settlement_invoice_number: string | null;
+    currency: number | null;
+    exchange_rate: number | null;
+    subtotal_no_vat: number | null;
+    vat_total: number | null;
+    grand_total: number | null;
     cost_lines: ClearanceCostLine[];
   }>
 ): Promise<ClearanceRow> {

@@ -48,9 +48,8 @@ type BrokerPick = { id: number; name: string; partner_type?: string };
 const SHIPPING_COST_LINE_LABEL = "دفعة الشحن (الناقل)";
 const LUMP_CLEARANCE_LINE_LABEL = "إجمالي تكلفة التخليص";
 
-function notesMeanShippingPayment(notes: string | null | undefined): boolean {
-  const n = String(notes ?? "").trimStart();
-  return n.startsWith("[شحن]") || n.startsWith("شحن");
+function isShippingPayment(p: { payment_purpose?: string }): boolean {
+  return p.payment_purpose === "shipping";
 }
 
 function sumLines(lines: ClearanceCostLine[]): number {
@@ -101,6 +100,15 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
   const [formStatus, setFormStatus] = useState("Processing");
   const [formNotes, setFormNotes] = useState("");
   const [formLines, setFormLines] = useState<ClearanceCostLine[]>(() => DEFAULT_CLEARANCE_COST_LINES.map((x) => ({ ...x })));
+  const [formTime, setFormTime] = useState("");
+  const [formSecondDate, setFormSecondDate] = useState("");
+  const [formLicensedDealer, setFormLicensedDealer] = useState("");
+  const [formSettlementInvoice, setFormSettlementInvoice] = useState("");
+  const [formCurrency, setFormCurrency] = useState<number | "">("");
+  const [formExchangeRate, setFormExchangeRate] = useState("");
+  const [formSubtotalNoVat, setFormSubtotalNoVat] = useState("");
+  const [formVatTotal, setFormVatTotal] = useState("");
+  const [formGrandTotal, setFormGrandTotal] = useState("");
   const [distributeInput, setDistributeInput] = useState("");
   const [quickLumpTotal, setQuickLumpTotal] = useState("");
   const [shippingLineAmount, setShippingLineAmount] = useState(0);
@@ -201,13 +209,22 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
       setFormDate(fresh.clearance_date ? String(fresh.clearance_date).slice(0, 10) : "");
       setFormStatus(fresh.status || "Processing");
       setFormNotes(fresh.notes || "");
+      setFormTime(fresh.transaction_time ? String(fresh.transaction_time).slice(0, 5) : "");
+      setFormSecondDate(fresh.second_date ? String(fresh.second_date).slice(0, 10) : "");
+      setFormLicensedDealer(fresh.licensed_dealer_no || "");
+      setFormSettlementInvoice(fresh.settlement_invoice_number || "");
+      setFormCurrency(fresh.currency ?? "");
+      setFormExchangeRate(fresh.exchange_rate != null ? String(fresh.exchange_rate) : "");
+      setFormSubtotalNoVat(fresh.subtotal_no_vat != null ? String(fresh.subtotal_no_vat) : "");
+      setFormVatTotal(fresh.vat_total != null ? String(fresh.vat_total) : "");
+      setFormGrandTotal(fresh.grand_total != null ? String(fresh.grand_total) : "");
       const rawLines = (fresh.cost_lines?.length ? fresh.cost_lines : DEFAULT_CLEARANCE_COST_LINES).map((x) => ({ label: x.label, amount: Number(x.amount) || 0 }));
       let shipFromLines = 0;
       const clearanceOnly = rawLines.filter((l) => { if (l.label.trim() === SHIPPING_COST_LINE_LABEL) { shipFromLines += Number(l.amount) || 0; return false; } return true; });
       const payRows = await listClearancePayments(row.id);
       setPayments(payRows);
-      const paidShip = (payRows || []).reduce((s, p) => s + (notesMeanShippingPayment(p.notes) ? Number(p.amount) || 0 : 0), 0);
-      const paidClearance = (payRows || []).reduce((s, p) => s + (!notesMeanShippingPayment(p.notes) ? Number(p.amount) || 0 : 0), 0);
+      const paidShip = (payRows || []).reduce((s, p) => s + (isShippingPayment(p) ? Number(p.amount) || 0 : 0), 0);
+      const paidClearance = (payRows || []).reduce((s, p) => s + (!isShippingPayment(p) ? Number(p.amount) || 0 : 0), 0);
       const shipLineEffective = shipFromLines > 0 ? shipFromLines : paidShip > 0 ? paidShip : 0;
       setShippingLineAmount(shipLineEffective);
       setFormLines(clearanceOnly.length ? clearanceOnly : DEFAULT_CLEARANCE_COST_LINES.map((x) => ({ ...x })));
@@ -229,6 +246,15 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
         customs_broker: formBroker === "" ? null : Number(formBroker),
         declaration_number: formDecl.trim() || undefined,
         clearance_date: formDate || null, status: formStatus, notes: formNotes.trim() || "",
+        transaction_time: formTime ? `${formTime}:00` : null,
+        second_date: formSecondDate || null,
+        licensed_dealer_no: formLicensedDealer.trim() || null,
+        settlement_invoice_number: formSettlementInvoice.trim() || null,
+        currency: formCurrency === "" ? null : Number(formCurrency),
+        exchange_rate: formExchangeRate === "" ? null : Number(formExchangeRate),
+        subtotal_no_vat: formSubtotalNoVat === "" ? null : Number(formSubtotalNoVat),
+        vat_total: formVatTotal === "" ? null : Number(formVatTotal),
+        grand_total: formGrandTotal === "" ? null : Number(formGrandTotal),
         cost_lines: [...formLines.filter((l) => l.label.trim() !== ""), ...(shippingLineAmount > 0 ? [{ label: SHIPPING_COST_LINE_LABEL, amount: Number(shippingLineAmount) || 0 }] : [])],
       });
       setSelected(updated); await reload();
@@ -263,10 +289,10 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
 
   const totalClearance = useMemo(() => sumLines(formLines) + (Number(shippingLineAmount) || 0), [formLines, shippingLineAmount]);
   const totalPaid = useMemo(() => payments.reduce((s, p) => s + Number(p.amount || 0), 0), [payments]);
-  const paidShippingIls = useMemo(() => payments.reduce((s, p) => s + (notesMeanShippingPayment(p.notes) ? Number(p.amount) || 0 : 0), 0), [payments]);
-  const paidClearanceIls = useMemo(() => payments.reduce((s, p) => s + (!notesMeanShippingPayment(p.notes) ? Number(p.amount) || 0 : 0), 0), [payments]);
-  const clearancePaymentRows = useMemo(() => payments.filter((p) => !notesMeanShippingPayment(p.notes)), [payments]);
-  const shippingPaymentRows = useMemo(() => payments.filter((p) => notesMeanShippingPayment(p.notes)), [payments]);
+  const paidShippingIls = useMemo(() => payments.reduce((s, p) => s + (isShippingPayment(p) ? Number(p.amount) || 0 : 0), 0), [payments]);
+  const paidClearanceIls = useMemo(() => payments.reduce((s, p) => s + (!isShippingPayment(p) ? Number(p.amount) || 0 : 0), 0), [payments]);
+  const clearancePaymentRows = useMemo(() => payments.filter((p) => !isShippingPayment(p)), [payments]);
+  const shippingPaymentRows = useMemo(() => payments.filter((p) => isShippingPayment(p)), [payments]);
   const clearanceBudgetIls = useMemo(() => sumLines(formLines), [formLines]);
   const shippingBudgetIls = Number(shippingLineAmount) || 0;
   const remainingClearanceOnly = Math.max(0, Number((clearanceBudgetIls - paidClearanceIls).toFixed(2)));
@@ -294,7 +320,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
       setPayments(rows);
       alert(`✅ ${res.status}${res.journal_id ? ` (قيد #${res.journal_id})` : ""}`);
       setPayNotes("");
-      const nextPaidClearance = rows.reduce((s, p) => s + (!notesMeanShippingPayment(p.notes) ? Number(p.amount) || 0 : 0), 0);
+      const nextPaidClearance = rows.reduce((s, p) => s + (!isShippingPayment(p) ? Number(p.amount) || 0 : 0), 0);
       setPayAmount(String(Math.max(0, Number((sumLines(formLines) - nextPaidClearance).toFixed(2)))));
     } catch (e) { const msg = e instanceof Error ? e.message : String(e); setErr(msg); alert(msg); }
     finally { setPaying(false); }
@@ -388,18 +414,32 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
             <>
               {fld("رقم البيان", <input className="aseel-input" readOnly value={selected.declaration_number || `#${selected.id}`} />)}
               {fld("التاريخ", <input className="aseel-input" type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} />)}
-              {fld("رقم القيد", <input className="aseel-input" readOnly value={selected.journal_id ? `#${selected.journal_id}` : "—"} />)}
-              {fld("كشف الضريبة", <input className="aseel-input" readOnly value={selected.vat_statement_no || "—"} />)}
+              {fld("التوقيت", <input className="aseel-input" type="time" value={formTime} onChange={(e) => setFormTime(e.target.value)} />)}
+              {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={formSecondDate} onChange={(e) => setFormSecondDate(e.target.value)} />)}
+              {fld("مشتغل مرخص", <input className="aseel-input" value={formLicensedDealer} onChange={(e) => setFormLicensedDealer(e.target.value)} />)}
+              {fld("رقم فاتورة المقاصة", <input className="aseel-input" value={formDecl} onChange={(e) => setFormDecl(e.target.value)} placeholder="رقم البيان / الإقرار" />)}
+              {fld("رقم القيد", <input className="aseel-input" readOnly value={selected.journal ? `#${selected.journal}` : "—"} />)}
+              {fld("كشف الضريبة", <input className="aseel-input" readOnly value={selected.vat_statement != null ? String(selected.vat_statement) : "—"} />)}
+              {fld("العملة", <select className="aseel-input" value={formCurrency === "" ? "" : String(formCurrency)} onChange={(e) => setFormCurrency(e.target.value === "" ? "" : Number(e.target.value))}>
+                <option value="">—</option>
+                <option value="1">USD</option>
+                <option value="2">EUR</option>
+                <option value="3">AED</option>
+                <option value="4">SAR</option>
+              </select>)}
+              {fld("سعر العملة", <input className="aseel-input" type="number" step="any" value={formExchangeRate} onChange={(e) => setFormExchangeRate(e.target.value)} />)}
               {fld("المخلّص", <div className="aseel-pickfield">
                 <input className="aseel-input aseel-input--hl" data-aseel-field="broker" data-aseel-key="1" readOnly value={selectedBroker ? `#${selectedBroker.id}` : ""} placeholder="+ للفهرس" onClick={() => setShowBrokerPicker(true)} />
                 <button type="button" className="aseel-ellipsis" onClick={() => setShowBrokerPicker(true)} title="فهرس المخلّصين (+)">…</button>
               </div>)}
               {fld("الاسم", <input className="aseel-input" readOnly value={selectedBroker?.name || selected.broker_name || ""} />)}
-              {fld("رقم فاتورة المقاصة", <input className="aseel-input" value={formDecl} onChange={(e) => setFormDecl(e.target.value)} placeholder="رقم البيان / الإقرار" />)}
               {fld("الحالة", <select className="aseel-input" value={formStatus} onChange={(e) => setFormStatus(e.target.value)}>
                 {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>)}
               {fld("الشحنة", <input className="aseel-input" readOnly value={clearanceShipmentTitle(selected)} />)}
+              {fld("صافي بدون ضريبة", <input className="aseel-input" type="number" step="any" value={formSubtotalNoVat} onChange={(e) => setFormSubtotalNoVat(e.target.value)} placeholder="0.00" />)}
+              {fld("مجموع الضريبة", <input className="aseel-input" type="number" step="any" value={formVatTotal} onChange={(e) => setFormVatTotal(e.target.value)} placeholder="0.00" />)}
+              {fld("الإجمالي", <input className="aseel-input" type="number" step="any" value={formGrandTotal} onChange={(e) => setFormGrandTotal(e.target.value)} placeholder="0.00" />)}
             </>
           ) : (
             <p className="aseel-text-soft text-sm" style={{ padding: 8 }}>اختر سجلاً من القائمة أو أضف تخليص جديد</p>

@@ -69,6 +69,12 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
         help_text='رقم الدفتر. 0 = يدوي. >0 = مسلسل لكل دفتر مستقل.',
     )
 
+    # P-F-3: Aseel header enrichment fields
+    transaction_time = models.TimeField(null=True, blank=True, db_column='TransactionTime', help_text='ساعة الصفقة')
+    second_date = models.DateField(null=True, blank=True, db_column='SecondDate', help_text='تاريخ ثاني للصفقة')
+    licensed_dealer_no = models.CharField(max_length=100, blank=True, default='', db_column='LicensedDealerNo', help_text='رقم المشتغل المرخص للمورد')
+    editable = models.BooleanField(default=True, db_column='Editable', help_text='قابل للتعديل')
+
     # V2 Overhaul Fields
     payment_status = models.CharField(
         max_length=20, 
@@ -164,6 +170,30 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
         self._assert_valid_workflow_transition()
         super().save(*args, **kwargs)
 
+    # ── P-F-4: Status field deprecation — deferred to task7 ──
+    # The task6.md plan (P-F-4) suggested converting `status`, `order_status`,
+    # `payment_status` to computed @property. We deferred this because:
+    #   1. Python's class body makes @property shadow the same-named Field,
+    #      breaking Django ORM (`.filter(payment_status=...)`, `.update(...)`).
+    #   2. `logistics.signals.recalculate_deal_payment_status` and
+    #      `core/dashboard_api.py` rely on `.filter()/.update()` on these
+    #      columns; converting silently breaks them.
+    # The task itself marks P-F-5 (drop columns) as "optional, may be deferred
+    # to task7", so we keep the fields and defer the full deprecation pass.
+
+    def compute_status_from_workflow(self):
+        """Helper: derive lifecycle label from shipping_workflow_status (read-only)."""
+        sw = self.shipping_workflow_status
+        if sw is None or sw == 'sw_mfg_start':
+            return 'Open'
+        if sw in ('sw_wait_agent_ship', 'sw_wait_intl_ship', 'sw_wait_arrival'):
+            return 'Shipped'
+        if sw == 'sw_wait_clearance':
+            return 'Cleared'
+        if sw == 'sw_released':
+            return 'Closed'
+        return self.status
+
     def __str__(self):
         return f"{self.ref_number} - {self.partner.name}"
 
@@ -239,6 +269,25 @@ class LogisticsDealItem(SoftDeleteMixin, models.Model):
     quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')
     unit_price = models.DecimalField(max_digits=18, decimal_places=4, db_column='UnitPrice')
     notes = models.CharField(max_length=255, null=True, blank=True, db_column='Notes')
+
+    seq = models.PositiveSmallIntegerField(null=True, blank=True, db_column='Seq', help_text='مسلسل البند')
+    catalog_number = models.CharField(max_length=100, blank=True, default='', db_column='CatalogNumber', help_text='رقم الكتالوج')
+    name_snapshot = models.CharField(max_length=255, blank=True, default='', db_column='NameSnapshot', help_text='لقطة اسم المنتج وقت الإدخال')
+    description_line = models.CharField(max_length=500, blank=True, default='', db_column='DescriptionLine', help_text='بيان السطر قابل للتعديل')
+    unit = models.CharField(max_length=50, blank=True, default='', db_column='Unit', help_text='وحدة القياس (نص حر)')
+    warehouse = models.CharField(max_length=100, blank=True, default='', db_column='Warehouse', help_text='المخزن')
+    extra_qty = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True, db_column='ExtraQty', help_text='الكمية الإضافية')
+    batch_number = models.CharField(max_length=100, blank=True, default='', db_column='BatchNumber', help_text='رقم الدفعة')
+    serial_number = models.CharField(max_length=100, blank=True, default='', db_column='SerialNumber', help_text='الرقم المسلسل')
+    manufacture_number = models.CharField(max_length=100, blank=True, default='', db_column='ManufactureNumber', help_text='رقم التصنيع')
+    expiry_date = models.DateField(null=True, blank=True, db_column='ExpiryDate', help_text='تاريخ انتهاء الصلاحية')
+    line_currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True, db_column='LineCurrencyID', help_text='عملة سعر البند')
+    line_exchange_rate = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True, db_column='LineExchangeRate', help_text='سعر صرف عملة البند')
+    second_date = models.DateField(null=True, blank=True, db_column='SecondDate', help_text='تاريخ ثاني للبند')
+    is_taxable = models.BooleanField(default=True, db_column='IsTaxable', help_text='يخضع للضريبة')
+    vat_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, db_column='VATPercent', help_text='نسبة الضريبة على البند')
+    discount_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, db_column='DiscountPercent', help_text='نسبة الخصم على البند')
+    discount_amount = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='DiscountAmount', help_text='قيمة الخصم على البند')
 
     class Meta:
         db_table = 'logistics_deal_items'
@@ -329,6 +378,16 @@ class LogisticsShipment(SoftDeleteMixin, models.Model):
         help_text='عنوان المورد/المستورد (نصّي حر، لا يتعارض مع شريك)',
     )
 
+    # P-F-2: Aseel header enrichment fields
+    transaction_time = models.TimeField(null=True, blank=True, db_column='TransactionTime', help_text='ساعة الإرسالية')
+    transit_journal = models.ForeignKey(JournalHeader, on_delete=models.SET_NULL, null=True, blank=True, db_column='TransitJournalID', related_name='transit_shipments', help_text='رقم القيد الناشئ من ترحيل الإرسالية')
+    editable = models.BooleanField(default=True, db_column='Editable', help_text='قابل للتعديل')
+    vat_statement = models.ForeignKey('sales.VatStatement', on_delete=models.SET_NULL, null=True, blank=True, db_column='VatStatementID', related_name='shipments', help_text='كشف الضريبة')
+    journal_no_display = models.CharField(max_length=50, blank=True, default='', db_column='JournalNoDisplay', help_text='رقم القيد للعرض (read-only computed)')
+    subtotal = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='Subtotal', help_text='المجموع بدون شحن')
+    vat_total = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='VATTotal', help_text='مجموع الضريبة')
+    grand_total = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='GrandTotal', help_text='إجمالي الإرسالية')
+
     deals = models.ManyToManyField(LogisticsDeal, through='LogisticsShipmentDeal', related_name='shipments')
 
     class Meta:
@@ -417,7 +476,6 @@ class LogisticsShipmentDeal(models.Model):
         unique_together = [['shipment', 'deal']]
 
 def default_clearance_cost_lines():
-    """بنود تكلفة التخليص الافتراضية — قابلة للتعديل/الحذف من الواجهة."""
     return [
         {"label": "ضريبة القيمة المضافة", "amount": 0},
         {"label": "رسوم البيان الجمركي", "amount": 0},
@@ -447,19 +505,51 @@ class LogisticsClearance(models.Model):
     clearance_date = models.DateField(null=True, blank=True, db_column='ClearanceDate')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Processing', db_column='Status')
     notes = models.TextField(null=True, blank=True, db_column='Notes')
-    cost_lines = models.JSONField(
-        default=default_clearance_cost_lines,
-        blank=True,
-        db_column='cost_lines',
-    )
+
+    transaction_time = models.TimeField(null=True, blank=True, db_column='TransactionTime', help_text='ساعة التخليص')
+    second_date = models.DateField(null=True, blank=True, db_column='SecondDate', help_text='تاريخ ثاني')
+    licensed_dealer_no = models.CharField(max_length=100, blank=True, default='', db_column='LicensedDealerNo', help_text='رقم المشتغل المرخص للمخلّص')
+    settlement_invoice_number = models.CharField(max_length=100, blank=True, default='', db_column='SettlementInvoiceNumber', help_text='رقم فاتورة المقاصة')
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True, db_column='CurrencyID', help_text='عملة البيان')
+    exchange_rate = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True, db_column='ExchangeRate', help_text='سعر الصرف')
+    vat_statement = models.ForeignKey('sales.VatStatement', on_delete=models.SET_NULL, null=True, blank=True, db_column='VatStatementID', help_text='كشف الضريبة')
+    subtotal_no_vat = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='SubtotalNoVAT', help_text='المجموع بدون ضريبة')
+    vat_total = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='VATTotal', help_text='مجموع الضريبة')
+    grand_total = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='GrandTotal', help_text='مبلغ البيان الإجمالي')
+    journal = models.ForeignKey(JournalHeader, on_delete=models.SET_NULL, null=True, blank=True, db_column='JournalID', related_name='clearances', help_text='رقم القيد المباشر')
+    editable = models.BooleanField(default=True, db_column='Editable', help_text='قابل للتعديل')
 
     class Meta:
         db_table = 'logistics_clearance'
         managed = True
 
+    @property
+    def cost_lines(self):
+        """Backwards-compat shim: legacy callsites (landed_cost, views) read
+        cost_lines as a list of {label, amount}. After P-D-1..P-D-4 the data
+        lives in `LogisticsClearanceLine` rows; expose the same shape here so
+        existing logic keeps working unchanged. Amount = debit - credit
+        (matches the old JSON where -100 meant credit)."""
+        try:
+            return [
+                {"label": line.description, "amount": float((line.debit or 0) - (line.credit or 0))}
+                for line in self.lines.all()
+            ]
+        except Exception:
+            return []
+
 
 class LogisticsClearancePayment(models.Model):
     """دفعة تخليص: قيد مباشر بين حساب المخلّص وحساب الصندوق."""
+
+    PAYMENT_PURPOSE_CHOICES = [
+        ('clearance_fee', 'رسوم تخليص'),
+        ('shipping', 'شحن'),
+        ('broker_fee', 'عمولة مخلص'),
+        ('customs', 'رسوم جمركية'),
+        ('vat', 'ضريبة'),
+        ('other', 'أخرى'),
+    ]
 
     id = models.AutoField(primary_key=True, db_column='ClearancePaymentID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
@@ -488,6 +578,11 @@ class LogisticsClearancePayment(models.Model):
         help_text='Payment amount currency; null = ILS (legacy)',
     )
     payment_date = models.DateField(null=True, blank=True, db_column='PaymentDate')
+    payment_purpose = models.CharField(
+        max_length=32, choices=PAYMENT_PURPOSE_CHOICES, default='other',
+        db_column='PaymentPurpose',
+        help_text='الغرض من الدفعة (رسوم تخليص، شحن، عمولة مخلص، ...)',
+    )
     cash_box_external_id = models.CharField(max_length=128, db_column='CashBoxExternalID')
     notes = models.TextField(null=True, blank=True, db_column='Notes')
     is_posted = models.BooleanField(default=False, db_column='IsPosted')
@@ -501,6 +596,34 @@ class LogisticsClearancePayment(models.Model):
             models.Index(fields=['clearance', 'payment_date']),
             models.Index(fields=['tenant', 'cash_box_external_id']),
         ]
+
+class LogisticsClearanceLine(models.Model):
+    LINE_TYPE_CHOICES = [
+        ('vat', 'ضريبة القيمة المضافة'),
+        ('declaration_fee', 'رسوم البيان الجمركي'),
+        ('terminal', 'محطة الشحن'),
+        ('permits', 'معالجة التصاريح'),
+        ('broker_commission', 'عمولة المخلص'),
+        ('customs_system', 'نظام الجمارك «الجيل الجديد»'),
+        ('other', 'أخرى'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='LineID')
+    clearance = models.ForeignKey(LogisticsClearance, on_delete=models.CASCADE, related_name='lines', db_column='ClearanceID')
+    seq = models.PositiveSmallIntegerField(db_column='Seq', help_text='ترتيب البند')
+    line_type = models.CharField(max_length=32, choices=LINE_TYPE_CHOICES, default='other', db_column='LineType')
+    account = models.ForeignKey(Account, on_delete=models.PROTECT, null=True, blank=True, db_column='AccountID', help_text='الحساب المحاسبي')
+    description = models.CharField(max_length=255, db_column='Description')
+    debit = models.DecimalField(max_digits=18, decimal_places=2, default=0, db_column='Debit')
+    credit = models.DecimalField(max_digits=18, decimal_places=2, default=0, db_column='Credit')
+    vat_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0, db_column='VATPercent')
+    cost_center = models.ForeignKey('accounting.CostCenter', on_delete=models.SET_NULL, null=True, blank=True, db_column='CostCenterID')
+
+    class Meta:
+        db_table = 'logistics_clearance_lines'
+        managed = True
+        ordering = ['seq']
+
 
 class LogisticsExpense(models.Model):
     RELATED_TYPE_CHOICES = [
@@ -770,8 +893,16 @@ class PurchaseInvoice(models.Model):
     shipping_included = models.BooleanField(default=False, db_column='ShippingIncluded')
     grand_total = models.DecimalField(max_digits=18, decimal_places=2, default=0, db_column='GrandTotal')
 
-    local_payments_json = models.JSONField(null=True, blank=True, db_column='LocalPaymentsJSON')
-    conversion_metadata_json = models.JSONField(null=True, blank=True, db_column='ConversionMetadataJSON')
+    converted_from_shipment = models.ForeignKey(
+        'LogisticsShipment', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='ConvertedFromShipmentID', related_name='converted_invoices',
+        help_text='الشحنة التي حوّلت إلى هذه الفاتورة',
+    )
+    converted_at = models.DateTimeField(null=True, blank=True, db_column='ConvertedAt')
+    converted_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='ConvertedBy_UserID', related_name='converted_purchase_invoices',
+    )
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', db_column='Status')
     notes = models.TextField(null=True, blank=True, db_column='Notes')
@@ -848,6 +979,25 @@ class PurchaseInvoiceItem(models.Model):
     notes = models.CharField(max_length=500, null=True, blank=True, db_column='Notes')
     hs_code = models.CharField(max_length=20, null=True, blank=True, db_column='HSCode')
 
+    seq = models.PositiveSmallIntegerField(null=True, blank=True, db_column='Seq')
+    catalog_number = models.CharField(max_length=100, blank=True, default='', db_column='CatalogNumber')
+    name_snapshot = models.CharField(max_length=255, blank=True, default='', db_column='NameSnapshot')
+    description_line = models.CharField(max_length=500, blank=True, default='', db_column='DescriptionLine')
+    unit = models.CharField(max_length=50, blank=True, default='', db_column='Unit')
+    warehouse = models.CharField(max_length=100, blank=True, default='', db_column='Warehouse')
+    extra_qty = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True, db_column='ExtraQty')
+    batch_number = models.CharField(max_length=100, blank=True, default='', db_column='BatchNumber')
+    serial_number = models.CharField(max_length=100, blank=True, default='', db_column='SerialNumber')
+    manufacture_number = models.CharField(max_length=100, blank=True, default='', db_column='ManufactureNumber')
+    expiry_date = models.DateField(null=True, blank=True, db_column='ExpiryDate')
+    line_currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True, db_column='LineCurrencyID')
+    line_exchange_rate = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True, db_column='LineExchangeRate')
+    second_date = models.DateField(null=True, blank=True, db_column='SecondDate')
+    is_taxable = models.BooleanField(default=True, db_column='IsTaxable')
+    vat_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, db_column='VATPercent')
+    discount_percent = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, db_column='DiscountPercent')
+    discount_amount = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='DiscountAmount')
+
     landed_unit_price_ils = models.DecimalField(
         max_digits=18, decimal_places=4, null=True, blank=True,
         db_column='LandedUnitPriceILS',
@@ -863,6 +1013,37 @@ class PurchaseInvoiceItem(models.Model):
 
     def __str__(self):
         return f"{self.name} x{self.quantity}"
+
+
+class PurchaseInvoicePayment(models.Model):
+    PAYMENT_METHOD_CHOICES = [
+        ('cash', 'نقدي'),
+        ('bank_transfer', 'تحويل بنكي'),
+        ('cheque', 'شيك'),
+        ('credit', 'آجل'),
+        ('other', 'أخرى'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='PaymentID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    invoice = models.ForeignKey(PurchaseInvoice, on_delete=models.CASCADE, related_name='payments', db_column='PurchaseInvoiceID')
+    payment_date = models.DateField(db_column='PaymentDate')
+    amount = models.DecimalField(max_digits=18, decimal_places=2, db_column='Amount')
+    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, db_column='CurrencyID')
+    exchange_rate = models.DecimalField(max_digits=18, decimal_places=6, default=1, db_column='ExchangeRate')
+    payment_method = models.CharField(max_length=32, choices=PAYMENT_METHOD_CHOICES, default='bank_transfer', db_column='PaymentMethod')
+    cash_or_bank_account = models.ForeignKey(Account, on_delete=models.PROTECT, db_column='CashBankAccountID', related_name='purchase_invoice_payments')
+    reference_number = models.CharField(max_length=100, blank=True, default='', db_column='ReferenceNumber')
+    is_posted = models.BooleanField(default=False, db_column='IsPosted')
+    journal = models.ForeignKey(JournalHeader, on_delete=models.SET_NULL, null=True, blank=True, db_column='JournalID')
+    notes = models.TextField(blank=True, default='', db_column='Notes')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, db_column='CreatedBy_UserID')
+
+    class Meta:
+        db_table = 'purchase_invoice_payments'
+        managed = True
+        ordering = ['-payment_date', '-id']
 
 
 class PurchaseInvoiceFee(models.Model):

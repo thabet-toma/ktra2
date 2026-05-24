@@ -1,4 +1,18 @@
-/** بنود تكلفة التخليص الافتراضية (مواءمة مع Django `default_clearance_cost_lines`). */
+/** بند تكلفة التخليص (الموديل الجديد — LogisticsClearanceLine). */
+export type ClearanceLine = {
+  id?: number;
+  clearance?: number;
+  seq: number;
+  line_type: string;
+  account?: number | null;
+  description: string;
+  debit: number;
+  credit: number;
+  vat_percent: number;
+  cost_center?: number | null;
+};
+
+/** بنود تكلفة التخليص القديمة (JSONField — backwards compat). */
 export type ClearanceCostLine = { label: string; amount: number };
 
 export const DEFAULT_CLEARANCE_COST_LINES: ClearanceCostLine[] = [

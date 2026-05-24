@@ -1071,13 +1071,45 @@ class PurchaseReceiptViewSet(viewsets.ViewSet):
             ref_id = int(str(invoice_ref).strip())
 
         net_amount = amount - tax_amount
+        computed_vat_from_lines = Decimal('0')
+        vat_lines = []
+        if ref_id and tax_amount > 0:
+            try:
+                from logistics.models import PurchaseInvoice as PI
+                pi = PI.objects.prefetch_related('items').get(pk=ref_id)
+                items = list(pi.items.all())
+                if items and any(getattr(it, 'vat_percent', None) for it in items):
+                    for it in items:
+                        vp = getattr(it, 'vat_percent', None)
+                        if vp:
+                            try:
+                                line_vat = (Decimal(str(it.quantity or 0)) * Decimal(str(it.unit_price or 0)) * Decimal(str(vp)) / Decimal('100')).quantize(Decimal('0.01'))
+                            except Exception:
+                                line_vat = Decimal('0')
+                            if line_vat > 0:
+                                vat_lines.append(('vat_input', line_vat, vp))
+                                computed_vat_from_lines += line_vat
+                    if computed_vat_from_lines > 0:
+                        tax_amount = computed_vat_from_lines
+                        net_amount = amount - tax_amount
+            except PI.DoesNotExist:
+                pass
+            except Exception:
+                pass
+
         lines_payload = [
             {'account': inventory_account.id, 'debit': net_amount, 'credit': Decimal('0'), 'partner': partner.id},
         ]
         if tax_amount > 0:
-            lines_payload.append({
-                'account': vat_input_account.id, 'debit': tax_amount, 'credit': Decimal('0'), 'partner': partner.id,
-            })
+            if vat_lines:
+                for vtype, vamt, vpct in vat_lines:
+                    lines_payload.append({
+                        'account': vat_input_account.id, 'debit': vamt, 'credit': Decimal('0'), 'partner': partner.id,
+                    })
+            else:
+                lines_payload.append({
+                    'account': vat_input_account.id, 'debit': tax_amount, 'credit': Decimal('0'), 'partner': partner.id,
+                })
         lines_payload.append({
             'account': partner.linked_account.id, 'debit': Decimal('0'), 'credit': amount, 'partner': partner.id,
         })

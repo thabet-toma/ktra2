@@ -1026,6 +1026,7 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
             .prefetch_related(
                 Prefetch("shipment__deals", queryset=deal_mini),
                 "local_shipments",
+                "lines",
             )
         )
 
@@ -1051,10 +1052,6 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
         """
         clearance = self.get_object()
         SHIPPING_COST_LINE_LABEL = "دفعة الشحن (الناقل)"
-
-        def _notes_mean_shipping_payment(notes_val) -> bool:
-            n = str(notes_val or "").lstrip()
-            return n.startswith("[شحن]") or n.startswith("شحن")
 
         kind = str(request.data.get("payment_kind") or "clearance").strip().lower()
         if kind not in ("clearance", "shipping"):
@@ -1152,13 +1149,13 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
 
         def _paid_clearance() -> Decimal:
             return sum(
-                (p.amount for p in existing_payments if not _notes_mean_shipping_payment(p.notes) and p.is_posted),
+                (p.amount for p in existing_payments if p.payment_purpose != 'shipping' and p.is_posted),
                 start=Decimal("0"),
             )
 
         def _paid_shipping() -> Decimal:
             return sum(
-                (p.amount for p in existing_payments if _notes_mean_shipping_payment(p.notes) and p.is_posted),
+                (p.amount for p in existing_payments if p.payment_purpose == 'shipping' and p.is_posted),
                 start=Decimal("0"),
             )
 
@@ -1190,11 +1187,6 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
-        if kind == "shipping":
-            final_notes = ("[شحن] " + notes).strip() if notes else "[شحن]"
-        else:
-            final_notes = notes
-
         try:
             with transaction.atomic():
                 pay_currency = None
@@ -1207,8 +1199,6 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                 if pay_currency is None:
                     pay_currency = Currency.objects.filter(Code__iexact='ILS').first()
 
-                # سعر الصرف الفعلي إلى العملة الأساسية — لا نُثبّت 1 (يطابق درس C1-05:
-                # تثبيت 1 لعملة أجنبية يخزّن أساساً = المبلغ الاسمي فيُفسد ميزان المراجعة).
                 base_cur = Currency.objects.filter(IsBaseCurrency=True).first()
                 if pay_currency and base_cur and pay_currency.pk != base_cur.pk:
                     pay_rate = get_exchange_rate(
@@ -1216,6 +1206,8 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                     )
                 else:
                     pay_rate = Decimal("1")
+
+                purpose = 'shipping' if kind == 'shipping' else 'clearance_fee'
 
                 if kind == "shipping":
                     jdesc = (
@@ -1237,8 +1229,9 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                     amount=amount,
                     currency=pay_currency,
                     payment_date=payment_date,
+                    payment_purpose=purpose,
                     cash_box_external_id=ext[:128],
-                    notes=final_notes,
+                    notes=notes,
                     is_posted=False,
                 )
 
