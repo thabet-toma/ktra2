@@ -679,6 +679,10 @@ System-wide cleanup — 8 tasks.
 - `logistics/views.py:646` `add_deal` action confirmed exists (used by C)
 - `clearanceApi.updateClearance` confirmed supports all P-F-1 fields (transaction_time, second_date, licensed_dealer_no, settlement_invoice_number, currency, exchange_rate, subtotal_no_vat, vat_total, grand_total) plus the legacy `cost_lines` JSON for backwards-compat sync
 
+### Completed after second review (C-4 + C-5)
+- **C-4 (edit allocation inline):** `حصة الشحن (USD)` column in the deals table is now an editable input. onBlur dispatches PATCH to `logistics/shipments/<id>/` with `deal_allocations: [{deal_id, allocated_shipping_cost}]` — uses the existing write-only field on `LogisticsShipmentSerializer._apply_deal_allocations` (no new endpoint needed). Sum + total displayed below the table for quick reconciliation against `total_shipping_cost_usd`.
+- **C-5 (unlink button):** new backend action `LogisticsShipmentViewSet.remove_deal` (POST `logistics/shipments/<id>/remove_deal/` body `{deal_id}`). Mirrors `add_deal`. Refuses to detach when the shipment has been posted to accounting (`transit_journal_id` set) to avoid orphan GL allocations. Frontend wired with `window.confirm` + refresh after success.
+
 ### Pending (task6.1)
 - **D** Local shipments CRUD inline form + post-to-accounting
 - **E** Add clearance payment from import-flow
@@ -686,4 +690,3 @@ System-wide cleanup — 8 tasks.
 - **G** Routing migration (Shipments/Clearance/Local → /import-flow with tab param) — A-G-1 redirect ready to restore
 - **H** Delete old forms (ShipmentForm, clearance form-mode, local form-mode)
 - **I** AseelSidePanel primitive + browse-modal sweep
-- **Backend `remove_deal` endpoint** — flagged in commit 8df2ac8 as `[QUESTION]`; unlink button currently shows a clear error message instead of failing silently.

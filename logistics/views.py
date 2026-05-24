@@ -666,6 +666,41 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+    @action(detail=True, methods=['post'])
+    def remove_deal(self, request, pk=None):
+        """task6.1 C-5: detach a deal from the shipment.
+
+        Mirror of `add_deal`. Refuses to detach if the shipment has already
+        been posted to accounting (transit_journal set) — that would leave
+        the GL entry hanging without its source allocation.
+        """
+        shipment = self.get_object()
+        deal_id = request.data.get('deal_id')
+        if not deal_id:
+            return Response({'error': 'deal_id مطلوب'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            deal_pk = int(deal_id)
+        except (TypeError, ValueError):
+            return Response({'error': 'deal_id يجب أن يكون رقماً'}, status=status.HTTP_400_BAD_REQUEST)
+
+        if getattr(shipment, 'transit_journal_id', None):
+            return Response(
+                {'error': 'الشحنة مرحَّلة محاسبياً — لا يمكن فك ربط الصفقات قبل عكس قيد التحويل.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        link = LogisticsShipmentDeal.objects.filter(shipment=shipment, deal_id=deal_pk).first()
+        if not link:
+            return Response({'error': 'الصفقة غير مربوطة بهذه الشحنة'}, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            link.delete()
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response({'status': 'تم فك ربط الصفقة بنجاح', 'deal_id': deal_pk}, status=status.HTTP_200_OK)
+
     @action(
         detail=True,
         methods=['post'],

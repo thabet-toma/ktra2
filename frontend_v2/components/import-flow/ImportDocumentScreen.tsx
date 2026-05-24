@@ -351,11 +351,44 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     }
   }, [shipment]);
 
-  const handleUnlinkDeal = useCallback(() => {
-    // [QUESTION] no remove_deal endpoint exists on LogisticsShipmentViewSet.
-    // Unlinking requires a backend addition (task6.1 phase C — flagged in commit 8df2ac8).
-    setError("إلغاء ربط الصفقة غير متاح حالياً — يتطلب endpoint جديد في الـbackend.");
-  }, []);
+  const handleUnlinkDeal = useCallback(async (dealId: number) => {
+    if (!shipment) return;
+    if (!window.confirm("هل تريد فك ربط هذه الصفقة من الشحنة؟")) return;
+    setSaving(true); setError(null);
+    try {
+      await apiPostObject(
+        `logistics/shipments/${shipment.id}/remove_deal/`,
+        { deal_id: dealId },
+        { tenantId: tid() },
+      );
+      const refreshed = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${shipment.id}/`, { tenantId: tid() });
+      setShipment(refreshed);
+      setShipmentForm({ ...refreshed });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [shipment]);
+
+  const handleUpdateAllocation = useCallback(async (dealId: number, newAlloc: number) => {
+    if (!shipment) return;
+    setSaving(true); setError(null);
+    try {
+      // Use the existing deal_allocations write-only field on the shipment serializer.
+      const patched = await apiPatchObject<ShipmentApiRow>(
+        `logistics/shipments/${shipment.id}/`,
+        { deal_allocations: [{ deal_id: dealId, allocated_shipping_cost: newAlloc }] },
+        { tenantId: tid() },
+      );
+      setShipment(patched);
+      setShipmentForm({ ...patched });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [shipment]);
 
   // ── Derived values ──
   const timelineSteps = useMemo(
@@ -488,7 +521,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
           <th style={{ padding: "2px 4px", textAlign: "start" }}>رقم الصفقة</th>
           <th style={{ padding: "2px 4px", textAlign: "start" }}>الاسم</th>
-          <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>حصة التكلفة</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 110 }}>حصة الشحن (USD)</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 60 }}>إلغاء</th>
         </tr></thead>
         <tbody>
@@ -496,9 +529,33 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             <tr key={d.id}>
               <td style={{ padding: "2px 4px" }}>#{d.deal}</td>
               <td style={{ padding: "2px 4px" }}>{d.deal_name || "—"}</td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(d.allocated_shipping_cost)}</td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>
-                <button type="button" className="aseel-toolbtn" onClick={handleUnlinkDeal} style={{ color: "var(--aseel-danger, #c0392b)", padding: "0 4px" }} title="إلغاء الربط (يتطلب endpoint جديد)">✕</button>
+                <input
+                  className="aseel-input"
+                  type="number"
+                  step="0.01"
+                  defaultValue={d.allocated_shipping_cost ?? 0}
+                  disabled={saving}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v) && v !== Number(d.allocated_shipping_cost ?? 0)) {
+                      void handleUpdateAllocation(d.deal, v);
+                    }
+                  }}
+                  style={{ width: 90, textAlign: "center" }}
+                />
+              </td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>
+                <button
+                  type="button"
+                  className="aseel-toolbtn"
+                  onClick={() => void handleUnlinkDeal(d.deal)}
+                  disabled={saving}
+                  style={{ color: "var(--aseel-danger, #c0392b)", padding: "0 4px" }}
+                  title="فك ربط الصفقة من الشحنة"
+                >
+                  ✕
+                </button>
               </td>
             </tr>
           ))}
@@ -507,6 +564,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           )}
         </tbody>
       </table>
+      {shipmentDeals.length > 0 && (
+        <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", padding: "4px 0" }}>
+          مجموع الحصص: <b>{fmt(shipmentDeals.reduce((sum, d) => sum + Number(d.allocated_shipping_cost ?? 0), 0))}</b> USD
+          {shipmentForm.total_shipping_cost_usd != null && (
+            <> · إجمالي الشحن: <b>{fmt(shipmentForm.total_shipping_cost_usd)}</b></>
+          )}
+        </p>
+      )}
     </div>
   );
 
