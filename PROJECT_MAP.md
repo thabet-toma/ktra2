@@ -683,10 +683,16 @@ System-wide cleanup — 8 tasks.
 - **C-4 (edit allocation inline):** `حصة الشحن (USD)` column in the deals table is now an editable input. onBlur dispatches PATCH to `logistics/shipments/<id>/` with `deal_allocations: [{deal_id, allocated_shipping_cost}]` — uses the existing write-only field on `LogisticsShipmentSerializer._apply_deal_allocations` (no new endpoint needed). Sum + total displayed below the table for quick reconciliation against `total_shipping_cost_usd`.
 - **C-5 (unlink button):** new backend action `LogisticsShipmentViewSet.remove_deal` (POST `logistics/shipments/<id>/remove_deal/` body `{deal_id}`). Mirrors `add_deal`. Refuses to detach when the shipment has been posted to accounting (`transit_journal_id` set) to avoid orphan GL allocations. Frontend wired with `window.confirm` + refresh after success.
 
+### Completed (task6.1 D+E+F — 2026-05-24, with review fixes)
+- **D — Local Shipments Tab Editable:** Inline CRUD form below the local shipments table. Row click → edit mode with 12 editable fields. Add / save / cancel / delete buttons. Post-to-accounting action button per unposted row. All state hoisted above early returns (hooks rules preserved).
+- **E — Payments Tab Editable:** Add-payment form (5 fields including cash-box picker). POST via existing `payClearanceFromCashBox`. Auto-refresh payments + right-dock totals after success.
+- **F — Convert to Purchase Invoice:** Toolbar button «تحويل إلى فاتورة شراء». Navigates to `/purchase-invoices/new?shipment=ID` (or opens the existing converted PI if found). Disabled for `shipment_type=transport`. Visual link shown if invoice already exists.
+
+### Errors found in external-model D+E+F commit and corrected
+1. **BLOCKER: E-payment dispatched empty `cash_box_external_id`** — the backend hard-requires it (`logistics/views.py:1135` returns 400 "حقل cash_box_external_id مطلوب"). Every payment attempt would have failed. Added `accountingApi.getCashBoxLedgers()` loader, `cashBoxes`/`payCashBoxId` state, a cash-box `<select>` in the form, and required-field validation on the submit button. Warning shown when no cash boxes are linked yet.
+2. **D-create payload sent `carrier: 0`** — fails on backend FK validation. Added early-return guard with a clear "الناقل مطلوب" message before dispatching the create. (Long-term: replace the number input with an `AseelIndexPicker` for carriers — flagged for task7.)
+
 ### Pending (task6.1)
-- **D** Local shipments CRUD inline form + post-to-accounting
-- **E** Add clearance payment from import-flow
-- **F** Convert to PurchaseInvoice
 - **G** Routing migration (Shipments/Clearance/Local → /import-flow with tab param) — A-G-1 redirect ready to restore
 - **H** Delete old forms (ShipmentForm, clearance form-mode, local form-mode)
 - **I** AseelSidePanel primitive + browse-modal sweep

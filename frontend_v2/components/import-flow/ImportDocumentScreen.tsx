@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Save } from "lucide-react";
+import { Save, Plus, FileText } from "lucide-react";
 import { apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
-import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance } from "@/services/clearanceApi";
+import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox } from "@/services/clearanceApi";
+import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
-import { listLocalShipments, LocalShipmentRow } from "@/services/localShippingApi";
+import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment } from "@/services/localShippingApi";
 import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab } from "@/components/aseel";
 import { CompactTimeline } from "./CompactTimeline";
 
@@ -119,7 +120,17 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   // Deals tab state
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [availableDeals, setAvailableDeals] = useState<DealRow[]>([]);
-
+  // Local tab state (D)
+  const [editingLocalId, setEditingLocalId] = useState<number | null>(null);
+  const [localForm, setLocalForm] = useState<Partial<LocalShipmentRow> | null>(null);
+  // Payments tab state (E)
+  const [showPaymentForm, setShowPaymentForm] = useState(false);
+  const [payAmount, setPayAmount] = useState("");
+  const [payPurpose, setPayPurpose] = useState("clearance_fee");
+  const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [payNotes, setPayNotes] = useState("");
+  const [cashBoxes, setCashBoxes] = useState<CashBoxLedgerLink[]>([]);
+  const [payCashBoxId, setPayCashBoxId] = useState("");
   // Empty nav (single-record view) — shell expects a nav prop but we don't browse here yet.
   const nav = useRecordNavigation({ items: [] as ShipmentApiRow[], getId: () => 0, currentId: null, onSelect: () => {} });
 
@@ -390,6 +401,168 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     }
   }, [shipment]);
 
+  // ── D: Local shipment helpers ──
+  const reloadLocal = useCallback(async () => {
+    if (!shipment) return;
+    try {
+      const locs = await listLocalShipments();
+      setLocalShipments(locs.filter((l) => l.shipment === shipment.id));
+    } catch { /* ignore */ }
+  }, [shipment]);
+
+  const handleEditLocal = useCallback((ls: LocalShipmentRow) => {
+    setEditingLocalId(ls.id);
+    setLocalForm({ ...ls });
+  }, []);
+
+  const handleNewLocal = useCallback(() => {
+    setEditingLocalId(0);
+    setLocalForm({ id: 0, shipment: (shipment || shipmentForm)?.id ?? null, carrier: 0, amount: "0", currency: 0, exchange_rate: "1", status: "pending", payment_type: "credit", capitalize_to_inventory: false, is_posted: false, purchase_invoice: null, shipment_number: "" } as Partial<LocalShipmentRow>);
+  }, [shipment, shipmentForm]);
+
+  const handleCancelLocal = useCallback(() => {
+    setEditingLocalId(null);
+    setLocalForm(null);
+  }, []);
+
+  const setLF = useCallback((patch: Partial<LocalShipmentRow>) =>
+    setLocalForm((prev) => (prev ? { ...prev, ...patch } : prev)), []);
+
+  const handleSaveLocal = useCallback(async () => {
+    if (!localForm || !shipment) return;
+    // Carrier is a required FK on LocalShipment — reject early so we don't
+    // round-trip a 400 just to learn the user missed the field.
+    if (!localForm.carrier || Number(localForm.carrier) <= 0) {
+      setError("الناقل مطلوب — أدخل رقم تعريف الناقل قبل الحفظ.");
+      return;
+    }
+    setSaving(true); setError(null);
+    try {
+      if (editingLocalId && editingLocalId > 0) {
+        const updated = await updateLocalShipment(editingLocalId, {
+          carrier: localForm.carrier, driver_name: localForm.driver_name,
+          vehicle_number: localForm.vehicle_number, origin: localForm.origin,
+          destination: localForm.destination, pickup_date: localForm.pickup_date,
+          delivery_date: localForm.delivery_date, amount: localForm.amount || "0",
+          payment_type: (localForm.payment_type as "credit" | "cash") || "credit",
+          status: localForm.status as LocalShipmentRow["status"],
+          notes: localForm.notes,
+        });
+        setLocalShipments((prev) => prev.map((l) => l.id === editingLocalId ? updated : l));
+        setEditingLocalId(null); setLocalForm(null);
+      } else {
+        const created = await createLocalShipment({
+          shipment: shipment.id, carrier: Number(localForm.carrier),
+          driver_name: localForm.driver_name, vehicle_number: localForm.vehicle_number,
+          origin: localForm.origin, destination: localForm.destination,
+          pickup_date: localForm.pickup_date, delivery_date: localForm.delivery_date,
+          amount: localForm.amount || "0",
+          payment_type: (localForm.payment_type as "credit" | "cash") || "credit",
+          status: localForm.status as LocalShipmentRow["status"],
+          notes: localForm.notes,
+        });
+        setLocalShipments((prev) => [...prev, created]);
+        setEditingLocalId(null); setLocalForm(null);
+      }
+      void reloadLocal();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [localForm, editingLocalId, shipment, reloadLocal]);
+
+  const handleDeleteLocal = useCallback(async (id: number) => {
+    if (!window.confirm("هل تريد حذف سجل النقل المحلي؟")) return;
+    setSaving(true); setError(null);
+    try {
+      await deleteLocalShipment(id);
+      setLocalShipments((prev) => prev.filter((l) => l.id !== id));
+      if (editingLocalId === id) { setEditingLocalId(null); setLocalForm(null); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [editingLocalId]);
+
+  const handlePostLocal = useCallback(async (id: number) => {
+    setSaving(true); setError(null);
+    try {
+      const updated = await postLocalShipment(id);
+      setLocalShipments((prev) => prev.map((l) => l.id === id ? updated : l));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
+  // ── E: Payment helpers ──
+  const reloadPayments = useCallback(async () => {
+    if (!clearance) return;
+    try {
+      const pays = await listClearancePayments(clearance.id);
+      setClearancePayments(pays);
+    } catch { /* ignore */ }
+  }, [clearance]);
+
+  // Load cash boxes once (used in E-payment form)
+  useEffect(() => {
+    if (cashBoxes.length > 0) return;
+    void accountingApi.getCashBoxLedgers().then((rows) => {
+      setCashBoxes(rows);
+      if (rows.length > 0 && !payCashBoxId) setPayCashBoxId(rows[0].external_id);
+    }).catch(() => { /* ignore — surfaced when user opens the form */ });
+  }, [cashBoxes.length, payCashBoxId]);
+
+  const handleAddPayment = useCallback(async () => {
+    if (!clearance || !payAmount || Number(payAmount) <= 0) return;
+    if (!payCashBoxId) {
+      setError("اختر الصندوق قبل تسجيل الدفعة.");
+      return;
+    }
+    setSaving(true); setError(null);
+    try {
+      await payClearanceFromCashBox(clearance.id, {
+        amount: Number(payAmount),
+        cash_box_external_id: payCashBoxId,
+        payment_kind: payPurpose === "shipping" ? "shipping" : "clearance",
+        payment_date: payDate || undefined,
+        notes: payNotes || undefined,
+      });
+      setShowPaymentForm(false);
+      setPayAmount("");
+      setPayPurpose("clearance_fee");
+      setPayDate(new Date().toISOString().slice(0, 10));
+      setPayNotes("");
+      void reloadPayments();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [clearance, payAmount, payPurpose, payDate, payNotes, payCashBoxId, reloadPayments]);
+
+  // ── F: Convert to purchase invoice ──
+  const [convertedPiId, setConvertedPiId] = useState<number | null>(null);
+  const checkConvertedInvoice = useCallback(async () => {
+    if (!shipment || !shipment.id) return;
+    try {
+      const invoices = await apiGetList<{ id: number; invoice_number: string }>(
+        "logistics/purchase-invoices/",
+        { tenantId: tid(), query: { shipment: shipment.id } },
+      );
+      const converted = invoices.find((inv: any) => {
+        const typed = inv as { converted_from_shipment?: number };
+        return typed.converted_from_shipment === shipment.id;
+      });
+      if (converted && converted.id) setConvertedPiId(converted.id);
+    } catch { /* ignore */ }
+  }, [shipment]);
+
+  useEffect(() => { void checkConvertedInvoice(); }, [checkConvertedInvoice]);
+
   // ── Derived values ──
   const timelineSteps = useMemo(
     () => buildTimelineSteps(shipment?.shipping_workflow_status, shipment?.shipping_type),
@@ -650,53 +823,147 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     </div>
   );
 
-  const localContent = localShipments.length > 0 ? (
-    <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)" }}>
-      <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
-        <th style={{ padding: "2px 4px", textAlign: "start" }}>رقم</th>
-        <th style={{ padding: "2px 4px", textAlign: "start" }}>الناقل</th>
-        <th style={{ padding: "2px 4px", textAlign: "center" }}>السائق</th>
-        <th style={{ padding: "2px 4px", textAlign: "center" }}>المركبة</th>
-        <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>المبلغ</th>
-        <th style={{ padding: "2px 4px", textAlign: "center", width: 60 }}>الحالة</th>
-      </tr></thead>
-      <tbody>
-        {localShipments.map((ls) => (
-          <tr key={ls.id}>
-            <td style={{ padding: "2px 4px" }}>{ls.shipment_number}</td>
-            <td style={{ padding: "2px 4px" }}>{ls.carrier_name || "—"}</td>
-            <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.driver_name || "—"}</td>
-            <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.vehicle_number || "—"}</td>
-            <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(ls.amount)}</td>
-            <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.status || "—"}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  ) : <p className="aseel-text-soft" style={{ padding: 8 }}>لا توجد شحنات محلية</p>;
+  const localContent = (
+    <div style={{ padding: "4px 8px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>الشحنات المحلية ({localShipments.length})</h4>
+        <button type="button" className="aseel-toolbtn" onClick={handleNewLocal} disabled={!shipment || saving}><Plus size={14} /> إضافة نقل محلي</button>
+      </div>
+      <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)" }}>
+        <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
+          <th style={{ padding: "2px 4px", textAlign: "start" }}>رقم</th>
+          <th style={{ padding: "2px 4px", textAlign: "start" }}>الناقل</th>
+          <th style={{ padding: "2px 4px", textAlign: "center" }}>السائق</th>
+          <th style={{ padding: "2px 4px", textAlign: "center" }}>المركبة</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>المبلغ</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 60 }}>الحالة</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 50 }}>مرحَّلة</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}></th>
+        </tr></thead>
+        <tbody>
+          {localShipments.map((ls) => (
+            <tr key={ls.id} onClick={() => handleEditLocal(ls)} style={{ cursor: "pointer" }}>
+              <td style={{ padding: "2px 4px" }}>{ls.shipment_number}</td>
+              <td style={{ padding: "2px 4px" }}>{ls.carrier_name || "—"}</td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.driver_name || "—"}</td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.vehicle_number || "—"}</td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(ls.amount)}</td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.status || "—"}</td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.is_posted ? "✓" : "—"}</td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>
+                {!ls.is_posted && (
+                  <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handlePostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }}>ترحيل</button>
+                )}
+              </td>
+            </tr>
+          ))}
+          {localShipments.length === 0 && (
+            <tr><td colSpan={8} style={{ padding: "8px 4px", textAlign: "center", color: "#999" }}>لا توجد شحنات محلية</td></tr>
+          )}
+        </tbody>
+      </table>
+      {localForm && (
+        <div style={{ marginTop: 8, border: "1px solid var(--aseel-border, #ddd)", padding: 8, borderRadius: 4 }}>
+          <h5 style={{ fontWeight: 600, marginBottom: 4, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+            {editingLocalId && editingLocalId > 0 ? `تعديل النقل المحلي #${editingLocalId}` : "إضافة نقل محلي جديد"}
+          </h5>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "2px 8px", marginBottom: 4 }}>
+            {fld("الناقل", <input className="aseel-input" type="number" placeholder="رقم الناقل" value={localForm.carrier ?? ""} onChange={(e) => setLF({ carrier: Number(e.target.value) })} />)}
+            {fld("السائق", <input className="aseel-input" value={localForm.driver_name || ""} onChange={(e) => setLF({ driver_name: e.target.value })} />)}
+            {fld("المركبة", <input className="aseel-input" value={localForm.vehicle_number || ""} onChange={(e) => setLF({ vehicle_number: e.target.value })} />)}
+            {fld("من", <input className="aseel-input" value={localForm.origin || ""} onChange={(e) => setLF({ origin: e.target.value })} />)}
+            {fld("إلى", <input className="aseel-input" value={localForm.destination || ""} onChange={(e) => setLF({ destination: e.target.value })} />)}
+            {fld("تاريخ التحميل", <input className="aseel-input" type="date" value={localForm.pickup_date ? String(localForm.pickup_date).slice(0, 10) : ""} onChange={(e) => setLF({ pickup_date: e.target.value })} />)}
+            {fld("تاريخ التسليم", <input className="aseel-input" type="date" value={localForm.delivery_date ? String(localForm.delivery_date).slice(0, 10) : ""} onChange={(e) => setLF({ delivery_date: e.target.value })} />)}
+            {fld("المبلغ", <input className="aseel-input" type="number" step="0.01" value={localForm.amount ? String(localForm.amount) : "0"} onChange={(e) => setLF({ amount: e.target.value })} />)}
+            {fld("طريقة الدفع", <select className="aseel-input" value={localForm.payment_type || "credit"} onChange={(e) => setLF({ payment_type: e.target.value as "credit" | "cash" })}>
+              <option value="credit">آجل</option>
+              <option value="cash">نقدي</option>
+            </select>)}
+            {fld("الحالة", <select className="aseel-input" value={localForm.status || "pending"} onChange={(e) => setLF({ status: e.target.value as LocalShipmentRow["status"] })}>
+              <option value="pending">قيد الانتظار</option>
+              <option value="in_transit">قيد النقل</option>
+              <option value="delivered">تم التسليم</option>
+              <option value="cancelled">ملغي</option>
+            </select>)}
+            {fld("ملاحظات", <input className="aseel-input" value={localForm.notes || ""} onChange={(e) => setLF({ notes: e.target.value })} />)}
+          </div>
+          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <button type="button" className="aseel-toolbtn" onClick={() => void handleSaveLocal()} disabled={saving}>
+              {editingLocalId && editingLocalId > 0 ? "تحديث" : "إضافة"}
+            </button>
+            <button type="button" className="aseel-toolbtn" onClick={handleCancelLocal}>إلغاء</button>
+            {editingLocalId && editingLocalId > 0 && (
+              <button type="button" className="aseel-toolbtn" onClick={() => void handleDeleteLocal(editingLocalId)} disabled={saving} style={{ color: "var(--aseel-danger, #c0392b)" }}>حذف</button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 
-  const paymentsContent = clearance && clearancePayments.length > 0 ? (
-    <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)" }}>
-      <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
-        <th style={{ padding: "2px 4px", textAlign: "start" }}>التاريخ</th>
-        <th style={{ padding: "2px 4px", textAlign: "start" }}>الغرض</th>
-        <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>المبلغ</th>
-        <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>مرحَّلة</th>
-        <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>القيد</th>
-      </tr></thead>
-      <tbody>
-        {clearancePayments.map((p) => (
-          <tr key={p.id}>
-            <td style={{ padding: "2px 4px" }}>{p.payment_date || "—"}</td>
-            <td style={{ padding: "2px 4px" }}>{p.payment_purpose || "—"}</td>
-            <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(p.amount)}</td>
-            <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.is_posted ? "✓" : "—"}</td>
-            <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.journal ? `#${p.journal}` : "—"}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  ) : <p className="aseel-text-soft" style={{ padding: 8 }}>لا توجد دفعات</p>;
+  const paymentsContent = (
+    <div style={{ padding: "4px 8px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>الدفعات ({clearancePayments.length})</h4>
+        {clearance && <button type="button" className="aseel-toolbtn" onClick={() => setShowPaymentForm(!showPaymentForm)} disabled={saving}><Plus size={14} /> إضافة دفعة</button>}
+      </div>
+      {showPaymentForm && (
+        <div style={{ marginBottom: 8, border: "1px solid var(--aseel-border, #ddd)", padding: 8, borderRadius: 4 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "2px 8px", marginBottom: 4 }}>
+            {fld("المبلغ", <input className="aseel-input" type="number" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />)}
+            {fld("الصندوق", <select className="aseel-input" value={payCashBoxId} onChange={(e) => setPayCashBoxId(e.target.value)}>
+              <option value="">— اختر —</option>
+              {cashBoxes.map((cb) => (
+                <option key={cb.external_id} value={cb.external_id}>{cb.name} ({cb.currency_code})</option>
+              ))}
+            </select>)}
+            {fld("الغرض", <select className="aseel-input" value={payPurpose} onChange={(e) => setPayPurpose(e.target.value)}>
+              <option value="clearance_fee">رسوم تخليص</option>
+              <option value="shipping">شحن</option>
+              <option value="broker_fee">عمولة مخلِّص</option>
+              <option value="customs">جمارك</option>
+              <option value="vat">ضريبة</option>
+              <option value="other">أخرى</option>
+            </select>)}
+            {fld("التاريخ", <input className="aseel-input" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />)}
+            {fld("ملاحظات", <input className="aseel-input" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} />)}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="aseel-toolbtn" onClick={() => void handleAddPayment()} disabled={saving || !payAmount || Number(payAmount) <= 0 || !payCashBoxId}>تسجيل الدفعة</button>
+            <button type="button" className="aseel-toolbtn" onClick={() => setShowPaymentForm(false)}>إلغاء</button>
+          </div>
+          {cashBoxes.length === 0 && (
+            <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", marginTop: 4, color: "var(--aseel-warn, #b45309)" }}>
+              لا يوجد صندوق مَربوط بحساب محاسبي — افتح «المحاسبة → ربط صناديق Firestore» قبل تسجيل دفعة.
+            </p>
+          )}
+        </div>
+      )}
+      {clearancePayments.length > 0 ? (
+        <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)" }}>
+          <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
+            <th style={{ padding: "2px 4px", textAlign: "start" }}>التاريخ</th>
+            <th style={{ padding: "2px 4px", textAlign: "start" }}>الغرض</th>
+            <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>المبلغ</th>
+            <th style={{ padding: "2px 4px", textAlign: "center", width: 60 }}>مرحَّلة</th>
+            <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>القيد</th>
+          </tr></thead>
+          <tbody>
+            {clearancePayments.map((p) => (
+              <tr key={p.id}>
+                <td style={{ padding: "2px 4px" }}>{p.payment_date || "—"}</td>
+                <td style={{ padding: "2px 4px" }}>{p.payment_purpose || "—"}</td>
+                <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(p.amount)}</td>
+                <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.is_posted ? "✓" : "—"}</td>
+                <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.journal ? `#${p.journal}` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : <p className="aseel-text-soft" style={{ padding: 8 }}>لا توجد دفعات</p>}
+    </div>
+  );
 
   const accountsContent = (
     <div style={{ padding: "4px 8px", fontSize: "var(--aseel-fs-sm, 12px)" }}>
@@ -731,6 +998,21 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const toolbarActions: AseelToolbarAction[] = [
     { key: "save", label: "تخزين (F12)", icon: <Save />, onClick: () => void handleSaveShipment(), disabled: !isShipmentDirty || saving },
+    {
+      key: "to-invoice", label: "تحويل إلى فاتورة شراء", icon: <FileText />,
+      onClick: () => {
+        if (convertedPiId) {
+          window.open(`/purchase-invoices/${convertedPiId}`, "_blank");
+        } else if (shipment?.id) {
+          window.open(`/purchase-invoices/new?shipment=${shipment.id}`, "_blank");
+        }
+      },
+      disabled: !shipment?.id || shipment?.shipment_type === "transport" || saving,
+    },
+    ...(convertedPiId ? [{
+      key: "view-pi", label: `فاتورة #${convertedPiId}`, icon: <FileText />,
+      onClick: () => window.open(`/purchase-invoices/${convertedPiId}`, "_blank"),
+    }] : []),
     ...(onClose ? [{ key: "back", label: "رجوع", onClick: onClose }] : []),
   ];
 
