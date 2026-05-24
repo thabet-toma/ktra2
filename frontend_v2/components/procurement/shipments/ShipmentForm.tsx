@@ -7,8 +7,7 @@ import { suppliersService } from '../../../services/firestoreService';
 import { dealsService } from '../../../services/dealsService';
 import { notificationsService } from '../../../services/notificationsService';
 import { cloudinaryService } from '../../../services/cloudinaryService';
-import { Truck, Save, CreditCard, AlertCircle, Plus, Trash2, Printer, X } from 'lucide-react';
-import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
+import { Save, Plus, Printer, X } from 'lucide-react';
 import { InstallmentManager } from '../deals/InstallmentManager';
 import { PaymentProgress } from '../deals/PaymentProgress';
 import { SupplierViewModal } from '@/components/common/SupplierViewModal';
@@ -464,6 +463,100 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
           </>
         }
         tabs={[
+          {
+            key: "deals",
+            label: "الصفقات",
+            content: (
+              <div style={{ padding: "4px 8px" }}>
+                <ShipmentDealsTable
+                  deals={formData.deals} allDeals={allDeals}
+                  onRemoveDeal={handleRemoveDeal} onUpdateDeal={handleDealUpdate}
+                  onOpenSelector={() => setIsDealSelectorOpen(true)}
+                  totalExtra={calculateTotalExtraCosts()} grandTotal={calculateGrandTotal()}
+                />
+              </div>
+            ),
+          },
+          {
+            key: "local",
+            label: "النقل المحلي",
+            content: loadingLocalShipments ? (
+              <p className="aseel-text-soft" style={{ padding: 8 }}>جاري التحميل...</p>
+            ) : localShipments.length === 0 ? (
+              <p className="aseel-text-soft text-sm" style={{ padding: 8 }}>لا توجد سجلات نقل محلي مرتبطة بهذه الشحنة</p>
+            ) : (
+              <div style={{ overflowX: 'auto', padding: 8 }}>
+                <table className="aseel-grid" style={{ width: '100%' }}>
+                  <thead>
+                    <tr><th>رقم</th><th>الناقل</th><th>السائق</th><th>المركبة</th><th>المبلغ</th><th>الحالة</th><th>المرحّل</th></tr>
+                  </thead>
+                  <tbody>
+                    {localShipments.map((ls) => (
+                      <tr key={ls.id}>
+                        <td className="font-mono">{ls.shipment_number}</td>
+                        <td>{ls.carrier_name || '-'}</td>
+                        <td>{ls.driver_name || '-'}</td>
+                        <td>{ls.vehicle_number || '-'}</td>
+                        <td>{Number(ls.amount).toLocaleString()} {ls.currency_code || ''}</td>
+                        <td>{ls.status === 'delivered' ? 'تم التسليم' : ls.status === 'in_transit' ? 'في الطريق' : ls.status === 'pending' ? 'معلق' : ls.status}</td>
+                        <td>{ls.is_posted ? `✓ #${ls.journal}` : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ),
+          },
+          {
+            key: "finance",
+            label: "المالية",
+            content: (
+              <div style={{ padding: "4px 8px" }}>
+                <InstallmentManager
+                  variant="shipment" installments={installments as any} grandTotal={calculateGrandTotal()}
+                  onUpdateInstallments={(newInst) => setInstallments(newInst as any)}
+                  validationError={installmentValidationError} installmentPlanEnabled={installmentPlanEnabled}
+                  onTogglePlan={(enabled) => {
+                    setInstallmentPlanEnabled(enabled);
+                    if (enabled && installments.length === 0) {
+                      setInstallments([{ id: crypto.randomUUID(), installmentNumber: 1, percentage: 100, amount: calculateGrandTotal(), status: 'unpaid', notes: 'دفعة واحدة', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]);
+                    } else if (!enabled) setInstallments([]);
+                  }}
+                  deal={formData as any} readOnly={formData.status === 'delivered' || formData.status === 'cancelled'}
+                />
+                {formData.id ? (
+                  <PaymentProgress
+                    installments={installments as any}
+                    deal={{ ...formData, id: formData.id, totalAmount: calculateGrandTotal(), payments: formData.payments || [] } as any}
+                    variant="shipment" currentUser={currentUser}
+                    onPaymentOperation={handlePaymentOperation} onConfirmSupplier={handleConfirmSupplier}
+                    onOpenAccountingJournal={onOpenAccountingJournal}
+                    readOnly={formData.status === "delivered" || formData.status === "cancelled"}
+                  />
+                ) : (
+                  <p className="aseel-text-soft text-sm" style={{ padding: 8 }}>يرجى حفظ الشحنة أولاً للبدء في إجراء عمليات الدفع.</p>
+                )}
+              </div>
+            ),
+          },
+          {
+            key: "details",
+            label: "تفاصيل إضافية",
+            content: (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: '4px 8px' }}>
+                <ShipmentBasicInfo
+                  formData={formData} setFormData={setFormData} allSuppliers={allSuppliers}
+                  totals={totals} handleTotalChange={handleTotalChange} handleUnitPriceChange={handleUnitPriceChange}
+                  onOpenSupplier={(id) => { setSelectedSupplierId(id); setIsSupplierModalOpen(true); }}
+                />
+                <ShipmentShippingDetails
+                  shippingInfo={shippingInfo} setShippingInfo={setShippingInfo}
+                  handleFileUpload={handleFileUpload} uploadingFile={uploadingFile}
+                  handleShipmentStatusChange={(status, notes) => setShippingInfo((prev: any) => ({ ...prev, shipmentStatus: { status, statusDate: new Date().toISOString(), notes, completed: false } }))}
+                />
+              </div>
+            ),
+          },
           { key: "notes", label: "الملاحظات", content: notesTab },
           { key: "other", label: "بيانات أخرى", content: otherTab },
         ]}
@@ -487,114 +580,29 @@ export const ShipmentForm: React.FC<ShipmentFormProps> = ({
           </>
         }
       >
-        {/* مسار حالات الشحنة */}
-        <div style={{ padding: '8px 0' }}>
-          <ShipmentStatusVisualizer
-            type={shippingInfo.shippingType || 'sea'}
-            currentStatus={shippingInfo.shipmentStatus?.status || 'agent_warehouse'}
-          />
-        </div>
-
-        {/* النقل المحلي */}
-        {loadingLocalShipments ? (
-          <p className="aseel-text-soft" style={{ padding: 8 }}>جاري التحميل...</p>
-        ) : localShipments.length === 0 ? (
-          <p className="aseel-text-soft text-sm" style={{ padding: 8 }}>لا توجد سجلات نقل محلي مرتبطة بهذه الشحنة</p>
-        ) : (
-          <div style={{ overflowX: 'auto', padding: 8 }}>
-            <table className="aseel-grid" style={{ width: '100%' }}>
-              <thead>
-                <tr>
-                  <th>رقم</th><th>الناقل</th><th>السائق</th><th>المركبة</th><th>المبلغ</th><th>الحالة</th><th>المرحّل</th>
-                </tr>
-              </thead>
-              <tbody>
-                {localShipments.map((ls) => (
-                  <tr key={ls.id}>
-                    <td className="font-mono">{ls.shipment_number}</td>
-                    <td>{ls.carrier_name || '-'}</td>
-                    <td>{ls.driver_name || '-'}</td>
-                    <td>{ls.vehicle_number || '-'}</td>
-                    <td>{Number(ls.amount).toLocaleString()} {ls.currency_code || ''}</td>
-                    <td>
-                      <span className={`px-2 py-0.5 rounded text-xs ${ls.status === 'delivered' ? 'bg-green-100 text-green-700' : ls.status === 'in_transit' ? 'aseel-bg-accent-bg aseel-text-accent' : 'aseel-bg-panel aseel-text-ink'}`}>
-                        {ls.status === 'delivered' ? 'تم التسليم' : ls.status === 'in_transit' ? 'في الطريق' : ls.status === 'pending' ? 'معلق' : ls.status}
-                      </span>
-                    </td>
-                    <td>{ls.is_posted ? <span className="text-green-600">✓ #{ls.journal}</span> : <span className="aseel-text-soft">—</span>}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* بيانات الشحنة + تفاصيل الشحن */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, padding: '8px 0' }}>
-          <ShipmentBasicInfo
-            formData={formData} setFormData={setFormData} allSuppliers={allSuppliers}
-            totals={totals} handleTotalChange={handleTotalChange} handleUnitPriceChange={handleUnitPriceChange}
-            onOpenSupplier={(id) => { setSelectedSupplierId(id); setIsSupplierModalOpen(true); }}
-          />
-          <ShipmentShippingDetails
-            shippingInfo={shippingInfo} setShippingInfo={setShippingInfo}
-            handleFileUpload={handleFileUpload} uploadingFile={uploadingFile}
-            handleShipmentStatusChange={(status, notes) => setShippingInfo((prev: any) => ({ ...prev, shipmentStatus: { status, statusDate: new Date().toISOString(), notes, completed: false } }))}
-          />
-        </div>
-
-        {/* الصفقات المرفقة */}
-        <ShipmentDealsTable
-          deals={formData.deals} allDeals={allDeals}
-          onRemoveDeal={handleRemoveDeal} onUpdateDeal={handleDealUpdate}
-          onOpenSelector={() => setIsDealSelectorOpen(true)}
-          totalExtra={calculateTotalExtraCosts()} grandTotal={calculateGrandTotal()}
-        />
-
-        {/* المالية */}
-        <CollapsibleSection title="المالية — خطة الدفع وتنفيذ التحويل" icon={CreditCard} defaultOpen={true}>
-          <div className="space-y-6">
-            <InstallmentManager
-              variant="shipment" installments={installments as any} grandTotal={calculateGrandTotal()}
-              onUpdateInstallments={(newInst) => setInstallments(newInst as any)}
-              validationError={installmentValidationError} installmentPlanEnabled={installmentPlanEnabled}
-              onTogglePlan={(enabled) => {
-                setInstallmentPlanEnabled(enabled);
-                if (enabled && installments.length === 0) {
-                  setInstallments([{ id: crypto.randomUUID(), installmentNumber: 1, percentage: 100, amount: calculateGrandTotal(), status: 'unpaid', notes: 'دفعة واحدة', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }]);
-                } else if (!enabled) setInstallments([]);
-              }}
-              deal={formData as any} readOnly={formData.status === 'delivered' || formData.status === 'cancelled'}
+        {/* Compact status timeline + build-invoice action — children area only.
+            Bulky stacked sections were moved to tabs (الصفقات / النقل المحلي /
+            المالية / تفاصيل إضافية / الملاحظات / بيانات أخرى) per task6 P-G
+            density rules (category 0). */}
+        <div style={{ padding: '4px 0', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <ShipmentStatusVisualizer
+              type={shippingInfo.shippingType || 'sea'}
+              currentStatus={shippingInfo.shipmentStatus?.status || 'agent_warehouse'}
             />
-            {formData.id ? (
-              <PaymentProgress
-                installments={installments as any}
-                deal={{ ...formData, id: formData.id, totalAmount: calculateGrandTotal(), payments: formData.payments || [] } as any}
-                variant="shipment" currentUser={currentUser}
-                onPaymentOperation={handlePaymentOperation} onConfirmSupplier={handleConfirmSupplier}
-                onOpenAccountingJournal={onOpenAccountingJournal}
-                readOnly={formData.status === "delivered" || formData.status === "cancelled"}
-              />
-            ) : (
-              <div className="p-4 aseel-bg-panel dark:aseel-bg-panel/20 aseel-text-ink dark:aseel-text-soft rounded-xl flex items-center gap-2 border aseel-border-soft dark:aseel-border-soft">
-                <AlertCircle className="w-5 h-5" />
-                <span>يرجى حفظ الشحنة أولاً للبدء في إجراء عمليات الدفع.</span>
-              </div>
-            )}
           </div>
-        </CollapsibleSection>
-
-        {/* زر تكوين فاتورة */}
-        {formData.id && (formData as any).shipment_type !== 'transport' && (
-          <button
-            onClick={() => window.open(`/purchase-invoices/new?shipment=${formData.id}`, '_blank')}
-            className="flex items-center gap-2 px-5 py-2.5 aseel-bg-panel text-white font-bold rounded-xl hover:aseel-bg-panel"
-            style={{ marginTop: 12 }}
-            title="تكوين فاتورة شراء من بيانات الإرسالية"
-          >
-            تكوين فاتورة
-          </button>
-        )}
+          {formData.id && (formData as any).shipment_type !== 'transport' && (
+            <button
+              type="button"
+              onClick={() => window.open(`/purchase-invoices/new?shipment=${formData.id}`, '_blank')}
+              className="aseel-toolbtn"
+              style={{ padding: '4px 10px', whiteSpace: 'nowrap' }}
+              title="تكوين فاتورة شراء من بيانات الإرسالية"
+            >
+              تكوين فاتورة
+            </button>
+          )}
+        </div>
       </AseelDocumentShell>
 
       {/* فهرس وكلاء الشحن */}
