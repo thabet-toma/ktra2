@@ -4,6 +4,7 @@ import { Save } from "lucide-react";
 import { apiGetObject, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
 import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance } from "@/services/clearanceApi";
+import type { ClearanceLine } from "@/constants/clearanceDefaults";
 import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, postLocalShipment } from "@/services/localShippingApi";
 import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab } from "@/components/aseel";
 import { CompactTimeline } from "./CompactTimeline";
@@ -251,30 +252,118 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     </div>
   );
 
-  const clearanceContent = clearance ? (
+  const setCF = (patch: Partial<ClearanceRow>) => setClearanceForm(prev => prev ? { ...prev, ...patch } : prev);
+  const cfOn = (key: keyof ClearanceRow) => (e: React.ChangeEvent<HTMLInputElement>) => setCF({ [key]: e.target.value });
+  const addLine = () => {
+    if (!clearanceForm) return;
+    const lines = clearanceForm.lines || [];
+    const maxSeq = lines.reduce((m, l) => Math.max(m, l.seq || 0), 0);
+    setCF({ lines: [...lines, { id: -(lines.length + 1), seq: maxSeq + 1, line_type: "other", description: "", debit: 0, credit: 0, vat_percent: 0 }] });
+  };
+  const updLine = (idx: number, patch: Partial<ClearanceLine>) => {
+    if (!clearanceForm) return;
+    const lines = (clearanceForm.lines || []).map((l, i) => i === idx ? { ...l, ...patch } : l);
+    setCF({ lines });
+  };
+  const delLine = (idx: number) => {
+    if (!clearanceForm) return;
+    setCF({ lines: (clearanceForm.lines || []).filter((_, i) => i !== idx) });
+  };
+  const handleSaveClearance = useCallback(async () => {
+    if (!clearanceForm || !clearanceForm.id) return;
+    setSaving(true); setError(null);
+    try {
+      const patched = await updateClearance(clearanceForm.id, {
+        declaration_number: clearanceForm.declaration_number,
+        clearance_date: clearanceForm.clearance_date,
+        transaction_time: clearanceForm.transaction_time,
+        second_date: clearanceForm.second_date,
+        settlement_invoice_number: clearanceForm.settlement_invoice_number,
+        licensed_dealer_no: clearanceForm.licensed_dealer_no,
+        customs_broker: clearanceForm.customs_broker,
+        currency: clearanceForm.currency,
+        exchange_rate: clearanceForm.exchange_rate,
+        subtotal_no_vat: clearanceForm.subtotal_no_vat,
+        vat_total: clearanceForm.vat_total,
+        grand_total: clearanceForm.grand_total,
+        cost_lines: (clearanceForm.lines || []).map(l => ({ label: l.description, amount: (l.debit || 0) - (l.credit || 0) })),
+      });
+      setClearance(patched);
+      setClearanceForm({ ...patched });
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  }, [clearanceForm]);
+  const handleCreateClearance = useCallback(async () => {
+    if (!shipment) return;
+    setSaving(true); setError(null);
+    try {
+      const created = await createClearance({ shipment: shipment.id });
+      setClearance(created);
+      setClearanceForm({ ...created });
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  }, [shipment]);
+
+  const clearanceContent = clearanceForm ? (
     <div style={{ padding: "4px 8px" }}>
-      <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600, marginBottom: 4 }}>بنود التخليص</h4>
-      <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "2px 8px", marginBottom: 8 }}>
+        {fld("رقم البيان", <input className="aseel-input" value={clearanceForm.declaration_number || ""} onChange={cfOn("declaration_number")} />)}
+        {fld("تاريخ التخليص", <input className="aseel-input" type="date" value={clearanceForm.clearance_date ? String(clearanceForm.clearance_date).slice(0, 10) : ""} onChange={cfOn("clearance_date")} />)}
+        {fld("الوقت", <input className="aseel-input" type="time" value={clearanceForm.transaction_time ? String(clearanceForm.transaction_time).slice(0, 5) : ""} onChange={cfOn("transaction_time")} />)}
+        {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={clearanceForm.second_date ? String(clearanceForm.second_date).slice(0, 10) : ""} onChange={cfOn("second_date")} />)}
+        {fld("مشتغل مرخص", <input className="aseel-input" value={clearanceForm.licensed_dealer_no || ""} onChange={cfOn("licensed_dealer_no")} />)}
+        {fld("رقم فاتورة المقاصة", <input className="aseel-input" value={clearanceForm.settlement_invoice_number || ""} onChange={cfOn("settlement_invoice_number")} />)}
+        {fld("المخلِّص", <input className="aseel-input" readOnly value={clearanceForm.broker_name || (clearanceForm.customs_broker ? `#${clearanceForm.customs_broker}` : "—")} />)}
+        {fld("العملة", <input className="aseel-input" value={clearanceForm.currency != null ? String(clearanceForm.currency) : ""} onChange={(e) => setCF({ currency: e.target.value ? Number(e.target.value) : null })} />)}
+        {fld("سعر العملة", <input className="aseel-input" type="number" step="0.000001" value={clearanceForm.exchange_rate != null ? String(clearanceForm.exchange_rate) : ""} onChange={(e) => setCF({ exchange_rate: e.target.value ? Number(e.target.value) : null })} />)}
+        {fld("مجموع بدون ضريبة", <input className="aseel-input" type="number" step="0.01" value={clearanceForm.subtotal_no_vat != null ? String(clearanceForm.subtotal_no_vat) : ""} onChange={(e) => setCF({ subtotal_no_vat: e.target.value ? Number(e.target.value) : null })} />)}
+        {fld("مجموع الضريبة", <input className="aseel-input" type="number" step="0.01" value={clearanceForm.vat_total != null ? String(clearanceForm.vat_total) : ""} onChange={(e) => setCF({ vat_total: e.target.value ? Number(e.target.value) : null })} />)}
+        {fld("الإجمالي", <input className="aseel-input" type="number" step="0.01" value={clearanceForm.grand_total != null ? String(clearanceForm.grand_total) : ""} onChange={(e) => setCF({ grand_total: e.target.value ? Number(e.target.value) : null })} />)}
+      </div>
+      <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)", tableLayout: "fixed" }}>
         <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
+          <th style={{ padding: "2px 4px", textAlign: "start", width: 80 }}>النوع</th>
           <th style={{ padding: "2px 4px", textAlign: "start" }}>البيان</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>مدين</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>دائن</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 60 }}>VAT%</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 40 }}>حذف</th>
         </tr></thead>
         <tbody>
-          {(clearance.lines || []).map((l) => (
-            <tr key={l.id}>
-              <td style={{ padding: "2px 4px" }}>{l.description}</td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}>{l.debit ? fmt(l.debit) : "—"}</td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}>{l.credit ? fmt(l.credit) : "—"}</td>
+          {(clearanceForm.lines || []).map((l, i) => (
+            <tr key={l.id ?? i}>
+              <td style={{ padding: "2px 4px" }}><select className="aseel-input" value={l.line_type} onChange={(e) => updLine(i, { line_type: e.target.value })}>
+                <option value="vat">ضريبة القيمة المضافة</option>
+                <option value="declaration_fee">رسوم البيان</option>
+                <option value="terminal">محطة الشحن</option>
+                <option value="permits">تصاريح</option>
+                <option value="broker_commission">عمولة المخلص</option>
+                <option value="customs_system">نظام الجمارك</option>
+                <option value="other">أخرى</option>
+              </select></td>
+              <td style={{ padding: "2px 4px" }}><input className="aseel-input" value={l.description} onChange={(e) => updLine(i, { description: e.target.value })} style={{ width: "100%" }} /></td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}><input className="aseel-input" type="number" step="0.01" value={String(l.debit || 0)} onChange={(e) => updLine(i, { debit: Number(e.target.value) })} style={{ width: 70 }} /></td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}><input className="aseel-input" type="number" step="0.01" value={String(l.credit || 0)} onChange={(e) => updLine(i, { credit: Number(e.target.value) })} style={{ width: 70 }} /></td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}><input className="aseel-input" type="number" step="0.01" value={String(l.vat_percent || 0)} onChange={(e) => updLine(i, { vat_percent: Number(e.target.value) })} style={{ width: 50 }} /></td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}><button type="button" className="aseel-toolbtn" onClick={() => delLine(i)} style={{ color: "var(--aseel-danger, #c0392b)", padding: "0 4px" }}>✕</button></td>
             </tr>
           ))}
-          {(!clearance.lines || clearance.lines.length === 0) && (
-            <tr><td colSpan={3} style={{ padding: "8px 4px", textAlign: "center", color: "#999" }}>لا توجد بنود تخليص</td></tr>
+          {(!clearanceForm.lines || clearanceForm.lines.length === 0) && (
+            <tr><td colSpan={6} style={{ padding: "8px 4px", textAlign: "center", color: "#999" }}>لا توجد بنود تخليص</td></tr>
           )}
         </tbody>
       </table>
+      <div style={{ display: "flex", gap: 8, padding: "4px 0" }}>
+        <button type="button" className="aseel-toolbtn" onClick={addLine}>+ إضافة بند</button>
+        <button type="button" className="aseel-toolbtn" onClick={handleSaveClearance} disabled={saving}>تخزين التخليص</button>
+      </div>
     </div>
-  ) : <p className="aseel-text-soft" style={{ padding: 8 }}>لا يوجد تخليص مرتبط</p>;
+  ) : clearance ? <p className="aseel-text-soft" style={{ padding: 8 }}>لا يوجد تخليص مرتبط</p> : (
+    <div style={{ padding: "8px", textAlign: "center" }}>
+      <p className="aseel-text-soft" style={{ marginBottom: 8 }}>لا يوجد سجل تخليص لهذه الشحنة</p>
+      <button type="button" className="aseel-toolbtn" onClick={handleCreateClearance} disabled={saving}>إنشاء سجل تخليص</button>
+    </div>
+  );
 
   const localContent = localShipments.length > 0 ? (
     <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)" }}>
