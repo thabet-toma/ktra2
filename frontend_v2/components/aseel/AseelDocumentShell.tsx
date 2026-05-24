@@ -6,7 +6,7 @@
  * ZERO business logic — everything is a slot/prop. Consumed by M1+ screens.
  * Reference: docs/aseel_reference/invoices.txt 51–192 + owner screenshots.
  */
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ChevronRight,
   ChevronLeft,
@@ -53,6 +53,12 @@ export interface AseelDocumentShellProps {
   totals?: React.ReactNode;
   /** Status bar items (user / journal no / movement no / ...). */
   status?: React.ReactNode;
+  /** Initial tab key (defaults to first tab). */
+  initialTab?: string;
+  /** Controlled active tab key. */
+  activeTab?: string;
+  /** Fired when active tab changes (for controlled mode). */
+  onTabChange?: (key: string) => void;
 }
 
 const navBtn = (
@@ -84,9 +90,18 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
   tabs = [],
   totals,
   status,
+  initialTab,
+  activeTab: controlledTab,
+  onTabChange,
 }) => {
-  const [activeTab, setActiveTab] = useState(0);
-  const tab = tabs[activeTab];
+  const initIdx = useMemo(() => {
+    if (initialTab) { const i = tabs.findIndex((t) => t.key === initialTab); if (i >= 0) return i; }
+    return 0;
+  }, [initialTab, tabs]);
+  const [localTab, setLocalTab] = useState(initIdx);
+  const activeIdx = controlledTab != null ? tabs.findIndex((t) => t.key === controlledTab) : localTab;
+  const effectiveIdx = activeIdx >= 0 ? activeIdx : 0;
+  const tab = tabs[effectiveIdx];
 
   return (
     <div className="aseel-doc" data-skin="aseel">
@@ -148,9 +163,12 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
                     key={t.key}
                     type="button"
                     role="tab"
-                    aria-selected={i === activeTab}
-                    className={`aseel-tab${i === activeTab ? ' aseel-tab--active' : ''}`}
-                    onClick={() => setActiveTab(i)}
+                    aria-selected={i === effectiveIdx}
+                    className={`aseel-tab${i === effectiveIdx ? ' aseel-tab--active' : ''}`}
+                    onClick={() => {
+                      if (controlledTab != null) { onTabChange?.(t.key); }
+                      else { setLocalTab(i); }
+                    }}
                   >
                     {t.label}
                   </button>

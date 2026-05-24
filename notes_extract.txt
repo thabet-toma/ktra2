@@ -1,0 +1,154 @@
+             
+        
+
+                                                 
+            
+
+                          
+                                
+
+                          
+           
+
+                                         
+                                       
+        
+           
+
+                                               
+         
+                                                 
+
+         
+                            
+
+       
+          
+
+                                              
+
+         
+                                        
+
+      Auto-seeding disabled for Real Auth mode.
+  :3000/deals/78:1 Error while trying to use the
+
+          following icon from the Manifest: http://
+ localhost:3000/android-chrome-192x192.png
+(Download error or resource isn't a valid image)
+      127.0.0.1:8000/api/m...obalDailyDisable/:1
+
+  Failed to load resource: the server responded
+                    with a status of 404 (Not Found)
+
+   autoDisableScheduler.ts:43   
+                                               
+    refresh.js:27 WebSocket connection to 'ws://
+
+                                 localhost:8081/' failed:
+         127.0.0.1:8000/api/logistics/deals/78/:1
+  Failed to load resource: the server responded
+       with a status of 500 (Internal Server Error)
+DealForm.tsx:509 shipping workflow: Error: API
+
+                      error: 500 (logistics/deals/78/)
+              at apiPatchObject (restApi.ts:216:11)
+         at async Object.patchShippingWorkflow
+
+                                 (dealsService.ts:621:5)
+       at async handleShippingWorkflowChange
+
+                                   (DealForm.tsx:506:7)
+                              at async handleWfSelect
+                         (DealStageControl.tsx:116:7)
+ autoDisableScheduler.ts:38   
+                                             :: ...
+      127.0.0.1:8000/api/m...obalDailyDisable/:1
+  Failed to load resource: the server responded
+                    with a status of 404 (Not Found)
+   autoDisableScheduler.ts:43   
+                                               
+
+ autoDisableScheduler.ts:38   
+                                             :: ...
+      127.0.0.1:8000/api/m...obalDailyDisable/:1
+  Failed to load resource: the server responded
+                    with a status of 404 (Not Found)
+
+             
+        
+
+         ...        
+            
+  task5 )n8-t9      
+
+                                             
+               
+
+                       n8-t10     override
+         
+                                  backend 
+
+                          
+         
+
+                                                 useState
+                                 3. useState useState
+                                 4. useState useState
+                                 5. useState useState
+                                 6. useState useState
+                                 7. useState useState
+                                 8. useState useState
+                                 9. useState useState
+                                10. useState useState
+                                11. useState useState
+                                12. useState useState
+                                13. useState useState
+                                14. useState useState
+
+                                     15. useRef useRef
+                            16. useMemo useMemo
+                            17. useMemo useMemo
+                           18. useCallback useCallback
+                           19. useCallback useCallback
+                           20. useCallback useCallback
+                           21. useCallback useCallback
+                           22. useCallback useCallback
+
+                                         23. useRef useRef
+                                  24. useEffect useEffect
+
+                                         25. useRef useRef
+                                  26. useEffect useEffect
+                                  27. useEffect useEffect
+                           28. useCallback useCallback
+                                  29. useEffect useEffect
+                              30. undefined useCallback
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+                                                               ^^
+
+react-dom_client.js?v=c1ad8383:5792 Uncaught
+      Error: Rendered more hooks than during the
+                                            previous render.
+                      at AccountingJournalEntryPage
+       (AccountingJournalEntryPage.tsx:444:30)
+react-dom_client.js?v=c1ad8383:6966 An error
+occurred in the <AccountingJournalEntryPage>
+
+                                               component.
+
+Consider adding an error boundary to your tree
+              to customize error handling behavior.
+
+ Visit https://react.dev/link/error-boundaries to
+                 learn more about error boundaries.
+
+   autoDisableScheduler.ts:32  
+                                               
+       127.0.0.1:8000/api/a...ing/cost-centers/:1
+  Failed to load resource: the server responded
+       with a status of 500 (Internal Server Error)
+
+                       
+

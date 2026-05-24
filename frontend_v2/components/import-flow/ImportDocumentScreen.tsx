@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { apiGetObject } from "@/services/restApi";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import { Save } from "lucide-react";
+import { apiGetObject, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
-import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow } from "@/services/clearanceApi";
-import { listLocalShipments, LocalShipmentRow } from "@/services/localShippingApi";
+import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance } from "@/services/clearanceApi";
+import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, postLocalShipment } from "@/services/localShippingApi";
 import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab } from "@/components/aseel";
 import { CompactTimeline } from "./CompactTimeline";
 
@@ -90,48 +92,61 @@ function buildTimelineSteps(sw: string | undefined | null, shipType: string | un
 }
 
 export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScreenProps) {
+  const [searchParams] = useSearchParams();
+  const initialTab = searchParams.get("tab") || "deals";
   const [shipment, setShipment] = useState<ShipmentApiRow | null>(null);
+  const [shipmentForm, setShipmentForm] = useState<ShipmentApiRow | null>(null);
   const [clearance, setClearance] = useState<ClearanceRow | null>(null);
+  const [clearanceForm, setClearanceForm] = useState<ClearanceRow | null>(null);
   const [localShipments, setLocalShipments] = useState<LocalShipmentRow[]>([]);
+  const [localForm, setLocalForm] = useState<LocalShipmentRow | null>(null);
   const [clearancePayments, setClearancePayments] = useState<ClearancePaymentRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  const loadAll = useCallback(async (id: number | string) => {
+    setLoading(true); setError(null);
+    try {
+      const s = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${id}/`, { tenantId: tid() });
+      setShipment(s);
+      setShipmentForm({ ...s });
+      const cls = await listClearances();
+      const matched = cls.find((c) => c.shipment === s.id) || null;
+      setClearance(matched);
+      setClearanceForm(matched ? { ...matched } : null);
+      const locs = await listLocalShipments();
+      setLocalShipments(locs.filter((l) => l.shipment === s.id));
+      if (matched) {
+        const pays = await listClearancePayments(matched.id);
+        setClearancePayments(pays);
+      } else {
+        setClearancePayments([]);
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setLoading(false); }
+  }, []);
 
   useEffect(() => {
-    if (!shipmentId) {
+    if (!shipmentId || shipmentId === "new") {
       setLoading(false);
-      setShipment(null);
+      if (shipmentId === "new") {
+        setShipment(null);
+        setShipmentForm({ id: 0, shipment_number: "", shipment_date: new Date().toISOString().slice(0, 10), editable: true } as ShipmentApiRow);
+      } else {
+        setShipment(null);
+        setShipmentForm(null);
+      }
       setClearance(null);
+      setClearanceForm(null);
       setLocalShipments([]);
+      setLocalForm(null);
       setClearancePayments([]);
       return;
     }
-    let cancelled = false;
-    (async () => {
-      setLoading(true); setError(null);
-      try {
-        const s = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${shipmentId}/`, { tenantId: tid() });
-        if (cancelled) return;
-        setShipment(s);
-        const cls = await listClearances();
-        if (cancelled) return;
-        const matched = cls.find((c) => c.shipment === s.id) || null;
-        setClearance(matched);
-        const locs = await listLocalShipments();
-        if (cancelled) return;
-        setLocalShipments(locs.filter((l) => l.shipment === s.id));
-        if (matched) {
-          const pays = await listClearancePayments(matched.id);
-          if (cancelled) return;
-          setClearancePayments(pays);
-        } else {
-          setClearancePayments([]);
-        }
-      } catch (e) { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); }
-      finally { if (!cancelled) setLoading(false); }
-    })();
-    return () => { cancelled = true; };
-  }, [shipmentId]);
+    loadAll(shipmentId);
+  }, [shipmentId, loadAll]);
 
   // Empty nav (single-record view) — shell expects a nav prop but we don't browse here yet.
   const nav = useRecordNavigation({ items: [] as ShipmentApiRow[], getId: () => 0, currentId: null, onSelect: () => {} });
@@ -147,9 +162,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       </div>
     );
   }
-  if (!shipment) return <div className="p-8 text-center aseel-text-soft">لم يتم العثور على الإرسالية</div>;
-
-  const s = shipment;
+  const s = shipment || shipmentForm;
+  if (!s) return <div className="p-8 text-center aseel-text-soft">لم يتم العثور على الإرسالية</div>;
   const paidShipping = clearancePayments
     .filter((p) => p.payment_purpose === "shipping" && p.is_posted)
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
@@ -188,32 +202,43 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     </>
   );
 
-  const headerBand = (
+  const setSF = (patch: Partial<ShipmentApiRow>) => setShipmentForm(prev => prev ? { ...prev, ...patch } : prev);
+  const sfOn = (key: keyof ShipmentApiRow) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setSF({ [key]: e.target.value });
+
+  const headerBand = shipmentForm ? (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "2px 8px", padding: "4px 0" }}>
-      {fld("رقم الإرسالية", <input className="aseel-input" readOnly value={s.shipment_number || `#${s.id}`} />)}
-      {fld("تاريخ", <input className="aseel-input" type="date" readOnly value={s.shipment_date ? String(s.shipment_date).slice(0, 10) : ""} />)}
-      {fld("الساعة", <input className="aseel-input" type="time" readOnly value={s.transaction_time ? String(s.transaction_time).slice(0, 5) : ""} />)}
-      {fld("تاريخ ثاني", <input className="aseel-input" type="date" readOnly value={s.second_date ? String(s.second_date).slice(0, 10) : ""} />)}
-      {fld("الوكيل", <input className="aseel-input" readOnly value={s.shipping_agent ? `#${s.shipping_agent}` : "—"} />)}
-      {fld("اسم الوكيل", <input className="aseel-input" readOnly value={s.agent_name || "—"} />)}
-      {fld("نوع الإرسالية", <input className="aseel-input" readOnly value={s.shipment_type === "transport" ? "نقل" : "فاتورة"} />)}
-      {fld("نوع الشحن", <input className="aseel-input" readOnly value={s.shipping_type === "air" ? "جوي" : s.shipping_type === "sea" ? "بحري" : s.shipping_type || "—"} />)}
-      {fld("رقم البوليصة", <input className="aseel-input" readOnly value={s.bill_of_lading || "—"} />)}
-      {fld("رقم الحاوية", <input className="aseel-input" readOnly value={s.container_number || "—"} />)}
-      {fld("المغادرة", <input className="aseel-input" type="date" readOnly value={s.departure_date ? String(s.departure_date).slice(0, 10) : ""} />)}
-      {fld("الوصول", <input className="aseel-input" type="date" readOnly value={s.arrival_date ? String(s.arrival_date).slice(0, 10) : ""} />)}
-      {fld("السفينة / الرحلة", <input className="aseel-input" readOnly value={s.ship_name || s.flight_number || "—"} />)}
-      {fld("رقم الحركة", <input className="aseel-input" readOnly value={s.agent_shipment_number || "—"} />)}
-      {fld("رقم الفاتورة", <input className="aseel-input" readOnly value={s.invoice_number || "—"} />)}
-      {fld("الحجم / الوزن", <input className="aseel-input" readOnly value={`${fmt(s.total_volume)} / ${fmt(s.total_weight_kg)}`} />)}
+      {fld("رقم الإرسالية", <input className="aseel-input" readOnly value={shipmentForm.shipment_number || `#${shipmentForm.id}`} />)}
+      {fld("تاريخ", <input className="aseel-input" type="date" value={shipmentForm.shipment_date ? String(shipmentForm.shipment_date).slice(0, 10) : ""} onChange={sfOn("shipment_date")} />)}
+      {fld("الساعة", <input className="aseel-input" type="time" value={shipmentForm.transaction_time ? String(shipmentForm.transaction_time).slice(0, 5) : ""} onChange={sfOn("transaction_time")} />)}
+      {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={shipmentForm.second_date ? String(shipmentForm.second_date).slice(0, 10) : ""} onChange={sfOn("second_date")} />)}
+      {fld("الوكيل", <input className="aseel-input" readOnly value={shipmentForm.shipping_agent ? `#${shipmentForm.shipping_agent}` : "—"} />)}
+      {fld("اسم الوكيل", <input className="aseel-input" readOnly value={shipmentForm.agent_name || "—"} />)}
+      {fld("نوع الإرسالية", <select className="aseel-input" value={shipmentForm.shipment_type || "invoice"} onChange={sfOn("shipment_type")}>
+        <option value="invoice">فاتورة</option>
+        <option value="transport">نقل</option>
+      </select>)}
+      {fld("نوع الشحن", <select className="aseel-input" value={shipmentForm.shipping_type || ""} onChange={sfOn("shipping_type")}>
+        <option value="">—</option>
+        <option value="sea">بحري</option>
+        <option value="air">جوي</option>
+        <option value="land">بري</option>
+      </select>)}
+      {fld("رقم البوليصة", <input className="aseel-input" value={shipmentForm.bill_of_lading || ""} onChange={sfOn("bill_of_lading")} />)}
+      {fld("رقم الحاوية", <input className="aseel-input" value={shipmentForm.container_number || ""} onChange={sfOn("container_number")} />)}
+      {fld("المغادرة", <input className="aseel-input" type="date" value={shipmentForm.departure_date ? String(shipmentForm.departure_date).slice(0, 10) : ""} onChange={sfOn("departure_date")} />)}
+      {fld("الوصول", <input className="aseel-input" type="date" value={shipmentForm.arrival_date ? String(shipmentForm.arrival_date).slice(0, 10) : ""} onChange={sfOn("arrival_date")} />)}
+      {fld("السفينة / الرحلة", <input className="aseel-input" value={shipmentForm.ship_name || shipmentForm.flight_number || ""} onChange={(e) => setSF({ ship_name: e.target.value, flight_number: e.target.value })} />)}
+      {fld("رقم الحركة", <input className="aseel-input" value={shipmentForm.agent_shipment_number || ""} onChange={sfOn("agent_shipment_number")} />)}
+      {fld("رقم الفاتورة", <input className="aseel-input" readOnly value={shipmentForm.invoice_number || "—"} />)}
+      {fld("الحجم / الوزن", <input className="aseel-input" readOnly value={`${fmt(shipmentForm.total_volume)} / ${fmt(shipmentForm.total_weight_kg)}`} />)}
       {fld("المخلِّص", <input className="aseel-input" readOnly value={clearance ? (clearance.broker_name || `#${clearance.customs_broker}`) : "—"} />)}
       {fld("رقم البيان", <input className="aseel-input" readOnly value={clearance?.declaration_number || "—"} />)}
       {fld("تاريخ التخليص", <input className="aseel-input" type="date" readOnly value={clearance?.clearance_date ? String(clearance.clearance_date).slice(0, 10) : ""} />)}
       {fld("فاتورة المقاصة", <input className="aseel-input" readOnly value={clearance?.settlement_invoice_number || "—"} />)}
       {fld("كشف الضريبة", <input className="aseel-input" readOnly value={clearance?.vat_statement != null ? String(clearance.vat_statement) : "—"} />)}
-      {fld("محرَّر", <input className="aseel-input" readOnly value={s.editable ? "نعم" : "لا"} />)}
+      {fld("محرَّر", <input className="aseel-input" readOnly value={shipmentForm.editable ? "نعم" : "لا"} />)}
     </div>
-  );
+  ) : <p className="aseel-text-soft" style={{ padding: 8 }}>...جاري تحميل الحقول</p>;
 
   const dealsContent = (
     <div style={{ padding: "4px 8px" }}>
@@ -325,7 +350,46 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     { key: "notes", label: "ملاحظات", content: notesContent },
   ];
 
+  const handleSaveShipment = useCallback(async () => {
+    if (!shipmentForm) return;
+    setSaving(true); setError(null);
+    try {
+      if (shipmentForm.id) {
+        const patched = await apiPatchObject<ShipmentApiRow>(`logistics/shipments/${shipmentForm.id}/`, shipmentForm, { tenantId: tid() });
+        setShipment(patched);
+        setShipmentForm({ ...patched });
+      } else {
+        const created = await apiPostObject<ShipmentApiRow>("logistics/shipments/", shipmentForm, { tenantId: tid() });
+        setShipment(created);
+        setShipmentForm({ ...created });
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    finally { setSaving(false); }
+  }, [shipmentForm]);
+
+  const isShipmentDirty = useMemo(() => {
+    if (!shipment || !shipmentForm) return false;
+    return JSON.stringify(shipment) !== JSON.stringify(shipmentForm);
+  }, [shipment, shipmentForm]);
+
+  useEffect(() => {
+    if (isShipmentDirty) {
+      const onUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+      window.addEventListener("beforeunload", onUnload);
+      return () => window.removeEventListener("beforeunload", onUnload);
+    }
+  }, [isShipmentDirty]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F12") { e.preventDefault(); handleSaveShipment(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleSaveShipment]);
+
   const toolbarActions: AseelToolbarAction[] = [
+    { key: "save", label: "تخزين (F12)", icon: <Save />, onClick: handleSaveShipment, disabled: !isShipmentDirty || saving },
     ...(onClose ? [{ key: "back", label: "رجوع", onClick: onClose }] : []),
   ];
 
@@ -337,6 +401,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       actions={toolbarActions}
       header={headerBand}
       tabs={tabsConfig}
+      initialTab={initialTab}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
       totals={totals}
       status={statusBar}
     >
