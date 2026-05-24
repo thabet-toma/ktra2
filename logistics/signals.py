@@ -23,11 +23,18 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # دالة موحّدة لحساب payment_status — تعتمد حصرياً على is_posted
+#
+# P-F-4: also re-syncs the legacy status / order_status cache columns from
+# shipping_workflow_status, so a single call here keeps all three denormalized
+# fields consistent with the canonical sources (workflow + posted payments).
 # ---------------------------------------------------------------------------
 def recalculate_deal_payment_status(deal_or_pk):
     """
     يعيد حساب payment_status للصفقة بناءً على الدفعات **المرحّلة محاسبياً فقط**
     (is_posted=True). هذا يضمن تناسق الحالة مع دفتر الأستاذ العام.
+
+    P-F-4: يحدّث أيضاً status + order_status من shipping_workflow_status حتى
+    تبقى الأعمدة الثلاثة (الكاش) متزامنة مع المصدر القانوني.
 
     يُستخدم في: post_payment, unpost_payment, remove_payment, signal.
     """
@@ -38,7 +45,10 @@ def recalculate_deal_payment_status(deal_or_pk):
     ) or 0
 
     try:
-        deal = LogisticsDeal.objects.only("total_amount", "payment_status").get(pk=pk)
+        deal = LogisticsDeal.objects.only(
+            "total_amount", "payment_status", "status", "order_status",
+            "shipping_workflow_status",
+        ).get(pk=pk)
     except LogisticsDeal.DoesNotExist:
         return
 
@@ -50,8 +60,19 @@ def recalculate_deal_payment_status(deal_or_pk):
     else:
         new_ps = "Unpaid"
 
+    sw = deal.shipping_workflow_status
+    new_status = LogisticsDeal._STATUS_FROM_WORKFLOW.get(sw, deal.status)
+    new_order = LogisticsDeal._ORDER_STATUS_FROM_WORKFLOW.get(sw, deal.order_status)
+
+    updates = {}
     if deal.payment_status != new_ps:
-        LogisticsDeal.objects.filter(pk=pk).update(payment_status=new_ps)
+        updates["payment_status"] = new_ps
+    if deal.status != new_status:
+        updates["status"] = new_status
+    if deal.order_status != new_order:
+        updates["order_status"] = new_order
+    if updates:
+        LogisticsDeal.objects.filter(pk=pk).update(**updates)
 
 
 @receiver(post_save, sender=LogisticsDeal)

@@ -604,22 +604,24 @@ System-wide cleanup — 8 tasks.
 - **P-F-1:** `LogisticsClearance` header enrichment — 11 new fields (transaction_time/second_date/licensed_dealer_no/settlement_invoice_number/currency FK/exchange_rate/vat_statement FK/subtotal_no_vat/vat_total/grand_total/journal FK/editable). Migration `0039_clearance_header_enrichment`.
 - **P-F-2:** `LogisticsShipment` header enrichment — 7 new fields (transaction_time/transit_journal FK/editable/vat_statement FK/journal_no_display/subtotal/vat_total/grand_total).
 - **P-F-3:** `LogisticsDeal` header enrichment — 4 new fields (transaction_time/second_date/licensed_dealer_no/editable).
-- **P-F-4:** **Deferred to task7.** External model attempted to convert `status`/`order_status`/`payment_status` to `@property`, but: (1) Python class body makes `@property` shadow the same-named Field, so Django ORM stopped seeing them as fields and `manage.py makemigrations` wanted to drop the columns; (2) `logistics/signals.py:54` and `core/dashboard_api.py:174` use `.filter()/.update()` on these fields and would silently break. The task itself marks P-F-5 (drop columns) as optional/deferred, so we reverted the properties and added a `compute_status_from_workflow()` helper as a non-shadowing read-only derivation.
-- **P-F-5:** **Deferred to task7** (column drop — optional per task6.md).
-- **P-F-6:** Frontend `CustomsClearanceManagement.tsx` — 9 new header inputs (التوقيت/تاريخ ثاني/مشتغل مرخص/رقم فاتورة المقاصة/العملة/سعر العملة/صافي بدون ضريبة/مجموع الضريبة/الإجمالي).
+- **P-F-4:** **Implemented as save-time auto-sync, not @property** (the pure-@property reading from task6.md is unsafe here — see fix #1 below). The legacy `status`/`order_status`/`payment_status` columns are kept as a denormalized cache, but `LogisticsDeal.save()` now calls `_sync_legacy_status_fields()` to force them to mirror `shipping_workflow_status` (lifecycle) + `remaining_amount`/posted-payments (settlement). `recalculate_deal_payment_status` in `signals.py` was extended to recompute all three fields atomically. Data migration `0040_pf4_backfill_deal_status_cache` brought every existing row in line. Single-source-of-truth goal achieved without breaking the 6+ ORM filters in `core/dashboard_api.py`, the views.py callers, or the frontend `SqlDealsPage`.
+- **P-F-5:** **Deferred to task7** (full column drop — task6.md flags it as optional; with the auto-sync in place the columns now behave as a write-through cache, so the drop is a low-priority cleanup rather than a correctness fix).
+- **P-F-6:** Frontend `CustomsClearanceManagement.tsx` — 10 new header inputs (التوقيت/تاريخ ثاني/مشتغل مرخص/**رقم البيان**/**رقم فاتورة المقاصة**/العملة/سعر العملة/صافي بدون ضريبة/مجموع الضريبة/الإجمالي). The external model had collapsed "رقم البيان" and "رقم فاتورة المقاصة" onto the same input (declaration_number); fixed to two separate inputs bound to `formDecl` and `formSettlementInvoice` respectively.
 
 ### Errors found in external-model commit & corrected
-1. **`@property status/order_status/payment_status` shadowed Django fields** → reverted; helper `compute_status_from_workflow()` retained instead. Drift eliminated.
+1. **`@property status/order_status/payment_status` shadowed Django fields** → replaced by a non-shadowing save-time auto-sync (P-F-4 above). `recalculate_deal_payment_status` now syncs all three fields atomically. Drift eliminated; ORM filters in dashboard_api/signals/SqlDealsPage keep working.
 2. **`LogisticsClearanceSerializer._default_cost_lines`** was defined as a regular method but without `self` parameter → would `TypeError` when called as `self._default_cost_lines()`. Fixed with `@staticmethod`.
 3. **Dropped `cost_lines` JSONField, but 7 callsites in `views.py` + `landed_cost.py` still read `clearance.cost_lines`** as a list → added `@property cost_lines` on `LogisticsClearance` returning `[{label, amount}]` from `lines` rows for backwards-compat. All legacy callsites work unchanged.
 4. **`cost_lines = SerializerMethodField`** was read-only → frontend writes (`updateClearance({cost_lines})`) silently dropped. Changed to `JSONField(required=False)` so writes flow into `validate_cost_lines` + `_sync_lines_from_cost_lines`.
+5. **P-F-6 UI:** "رقم البيان" and "رقم فاتورة المقاصة" were collapsed onto the same input → split into two distinct inputs (declaration_number vs settlement_invoice_number).
 
 ### Verified
 - `manage.py check` = 0 issues
 - `makemigrations --check` = no drift (after corrections)
-- All 12 new migrations 0028-0039 applied successfully
+- All 13 new migrations 0028-0040 applied successfully
 - `tsc --noEmit` = 41 errors (no regression vs baseline)
 - Model import sanity test passes; `LogisticsClearance.cost_lines` is now a property exposing the same shape
+- `LogisticsDeal._sync_legacy_status_fields` runs on every `save()`; backfill migration succeeded
 
 ### Orphans Update
 - JSONField `cost_lines` on clearance: **dropped + replaced by structured `LogisticsClearanceLine` table** (with backwards-compat property)
@@ -629,6 +631,6 @@ System-wide cleanup — 8 tasks.
 - Clearance + Shipment + Deal missing Aseel header fields: **22 fields added in total**
 
 ### Pending
-- P-F-4/5 (status field unification + column drop) — deferred to task7
+- P-F-5 (full column drop) — deferred to task7 (optional; auto-sync makes the columns a cache rather than independent state)
 - P-G (UI density redesign + ImportDocumentScreen merger) — the largest remaining piece (~20-30h)
 - P-H..P-K (business logic completion, frontend quality, tests, push)

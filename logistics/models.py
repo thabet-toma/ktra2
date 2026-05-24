@@ -168,31 +168,74 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
 
     def save(self, *args, **kwargs):
         self._assert_valid_workflow_transition()
+        self._sync_legacy_status_fields()
         super().save(*args, **kwargs)
 
-    # ── P-F-4: Status field deprecation — deferred to task7 ──
+    # ── P-F-4: Status field auto-sync (cache layer over shipping_workflow_status) ──
+    #
     # The task6.md plan (P-F-4) suggested converting `status`, `order_status`,
-    # `payment_status` to computed @property. We deferred this because:
+    # `payment_status` to computed @property. A pure @property approach is
+    # unsafe in this codebase because:
     #   1. Python's class body makes @property shadow the same-named Field,
     #      breaking Django ORM (`.filter(payment_status=...)`, `.update(...)`).
-    #   2. `logistics.signals.recalculate_deal_payment_status` and
-    #      `core/dashboard_api.py` rely on `.filter()/.update()` on these
-    #      columns; converting silently breaks them.
-    # The task itself marks P-F-5 (drop columns) as "optional, may be deferred
-    # to task7", so we keep the fields and defer the full deprecation pass.
+    #   2. `core/dashboard_api.py` issues 6+ filters/values on `status` and
+    #      `payment_status`. `logistics.signals.recalculate_deal_payment_status`
+    #      uses `.update(payment_status=...)`. The migrate-from-firebase command
+    #      writes to `payment_status` directly. Frontend `SqlDealsPage` reads
+    #      both fields from the API response.
+    #
+    # Safe equivalent: keep the columns as a denormalized cache, but force-sync
+    # them from the canonical sources (`shipping_workflow_status` + payments
+    # totals) on every save. The columns then function as a write-through cache
+    # rather than independent state — same goal as @property (single source of
+    # truth) without the breakage. P-F-5 (full column drop) remains optional
+    # and deferred to task7 per task6.md's own statement.
+    _STATUS_FROM_WORKFLOW = {
+        None: 'Open',
+        'sw_mfg_start': 'Open',
+        'sw_wait_agent_ship': 'Shipped',
+        'sw_wait_intl_ship': 'Shipped',
+        'sw_wait_arrival': 'Shipped',
+        'sw_wait_clearance': 'Cleared',
+        'sw_released': 'Closed',
+    }
+    _ORDER_STATUS_FROM_WORKFLOW = {
+        'sw_mfg_start': 'Manufacturing',
+        'sw_wait_agent_ship': 'Shipping',
+        'sw_wait_intl_ship': 'Shipping',
+        'sw_wait_arrival': 'Shipping',
+        'sw_wait_clearance': 'Clearance',
+        'sw_released': 'Delivered',
+    }
 
-    def compute_status_from_workflow(self):
-        """Helper: derive lifecycle label from shipping_workflow_status (read-only)."""
+    def _sync_legacy_status_fields(self):
+        """Force status/order_status/payment_status to reflect canonical state.
+        Called from save(); also runnable as a one-shot via the migration."""
         sw = self.shipping_workflow_status
-        if sw is None or sw == 'sw_mfg_start':
-            return 'Open'
-        if sw in ('sw_wait_agent_ship', 'sw_wait_intl_ship', 'sw_wait_arrival'):
-            return 'Shipped'
-        if sw == 'sw_wait_clearance':
-            return 'Cleared'
-        if sw == 'sw_released':
-            return 'Closed'
-        return self.status
+        derived_status = self._STATUS_FROM_WORKFLOW.get(sw)
+        if derived_status is not None:
+            self.status = derived_status
+        derived_order = self._ORDER_STATUS_FROM_WORKFLOW.get(sw)
+        if derived_order is not None:
+            self.order_status = derived_order
+        # payment_status from remaining_amount (no payment posting required —
+        # `recalculate_deal_payment_status` keeps remaining_amount fresh).
+        rem = self.remaining_amount if self.remaining_amount is not None else 0
+        tot = self.total_amount if self.total_amount is not None else 0
+        try:
+            from decimal import Decimal
+            rem_d = Decimal(str(rem))
+            tot_d = Decimal(str(tot))
+        except Exception:
+            rem_d, tot_d = 0, 0
+        if tot_d <= 0:
+            self.payment_status = 'Unpaid'
+        elif rem_d <= 0:
+            self.payment_status = 'Fully Paid'
+        elif rem_d < tot_d:
+            self.payment_status = 'Partially Paid'
+        else:
+            self.payment_status = 'Unpaid'
 
     def __str__(self):
         return f"{self.ref_number} - {self.partner.name}"

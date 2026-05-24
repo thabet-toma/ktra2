@@ -417,7 +417,8 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
               {fld("التوقيت", <input className="aseel-input" type="time" value={formTime} onChange={(e) => setFormTime(e.target.value)} />)}
               {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={formSecondDate} onChange={(e) => setFormSecondDate(e.target.value)} />)}
               {fld("مشتغل مرخص", <input className="aseel-input" value={formLicensedDealer} onChange={(e) => setFormLicensedDealer(e.target.value)} />)}
-              {fld("رقم فاتورة المقاصة", <input className="aseel-input" value={formDecl} onChange={(e) => setFormDecl(e.target.value)} placeholder="رقم البيان / الإقرار" />)}
+              {fld("رقم البيان / الإقرار", <input className="aseel-input" value={formDecl} onChange={(e) => setFormDecl(e.target.value)} placeholder="رقم البيان / الإقرار" />)}
+              {fld("رقم فاتورة المقاصة", <input className="aseel-input" value={formSettlementInvoice} onChange={(e) => setFormSettlementInvoice(e.target.value)} placeholder="رقم المقاصة" />)}
               {fld("رقم القيد", <input className="aseel-input" readOnly value={selected.journal ? `#${selected.journal}` : "—"} />)}
               {fld("كشف الضريبة", <input className="aseel-input" readOnly value={selected.vat_statement != null ? String(selected.vat_statement) : "—"} />)}
               {fld("العملة", <select className="aseel-input" value={formCurrency === "" ? "" : String(formCurrency)} onChange={(e) => setFormCurrency(e.target.value === "" ? "" : Number(e.target.value))}>
