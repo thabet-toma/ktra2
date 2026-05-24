@@ -5,7 +5,7 @@ import { apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "@/servi
 import { resolveTenantId } from "@/utils/tenantContext";
 import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance } from "@/services/clearanceApi";
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
-import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, postLocalShipment } from "@/services/localShippingApi";
+import { listLocalShipments, LocalShipmentRow } from "@/services/localShippingApi";
 import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab } from "@/components/aseel";
 import { CompactTimeline } from "./CompactTimeline";
 
@@ -64,6 +64,14 @@ interface ShipmentApiRow {
   notes?: string;
   deals_count?: number;
   deals_preview?: string | null;
+  shipment_deal_allocations?: Array<{ id: number; deal: number; deal_name?: string; allocated_shipping_cost?: number }>;
+}
+
+interface DealRow {
+  id: number;
+  deal_name?: string;
+  deal_number?: string;
+  ref_number?: string;
 }
 
 const ROUTE_LABELS: Record<string, string> = {
@@ -79,8 +87,8 @@ const ROUTE_LABELS: Record<string, string> = {
   delivered_local: "محلي",
 };
 
-const STATUS_ORDER_SEA = ["agent_warehouse","china_customs_clearance","on_board","at_sea","arrived_port","israel_customs_clearance","released","delivered_local"];
-const STATUS_ORDER_AIR = ["agent_warehouse","china_customs_clearance","departed","arrived_airport","israel_customs_clearance","released","delivered_local"];
+const STATUS_ORDER_SEA = ["agent_warehouse", "china_customs_clearance", "on_board", "at_sea", "arrived_port", "israel_customs_clearance", "released", "delivered_local"];
+const STATUS_ORDER_AIR = ["agent_warehouse", "china_customs_clearance", "departed", "arrived_airport", "israel_customs_clearance", "released", "delivered_local"];
 
 function buildTimelineSteps(sw: string | undefined | null, shipType: string | undefined): { key: string; label: string; status: "done" | "current" | "pending" }[] {
   const order = shipType === "air" ? STATUS_ORDER_AIR : STATUS_ORDER_SEA;
@@ -92,7 +100,10 @@ function buildTimelineSteps(sw: string | undefined | null, shipType: string | un
   }));
 }
 
+const EMPTY_SHIPMENT_ALLOCS: ShipmentApiRow["shipment_deal_allocations"] = [];
+
 export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScreenProps) {
+  // ── All hooks MUST be declared before any early return (React rules-of-hooks). ──
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab") || "deals";
   const [shipment, setShipment] = useState<ShipmentApiRow | null>(null);
@@ -100,12 +111,17 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const [clearance, setClearance] = useState<ClearanceRow | null>(null);
   const [clearanceForm, setClearanceForm] = useState<ClearanceRow | null>(null);
   const [localShipments, setLocalShipments] = useState<LocalShipmentRow[]>([]);
-  const [localForm, setLocalForm] = useState<LocalShipmentRow | null>(null);
   const [clearancePayments, setClearancePayments] = useState<ClearancePaymentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState(initialTab);
+  // Deals tab state
+  const [linkPickerOpen, setLinkPickerOpen] = useState(false);
+  const [availableDeals, setAvailableDeals] = useState<DealRow[]>([]);
+
+  // Empty nav (single-record view) — shell expects a nav prop but we don't browse here yet.
+  const nav = useRecordNavigation({ items: [] as ShipmentApiRow[], getId: () => 0, currentId: null, onSelect: () => {} });
 
   const loadAll = useCallback(async (id: number | string) => {
     setLoading(true); setError(null);
@@ -125,8 +141,11 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       } else {
         setClearancePayments([]);
       }
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setLoading(false); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -134,7 +153,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setLoading(false);
       if (shipmentId === "new") {
         setShipment(null);
-        setShipmentForm({ id: 0, shipment_number: "", shipment_date: new Date().toISOString().slice(0, 10), editable: true } as ShipmentApiRow);
+        setShipmentForm({
+          id: 0,
+          shipment_number: "",
+          shipment_date: new Date().toISOString().slice(0, 10),
+          editable: true,
+        } as ShipmentApiRow);
       } else {
         setShipment(null);
         setShipmentForm(null);
@@ -142,19 +166,210 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setClearance(null);
       setClearanceForm(null);
       setLocalShipments([]);
-      setLocalForm(null);
       setClearancePayments([]);
       return;
     }
-    loadAll(shipmentId);
+    void loadAll(shipmentId);
   }, [shipmentId, loadAll]);
 
-  // Empty nav (single-record view) — shell expects a nav prop but we don't browse here yet.
-  const nav = useRecordNavigation({ items: [] as ShipmentApiRow[], getId: () => 0, currentId: null, onSelect: () => {} });
-  const timelineSteps = useMemo(() => buildTimelineSteps(shipment?.shipping_workflow_status, shipment?.shipping_type), [shipment]);
+  // ── Shipment form helpers ──
+  const setSF = useCallback(
+    (patch: Partial<ShipmentApiRow>) =>
+      setShipmentForm((prev) => (prev ? { ...prev, ...patch } : prev)),
+    [],
+  );
 
-  if (loading) return <div className="p-8 text-center aseel-text-soft">جاري تحميل الإرسالية…</div>;
-  if (error) return <div className="p-8 text-center" style={{ color: "var(--aseel-danger, #c0392b)" }}>{error}</div>;
+  const handleSaveShipment = useCallback(async () => {
+    if (!shipmentForm) return;
+    setSaving(true); setError(null);
+    try {
+      if (shipmentForm.id) {
+        const patched = await apiPatchObject<ShipmentApiRow>(
+          `logistics/shipments/${shipmentForm.id}/`,
+          shipmentForm,
+          { tenantId: tid() },
+        );
+        setShipment(patched);
+        setShipmentForm({ ...patched });
+      } else {
+        const created = await apiPostObject<ShipmentApiRow>(
+          "logistics/shipments/",
+          shipmentForm,
+          { tenantId: tid() },
+        );
+        setShipment(created);
+        setShipmentForm({ ...created });
+        // Note: route stays /import-flow/new; caller can navigate to /import-flow/<created.id>
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [shipmentForm]);
+
+  const isShipmentDirty = useMemo(() => {
+    if (!shipment || !shipmentForm) return false;
+    return JSON.stringify(shipment) !== JSON.stringify(shipmentForm);
+  }, [shipment, shipmentForm]);
+
+  // Browser warning on close while dirty
+  useEffect(() => {
+    if (!isShipmentDirty) return undefined;
+    const onUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", onUnload);
+    return () => window.removeEventListener("beforeunload", onUnload);
+  }, [isShipmentDirty]);
+
+  // F12 → save
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "F12") { e.preventDefault(); void handleSaveShipment(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [handleSaveShipment]);
+
+  // ── Clearance form helpers ──
+  const setCF = useCallback(
+    (patch: Partial<ClearanceRow>) =>
+      setClearanceForm((prev) => (prev ? { ...prev, ...patch } : prev)),
+    [],
+  );
+
+  const addClearanceLine = useCallback(() => {
+    setClearanceForm((prev) => {
+      if (!prev) return prev;
+      const lines = prev.lines || [];
+      const maxSeq = lines.reduce((m, l) => Math.max(m, l.seq || 0), 0);
+      return {
+        ...prev,
+        lines: [
+          ...lines,
+          { id: -(lines.length + 1), seq: maxSeq + 1, line_type: "other", description: "", debit: 0, credit: 0, vat_percent: 0 },
+        ],
+      };
+    });
+  }, []);
+
+  const updateClearanceLine = useCallback((idx: number, patch: Partial<ClearanceLine>) => {
+    setClearanceForm((prev) => {
+      if (!prev) return prev;
+      const lines = (prev.lines || []).map((l, i) => (i === idx ? { ...l, ...patch } : l));
+      return { ...prev, lines };
+    });
+  }, []);
+
+  const deleteClearanceLine = useCallback((idx: number) => {
+    setClearanceForm((prev) => {
+      if (!prev) return prev;
+      return { ...prev, lines: (prev.lines || []).filter((_, i) => i !== idx) };
+    });
+  }, []);
+
+  const handleSaveClearance = useCallback(async () => {
+    if (!clearanceForm || !clearanceForm.id) return;
+    setSaving(true); setError(null);
+    try {
+      const patched = await updateClearance(clearanceForm.id, {
+        declaration_number: clearanceForm.declaration_number,
+        clearance_date: clearanceForm.clearance_date,
+        transaction_time: clearanceForm.transaction_time,
+        second_date: clearanceForm.second_date,
+        settlement_invoice_number: clearanceForm.settlement_invoice_number,
+        licensed_dealer_no: clearanceForm.licensed_dealer_no,
+        customs_broker: clearanceForm.customs_broker,
+        currency: clearanceForm.currency,
+        exchange_rate: clearanceForm.exchange_rate,
+        subtotal_no_vat: clearanceForm.subtotal_no_vat,
+        vat_total: clearanceForm.vat_total,
+        grand_total: clearanceForm.grand_total,
+        cost_lines: (clearanceForm.lines || []).map((l) => ({
+          label: l.description,
+          amount: (l.debit || 0) - (l.credit || 0),
+        })),
+      });
+      setClearance(patched);
+      setClearanceForm({ ...patched });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [clearanceForm]);
+
+  const handleCreateClearance = useCallback(async () => {
+    if (!shipment) return;
+    setSaving(true); setError(null);
+    try {
+      const created = await createClearance({ shipment: shipment.id });
+      setClearance(created);
+      setClearanceForm({ ...created });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [shipment]);
+
+  // ── Deals tab helpers (linking only — unlink/allocate need backend endpoints) ──
+  const shipmentDeals = useMemo(
+    () => (shipment?.shipment_deal_allocations as ShipmentApiRow["shipment_deal_allocations"]) || EMPTY_SHIPMENT_ALLOCS,
+    [shipment],
+  );
+
+  const openLinkPicker = useCallback(async () => {
+    if (!shipment) return;
+    setLinkPickerOpen(true);
+    try {
+      const rows = await apiGetList<DealRow>("logistics/deals/", { tenantId: tid() });
+      const linkedIds = new Set(shipmentDeals.map((d) => d.deal));
+      setAvailableDeals(rows.filter((r) => !linkedIds.has(r.id)));
+    } catch {
+      setAvailableDeals([]);
+    }
+  }, [shipment, shipmentDeals]);
+
+  const handleLinkDeal = useCallback(async (dealId: number) => {
+    if (!shipment) return;
+    setSaving(true); setError(null);
+    try {
+      await apiPostObject(
+        `logistics/shipments/${shipment.id}/add_deal/`,
+        { deal_id: dealId },
+        { tenantId: tid() },
+      );
+      // Refresh shipment to get updated allocations
+      const refreshed = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${shipment.id}/`, { tenantId: tid() });
+      setShipment(refreshed);
+      setShipmentForm({ ...refreshed });
+      setLinkPickerOpen(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [shipment]);
+
+  const handleUnlinkDeal = useCallback(() => {
+    // [QUESTION] no remove_deal endpoint exists on LogisticsShipmentViewSet.
+    // Unlinking requires a backend addition (task6.1 phase C — flagged in commit 8df2ac8).
+    setError("إلغاء ربط الصفقة غير متاح حالياً — يتطلب endpoint جديد في الـbackend.");
+  }, []);
+
+  // ── Derived values ──
+  const timelineSteps = useMemo(
+    () => buildTimelineSteps(shipment?.shipping_workflow_status, shipment?.shipping_type),
+    [shipment],
+  );
+
+  // ── Early returns AFTER all hooks ──
+  if (loading) {
+    return <div className="p-8 text-center aseel-text-soft">جاري تحميل الإرسالية…</div>;
+  }
+  if (error && !shipmentForm) {
+    return <div className="p-8 text-center" style={{ color: "var(--aseel-danger, #c0392b)" }}>{error}</div>;
+  }
   if (!shipmentId) {
     return (
       <div className="p-8 text-center aseel-text-soft">
@@ -164,7 +379,11 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     );
   }
   const s = shipment || shipmentForm;
-  if (!s) return <div className="p-8 text-center aseel-text-soft">لم يتم العثور على الإرسالية</div>;
+  if (!s || !shipmentForm) {
+    return <div className="p-8 text-center aseel-text-soft">لم يتم العثور على الإرسالية</div>;
+  }
+
+  // ── Render ──
   const paidShipping = clearancePayments
     .filter((p) => p.payment_purpose === "shipping" && p.is_posted)
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
@@ -199,37 +418,37 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       <span className="aseel-status-item">الحالة <b>{s.shipping_workflow_status || "—"}</b></span>
       {s.transit_journal && <span className="aseel-status-item">رقم القيد <b>#{s.transit_journal}</b></span>}
       <span className="aseel-status-item">رقم الإرسالية <b>{s.shipment_number || "—"}</b></span>
+      {isShipmentDirty && <span className="aseel-status-item" style={{ color: "var(--aseel-warn, #b45309)" }}>● غير محفوظ</span>}
       <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
     </>
   );
 
-  const setSF = (patch: Partial<ShipmentApiRow>) => setShipmentForm(prev => prev ? { ...prev, ...patch } : prev);
-  const sfOn = (key: keyof ShipmentApiRow) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setSF({ [key]: e.target.value });
+  const sfText = (key: keyof ShipmentApiRow) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setSF({ [key]: e.target.value });
 
-  const headerBand = shipmentForm ? (
+  const headerBand = (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "2px 8px", padding: "4px 0" }}>
-      {fld("رقم الإرسالية", <input className="aseel-input" readOnly value={shipmentForm.shipment_number || `#${shipmentForm.id}`} />)}
-      {fld("تاريخ", <input className="aseel-input" type="date" value={shipmentForm.shipment_date ? String(shipmentForm.shipment_date).slice(0, 10) : ""} onChange={sfOn("shipment_date")} />)}
-      {fld("الساعة", <input className="aseel-input" type="time" value={shipmentForm.transaction_time ? String(shipmentForm.transaction_time).slice(0, 5) : ""} onChange={sfOn("transaction_time")} />)}
-      {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={shipmentForm.second_date ? String(shipmentForm.second_date).slice(0, 10) : ""} onChange={sfOn("second_date")} />)}
+      {fld("رقم الإرسالية", <input className="aseel-input" readOnly value={shipmentForm.shipment_number || (shipmentForm.id ? `#${shipmentForm.id}` : "— جديدة —")} />)}
+      {fld("تاريخ", <input className="aseel-input" type="date" value={shipmentForm.shipment_date ? String(shipmentForm.shipment_date).slice(0, 10) : ""} onChange={sfText("shipment_date")} />)}
+      {fld("الساعة", <input className="aseel-input" type="time" value={shipmentForm.transaction_time ? String(shipmentForm.transaction_time).slice(0, 5) : ""} onChange={sfText("transaction_time")} />)}
+      {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={shipmentForm.second_date ? String(shipmentForm.second_date).slice(0, 10) : ""} onChange={sfText("second_date")} />)}
       {fld("الوكيل", <input className="aseel-input" readOnly value={shipmentForm.shipping_agent ? `#${shipmentForm.shipping_agent}` : "—"} />)}
       {fld("اسم الوكيل", <input className="aseel-input" readOnly value={shipmentForm.agent_name || "—"} />)}
-      {fld("نوع الإرسالية", <select className="aseel-input" value={shipmentForm.shipment_type || "invoice"} onChange={sfOn("shipment_type")}>
+      {fld("نوع الإرسالية", <select className="aseel-input" value={shipmentForm.shipment_type || "invoice"} onChange={sfText("shipment_type")}>
         <option value="invoice">فاتورة</option>
         <option value="transport">نقل</option>
       </select>)}
-      {fld("نوع الشحن", <select className="aseel-input" value={shipmentForm.shipping_type || ""} onChange={sfOn("shipping_type")}>
+      {fld("نوع الشحن", <select className="aseel-input" value={shipmentForm.shipping_type || ""} onChange={sfText("shipping_type")}>
         <option value="">—</option>
         <option value="sea">بحري</option>
         <option value="air">جوي</option>
         <option value="land">بري</option>
       </select>)}
-      {fld("رقم البوليصة", <input className="aseel-input" value={shipmentForm.bill_of_lading || ""} onChange={sfOn("bill_of_lading")} />)}
-      {fld("رقم الحاوية", <input className="aseel-input" value={shipmentForm.container_number || ""} onChange={sfOn("container_number")} />)}
-      {fld("المغادرة", <input className="aseel-input" type="date" value={shipmentForm.departure_date ? String(shipmentForm.departure_date).slice(0, 10) : ""} onChange={sfOn("departure_date")} />)}
-      {fld("الوصول", <input className="aseel-input" type="date" value={shipmentForm.arrival_date ? String(shipmentForm.arrival_date).slice(0, 10) : ""} onChange={sfOn("arrival_date")} />)}
+      {fld("رقم البوليصة", <input className="aseel-input" value={shipmentForm.bill_of_lading || ""} onChange={sfText("bill_of_lading")} />)}
+      {fld("رقم الحاوية", <input className="aseel-input" value={shipmentForm.container_number || ""} onChange={sfText("container_number")} />)}
+      {fld("المغادرة", <input className="aseel-input" type="date" value={shipmentForm.departure_date ? String(shipmentForm.departure_date).slice(0, 10) : ""} onChange={sfText("departure_date")} />)}
+      {fld("الوصول", <input className="aseel-input" type="date" value={shipmentForm.arrival_date ? String(shipmentForm.arrival_date).slice(0, 10) : ""} onChange={sfText("arrival_date")} />)}
       {fld("السفينة / الرحلة", <input className="aseel-input" value={shipmentForm.ship_name || shipmentForm.flight_number || ""} onChange={(e) => setSF({ ship_name: e.target.value, flight_number: e.target.value })} />)}
-      {fld("رقم الحركة", <input className="aseel-input" value={shipmentForm.agent_shipment_number || ""} onChange={sfOn("agent_shipment_number")} />)}
+      {fld("رقم الحركة", <input className="aseel-input" value={shipmentForm.agent_shipment_number || ""} onChange={sfText("agent_shipment_number")} />)}
       {fld("رقم الفاتورة", <input className="aseel-input" readOnly value={shipmentForm.invoice_number || "—"} />)}
       {fld("الحجم / الوزن", <input className="aseel-input" readOnly value={`${fmt(shipmentForm.total_volume)} / ${fmt(shipmentForm.total_weight_kg)}`} />)}
       {fld("المخلِّص", <input className="aseel-input" readOnly value={clearance ? (clearance.broker_name || `#${clearance.customs_broker}`) : "—"} />)}
@@ -239,57 +458,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       {fld("كشف الضريبة", <input className="aseel-input" readOnly value={clearance?.vat_statement != null ? String(clearance.vat_statement) : "—"} />)}
       {fld("محرَّر", <input className="aseel-input" readOnly value={shipmentForm.editable ? "نعم" : "لا"} />)}
     </div>
-  ) : <p className="aseel-text-soft" style={{ padding: 8 }}>...جاري تحميل الحقول</p>;
-
-  const [shipmentDeals, setShipmentDeals] = useState<any[]>([]);
-  const [linkPickerOpen, setLinkPickerOpen] = useState(false);
-  const [availableDeals, setAvailableDeals] = useState<any[]>([]);
-
-  const loadDeals = useCallback(async () => {
-    if (!shipmentForm?.id) return;
-    try {
-      const s = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${shipmentForm.id}/`, { tenantId: tid() });
-      setShipmentDeals((s as any).shipment_deal_allocations || []);
-    } catch { /* ignore */ }
-  }, [shipmentForm?.id]);
-
-  const handleLinkDeal = useCallback(async (dealIds: number[]) => {
-    if (!shipment || dealIds.length === 0) return;
-    setSaving(true);
-    try {
-      for (const dealId of dealIds) {
-        await apiPostObject(`logistics/shipments/${shipment.id}/add_deal/`, { deal_id: dealId }, { tenantId: tid() });
-      }
-      await loadDeals();
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setSaving(false); setLinkPickerOpen(false); }
-  }, [shipment, loadDeals]);
-
-  const handleUnlinkDeal = useCallback(async (dealId: number) => {
-    // [QUESTION] لا يوجد remove_deal endpoint. سيُضاف لاحقاً.
-    setError("إلغاء ربط الصفقة غير متاح حالياً — لا يوجد endpoint remove_deal في الـbackend.");
-  }, []);
-
-  useEffect(() => {
-    if (s?.id && s.id > 0) {
-      const allocs = (s as any).shipment_deal_allocations || [];
-      setShipmentDeals(allocs);
-    }
-  }, [s]);
+  );
 
   const dealsContent = (
     <div style={{ padding: "4px 8px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>الصفقات المرتبطة ({shipmentDeals.length})</h4>
-        <button type="button" className="aseel-toolbtn" onClick={async () => {
-          if (!shipment) return;
-          setLinkPickerOpen(true);
-          try {
-            const rows = await apiGetList<any>("logistics/deals/", { tenantId: tid() });
-            const linkedIds = new Set(shipmentDeals.map((d: any) => d.deal));
-            setAvailableDeals(rows.filter((r: any) => !linkedIds.has(r.id)));
-          } catch { setAvailableDeals([]); }
-        }} disabled={!shipment}>+ ربط صفقة</button>
+        <button type="button" className="aseel-toolbtn" onClick={() => void openLinkPicker()} disabled={!shipment || saving}>+ ربط صفقة</button>
       </div>
       {linkPickerOpen && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.3)" }}>
@@ -298,8 +473,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             {availableDeals.length === 0 && <p className="aseel-text-soft">لا توجد صفقات متاحة</p>}
             {availableDeals.map((d) => (
               <div key={d.id} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid #eee", cursor: "pointer" }}
-                onClick={() => handleLinkDeal([d.id])}>
-                <span>{d.deal_name || d.deal_number || `#${d.id}`}</span>
+                onClick={() => void handleLinkDeal(d.id)}>
+                <span>{d.deal_name || d.deal_number || d.ref_number || `#${d.id}`}</span>
                 <span className="aseel-toolbtn">ربط</span>
               </div>
             ))}
@@ -317,13 +492,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           <th style={{ padding: "2px 4px", textAlign: "center", width: 60 }}>إلغاء</th>
         </tr></thead>
         <tbody>
-          {shipmentDeals.map((d: any) => (
+          {shipmentDeals.map((d) => (
             <tr key={d.id}>
               <td style={{ padding: "2px 4px" }}>#{d.deal}</td>
               <td style={{ padding: "2px 4px" }}>{d.deal_name || "—"}</td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(d.allocated_shipping_cost)}</td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>
-                <button type="button" className="aseel-toolbtn" onClick={() => handleUnlinkDeal(d.deal)} style={{ color: "var(--aseel-danger, #c0392b)", padding: "0 4px" }}>✕</button>
+                <button type="button" className="aseel-toolbtn" onClick={handleUnlinkDeal} style={{ color: "var(--aseel-danger, #c0392b)", padding: "0 4px" }} title="إلغاء الربط (يتطلب endpoint جديد)">✕</button>
               </td>
             </tr>
           ))}
@@ -335,67 +510,17 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     </div>
   );
 
-  const setCF = (patch: Partial<ClearanceRow>) => setClearanceForm(prev => prev ? { ...prev, ...patch } : prev);
-  const cfOn = (key: keyof ClearanceRow) => (e: React.ChangeEvent<HTMLInputElement>) => setCF({ [key]: e.target.value });
-  const addLine = () => {
-    if (!clearanceForm) return;
-    const lines = clearanceForm.lines || [];
-    const maxSeq = lines.reduce((m, l) => Math.max(m, l.seq || 0), 0);
-    setCF({ lines: [...lines, { id: -(lines.length + 1), seq: maxSeq + 1, line_type: "other", description: "", debit: 0, credit: 0, vat_percent: 0 }] });
-  };
-  const updLine = (idx: number, patch: Partial<ClearanceLine>) => {
-    if (!clearanceForm) return;
-    const lines = (clearanceForm.lines || []).map((l, i) => i === idx ? { ...l, ...patch } : l);
-    setCF({ lines });
-  };
-  const delLine = (idx: number) => {
-    if (!clearanceForm) return;
-    setCF({ lines: (clearanceForm.lines || []).filter((_, i) => i !== idx) });
-  };
-  const handleSaveClearance = useCallback(async () => {
-    if (!clearanceForm || !clearanceForm.id) return;
-    setSaving(true); setError(null);
-    try {
-      const patched = await updateClearance(clearanceForm.id, {
-        declaration_number: clearanceForm.declaration_number,
-        clearance_date: clearanceForm.clearance_date,
-        transaction_time: clearanceForm.transaction_time,
-        second_date: clearanceForm.second_date,
-        settlement_invoice_number: clearanceForm.settlement_invoice_number,
-        licensed_dealer_no: clearanceForm.licensed_dealer_no,
-        customs_broker: clearanceForm.customs_broker,
-        currency: clearanceForm.currency,
-        exchange_rate: clearanceForm.exchange_rate,
-        subtotal_no_vat: clearanceForm.subtotal_no_vat,
-        vat_total: clearanceForm.vat_total,
-        grand_total: clearanceForm.grand_total,
-        cost_lines: (clearanceForm.lines || []).map(l => ({ label: l.description, amount: (l.debit || 0) - (l.credit || 0) })),
-      });
-      setClearance(patched);
-      setClearanceForm({ ...patched });
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setSaving(false); }
-  }, [clearanceForm]);
-  const handleCreateClearance = useCallback(async () => {
-    if (!shipment) return;
-    setSaving(true); setError(null);
-    try {
-      const created = await createClearance({ shipment: shipment.id });
-      setClearance(created);
-      setClearanceForm({ ...created });
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setSaving(false); }
-  }, [shipment]);
+  const cfText = (key: keyof ClearanceRow) => (e: React.ChangeEvent<HTMLInputElement>) => setCF({ [key]: e.target.value });
 
   const clearanceContent = clearanceForm ? (
     <div style={{ padding: "4px 8px" }}>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "2px 8px", marginBottom: 8 }}>
-        {fld("رقم البيان", <input className="aseel-input" value={clearanceForm.declaration_number || ""} onChange={cfOn("declaration_number")} />)}
-        {fld("تاريخ التخليص", <input className="aseel-input" type="date" value={clearanceForm.clearance_date ? String(clearanceForm.clearance_date).slice(0, 10) : ""} onChange={cfOn("clearance_date")} />)}
-        {fld("الوقت", <input className="aseel-input" type="time" value={clearanceForm.transaction_time ? String(clearanceForm.transaction_time).slice(0, 5) : ""} onChange={cfOn("transaction_time")} />)}
-        {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={clearanceForm.second_date ? String(clearanceForm.second_date).slice(0, 10) : ""} onChange={cfOn("second_date")} />)}
-        {fld("مشتغل مرخص", <input className="aseel-input" value={clearanceForm.licensed_dealer_no || ""} onChange={cfOn("licensed_dealer_no")} />)}
-        {fld("رقم فاتورة المقاصة", <input className="aseel-input" value={clearanceForm.settlement_invoice_number || ""} onChange={cfOn("settlement_invoice_number")} />)}
+        {fld("رقم البيان", <input className="aseel-input" value={clearanceForm.declaration_number || ""} onChange={cfText("declaration_number")} />)}
+        {fld("تاريخ التخليص", <input className="aseel-input" type="date" value={clearanceForm.clearance_date ? String(clearanceForm.clearance_date).slice(0, 10) : ""} onChange={cfText("clearance_date")} />)}
+        {fld("الوقت", <input className="aseel-input" type="time" value={clearanceForm.transaction_time ? String(clearanceForm.transaction_time).slice(0, 5) : ""} onChange={cfText("transaction_time")} />)}
+        {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={clearanceForm.second_date ? String(clearanceForm.second_date).slice(0, 10) : ""} onChange={cfText("second_date")} />)}
+        {fld("مشتغل مرخص", <input className="aseel-input" value={clearanceForm.licensed_dealer_no || ""} onChange={cfText("licensed_dealer_no")} />)}
+        {fld("رقم فاتورة المقاصة", <input className="aseel-input" value={clearanceForm.settlement_invoice_number || ""} onChange={cfText("settlement_invoice_number")} />)}
         {fld("المخلِّص", <input className="aseel-input" readOnly value={clearanceForm.broker_name || (clearanceForm.customs_broker ? `#${clearanceForm.customs_broker}` : "—")} />)}
         {fld("العملة", <input className="aseel-input" value={clearanceForm.currency != null ? String(clearanceForm.currency) : ""} onChange={(e) => setCF({ currency: e.target.value ? Number(e.target.value) : null })} />)}
         {fld("سعر العملة", <input className="aseel-input" type="number" step="0.000001" value={clearanceForm.exchange_rate != null ? String(clearanceForm.exchange_rate) : ""} onChange={(e) => setCF({ exchange_rate: e.target.value ? Number(e.target.value) : null })} />)}
@@ -415,20 +540,32 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         <tbody>
           {(clearanceForm.lines || []).map((l, i) => (
             <tr key={l.id ?? i}>
-              <td style={{ padding: "2px 4px" }}><select className="aseel-input" value={l.line_type} onChange={(e) => updLine(i, { line_type: e.target.value })}>
-                <option value="vat">ضريبة القيمة المضافة</option>
-                <option value="declaration_fee">رسوم البيان</option>
-                <option value="terminal">محطة الشحن</option>
-                <option value="permits">تصاريح</option>
-                <option value="broker_commission">عمولة المخلص</option>
-                <option value="customs_system">نظام الجمارك</option>
-                <option value="other">أخرى</option>
-              </select></td>
-              <td style={{ padding: "2px 4px" }}><input className="aseel-input" value={l.description} onChange={(e) => updLine(i, { description: e.target.value })} style={{ width: "100%" }} /></td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}><input className="aseel-input" type="number" step="0.01" value={String(l.debit || 0)} onChange={(e) => updLine(i, { debit: Number(e.target.value) })} style={{ width: 70 }} /></td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}><input className="aseel-input" type="number" step="0.01" value={String(l.credit || 0)} onChange={(e) => updLine(i, { credit: Number(e.target.value) })} style={{ width: 70 }} /></td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}><input className="aseel-input" type="number" step="0.01" value={String(l.vat_percent || 0)} onChange={(e) => updLine(i, { vat_percent: Number(e.target.value) })} style={{ width: 50 }} /></td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}><button type="button" className="aseel-toolbtn" onClick={() => delLine(i)} style={{ color: "var(--aseel-danger, #c0392b)", padding: "0 4px" }}>✕</button></td>
+              <td style={{ padding: "2px 4px" }}>
+                <select className="aseel-input" value={l.line_type} onChange={(e) => updateClearanceLine(i, { line_type: e.target.value })}>
+                  <option value="vat">ضريبة القيمة المضافة</option>
+                  <option value="declaration_fee">رسوم البيان</option>
+                  <option value="terminal">محطة الشحن</option>
+                  <option value="permits">تصاريح</option>
+                  <option value="broker_commission">عمولة المخلص</option>
+                  <option value="customs_system">نظام الجمارك</option>
+                  <option value="other">أخرى</option>
+                </select>
+              </td>
+              <td style={{ padding: "2px 4px" }}>
+                <input className="aseel-input" value={l.description} onChange={(e) => updateClearanceLine(i, { description: e.target.value })} style={{ width: "100%" }} />
+              </td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>
+                <input className="aseel-input" type="number" step="0.01" value={String(l.debit || 0)} onChange={(e) => updateClearanceLine(i, { debit: Number(e.target.value) })} style={{ width: 70 }} />
+              </td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>
+                <input className="aseel-input" type="number" step="0.01" value={String(l.credit || 0)} onChange={(e) => updateClearanceLine(i, { credit: Number(e.target.value) })} style={{ width: 70 }} />
+              </td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>
+                <input className="aseel-input" type="number" step="0.01" value={String(l.vat_percent || 0)} onChange={(e) => updateClearanceLine(i, { vat_percent: Number(e.target.value) })} style={{ width: 50 }} />
+              </td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>
+                <button type="button" className="aseel-toolbtn" onClick={() => deleteClearanceLine(i)} style={{ color: "var(--aseel-danger, #c0392b)", padding: "0 4px" }}>✕</button>
+              </td>
             </tr>
           ))}
           {(!clearanceForm.lines || clearanceForm.lines.length === 0) && (
@@ -437,14 +574,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </tbody>
       </table>
       <div style={{ display: "flex", gap: 8, padding: "4px 0" }}>
-        <button type="button" className="aseel-toolbtn" onClick={addLine}>+ إضافة بند</button>
-        <button type="button" className="aseel-toolbtn" onClick={handleSaveClearance} disabled={saving}>تخزين التخليص</button>
+        <button type="button" className="aseel-toolbtn" onClick={addClearanceLine}>+ إضافة بند</button>
+        <button type="button" className="aseel-toolbtn" onClick={() => void handleSaveClearance()} disabled={saving}>تخزين التخليص</button>
       </div>
     </div>
-  ) : clearance ? <p className="aseel-text-soft" style={{ padding: 8 }}>لا يوجد تخليص مرتبط</p> : (
+  ) : (
     <div style={{ padding: "8px", textAlign: "center" }}>
       <p className="aseel-text-soft" style={{ marginBottom: 8 }}>لا يوجد سجل تخليص لهذه الشحنة</p>
-      <button type="button" className="aseel-toolbtn" onClick={handleCreateClearance} disabled={saving}>إنشاء سجل تخليص</button>
+      <button type="button" className="aseel-toolbtn" onClick={() => void handleCreateClearance()} disabled={saving || !shipment}>إنشاء سجل تخليص</button>
     </div>
   );
 
@@ -509,7 +646,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   );
 
   const notesContent = (
-    <textarea className="aseel-input" readOnly value={s.notes || clearance?.notes || ""} style={{ width: "100%", height: "100%", minHeight: 80, resize: "none", border: "none", padding: 8 }} />
+    <textarea
+      className="aseel-input"
+      value={shipmentForm.notes || ""}
+      onChange={(e) => setSF({ notes: e.target.value })}
+      style={{ width: "100%", height: "100%", minHeight: 80, resize: "none", border: "none", padding: 8 }}
+    />
   );
 
   const tabsConfig: AseelTab[] = [
@@ -522,64 +664,33 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     { key: "notes", label: "ملاحظات", content: notesContent },
   ];
 
-  const handleSaveShipment = useCallback(async () => {
-    if (!shipmentForm) return;
-    setSaving(true); setError(null);
-    try {
-      if (shipmentForm.id) {
-        const patched = await apiPatchObject<ShipmentApiRow>(`logistics/shipments/${shipmentForm.id}/`, shipmentForm, { tenantId: tid() });
-        setShipment(patched);
-        setShipmentForm({ ...patched });
-      } else {
-        const created = await apiPostObject<ShipmentApiRow>("logistics/shipments/", shipmentForm, { tenantId: tid() });
-        setShipment(created);
-        setShipmentForm({ ...created });
-      }
-    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-    finally { setSaving(false); }
-  }, [shipmentForm]);
-
-  const isShipmentDirty = useMemo(() => {
-    if (!shipment || !shipmentForm) return false;
-    return JSON.stringify(shipment) !== JSON.stringify(shipmentForm);
-  }, [shipment, shipmentForm]);
-
-  useEffect(() => {
-    if (isShipmentDirty) {
-      const onUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); };
-      window.addEventListener("beforeunload", onUnload);
-      return () => window.removeEventListener("beforeunload", onUnload);
-    }
-  }, [isShipmentDirty]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "F12") { e.preventDefault(); handleSaveShipment(); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [handleSaveShipment]);
-
   const toolbarActions: AseelToolbarAction[] = [
-    { key: "save", label: "تخزين (F12)", icon: <Save />, onClick: handleSaveShipment, disabled: !isShipmentDirty || saving },
+    { key: "save", label: "تخزين (F12)", icon: <Save />, onClick: () => void handleSaveShipment(), disabled: !isShipmentDirty || saving },
     ...(onClose ? [{ key: "back", label: "رجوع", onClick: onClose }] : []),
   ];
 
   return (
-    <AseelDocumentShell
-      title={s.shipment_name || `إرسالية ${s.shipment_number || ""}`}
-      state={s.shipment_number ? `شحنة #${s.shipment_number}` : "إرسالية جديدة"}
-      nav={nav}
-      actions={toolbarActions}
-      header={headerBand}
-      tabs={tabsConfig}
-      initialTab={initialTab}
-      activeTab={activeTab}
-      onTabChange={setActiveTab}
-      totals={totals}
-      status={statusBar}
-    >
-      <CompactTimeline steps={timelineSteps} />
-    </AseelDocumentShell>
+    <>
+      {error && (
+        <div style={{ background: "var(--aseel-err-bg, #fde8e8)", color: "var(--aseel-err, #c0392b)", padding: "4px 12px", borderBottom: "1px solid var(--aseel-err, #c0392b)", fontSize: "var(--aseel-fs-sm, 12px)" }}>
+          {error}
+        </div>
+      )}
+      <AseelDocumentShell
+        title={s.shipment_name || `إرسالية ${s.shipment_number || ""}`}
+        state={s.shipment_number ? `شحنة #${s.shipment_number}` : "إرسالية جديدة"}
+        nav={nav}
+        actions={toolbarActions}
+        header={headerBand}
+        tabs={tabsConfig}
+        initialTab={initialTab}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        totals={totals}
+        status={statusBar}
+      >
+        <CompactTimeline steps={timelineSteps} />
+      </AseelDocumentShell>
+    </>
   );
 }

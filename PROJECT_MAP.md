@@ -655,3 +655,35 @@ System-wide cleanup — 8 tasks.
 - **G-12 full:** Dedicated `AseelSidePanel` primitive (proper props/API/types) — current change is CSS-only on AseelIndexPicker.
 - **Editing parity in ImportDocumentScreen** — currently 100% read-only; field-level edit + save buttons + tab-level forms needed before old forms can be retired.
 - **P-H..P-K** (business logic completion, frontend quality, tests, push).
+
+## [TASK6.1 — A + B + C DONE 2026-05-24]
+
+> **Status:** Editing parity Phases A (shipment header), B (clearance tab), C (deals link) completed on `claude/task6.1`. External-model commits 9f29870, 8e439c8, 8df2ac8 reviewed — one critical hooks-order bug fixed.
+
+### Done
+- **A — Shipment header editable:** `shipmentForm` state + onChange wired across 22 header fields. `Save (F12)` toolbar button + dirty guard via `JSON.stringify` diff + `beforeunload` warning + `● غير محفوظ` indicator in status bar. New-shipment case (`/import-flow/new`) starts with blank form; POST creates record. `apiPatchObject`/`apiPostObject` from `restApi.ts`.
+- **B — Clearance tab editable:** 12-field clearance header (4×3 grid: declaration_number, clearance_date, transaction_time, second_date, licensed_dealer_no, settlement_invoice_number, broker, currency, exchange_rate, subtotal_no_vat, vat_total, grand_total). Inline lines table (add/edit/delete rows) with `line_type` choices (vat/declaration_fee/terminal/permits/broker_commission/customs_system/other). `تخزين التخليص` button → `updateClearance` with `cost_lines` JSON payload (backwards-compat with backend `_sync_lines_from_cost_lines`). Empty-clearance case shows `إنشاء سجل تخليص` button calling `createClearance({shipment})`.
+- **C — Deals tab link:** `+ ربط صفقة` button opens picker modal listing unlinked deals (`apiGetList('logistics/deals/')`). Click → POST `logistics/shipments/<id>/add_deal/` then refreshes shipment to pull `shipment_deal_allocations`. Allocations table shows linked deals with cost-share preview.
+- **AseelDocumentShell extension:** added `initialTab`/`activeTab`/`onTabChange` props for controlled tab state (so `?tab=clearance` query param works).
+
+### Errors found in external-model commits & corrected
+1. **React hooks-order violation** (the EXACT VII-1 bug fixed in P-B-1 for AccountingJournalEntryPage). External commits 9f29870/8e439c8/8df2ac8 declared **11+ `useState`/`useCallback`/`useEffect`/`useMemo`** AFTER the `if (loading)/if (error)/if (!shipmentId)/if (!s)` early returns. React would crash with "Rendered fewer hooks than during the previous render" on the first loading→loaded transition. Restructured: all hooks now declared before early returns; derived values (paidShipping/paidClearance/totals/headerBand/etc.) moved after the returns where they belong.
+2. **Stale double-source for `shipmentDeals`** — external code had both a separate `useState([])` + extra `loadDeals()` API call AND a `useEffect` reading from `shipment.shipment_deal_allocations`. Two competing sources. Replaced with single `useMemo(shipment?.shipment_deal_allocations)` — the serializer already includes allocations on the GET, no extra fetch needed.
+3. **`notesContent` was readOnly textarea** but `shipmentForm.notes` had no onChange — silently dropped edits. Wired to `setSF({ notes })`.
+4. **`postLocalShipment`/`createLocalShipment`/`updateLocalShipment` imports** were added by the external model but never called (D wasn't implemented). Removed unused imports.
+
+### Verified
+- `manage.py check` = 0 issues
+- `makemigrations --check` = no drift
+- `tsc --noEmit` = 41 errors (no regression vs baseline)
+- `logistics/views.py:646` `add_deal` action confirmed exists (used by C)
+- `clearanceApi.updateClearance` confirmed supports all P-F-1 fields (transaction_time, second_date, licensed_dealer_no, settlement_invoice_number, currency, exchange_rate, subtotal_no_vat, vat_total, grand_total) plus the legacy `cost_lines` JSON for backwards-compat sync
+
+### Pending (task6.1)
+- **D** Local shipments CRUD inline form + post-to-accounting
+- **E** Add clearance payment from import-flow
+- **F** Convert to PurchaseInvoice
+- **G** Routing migration (Shipments/Clearance/Local → /import-flow with tab param) — A-G-1 redirect ready to restore
+- **H** Delete old forms (ShipmentForm, clearance form-mode, local form-mode)
+- **I** AseelSidePanel primitive + browse-modal sweep
+- **Backend `remove_deal` endpoint** — flagged in commit 8df2ac8 as `[QUESTION]`; unlink button currently shows a clear error message instead of failing silently.
