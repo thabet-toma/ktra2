@@ -62,7 +62,7 @@ export const EditCashBoxModal: React.FC<EditCashBoxModalProps> = ({
       onLedgersMaybeChanged?.();
       onClose();
     } catch (error) {
-      console.error("Error updating cash box:", error);
+      // console suppressed
       alert("حدث خطأ أثناء تعديل الصندوق");
     } finally {
       setIsLoading(false);

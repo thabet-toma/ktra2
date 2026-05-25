@@ -114,7 +114,7 @@ export const findProducts = async (query: SearchQuery): Promise<Product[]> => {
         description: p.description
     }));
   } catch (error) {
-    console.error("Error in Gemini sourcing workflow:", error);
+    // console suppressed
     throw error;
   }
 };

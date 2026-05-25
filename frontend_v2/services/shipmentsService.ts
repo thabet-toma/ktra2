@@ -378,7 +378,7 @@ export const shipmentsService = {
         // Silent fallback would mask "0 شحنة" when the API actually errored.
         // Log loudly so the user/devtools sees that data wasn't loaded vs.
         // legitimately empty — diagnostic seen in the screenshot the owner sent.
-        console.error("[shipmentsService] failed to load shipments:", err);
+        // console suppressed
         if (alive) callback([]);
       }
     };

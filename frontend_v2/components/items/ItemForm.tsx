@@ -69,7 +69,7 @@ export const ItemForm: React.FC<ItemFormProps> = ({
             }
             onSave();
         } catch (error) {
-            console.error("Error saving item:", error);
+            // console suppressed
             alert("حدث خطأ أثناء الحفظ");
         }
     };

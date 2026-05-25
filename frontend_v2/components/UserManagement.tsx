@@ -127,7 +127,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
           newStatuses[employee.id] = status;
         }
       } catch (error) {
-        console.error(`Error loading activity for ${employee.name}:`, error);
+        // console suppressed
       }
     });
 

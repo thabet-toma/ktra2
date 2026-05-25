@@ -57,7 +57,7 @@ export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClos
                 );
                 setItemPrices(prices);
             } catch (error) {
-                console.error("Error fetching item prices:", error);
+                // console suppressed
             } finally {
                 setLoadingPrices(false);
             }

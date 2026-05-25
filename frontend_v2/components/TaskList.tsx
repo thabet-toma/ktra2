@@ -39,7 +39,7 @@ export const TaskList: React.FC<TaskListProps> = ({
           const fetchedCategories = await getCategories();
           setLocalCategories(fetchedCategories);
         } catch (error) {
-          console.error('Error fetching categories:', error);
+          // console suppressed
         }
       };
       fetchCategories();

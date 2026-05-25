@@ -332,7 +332,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
             );
             onClose();
         } catch (e) {
-            console.error(e);
+            // console suppressed
             alert(e instanceof Error ? e.message : "فشل استيراد الفواتير من الخادم");
         } finally {
             setImportBusy(false);

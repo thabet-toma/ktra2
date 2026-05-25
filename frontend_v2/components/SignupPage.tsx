@@ -132,7 +132,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
         onNavigateToLogin();
       }, 6000);
     } catch (err: any) {
-      console.error(err);
+      // console suppressed
       if (err.code === 'auth/email-already-in-use') {
         setError("⚠️ البريد الإلكتروني مستخدم بالفعل.");
       } else {

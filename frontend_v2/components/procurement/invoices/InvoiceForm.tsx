@@ -133,7 +133,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           setInstallments(mapped.installments || []);
           setInstallmentPlanEnabled(mapped.installmentPlanEnabled || false);
         } catch (err) {
-          console.error('Error loading invoice:', err);
+          // console suppressed
         }
       }
     },
@@ -172,7 +172,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         const list = await purchaseInvoiceApi.list();
         setInvoicesList(list);
       } catch (err) {
-        console.error('Error loading invoices list:', err);
+        // console suppressed
       }
     };
     loadInvoices();
@@ -412,7 +412,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       if (onSave) onSave({ id: savedSqlId });
       alert("تم حفظ الفاتورة بنجاح");
     } catch (error) {
-      console.error("Error saving invoice:", error);
+      // console suppressed
       const msg =
         error instanceof Error && error.message?.trim()
           ? error.message.trim()
@@ -586,7 +586,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             : "لم تُحدَّث الفاتورة من الخادم.";
       alert(msg);
     } catch (e) {
-      console.error(e);
+      // console suppressed
       alert(e instanceof Error ? e.message : "تعذّر إعادة الحساب");
     } finally {
       setRecalcBusy(false);

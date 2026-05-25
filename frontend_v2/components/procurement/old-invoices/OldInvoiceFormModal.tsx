@@ -171,7 +171,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                 return data.price || 0;
             }
         } catch (error) {
-            console.error("Error fetching last price:", error);
+            // console suppressed
         }
         return 0;
     };
@@ -270,7 +270,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
             }
             setImageUrls(prev => [...prev, ...newUrls]);
         } catch (error) {
-            console.error("Error uploading images:", error);
+            // console suppressed
             alert("فشل رفع الصور");
         } finally {
             setUploadingImages(false);
@@ -309,7 +309,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
             }
             setPdfFiles(prev => [...prev, ...newPdfFiles]);
         } catch (error) {
-            console.error("Error uploading PDF files:", error);
+            // console suppressed
             alert("حدث خطأ أثناء معالجة ملفات PDF");
         } finally {
             setUploadingPdfs(false);
@@ -373,7 +373,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
             await onSave(invoiceData);
             onClose();
         } catch (error) {
-            console.error(error);
+            // console suppressed
             alert('حدث خطأ أثناء الحفظ');
         } finally {
             setIsSaving(false);

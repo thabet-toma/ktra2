@@ -118,8 +118,6 @@ async markAttendance(userId: string, sessionId: string): Promise<AttendanceRecor
 
 private async updateAttendancePoints(userId: string, date: string, addPoints: boolean = true): Promise<void> {
   try {
-    console.log('تحديث نقاط الحضور:', { userId, date, addPoints });
-    
     const pointsRef = doc(db, "pointsHistory", userId, "days", date);
     const pointsSnap = await getDoc(pointsRef);
     
@@ -127,8 +125,6 @@ private async updateAttendancePoints(userId: string, date: string, addPoints: bo
     
     if (pointsSnap.exists()) {
       const current = pointsSnap.data() as DailyPoints;
-      console.log('النقاط الحالية قبل التحديث:', current);
-      
       const currentAttendancePoints = current.attendancePoints || 0;
       const newAttendancePoints = Math.max(0, currentAttendancePoints + pointsChange);
       const newTotalPoints = Math.max(0, (current.totalPoints || 0) + pointsChange);
@@ -137,12 +133,6 @@ private async updateAttendancePoints(userId: string, date: string, addPoints: bo
         attendancePoints: newAttendancePoints,
         totalPoints: newTotalPoints,
         attended: addPoints // إذا كنا نضيف نقاط = حاضر، إذا كنا نخصم = غائب
-      });
-      
-      console.log('تم تحديث نقاط الحضور. النقاط بعد التحديث:', {
-        attendancePoints: newAttendancePoints,
-        totalPoints: newTotalPoints,
-        attended: addPoints
       });
     } else if (addPoints) {
       // فقط ننشئ سجل جديد إذا كنا نضيف نقاط
@@ -159,10 +149,9 @@ private async updateAttendancePoints(userId: string, date: string, addPoints: bo
         attended: true
       };
       await setDoc(pointsRef, newPoints);
-      console.log('تم إنشاء سجل نقاط جديد مع نقاط الحضور');
     }
   } catch (error) {
-    console.error('خطأ في تحديث نقاط الحضور:', error);
+    // console suppressed
     throw error;
   }
 }
@@ -246,8 +235,7 @@ async getAttendanceRecords(date: string): Promise<AttendanceRecord[]> {
     
     return filteredRecords;
   } catch (error) {
-    console.error('Error loading attendance records:', error);
-    
+    // console suppressed
     // Fallback: إرجاع مصفوفة فارغة في حالة الخطأ
     return [];
   }
@@ -278,7 +266,7 @@ async getAttendanceReport(startDate: string, endDate: string): Promise<{ [userId
 
     return report;
   } catch (error) {
-    console.error('Error loading attendance report:', error);
+    // console suppressed
     return {};
   }
 }
@@ -290,8 +278,6 @@ async updateAttendanceManually(
   attended: boolean
 ): Promise<void> {
   try {
-    console.log('تعديل الحضور يدوياً:', { userId, date, attended });
-    
     if (attended) {
       // إنشاء سجل حضور يدوي وإضافة النقاط
       const recordId = crypto.randomUUID();
@@ -307,8 +293,6 @@ async updateAttendanceManually(
 
       await setDoc(doc(db, 'attendanceRecords', recordId), record);
       await this.updateAttendancePoints(userId, date, true); // true يعني إضافة نقاط
-      
-      console.log('تم تسجيل الحضور وإضافة 10 نقاط');
     } else {
       // 🔥 البحث عن سجلات الحضور لهذا اليوم وحذفها
       const q = query(
@@ -328,26 +312,20 @@ async updateAttendanceManually(
       
       // 🔥 خصم 10 نقاط من سجل النقاط
       await this.deductAttendancePoints(userId, date);
-      
-      console.log('تم إلغاء الحضور وخصم 10 نقاط');
     }
   } catch (error) {
-    console.error('خطأ في التعديل اليدوي للحضور:', error);
+    // console suppressed
     throw error;
   }
 }
 
 private async deductAttendancePoints(userId: string, date: string): Promise<void> {
   try {
-    console.log('خصم نقاط الحضور للمستخدم:', userId, 'التاريخ:', date);
-    
     const pointsRef = doc(db, "pointsHistory", userId, "days", date);
     const pointsSnap = await getDoc(pointsRef);
     
     if (pointsSnap.exists()) {
       const current = pointsSnap.data() as DailyPoints;
-      console.log('النقاط قبل الخصم:', current);
-      
       const currentAttendancePoints = current.attendancePoints || 0;
       const pointsToDeduct = Math.min(currentAttendancePoints, 10); // لا نخصم أكثر من 10
       
@@ -365,7 +343,6 @@ private async deductAttendancePoints(userId: string, date: string): Promise<void
         totalPoints: Math.max(0, updatedTotalPoints)
       });
     } else {
-      console.log('لا يوجد سجل نقاط لهذا اليوم، لا يوجد ما يتم خصمه');
       // إذا لم يكن هناك سجل، ننشئ سجل بدون نقاط حضور
       const newPoints: DailyPoints = {
         date,
@@ -382,7 +359,7 @@ private async deductAttendancePoints(userId: string, date: string): Promise<void
       await setDoc(pointsRef, newPoints);
     }
   } catch (error) {
-    console.error('خطأ في خصم نقاط الحضور:', error);
+    // console suppressed
     throw error;
   }
 }

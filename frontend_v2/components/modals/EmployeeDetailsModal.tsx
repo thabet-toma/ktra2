@@ -34,7 +34,7 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
             await onSaveNotes(user.id, notes);
             // Optional: Show success indication visually if needed
         } catch (error) {
-            console.error("Failed to save notes", error);
+            // console suppressed
             alert("فشل حفظ الملاحظات");
         } finally {
             setIsSavingNotes(false);

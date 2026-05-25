@@ -63,7 +63,7 @@ export const aboutLinksService = {
         callback(items);
       });
     } catch (error) {
-      console.error("subscribeToLinks error:", error);
+      // console suppressed
       return () => { };
     }
   },
@@ -384,7 +384,7 @@ export const activityService = {
         return defaultSettings;
       }
     } catch (error) {
-      console.error('Error getting global disable settings:', error);
+      // console suppressed
       return null;
     }
   },
@@ -424,7 +424,6 @@ export const activityService = {
     try {
       const globalSettings = await activityService.getGlobalDailyDisableSchedule();
       if (!globalSettings || !globalSettings.isEnabled) {
-        console.log('⚠️ الإعدادات العامة غير مفعلة');
         return;
       }
 
@@ -436,15 +435,6 @@ export const activityService = {
         globalSettings.startTime,
         globalSettings.endTime
       );
-
-      console.log('⏰ تطبيق الإعدادات العامة:', {
-        currentTime,
-        startTime: globalSettings.startTime,
-        endTime: globalSettings.endTime,
-        isInDisabledRange,
-        shouldDisable: isInDisabledRange
-      });
-
       // جلب جميع المستخدمين
       const usersSnapshot = await getDocs(collection(db, "users"));
       const employees = usersSnapshot.docs
@@ -490,10 +480,8 @@ export const activityService = {
           updatedCount++;
         }
       }
-
-      console.log(`✅ تم تحديث ${updatedCount} من ${employees.length} موظف`);
     } catch (error) {
-      console.error('❌ خطأ في تطبيق الإعدادات العامة:', error);
+      // console suppressed
     }
   },
 
@@ -521,10 +509,8 @@ export const activityService = {
           }
         }
       }
-
-      console.log(`تم تفعيل جميع الأزرار للموظفين الذين يستخدمون الإعدادات العامة`);
     } catch (error) {
-      console.error('Error enabling all check-in buttons:', error);
+      // console suppressed
     }
   },
 
@@ -543,7 +529,7 @@ export const activityService = {
         await activityService.applyGlobalDisableToAllEmployees();
       }
     } catch (error) {
-      console.error('❌ خطأ في تطبيق الإعدادات العامة:', error);
+      // console suppressed
     }
   },
 
@@ -732,7 +718,7 @@ export const getCategories = async (): Promise<Category[]> => {
       ...doc.data()
     } as Category));
   } catch (error) {
-    console.error("Error fetching categories:", error);
+    // console suppressed
     return [];
   }
 };
@@ -761,7 +747,7 @@ export const brandsService = {
         ...doc.data()
       } as Brand));
     } catch (error) {
-      console.error("Error fetching brands:", error);
+      // console suppressed
       return [];
     }
   },
@@ -842,7 +828,7 @@ export const cashBoxesService = {
         ...doc.data()
       } as CashBox));
     } catch (error) {
-      console.error("Error fetching cash boxes:", error);
+      // console suppressed
       return [];
     }
   },
@@ -915,7 +901,7 @@ export const cashBoxTransactionsService = {
         ...doc.data()
       } as CashBoxTransaction));
     } catch (error) {
-      console.error("Error fetching transactions:", error);
+      // console suppressed
       return [];
     }
   },
@@ -1032,7 +1018,6 @@ export const attendanceService = {
 
 // --- Users Service ---
 export const seedUsersIfEmpty = async () => {
-  console.log("Auto-seeding disabled for Real Auth mode.");
 };
 
 export const updateUserInDb = async (user: Partial<User> & { id: string }) => {
@@ -1374,7 +1359,7 @@ export const invoicesService = {
       return `i-${Date.now().toString().slice(-4)}`;
       
     } catch (error) {
-      console.error("Error generating next invoice number:", error);
+      // console suppressed
       return "i-0001";
     }
   },
@@ -1406,7 +1391,7 @@ export const invoicesService = {
         await updateDoc(invoiceRef, { glPurchaseReceiptJournalId: jid });
       }
     } catch (e) {
-      console.error("post purchase receipt after new invoice:", e);
+      // console suppressed
     }
   },
 
@@ -1428,7 +1413,7 @@ export const invoicesService = {
         await updateDoc(invoiceRef, { glPurchaseReceiptJournalId: jid });
       }
     } catch (e) {
-      console.error("post purchase receipt after invoice update:", e);
+      // console suppressed
     }
   },
 
@@ -1532,7 +1517,7 @@ export const suppliersService = {
 
       return { isUnique: true };
     } catch (error) {
-      console.error("❌ checkSupplierUniqueness:", error);
+      // console suppressed
       return { isUnique: true };
     }
   },
@@ -1576,7 +1561,7 @@ export const suppliersService = {
 
         if (alive) callback(mapped);
       } catch (e) {
-        console.error("subscribeToSuppliers failed:", e);
+        // console suppressed
         try {
           const deals = await apiGetList<any>("logistics/deals/", { tenantId: 1 });
           const byName = new Map<string, Supplier>();
@@ -1612,7 +1597,7 @@ export const suppliersService = {
           });
           if (alive) callback(Array.from(byName.values()));
         } catch (e2) {
-          console.error("subscribeToSuppliers fallback failed:", e2);
+          // console suppressed
           if (alive) callback([]);
         }
       }
@@ -1750,7 +1735,7 @@ export const priceOffersService = {
       return `OFF-${Date.now().toString().slice(-4)}`;
       
     } catch (error) {
-      console.error("Error generating next offer number:", error);
+      // console suppressed
       return "OFF-0001";
     }
   }

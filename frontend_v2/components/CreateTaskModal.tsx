@@ -58,7 +58,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                     setCategory(fetchedCategories[0].id as TaskCategory);
                 }
             } catch (error) {
-                console.error('خطأ في جلب الفئات:', error);
+                // console suppressed
                 // فئات افتراضية للطوارئ
                 setCategories([
                     { id: 'electronics', name: 'إلكترونيات' },
@@ -104,7 +104,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             };
             
             reader.onerror = () => {
-                console.error('خطأ في قراءة الملف');
+                // console suppressed
             };
             
             reader.readAsDataURL(file);
@@ -128,12 +128,10 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         
         setUploading(true);
         try {
-            console.log('بدء رفع', selectedImages.length, 'صورة...');
             const imageUrls = await cloudinaryService.uploadMultipleImages(selectedImages);
-            console.log('تم رفع الصور بنجاح:', imageUrls);
             return imageUrls;
         } catch (error) {
-            console.error('خطأ في رفع الصور:', error);
+            // console suppressed
             throw new Error('فشل في رفع الصور إلى السحابة');
         } finally {
             setUploading(false);
@@ -176,8 +174,6 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
                 images: uploadedImageUrls,
                 imageUrl: uploadedImageUrls[0] || undefined,
             };
-
-            console.log('إرسال بيانات المهمة:', taskData);
             onSubmit(taskData);
 
             // إعادة تعيين النموذج
@@ -185,7 +181,7 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
             onClose();
             
         } catch (error) {
-            console.error('خطأ في إنشاء المهمة:', error);
+            // console suppressed
             alert('حدث خطأ أثناء إنشاء المهمة. يرجى المحاولة مرة أخرى.');
         } finally {
             setUploading(false);

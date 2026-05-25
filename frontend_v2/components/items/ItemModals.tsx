@@ -28,7 +28,7 @@ export const CategoryModal: React.FC<ModalProps> = ({ isOpen, onClose, onSuccess
             onSuccess();
             onClose();
         } catch (error) {
-            console.error(error);
+            // console suppressed
         }
     };
 
@@ -87,7 +87,7 @@ export const SubCategoryModal: React.FC<SubCategoryModalProps> = ({ isOpen, onCl
             onSuccess();
             onClose();
         } catch (error) {
-            console.error(error);
+            // console suppressed
         }
     };
 
@@ -146,7 +146,7 @@ export const BrandModal: React.FC<ModalProps> = ({ isOpen, onClose, onSuccess })
             onSuccess();
             onClose();
         } catch (error) {
-            console.error(error);
+            // console suppressed
         }
     };
 

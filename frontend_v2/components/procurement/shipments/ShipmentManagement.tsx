@@ -114,7 +114,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
         try {
             await shipmentsService.deleteShipment(shipmentId);
         } catch (error) {
-            console.error('Error deleting shipment:', error);
+            // console suppressed
             alert('حدث خطأ أثناء حذف الشحنة');
         }
     };

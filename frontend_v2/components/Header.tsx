@@ -64,10 +64,8 @@ export const Header: React.FC<HeaderProps> = ({
 
       audioRef.current.play()
         .then(() => {
-          console.log('🔊 تم تشغيل الصوت بنجاح');
         })
         .catch(error => {
-          console.log('تعذر تشغيل الصوت:', error);
           // إظهار رسالة مرئية بديلة
           setCheckInMessage('🔔 حان وقت تأكيد الاستمرار!');
           setTimeout(() => setCheckInMessage(null), 3000);

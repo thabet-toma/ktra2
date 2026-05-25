@@ -184,7 +184,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
           }));
           setLines(mapped.length > 0 ? mapped : [emptyLine(), emptyLine(), emptyLine()]);
         } catch (err) {
-          console.error('Error loading journal:', err);
+          // console suppressed
         }
       }
     },
@@ -238,7 +238,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         const list = await accountingApi.getJournals();
         setJournalsList(list);
       } catch (err) {
-        console.error('Error loading journals list:', err);
+        // console suppressed
       }
     };
     loadJournals();

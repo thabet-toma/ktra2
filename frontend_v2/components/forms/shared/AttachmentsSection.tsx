@@ -47,7 +47,7 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
         [imagesKey]: [...(prev[imagesKey] || []), ...newUrls]
       }));
     } catch (error) {
-      console.error("Error uploading images:", error);
+      // console suppressed
       alert("فشل رفع الصور");
     } finally {
       setUploadingImages(false);
@@ -89,7 +89,7 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
         [pdfsKey]: [...(prev[pdfsKey] || []), ...newPdfFiles]
       }));
     } catch (error) {
-      console.error("Error processing PDFs:", error);
+      // console suppressed
       alert("حدث خطأ أثناء رفع ملفات PDF");
     } finally {
       setUploadingPdfs(false);

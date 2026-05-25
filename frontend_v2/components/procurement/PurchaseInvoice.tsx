@@ -147,7 +147,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
       const mapped = rows.map(sqlListToInvoice);
       setInvoices(mapped);
     } catch (e) {
-      console.error("Failed to load invoices from SQL:", e);
+      // console suppressed
     } finally {
       setLoading(false);
     }
@@ -197,7 +197,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
         setIsReadOnly(readOnly);
         setViewMode("form");
       } catch (e) {
-        console.error(e);
+        // console suppressed
         navigate("/purchase-invoices", { replace: true });
       } finally {
         setInvoiceRouteLoading(false);
@@ -239,7 +239,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
       setPrintInvoice(mapPurchaseInvoiceDtoToInvoice(full));
       setShowPrintView(true);
     } catch (e) {
-      console.error(e);
+      // console suppressed
       alert('تعذّر تحميل الفاتورة للطباعة.');
     }
   };
@@ -249,7 +249,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
       await purchaseInvoiceApi.delete(Number(id));
       await loadInvoices();
     } catch (error) {
-      console.error("Failed to delete invoice:", error);
+      // console suppressed
       alert("حدث خطأ أثناء محاولة حذف الفاتورة.");
     }
   };
@@ -345,7 +345,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
       alert("✅ تم تحويل الفاتورة إلى صفقة بنجاح!");
 
     } catch (e: any) {
-      console.error("خطأ في تحويل الفاتورة:", e);
+      // console suppressed
       if (e.message && e.message.includes('exceeds the maximum allowed size')) {
         alert("❌ لا يزال حجم البيانات كبيراً جداً. يبدو أن الفاتورة تحتوي على عدد كبير جداً من المنتجات أو نصوص طويلة جداً.");
       } else {
@@ -397,7 +397,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
           : "✅ تم تحديث المسارات بعد الاستيراد."
       );
     } catch (error) {
-      console.error("Error importing clearance invoices:", error);
+      // console suppressed
       alert("حدث خطأ أثناء استيراد الفواتير");
     } finally {
       setImporting(false);

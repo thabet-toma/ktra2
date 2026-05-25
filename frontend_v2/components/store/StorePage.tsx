@@ -61,7 +61,7 @@ export const StorePage: React.FC = () => {
                 }
             }
         } catch (error: any) {
-            console.error("Google Login Error:", error);
+            // console suppressed
             if (error.code === 'auth/operation-not-allowed') {
                 alert("عذراً، خدمة الدخول عبر جوجل غير مفعلة حالياً.\n(للإدارة: يرجى تفعيل Google Auth Provider من لوحة تحكم Firebase)");
             } else if (error.code === 'auth/popup-closed-by-user') {

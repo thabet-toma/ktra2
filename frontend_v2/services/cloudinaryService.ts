@@ -40,7 +40,7 @@ export class CloudinaryService {
 
       if (!response.ok) {
         const errorData = await response.json();
-        console.error("Cloudinary Detailed Error:", errorData);
+        // console suppressed
         throw new Error(`فشل في الرفع: ${errorData.error?.message || response.status}`);
       }
 
@@ -48,7 +48,7 @@ export class CloudinaryService {
       return data.secure_url || data.url;
 
     } catch (error) {
-      console.error('خطأ في رفع الملف:', error);
+      // console suppressed
       throw error;
     }
   }

@@ -29,7 +29,7 @@ export const ProductDetailPage: React.FC = () => {
                 if (fetchedItem) setItem(fetchedItem);
                 else navigate('/store');
             } catch (error) {
-                console.error('Error fetching item:', error);
+                // console suppressed
                 navigate('/store');
             } finally {
                 setLoading(false);

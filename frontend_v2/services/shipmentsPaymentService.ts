@@ -59,15 +59,8 @@ export const shipmentsPaymentService = {
                 updatedAt: serverTimestamp(),
                 updatedBy: userId
             }));
-
-            console.log('✅ تم حفظ دفعات الشحنة:', {
-                shipmentId,
-                count: updatedInstallments.length,
-                enabled: installmentPlanEnabled
-            });
-
         } catch (error) {
-            console.error('Error saving shipment installments:', error);
+            // console suppressed
             throw error;
         }
     },
@@ -156,7 +149,7 @@ export const shipmentsPaymentService = {
 
             return paymentId;
         } catch (error) {
-            console.error('Error adding shipment payment:', error);
+            // console suppressed
             throw error;
         }
     },
@@ -342,7 +335,7 @@ export const shipmentsPaymentService = {
             });
 
         } catch (error) {
-            console.error('Error updating shipment payment with swift:', error);
+            // console suppressed
             throw error;
         }
     },
@@ -373,7 +366,6 @@ export const shipmentsPaymentService = {
                 const payment = payments[paymentIndex] as any;
 
                 if (payment.cashBoxWithdrawalAt) {
-                    console.log('الدفعة تم خصمها بالفعل عند رفع السليب');
                 } else if (payment.bankSwiftImage && !payment.cashBoxWithdrawalAt) {
                     throw new Error('يجب خصم المبلغ من الصندوق أولاً عند رفع السليب قبل تأكيد وكيل الشحن');
                 }
@@ -421,7 +413,7 @@ export const shipmentsPaymentService = {
                 });
             });
         } catch (error) {
-            console.error('Error confirming shipment payment:', error);
+            // console suppressed
             throw error;
         }
     },
@@ -461,7 +453,7 @@ export const shipmentsPaymentService = {
             }));
 
         } catch (error) {
-            console.error('Error canceling shipment payment:', error);
+            // console suppressed
             throw error;
         }
     },
@@ -483,7 +475,7 @@ export const shipmentsPaymentService = {
             }));
 
         } catch (error) {
-            console.error('Error updating shipment status:', error);
+            // console suppressed
             throw error;
         }
     }

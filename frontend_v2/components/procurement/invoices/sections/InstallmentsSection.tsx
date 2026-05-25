@@ -161,7 +161,7 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
         alert("فشل رفع الصورة");
       }
     } catch (error) {
-      console.error("Upload error:", error);
+      // console suppressed
       alert("حدث خطأ أثناء رفع الصورة");
     } finally {
       setUploadingIndex(null);

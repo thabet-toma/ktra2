@@ -538,7 +538,7 @@ const App: React.FC = () => {
         }
       }
     } catch (error) {
-      console.error("Error updating user task status:", error);
+      // console suppressed
       alert("حدث خطأ أثناء تحديث حالة المهمة");
     }
   };
@@ -602,7 +602,7 @@ const App: React.FC = () => {
       }
       setSelectedTaskDetails(null);
     } catch (e) {
-      console.error("Error creating submission:", e);
+      // console suppressed
       alert("حدث خطأ أثناء حفظ التسليم. الرجاء المحاولة مرة أخرى.");
     }
   };
@@ -640,7 +640,7 @@ const App: React.FC = () => {
         });
       }
     } catch (e) {
-      console.error("Error editing submission:", e);
+      // console suppressed
       alert("حدث خطأ أثناء تعديل التسليم.");
     }
   };
@@ -777,7 +777,7 @@ const App: React.FC = () => {
 
       await updateTaskInDb(updatedTask);
     } catch (error) {
-      console.error("❌ خطأ في handleUpdateSubmissionStatus:", error);
+      // console suppressed
       alert("حدث خطأ أثناء تحديث حالة التسليم");
     }
   };

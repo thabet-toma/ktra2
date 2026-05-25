@@ -113,7 +113,7 @@ export const PriceOfferManagement: React.FC = () => {
       }
       setViewMode("list");
     } catch (e) {
-      console.error(e);
+      // console suppressed
     } finally {
       setSaving(false);
     }

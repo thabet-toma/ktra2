@@ -110,7 +110,7 @@ export const OldPurchaseInvoice: React.FC = () => {
             }, 2000);
 
         } catch (error) {
-            console.error("Error converting invoice:", error);
+            // console suppressed
             alert("حدث خطأ أثناء تحويل الفاتورة");
         } finally {
             setIsConverting(false);
@@ -152,7 +152,7 @@ export const OldPurchaseInvoice: React.FC = () => {
             }, 500);
 
         } catch (error) {
-            console.error("Error deleting invoice:", error);
+            // console suppressed
             alert("حدث خطأ أثناء حذف الفاتورة");
         }
     };
@@ -177,7 +177,7 @@ export const OldPurchaseInvoice: React.FC = () => {
                 setLoading(false);
             },
             error: (error) => {
-                console.error("Error fetching invoices:", error);
+                // console suppressed
                 setLoading(false);
             },
         });
@@ -298,7 +298,7 @@ export const OldPurchaseInvoice: React.FC = () => {
                 await invoicesService.addInvoiceToDb(newInvoiceData);
             }
         } catch (error) {
-            console.error("Error saving invoice:", error);
+            // console suppressed
             throw error;
         }
     };

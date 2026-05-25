@@ -19,7 +19,7 @@ export const firebaseStorageService = {
                 type: file.type
             };
         } catch (error) {
-            console.error('Error uploading file:', error);
+            // console suppressed
             throw new Error('فشل رفع الملف');
         }
     },

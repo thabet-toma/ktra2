@@ -49,7 +49,7 @@ export const CreateCashBoxModal: React.FC<CreateCashBoxModalProps> = ({ isOpen, 
             setName('');
             setCurrency('USD');
         } catch (error) {
-            console.error("Error creating cash box:", error);
+            // console suppressed
             alert("حدث خطأ أثناء إنشاء الصندوق");
         } finally {
             setIsLoading(false);

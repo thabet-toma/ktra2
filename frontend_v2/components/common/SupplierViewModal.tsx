@@ -72,7 +72,7 @@ export const SupplierViewModal: React.FC<SupplierViewModalProps> = ({
             const data = await suppliersService.getSupplierById(supplierId);
             data ? setSupplier(data) : setError('المورد غير موجود');
         } catch (err) {
-            console.error(err);
+            // console suppressed
             setError('حدث خطأ في تحميل البيانات');
         } finally {
             setLoading(false);

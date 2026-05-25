@@ -73,7 +73,7 @@ const PublicGallery: React.FC = () => {
         });
       }
     } catch (error) {
-      console.error("Error loading gallery:", error);
+      // console suppressed
     } finally {
       setLoadingImages(false);
     }
@@ -103,7 +103,7 @@ const PublicGallery: React.FC = () => {
       // Scroll to top of gallery section
       window.scrollTo({ top: 400, behavior: 'smooth' });
     } catch (error) {
-      console.error("Error fetching page:", error);
+      // console suppressed
     } finally {
       setLoadingImages(false);
     }
@@ -224,7 +224,7 @@ const PublicGallery: React.FC = () => {
         uploadCount++;
 
       } catch (err: any) {
-        console.error('Upload error', err);
+        // console suppressed
         newLocalFiles[i] = { ...lf, status: 'error', errorMessage: err?.message || 'فشل الرفع' };
         setLocalFiles([...newLocalFiles]);
       }

@@ -70,7 +70,7 @@ export const priceListService = {
       
       return 0;
     } catch (error) {
-      console.error("Error fetching last supplier price:", error);
+      // console suppressed
       return 0;
     }
   },
@@ -99,7 +99,7 @@ export const priceListService = {
       });
       
     } catch (error) {
-      console.error("Error fetching supplier prices for items:", error);
+      // console suppressed
     }
     
     return prices;
@@ -118,7 +118,7 @@ export const priceListService = {
       const snapshot = await getDocs(q);
       return snapshot.docs.map(doc => doc.data() as SupplierItemPrice);
     } catch (error) {
-      console.error("Error fetching supplier all prices:", error);
+      // console suppressed
       return [];
     }
   }

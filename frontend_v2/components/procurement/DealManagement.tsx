@@ -181,7 +181,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 });
                 setViewMode('form');
             } catch (e) {
-                console.error(e);
+                // console suppressed
                 newFormInitRef.current = false;
                 navigate('/deals', { replace: true });
             }
@@ -260,7 +260,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
             newFormInitRef.current = false;
             navigate('/deals/new', { state: { draftDeal: dealData } });
         } catch (error) {
-            console.error('Error:', error);
+            // console suppressed
         }
     };
 
@@ -284,7 +284,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         try {
             await dealsService.deleteDeal(dealId);
         } catch (error) {
-            console.error('Error deleting deal:', error);
+            // console suppressed
             alert('فشل حذف الصفقة');
         }
     };

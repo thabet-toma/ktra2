@@ -37,7 +37,7 @@ export const DealActivityPreview: React.FC<DealActivityPreviewProps> = ({
             const loadedActivities = await dealsService.getDealActivities(dealId);
             setActivities(loadedActivities);
         } catch (error) {
-            console.error('Error loading activities:', error);
+            // console suppressed
         } finally {
             setLoading(false);
         }

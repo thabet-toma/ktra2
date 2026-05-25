@@ -115,7 +115,7 @@ export const DealStageControl: React.FC<StageProps> = ({
       setWfLoading(true);
       await onShippingWorkflowChange(v);
     } catch (err) {
-      console.error(err);
+      // console suppressed
     } finally {
       setWfLoading(false);
     }

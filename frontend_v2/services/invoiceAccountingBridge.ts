@@ -70,7 +70,7 @@ export async function tryPostPurchaseReceiptFromInvoice(
     const jid = typeof r?.journal_id === "number" ? r.journal_id : Number(r?.journal_id);
     return Number.isFinite(jid) && jid > 0 ? jid : null;
   } catch (e) {
-    console.error("[invoiceAccounting] فشل ترحيل قيد الاستلام:", e);
+    // console suppressed
     return null;
   }
 }

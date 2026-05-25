@@ -127,7 +127,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
             }
             onClose();
         } catch (error: unknown) {
-            console.error("Error saving supplier:", error);
+            // console suppressed
             const msg = error instanceof Error && error.message
                 ? error.message
                 : 'حدث خطأ أثناء الحفظ';

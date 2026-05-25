@@ -36,8 +36,6 @@ class ActiveTasksService {
       startTime: Date.now(),
       totalAccumulated: accumulatedTime
     });
-
-    console.log(`بدأ تتبع المهمة: ${taskId} للمستخدم: ${userId}`, {accumulatedTime});
   }
 
   stopTask(taskId: string, userId: string): number {
@@ -50,8 +48,6 @@ class ActiveTasksService {
       const totalTime = activeTask.totalAccumulated + elapsed;
       
       this.activeTasks.delete(key);
-      console.log(`توقف تتبع المهمة: ${taskId} للمستخدم: ${userId}`, {totalTime});
-      
       return totalTime; // إرجاع الوقت بالمللي ثانية
     }
     

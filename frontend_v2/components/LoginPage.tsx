@@ -45,7 +45,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToSignup, onGoTo
       } as User;
       await completeLogin(merged);
     } catch (err: any) {
-      console.error(err);
+      // console suppressed
       if (err.message === "EMAIL_NOT_VERIFIED") {
         setError("يجب عليك تفعيل بريدك الإلكتروني قبل تسجيل الدخول.");
         setShowResend(true);

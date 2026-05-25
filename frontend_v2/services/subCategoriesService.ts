@@ -40,9 +40,8 @@ export const subCategoriesService = {
             };
 
             await setDoc(subCategoryRef, newSubCategory);
-            console.log("Sub-category added successfully");
         } catch (error) {
-            console.error("Error adding sub-category:", error);
+            // console suppressed
             throw error;
         }
     },
@@ -54,9 +53,8 @@ export const subCategoriesService = {
 
             const subCategoryRef = doc(db, "subCategories", subCategory.id);
             await updateDoc(subCategoryRef, subCategory as any);
-            console.log("Sub-category updated successfully");
         } catch (error) {
-            console.error("Error updating sub-category:", error);
+            // console suppressed
             throw error;
         }
     },
@@ -66,9 +64,8 @@ export const subCategoriesService = {
         try {
             const subCategoryRef = doc(db, "subCategories", id);
             await deleteDoc(subCategoryRef);
-            console.log("Sub-category deleted successfully");
         } catch (error) {
-            console.error("Error deleting sub-category:", error);
+            // console suppressed
             throw error;
         }
     },
@@ -85,7 +82,7 @@ export const subCategoriesService = {
                 (d) => ({ id: d.id, ...d.data() }) as SubCategory
             );
         } catch (error) {
-            console.error("Error fetching sub-categories by parent:", error);
+            // console suppressed
             return [];
         }
     }

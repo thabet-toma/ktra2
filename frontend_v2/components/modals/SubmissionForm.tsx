@@ -50,7 +50,7 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
             initialItems = parsedData.items;
           }
         } catch (error) {
-          console.error("Error loading saved data", error);
+          // console suppressed
         }
       }
     }
@@ -214,7 +214,7 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
 
       resetCurrentItem();
     } catch (error) {
-      console.error("Error uploading images:", error);
+      // console suppressed
       alert("حدث خطأ أثناء رفع الصور. يرجى المحاولة مرة أخرى.");
     } finally {
       setUploading(false);

@@ -41,7 +41,7 @@ export const notificationsService = {
                 callback(uniqueNotifications);
             },
             error: (error) => {
-                console.error("Error fetching notifications:", error);
+                // console suppressed
             },
         });
     },
@@ -55,7 +55,7 @@ export const notificationsService = {
                 createdAt: new Date().toISOString(),
             });
         } catch (error) {
-            console.error("Error adding notification:", error);
+            // console suppressed
         }
     },
 
@@ -67,7 +67,7 @@ export const notificationsService = {
                 isRead: true,
             });
         } catch (error) {
-            console.error("Error marking notification as read:", error);
+            // console suppressed
         }
     },
 
@@ -79,7 +79,7 @@ export const notificationsService = {
             );
             await Promise.all(promises);
         } catch (error) {
-            console.error("Error marking all notifications as read:", error);
+            // console suppressed
         }
     }
 };

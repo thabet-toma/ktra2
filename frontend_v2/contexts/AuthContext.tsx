@@ -33,7 +33,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             return await fetchUserProfileApi(userId);
         } catch (error) {
-            console.error("Error fetching user profile:", error);
+            // console suppressed
             return null;
         }
     };
@@ -48,7 +48,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                     await activityService.initializeActivityStatus(userProfile.id);
                 }
             } catch (err) {
-                console.error("Error initializing activity:", err);
+                // console suppressed
             }
         } else {
             setCurrentUser(null);
@@ -73,7 +73,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 await activityService.initializeActivityStatus(user.id);
             }
         } catch (err) {
-            console.error("Error initializing activity:", err);
+            // console suppressed
         }
     };
 
@@ -87,7 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
                 try {
                     await applyUserSession(userId);
                 } catch (error) {
-                    console.error(error);
+                    // console suppressed
                     setCurrentUser(null);
                 }
             } else {

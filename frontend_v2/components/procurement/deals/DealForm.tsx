@@ -174,7 +174,7 @@ export const DealForm: React.FC<DealFormProps> = ({
           setInstallments(loaded.installments || []);
           setInstallmentPlanEnabled(loaded.installmentPlanEnabled || false);
         } catch (err) {
-          console.error('Error loading deal:', err);
+          // console suppressed
         }
       }
     },
@@ -477,7 +477,7 @@ export const DealForm: React.FC<DealFormProps> = ({
         onOpenAccountingJournal?.(acc.openManualJournal ? null : j, { dealId: formData.id!, dealNumber: formData.dealNumber || '', displayName: [formData.dealNumber, dealDesc].filter(Boolean).join(' — ') });
       }
     } catch (error: any) {
-      console.error("Error confirming payment:", error);
+      // console suppressed
       let diag = "";
       try {
         if (formData.id && confirmationData.paymentId) {

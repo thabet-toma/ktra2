@@ -23,7 +23,7 @@ const NoteCard: React.FC<{ user: User; onSave: (userId: string, notes: string) =
             await onSave(user.id, notes);
             setIsDirty(false);
         } catch (error) {
-            console.error("Error saving notes", error);
+            // console suppressed
             alert("حدث خطأ أثناء حفظ الملاحظات");
         } finally {
             setIsSaving(false);

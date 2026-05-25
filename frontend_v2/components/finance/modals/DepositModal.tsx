@@ -51,7 +51,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
                     firestore_transaction_id: txId,
                 });
             } catch (je) {
-                console.error(je);
+                // console suppressed
                 const msg =
                     je instanceof Error
                         ? je.message
@@ -68,7 +68,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
             setReference('');
             setDate(new Date().toISOString().split('T')[0]);
         } catch (error) {
-            console.error("Error creating deposit:", error);
+            // console suppressed
             alert("حدث خطأ أثناء عملية الإيداع");
         } finally {
             setIsLoading(false);
