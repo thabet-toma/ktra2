@@ -23,6 +23,9 @@ import { SignupPage } from "./components/SignupPage";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { NoSqlMigrationBanner } from "./components/NoSqlMigrationBanner";
+import { useOnlineStatus } from "./hooks/useOnlineStatus";
+import OfflineBanner from "./components/offline/OfflineBanner";
+import UpdatePrompt from "./components/offline/UpdatePrompt";
 import { Dashboard } from "./components/Dashboard";
 import { TradeDashboard } from "./components/dashboard/TradeDashboard";
 import { TaskManagement } from "./components/TaskManagement";
@@ -196,6 +199,7 @@ const App: React.FC = () => {
   const [accountingSupplierPartnerId, setAccountingSupplierPartnerId] = useState<number | null>(null);
   const [rejectingTask, setRejectingTask] = useState<Task | null>(null);
   const [theme, setTheme] = useState<Theme>("light");
+  const onlineStatus = useOnlineStatus();
   /** N0-T5: F11 modal portal لثوابت المجموعة */
   const [groupConstantsOpen, setGroupConstantsOpen] = useState(false);
 
@@ -1619,6 +1623,7 @@ const App: React.FC = () => {
   return (
     <div dir="rtl">
       <AppLayout user={currentUser} activeView={appView} onNavigate={setViewAndSyncPath} onOpenGroupConstants={() => setGroupConstantsOpen(true)}>
+        <OfflineBanner status={onlineStatus} onRetry={() => window.location.reload()} />
         <NoSqlMigrationBanner isManager={currentUser?.role === "manager"} />
         <main className="p-3 sm:p-4 lg:p-6">
           {renderMainContent()}
@@ -1661,6 +1666,7 @@ const App: React.FC = () => {
           }
         />
       )}
+      <UpdatePrompt />
     </div>
   );
 };

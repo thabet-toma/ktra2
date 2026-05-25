@@ -1,21 +1,22 @@
 {
   "name": "نظام K.T.R.A",
   "short_name": "K.T.R.A",
-  "description": "نظام متكامل لإدارة الفواتير والشحنات والاستيراد",
+  "description": "نظام متكامل لإدارة الفواتير والشحنات والاستيراد والتخليص الجمركي",
   "icons": [
-    {
-      "src": "/android-chrome-512x512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
+    { "src": "/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "categories": ["business", "finance", "productivity"],
+  "shortcuts": [
+    { "name": "شحنة جديدة", "short_name": "شحنة", "url": "/import-flow/new" },
+    { "name": "فاتورة جديدة", "short_name": "فاتورة", "url": "/sales/invoices/new" },
+    { "name": "قيد جديد", "short_name": "قيد", "url": "/accounting/journals/new" }
   ],
   "theme_color": "#1e40af",
   "background_color": "#ffffff",
   "display": "standalone",
+  "orientation": "any",
   "start_url": "/",
   "scope": "/",
   "lang": "ar",
-  "dir": "rtl",
-  "orientation": "any"
+  "dir": "rtl"
 }

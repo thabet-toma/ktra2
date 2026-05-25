@@ -8,6 +8,8 @@ import type { SqlProduct } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { Plus, RefreshCw, Edit2 } from "lucide-react";
 import { ItemFormAseel } from "./ItemFormAseel";
+import { StalenessBadge } from "../offline";
+import db from "../../services/offline/db";
 
 const fmt = (n: number | string) =>
   Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -21,13 +23,48 @@ export const ItemsManagement: React.FC<{ user?: unknown }> = () => {
   const [view, setView] = useState<View>("list");
   const [editId, setEditId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  // Phase 2 wiring: track when the list was last refreshed from the server,
+  // and whether the current render is being served from the offline cache.
+  const [lastSync, setLastSync] = useState<string | null>(null);
+  const [fromCache, setFromCache] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
-      setProducts((await inventoryApi.getProducts()) as SqlProduct[]);
+      const rows = (await inventoryApi.getProducts()) as SqlProduct[];
+      setProducts(rows);
+      const now = new Date().toISOString();
+      setLastSync(now);
+      setFromCache(false);
+      // Mirror into Dexie so the offline fallback below has fresh data.
+      try {
+        for (const p of rows) {
+          await db.products.put({
+            id: p.id,
+            tenant_id: (p as { tenant?: number }).tenant ?? 0,
+            sku: p.sku,
+            name_ar: p.name_ar || "",
+            data: JSON.stringify(p),
+            updated_at: now,
+          });
+        }
+        await db.cache_meta.put({ key: "products:list", updated_at: now });
+      } catch { /* IndexedDB unavailable in private mode — non-fatal */ }
     } catch (e: unknown) {
+      // Network failed — try to serve the last cached snapshot so the screen
+      // stays usable offline. Surface the staleness via the badge.
+      try {
+        const cached = await db.products.toArray();
+        if (cached.length > 0) {
+          setProducts(cached.map((c) => JSON.parse(c.data) as SqlProduct));
+          const meta = await db.cache_meta.get("products:list");
+          setLastSync(meta?.updated_at ?? cached[0].updated_at);
+          setFromCache(true);
+          setErr(null);
+          return;
+        }
+      } catch { /* fall through */ }
       setErr(e instanceof Error ? e.message : "خطأ");
     } finally {
       setLoading(false);
@@ -96,6 +133,18 @@ export const ItemsManagement: React.FC<{ user?: unknown }> = () => {
           إدارة الأصناف
         </strong>
         <span className="aseel-status-item">الإجمالي: <b>{products.length}</b></span>
+        {/* Phase 2 wiring — freshness/cache indicator */}
+        <StalenessBadge updatedAt={lastSync} />
+        {fromCache && (
+          <span
+            role="status"
+            aria-live="polite"
+            className="text-xs font-medium px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-800"
+            title="تعذّر الاتصال — يتم عرض آخر نسخة محفوظة محلياً"
+          >
+            من الذاكرة المحلية
+          </span>
+        )}
         <div style={{ flex: 1 }} />
         <input className="aseel-input" style={{ width: 200 }}
           placeholder="بحث SKU / الاسم…"
