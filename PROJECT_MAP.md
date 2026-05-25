@@ -745,10 +745,33 @@ All 9 sub-phases (A..I) merged to main. The import flow editor (`ImportDocumentS
 - Density audit baseline preserved
 
 ### Pending in task6
-- **P-H-2** Sales/Purchase Return stock reconciliation (RETURN_IN/RETURN_OUT movements)
-- **P-H-5** Voucher atomicity across `attach_payment_voucher` + `post_sales_invoice` (each is atomic on its own; cross-call rollback would need view-level wrapping)
-- **P-H-6** `VatStatement` UniqueConstraint + `select_for_update` in `build_vat_statement`
-- **P-H-8** Multi-currency FX per allocation in `post_customer_payment`
-- **P-H-9** `core/payments.py` wiring into 3 viewsets (CustomerPayment, LogisticsClearance pay_from_cashbox, LogisticsPayment)
-- **P-I-7** Sidebar / `AccountingJournalEntryPage` dead-state cleanup (`pickerTargetLine` etc.)
+- **P-H-5** Voucher atomicity — current behavior is safe: cheques stay in `Draft` if `post_sales_invoice` fails (post is atomic, draft cheques aren't claimed as cash flow). A combined endpoint would be cleaner but not a correctness blocker.
+- **P-H-8** Multi-currency FX per allocation — non-trivial refactor; deferred without test coverage.
+- **P-I-7** Sidebar / `AccountingJournalEntryPage` dead-state cleanup — inspection shows `pickerTargetLine` is actually live (read at lines 204/942, written at 531/534). True dead state needs a deeper code review.
 - **P-J** (tests + CI), **P-K** (docs + final cleanup)
+
+## [TASK6 — P-H-2 + P-H-6 + P-H-9 filled in 2026-05-25]
+
+User flagged that the missing P-H/P-I items should have been executed instead of documented. Filled in the three lowest-risk gaps in this round.
+
+### P-H-6 — VatStatement uniqueness + lock
+- `sales/models.py:VatStatement.Meta.constraints` adds `UniqueConstraint(tenant, period_from, period_to, name='unique_vat_statement_period')`.
+- `sales/services.py:build_vat_statement` now wraps the whole flow in `transaction.atomic()`, rejects overlapping periods up-front (`period_from__lte=period_to AND period_to__gte=period_from`), and locks the candidate invoice rows via `select_for_update()` so a concurrent generator can't claim the same rows under a different statement.
+- Migration `sales/0015_vatstatement_unique_vat_statement_period.py` generated + applied.
+
+### P-H-9 — core.payments.validate_payment wired into 3 surfaces
+- `sales/views.py:CustomerPaymentViewSet.perform_create` — atomic save + `validate_payment(PaymentContext.from_customer_payment(...))`. DRF `ValidationError` on failure → row rolled back.
+- `logistics/views.py:LogisticsPaymentViewSet.perform_create` — same pattern using `PaymentContext.from_deal_payment`.
+- `logistics/views.py:LogisticsClearanceViewSet.pay_from_cashbox` — runs the gate immediately after `LogisticsClearancePayment.objects.create`, inside the existing `transaction.atomic` block (raises Django `ValidationError` which the existing handler turns into 400 via core/exception_handler).
+- All four payment surfaces (deal / customer / clearance / shipment-agent) now refuse the same malformed inputs (amount<=0, missing date, missing tenant, missing partner where required).
+
+### P-H-2 — Sales/Purchase return stock reconciliation
+- `sales/services.py:post_sales_invoice` previously emitted `RETURN_IN` for every return. Split by `invoice_kind`:
+  - `INVOICE_KIND_SALE_RETURN` → `RETURN_IN` (goods come back from customer).
+  - `INVOICE_KIND_PURCHASE_RETURN` → `RETURN_OUT` (goods leave back to supplier).
+- Both directions are already recognised in `inventory/services.py:OUTBOUND_TYPES`/`INBOUND_TYPES` and listed in `inventory/models.py.StockMovement.MOVEMENT_TYPE_CHOICES`.
+
+### Verified
+- `manage.py check` = 0
+- `makemigrations --check` = no drift (migration 0015 applied)
+- `tsc --noEmit` = 0

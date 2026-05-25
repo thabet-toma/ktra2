@@ -948,6 +948,16 @@ class VatStatement(models.Model):
         db_table = 'sales_module_vat_statements'
         managed = True
         unique_together = [('tenant', 'statement_number')]
+        constraints = [
+            # P-H-6: forbid two statements covering the exact same period
+            # for the same tenant. Combined with the select_for_update in
+            # build_vat_statement, this stops two concurrent generators
+            # from producing a duplicate statement for the same window.
+            models.UniqueConstraint(
+                fields=['tenant', 'period_from', 'period_to'],
+                name='unique_vat_statement_period',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.statement_number} ({self.period_from} → {self.period_to})"

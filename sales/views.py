@@ -322,7 +322,20 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
         if not tenant:
             from rest_framework.exceptions import ValidationError as DRFValidationError
             raise DRFValidationError({"tenant": "لا يوجد شركة محددة لهذا الطلب."})
-        serializer.save(tenant=tenant)
+        # P-H-9: shared cross-payment-type validation (amount, date, tenant,
+        # partner-presence). The same gate is applied on deal / clearance /
+        # shipment-agent payment surfaces so all four refuse the same set
+        # of malformed inputs. Wrapped in atomic so the row is rolled back
+        # if validate_payment rejects it.
+        from django.db import transaction
+        from core.payments import PaymentContext, validate_payment
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+        with transaction.atomic():
+            payment = serializer.save(tenant=tenant)
+            ctx = PaymentContext.from_customer_payment(payment)
+            errors = validate_payment(ctx)
+            if errors:
+                raise DRFValidationError({"payment": errors})
 
     @action(detail=True, methods=["post"], url_path="post")
     def post_payment(self, request, pk=None):

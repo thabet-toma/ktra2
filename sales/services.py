@@ -846,13 +846,17 @@ def post_sales_invoice(
 
         if invoice.stock_on_post:
             if is_return:
-                # N8-T11: عكس حركة المخزون للمراجيع (إرجاع للمخزون)
+                # N8-T11 + P-H-2: stock reconciliation by return direction.
+                # sale_return → RETURN_IN  (goods come back from customer)
+                # purchase_return → RETURN_OUT (goods leave back to supplier)
+                is_purchase_return = kind == SalesInvoice.INVOICE_KIND_PURCHASE_RETURN
+                mv_type = "RETURN_OUT" if is_purchase_return else "RETURN_IN"
                 for line in lines:
                     if getattr(line.product, "is_service", False):
                         continue
                     record_stock_movement(
                         product=line.product,
-                        movement_type="RETURN_IN",
+                        movement_type=mv_type,
                         quantity=line.quantity,
                         reference_type="SALE",
                         reference_id=invoice.id,
@@ -1540,56 +1544,76 @@ def build_vat_statement(
     *,
     user=None,
 ):
-    """يُولّد كشف ض.ق.م دوري — يَجمع الفواتير المرحَّلة في الفترة بـvat_statement IS NULL."""
+    """يُولّد كشف ض.ق.م دوري — يَجمع الفواتير المرحَّلة في الفترة بـvat_statement IS NULL.
+
+    P-H-6: مَلفوف بـtransaction.atomic() + select_for_update على الفواتير المؤهَّلة
+    لمنع سباق مُولِّدَيْن مُتزامنَيْن. كما يَرفض الفترات المتداخلة مع كشوف موجودة.
+    """
     from sales.models import VatStatement
     from accounting.services import next_document_number
 
-    invoices = SalesInvoice.objects.filter(
-        tenant_id=tenant_id,
-        status=SalesInvoice.STATUS_POSTED,
-        invoice_date__gte=period_from,
-        invoice_date__lte=period_to,
-        vat_statement__isnull=True,
-    ).select_related('currency')
+    with transaction.atomic():
+        # P-H-6: reject overlapping period windows for the same tenant.
+        # Combined with the DB-level UniqueConstraint on
+        # (tenant, period_from, period_to) this catches both exact-match
+        # races and accidental overlap.
+        overlap = VatStatement.objects.filter(
+            tenant_id=tenant_id,
+            period_from__lte=period_to,
+            period_to__gte=period_from,
+        ).first()
+        if overlap:
+            raise ValidationError(
+                f"يوجد كشف ضريبة يُغطّي هذه الفترة بالفعل: «{overlap.statement_number}» "
+                f"({overlap.period_from} → {overlap.period_to})."
+            )
 
-    total_sales_vat = Decimal('0.00')
-    total_purchase_vat = Decimal('0.00')
+        # Lock the candidate invoices so a concurrent generator cannot
+        # claim the same rows under a different statement.
+        invoices = list(
+            SalesInvoice.objects.select_for_update().filter(
+                tenant_id=tenant_id,
+                status=SalesInvoice.STATUS_POSTED,
+                invoice_date__gte=period_from,
+                invoice_date__lte=period_to,
+                vat_statement__isnull=True,
+            ).select_related('currency')
+        )
 
-    for inv in invoices:
-        if inv.invoice_kind in (SalesInvoice.INVOICE_KIND_SALE, SalesInvoice.INVOICE_KIND_SALE_RETURN):
-            total_sales_vat += Decimal(str(inv.tax_amount or 0))
-        else:
-            total_purchase_vat += Decimal(str(inv.tax_amount or 0))
+        total_sales_vat = Decimal('0.00')
+        total_purchase_vat = Decimal('0.00')
 
-    net_vat = (total_sales_vat - total_purchase_vat).quantize(Decimal('0.01'))
-    stmt_no = f"VAT-{next_document_number(tenant_id, 'vat_statement')}"
+        for inv in invoices:
+            if inv.invoice_kind in (SalesInvoice.INVOICE_KIND_SALE, SalesInvoice.INVOICE_KIND_SALE_RETURN):
+                total_sales_vat += Decimal(str(inv.tax_amount or 0))
+            else:
+                total_purchase_vat += Decimal(str(inv.tax_amount or 0))
 
-    stmt = VatStatement.objects.create(
-        tenant_id=tenant_id,
-        statement_number=stmt_no,
-        period_from=period_from,
-        period_to=period_to,
-        total_sales_vat=total_sales_vat.quantize(Decimal('0.01')),
-        total_purchase_vat=total_purchase_vat.quantize(Decimal('0.01')),
-        net_vat=net_vat,
-        created_by=user,
-    )
+        net_vat = (total_sales_vat - total_purchase_vat).quantize(Decimal('0.01'))
+        stmt_no = f"VAT-{next_document_number(tenant_id, 'vat_statement')}"
 
-    updated = SalesInvoice.objects.filter(
-        tenant_id=tenant_id,
-        status=SalesInvoice.STATUS_POSTED,
-        invoice_date__gte=period_from,
-        invoice_date__lte=period_to,
-        vat_statement__isnull=True,
-    ).update(vat_statement=stmt)
+        stmt = VatStatement.objects.create(
+            tenant_id=tenant_id,
+            statement_number=stmt_no,
+            period_from=period_from,
+            period_to=period_to,
+            total_sales_vat=total_sales_vat.quantize(Decimal('0.01')),
+            total_purchase_vat=total_purchase_vat.quantize(Decimal('0.01')),
+            net_vat=net_vat,
+            created_by=user,
+        )
 
-    create_audit_log(
-        tenant=stmt.tenant,
-        user=user,
-        action="CREATE",
-        model_name="VatStatement",
-        object_id=stmt.id,
-        change_details=f"Created VAT statement {stmt_no}: {updated} invoices linked, net={net_vat}",
-    )
-    return stmt
+        # Re-issue the update by pk to use the lock acquired above.
+        invoice_ids = [inv.pk for inv in invoices]
+        updated = SalesInvoice.objects.filter(pk__in=invoice_ids).update(vat_statement=stmt)
+
+        create_audit_log(
+            tenant=stmt.tenant,
+            user=user,
+            action="CREATE",
+            model_name="VatStatement",
+            object_id=stmt.id,
+            change_details=f"Created VAT statement {stmt_no}: {updated} invoices linked, net={net_vat}",
+        )
+        return stmt
 

@@ -609,7 +609,18 @@ class LogisticsPaymentViewSet(BaseTenantViewSet):
         return LogisticsPayment.objects.none()
 
     def perform_create(self, serializer):
-        serializer.save()
+        # P-H-9: shared cross-payment-type validation. Routes through
+        # core.payments to refuse the same set of malformed inputs that
+        # customer / clearance / shipment-agent payments refuse.
+        from django.db import transaction
+        from core.payments import PaymentContext, validate_payment
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+        with transaction.atomic():
+            payment = serializer.save()
+            ctx = PaymentContext.from_deal_payment(payment)
+            errors = validate_payment(ctx)
+            if errors:
+                raise DRFValidationError({"payment": errors})
 
 
 class LogisticsShipmentViewSet(BaseTenantViewSet):
@@ -1271,6 +1282,15 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                     notes=notes,
                     is_posted=False,
                 )
+                # P-H-9: shared validation gate. Same as customer / deal /
+                # shipment-agent payment surfaces. We're inside the
+                # transaction.atomic block already, so raising rolls the
+                # ClearancePayment row back.
+                from core.payments import PaymentContext, validate_payment
+                ctx = PaymentContext.from_clearance_payment(pay)
+                errors = validate_payment(ctx)
+                if errors:
+                    raise DjangoValidationError(errors)
 
                 lines_data = [
                     {
