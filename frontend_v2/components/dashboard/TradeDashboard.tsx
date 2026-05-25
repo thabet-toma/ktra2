@@ -2,7 +2,8 @@ import React, { useEffect, useState, useCallback } from "react";
 import { fetchDashboard } from "../../services/dashboardApi";
 import type { DashboardData, DashboardAlert } from "../../types/dashboard";
 import type { AppView } from "../../types/common";
-import { StatusBadge, Spinner, DataGrid, EmptyState } from "../../components/ui";
+import { StatusBadge, Spinner, EmptyState } from "../../components/ui";
+import { AseelDenseTable } from "../aseel";
 import {
   Handshake,
   Ship,
@@ -317,7 +318,7 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
             {shipments.recent.length === 0 ? (
               <EmptyState title="لا توجد شحنات" />
             ) : (
-              <DataGrid
+              <AseelDenseTable
                 columns={[
                   { key: 'shipment_number', header: 'رقم الشحنة' },
                   { key: 'status', header: 'الحالة', align: 'center', render: (row: any) => <StatusBadge status={row.status} /> },
@@ -325,8 +326,8 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
                   { key: 'arrival_date', header: 'الوصول', align: 'center', render: (row: any) => <span className="text-[var(--font-size-xs)]">{fmtDate(row.arrival_date)}</span> },
                   { key: 'total_shipping_cost_usd', header: 'التكلفة', align: 'end', render: (row: any) => <span className="font-mono text-[var(--font-size-xs)]">{fmtMoney(row.total_shipping_cost_usd)} $</span> },
                 ]}
-                data={shipments.recent}
-                keyField="id"
+                rows={shipments.recent}
+                getRowKey={(row: any) => row.id}
               />
             )}
           </div>
