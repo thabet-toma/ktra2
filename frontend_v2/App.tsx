@@ -314,6 +314,14 @@ const App: React.FC = () => {
       return;
     }
     if (path === "/shipments" || path.startsWith("/shipments/")) {
+      // task6.1 G-5: legacy /shipments/<id> bookmarks → import-flow editor.
+      // List page (/shipments) keeps showing ShipmentManagement.
+      const m = path.match(/^\/shipments\/(.+)$/);
+      const seg = m ? decodeURIComponent(m[1]) : "";
+      if (seg) {
+        navigate(`/import-flow/${encodeURIComponent(seg)}`, { replace: true });
+        return;
+      }
       setAppView("shipments-management");
       return;
     }

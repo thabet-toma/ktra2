@@ -3,13 +3,12 @@
  * المرجع: task5.md:796 + الإرساليات.txt:6-155
  */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Shipment, User, Supplier } from '../../../types';
 import { shipmentsService } from '../../../services/shipmentsService';
 import { suppliersService } from '../../../services/firestoreService';
 import { Plus, Eye, Edit, Trash2, RefreshCw } from 'lucide-react';
 import { LoadingSpinner } from '../../LoadingSpinner';
-import { ShipmentForm } from './ShipmentForm';
 import { ShipmentDetailView } from './ShipmentDetailView';
 import { AseelDenseTable, type DenseColumn } from '../../aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from '../../aseel/useAseelIndexKeymap';
@@ -55,37 +54,15 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     onOpenAccountingJournal,
 }) => {
     const navigate = useNavigate();
-    const location = useLocation();
-    const newFormInitRef = useRef(false);
 
-    const shipmentsPathMatch = useMemo(() => {
-        const path = (location.pathname || '/').replace(/\/$/, '') || '/';
-        if (path !== '/shipments' && !path.startsWith('/shipments/')) return null;
-        if (path === '/shipments') return { mode: 'list' as const };
-        const m = path.match(/^\/shipments\/(.+)$/);
-        const seg = m ? decodeURIComponent(m[1]) : '';
-        if (seg === 'new') return { mode: 'new' as const };
-        if (!seg) return { mode: 'list' as const };
-        return { mode: 'shipment' as const, id: seg };
-    }, [location.pathname]);
-
-    const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
     const [shipments, setShipments] = useState<Shipment[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-    const [currentShipment, setCurrentShipment] = useState<Partial<Shipment> | null>(null);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
     const [typeFilter, setTypeFilter] = useState<'all' | 'sea' | 'air'>('all');
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [viewingShipment, setViewingShipment] = useState<Shipment | null>(null);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
-
-    useEffect(() => {
-        const path = (location.pathname || '/').replace(/\/$/, '') || '/';
-        if (path !== '/shipments' && !path.startsWith('/shipments/')) {
-            navigate('/shipments', { replace: true });
-        }
-    }, [location.pathname, navigate]);
 
     useEffect(() => {
         const unsubShipments = shipmentsService.subscribeToShipments((s) => {
@@ -97,47 +74,6 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
         });
         return () => { unsubShipments(); unsubSuppliers(); };
     }, []);
-
-    useEffect(() => {
-        if (!shipmentsPathMatch) return;
-        if (shipmentsPathMatch.mode === 'list') {
-            newFormInitRef.current = false;
-            setViewMode('list');
-            setCurrentShipment(null);
-            return;
-        }
-        if (shipmentsPathMatch.mode === 'shipment') {
-            const id = shipmentsPathMatch.id;
-            if (shipments.length === 0) return;
-            const target = shipments.find((s) => String(s.id) === String(id));
-            if (target) {
-                setCurrentShipment({ ...target });
-                setViewMode('form');
-            } else {
-                navigate('/shipments', { replace: true });
-            }
-            return;
-        }
-        if (newFormInitRef.current) return;
-        newFormInitRef.current = true;
-        void (async () => {
-            try {
-                const shipmentNumber = await shipmentsService.getNextShipmentNumber();
-                setCurrentShipment({
-                    shipmentNumber,
-                    status: 'draft',
-                    deals: [],
-                    totalShippingCostUsd: 0,
-                    totalVolume: 0,
-                });
-                setViewMode('form');
-            } catch (e) {
-                console.error(e);
-                newFormInitRef.current = false;
-                navigate('/shipments', { replace: true });
-            }
-        })();
-    }, [shipmentsPathMatch, shipments, navigate]);
 
     const filteredShipments = useMemo(() => {
         let result = shipments;
@@ -166,24 +102,17 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     }), [shipments]);
 
     const handleCreateNew = () => {
-        newFormInitRef.current = false;
-        navigate('/shipments/new');
+        navigate('/import-flow/new');
     };
 
     const handleEdit = (shipment: Shipment) => {
-        navigate(`/shipments/${encodeURIComponent(String(shipment.id))}`);
+        navigate(`/import-flow/${encodeURIComponent(String(shipment.id))}`);
     };
 
     const handleDelete = async (shipmentId: string) => {
         if (!window.confirm('هل أنت متأكد من حذف هذه الشحنة؟')) return;
         try {
             await shipmentsService.deleteShipment(shipmentId);
-            const path = (location.pathname || '/').replace(/\/$/, '') || '/';
-            const m = path.match(/^\/shipments\/(.+)$/);
-            const seg = m ? decodeURIComponent(m[1]) : '';
-            if (seg && seg !== 'new' && String(seg) === String(shipmentId)) {
-                navigate('/shipments', { replace: true });
-            }
         } catch (error) {
             console.error('Error deleting shipment:', error);
             alert('حدث خطأ أثناء حذف الشحنة');
@@ -294,35 +223,17 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
         },
     ];
 
-    // N0-T7 — keymap على قائمة الشحنات (list mode فقط)
+    // N0-T7 — keymap على قائمة الشحنات
     useAseelIndexKeymap(
         {
             CtrlIns: handleCreateNew,
             F6: () => searchInputRef.current?.focus(),
             Escape: () => { setSearch(''); setTypeFilter('all'); setStatusFilter('all'); },
         },
-        { enabled: viewMode === 'list' && !viewingShipment },
+        { enabled: !viewingShipment },
     );
 
     if (loading) return <LoadingSpinner />;
-
-    if (viewMode === 'form' && currentShipment) {
-        return (
-            <ShipmentForm
-                shipment={currentShipment}
-                onCancel={() => {
-                    setViewMode('list');
-                    setCurrentShipment(null);
-                    navigate('/shipments');
-                }}
-                onSave={(shipmentId) => {
-                    navigate(`/shipments/${encodeURIComponent(shipmentId)}`, { replace: true });
-                }}
-                currentUser={currentUser}
-                onOpenAccountingJournal={onOpenAccountingJournal}
-            />
-        );
-    }
 
     return (
         <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>

@@ -692,7 +692,22 @@ System-wide cleanup — 8 tasks.
 1. **BLOCKER: E-payment dispatched empty `cash_box_external_id`** — the backend hard-requires it (`logistics/views.py:1135` returns 400 "حقل cash_box_external_id مطلوب"). Every payment attempt would have failed. Added `accountingApi.getCashBoxLedgers()` loader, `cashBoxes`/`payCashBoxId` state, a cash-box `<select>` in the form, and required-field validation on the submit button. Warning shown when no cash boxes are linked yet.
 2. **D-create payload sent `carrier: 0`** — fails on backend FK validation. Added early-return guard with a clear "الناقل مطلوب" message before dispatching the create. (Long-term: replace the number input with an `AseelIndexPicker` for carriers — flagged for task7.)
 
-### Pending (task6.1)
-- **G** Routing migration (Shipments/Clearance/Local → /import-flow with tab param) — A-G-1 redirect ready to restore
-- **H** Delete old forms (ShipmentForm, clearance form-mode, local form-mode)
-- **I** AseelSidePanel primitive + browse-modal sweep
+### Completed (task6.1 G+H+I — 2026-05-24, with review fixes)
+- **G — Routing migration:** ShipmentManagement.handleEdit + handleCreateNew → `/import-flow/<id>` and `/import-flow/new`. CustomsClearanceManagement row-click + new + toolbar «رحلة الاستيراد» → `/import-flow/<shipment>?tab=clearance`. LocalShippingPage row-click + new → `/import-flow/<shipment>?tab=local`. App.tsx redirects legacy `/shipments/<id>` bookmarks to `/import-flow/<id>` for backward-compat.
+- **H — Delete old forms:** `ShipmentForm.tsx` + 6 subcomponents (`ShipmentBasicInfo`, `ShipmentShippingDetails`, `ShipmentDealSelector`, `ShipmentDealsTable`, `ShipmentStatusTimeline`, `ShipmentStatusVisualizer`) deleted. Form-mode branch removed from `ShipmentManagement.tsx` (list-only now). Most of the editable internals of `CustomsClearanceManagement.tsx` deleted — kept as a list-only browse page. `LocalShippingPage.tsx` modal-create logic stripped — list-only. Orphan `aseel-commercial-band` CSS rules deleted (~22 lines). `density-audit` drops from **308 → 289** issues / **130 → 123** files (target trend per task6.1 H-5 confirmed).
+- **I — AseelSidePanel primitive:** new `frontend_v2/components/aseel/AseelSidePanel.tsx` — portal-rendered right-sliding panel with `open/onClose/title/width/children` props, ESC + click-outside close, transform-based slide transition, body scroll-lock while open. Exported from `aseel/index.ts`. `SupplierViewModal` converted from centered modal to `AseelSidePanel` (width=520, browse-only use case). `AseelIndexPicker` (decision modal) kept as-is per the spec.
+
+### Errors found in external-model G+H+I commit and corrected
+1. **`LocalShippingPage` row-click used `window.location.href`** → full page reload (lost SPA state, double-fetched data). Replaced with `navigate()` from react-router (the import was already present at the top of the file).
+2. **App.tsx `/shipments/<id>` legacy URL still routed to ShipmentManagement list** after the form-mode was deleted — users with old bookmarks would land on the list with no indication that the URL is wrong. Added a `navigate("/import-flow/<id>", { replace: true })` in the path-resolver so legacy bookmarks transparently land on the new editor.
+
+### Verified
+- `manage.py check` = 0
+- `makemigrations --check` = no drift
+- `tsc --noEmit` = 41 errors (no regression vs baseline)
+- `grep -r "ShipmentForm\|ShipmentBasicInfo\|ShipmentDealSelector" frontend_v2/ --include="*.tsx" --include="*.ts"` = 0 (only `shipmentForm` state variable in `ImportDocumentScreen.tsx`)
+- Density audit: 308 → 289 issues / 130 → 123 files
+- `SupplierViewModal` confirmed renders via `AseelSidePanel` (open/onClose/title/width=520)
+
+### task6.1 — COMPLETE
+All 9 sub-phases (A..I) merged to main. The import flow editor (`ImportDocumentScreen`) is now the single canonical screen for editing shipments, clearance, local transport, payments, and converting to purchase invoices. Old forms retired. The 3-screens-per-shipment problem from task6.md category 0 is closed.

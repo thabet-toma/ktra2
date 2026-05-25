@@ -55,3 +55,7 @@ export type { AseelSpinnerProps, AseelEmptyStateProps, AseelErrorStateProps } fr
 // N9-T7
 export { AseelContextMenu } from './AseelContextMenu';
 export type { AseelContextMenuAction, AseelContextMenuProps } from './AseelContextMenu';
+
+// I-1
+export { AseelSidePanel } from './AseelSidePanel';
+export type { AseelSidePanelProps } from './AseelSidePanel';
