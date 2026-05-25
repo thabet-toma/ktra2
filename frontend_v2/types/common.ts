@@ -67,6 +67,7 @@ export type AppView =
     | "accounting-balance-sheet"
     | "accounting-income-statement"
     | "accounting-vat-statements"
+    | "accounting-year-end-close"
     | "sales-return"
     | "purchase-return"
     | "supplier-payments"

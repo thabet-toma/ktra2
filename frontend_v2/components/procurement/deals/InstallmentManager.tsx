@@ -51,7 +51,7 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
     onUpdateInstallments,
     installmentPlanEnabled,
     onTogglePlan,
-    deal = {},
+    deal = {} as any,
     readOnly = false,
     variant = 'deal',
 }) => {

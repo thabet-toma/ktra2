@@ -63,21 +63,15 @@ function sqlListToInvoice(row: PurchaseInvoiceListDto): Invoice {
 function initialPurchaseInvoiceViewMode(): "list" | "form" {
   if (typeof window === "undefined") return "list";
   const path = (window.location.pathname.replace(/\/$/, "") || "/");
-  const d = matchPath<{ invoiceId: string }>(
-    { path: "/purchase-invoices/:invoiceId", end: true },
-    path
-  );
-  return d?.params.invoiceId ? "form" : "list";
+  const d = matchPath({ path: "/purchase-invoices/:invoiceId", end: true }, path);
+  return (d?.params as Record<string, string>)?.invoiceId ? "form" : "list";
 }
 
 function initialInvoiceRouteLoading(): boolean {
   if (typeof window === "undefined") return false;
   const path = (window.location.pathname.replace(/\/$/, "") || "/");
-  const d = matchPath<{ invoiceId: string }>(
-    { path: "/purchase-invoices/:invoiceId", end: true },
-    path
-  );
-  const id = d?.params.invoiceId;
+  const d = matchPath({ path: "/purchase-invoices/:invoiceId", end: true }, path);
+  const id = (d?.params as Record<string, string>)?.invoiceId;
   return !!id && id !== "new" && Number(id) > 0;
 }
 
@@ -114,11 +108,11 @@ function invoiceToSqlPayload(inv: Partial<Invoice>): Partial<PurchaseInvoiceDto>
       notes: item.notes || null,
       hs_code: item.hsCodePrimary || null,
       landed_unit_price_ils:
-        item.landedUnitPriceIls != null && item.landedUnitPriceIls !== ''
+        item.landedUnitPriceIls != null
           ? roundSqlMoney4(item.landedUnitPriceIls)
           : null,
       landed_line_total_ils:
-        item.landedLineTotalIls != null && item.landedLineTotalIls !== ''
+        item.landedLineTotalIls != null
           ? roundSqlMoney2(item.landedLineTotalIls)
           : null,
     })),
@@ -163,10 +157,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
   const applyLocationToView = useCallback(async () => {
     const path = location.pathname.replace(/\/$/, "") || "/";
     const listOnly = matchPath({ path: "/purchase-invoices", end: true }, path);
-    const detail = matchPath<{ invoiceId: string }>(
-      { path: "/purchase-invoices/:invoiceId", end: true },
-      path
-    );
+    const detail = matchPath({ path: "/purchase-invoices/:invoiceId", end: true }, path);
 
     if (listOnly) {
       setInvoiceRouteLoading(false);
@@ -176,16 +167,16 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
       return;
     }
 
-    if (detail?.params.invoiceId) {
-      const raw = detail.params.invoiceId;
-      if (raw === "new") {
+    const pathId = (detail?.params as Record<string, string>)?.invoiceId;
+    if (pathId) {
+      if (pathId === "new") {
         setInvoiceRouteLoading(false);
         setCurrentInvoice(null);
         setIsReadOnly(false);
         setViewMode("form");
         return;
       }
-      const numId = Number(raw);
+      const numId = Number(pathId);
       if (!Number.isFinite(numId) || numId <= 0) {
         setInvoiceRouteLoading(false);
         navigate("/purchase-invoices", { replace: true });
@@ -347,12 +338,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
       };
 
       // 2. إنشاء الصفقة
-      const dealId = await dealsService.createDeal(
-        dealData,
-        currentUser.id,
-        currentUser.name,
-        currentUser.role
-      );
+      const dealId = await dealsService.createDeal(dealData);
 
       // 🟢 تم حذف إضافة النشاط الخاص بنقل الملفات
 

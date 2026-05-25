@@ -607,7 +607,7 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
   shippingCost = 0,
   shippingIncluded = false,
   payments = [],
-  localPayments = {},
+  localPayments = {} as any,
   productionDays, deliveryDays, paymentMethod, shippingMethod,
   warrantyDuration, totalWeight, totalVolume, certificates, shipmentNotes,
   onUpdateFinancial,

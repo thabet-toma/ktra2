@@ -170,13 +170,16 @@ export const OldPurchaseInvoice: React.FC = () => {
             limit(50)
         );
 
-        const unsubscribeInvoices = onSnapshot(q, (snapshot) => {
-            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
-            setInvoices(data);
-            setLoading(false);
-        }, (error) => {
-            console.error("Error fetching invoices:", error);
-            setLoading(false);
+        const unsubscribeInvoices = onSnapshot(q, {
+            next: (snapshot) => {
+                const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Invoice));
+                setInvoices(data);
+                setLoading(false);
+            },
+            error: (error) => {
+                console.error("Error fetching invoices:", error);
+                setLoading(false);
+            },
         });
 
         return () => {

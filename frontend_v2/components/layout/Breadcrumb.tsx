@@ -42,6 +42,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'accounting-balance-sheet': 'الميزانية العمومية',
   'accounting-income-statement': 'قائمة الدخل',
   'accounting-vat-statements': 'كشوف ضريبة القيمة المضافة',
+  'accounting-year-end-close': 'الإغلاق السنوي',
   'sales-return': 'مرجع البيع',
   'purchase-return': 'مرجع الشراء',
   'supplier-payments': 'سندات الصرف للموردين',

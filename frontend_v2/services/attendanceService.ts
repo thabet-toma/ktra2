@@ -320,7 +320,7 @@ async updateAttendanceManually(
       const snapshot = await getDocs(q);
       
       // حذف جميع سجلات الحضور لهذا اليوم
-      const deletePromises = snapshot.docs.map(async (doc) => {
+      const deletePromises = snapshot.docs.map(async (doc: any) => {
         await deleteDoc(doc.ref);
       });
       

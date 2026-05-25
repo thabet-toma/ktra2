@@ -407,7 +407,7 @@ export const prepareInvoiceFromDeal = (
             totalVolume: deal.totalVolume,
             quoteImages: deal.quoteImages || [],
             quotePdfs: deal.quotePdfs || [],
-            supplierSnapshot: deal.supplierSnapshot,
+            supplierSnapshot: deal.supplierSnapshot as any,
         },
     };
 

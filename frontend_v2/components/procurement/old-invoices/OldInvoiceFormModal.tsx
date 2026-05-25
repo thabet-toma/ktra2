@@ -339,7 +339,7 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
 
         setIsSaving(true);
         try {
-            const invoiceData: Partial<Invoice> = {
+            const invoiceData = {
                 invoiceDate,
                 invoiceNumber,
                 invoiceLink,

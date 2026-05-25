@@ -29,18 +29,20 @@ export const notificationsService = {
             limit(50)
         );
 
-        return onSnapshot(q, (snapshot) => {
-            const notifications = snapshot.docs.map((doc) => ({
-                id: doc.id,
-                ...doc.data(),
-            })) as AppNotification[];
+        return onSnapshot(q, {
+            next: (snapshot) => {
+                const notifications = snapshot.docs.map((doc) => ({
+                    id: doc.id,
+                    ...doc.data(),
+                })) as AppNotification[];
 
-            // ⭐ الفلتر الجديد: إزالة أي تكرار بناءً على الـ ID
-            const uniqueNotifications = Array.from(new Map(notifications.map(item => [item.id, item])).values());
+                const uniqueNotifications = Array.from(new Map(notifications.map(item => [item.id, item])).values());
 
-            callback(uniqueNotifications);
-        }, (error) => {
-            console.error("Error fetching notifications:", error);
+                callback(uniqueNotifications);
+            },
+            error: (error) => {
+                console.error("Error fetching notifications:", error);
+            },
         });
     },
 

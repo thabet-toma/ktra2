@@ -67,6 +67,9 @@ export class CloudinaryService {
     const uploadPromises = files.map(file => this.uploadFile(file));
     return Promise.all(uploadPromises);
   }
+
+  /** Alias للتوافق مع الشيفرة القديمة */
+  uploadMultipleImages = this.uploadMultipleFiles;
 }
 
 export const cloudinaryService = new CloudinaryService();
