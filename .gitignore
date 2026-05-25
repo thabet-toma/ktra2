@@ -79,4 +79,22 @@ frontend/
 /verify_*.py
 /_patch_services.py
 /_test_sales.py
+/_tmp_*.py
 /*.sql
+
+# P-K-1: frontend_v2 root cleanup — orphan dump / consolidation artifacts
+# that the docs-generation step in older sessions left tracked.
+/frontend_v2/dist/
+/frontend_v2/dist.zip
+/frontend_v2/complete_dump.py
+/frontend_v2/consolidate*.js
+/frontend_v2/consolidate*.py
+/frontend_v2/dump_code.js
+/frontend_v2/extractor.js
+/frontend_v2/final_*.js
+/frontend_v2/final_*.py
+/frontend_v2/FULL_LITERAL_CODEBASE*.md
+/frontend_v2/Full_Project_*.md
+/frontend_v2/LITERAL_COMPLETE_CODEBASE*.md
+/notes_extract.txt
+/task6_baseline.md

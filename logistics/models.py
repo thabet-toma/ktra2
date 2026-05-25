@@ -979,11 +979,6 @@ class PurchaseInvoice(models.Model):
         help_text='حساب الصندوق/البنك — مطلوب عند payment_type=cash',
     )
 
-    firestore_id = models.CharField(
-        max_length=100, null=True, blank=True, db_column='FirestoreID',
-        help_text='Legacy link to Firestore document id',
-    )
-
     # P-H-1: attached payment voucher fields (mirror of SalesInvoice)
     attached_cash_amount = models.DecimalField(
         max_digits=18, decimal_places=2, default=0,

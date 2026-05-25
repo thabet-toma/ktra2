@@ -25,11 +25,11 @@ class TenantIsolationDealTest(TestCase):
 
         partner_a = Partner.objects.create(
             tenant=cls.tenant_a, name='Partner A',
-            code='PA001', account_receivable=None, account_payable=None,
+            partner_type='Supplier',
         )
         partner_b = Partner.objects.create(
             tenant=cls.tenant_b, name='Partner B',
-            code='PB001', account_receivable=None, account_payable=None,
+            partner_type='Supplier',
         )
 
         cls.deal_a = LogisticsDeal.objects.create(
