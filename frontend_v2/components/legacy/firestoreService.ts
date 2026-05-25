@@ -19,7 +19,7 @@ import {
   serverTimestamp,
   runTransaction,
   db,
-} from "./sqlApiClient";
+} from "../../services/sqlApiClient";
 import { 
   Task, 
   User, 
@@ -44,9 +44,9 @@ import {
   CashBox,
   CashBoxTransaction,
   Currency
-} from "../types";
-import { apiDelete, apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "./restApi";
-import { tryPostPurchaseReceiptFromInvoice } from "./invoiceAccountingBridge";
+} from "../../types";
+import { apiDelete, apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "../../services/restApi";
+import { tryPostPurchaseReceiptFromInvoice } from "../../services/invoiceAccountingBridge";
 
 // --- Helper: Sanitize Data ---
 export const removeUndefined = <T>(obj: T): T => {

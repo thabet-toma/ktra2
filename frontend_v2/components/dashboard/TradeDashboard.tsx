@@ -324,7 +324,7 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
                   { key: 'status', header: 'الحالة', align: 'center', render: (row: any) => <StatusBadge status={row.status} /> },
                   { key: 'departure_date', header: 'المغادرة', align: 'center', render: (row: any) => <span className="text-[var(--font-size-xs)]">{fmtDate(row.departure_date)}</span> },
                   { key: 'arrival_date', header: 'الوصول', align: 'center', render: (row: any) => <span className="text-[var(--font-size-xs)]">{fmtDate(row.arrival_date)}</span> },
-                  { key: 'total_shipping_cost_usd', header: 'التكلفة', align: 'end', render: (row: any) => <span className="font-mono text-[var(--font-size-xs)]">{fmtMoney(row.total_shipping_cost_usd)} $</span> },
+                  { key: 'total_shipping_cost_usd', header: 'التكلفة', align: 'right', render: (row: any) => <span className="font-mono text-[var(--font-size-xs)]">{fmtMoney(row.total_shipping_cost_usd)} $</span> },
                 ]}
                 rows={shipments.recent}
                 getRowKey={(row: any) => row.id}
