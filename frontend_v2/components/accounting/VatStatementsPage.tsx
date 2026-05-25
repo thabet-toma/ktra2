@@ -8,6 +8,7 @@ import {
 } from "../aseel";
 import type { AseelToolbarAction, AseelTab, DenseColumn, ReportColumn } from "../aseel";
 import { Plus, Search, FileText } from "lucide-react";
+import OfflineGuard from "../offline/OfflineGuard";
 
 // Placeholder type for future VAT statements (N8-T13 backend not yet done)
 interface VatStatement {
@@ -146,15 +147,20 @@ export const VatStatementsPage: React.FC = () => {
 
       {previewData && (
         <div style={{ marginTop: "12px", display: "flex", justifyContent: "flex-end" }}>
-          <button
-            type="button"
-            className="aseel-toolbtn"
-            onClick={() => {
-              alert("إنشاء الكشف سيكون متاحاً بعد تنفيذ N8-T13 في الخادم.");
-            }}
+          <OfflineGuard
+            action="إصدار كشف الضريبة"
+            warningMessage="إصدار الكشف يتطلب اتصالاً — يَقفل الفواتير المؤهَّلة على الـserver"
           >
-            <FileText className="w-4 h-4" />إصدار الكشف
-          </button>
+            <button
+              type="button"
+              className="aseel-toolbtn"
+              onClick={() => {
+                alert("إنشاء الكشف سيكون متاحاً بعد تنفيذ N8-T13 في الخادم.");
+              }}
+            >
+              <FileText className="w-4 h-4" />إصدار الكشف
+            </button>
+          </OfflineGuard>
         </div>
       )}
     </div>

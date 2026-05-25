@@ -66,10 +66,10 @@ frontend_v2/
 
 ## [ORPHANS & PENDING]
 - [x] Phase 1: PWA Foundation (Manifest, vite-plugin-pwa, UpdatePrompt, offline page)
-- [x] Phase 2: Read-Side Cache + Online/Offline UI (Dexie, cachedApi, useOnlineStatus, OfflineBanner, StalenessBadge)
-- [x] Phase 3: Employee Guidance UI (OfflineGuard, StaleDataConfirm, PendingMutations, SyncConflict, StatusMessages, Coachmark) — infra complete, needs component-level button wrapping
-- [x] Phase 4: Draft-Mode Writes + Sync Queue (mutationClient, background sync, drafts API, temp-id mapping) — infra complete
-- [x] Phase 5: Storage Quotas + Multi-Tab + Playwright Tests — complete
+- [x] Phase 2: Read-Side Cache + Online/Offline UI (Dexie, cachedApi, useOnlineStatus, OfflineBanner, StalenessBadge) — wired into ItemsManagement + accountingApi.getPartners
+- [x] Phase 3: Employee Guidance UI — primitives + wiring on Year-End, Journal Entry post, VAT statement issue, Cheque transitions, Clearance payment, SalesInvoice post; useStaleConfirm wired in SalesInvoiceEditor
+- [x] Phase 4: Draft-Mode Writes + Sync Queue — mutationClient + Background-Sync + temp-id mapping + BroadcastChannel emit on sync + SalesInvoicesPage shows queued drafts with pending badge
+- [x] Phase 5: Storage Quotas + Multi-Tab + Playwright Tests — quota guard, broadcast sync, 5 Playwright specs (test1+test3 rewritten to drive real DOM)
 
 ## [TASK7 — Phase 1 + 2 review 2026-05-25]
 
@@ -123,3 +123,32 @@ External-model delivered all three remaining phases as a single uncommitted drop
 - `manage.py check` = 0, no migration drift
 - `@playwright/test`, `dexie`, `vite-plugin-pwa`, `workbox-window` installed
 - CI workflow now installs chromium and runs the e2e suite
+
+## [TASK7 — closing round 2026-05-25 round 3 — all pending items done]
+
+User pushed back on the «pending» list and asked for all of it. Closed every remaining task7 bullet in this commit.
+
+### Done in this round
+1. **`OfflineGuard` wired around 5 posting surfaces** (was 2):
+   - `YearEndClosePage` (already done).
+   - `AccountingJournalEntryPage` «حفظ وترحيل F12» (already done).
+   - `SalesInvoiceEditor` post action — guarded via `useOnlineStatus` on the AseelToolbarAction's `disabled` + label changes to «ترحيل (يتطلب اتصال)» when offline (the toolbar uses data-driven actions, not raw JSX, so the visual gate is on the action object).
+   - `VatStatementsPage` «إصدار الكشف» — wrapped with `<OfflineGuard>`.
+   - `AccountingChequesPage` «تحويل» — wrapped with `<OfflineGuard>`.
+   - `ImportDocumentScreen` «تسجيل الدفعة» (clearance pay_from_cashbox) — wrapped with `<OfflineGuard>`.
+2. **`useStaleConfirm` wired into `SalesInvoiceEditor.onSelectProduct`.** When offline and the picked product's Dexie row is >1h old, the user gets a modal warning «كمية المنتج … قد لا تكون متاحة فعلياً — تَأكَّد قبل المتابعة» with «أَفهم وأَستمر / إلغاء». Cancel aborts the line addition. The `staleModal` portal is rendered at the editor's root JSX so it overlays the document shell.
+3. **Phase 4-3 — drafts visible in lists.** `SalesInvoicesPage` now loads pending mutations whose endpoint starts with `sales/invoices` from `mutation_queue` and prepends them to the rows array with an `__pending: true` flag + negative id. The invoice_number column renders an amber dot (`bg-amber-500`) next to drafts with `title="مسوَّدة محلية — لم تُرحَّل بعد"` and `aria-label="مسوَّدة معلَّقة"`.
+4. **Phase 4-4 — BroadcastChannel on sync success.** `processMutationQueue` now broadcasts `{ type: "MUTATION_UPDATED", temp_id, real_id }` on the `ktra-sync` channel whenever a queued POST gets a real id back. The existing `useBroadcastSync` listener in `App.tsx` consumes it.
+5. **Playwright tests 1 + 3 rewritten** to drive the real DOM: test 1 asserts the banner mounts via `role=status` + Arabic text + the «أعِد المحاولة» button is keyboard-reachable; test 3 navigates to `/accounting/year-end-close` and asserts the `[role=group][aria-label="تنفيذ الإغلاق السنوي"]` container is visible offline. The dynamic-import smoke checks in tests 4-5 are kept (they fail loudly enough at runtime to flag a missing module without needing a full backend).
+6. **Phase 2 wiring — `accountingApi.getPartners`** now mirrors fresh rows into Dexie's `partners` store + writes a `cache_meta` entry. On network failure it returns the last cached snapshot so partner dropdowns keep working offline.
+
+### Final verification
+- `tsc --noEmit` = 0
+- `manage.py check` = 0, no migration drift
+- All Phase 3 user-facing primitives are now consumed in the app (no more dead code).
+- All 5 «pending» bullets from the previous review are closed.
+
+### Truly out of scope (would belong to a task8)
+- Full manual-merge editor UI for `SyncConflictModal` (currently parks as `failed` for inspection in the pending panel).
+- Wiring `useStaleConfirm` into `DealForm` / `PurchaseInvoice` add-line flows (only SalesInvoiceEditor was wired — the other two have very different add-line architectures).
+- Refactoring `getCostCenters`/`getAccounts`/`getCheques` in `accountingApi` to use the same Dexie mirror pattern as `getPartners`.

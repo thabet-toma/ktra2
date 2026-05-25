@@ -7,6 +7,7 @@ import {
 } from "../aseel";
 import type { AseelToolbarAction, AseelTab, DenseColumn } from "../aseel";
 import { Plus, Save, X, ArrowRightLeft } from "lucide-react";
+import OfflineGuard from "../offline/OfflineGuard";
 
 const CHEQUE_STATUSES = [
   { v: "Draft", l: "مسودة" },
@@ -406,9 +407,14 @@ export const AccountingChequesPage: React.FC = () => {
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
               <button type="button" className="aseel-toolbtn" onClick={() => setTransferCheque(null)}>إلغاء</button>
-              <button type="button" className="aseel-toolbtn" onClick={doTransfer}>
-                <ArrowRightLeft className="w-4 h-4" />تحويل
-              </button>
+              <OfflineGuard
+                action="تحويل حالة الشيك"
+                warningMessage="تَحويل حالة الشيك يتطلب اتصالاً — state machine يَنفَّذ على الـserver"
+              >
+                <button type="button" className="aseel-toolbtn" onClick={doTransfer}>
+                  <ArrowRightLeft className="w-4 h-4" />تحويل
+                </button>
+              </OfflineGuard>
             </div>
           </div>
         </div>

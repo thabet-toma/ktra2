@@ -168,7 +168,43 @@ export const SalesInvoicesPage: React.FC = () => {
     load();
   }, [load]);
 
-  const filteredRows = rows.filter((r) => {
+  // P4-3: pull pending sales-invoice mutations from the offline queue so
+  // local drafts show up alongside posted records with a «معلَّقة» badge.
+  const [pendingDrafts, setPendingDrafts] = useState<ExtRow[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const db = (await import("../../services/offline/db")).default;
+        const queued = await db.mutation_queue
+          .where("endpoint")
+          .startsWith("sales/invoices")
+          .filter((m) => m.status !== "synced")
+          .toArray();
+        if (cancelled) return;
+        const drafts: ExtRow[] = queued.map((m) => {
+          let body: Record<string, unknown> = {};
+          try { body = JSON.parse(m.body); } catch { /* ignore */ }
+          const draft = {
+            id: -(m.id ?? 0),
+            invoice_number: (body.invoice_number as string) || `مسوّدة #${m.temp_id?.slice(-6) || ""}`,
+            invoice_date: (body.invoice_date as string) || m.created_at.slice(0, 10),
+            status: "draft",
+            grand_total: (body.grand_total as number | undefined) ?? 0,
+            amount_paid: 0,
+            customer: (body.customer as number | null | undefined) ?? null,
+            ...body,
+            __pending: true,
+          };
+          return draft as unknown as ExtRow;
+        });
+        setPendingDrafts(drafts);
+      } catch { /* IndexedDB unavailable — skip */ }
+    })();
+    return () => { cancelled = true; };
+  }, [rows.length]);
+
+  const filteredRows = [...pendingDrafts, ...rows].filter((r) => {
     if (search) {
       const s = search.toLowerCase();
       const hay = `${r.invoice_number || ""} ${r.customer_name || ""} ${r.customer || ""}`.toLowerCase();
@@ -271,8 +307,19 @@ export const SalesInvoicesPage: React.FC = () => {
     {
       key: "invoice_number",
       header: "رقم",
-      width: "100px",
-      render: (r) => <span className="font-mono text-xs">{r.invoice_number}</span>,
+      width: "120px",
+      render: (r) => (
+        <span className="font-mono text-xs flex items-center gap-1">
+          {(r as ExtRow & { __pending?: boolean }).__pending && (
+            <span
+              className="inline-block w-2 h-2 rounded-full bg-amber-500"
+              title="مسوَّدة محلية — لم تُرحَّل بعد"
+              aria-label="مسوَّدة معلَّقة"
+            />
+          )}
+          {r.invoice_number}
+        </span>
+      ),
     },
     {
       key: "invoice_date",

@@ -11,6 +11,9 @@ import {
   type SalesInvoiceDetail,
   type SalesInvoiceRow,
 } from "../../services/salesApi";
+import { useOnlineStatus } from "../../hooks/useOnlineStatus";
+import { useStaleConfirm } from "../offline/StaleDataConfirm";
+import db from "../../services/offline/db";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
 import { apiPostObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -209,6 +212,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [productPickerLineKey, setProductPickerLineKey] = useState<string | null>(null);
   const [invoiceStatus, setInvoiceStatus] = useState<string>("draft");
   const [postedJournalId, setPostedJournalId] = useState<number | null>(null);
+  // P3-2-b wiring: offline status + stale-data confirm for line additions.
+  const { online: networkOnline } = useOnlineStatus();
+  const { confirm: confirmStale, modal: staleModal } = useStaleConfirm();
 
   const [saving, setSaving] = useState(false);
   const [posting, setPosting] = useState(false);
@@ -905,12 +911,31 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     }
   };
 
-  const onSelectProduct = (key: string, productId: number) => {
+  const onSelectProduct = async (key: string, productId: number) => {
     const pr = productsById.get(productId);
     const price =
       pr?.online_price != null && pr.online_price !== ""
         ? String(pr.online_price)
         : "0";
+    // P3-2-b: when offline, warn the user if the product row is from the
+    // local cache and older than 1 hour. The cached row may show a stale
+    // quantity which the user is about to commit to a sale.
+    if (!networkOnline) {
+      try {
+        const cached = await db.products.get(productId);
+        if (cached) {
+          const ageMs = Date.now() - new Date(cached.updated_at).getTime();
+          if (ageMs > 3600_000) {
+            const verdict = await confirmStale(
+              pr?.name_ar || cached.sku || String(productId),
+              "—",
+              cached.updated_at,
+            );
+            if (verdict === "cancel") return;
+          }
+        }
+      } catch { /* IndexedDB unavailable — fall through without blocking */ }
+    }
     updateLine(key, {
       product: productId,
       unit_price: price,
@@ -1235,9 +1260,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     },
     {
       key: "post",
-      label: posting ? "...ترحيل" : "ترحيل",
+      // P3-1-b: posting requires a server-side document number + journal
+      // post — block visually when offline so the user is not misled.
+      label: posting ? "...ترحيل" : !networkOnline ? "ترحيل (يتطلب اتصال)" : "ترحيل",
       icon: posting ? <Loader2 className="animate-spin" /> : <Send />,
       onClick:
+        networkOnline &&
         !isPosted &&
         draftId != null &&
         journalPreview.balanced &&
@@ -1246,6 +1274,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           ? () => void handlePost()
           : undefined,
       disabled:
+        !networkOnline ||
         isPosted ||
         draftId == null ||
         !journalPreview.balanced ||
@@ -2179,6 +2208,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           </div>
         </div>
       )}
+      {/* P3-2-b: stale-data confirmation portal for offline product picks */}
+      {staleModal}
     </div>
   );
 };

@@ -126,8 +126,42 @@ export const accountingApi = {
     await handle(res, "deleteJournal");
   },
 
-  getPartners: () =>
-    fetch(`${API_BASE}/partners/`, { headers: headers() }).then(asList),
+  // Phase 2-2-b wiring: master-data lookup with offline cache fallback.
+  // When the network is up, we hit the server, mirror rows into Dexie + stamp
+  // cache_meta. When it's down, we serve the last known snapshot so dropdowns
+  // and pickers keep working offline. Read errors here are non-fatal — the
+  // caller still gets [] if nothing has ever been cached.
+  getPartners: async () => {
+    const db = (await import("./offline/db")).default;
+    try {
+      const data = await fetch(`${API_BASE}/partners/`, { headers: headers() }).then(asList);
+      try {
+        const now = new Date().toISOString();
+        for (const p of data as Array<Record<string, unknown>>) {
+          const id = Number(p.id);
+          if (!Number.isFinite(id)) continue;
+          await db.partners.put({
+            id,
+            tenant_id: Number(p.tenant ?? 0),
+            name: String(p.name ?? ""),
+            partner_type: String(p.partner_type ?? ""),
+            data: JSON.stringify(p),
+            updated_at: now,
+          });
+        }
+        await db.cache_meta.put({ key: "partners:list", updated_at: now });
+      } catch { /* IndexedDB unavailable in private mode — non-fatal */ }
+      return data;
+    } catch {
+      // Network failed — fall back to the last cached snapshot.
+      try {
+        const cached = await db.partners.toArray();
+        return cached.map((c) => JSON.parse(c.data));
+      } catch {
+        return [];
+      }
+    }
+  },
 
   getCostCenters: () =>
     fetch(`${ACC}/cost-centers/`, { headers: headers() }).then(asList),

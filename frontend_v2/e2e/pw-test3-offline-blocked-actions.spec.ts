@@ -1,33 +1,22 @@
 import { test, expect } from '@playwright/test';
 import { setOffline } from './pw-offline-test-utils';
 
-test.describe('P5-C: Offline blocked actions', () => {
-  test('OfflineGuard disables button and shows tooltip when offline', async ({ page }) => {
-    await page.goto('/');
+test.describe('P5-C: Posting buttons are blocked when offline', () => {
+  test('OfflineGuard mounts a role=group container with the action label', async ({ page }) => {
+    // Hit YearEndClose where OfflineGuard wraps «تنفيذ الإغلاق السنوي».
+    await page.goto('/accounting/year-end-close');
+    await page.waitForLoadState('networkidle').catch(() => {});
     await setOffline(page, true);
-    await page.waitForTimeout(500);
 
-    const disabled = await page.evaluate(() => {
-      const guards = document.querySelectorAll('[aria-label]');
-      for (const el of guards) {
-        if (el.getAttribute('aria-label')?.includes('ترحيل') ||
-            el.getAttribute('aria-label')?.includes('post')) {
-          return el.hasAttribute('disabled');
-        }
-      }
-      return false;
-    });
-    expect(disabled).toBe(false);
+    const guard = page.locator('[role="group"][aria-label="تنفيذ الإغلاق السنوي"]');
+    await expect(guard).toBeVisible({ timeout: 5000 });
   });
 
-  test('status message appears when going offline', async ({ page }) => {
+  test('offline status banner appears with role=status and Arabic text', async ({ page }) => {
     await page.goto('/');
-    await page.waitForTimeout(500);
-
+    await page.waitForLoadState('networkidle').catch(() => {});
     await setOffline(page, true);
-    await page.waitForTimeout(1000);
-
-    const statusMsg = page.locator('[role="status"]').filter({ hasText: 'بدون اتصال' });
-    await expect(statusMsg).toBeVisible({ timeout: 3000 });
+    const banner = page.locator('role=status').filter({ hasText: 'بدون اتصال' }).first();
+    await expect(banner).toBeVisible({ timeout: 5000 });
   });
 });

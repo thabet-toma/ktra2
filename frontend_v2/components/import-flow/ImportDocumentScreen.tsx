@@ -9,6 +9,7 @@ import type { ClearanceLine } from "@/constants/clearanceDefaults";
 import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment } from "@/services/localShippingApi";
 import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab } from "@/components/aseel";
 import { CompactTimeline } from "./CompactTimeline";
+import OfflineGuard from "@/components/offline/OfflineGuard";
 
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => {
@@ -930,7 +931,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             {fld("ملاحظات", <input className="aseel-input" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} />)}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" className="aseel-toolbtn" onClick={() => void handleAddPayment()} disabled={saving || !payAmount || Number(payAmount) <= 0 || !payCashBoxId}>تسجيل الدفعة</button>
+            <OfflineGuard
+              action="تسجيل دفعة تخليص"
+              warningMessage="تسجيل الدفعة يتطلب اتصالاً — يُولَّد قيد محاسبي على الـserver"
+            >
+              <button type="button" className="aseel-toolbtn" onClick={() => void handleAddPayment()} disabled={saving || !payAmount || Number(payAmount) <= 0 || !payCashBoxId}>تسجيل الدفعة</button>
+            </OfflineGuard>
             <button type="button" className="aseel-toolbtn" onClick={() => setShowPaymentForm(false)}>إلغاء</button>
           </div>
           {cashBoxes.length === 0 && (

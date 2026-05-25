@@ -142,6 +142,15 @@ export async function processMutationQueue(): Promise<void> {
             model: entry.endpoint.split('/')[0] || 'unknown',
             synced_at: new Date().toISOString(),
           });
+          // P4-4: notify other tabs about the temp→real id mapping so any
+          // open editor referencing the draft can swap its in-memory id.
+          try {
+            new BroadcastChannel('ktra-sync').postMessage({
+              type: 'MUTATION_UPDATED',
+              temp_id: entry.temp_id,
+              real_id: result.id,
+            });
+          } catch { /* BroadcastChannel unavailable in some contexts */ }
         }
         await log('info', `processMutationQueue: synced ${entry.method} ${entry.endpoint}`, { id: entry.id });
       } else if (res.status === 409 && conflictListener) {
