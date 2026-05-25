@@ -32,6 +32,7 @@ import {
   type AseelGridColumn,
   type AseelIndexColumn,
 } from "../aseel";
+import OfflineGuard from "../offline/OfflineGuard";
 
 /* ─────────── types ─────────── */
 
@@ -905,20 +906,25 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
             {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
             حفظ مسودة
           </button>
-          <button
-            type="button"
-            className="aseel-toolbtn"
-            disabled={saving || !balanced || totalDebit <= 0}
-            onClick={saveAndPost}
-            title={!balanced ? 'يجب توازن القيد أولاً (F12)' : 'F12 = حفظ وترحيل'}
-            style={{
-              background: balanced && totalDebit > 0 ? 'var(--aseel-ok, #2d7d46)' : undefined,
-              color: balanced && totalDebit > 0 ? '#fff' : undefined,
-            }}
+          <OfflineGuard
+            action="ترحيل القيد"
+            warningMessage="الترحيل يتطلب اتصالاً — أرقام القيود تُولَّد على الـserver"
           >
-            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
-            حفظ وترحيل (F12)
-          </button>
+            <button
+              type="button"
+              className="aseel-toolbtn"
+              disabled={saving || !balanced || totalDebit <= 0}
+              onClick={saveAndPost}
+              title={!balanced ? 'يجب توازن القيد أولاً (F12)' : 'F12 = حفظ وترحيل'}
+              style={{
+                background: balanced && totalDebit > 0 ? 'var(--aseel-ok, #2d7d46)' : undefined,
+                color: balanced && totalDebit > 0 ? '#fff' : undefined,
+              }}
+            >
+              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle className="w-3 h-3" />}
+              حفظ وترحيل (F12)
+            </button>
+          </OfflineGuard>
         </div>
       )}
 

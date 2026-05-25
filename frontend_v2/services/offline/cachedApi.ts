@@ -107,6 +107,20 @@ export async function enqueueMutation(
   return id;
 }
 
+// Pub/sub for sync conflicts. UI registers a listener; when a 409 lands here,
+// the listener gets a snapshot of (local, server, endpoint) and is expected to
+// open `SyncConflictModal` and resolve via the returned promise.
+export type ConflictPayload = {
+  mutationId: number;
+  endpoint: string;
+  localBody: string;
+  serverBody: string;
+};
+export type ConflictResolution = 'overwrite' | 'take_server' | 'manual_merge';
+type ConflictListener = (p: ConflictPayload) => Promise<ConflictResolution>;
+let conflictListener: ConflictListener | null = null;
+export function registerConflictListener(fn: ConflictListener | null) { conflictListener = fn; }
+
 export async function processMutationQueue(): Promise<void> {
   const pending = await db.mutation_queue.where('status').equals('pending').sortBy('created_at');
   for (const entry of pending) {
@@ -130,6 +144,33 @@ export async function processMutationQueue(): Promise<void> {
           });
         }
         await log('info', `processMutationQueue: synced ${entry.method} ${entry.endpoint}`, { id: entry.id });
+      } else if (res.status === 409 && conflictListener) {
+        // P3-4: hand the conflict to the UI for resolution. Default if no
+        // listener is registered: mark as failed so the user can inspect it
+        // in the pending-mutations panel.
+        const serverBody = await res.text().catch(() => '');
+        try {
+          const resolution = await conflictListener({
+            mutationId: entry.id!,
+            endpoint: entry.endpoint,
+            localBody: entry.body,
+            serverBody,
+          });
+          if (resolution === 'overwrite') {
+            // Re-issue with force flag; server contract may vary — leaves the
+            // entry pending for the next sync round.
+            await db.mutation_queue.update(entry.id!, { status: 'pending', error: 'pending overwrite' });
+          } else if (resolution === 'take_server') {
+            await db.mutation_queue.update(entry.id!, { status: 'synced', error: 'server-wins' });
+          } else {
+            // Manual merge: the UI is expected to load both bodies into an
+            // editor and post the merged result; we just park as failed.
+            await db.mutation_queue.update(entry.id!, { status: 'failed', error: 'awaiting manual merge' });
+          }
+        } catch {
+          await db.mutation_queue.update(entry.id!, { status: 'failed', error: 'conflict resolution aborted' });
+        }
+        await log('warn', `processMutationQueue: 409 conflict for ${entry.endpoint}`, { id: entry.id });
       } else if (res.status >= 400 && res.status < 500) {
         const errBody = await res.text().catch(() => '');
         await db.mutation_queue.update(entry.id!, { status: 'failed', error: errBody.slice(0, 500) });

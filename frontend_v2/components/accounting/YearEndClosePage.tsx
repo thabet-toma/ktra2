@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import { AseelDocumentShell } from "../aseel";
 import { AlertCircle, CheckCircle, Loader2 } from "lucide-react";
+import OfflineGuard from "../offline/OfflineGuard";
 
 export const YearEndClosePage: React.FC = () => {
   const today = new Date();
@@ -70,17 +71,22 @@ export const YearEndClosePage: React.FC = () => {
           />
         </div>
 
-        <button
-          onClick={executeClose}
-          disabled={loading}
-          style={{
-            width: "100%", padding: "10px 16px", borderRadius: 6, border: "none",
-            backgroundColor: "#d97706", color: "#fff", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer",
-            opacity: loading ? 0.7 : 1,
-          }}
+        <OfflineGuard
+          action="تنفيذ الإغلاق السنوي"
+          warningMessage="الإغلاق السنوي يتطلب اتصالاً — لا يمكن تنفيذه offline"
         >
-          {loading ? <Loader2 className="animate-spin" size={18} /> : "تنفيذ الإغلاق السنوي"}
-        </button>
+          <button
+            onClick={executeClose}
+            disabled={loading}
+            style={{
+              width: "100%", padding: "10px 16px", borderRadius: 6, border: "none",
+              backgroundColor: "#d97706", color: "#fff", fontWeight: 600, cursor: loading ? "not-allowed" : "pointer",
+              opacity: loading ? 0.7 : 1,
+            }}
+          >
+            {loading ? <Loader2 className="animate-spin" size={18} /> : "تنفيذ الإغلاق السنوي"}
+          </button>
+        </OfflineGuard>
 
         {err && (
           <div style={{ marginTop: 16, padding: 12, borderRadius: 6, background: "#fee2e2", display: "flex", alignItems: "center", gap: 8 }}>

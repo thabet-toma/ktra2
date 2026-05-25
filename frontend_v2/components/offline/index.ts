@@ -1,3 +1,10 @@
 export { default as OfflineBanner } from './OfflineBanner';
 export { default as StalenessBadge } from './StalenessBadge';
 export { default as UpdatePrompt } from './UpdatePrompt';
+export { default as OfflineGuard } from './OfflineGuard';
+export { default as StaleDataConfirm, useStaleConfirm } from './StaleDataConfirm';
+export { default as PendingMutationsPanel } from './PendingMutationsPanel';
+export { default as SyncConflictModal } from './SyncConflictModal';
+export { default as StatusMessage } from './StatusMessage';
+export { default as OfflineCoachmark } from './OfflineCoachmark';
+export { default as StorageQuotaGuard } from './StorageQuotaGuard';

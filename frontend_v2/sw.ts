@@ -121,6 +121,18 @@ async function fetchAndCache(request: Request, cache: Cache): Promise<void> {
   } catch {}
 }
 
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'ktra-mutations') {
+    event.waitUntil(
+      self.clients.matchAll().then((clients) => {
+        clients.forEach((client) => {
+          client.postMessage({ type: 'PROCESS_MUTATIONS' });
+        });
+      })
+    );
+  }
+});
+
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SKIP_WAITING') {
     self.skipWaiting();

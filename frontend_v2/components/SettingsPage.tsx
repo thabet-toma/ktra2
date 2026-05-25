@@ -182,6 +182,26 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
                     </div>
                 </div>
             </form>
+
+            {/* P5-T1-b: إدارة التخزين المحلي */}
+            <div className="aseel-form-section" style={{ marginTop: 20 }}>
+                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>إدارة التخزين المحلي</h3>
+                <p style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
+                    البيانات المخزنة محلياً (cache) تتيح تصفح التطبيق بدون اتصال.
+                </p>
+                <button
+                    type="button"
+                    className="aseel-toolbtn"
+                    onClick={async () => {
+                        const { cleanOldCache } = await import('../services/offline/cacheCleaner');
+                        const n = await cleanOldCache(7);
+                        alert(`تم حذف ${n} سجل قديم`);
+                    }}
+                    style={{ padding: '5px 16px', fontWeight: 700 }}
+                >
+                    امسح cache قديم (أقدم من 7 أيام)
+                </button>
+            </div>
         </div>
     );
 };

@@ -26,6 +26,14 @@ import { NoSqlMigrationBanner } from "./components/NoSqlMigrationBanner";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import OfflineBanner from "./components/offline/OfflineBanner";
 import UpdatePrompt from "./components/offline/UpdatePrompt";
+import PendingMutationsPanel from "./components/offline/PendingMutationsPanel";
+import OfflineCoachmark from "./components/offline/OfflineCoachmark";
+import StatusMessage from "./components/offline/StatusMessage";
+import { processMutationQueue, registerConflictListener, type ConflictPayload, type ConflictResolution } from "./services/offline/cachedApi";
+import StorageQuotaGuard from "./components/offline/StorageQuotaGuard";
+import SyncConflictModal from "./components/offline/SyncConflictModal";
+import { useBroadcastSync } from "./hooks/useBroadcastSync";
+import { cleanOldCache } from "./services/offline/cacheCleaner";
 import { Dashboard } from "./components/Dashboard";
 import { TradeDashboard } from "./components/dashboard/TradeDashboard";
 import { TaskManagement } from "./components/TaskManagement";
@@ -200,6 +208,35 @@ const App: React.FC = () => {
   const [rejectingTask, setRejectingTask] = useState<Task | null>(null);
   const [theme, setTheme] = useState<Theme>("light");
   const onlineStatus = useOnlineStatus();
+  const [statusMsg, setStatusMsg] = useState<{ message: string; type: 'info' | 'warn' | 'error' } | null>(null);
+  // P3-4 wiring: keep one conflict modal at app root and route 409s from
+  // processMutationQueue through it.
+  const [syncConflict, setSyncConflict] = useState<{
+    payload: ConflictPayload;
+    resolve: (r: ConflictResolution) => void;
+  } | null>(null);
+
+  useEffect(() => {
+    registerConflictListener((payload) => {
+      return new Promise<ConflictResolution>((resolve) => {
+        setSyncConflict({ payload, resolve });
+      });
+    });
+    return () => registerConflictListener(null);
+  }, []);
+
+  useBroadcastSync(useCallback((msg) => {
+    if (msg.type === 'ONLINE_CHANGED' && msg.online) {
+      processMutationQueue().catch(() => {});
+    }
+    if (msg.type === 'TENANT_SWITCHED') {
+      cleanOldCache(0).catch(() => {});
+    }
+    if (msg.type === 'MUTATION_UPDATED') {
+      setStatusMsg({ message: 'تحديث من تبويب آخر', type: 'info' });
+      setTimeout(() => setStatusMsg(null), 3000);
+    }
+  }, []));
   /** N0-T5: F11 modal portal لثوابت المجموعة */
   const [groupConstantsOpen, setGroupConstantsOpen] = useState(false);
 
@@ -414,6 +451,28 @@ const App: React.FC = () => {
       unsubscribeTasks();
     };
   }, [currentUser]);
+
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      if (event.data?.type === 'PROCESS_MUTATIONS') {
+        processMutationQueue().catch(() => {});
+      }
+    };
+    navigator.serviceWorker?.addEventListener('message', handler);
+    return () => navigator.serviceWorker?.removeEventListener('message', handler);
+  }, []);
+
+  useEffect(() => {
+    setStatusMsg({
+      message: onlineStatus.online ? 'عودة الاتصال — جارٍ مزامنة العمليات المعلقة' : 'أنت الآن بدون اتصال — الأعمال ستُحفظ محلياً',
+      type: onlineStatus.online ? 'info' : 'warn',
+    });
+    if (onlineStatus.online) {
+      processMutationQueue().catch(() => {});
+    }
+    const t = setTimeout(() => setStatusMsg(null), 5000);
+    return () => clearTimeout(t);
+  }, [onlineStatus.online]);
 
   /** تذكيرات وصول الشحنات (≤ 3 أيام) — إشعار Firestore، تكرار محكوم بـ localStorage */
   useEffect(() => {
@@ -1623,6 +1682,9 @@ const App: React.FC = () => {
   return (
     <div dir="rtl">
       <AppLayout user={currentUser} activeView={appView} onNavigate={setViewAndSyncPath} onOpenGroupConstants={() => setGroupConstantsOpen(true)}>
+        <div className="fixed top-3 left-3 z-50">
+          <PendingMutationsPanel />
+        </div>
         <OfflineBanner status={onlineStatus} onRetry={() => window.location.reload()} />
         <NoSqlMigrationBanner isManager={currentUser?.role === "manager"} />
         <main className="p-3 sm:p-4 lg:p-6">
@@ -1667,6 +1729,17 @@ const App: React.FC = () => {
         />
       )}
       <UpdatePrompt />
+      <OfflineCoachmark />
+      <StorageQuotaGuard />
+      {statusMsg && <StatusMessage message={statusMsg.message} type={statusMsg.type} />}
+      {syncConflict && (
+        <SyncConflictModal
+          modelName={syncConflict.payload.endpoint}
+          localData={syncConflict.payload.localBody}
+          serverData={syncConflict.payload.serverBody}
+          onResolve={(r) => { syncConflict.resolve(r); setSyncConflict(null); }}
+        />
+      )}
     </div>
   );
 };
