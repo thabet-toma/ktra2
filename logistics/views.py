@@ -39,6 +39,7 @@ from .landed_cost import (
     recalculate_landed_for_shipment,
     redistribute_shipment_deal_allocations,
 )
+from .services import attach_pi_payment_voucher
 
 
 class LogisticsDealViewSet(BaseTenantViewSet):
@@ -1671,6 +1672,37 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(result)
+
+    @action(detail=True, methods=['post'], url_path='payment-voucher')
+    def payment_voucher(self, request, pk=None):
+        """P-H-1 — Attach the financial voucher (cash + cheques) to a purchase invoice.
+
+        Mirrors sales/views.py SalesInvoiceViewSet.payment_voucher.
+
+        Body:
+            {
+                "cash_amount": "100.00",
+                "cash_account_id": 12,
+                "cheques": [
+                    {"cheque_number": "12345", "amount": "50", "bank_name": "...",
+                     "due_date": "2026-06-01", "issue_date": "2026-05-20", "notes": ""}
+                ]
+            }
+        """
+        invoice = self.get_object()
+        try:
+            attach_pi_payment_voucher(
+                invoice,
+                cash_amount=request.data.get('cash_amount', 0),
+                cash_account_id=request.data.get('cash_account_id'),
+                cheques=request.data.get('cheques') or [],
+                user=request.user,
+            )
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        invoice.refresh_from_db()
+        ser = PurchaseInvoiceSerializer(invoice, context={'request': request})
+        return Response(ser.data)
 
     @action(detail=True, methods=['post'], url_path='post-to-accounting')
     def post_to_accounting(self, request, pk=None):

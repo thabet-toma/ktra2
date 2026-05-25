@@ -223,6 +223,14 @@ class Cheque(models.Model):
         db_column='CustomerPaymentID',
         related_name='cheques',
     )
+    # P-H-1: link to purchase invoice (mirror of sales_invoice)
+    purchase_invoice = models.ForeignKey(
+        'logistics.PurchaseInvoice',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column='PurchaseInvoiceID',
+        related_name='cheques',
+    )
 
     class Meta:
         db_table = 'cheques'

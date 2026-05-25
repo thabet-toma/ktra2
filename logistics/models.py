@@ -984,6 +984,13 @@ class PurchaseInvoice(models.Model):
         help_text='Legacy link to Firestore document id',
     )
 
+    # P-H-1: attached payment voucher fields (mirror of SalesInvoice)
+    attached_cash_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0,
+        db_column='AttachedCashAmount',
+        help_text='مبلغ نقدي مرفق عبر السند المالي (P-H-1)',
+    )
+
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
     updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
     created_by = models.ForeignKey(

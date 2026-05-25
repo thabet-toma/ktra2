@@ -928,6 +928,8 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     cash_or_bank_account_code = serializers.CharField(
         source='cash_or_bank_account.code', read_only=True, default=None,
     )
+    # P-H-1: exposed for payment-voucher endpoint (read-only)
+    cheques = serializers.SerializerMethodField()
 
     class Meta:
         model = PurchaseInvoice
@@ -944,12 +946,13 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'grand_total',
             'payment_type',
             'cash_or_bank_account', 'cash_or_bank_account_name', 'cash_or_bank_account_code',
+            'attached_cash_amount',
             'local_payments_json', 'conversion_metadata_json',
             'status', 'status_display', 'notes',
             'supplier_invoice_number', 'factory_name',
             'is_posted', 'journal', 'journal_id_display',
             'firestore_id',
-            'items', 'fees',
+            'items', 'fees', 'cheques',
             'created_at', 'updated_at', 'created_by',
         ]
         read_only_fields = ['id', 'is_posted', 'journal', 'created_at', 'updated_at']
@@ -967,6 +970,23 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
                 'cash_or_bank_account': 'الدفع النقدي يتطلب اختيار حساب صندوق/بنك.'
             })
         return attrs
+
+    def get_cheques(self, obj):
+        return [
+            {
+                'id': c.id,
+                'cheque_number': c.cheque_number,
+                'bank_name': c.bank_name,
+                'amount': str(c.amount),
+                'status': c.status,
+                'direction': c.direction,
+                'due_date': c.due_date.isoformat() if c.due_date else None,
+                'issue_date': c.issue_date.isoformat() if c.issue_date else None,
+                'payee_name': c.payee_name,
+                'notes': c.notes,
+            }
+            for c in obj.cheques.all()
+        ]
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
