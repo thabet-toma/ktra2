@@ -345,6 +345,16 @@ export const accountingApi = {
     return res.json();
   },
 
+  yearEndClose: async (body: { year: number; retained_earnings_account_id: number }) => {
+    const res = await fetch(`${ACC}/fiscal-periods/year-end-close/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "yearEndClose");
+    return res.json();
+  },
+
   // ─── Tax Rates ───
 
   getTaxRates: () =>

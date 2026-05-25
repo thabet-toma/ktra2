@@ -88,6 +88,7 @@ import { ExchangeRatesPage } from "./components/accounting/ExchangeRatesPage";
 import { BalanceSheetPage } from "./components/accounting/BalanceSheetPage";
 import { IncomeStatementPage } from "./components/accounting/IncomeStatementPage";
 import { VatStatementsPage } from "./components/accounting/VatStatementsPage";
+import { YearEndClosePage } from "./components/accounting/YearEndClosePage";
 import { SqlProductsPage } from "./components/sql/SqlProductsPage";
 import { SqlPartnersPage } from "./components/sql/SqlPartnersPage";
 import { SqlDealsPage } from "./components/sql/SqlDealsPage";
@@ -1479,6 +1480,12 @@ const App: React.FC = () => {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <VatStatementsPage />;
+
+      case "accounting-year-end-close":
+        if (currentUser!.role !== "manager") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <YearEndClosePage />;
 
       case "stock-levels":
         return <StockLevelsPage />;
