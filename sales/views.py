@@ -215,16 +215,31 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             }
         Replaces previously-attached DRAFT cheques. Posting still happens via
         the `/post` endpoint, which produces ONE integrated journal (M2-T3).
+
+        P-H-5: pass `"post": true` in the body to atomically attach + post in
+        a single `transaction.atomic()` so a post failure rolls the cheques
+        back too. Default `post: false` preserves the prior two-step flow.
         """
         invoice = self.get_object()
+        want_post = bool(request.data.get("post"))
         try:
-            attach_payment_voucher(
-                invoice,
-                cash_amount=request.data.get("cash_amount", 0),
-                cash_account_id=request.data.get("cash_account_id"),
-                cheques=request.data.get("cheques") or [],
-                user=request.user,
-            )
+            if want_post:
+                from sales.services import attach_voucher_and_post
+                attach_voucher_and_post(
+                    invoice,
+                    cash_amount=request.data.get("cash_amount", 0),
+                    cash_account_id=request.data.get("cash_account_id"),
+                    cheques=request.data.get("cheques") or [],
+                    user=request.user,
+                )
+            else:
+                attach_payment_voucher(
+                    invoice,
+                    cash_amount=request.data.get("cash_amount", 0),
+                    cash_account_id=request.data.get("cash_account_id"),
+                    cheques=request.data.get("cheques") or [],
+                    user=request.user,
+                )
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         invoice.refresh_from_db()

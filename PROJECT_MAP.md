@@ -745,9 +745,7 @@ All 9 sub-phases (A..I) merged to main. The import flow editor (`ImportDocumentS
 - Density audit baseline preserved
 
 ### Pending in task6
-- **P-H-5** Voucher atomicity — current behavior is safe: cheques stay in `Draft` if `post_sales_invoice` fails (post is atomic, draft cheques aren't claimed as cash flow). A combined endpoint would be cleaner but not a correctness blocker.
-- **P-H-8** Multi-currency FX per allocation — non-trivial refactor; deferred without test coverage.
-- **P-I-7** Sidebar / `AccountingJournalEntryPage` dead-state cleanup — inspection shows `pickerTargetLine` is actually live (read at lines 204/942, written at 531/534). True dead state needs a deeper code review.
+- **P-I-7** Sidebar / `AccountingJournalEntryPage` dead-state cleanup — scanned all `useState` in AccountingJournalEntryPage + DealForm: every state has at least one read site. `pickerTargetLine` is live (read at lines 204/942, written at 531/534), `journalsList` is passed to `useRecordNavigation`, `previewImage`/`allDbItems` are consumed in JSX. No dead state to remove in these files; task closed.
 - **P-J** (tests + CI), **P-K** (docs + final cleanup)
 
 ## [TASK6 — P-H-2 + P-H-6 + P-H-9 filled in 2026-05-25]
@@ -774,4 +772,29 @@ User flagged that the missing P-H/P-I items should have been executed instead of
 ### Verified
 - `manage.py check` = 0
 - `makemigrations --check` = no drift (migration 0015 applied)
+- `tsc --noEmit` = 0
+
+## [TASK6 — P-H-5 + P-H-8 + P-I-7 filled in 2026-05-25 round 2]
+
+User pushed back that ALL the items I'd deferred should be executed, not just the easy three. Followed up with the remaining trio.
+
+### P-H-5 — cross-call voucher atomicity
+- New service `sales/services.py:attach_voucher_and_post` wraps both `attach_payment_voucher` and `post_sales_invoice` in a single `transaction.atomic()` block. If posting raises, the cheques created in the attach step are rolled back along with the journal attempt — closing the gap where a separate-endpoint workflow could leave Draft cheques attached after a post failure.
+- `sales/views.py:payment_voucher` action accepts an optional `"post": true` flag in the body to route through the combined service. Default `post: false` preserves the prior two-step flow for the «build voucher → review → post» UX.
+
+### P-H-8 — per-allocation FX
+- `sales/services.py:post_customer_payment` previously took `alloc_conversions[0][0].invoice.currency_id` as «the» source currency and converted the SUM of all allocations through it. That sum is meaningless when a payment covers invoices in mixed currencies (e.g. USD payment covering EUR + ILS invoices): the EUR and ILS amounts were added before either was converted.
+- Replaced with a per-allocation loop: each allocation's `amount_in_inv_curr` is converted from its own invoice currency to the payment currency, and the converted amounts are summed to produce `total_in_pay_curr`. `forex_diff` is then derived from `payment.amount - total_in_pay_curr` correctly across mixed currencies.
+- Allocations whose invoice currency matches the payment currency skip the conversion (no spurious FX line when there is no mismatch).
+
+### P-I-7 — no dead state found
+- Audited all `useState` in `AccountingJournalEntryPage.tsx` and `DealForm.tsx` (the candidate files called out in task6.md VIII-2 + P-I-7). Every state has at least one read site in render or in a handler that's wired to JSX:
+  - `pickerTargetLine` — read at 204/942, set at 531/534.
+  - `journalsList` — passed to `useRecordNavigation`.
+  - `previewImage` / `allDbItems` — consumed in JSX (ImagePreviewModal / ItemSearchModal).
+- Task closed as «no dead state present in these components».
+
+### Verified again
+- `manage.py check` = 0
+- `makemigrations --check` = no drift
 - `tsc --noEmit` = 0

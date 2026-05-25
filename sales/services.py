@@ -501,6 +501,39 @@ def attach_payment_voucher(
     return invoice
 
 
+def attach_voucher_and_post(
+    invoice: SalesInvoice,
+    *,
+    cash_amount: Decimal | str | float = 0,
+    cash_account_id: int | None = None,
+    cheques: list[dict] | None = None,
+    user=None,
+) -> SalesInvoice:
+    """P-H-5: atomic attach + post.
+
+    Wraps `attach_payment_voucher` and `post_sales_invoice` in a single
+    `transaction.atomic()` block. If `post_sales_invoice` raises, the
+    cheques created in the attach step are rolled back along with the
+    posting attempt. This closes the gap where a user calls the two
+    endpoints separately and gets a half-applied state (Draft cheques
+    attached but no journal posted).
+
+    Use this for the «sign+post in one click» UX; the separate endpoints
+    remain available for the «build the voucher, review, then post»
+    flow.
+    """
+    with transaction.atomic():
+        attach_payment_voucher(
+            invoice,
+            cash_amount=cash_amount,
+            cash_account_id=cash_account_id,
+            cheques=cheques,
+            user=user,
+        )
+        post_sales_invoice(invoice, user=user)
+    return invoice
+
+
 def post_sales_invoice(
     invoice: SalesInvoice,
     *,
@@ -1108,16 +1141,33 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
         forex_diff = Decimal("0")
         forex_acc = None
 
+        # P-H-8: per-allocation FX. The previous implementation took
+        # alloc_conversions[0][0].invoice.currency_id as "the" source
+        # currency and converted the SUM of all allocations through it.
+        # That sum is meaningless when the payment covers invoices in
+        # mixed currencies (e.g. EUR invoice + ILS invoice with a USD
+        # payment): the EUR and ILS amounts get added before either is
+        # converted. The fix is to convert each allocation separately
+        # from its own invoice currency to the payment currency and
+        # accumulate the result.
         if payment_currency_id and alloc_conversions:
-            first_inv_curr_id = alloc_conversions[0][0].invoice.currency_id
-            if payment_currency_id != first_inv_curr_id:
-                total_in_pay_curr, _ = convert_amount(
-                    amount=total_alloc_in_inv_curr,
-                    from_currency_id=first_inv_curr_id,
-                    to_currency_id=payment_currency_id,
-                    tenant_id=payment.tenant_id,
-                    effective_date=payment.payment_date,
-                )
+            total_in_pay_curr = Decimal("0")
+            any_mismatch = False
+            for alloc, amount_in_inv_curr, _rate in alloc_conversions:
+                inv_curr_id = alloc.invoice.currency_id
+                if inv_curr_id == payment_currency_id:
+                    total_in_pay_curr += amount_in_inv_curr
+                else:
+                    any_mismatch = True
+                    converted, _ = convert_amount(
+                        amount=amount_in_inv_curr,
+                        from_currency_id=inv_curr_id,
+                        to_currency_id=payment_currency_id,
+                        tenant_id=payment.tenant_id,
+                        effective_date=payment.payment_date,
+                    )
+                    total_in_pay_curr += converted
+            if any_mismatch:
                 forex_diff = (payment.amount - total_in_pay_curr).quantize(DEC)
                 if abs(forex_diff) > DEC:
                     forex_acc = resolve_forex_account(payment.tenant_id)
