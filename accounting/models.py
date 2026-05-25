@@ -236,6 +236,47 @@ class Cheque(models.Model):
         db_table = 'cheques'
         managed = True
 
+    VALID_TRANSITIONS = {
+        'Draft': ['Under_Collection', 'Bounced', 'Returned'],
+        'Under_Collection': ['Collected', 'Bounced', 'Returned'],
+        'Collected': ['Bounced', 'Returned'],
+        'Bounced': ['Draft', 'Under_Collection', 'Returned'],
+        'Returned': [],
+    }
+
+    def change_status(self, new_status, *, notes='', user=None):
+        """P-H-4: تغيير حالة الشيك مع تسجيل الحركة والتحقق من الانتقال الصحيح.
+
+        Returns: ChequeMovement that was created.
+        Raises: ValidationError if transition is invalid.
+        """
+        from django.core.exceptions import ValidationError
+
+        if new_status == self.status:
+            return None
+        allowed = self.VALID_TRANSITIONS.get(self.status, [])
+        if new_status not in allowed:
+            raise ValidationError(
+                f"لا يمكن تغيير حالة الشيك من {self.status} إلى {new_status}. "
+                f"الانتقالات المسموحة من {self.status}: {', '.join(allowed) if allowed else '—'}."
+            )
+        self.status = new_status
+        self.save(update_fields=['status'])
+        from django.utils import timezone
+        movement_type_map = {
+            'Under_Collection': 'deposit',
+            'Collected': 'settle',
+            'Bounced': 'bounce',
+            'Returned': 'return_to_customer',
+        }
+        movement_type = movement_type_map.get(new_status, new_status.lower())
+        return ChequeMovement.objects.create(
+            cheque=self,
+            movement_type=movement_type,
+            notes=notes or '',
+            created_by=user if user and not getattr(user, 'is_anonymous', False) else None,
+        )
+
     def __str__(self):
         return f"Cheque {self.cheque_number} - {self.amount}"
 
