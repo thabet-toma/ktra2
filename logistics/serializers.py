@@ -3,6 +3,8 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from rest_framework import serializers
 
+from sales.models import SupplierPayment
+
 from .text_utils import has_arabic as _has_arabic
 from .text_utils import (
     is_english_payment_or_legal_boilerplate as _english_payment_boilerplate,
@@ -1145,4 +1147,41 @@ class LocalShipmentSerializer(serializers.ModelSerializer):
                 })
         except (InvalidOperation, TypeError):
             raise serializers.ValidationError({'amount': 'قيمة غير صالحة.'})
+        return attrs
+
+
+# ── P-H-3: SupplierPayment ──────────────────────────────────────────
+
+class SupplierPaymentSerializer(serializers.ModelSerializer):
+    partner_name = serializers.CharField(source='partner.name', read_only=True)
+    currency_code = serializers.CharField(source='currency.Code', read_only=True, default=None)
+    cash_account_name = serializers.CharField(
+        source='cash_or_bank_account.name', read_only=True, default=None,
+    )
+
+    class Meta:
+        model = SupplierPayment
+        fields = [
+            'id',
+            'partner', 'partner_name',
+            'payment_date',
+            'amount',
+            'currency', 'currency_code', 'exchange_rate',
+            'cash_or_bank_account', 'cash_account_name',
+            'is_posted', 'journal',
+            'notes',
+            'created_at',
+        ]
+        read_only_fields = ['id', 'is_posted', 'journal', 'created_at']
+
+    def validate(self, attrs):
+        try:
+            if Decimal(str(attrs.get('amount', 0))) <= 0:
+                raise serializers.ValidationError({'amount': 'المبلغ يجب أن يكون أكبر من صفر.'})
+        except (InvalidOperation, TypeError):
+            raise serializers.ValidationError({'amount': 'قيمة غير صالحة.'})
+        if not attrs.get('payment_date'):
+            raise serializers.ValidationError({'payment_date': 'تاريخ الدفعة مطلوب.'})
+        if not attrs.get('cash_or_bank_account'):
+            raise serializers.ValidationError({'cash_or_bank_account': 'الصندوق/البنك مطلوب.'})
         return attrs

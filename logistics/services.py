@@ -1,6 +1,7 @@
-"""P-H-1: Business-logic services for logistics app.
+"""P-H-1/3: Business-logic services for logistics app.
 
-Mirrors sales/services.py patterns for attached payment vouchers (M2-T3).
+Mirrors sales/services.py patterns for attached payment vouchers (M2-T3)
+and AP account resolution.
 """
 
 from decimal import Decimal, ROUND_HALF_UP
@@ -8,9 +9,38 @@ from decimal import Decimal, ROUND_HALF_UP
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from accounting.models import Cheque
+from accounting.models import Account, Cheque
 
 DEC = Decimal("0.01")
+
+
+def _resolve_ap_account(partner) -> Account:
+    """P-H-3: يحلّ حساب الذمم الدائنة للمورد بسلسلة أولويات.
+
+    1. حساب مرتبط بالمورد مباشرة (partner.linked_account)
+    2. حساب ذمم مجموعة المورد (partner.group.account_payable)
+    3. حساب برمز 2101 (حساب ذمم موردين معياري)
+    4. أول حساب خصوم (Liability) نشط في الشركة
+    """
+    if partner.linked_account_id:
+        return partner.linked_account
+    if partner.group_id:
+        from partners.models import PartnerGroup
+        g = PartnerGroup.objects.filter(pk=partner.group_id).first()
+        if g and g.account_payable_id:
+            return g.account_payable
+    ap = Account.objects.filter(tenant_id=partner.tenant_id, code="2101").first()
+    if ap:
+        return ap
+    ap = Account.objects.filter(
+        tenant_id=partner.tenant_id, account_type="Liability", is_active=True,
+    ).first()
+    if ap:
+        return ap
+    raise ValidationError(
+        f"لم يُعثر على حساب ذمم دائنة للمورد «{partner.name}». "
+        "اربط المورد بحساب، أو حدد حساب ذمم للمجموعة، أو أنشئ حساب 2101."
+    )
 
 
 def attach_pi_payment_voucher(

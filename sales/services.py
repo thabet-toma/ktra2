@@ -1479,9 +1479,8 @@ def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'Supplier
         raise ValidationError("المورد لا يتبع نفس الشركة.")
     validate_fiscal_period(payment.tenant_id, payment.payment_date)
 
-    ap_account = payment.partner.linked_account
-    if not ap_account:
-        raise ValidationError(f"المورد «{payment.partner.name}» ليس لديه حساب ذمم دائنة (linked_account).")
+    from logistics.services import _resolve_ap_account
+    ap_account = _resolve_ap_account(payment.partner)
 
     with transaction.atomic():
         jh = post_journal(

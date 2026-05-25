@@ -15,13 +15,14 @@ from .models import (
     PurchaseInvoice, PurchaseInvoiceItem, PurchaseInvoiceFee,
     LocalShipment,
 )
+from sales.models import SupplierPayment
 from .serializers import (
     LogisticsDealSerializer, LogisticsDealItemSerializer,
     LogisticsShipmentSerializer, LogisticsClearanceSerializer,
     LogisticsExpenseSerializer, LogisticsPaymentSerializer,
     LogisticsClearancePaymentSerializer,
     PurchaseInvoiceSerializer, PurchaseInvoiceListSerializer,
-    LocalShipmentSerializer,
+    LocalShipmentSerializer, SupplierPaymentSerializer,
 )
 from accounting.models import Account, TaxRate
 from partners.models import Partner
@@ -1968,6 +1969,46 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({'message': 'تم إلغاء الترحيل بقيد عكسي', 'reversal_journal_id': rev.id})
+
+
+# ── P-H-3: SupplierPayment ──────────────────────────────────────────
+
+class SupplierPaymentViewSet(BaseTenantViewSet):
+    serializer_class = SupplierPaymentSerializer
+
+    def get_queryset(self):
+        qs = SupplierPayment.objects.all().select_related(
+            'partner', 'currency', 'cash_or_bank_account', 'journal',
+        ).order_by('-created_at')
+        tenant = get_tenant(self.request)
+        if tenant:
+            qs = qs.filter(tenant=tenant)
+        return qs
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        payment = serializer.save(tenant=tenant)
+        from logistics.services import _resolve_ap_account
+        try:
+            _resolve_ap_account(payment.partner)
+        except Exception as e:
+            payment.delete()
+            from rest_framework.exceptions import ValidationError as DRFValidationError
+            raise DRFValidationError(str(e))
+
+    @action(detail=True, methods=['post'], url_path='post')
+    def post_to_accounting(self, request, pk=None):
+        payment = self.get_object()
+        if payment.is_posted:
+            return Response({'error': 'سند الصرف مرحّل مسبقاً.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            from sales.services import post_supplier_payment
+            post_supplier_payment(payment, user=request.user)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        payment.refresh_from_db()
+        ser = SupplierPaymentSerializer(payment, context={'request': request})
+        return Response(ser.data)
 
 
 class LocalShipmentViewSet(BaseTenantViewSet):
