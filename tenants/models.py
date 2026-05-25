@@ -136,5 +136,32 @@ class TenantBook(models.Model):
         managed = True
         unique_together = [['tenant', 'document_type', 'book_number']]
 
+    @classmethod
+    def get_next_number(cls, tenant_id: int, document_type: str, book_number: int = 0) -> int:
+        """P-H-11: يولد الرقم التالي مع select_for_update لضمان الذرية.
+
+        يستخدم قفل الصف (row-level lock) لمنع سباق الرقم المتزامن بين
+        المستخدمين. يخلق الدفتر تلقائياً إذا لم يكن موجوداً.
+        """
+        from django.db import transaction
+        with transaction.atomic():
+            book = cls.objects.select_for_update().get_or_create(
+                tenant_id=tenant_id,
+                document_type=document_type,
+                book_number=book_number,
+                defaults={
+                    'name': f'{document_type} [{book_number}]',
+                    'last_used_number': 0,
+                    'is_active': True,
+                },
+            )[0]
+            if not book.is_active:
+                from django.core.exceptions import ValidationError
+                raise ValidationError(f"الدفتر {book_number} لنوع {document_type} غير نشط.")
+            next_num = book.last_used_number + 1
+            book.last_used_number = next_num
+            book.save(update_fields=['last_used_number'])
+            return next_num
+
     def __str__(self):
         return f"{self.tenant} — {self.document_type} [{self.book_number}]"
