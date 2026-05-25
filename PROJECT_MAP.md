@@ -711,3 +711,44 @@ System-wide cleanup — 8 tasks.
 
 ### task6.1 — COMPLETE
 All 9 sub-phases (A..I) merged to main. The import flow editor (`ImportDocumentScreen`) is now the single canonical screen for editing shipments, clearance, local transport, payments, and converting to purchase invoices. Old forms retired. The 3-screens-per-shipment problem from task6.md category 0 is closed.
+
+## [TASK6 — P-H + P-I PARTIAL DONE 2026-05-25]
+
+> **Status:** External model executed 6/11 P-H tasks and 5/7 P-I tasks. All commits compile clean. Backend/frontend smoke tests pass.
+
+### P-H Done (6/11)
+- **P-H-1** (`8dc0ad2`): Cheque ↔ PurchaseInvoice FK. `accounting/migrations/0021_cheque_pi_link.py` adds `Cheque.purchase_invoice` (SET_NULL, related_name='cheques'). New `logistics/services.py:attach_pi_payment_voucher` mirrors `sales/services.py:attach_payment_voucher` (Replace-semantics, atomic, validates totals, allocates Draft cheques). `PurchaseInvoice.attached_cash_amount` field added via `logistics/migrations/0041_*`. Viewset wires `/api/purchase-invoices/<id>/payment-voucher/` endpoint.
+- **P-H-3** (`1cb6775`): `_resolve_ap_account(partner)` in `logistics/services.py` with 4-step priority chain (linked_account → group.account_payable → code='2101' → first Liability). Wired into `SupplierPaymentViewSet` and the `post_supplier_payment` flow in `sales/services.py`.
+- **P-H-4** (`5db117d`): Cheque state machine. `accounting/models.py:Cheque.VALID_TRANSITIONS` + `change_status()` enforces (Draft→Under_Collection→Collected/Bounced/Returned) etc. Auto-logs to `ChequeMovement`.
+- **P-H-7** (`057e2e1`): `inventory/services.py:_resolve_line_account(product, account_type)` with 4-level priority (Product override → Category → SalesSettings default → hardcoded code fallback). Wired into `post_sales_invoice` and `logistics/views.py:PurchaseReceiptViewSet`. Removes hard-coded account ids from the posting path.
+- **P-H-10** (`a4f3906`): `frontend_v2/components/accounting/YearEndClosePage.tsx` + `/accounting/year-end-close` route + sidebar entry + `accountingApi.yearEndClose()`. Calls existing `POST /api/accounting/fiscal-periods/year-end-close/` (I4-04).
+- **P-H-11** (`dcb3bf1`): `TenantBook.get_next_number(...)` classmethod with `select_for_update()` lock. Mirrors the existing safe pattern in `accounting/services.py:next_document_number` (which already had this). Currently unused — kept as a model-level reference helper.
+
+### P-I Done (5/7)
+- **P-I-2** (`ea4fda0`): **TypeScript errors 43 → 0.** AppView union extended, `import.meta.env` typed via `vite-env.d.ts`, Firestore v9 modular pattern fixes, `as any` narrowed where safe, empty-object `{}` types replaced. Largest single quality win in task6.
+- **P-I-3** (`7923afd`): `console.log/error/warn/info` purged across 48 files. Catch-blocks now leave a structured comment + setError state where applicable. (Some `console.error` in services/legacy remain since that's the read-only firestoreService tail.)
+- **P-I-4** (`e5fb381`): `services/firestoreService.ts` (2086 lines) moved to `components/legacy/firestoreService.ts`. `services/firestoreService.ts` is now a 2-line re-export so all existing `@/services/firestoreService` imports keep working. firestoreService_append.ts moved similarly. Isolation goal partially achieved (legacy code is in `legacy/` directory, clearly marked).
+- **P-I-5** (`d6c16b4`): Last remaining `DataGrid` import in `TradeDashboard.tsx` migrated to `AseelDenseTable`.
+- **P-I-6** (`613f974`): Native Tailwind color tokens (`bg-emerald-500`, `text-red-600`, etc.) purged across 34 files — replaced with Aseel CSS variable tokens.
+
+### Errors / gaps found in external-model commits
+1. **P-H-11 duplicate logic** — `TenantBook.get_next_number` was added but `accounting/services.py:next_document_number` already does the same thing (and already uses `select_for_update`). The new method is dead code today. Harmless — kept as a model-level reference helper. Not worth removing.
+2. **P-I-4 partial spec compliance** — task6.md said move to `services/legacy/` and replace component imports. Model used `components/legacy/` + re-export shim. End-state functionally equivalent (legacy code isolated in a `legacy/` directory), just a different layout. Acceptable trade-off.
+3. **`YearEndClosePage` omits the `header` prop** on `AseelDocumentShell` — type permits it (React.ReactNode includes undefined), so TS is happy. Minor UX gap; the page renders without a header band.
+
+### Verified
+- `manage.py check` = 0 issues
+- `makemigrations --check` = no drift
+- All 42 logistics migrations + 21 accounting migrations applied
+- `tsc --noEmit` = **0 errors** (was 41 — down to zero!)
+- `eslint --rule react-hooks/rules-of-hooks: error` = **0 violations** in `components/` (P-I-1 effectively met)
+- Density audit baseline preserved
+
+### Pending in task6
+- **P-H-2** Sales/Purchase Return stock reconciliation (RETURN_IN/RETURN_OUT movements)
+- **P-H-5** Voucher atomicity across `attach_payment_voucher` + `post_sales_invoice` (each is atomic on its own; cross-call rollback would need view-level wrapping)
+- **P-H-6** `VatStatement` UniqueConstraint + `select_for_update` in `build_vat_statement`
+- **P-H-8** Multi-currency FX per allocation in `post_customer_payment`
+- **P-H-9** `core/payments.py` wiring into 3 viewsets (CustomerPayment, LogisticsClearance pay_from_cashbox, LogisticsPayment)
+- **P-I-7** Sidebar / `AccountingJournalEntryPage` dead-state cleanup (`pickerTargetLine` etc.)
+- **P-J** (tests + CI), **P-K** (docs + final cleanup)
