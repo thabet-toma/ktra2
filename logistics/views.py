@@ -1751,16 +1751,36 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        # ─── 2) حساب المخزون/المشتريات — نعطي الأولوية لكود 1104 ───────────────
-        inventory_account = (
-            Account.objects.filter(tenant=tenant, code="1104").first()
-            or Account.objects.filter(
-                tenant=tenant, account_type="Asset", name__icontains="مخزون",
-            ).first()
-            or Account.objects.filter(
-                tenant=tenant, account_type="Expense", name__icontains="مشتريات",
-            ).first()
-        )
+        # ─── 2) حساب المخزون/المشتريات — P-H-7: عبر _resolve_line_account ──
+        inventory_account = None
+        invoice_items = list(invoice.items.select_related('product__category').all())
+        if invoice_items:
+            # Per-line using product account overrides
+            from inventory.services import _resolve_line_account
+            line_accounts: dict[int, Decimal] = {}
+            for it in invoice_items:
+                if it.product_id:
+                    try:
+                        acc = _resolve_line_account(it.product, 'purchase', tenant_id=tenant.id)
+                    except Exception:
+                        continue
+                    line_accounts.setdefault(acc.id, Decimal('0'))
+                    line_total = Decimal(str(it.total_price or it.quantity * it.unit_price or 0))
+                    line_accounts[acc.id] += line_total
+            if line_accounts:
+                # Pick the most-used account for the single-line simplification
+                inventory_account = Account.objects.get(pk=max(line_accounts, key=line_accounts.get))
+
+        if not inventory_account:
+            inventory_account = (
+                Account.objects.filter(tenant=tenant, code="1104").first()
+                or Account.objects.filter(
+                    tenant=tenant, account_type="Asset", name__icontains="مخزون",
+                ).first()
+                or Account.objects.filter(
+                    tenant=tenant, account_type="Expense", name__icontains="مشتريات",
+                ).first()
+            )
         if not inventory_account:
             return Response(
                 {'error': 'لم يُعثر على حساب المخزون/المشتريات (1104). شغّل seed_professional_coa أولاً.'},

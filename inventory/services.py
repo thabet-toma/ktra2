@@ -258,3 +258,96 @@ def warn_landed_cost_mismatch(purchase_invoice):
             'recorded': str(current_cost),
         })
     return warnings
+
+
+def _resolve_line_account(product, account_type='revenue', *, tenant_id=None):
+    """P-H-7: يحلّ الحساب المحاسبي لصنف/بند المخزون بسلسلة أولويات.
+
+    1. Product-level override (حسب account_type)
+    2. Category-level account
+    3. Settings default (SalesSettings)
+    4. Hardcoded fallback (أول حساب نشيط حسب النوع/الكود)
+
+    account_type: 'revenue' | 'cogs' | 'inventory' | 'purchase'
+    Returns: Account instance
+    Raises: ValidationError if not found
+    """
+    from accounting.models import Account
+    from sales.models import SalesSettings
+
+    tid = tenant_id or (product.tenant_id if hasattr(product, 'tenant_id') else None)
+
+    # ── Level 1: Product-level override ──────────────────────────
+    override_map = {
+        'revenue': 'sale_account_override',
+        'cogs': None,  # not overridable per product
+        'inventory': 'ending_inventory_account_override',
+        'purchase': 'purchase_account_override',
+    }
+    override_field = override_map.get(account_type)
+    if override_field:
+        val = getattr(product, override_field, None)
+        if val is not None:
+            return val
+
+    # ── Level 2: Category-level account ──────────────────────────
+    cat = getattr(product, 'category', None)
+    if cat:
+        cat_field_map = {
+            'revenue': 'revenue_account',
+            'cogs': 'cogs_account',
+            'inventory': 'inventory_account',
+            'purchase': 'inventory_account',  # purchases use inventory account
+        }
+        cat_field = cat_field_map.get(account_type)
+        if cat_field:
+            val = getattr(cat, cat_field, None)
+            if val is not None:
+                return val
+
+    # ── Level 3: Settings default ────────────────────────────────
+    if tid:
+        ss = SalesSettings.objects.filter(tenant_id=tid).first()
+        if ss:
+            ss_field_map = {
+                'revenue': 'default_revenue_account_product',
+                'cogs': 'default_cogs_account',
+                'inventory': 'default_inventory_account',
+                'purchase': 'default_inventory_account',
+            }
+            ss_field = ss_field_map.get(account_type)
+            if ss_field:
+                val = getattr(ss, ss_field, None)
+                if val is not None:
+                    return val
+
+    # ── Level 4: Hardcoded fallback ──────────────────────────────
+    code_fallbacks = {
+        'revenue': '4101',
+        'cogs': '5101',
+        'inventory': '1104',
+        'purchase': '1104',
+    }
+    fb_code = code_fallbacks.get(account_type)
+    if fb_code and tid:
+        acc = Account.objects.filter(tenant_id=tid, code=fb_code).first()
+        if acc:
+            return acc
+
+    # Last resort: any matching account type
+    type_fallbacks = {
+        'revenue': 'Revenue',
+        'cogs': 'Expense',
+        'inventory': 'Asset',
+        'purchase': 'Asset',
+    }
+    fb_type = type_fallbacks.get(account_type)
+    if fb_type and tid:
+        acc = Account.objects.filter(tenant_id=tid, account_type=fb_type, is_active=True).first()
+        if acc:
+            return acc
+
+    raise ValidationError(
+        f"لم يُعثر على حساب {account_type} للصنف «{product.sku or product.name}». "
+        "حدد حساباً للصنف أو للتصنيف أو في إعدادات المبيعات."
+    )

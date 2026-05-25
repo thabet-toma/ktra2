@@ -240,7 +240,15 @@ def _default_revenue_account(tenant_id: int, *, is_service: bool = False) -> Acc
 def _resolve_revenue_account_for_line(invoice: SalesInvoice, line: SalesInvoiceLine) -> Account:
     p = line.product
     is_service = bool(getattr(p, "is_service", False))
-    # للمنتجات: ممكن تُثبَّت على الفاتورة. للخدمات: نفضّل إعداد الخدمة دائمًا.
+
+    # P-H-7: product-level override (from inventory.Product account overrides)
+    if not is_service:
+        from inventory.services import _resolve_line_account
+        try:
+            return _resolve_line_account(p, 'revenue', tenant_id=invoice.tenant_id)
+        except Exception:
+            pass  # fall through to legacy resolution
+
     if invoice.revenue_account_id and not is_service:
         return invoice.revenue_account
     cat = getattr(p, "category", None)
