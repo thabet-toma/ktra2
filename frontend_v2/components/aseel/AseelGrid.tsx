@@ -1,16 +1,5 @@
-/**
- * M0-T6 — AseelGrid
- * Dense, keyboard-editable line grid (RTL) for Aseel document detail tables.
- * Generic & presentational: the parent owns `rows` and handles `onChange`.
- * Supports a `variant`:
- *   - 'items'   : item lines (default) — رقم الصنف/بيان/الوحدة/الكمية/سعر/إجمالي
- *   - 'journal' : debit/credit + VAT layout used by «فاتورة البيان الجمركي»
- *                 (negative = credit) — the parent supplies the columns.
- * Keyboard: Enter → next row (same column), ↑/↓ → move row, Tab natural.
- * A trailing blank row is offered automatically when `onAddRow` is given.
- * Reference: invoices.txt 94–142, 186–192; shipments.txt 35–80, 191–214.
- */
-import React, { useCallback } from 'react';
+import React, { useCallback, useState } from 'react';
+import { AseelCalculatorPopover } from './AseelCalculatorPopover';
 
 export interface AseelGridColumn<T> {
   key: string;
@@ -48,6 +37,14 @@ export function AseelGrid<T>({
   variant = 'items',
   emptyHint = 'لا توجد بنود — ابدأ الإدخال',
 }: AseelGridProps<T>) {
+  const [calcState, setCalcState] = useState<{
+    rowIndex: number;
+    columnKey: string;
+    initialValue: string | number;
+    x: number;
+    y: number;
+  } | null>(null);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>, rowIndex: number) => {
       const td = (e.target as HTMLElement).closest('td');
@@ -79,60 +76,98 @@ export function AseelGrid<T>({
     [rows.length, onAddRow],
   );
 
+  const handleDoubleClick = (
+    e: React.MouseEvent<HTMLInputElement>,
+    ri: number,
+    columnKey: string,
+    currentVal: any
+  ) => {
+    const rect = (e.target as HTMLElement).getBoundingClientRect();
+    setCalcState({
+      rowIndex: ri,
+      columnKey: columnKey,
+      initialValue: currentVal ?? '',
+      x: rect.left,
+      y: rect.bottom + window.scrollY,
+    });
+  };
+
   return (
-    <table className="aseel-grid" data-variant={variant}>
-      <thead>
-        <tr>
-          {columns.map((c) => (
-            <th key={c.key} style={{ width: c.width }}>
-              {c.header}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.length === 0 ? (
+    <div className="relative">
+      <table className="aseel-grid" data-variant={variant}>
+        <thead>
           <tr>
-            <td
-              colSpan={columns.length}
-              style={{ textAlign: 'center', color: 'var(--aseel-ink-soft)', padding: '14px' }}
-            >
-              {emptyHint}
-            </td>
+            {columns.map((c) => (
+              <th key={c.key} style={{ width: c.width }}>
+                {c.header}
+              </th>
+            ))}
           </tr>
-        ) : (
-          rows.map((row, ri) => (
-            <tr
-              key={getRowKey(row, ri)}
-              className={ri === selectedIndex ? 'aseel-row--sel' : undefined}
-              onMouseDown={() => onSelectRow?.(ri)}
-            >
-              {columns.map((c) => {
-                const val = getCell(row, c.key);
-                const alignClass =
-                  c.align === 'left' || c.type === 'number' ? 'aseel-num' : undefined;
-                return (
-                  <td key={c.key} className={alignClass} style={{ textAlign: c.align }}>
-                    {c.render ? (
-                      c.render(row, ri)
-                    ) : c.readOnly || !onChange ? (
-                      <span>{val ?? ''}</span>
-                    ) : (
-                      <input
-                        data-aseel-key="1"
-                        inputMode={c.type === 'number' ? 'decimal' : undefined}
-                        value={val == null ? '' : String(val)}
-                        onChange={(e) => onChange(ri, c.key, e.target.value)}
-                        onKeyDown={(e) => handleKeyDown(e, ri)}
-                      />
-                    )}
-                  </td>
-                );
-              })}
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr>
+              <td
+                colSpan={columns.length}
+                style={{ textAlign: 'center', color: 'var(--aseel-ink-soft)', padding: '14px' }}
+              >
+                {emptyHint}
+              </td>
             </tr>
-          ))
-        )}
-      </tbody>
-    </table>
+          ) : (
+            rows.map((row, ri) => (
+              <tr
+                key={getRowKey(row, ri)}
+                className={ri === selectedIndex ? 'aseel-row--sel' : undefined}
+                onMouseDown={() => onSelectRow?.(ri)}
+              >
+                {columns.map((c) => {
+                  const val = getCell(row, c.key);
+                  const alignClass =
+                    c.align === 'left' || c.type === 'number' ? 'aseel-num' : undefined;
+                  return (
+                    <td key={c.key} className={alignClass} style={{ textAlign: c.align }}>
+                      {c.render ? (
+                        c.render(row, ri)
+                      ) : c.readOnly || !onChange ? (
+                        <span>{val ?? ''}</span>
+                      ) : (
+                        <input
+                          data-aseel-key="1"
+                          inputMode={c.type === 'number' ? 'decimal' : undefined}
+                          value={val == null ? '' : String(val)}
+                          onChange={(e) => onChange(ri, c.key, e.target.value)}
+                          onKeyDown={(e) => handleKeyDown(e, ri)}
+                          onDoubleClick={
+                            c.type === 'number'
+                              ? (e) => handleDoubleClick(e, ri, c.key, val)
+                              : undefined
+                          }
+                        />
+                      )}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+
+      {calcState && (
+        <AseelCalculatorPopover
+          initialValue={calcState.initialValue}
+          x={calcState.x}
+          y={calcState.y}
+          onConfirm={(result) => {
+            if (onChange) {
+              onChange(calcState.rowIndex, calcState.columnKey, String(result));
+            }
+            setCalcState(null);
+          }}
+          onClose={() => setCalcState(null)}
+        />
+      )}
+    </div>
   );
 }

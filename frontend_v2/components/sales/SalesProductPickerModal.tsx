@@ -46,23 +46,64 @@ export const SalesProductPickerModal: React.FC<Props> = ({
   onSelect,
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const activeItemRef = React.useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
-    if (isOpen) setSearchTerm(initialSearch);
+    if (isOpen) {
+      setSearchTerm(initialSearch);
+      setSelectedIndex(0);
+    }
   }, [isOpen, initialSearch]);
 
   const filtered = useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
-    if (!q) return products.slice(0, 400);
-    return products
-      .filter((p) => {
-        const sku = (p.sku || "").toLowerCase();
-        const bar = (p.barcode || "").toLowerCase();
-        const n = `${p.name_ar || ""} ${p.name_en || ""}`.toLowerCase();
-        return sku.includes(q) || bar.includes(q) || bar === q || n.includes(q);
-      })
-      .slice(0, 400);
+    const result = q
+      ? products.filter((p) => {
+          const sku = (p.sku || "").toLowerCase();
+          const bar = (p.barcode || "").toLowerCase();
+          const n = `${p.name_ar || ""} ${p.name_en || ""}`.toLowerCase();
+          return sku.includes(q) || bar.includes(q) || bar === q || n.includes(q);
+        })
+      : products;
+    return result.slice(0, 400);
   }, [products, searchTerm]);
+
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [filtered]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedIndex((prev) => (filtered.length > 0 ? (prev + 1) % filtered.length : 0));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedIndex((prev) => (filtered.length > 0 ? (prev - 1 + filtered.length) % filtered.length : 0));
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        if (filtered.length > 0 && selectedIndex >= 0 && selectedIndex < filtered.length) {
+          onSelect(filtered[selectedIndex].id);
+          onClose();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
+    return () => window.removeEventListener("keydown", handleGlobalKeyDown);
+  }, [isOpen, filtered, selectedIndex, onSelect, onClose]);
+
+  useEffect(() => {
+    if (activeItemRef.current) {
+      activeItemRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    }
+  }, [selectedIndex]);
 
   if (!isOpen) return null;
 
@@ -80,7 +121,7 @@ export const SalesProductPickerModal: React.FC<Props> = ({
               اختيار الصنف
             </h3>
             <p className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
-              ابحث بالاسم أو SKU أو الباركود، ثم اضغط على البطاقة لاختيار الصنف.
+              ابحث بالاسم أو SKU أو الباركود، واستخدم الأسهم والـ Enter أو اضغط على البطاقة.
             </p>
           </div>
           <button
@@ -103,9 +144,6 @@ export const SalesProductPickerModal: React.FC<Props> = ({
               className="w-full pl-3 pr-10 py-2.5 aseel-bg-panel dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") onClose();
-              }}
             />
           </div>
         </div>
@@ -115,18 +153,23 @@ export const SalesProductPickerModal: React.FC<Props> = ({
             <div className="text-center py-12 aseel-text-soft text-sm">لا توجد نتائج. جرّب كلمات أخرى.</div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {filtered.map((p) => {
+              {filtered.map((p, idx) => {
                 const qty = Number(p.quantity_on_hand);
                 const low = qty <= 0;
                 return (
                   <button
                     key={p.id}
+                    ref={idx === selectedIndex ? activeItemRef : undefined}
                     type="button"
                     onClick={() => {
                       onSelect(p.id);
                       onClose();
                     }}
-                    className="text-right rounded-xl border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel p-3 hover:aseel-border-soft hover:shadow-md dark:hover:aseel-border-soft transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    className={`text-right rounded-xl border p-3 transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                      idx === selectedIndex
+                        ? "border-emerald-500 ring-2 ring-emerald-500 aseel-bg-panel/40"
+                        : "aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel hover:aseel-border-soft hover:shadow-md dark:hover:aseel-border-soft"
+                    }`}
                   >
                     <div className="font-semibold aseel-text-ink dark:text-white text-sm leading-snug line-clamp-2">
                       {formatProductPrimaryName(p)}

@@ -11,7 +11,9 @@
 
 - [x] **P0-1** تأكد من وجود Tenant. ✅ يوجد `TenantID=1` باسم "Default Company". السبب البيئي لخطأ 500 كان في الكود (غياب حارس `tenant=None`) لا في قاعدة البيانات.
 - [x] **P0-2** راجع حالة الهجرات: ✅ `makemigrations --check` → "No changes detected". `migrate --plan` → "No planned operations". لا انجراف schema.
-- [x] **P0-3** ✅ أُضيف `sales/` + migrations 0008-0022 + frontend_v2/components/sales/ وأقاربها (41 ملف، commit 79a9abe). `frontend/` موثّق orphan في PROJECT_MAP.md. سكربتات DB surgery مُستثناة عمداً.
+- [x] **M12 — Repo Hygiene**
+  - [x] Delete `github.zip` (125MB) from workspace root
+  - [x] Delete legacy `frontend/` Next.js directory from workspace root
 
 ---
 

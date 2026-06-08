@@ -3,6 +3,8 @@
  * المساعد الذكي: المتصفح يطلب /api/assistant/chat/ على Django؛ Django يتصل بـ OpenClaw (72.60…:18789) من السيرفر.
  * لا تضع عنوان OpenClaw في الواجهة — التوكن والبروكسي على Django.
  */
+import { clientLogger } from "./logger";
+
 /** إذا وُضع عنوان الخادم بدون مسار (مثل http://localhost:8000) يُضاف /api تلقائياً. */
 export function resolveApiBase(raw: string): string {
   const trimmed = raw.replace(/\/+$/, "");
@@ -96,6 +98,21 @@ function flattenDrfError(data: any): string {
   return parts.join("; ") || JSON.stringify(data);
 }
 
+async function handleResponseError(res: Response, path: string): Promise<never> {
+  const traceId = res.headers.get("X-Trace-ID") || undefined;
+  const data = await parseJsonSafe(res);
+  let msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
+  if (traceId) {
+    msg = `${msg} [Trace ID: ${traceId}]`;
+  }
+  clientLogger.error(`API Error on ${path}: ${msg}`, {
+    status: res.status,
+    path,
+    data: data as Record<string, unknown>,
+  }, traceId);
+  throw new Error(msg);
+}
+
 export async function apiGetList<T = any>(
   path: string,
   opts?: { tenantId?: number; query?: Record<string, string | number | boolean | undefined> }
@@ -117,9 +134,7 @@ export async function apiGetList<T = any>(
   });
 
   if (!res.ok) {
-    const data = await parseJsonSafe(res);
-    const msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
 
   return toList<T>(await res.json());
@@ -138,9 +153,7 @@ export async function apiGetObject<T = any>(
   });
 
   if (!res.ok) {
-    const data = await parseJsonSafe(res);
-    const msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
 
   return (await res.json()) as T;
@@ -162,9 +175,7 @@ export async function apiPostObject<T = any>(
   });
 
   if (!res.ok) {
-    const data = await parseJsonSafe(res);
-    const msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
 
   return (await res.json()) as T;
@@ -188,9 +199,7 @@ export async function apiPostFormData<T = any>(
   });
 
   if (!res.ok) {
-    const data = await parseJsonSafe(res);
-    const msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
 
   return (await res.json()) as T;
@@ -211,9 +220,7 @@ export async function apiPatchObject<T = any>(
     body: JSON.stringify(body ?? {}),
   });
   if (!res.ok) {
-    const data = await parseJsonSafe(res);
-    const msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
   return (await res.json()) as T;
 }
@@ -228,9 +235,7 @@ export async function apiDelete(path: string, opts?: { tenantId?: number }): Pro
     ),
   });
   if (!res.ok) {
-    const data = await parseJsonSafe(res);
-    const msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
-    throw new Error(msg);
+    await handleResponseError(res, path);
   }
 }
 

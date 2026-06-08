@@ -1,4 +1,6 @@
+import React, { useState, useEffect } from 'react';
 import type { OnlineStatus } from '../../hooks/useOnlineStatus';
+import db from '../../services/offline/db';
 
 type Props = {
   status: OnlineStatus;
@@ -14,9 +16,21 @@ function relativeTime(date: Date): string {
 }
 
 export default function OfflineBanner({ status, onRetry }: Props) {
-  if (status.online) return null;
+  const [hasOfflineData, setHasOfflineData] = useState(false);
+  const [customMessage, setCustomMessage] = useState('');
 
-  const hasOfflineData = true;
+  useEffect(() => {
+    db.cache_meta.count().then((count) => {
+      setHasOfflineData(count > 0);
+    });
+
+    const msg = localStorage.getItem('offline_notification_message');
+    if (msg) {
+      setCustomMessage(msg);
+    }
+  }, []);
+
+  if (status.online) return null;
 
   return (
     <div
@@ -29,8 +43,13 @@ export default function OfflineBanner({ status, onRetry }: Props) {
         }`}
     >
       <span>
-        🔴 بدون اتصال — تعرض آخر بيانات محفوظة {status.lastOnline ? relativeTime(status.lastOnline) : ''}.
-        الترحيل والمزامنة معطَّلة.
+        {customMessage ? (
+          customMessage
+        ) : (
+          `🔴 بدون اتصال — تعرض آخر بيانات محفوظة ${
+            status.lastOnline ? relativeTime(status.lastOnline) : ''
+          }. الترحيل والمزامنة معطَّلة.`
+        )}
       </span>
       <button
         onClick={onRetry}

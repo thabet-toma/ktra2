@@ -59,3 +59,6 @@ export type { AseelContextMenuAction, AseelContextMenuProps } from './AseelConte
 // I-1
 export { AseelSidePanel } from './AseelSidePanel';
 export type { AseelSidePanelProps } from './AseelSidePanel';
+
+export { AseelCalculatorPopover } from './AseelCalculatorPopover';
+

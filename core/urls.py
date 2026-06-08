@@ -21,6 +21,7 @@ from core import assistant_views, agent_db_view, dashboard_api, health
 
 urlpatterns = [
     path('api/health/', health.health_check),
+    path('api/client-logs/', health.client_logs),
     path('admin/', admin.site.urls),
     path('api/mapper/', include('bridge.urls')),
     path('api/assistant/chat/', assistant_views.assistant_chat),

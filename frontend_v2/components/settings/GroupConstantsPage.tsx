@@ -111,6 +111,15 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
   const [seeding, setSeeding] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [localErr, setLocalErr] = useState<string | null>(null);
+  const [offlineMessage, setOfflineMessage] = useState("");
+
+  /** Load offline message from localStorage */
+  useEffect(() => {
+    const cachedMsg = localStorage.getItem("offline_notification_message");
+    if (cachedMsg) {
+      setOfflineMessage(cachedMsg);
+    }
+  }, []);
 
   /** Account helpers */
   const revenueAccounts = accounts.filter((a) => a.account_type === "Revenue");
@@ -187,6 +196,7 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
     setMsg(null);
     try {
       await apiPatchObject("tenants/settings/current/", settings, { tenantId });
+      localStorage.setItem("offline_notification_message", offlineMessage);
 
       // Save each modified book (PATCH per row)
       await Promise.all(
@@ -301,6 +311,10 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
           <option value="index">فتح فهرس الأصناف</option>
           <option value="cashier">فتح فاتورة كاشير</option>
         </select>
+      ))}
+      {fld("رسالة إشعار الأوفلاين", (
+        <input className="aseel-input" value={offlineMessage}
+          onChange={(e) => setOfflineMessage(e.target.value)} placeholder="رسالة مخصصة تظهر عند انقطاع الاتصال..." />
       ))}
       <label className="aseel-field aseel-field--inline" style={{ gridColumn: "1 / -1" }}>
         <input type="checkbox" checked={settings?.mixture_auto_fill_enabled || false}

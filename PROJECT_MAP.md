@@ -75,13 +75,13 @@ frontend_v2/
 - [x] Task 8 - M3 Negative-Stock Policy (allow by default; settings toggle; client block removed)
 - [x] Task 8 - M4 Sales Invoice Draft Safety (beforeunload + Dexie autosave + restore-on-return)
 - [x] Task 8 - M5 Customer Balance / Debtor-Creditor / GL Drill-down + Invoice Profit
-- [ ] Task 8 - M6 Al-Aseel Date Picker + Auto-Expanding Grid + Header Parity
-- [ ] Task 8 - M7 Purchase Invoice Parity
-- [ ] Task 8 - M8 Item Picker UX + Calculator + Payment Placement
-- [ ] Task 8 - M9 Offline Polish (OfflineBanner, useOnlineStatus, writes)
-- [ ] Task 8 - M10 Navigation & Workspace (Sidebar, real-estate, receipt nav)
-- [ ] Task 8 - M11 Logging & Observability
-- [ ] Task 8 - M12 Repo Hygiene (github.zip, legacy frontend)
+- [x] Task 8 - M6 Al-Aseel Date Picker + Auto-Expanding Grid + Header Parity
+- [x] Task 8 - M7 Purchase Invoice Parity
+- [x] Task 8 - M8 Item Picker UX + Calculator + Payment Placement
+- [x] Task 8 - M9 Offline Polish (OfflineBanner, useOnlineStatus, writes)
+- [x] Task 8 - M10 Navigation & Workspace (Sidebar, real-estate, receipt nav)
+- [x] Task 8 - M11 Logging & Observability
+- [x] Task 8 - M12 Repo Hygiene (github.zip, legacy frontend)
 
 ## [KNOWN_ISSUES]
 - ~~/api/health/ missing → offline indicator broken~~ (Fixed M1)

@@ -46,7 +46,7 @@ function sqlListToInvoice(row: PurchaseInvoiceListDto): Invoice {
     taxRate: row.tax_rate,
     taxAmount: row.tax_amount,
     grandTotal: row.grand_total,
-    currency: row.currency_code === 'ILS' ? 'ILS' : 'USD',
+    currency: row.currency_code === 'USD' ? 'USD' : 'ILS',
     invoiceDate: row.invoice_date || undefined,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

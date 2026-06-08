@@ -222,7 +222,7 @@ Compared against the two Al-Aseel screenshots provided (purchase-invoice header 
 - **API:** lightweight `GET /api/partners/{id}/balance/` (immediate net balance + debtor/creditor).
 - **Frontend:** balance widget on customer select (cash + credit); clickable → GL; profit line (revenue − COGS) in totals.
 
-### M6 — Al-Aseel Date Picker + Auto-Expanding Grid + Header Parity (🟠)
+### M6 — Al-Aseel Date Picker + Auto-Expanding Grid + Header Parity (✅ المكتمل)
 - **Files:** new `components/ui/AseelDatePicker.tsx`, `SalesInvoiceEditor.tsx`, line-grid component.
 - **Frontend:** custom RTL calendar (اليوم/إغلاق/مسح, month/year dropdowns); auto-append blank row on last-row fill; header layout to match screenshot.
 

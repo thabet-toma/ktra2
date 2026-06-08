@@ -19,6 +19,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import { AseelDatePicker } from "../../ui/AseelDatePicker";
 import {
   suppliersService,
 } from "@/services/firestoreService";
@@ -83,6 +84,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [recalcBusy, setRecalcBusy] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showItemSearch, setShowItemSearch] = useState(false);
+  const [activeItemSearchIndex, setActiveItemSearchIndex] = useState<number | null>(null);
   /** بيانات الفاتورة والمورد — تُعرض من رأس الصفحة عند الضغط على «تفاصيل» */
   const [invoiceHeaderDetailsOpen, setInvoiceHeaderDetailsOpen] = useState(false);
   /** وصف الصفقة من SQL عند غيابه في الفاتورة المحمّلة */
@@ -241,7 +243,20 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     if (initialInvoice?.id) return;
     setFormData((prev) => ({
       ...prev,
-      items: prev.items || [],
+      items: prev.items && prev.items.length > 0 ? prev.items : [
+        {
+          id: crypto.randomUUID(),
+          itemId: "",
+          name: "",
+          categoryId: "",
+          categoryName: "",
+          specifications: "",
+          imageUrls: [],
+          quantity: 1,
+          unitPrice: 0,
+          totalPrice: 0,
+        }
+      ],
       status: "incomplete",
       discountAmount: 0,
       taxRate: 0,
@@ -254,7 +269,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       invoiceName: dealData?.dealDescription || dealData?.internalNotes || "",
       invoiceDate: dealData?.dealDate || new Date().toISOString().split("T")[0],
       dealInfo: dealInfo,
-      currency: dealData ? "ILS" : "USD",
+      currency: "ILS",
     }));
   }, [initialInvoice, dealData]);
 
@@ -355,23 +370,25 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         notes: payload.notes || null,
         supplier_invoice_number: payload.supplierInvoiceNumber || null,
         factory_name: payload.factoryName || null,
-        items: (payload.items || []).map((item: any) => ({
-          product: item.itemId ? Number(item.itemId) || null : null,
-          name: item.name,
-          quantity: roundSqlMoney4(item.quantity ?? 0),
-          unit_price: roundSqlMoney4(item.unitPrice ?? 0),
-          total_price: roundSqlMoney2(item.totalPrice ?? 0),
-          notes: item.notes || null,
-          hs_code: item.hsCodePrimary || null,
-          landed_unit_price_ils:
-            item.landedUnitPriceIls != null && item.landedUnitPriceIls !== ""
-              ? roundSqlMoney4(item.landedUnitPriceIls)
-              : null,
-          landed_line_total_ils:
-            item.landedLineTotalIls != null && item.landedLineTotalIls !== ""
-              ? roundSqlMoney2(item.landedLineTotalIls)
-              : null,
-        })),
+        items: (payload.items || [])
+          .filter((item: any) => item.itemId && item.itemId !== "")
+          .map((item: any) => ({
+            product: Number(item.itemId) || null,
+            name: item.name,
+            quantity: roundSqlMoney4(item.quantity ?? 0),
+            unit_price: roundSqlMoney4(item.unitPrice ?? 0),
+            total_price: roundSqlMoney2(item.totalPrice ?? 0),
+            notes: item.notes || null,
+            hs_code: item.hsCodePrimary || null,
+            landed_unit_price_ils:
+              item.landedUnitPriceIls != null && item.landedUnitPriceIls !== ""
+                ? roundSqlMoney4(item.landedUnitPriceIls)
+                : null,
+            landed_line_total_ils:
+              item.landedLineTotalIls != null && item.landedLineTotalIls !== ""
+                ? roundSqlMoney2(item.landedLineTotalIls)
+                : null,
+          })),
       };
 
       let savedSqlId: string;
@@ -442,9 +459,33 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       totalPrice: roundSqlMoney2(lastPrice || 0),
     };
 
-    const updatedItems = [...(formData.items || []), newItem];
+    let updatedItems = [...(formData.items || [])];
+    if (activeItemSearchIndex !== null && activeItemSearchIndex < updatedItems.length) {
+      newItem.id = updatedItems[activeItemSearchIndex].id;
+      updatedItems[activeItemSearchIndex] = newItem;
+    } else {
+      updatedItems.push(newItem);
+    }
+
+    const lastLineIndex = updatedItems.length - 1;
+    if (activeItemSearchIndex === lastLineIndex || activeItemSearchIndex === null) {
+      updatedItems.push({
+        id: crypto.randomUUID(),
+        itemId: "",
+        name: "",
+        categoryId: "",
+        categoryName: "",
+        specifications: "",
+        imageUrls: [],
+        quantity: 1,
+        unitPrice: 0,
+        totalPrice: 0,
+      });
+    }
+
     recalculateTotals({ items: updatedItems });
     setShowItemSearch(false);
+    setActiveItemSearchIndex(null);
   };
 
   const handleUpdateItem = (index: number, field: string, value: any) => {
@@ -742,6 +783,24 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       item.totalPrice = roundSqlMoney2((item.quantity || 0) * item.unitPrice);
     }
     items[rowIndex] = item;
+
+    // Auto-expanding line item grid logic when last row is edited
+    const lastRow = items[items.length - 1];
+    if (rowIndex === items.length - 1 && lastRow.itemId) {
+      items.push({
+        id: crypto.randomUUID(),
+        itemId: "",
+        name: "",
+        categoryId: "",
+        categoryName: "",
+        specifications: "",
+        imageUrls: [],
+        quantity: 1,
+        unitPrice: 0,
+        totalPrice: 0,
+      });
+    }
+
     recalculateTotals({ items });
   };
 
@@ -766,13 +825,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     recalculateTotals({ items: updated });
   };
 
-  const renderItemIdCell = (row: InvoiceItem) => (
+  const renderItemIdCell = (row: InvoiceItem, rowIndex: number) => (
     <button
       type="button"
       className="aseel-cell-picker"
       disabled={readOnly || formData.isHistorical}
       data-aseel-key="1"
-      onClick={() => setShowItemSearch(true)}
+      onClick={() => {
+        setActiveItemSearchIndex(rowIndex);
+        setShowItemSearch(true);
+      }}
       title="اختر صنفاً (+ فهرس الأصناف)"
     >
       {row.itemId ? `#${row.itemId}` : "— اختر صنفاً —"}
@@ -1014,22 +1076,20 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           )}
           {fld(
             "التاريخ",
-            <input
+            <AseelDatePicker
               className="aseel-input"
-              type="date"
               disabled={readOnly || formData.isHistorical}
               value={formData.invoiceDate || ""}
-              onChange={(e) => handleUpdateFinancial("invoiceDate", e.target.value)}
+              onChange={(val) => handleUpdateFinancial("invoiceDate", val)}
             />
           )}
           {fld(
             "تاريخ الاستحقاق",
-            <input
+            <AseelDatePicker
               className="aseel-input"
-              type="date"
               disabled={readOnly || formData.isHistorical}
               value={formData.dealInfo?.dueDate || ""}
-              onChange={(e) => handleDealInfoUpdate("dueDate", e.target.value)}
+              onChange={(val) => handleDealInfoUpdate("dueDate", val)}
             />
           )}
           {fld(
@@ -1079,7 +1139,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             <select
               className="aseel-input"
               disabled={readOnly || formData.isHistorical}
-              value={formData.currency || "USD"}
+              value={formData.currency || "ILS"}
               onChange={(e) => handleUpdateFinancial("currency", e.target.value)}
             >
               <option value="USD">USD — دولار</option>

@@ -45,7 +45,7 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     localPayments: (dto.local_payments_json as Invoice["localPayments"]) || undefined,
     conversionMetadata:
       (dto.conversion_metadata_json as Invoice["conversionMetadata"]) || undefined,
-    currency: dto.currency_code === "ILS" ? "ILS" : "USD",
+    currency: dto.currency_code === "USD" ? "USD" : "ILS",
     invoiceDate: dto.invoice_date || undefined,
     createdAt: dto.created_at || new Date().toISOString(),
     updatedAt: dto.updated_at || new Date().toISOString(),

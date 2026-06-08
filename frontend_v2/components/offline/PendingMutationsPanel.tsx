@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { AseelSidePanel } from '../aseel/AseelSidePanel';
 import db, { type MutationEntry } from '../../services/offline/db';
+import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 
 export default function PendingMutationsPanel() {
   const [open, setOpen] = useState(false);
   const [mutations, setMutations] = useState<MutationEntry[]>([]);
+  const { online } = useOnlineStatus();
 
   const refresh = useCallback(async () => {
     const items = await db.mutation_queue
@@ -22,6 +24,7 @@ export default function PendingMutationsPanel() {
 
   const pendingCount = mutations.filter((m) => m.status === 'pending').length;
   const failedCount = mutations.filter((m) => m.status === 'failed').length;
+  const syncingCount = mutations.filter((m) => m.status === 'syncing').length;
 
   const retryMutation = async (id: number) => {
     await db.mutation_queue.update(id, { status: 'pending', error: undefined });
@@ -47,22 +50,38 @@ export default function PendingMutationsPanel() {
     }
   };
 
+  let chipBg = "bg-green-100 text-green-800 dark:bg-green-950/20 dark:text-green-400";
+  let chipText = "مزامنة نشطة / متصل";
+  let chipDot = "bg-green-500";
+
+  if (!online && pendingCount === 0 && failedCount === 0 && syncingCount === 0) {
+    chipBg = "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400";
+    chipText = "منقطع / أوفلاين";
+    chipDot = "bg-gray-400";
+  } else if (failedCount > 0) {
+    chipBg = "bg-red-100 text-red-800 dark:bg-red-950/20 dark:text-red-400";
+    chipText = `فشل: ${failedCount}`;
+    chipDot = "bg-red-500";
+  } else if (syncingCount > 0) {
+    chipBg = "bg-blue-100 text-blue-800 dark:bg-blue-950/20 dark:text-blue-400";
+    chipText = "جاري المزامنة...";
+    chipDot = "bg-blue-500 animate-pulse";
+  } else if (pendingCount > 0) {
+    chipBg = "bg-yellow-100 text-yellow-800 dark:bg-yellow-950/20 dark:text-yellow-400";
+    chipText = `معلق: ${pendingCount}`;
+    chipDot = "bg-yellow-500";
+  }
+
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="relative p-2 rounded-lg hover:bg-gray-100 transition-colors"
-        aria-label={`العملية المعلقة: ${pendingCount + failedCount}`}
+        className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700 ${chipBg}`}
+        aria-label={`حالة المزامنة: ${chipText}`}
       >
-        <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-        {(pendingCount + failedCount) > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">
-            {pendingCount + failedCount}
-          </span>
-        )}
+        <span className={`w-2 h-2 rounded-full ${chipDot}`} />
+        <span>{chipText}</span>
       </button>
 
       <AseelSidePanel open={open} onClose={() => setOpen(false)} title="العمليات المعلقة" width={420}>

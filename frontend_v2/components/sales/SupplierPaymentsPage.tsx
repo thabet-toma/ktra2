@@ -9,6 +9,7 @@
  * يَعتمد على N8-T12 backend (SupplierPayment + endpoint /purchase/payments/).
  */
 import React, { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiGetList, apiPostObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { accountingApi } from "../../services/accountingApi";
@@ -60,6 +61,7 @@ const fmt = (n: string | number) =>
   Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export const SupplierPaymentsPage: React.FC = () => {
+  const navigate = useNavigate();
   const today = new Date().toISOString().slice(0, 10);
   const [payments, setPayments] = useState<SupplierPaymentRow[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
@@ -126,7 +128,13 @@ export const SupplierPaymentsPage: React.FC = () => {
     F2: () => window.print(),
     F5: () => void load(),
     F12: () => void submit(),
-    Escape: () => setShowForm(false),
+    Escape: () => {
+      if (showForm) {
+        setShowForm(false);
+      } else {
+        navigate(-1);
+      }
+    },
     CtrlIns: () => setShowForm(true),
   });
 
@@ -224,6 +232,20 @@ export const SupplierPaymentsPage: React.FC = () => {
       label: "تحديث",
       icon: <RefreshCw className={loading ? "animate-spin" : ""} />,
       onClick: () => void load(),
+      separatorBefore: true,
+    },
+    {
+      key: "cancel",
+      label: "إلغاء",
+      icon: <X />,
+      onClick: () => {
+        if (showForm) {
+          setShowForm(false);
+        } else {
+          navigate(-1);
+        }
+      },
+      danger: true,
       separatorBefore: true,
     },
   ];

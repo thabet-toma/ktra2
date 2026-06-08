@@ -47,10 +47,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "accounting-income-statement", label: "قائمة الدخل", icon: <TrendingUp className="h-4 w-4" /> },
     { view: "accounting-vat-statements", label: "كشوف ضريبة القيمة المضافة", icon: <ClipboardList className="h-4 w-4" /> },
     { view: "accounting-year-end-close", label: "الإغلاق السنوي", icon: <CalendarX className="h-4 w-4" /> },
+    { view: "property-rental", label: "تأجير العقارات والعدادات", icon: <Building2 className="h-4 w-4" /> },
   ];
 
   useEffect(() => {
-    if (activeView.startsWith("accounting-")) setAccountingExpanded(true);
+    if (activeView.startsWith("accounting-") || activeView === "property-rental") setAccountingExpanded(true);
   }, [activeView]);
 
   useEffect(() => {
@@ -98,7 +99,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "local-shipping" as AppView, label: "الشحن المحلي", icon: <Truck className="h-5 w-5" /> },
     { view: "stock-levels" as AppView, label: "أرصدة المخزون", icon: <BarChart3 className="h-5 w-5" /> },
     { view: "stock-movements" as AppView, label: "حركات المخزون", icon: <Boxes className="h-5 w-5" /> },
-    { view: "property-rental" as AppView, label: "تأجير العقارات والعدادات", icon: <Building2 className="h-5 w-5" /> },
     { view: "aseel-kit" as AppView, label: "🔧 Aseel Kit (M0)", icon: <Wrench className="h-5 w-5" />, roles: ['manager', 'procurement'] as string[] },
   ];
 

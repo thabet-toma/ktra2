@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Banknote,
   Plus,
@@ -49,6 +50,7 @@ type AgingInvoice = {
 };
 
 export const SalesCustomerPaymentsPage: React.FC = () => {
+  const navigate = useNavigate();
   const [payments, setPayments] = useState<CustomerPaymentRow[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -88,8 +90,12 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     },
     Escape: () => {
       if (showPartnerPicker) { setShowPartnerPicker(false); return; }
-      setShowForm(false);
-      setSelectedPayment(null);
+      if (showForm || selectedPayment) {
+        setShowForm(false);
+        setSelectedPayment(null);
+      } else {
+        navigate(-1);
+      }
     },
     plus: () => {
       const ae = document.activeElement;
@@ -202,6 +208,14 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
         { key: 'new', label: 'سند جديد', icon: <Plus />, onClick: () => setShowForm(true) },
         { key: 'reload', label: 'تحديث', icon: <RefreshCw />, onClick: () => loadAll(), separatorBefore: true },
         { key: 'print', label: 'طباعة', icon: <Printer />, onClick: () => window.print() },
+        { key: 'cancel', label: 'إلغاء', icon: <X />, onClick: () => {
+          if (showForm || selectedPayment) {
+            setShowForm(false);
+            setSelectedPayment(null);
+          } else {
+            navigate(-1);
+          }
+        }, danger: true, separatorBefore: true },
       ]}
       header={<></>}
       status={

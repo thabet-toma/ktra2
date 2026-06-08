@@ -13,6 +13,7 @@ import {
 } from "../../services/salesApi";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
 import { useStaleConfirm } from "../offline/StaleDataConfirm";
+import { AseelDatePicker } from "../ui/AseelDatePicker";
 import db from "../../services/offline/db";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
 import { apiPostObject } from "../../services/restApi";
@@ -30,6 +31,7 @@ import {
   Send,
   Trash2,
   X,
+  CreditCard,
 } from "lucide-react";
 import { formatProductPrimaryName } from "./SalesProductPickerModal";
 import {
@@ -206,6 +208,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   >([]);
   const [voucherOpen, setVoucherOpen] = useState(false);
   const [voucherSaving, setVoucherSaving] = useState(false);
+  const [activeTabKey, setActiveTabKey] = useState("notes");
   // ── M2-T4: Source discount overrides (null = use customer default) ─────
   const [sourceDiscountPctOverride, setSourceDiscountPctOverride] = useState<string>("");
   const [sourceDiscountAmtOverride, setSourceDiscountAmtOverride] = useState<string>("");
@@ -919,12 +922,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setSaving(true);
     try {
       const payload = buildPayload();
+      let activeDraftId = draftId;
       if (draftId) {
         const updated = await patchSalesInvoice(draftId, payload);
         applyDetail(updated);
         setMsg("تم حفظ المسودة.");
       } else {
         const created = await createSalesInvoice(payload);
+        activeDraftId = created.id;
         setDraftId(created.id);
         applyDetail(created);
         if (created.status === "posted") {
@@ -933,6 +938,33 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           );
         } else {
           setMsg(`تم إنشاء المسودة ${created.invoice_number}`);
+        }
+      }
+
+      // Auto-save payment voucher
+      if (activeDraftId) {
+        try {
+          const updatedWithVoucher = await attachPaymentVoucher(activeDraftId, {
+            cash_amount: attachedCashAmount || "0",
+            cash_account_id:
+              attachedCashAccountId === ""
+                ? null
+                : Number(attachedCashAccountId),
+            cheques: attachedCheques.map((c) => ({
+              cheque_number: c.cheque_number,
+              amount: c.amount,
+              bank_name: c.bank_name || "",
+              due_date: c.due_date || null,
+              issue_date: c.issue_date || null,
+              payee_name: c.payee_name || "",
+              notes: c.notes || "",
+            })),
+          });
+          applyDetail(updatedWithVoucher);
+          setMsg((m) => (m ? m + " مع السند المالي المرفق." : "تم حفظ السند المالي."));
+        } catch (voucherErr) {
+          console.warn("Failed to auto-save payment voucher:", voucherErr);
+          setLocalErr("تم حفظ الفاتورة بنجاح، لكن فشل حفظ السند المالي: " + (voucherErr instanceof Error ? voucherErr.message : String(voucherErr)));
         }
       }
       dirtyRef.current = false;
@@ -1041,7 +1073,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const updateLine = (key: string, patch: Partial<DraftLine>) => {
     if (readOnly) return;
-    setLines((prev) => prev.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+    setLines((prev) => {
+      const next = prev.map((r) => (r.key === key ? { ...r, ...patch } : r));
+      const lastLine = next[next.length - 1];
+      if (lastLine && (lastLine.product !== "" || (lastLine.quantity !== "" && lastLine.quantity !== "0"))) {
+        return [...next, makeEmptyLine()];
+      }
+      return next;
+    });
     markDirty();
   };
 
@@ -1178,17 +1217,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         window.print();
       },
       F3: () => {
-        // M2-T3: open the attached financial voucher (cash + cheques) editor.
         noteKey("F3 سند مالي");
         if (isPosted) {
           setMsg("الفاتورة مرحَّلة — السند مغلق.");
           return;
         }
-        if (!draftId) {
-          setLocalErr("احفظ الفاتورة كمسودة أولاً (F12) ثم افتح السند بـ F3.");
-          return;
-        }
-        setVoucherOpen(true);
+        setActiveTabKey("payments");
       },
       F6: () => {
         noteKey("F6 بحث");
@@ -1475,11 +1509,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       key: "receipt",
       label: "سند مالي",
       icon: <Receipt />,
-      onClick:
-        !isPosted && draftId != null
-          ? () => setVoucherOpen(true)
-          : undefined,
-      disabled: isPosted || draftId == null,
+      onClick: () => setActiveTabKey("payments"),
       separatorBefore: true,
     },
     { key: "print", label: "طباعة", icon: <Printer />, onClick: () => window.print() },
@@ -1653,6 +1683,258 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     </div>
   );
 
+  const paymentsTab = (
+    <div className="aseel-legacy-tab space-y-4 p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+      {/* Cash */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <label className="aseel-field">
+          <span className="aseel-field-label">المبلغ نقدا</span>
+          <input
+            className="aseel-input"
+            disabled={readOnly || isPosted}
+            data-aseel-key="1"
+            type="number"
+            min={0}
+            step={0.01}
+            value={attachedCashAmount}
+            onChange={(e) => {
+              setAttachedCashAmount(e.target.value);
+              markDirty();
+            }}
+          />
+        </label>
+        <label className="aseel-field">
+          <span className="aseel-field-label">حساب الصندوق</span>
+          <select
+            className="aseel-input"
+            disabled={readOnly || isPosted}
+            value={attachedCashAccountId}
+            onChange={(e) => {
+              setAttachedCashAccountId(e.target.value ? Number(e.target.value) : "");
+              markDirty();
+            }}
+          >
+            <option value="">— اختر —</option>
+            {cashboxAccounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {(a.code || "") + " — " + (a.name || "")}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      {/* Cheques list */}
+      <div style={{ marginTop: 12 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 4,
+          }}
+        >
+          <strong>الشيكات المرفقة</strong>
+          {!(readOnly || isPosted) && (
+            <button
+              type="button"
+              className="aseel-toolbtn"
+              onClick={() => {
+                setAttachedCheques((cs) => [
+                  ...cs,
+                  {
+                    cheque_number: "",
+                    bank_name: "",
+                    amount: "0.00",
+                    due_date: "",
+                    issue_date: "",
+                    status: "Draft",
+                  },
+                ]);
+                markDirty();
+              }}
+            >
+              <Plus /> إضافة شيك
+            </button>
+          )}
+        </div>
+        <table className="aseel-grid">
+          <thead>
+            <tr>
+              <th style={{ width: 110 }}>رقم الشيك</th>
+              <th>البنك</th>
+              <th style={{ width: 110 }}>المبلغ</th>
+              <th style={{ width: 130 }}>تاريخ الاستحقاق</th>
+              <th style={{ width: 110 }}>الحالة</th>
+              {!(readOnly || isPosted) && <th style={{ width: 36 }}></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {attachedCheques.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={readOnly || isPosted ? 5 : 6}
+                  style={{ textAlign: "center", padding: 10 }}
+                >
+                  لا توجد شيكات مرفقة
+                </td>
+              </tr>
+            ) : (
+              attachedCheques.map((c, i) => (
+                <tr key={i}>
+                  <td>
+                    <input
+                      className="aseel-input"
+                      disabled={readOnly || isPosted}
+                      value={c.cheque_number}
+                      onChange={(e) => {
+                        setAttachedCheques((arr) =>
+                          arr.map((x, j) =>
+                            j === i
+                              ? { ...x, cheque_number: e.target.value }
+                              : x
+                          )
+                        );
+                        markDirty();
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="aseel-input"
+                      disabled={readOnly || isPosted}
+                      value={c.bank_name || ""}
+                      onChange={(e) => {
+                        setAttachedCheques((arr) =>
+                          arr.map((x, j) =>
+                            j === i
+                              ? { ...x, bank_name: e.target.value }
+                              : x
+                          )
+                        );
+                        markDirty();
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="aseel-input"
+                      disabled={readOnly || isPosted}
+                      data-aseel-key="1"
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={c.amount}
+                      onChange={(e) => {
+                        setAttachedCheques((arr) =>
+                          arr.map((x, j) =>
+                            j === i
+                              ? { ...x, amount: e.target.value }
+                              : x
+                          )
+                        );
+                        markDirty();
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      className="aseel-input"
+                      disabled={readOnly || isPosted}
+                      type="date"
+                      value={c.due_date || ""}
+                      onChange={(e) => {
+                        setAttachedCheques((arr) =>
+                          arr.map((x, j) =>
+                            j === i
+                              ? { ...x, due_date: e.target.value }
+                              : x
+                          )
+                        );
+                        markDirty();
+                      }}
+                    />
+                  </td>
+                  <td style={{ fontSize: "var(--aseel-fs-sm)" }}>
+                    {c.status || "Draft"}
+                  </td>
+                  {!(readOnly || isPosted) && (
+                    <td>
+                      <button
+                        type="button"
+                        className="aseel-iconbtn aseel-iconbtn--danger"
+                        onClick={() => {
+                          setAttachedCheques((arr) =>
+                            arr.filter((_, j) => j !== i)
+                          );
+                          markDirty();
+                        }}
+                        title="حذف"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Summary */}
+      <div
+        style={{
+          marginTop: 12,
+          padding: 6,
+          background: "var(--aseel-panel)",
+          border: "1px solid var(--aseel-border-soft)",
+          borderRadius: "var(--aseel-radius)",
+        }}
+      >
+        <div className="aseel-total-row">
+          <span>إجمالي الفاتورة</span>
+          <span className="aseel-total-value">
+            {fmt(totals.grandTotal)}
+          </span>
+        </div>
+        <div className="aseel-total-row">
+          <span>نقدي</span>
+          <span className="aseel-total-value">
+            {fmt(Number(attachedCashAmount) || 0)}
+          </span>
+        </div>
+        <div className="aseel-total-row">
+          <span>شيكات</span>
+          <span className="aseel-total-value">
+            {fmt(
+              attachedCheques.reduce(
+                (s, c) => s + (Number(c.amount) || 0),
+                0
+              )
+            )}
+          </span>
+        </div>
+        <div className="aseel-total-row aseel-total-row--grand">
+          <span>متبقي على ذمم العميل</span>
+          <span className="aseel-total-value">
+            {fmt(
+              Math.max(
+                0,
+                totals.grandTotal -
+                  (Number(attachedCashAmount) || 0) -
+                  attachedCheques.reduce(
+                    (s, c) => s + (Number(c.amount) || 0),
+                    0
+                  )
+              )
+            )}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div
       id="sales-invoice-print"
@@ -1669,265 +1951,54 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         actions={toolbarActions}
         header={
           <>
-            {fld(
-              "رقم الفاتورة",
-              <input
-                className="aseel-input"
-                readOnly
-                value={draftId ? `#${draftId}` : "— جديدة —"}
-              />
-            )}
-            {fld(
-              "التاريخ",
-              <input
-                className="aseel-input"
-                type="date"
-                disabled={readOnly}
-                value={invDate}
-                onChange={(e) => {
-                  setInvDate(e.target.value);
-                  markDirty();
-                }}
-              />
-            )}
-            {fld(
-              "تاريخ الاستحقاق",
-              <input
-                className="aseel-input"
-                type="date"
-                disabled={readOnly}
-                value={dueDate}
-                onChange={(e) => {
-                  setDueDate(e.target.value);
-                  markDirty();
-                }}
-              />
-            )}
-            {fld(
-              "نوع الدفع",
-              <select
-                className="aseel-input"
-                disabled={readOnly}
-                value={invType}
-                onChange={(e) => {
-                  setInvType(e.target.value as "cash" | "credit");
-                  markDirty();
-                }}
-              >
-                <option value="credit">آجل (ذمم)</option>
-                <option value="cash">نقدي</option>
-              </select>
-            )}
-            {fld(
-              "رقم الحساب / العميل",
-              <div className="aseel-pickfield">
-                <input
-                  className="aseel-input aseel-input--hl"
-                  data-aseel-field="customer"
-                  data-aseel-key="1"
-                  readOnly
-                  disabled={readOnly}
-                  value={selectedCustomer ? `#${selectedCustomer.id}` : ""}
-                  placeholder="+ للفهرس"
-                  onClick={() => !readOnly && setCustomerPickerOpen(true)}
-                />
-                <button
-                  type="button"
-                  className="aseel-ellipsis"
-                  disabled={readOnly}
-                  onClick={() => setCustomerPickerOpen(true)}
-                  title="فهرس الحسابات (+)"
-                >
-                  …
-                </button>
+            <div className="flex w-full gap-12 max-w-5xl">
+              <div className="flex-1 flex flex-col gap-2">
+                {fld("رقم الفاتورة", <input className="aseel-input" readOnly value={draftId ? `#${draftId}` : "— جديدة —"} />)}
+                {fld("التاريخ", <AseelDatePicker className="aseel-input" disabled={readOnly} value={invDate} onChange={(val) => { setInvDate(val); markDirty(); }} />)}
+                {fld("تاريخ الاستحقاق", <AseelDatePicker className="aseel-input" disabled={readOnly} value={dueDate} onChange={(val) => { setDueDate(val); markDirty(); }} />)}
+                {fld("تاريخ ثاني", <AseelDatePicker className="aseel-input" disabled={readOnly} value={secondDate} onChange={(val) => { setSecondDate(val); markDirty(); }} />)}
+                {fld("دفتر", <input className="aseel-input" data-aseel-key="1" type="number" min={0} disabled={readOnly} value={bookNumber} onChange={(e) => { setBookNumber(e.target.value); markDirty(); }} title="0 = ترقيم يدوي · >0 = مسلسل مستقل لكل دفتر" />)}
+                {fld("مشتغل مرخص", <input className="aseel-input" disabled={readOnly} value={licensedDealerNo} onChange={(e) => { setLicensedDealerNo(e.target.value); markDirty(); }} placeholder="رقم المشتغل المرخص" />)}
+                {fld("فاتورة مقاصة", <input className="aseel-input" disabled={readOnly} value={settlementInvoiceNo} onChange={(e) => { setSettlementInvoiceNo(e.target.value); markDirty(); }} placeholder="رقم فاتورة المقاصة" />)}
+                {fld("خصم %", <input className="aseel-input" data-aseel-key="1" type="number" min={0} max={100} step={0.01} disabled={readOnly} value={discountPercent} onChange={(e) => { setDiscountPercent(e.target.value); markDirty(); }} title="نسبة الخصم الإضافية على الفاتورة (بعد خصم المبلغ)" />)}
               </div>
-            )}
-            {fld(
-              "الاسم",
-              <input
-                className="aseel-input"
-                readOnly
-                value={selectedCustomer?.name ?? ""}
-              />
-            )}
-            {fld(
-              "العملة",
-              <select
-                className="aseel-input"
-                disabled={readOnly}
-                value={currencyId}
-                onChange={(e) => {
-                  setCurrencyId(e.target.value ? Number(e.target.value) : "");
-                  markDirty();
-                }}
-              >
-                <option value="">—</option>
-                {currencies.map((c) => (
-                  <option key={c.CurrencyID} value={c.CurrencyID}>
-                    {c.Code} {c.Name ? `— ${c.Name}` : ""}
-                  </option>
-                ))}
-              </select>
-            )}
-            {fld(
-              "سعر العملة",
-              <input
-                className="aseel-input"
-                data-aseel-key="1"
-                disabled={readOnly}
-                value={exchangeRate}
-                onChange={(e) => {
-                  setExchangeRate(e.target.value);
-                  markDirty();
-                }}
-              />
-            )}
-            {fld(
-              "حساب الإيراد",
-              <select
-                className="aseel-input"
-                disabled={readOnly}
-                value={revenueAccountId}
-                onChange={(e) => {
-                  setRevenueAccountId(e.target.value ? Number(e.target.value) : "");
-                  markDirty();
-                }}
-              >
-                <option value="">— اختر حساب مبيعات —</option>
-                {revenueAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {(a.code || "") + " — " + (a.name || "")}
-                  </option>
-                ))}
-              </select>
-            )}
-            {invType === "cash" &&
-              fld(
-                "حساب الصندوق / البنك",
-                <select
+              <div className="flex-1 flex flex-col gap-2">
+                {fld("رقم الحساب / العميل", <div className="aseel-pickfield"><input className="aseel-input aseel-input--hl" data-aseel-field="customer" data-aseel-key="1" readOnly disabled={readOnly} value={selectedCustomer ? `#${selectedCustomer.id}` : ""} placeholder="+ للفهرس" onClick={() => !readOnly && setCustomerPickerOpen(true)} /><button type="button" className="aseel-ellipsis" disabled={readOnly} onClick={() => setCustomerPickerOpen(true)} title="فهرس الحسابات (+)">…</button></div>)}
+                {fld("الاسم", <input className="aseel-input" readOnly value={selectedCustomer?.name ?? ""} />)}
+                {fld("نوع الدفع", <select className="aseel-input" disabled={readOnly} value={invType} onChange={(e) => { setInvType(e.target.value as "cash" | "credit"); markDirty(); }}><option value="credit">آجل (ذمم)</option><option value="cash">نقدي</option></select>)}
+                {invType === "cash" && fld("حساب الصندوق / البنك", <select className="aseel-input" disabled={readOnly} value={cashAccountId} onChange={(e) => { setCashAccountId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}><option value="">— اختر —</option>{cashboxAccounts.map((a) => (<option key={a.id} value={a.id}>{(a.code || "") + " — " + (a.name || "")}</option>))}</select>)}
+                <div className="flex gap-2">
+                  <div className="flex-1">{fld("العملة", <select className="aseel-input" disabled={readOnly} value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}><option value="">—</option>{currencies.map((c) => (<option key={c.CurrencyID} value={c.CurrencyID}>{c.Code} {c.Name ? `— ${c.Name}` : ""}</option>))}</select>)}</div>
+                  <div className="w-24">{fld("سعر العملة", <input className="aseel-input" data-aseel-key="1" disabled={readOnly} value={exchangeRate} onChange={(e) => { setExchangeRate(e.target.value); markDirty(); }} />)}</div>
+                </div>
+                {fld("حساب الإيراد", <select className="aseel-input" disabled={readOnly} value={revenueAccountId} onChange={(e) => { setRevenueAccountId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}><option value="">— اختر حساب مبيعات —</option>{revenueAccounts.map((a) => (<option key={a.id} value={a.id}>{(a.code || "") + " — " + (a.name || "")}</option>))}</select>)}
+                <label className="aseel-field aseel-field--inline mt-1"><input type="checkbox" disabled={readOnly} checked={pricesIncludeTax} onChange={(e) => { setPricesIncludeTax(e.target.checked); markDirty(); }} /><span className="aseel-field-label" style={{ flex: "unset" }}>الأسعار تشمل ض.ق.م</span></label>
+              </div>
+            </div>
+            
+            <div className="mt-4 max-w-5xl">
+              {fld(
+                "بحث / باركود",
+                <input
                   className="aseel-input"
+                  data-aseel-field="barcode"
                   disabled={readOnly}
-                  value={cashAccountId}
-                  onChange={(e) => {
-                    setCashAccountId(e.target.value ? Number(e.target.value) : "");
-                    markDirty();
+                  value={productFilter}
+                  onChange={(e) => setProductFilter(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleBarcodeEnter(productFilter);
+                    }
                   }}
-                >
-                  <option value="">— اختر —</option>
-                  {cashboxAccounts.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {(a.code || "") + " — " + (a.name || "")}
-                    </option>
-                  ))}
-                </select>
+                  placeholder="اسم/SKU/Barcode ثم Enter — أو F6"
+                />
               )}
-            {/* ───── M2-T1: Aseel header fields ─────────────────────────── */}
-            {fld(
-              "دفتر",
-              <input
-                className="aseel-input"
-                data-aseel-key="1"
-                type="number"
-                min={0}
-                disabled={readOnly}
-                value={bookNumber}
-                onChange={(e) => {
-                  setBookNumber(e.target.value);
-                  markDirty();
-                }}
-                title="0 = ترقيم يدوي · >0 = مسلسل مستقل لكل دفتر"
-              />
-            )}
-            {fld(
-              "تاريخ ثاني",
-              <input
-                className="aseel-input"
-                type="date"
-                disabled={readOnly}
-                value={secondDate}
-                onChange={(e) => {
-                  setSecondDate(e.target.value);
-                  markDirty();
-                }}
-              />
-            )}
-            {fld(
-              "مشتغل مرخص",
-              <input
-                className="aseel-input"
-                disabled={readOnly}
-                value={licensedDealerNo}
-                onChange={(e) => {
-                  setLicensedDealerNo(e.target.value);
-                  markDirty();
-                }}
-                placeholder="رقم المشتغل المرخص"
-              />
-            )}
-            {fld(
-              "فاتورة مقاصة",
-              <input
-                className="aseel-input"
-                disabled={readOnly}
-                value={settlementInvoiceNo}
-                onChange={(e) => {
-                  setSettlementInvoiceNo(e.target.value);
-                  markDirty();
-                }}
-                placeholder="رقم فاتورة المقاصة"
-              />
-            )}
-            {fld(
-              "خصم %",
-              <input
-                className="aseel-input"
-                data-aseel-key="1"
-                type="number"
-                min={0}
-                max={100}
-                step={0.01}
-                disabled={readOnly}
-                value={discountPercent}
-                onChange={(e) => {
-                  setDiscountPercent(e.target.value);
-                  markDirty();
-                }}
-                title="نسبة الخصم الإضافية على الفاتورة (بعد خصم المبلغ)"
-              />
-            )}
-            <label className="aseel-field aseel-field--inline">
-              <input
-                type="checkbox"
-                disabled={readOnly}
-                checked={pricesIncludeTax}
-                onChange={(e) => {
-                  setPricesIncludeTax(e.target.checked);
-                  markDirty();
-                }}
-              />
-              <span className="aseel-field-label" style={{ flex: "unset" }}>
-                الأسعار تشمل ض.ق.م
-              </span>
-            </label>
-            {fld(
-              "بحث / باركود",
-              <input
-                className="aseel-input"
-                data-aseel-field="barcode"
-                disabled={readOnly}
-                value={productFilter}
-                onChange={(e) => setProductFilter(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleBarcodeEnter(productFilter);
-                  }
-                }}
-                placeholder="اسم/SKU/Barcode ثم Enter — أو F6"
-              />
-            )}
+            </div>
           </>
         }
+        activeTab={activeTabKey}
+        onTabChange={setActiveTabKey}
         tabs={[
           {
             key: "notes",
@@ -1945,6 +2016,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 }}
               />
             ),
+          },
+          {
+            key: "payments",
+            label: "المقبوضات / السند المالي",
+            content: paymentsTab,
           },
           {
             key: "accounts",
@@ -2130,11 +2206,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           onAddRow={readOnly ? undefined : addRow}
           emptyHint="لا توجد بنود — أضف صنفاً (+ فهرس الأصناف)"
         />
-        {!readOnly && (
-          <button type="button" className="aseel-addrow" onClick={addRow}>
-            <Plus className="h-3 w-3" /> إضافة سطر
-          </button>
-        )}
       </AseelDocumentShell>
 
       {/* فهرس الحسابات (العميل) */}
@@ -2192,317 +2263,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         onClose={() => setProductPickerLineKey(null)}
       />
 
-      {/* M2-T3 — Invoice payment voucher (cash + cheques) ─────────────────── */}
-      {voucherOpen && (
-        <div className="aseel-picker-mask" data-skin="aseel" data-aseel-modal="1">
-          <div
-            className="aseel-picker"
-            role="dialog"
-            aria-modal="true"
-            aria-label="السند المالي المرفق بالفاتورة"
-            style={{ width: "min(720px, 96vw)" }}
-          >
-            <div className="aseel-picker-head">
-              <span>السند المالي المرفق — نقدي + شيكات (F3)</span>
-              <button
-                type="button"
-                className="aseel-toolbtn"
-                onClick={() => setVoucherOpen(false)}
-                aria-label="إغلاق"
-              >
-                <X />
-              </button>
-            </div>
-            <div className="aseel-picker-body" style={{ padding: 10 }}>
-              {/* Cash */}
-              <div
-                style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
-              >
-                <label className="aseel-field">
-                  <span className="aseel-field-label">المبلغ نقدا</span>
-                  <input
-                    className="aseel-input"
-                    data-aseel-key="1"
-                    type="number"
-                    min={0}
-                    step={0.01}
-                    value={attachedCashAmount}
-                    onChange={(e) => setAttachedCashAmount(e.target.value)}
-                  />
-                </label>
-                <label className="aseel-field">
-                  <span className="aseel-field-label">حساب الصندوق</span>
-                  <select
-                    className="aseel-input"
-                    value={attachedCashAccountId}
-                    onChange={(e) =>
-                      setAttachedCashAccountId(
-                        e.target.value ? Number(e.target.value) : ""
-                      )
-                    }
-                  >
-                    <option value="">— اختر —</option>
-                    {cashboxAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {(a.code || "") + " — " + (a.name || "")}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              {/* Cheques list */}
-              <div style={{ marginTop: 12 }}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: 4,
-                  }}
-                >
-                  <strong>الشيكات المرفقة</strong>
-                  <button
-                    type="button"
-                    className="aseel-toolbtn"
-                    onClick={() =>
-                      setAttachedCheques((cs) => [
-                        ...cs,
-                        {
-                          cheque_number: "",
-                          bank_name: "",
-                          amount: "0.00",
-                          due_date: "",
-                          issue_date: "",
-                          status: "Draft",
-                        },
-                      ])
-                    }
-                  >
-                    <Plus /> إضافة شيك
-                  </button>
-                </div>
-                <table className="aseel-grid">
-                  <thead>
-                    <tr>
-                      <th style={{ width: 110 }}>رقم الشيك</th>
-                      <th>البنك</th>
-                      <th style={{ width: 110 }}>المبلغ</th>
-                      <th style={{ width: 130 }}>تاريخ الاستحقاق</th>
-                      <th style={{ width: 110 }}>الحالة</th>
-                      <th style={{ width: 36 }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {attachedCheques.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan={6}
-                          style={{ textAlign: "center", padding: 10 }}
-                        >
-                          لا توجد شيكات مرفقة
-                        </td>
-                      </tr>
-                    ) : (
-                      attachedCheques.map((c, i) => (
-                        <tr key={i}>
-                          <td>
-                            <input
-                              className="aseel-input"
-                              value={c.cheque_number}
-                              onChange={(e) =>
-                                setAttachedCheques((arr) =>
-                                  arr.map((x, j) =>
-                                    j === i
-                                      ? { ...x, cheque_number: e.target.value }
-                                      : x
-                                  )
-                                )
-                              }
-                            />
-                          </td>
-                          <td>
-                            <input
-                              className="aseel-input"
-                              value={c.bank_name || ""}
-                              onChange={(e) =>
-                                setAttachedCheques((arr) =>
-                                  arr.map((x, j) =>
-                                    j === i
-                                      ? { ...x, bank_name: e.target.value }
-                                      : x
-                                  )
-                                )
-                              }
-                            />
-                          </td>
-                          <td>
-                            <input
-                              className="aseel-input"
-                              data-aseel-key="1"
-                              type="number"
-                              min={0}
-                              step={0.01}
-                              value={c.amount}
-                              onChange={(e) =>
-                                setAttachedCheques((arr) =>
-                                  arr.map((x, j) =>
-                                    j === i
-                                      ? { ...x, amount: e.target.value }
-                                      : x
-                                  )
-                                )
-                              }
-                            />
-                          </td>
-                          <td>
-                            <input
-                              className="aseel-input"
-                              type="date"
-                              value={c.due_date || ""}
-                              onChange={(e) =>
-                                setAttachedCheques((arr) =>
-                                  arr.map((x, j) =>
-                                    j === i
-                                      ? { ...x, due_date: e.target.value }
-                                      : x
-                                  )
-                                )
-                              }
-                            />
-                          </td>
-                          <td style={{ fontSize: "var(--aseel-fs-sm)" }}>
-                            {c.status || "Draft"}
-                          </td>
-                          <td>
-                            <button
-                              type="button"
-                              className="aseel-iconbtn aseel-iconbtn--danger"
-                              onClick={() =>
-                                setAttachedCheques((arr) =>
-                                  arr.filter((_, j) => j !== i)
-                                )
-                              }
-                              title="حذف"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Summary */}
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: 6,
-                  background: "var(--aseel-panel)",
-                  border: "1px solid var(--aseel-border-soft)",
-                  borderRadius: "var(--aseel-radius)",
-                }}
-              >
-                <div className="aseel-total-row">
-                  <span>إجمالي الفاتورة</span>
-                  <span className="aseel-total-value">
-                    {fmt(totals.grandTotal)}
-                  </span>
-                </div>
-                <div className="aseel-total-row">
-                  <span>نقدي</span>
-                  <span className="aseel-total-value">
-                    {fmt(Number(attachedCashAmount) || 0)}
-                  </span>
-                </div>
-                <div className="aseel-total-row">
-                  <span>شيكات</span>
-                  <span className="aseel-total-value">
-                    {fmt(
-                      attachedCheques.reduce(
-                        (s, c) => s + (Number(c.amount) || 0),
-                        0
-                      )
-                    )}
-                  </span>
-                </div>
-                <div className="aseel-total-row aseel-total-row--grand">
-                  <span>متبقي على ذمم العميل</span>
-                  <span className="aseel-total-value">
-                    {fmt(
-                      Math.max(
-                        0,
-                        totals.grandTotal -
-                          (Number(attachedCashAmount) || 0) -
-                          attachedCheques.reduce(
-                            (s, c) => s + (Number(c.amount) || 0),
-                            0
-                          )
-                      )
-                    )}
-                  </span>
-                </div>
-              </div>
-            </div>
-            <div className="aseel-picker-foot" style={{ gap: 8 }}>
-              <button
-                type="button"
-                className="aseel-toolbtn"
-                onClick={() => setVoucherOpen(false)}
-              >
-                <X /> إلغاء
-              </button>
-              <button
-                type="button"
-                className="aseel-toolbtn"
-                disabled={voucherSaving || !draftId}
-                onClick={async () => {
-                  if (!draftId) return;
-                  setVoucherSaving(true);
-                  setLocalErr(null);
-                  setMsg(null);
-                  try {
-                    const updated = await attachPaymentVoucher(draftId, {
-                      cash_amount: attachedCashAmount || "0",
-                      cash_account_id:
-                        attachedCashAccountId === ""
-                          ? null
-                          : Number(attachedCashAccountId),
-                      cheques: attachedCheques.map((c) => ({
-                        cheque_number: c.cheque_number,
-                        amount: c.amount,
-                        bank_name: c.bank_name || "",
-                        due_date: c.due_date || null,
-                        issue_date: c.issue_date || null,
-                        payee_name: c.payee_name || "",
-                        notes: c.notes || "",
-                      })),
-                    });
-                    applyDetail(updated);
-                    setMsg("تم حفظ السند المالي المرفق.");
-                    setVoucherOpen(false);
-                  } catch (e) {
-                    setLocalErr(
-                      e instanceof Error ? e.message : "فشل حفظ السند"
-                    );
-                  } finally {
-                    setVoucherSaving(false);
-                  }
-                }}
-              >
-                {voucherSaving ? (
-                  <Loader2 className="animate-spin" />
-                ) : (
-                  <Save />
-                )}
-                حفظ السند
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Attached payment voucher modal removed - now a bottom tab */}
       {/* P3-2-b: stale-data confirmation portal for offline product picks */}
       {staleModal}
     </div>
