@@ -243,6 +243,23 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     return m;
   }, [products]);
 
+  // M3: selling below available stock is ALLOWED — but we surface a
+  // non-blocking warning so the user is aware the stock will go negative.
+  const overSellWarnings = useMemo(() => {
+    if (!stockOnPost) return [] as { sku: string; qty: number; available: number }[];
+    const out: { sku: string; qty: number; available: number }[] = [];
+    for (const l of lines) {
+      if (l.product === "") continue;
+      const pr = productsById.get(Number(l.product));
+      if (!pr) continue;
+      const q = Number(l.quantity) || 0;
+      const avail = Number(pr.quantity_on_hand) || 0;
+      if (q > avail + 1e-6) out.push({ sku: pr.sku, qty: q, available: avail });
+    }
+    return out;
+    // lines/quantities are strings in state; recompute whenever they change
+  }, [lines, productsById, stockOnPost]);
+
   /** نسب الضرائب المسموحة للمبيعات: direction ∈ {sales, both} أو بدون direction (قديم). */
   const salesTaxRates = useMemo(
     () =>
@@ -1480,6 +1497,29 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       </div>
     ) : null;
 
+  // M3: non-blocking warning when one or more lines exceed available stock.
+  const stockWarningBanner =
+    overSellWarnings.length > 0 ? (
+      <div
+        className="aseel-banner"
+        role="status"
+        style={{
+          backgroundColor: "#fef9c3",
+          color: "#854d0e",
+          border: "1px solid #fde047",
+        }}
+      >
+        <AlertCircle className="h-4 w-4 shrink-0" />
+        <span>
+          تنبيه: الكمية تتجاوز المتوفر وسيصبح المخزون بالسالب —{" "}
+          {overSellWarnings
+            .map((w) => `«${w.sku}» (المطلوب ${w.qty} / المتوفر ${w.available})`)
+            .join("، ")}
+          . البيع مسموح ويمكنك المتابعة.
+        </span>
+      </div>
+    ) : null;
+
   // M4: recover an autosaved-but-unsaved draft (only offered for a fresh invoice).
   const restoreBanner = recoverableDraft ? (
     <div className="aseel-banner aseel-banner--ok" role="status">
@@ -2079,6 +2119,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         }
       >
         {banner}
+        {stockWarningBanner}
         {restoreBanner}
         <AseelGrid<DraftLine>
           columns={gridColumns}
