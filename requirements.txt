@@ -1,4 +1,21 @@
+# ── Core framework ──────────────────────────────────────────────
+Django==6.0.1
+djangorestframework==3.16.1
+django-cors-headers==4.9.0
+
+# ── Media / storage (loaded via INSTALLED_APPS) ─────────────────
+django-cloudinary-storage==0.3.0
+cloudinary==1.44.1
+Pillow==12.1.0
+
+# ── Database driver ─────────────────────────────────────────────
+mysqlclient==2.2.7
+
+# ── HTTP / realtime ─────────────────────────────────────────────
+requests==2.32.5
 websocket-client>=1.6.0
+
+# ── Testing / coverage ──────────────────────────────────────────
 pytest>=8.0
 pytest-django>=4.8
 coverage>=7.4
