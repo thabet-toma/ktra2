@@ -312,3 +312,36 @@ if 'test' in sys.argv:
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': ':memory:',
     }
+
+# ── Logging (M11) ──────────────────────────────────────────────────────────
+# Lightweight console logging so request tracing, the custom exception handler,
+# and the client-log sink actually surface. Levels are tunable via env.
+LOG_LEVEL = os.environ.get("DJANGO_LOG_LEVEL", "INFO" if DEBUG else "WARNING").upper()
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{asctime}] {levelname} {name}: {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "WARNING",
+    },
+    "loggers": {
+        # App loggers emit at INFO (or LOG_LEVEL) regardless of root level.
+        "core.request_tracing": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
+        "core.exception_handler": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "core.health": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "client_logs": {"handlers": ["console"], "level": "INFO", "propagate": False},
+        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+    },
+}

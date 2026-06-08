@@ -87,12 +87,14 @@ frontend_v2/
 - ~~/api/health/ missing → offline indicator broken~~ (Fixed M1)
 - ~~custom_exception_handler returns None on unhandled exc~~ (Fixed M1)
 - ~~Composite screens use Promise.all~~ (Fixed M2: SalesSettingsPage)
-- ~~SalesInvoiceEditor: no autosave, no beforeunload guard~~ (Fixed M4); native date input + no auto-row still pending (M6)
+- ~~SalesInvoiceEditor: no autosave, no beforeunload guard~~ (Fixed M4)
+- ~~native date input + no auto-row~~ (Fixed M6: AseelDatePicker + AseelGrid auto-expand)
 - ~~Negative-stock blocked by default; business requires allow~~ (Fixed M3: allow by default + settings toggle)
 - ~~Customer balance/debtor-creditor/GL drill-down/profit missing~~ (Fixed M5)
-- OfflineBanner hasOfflineData hardcoded true
-- Purchase currency defaults USD-leaning, grid non-expanding
-- Dexie mirror only covers products + partners (accounts/tax-rates/cheques uncovered)
+- ~~OfflineBanner hasOfflineData hardcoded true~~ (Fixed M9: reads Dexie cache_meta + configurable message)
+- ~~Purchase currency defaults USD-leaning~~ (Fixed M7: ILS-first default)
+- Dexie mirror only covers products + partners (accounts/tax-rates/cheques uncovered) — future work
+- Note: dev `@types/date-fns` is a deprecated stub (date-fns v4 ships own types); harmless, can be pruned later
 
 ## [TASK7 — Phase 1 + 2 review 2026-05-25]
 

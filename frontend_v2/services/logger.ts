@@ -1,3 +1,8 @@
+// NOTE: restApi imports clientLogger and this module imports API_BASE from
+// restApi — a cycle that is safe because both references are used only at
+// runtime (inside functions), never at module-evaluation time.
+import { API_BASE } from "./restApi";
+
 interface LogEntry {
   level: "info" | "warn" | "error" | "debug";
   message: string;
@@ -58,7 +63,7 @@ class ClientLogger {
 
       const payload = JSON.stringify(logsToFlush);
 
-      fetch("/api/client-logs/", {
+      fetch(`${API_BASE}/client-logs/`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

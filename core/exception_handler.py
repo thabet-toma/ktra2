@@ -15,7 +15,11 @@ def custom_exception_handler(exc, context):
             exc = DRFVE(detail=list(exc.messages) if hasattr(exc, 'messages') else [str(exc)])
     response = drf_handler(exc, context)
     if response is None:
-        trace_id = str(uuid.uuid4())
+        # Reuse the request-scoped trace id from RequestTracingMiddleware so the
+        # 500 response, the request log line, and any client report share one
+        # correlation id. Fall back to a fresh uuid if unavailable.
+        from core.logger_middleware import get_current_trace_id
+        trace_id = get_current_trace_id() or str(uuid.uuid4())
         logger.exception(f"Unhandled exception in view [trace_id:{trace_id}]")
         return Response({
             "detail": "حدث خطأ داخلي في الخادم.",

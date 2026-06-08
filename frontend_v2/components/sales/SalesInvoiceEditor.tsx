@@ -206,8 +206,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       status?: string;
     }>
   >([]);
-  const [voucherOpen, setVoucherOpen] = useState(false);
-  const [voucherSaving, setVoucherSaving] = useState(false);
   const [activeTabKey, setActiveTabKey] = useState("notes");
   // ── M2-T4: Source discount overrides (null = use customer default) ─────
   const [sourceDiscountPctOverride, setSourceDiscountPctOverride] = useState<string>("");
@@ -1294,7 +1292,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       CtrlPageDown: () => { noteKey("Ctrl+PgDn التالي"); nav.next(); },
       CtrlIns: () => { noteKey("Ctrl+Ins جديد"); resetForm(); },
     },
-    { enabled: !customerPickerOpen && productPickerLineKey === null && !voucherOpen }
+    { enabled: !customerPickerOpen && productPickerLineKey === null }
   );
 
   /* ───────────── شريحة الحالة + بيانات الرأس ───────────── */
@@ -1838,17 +1836,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                     />
                   </td>
                   <td>
-                    <input
+                    <AseelDatePicker
                       className="aseel-input"
                       disabled={readOnly || isPosted}
-                      type="date"
                       value={c.due_date || ""}
-                      onChange={(e) => {
+                      onChange={(val) => {
                         setAttachedCheques((arr) =>
                           arr.map((x, j) =>
-                            j === i
-                              ? { ...x, due_date: e.target.value }
-                              : x
+                            j === i ? { ...x, due_date: val } : x
                           )
                         );
                         markDirty();
