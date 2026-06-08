@@ -33,7 +33,7 @@ import {
   X,
   CreditCard,
 } from "lucide-react";
-import { formatProductPrimaryName } from "./SalesProductPickerModal";
+import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
 import {
   AseelDocumentShell,
   AseelGrid,
@@ -2229,30 +2229,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       />
 
       {/* فهرس الأصناف */}
-      <AseelIndexPicker<ProductRow>
-        open={productPickerLineKey !== null}
-        title="فهرس الأصناف"
-        rows={products}
-        columns={[
-          { key: "sku", header: "رقم الصنف", width: "120px", value: (r) => r.sku },
-          { key: "name", header: "بيان الصنف", value: (r) => formatProductPrimaryName(r) },
-          {
-            key: "qoh",
-            header: "المتاح",
-            width: "90px",
-            value: (r) => fmt(Number(r.quantity_on_hand)),
-          },
-          {
-            key: "price",
-            header: "السعر",
-            width: "90px",
-            value: (r) => r.online_price ?? "—",
-          },
-        ]}
-        getRowKey={(r) => r.id}
-        searchValue={(r) => `${r.sku} ${r.barcode ?? ""} ${formatProductPrimaryName(r)}`}
-        onSelect={(r) => {
-          if (productPickerLineKey) onSelectProduct(productPickerLineKey, r.id);
+      <SalesProductPickerModal
+        isOpen={productPickerLineKey !== null}
+        products={products}
+        onSelect={(productId) => {
+          if (productPickerLineKey) onSelectProduct(productPickerLineKey, productId);
           setProductPickerLineKey(null);
         }}
         onClose={() => setProductPickerLineKey(null)}
