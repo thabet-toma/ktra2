@@ -72,7 +72,14 @@ const fmtNum = (s: string | number | undefined | null) => {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
-export const SalesInvoicesPage: React.FC = () => {
+type SalesInvoicesPageProps = {
+  /** M5: فتح الأستاذ العام لحساب العميل (drill-down من محرر الفاتورة). */
+  onOpenGeneralLedger?: (accountId: number) => void;
+};
+
+export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
+  onOpenGeneralLedger,
+}) => {
   const [rows, setRows] = useState<ExtRow[]>([]);
   const [partners, setPartners] = useState<PartnerRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -639,6 +646,7 @@ export const SalesInvoicesPage: React.FC = () => {
               onDraftEditConsumed={() => setDraftToEditId(null)}
               onInvoiceSaved={() => { setEditorOpen(false); load(); }}
               invoiceList={rows}
+              onOpenGeneralLedger={onOpenGeneralLedger}
               salesSettings={salesSettings}
             />
           </div>

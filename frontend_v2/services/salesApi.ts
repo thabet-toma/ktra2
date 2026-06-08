@@ -279,6 +279,7 @@ export type SalesSettings = {
   default_ar_account: number | null;
   default_payment_type: "cash" | "credit";
   stock_on_post_default: boolean;
+  allow_negative_stock_default: boolean;
   default_vat_rate: number | null;
   default_vat_rate_code?: string;
   default_vat_rate_value?: string;

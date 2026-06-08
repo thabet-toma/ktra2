@@ -74,6 +74,13 @@ export interface IdMapping {
   synced_at: string;
 }
 
+export interface InvoiceDraft {
+  draft_id: string;
+  tenant_id: number;
+  data: string;
+  updated_at: string;
+}
+
 const db = new Dexie('ktra_offline') as Dexie & {
   products: EntityTable<ProductCache, 'id'>;
   partners: EntityTable<PartnerCache, 'id'>;
@@ -84,6 +91,7 @@ const db = new Dexie('ktra_offline') as Dexie & {
   mutation_queue: EntityTable<MutationEntry, 'id'>;
   sync_log: EntityTable<SyncLogEntry, 'id'>;
   id_mappings: EntityTable<IdMapping, 'temp_id'>;
+  invoice_drafts: EntityTable<InvoiceDraft, 'draft_id'>;
 };
 
 db.version(1).stores({
@@ -96,6 +104,10 @@ db.version(1).stores({
   mutation_queue: '++id, status, created_at, endpoint, method',
   sync_log: '++id, timestamp, level, message',
   id_mappings: 'temp_id, real_id, model, synced_at',
+});
+
+db.version(2).stores({
+  invoice_drafts: 'draft_id, tenant_id, updated_at',
 });
 
 export default db;

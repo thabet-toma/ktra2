@@ -17,9 +17,10 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
-from core import assistant_views, agent_db_view, dashboard_api
+from core import assistant_views, agent_db_view, dashboard_api, health
 
 urlpatterns = [
+    path('api/health/', health.health_check),
     path('admin/', admin.site.urls),
     path('api/mapper/', include('bridge.urls')),
     path('api/assistant/chat/', assistant_views.assistant_chat),

@@ -68,9 +68,14 @@ def record_stock_movement(
             else:
                 new_avg = unit_cost
         else:
-            # ── Negative stock prevention (يتجاوزها allow_negative_stock على المنتج) ──
+            # ── Negative stock prevention (يتجاوزها allow_negative_stock على المنتج أو الإعداد العام) ──
             if qty_before < quantity:
-                allow_negative = bool(getattr(prod, "allow_negative_stock", False))
+                from sales.models import SalesSettings
+                ss = SalesSettings.objects.filter(tenant_id=tenant.TenantID if tenant else prod.tenant_id).first()
+                global_allow = ss.allow_negative_stock_default if ss else True
+
+                # Allow if either global default is true, or product explicitly allows it
+                allow_negative = global_allow or bool(getattr(prod, "allow_negative_stock", False))
                 if not allow_negative:
                     raise ValidationError(
                         f"لا يمكن صرف {quantity} من الصنف «{prod.sku}» — "

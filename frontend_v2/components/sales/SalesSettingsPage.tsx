@@ -84,24 +84,39 @@ export const SalesSettingsPage: React.FC = () => {
     setErr(null);
     try {
       const tenantId = resolveTenantId();
-      const [ss, accs, currs, parts, taxes] = await Promise.all([
+      const results = await Promise.allSettled([
         getSalesSettings(),
         apiGetList<AccountOpt>("accounting/accounts/", { tenantId }),
         apiGetList<CurrOpt>("accounting/currencies/", { tenantId }),
         apiGetList<PartnerRow>("partners/", { tenantId }),
         apiGetList<TaxRateRow>("accounting/tax-rates/", { tenantId }),
       ]);
-      setSettings(ss);
-      setAccounts(accs || []);
-      setCurrencies(currs || []);
-      setCustomers(
-        (parts || []).filter(
-          (p) => !p.partner_type || p.partner_type === "Customer"
-        )
-      );
-      setTaxRates(taxes || []);
+
+      const [ssRes, accsRes, currsRes, partsRes, taxesRes] = results;
+
+      if (ssRes.status === "fulfilled" && ssRes.value) {
+        setSettings(ssRes.value);
+      } else {
+        // Core settings object failed to load; the form gates on `settings`
+        // being non-null and shows this error instead of white-screening.
+        setErr((prev) => (prev ? prev + " | " : "") + "تعذر تحميل إعدادات المبيعات الأساسية");
+      }
+
+      setAccounts(accsRes.status === "fulfilled" ? (accsRes.value || []) : []);
+      if (accsRes.status === "rejected") setErr((prev) => (prev ? prev + " | " : "") + "بعض الحسابات لم تُحمل");
+
+      setCurrencies(currsRes.status === "fulfilled" ? (currsRes.value || []) : []);
+      if (currsRes.status === "rejected") setErr((prev) => (prev ? prev + " | " : "") + "العملات لم تُحمل");
+
+      const parts = partsRes.status === "fulfilled" ? (partsRes.value || []) : [];
+      setCustomers(parts.filter((p) => !p.partner_type || p.partner_type === "Customer"));
+      if (partsRes.status === "rejected") setErr((prev) => (prev ? prev + " | " : "") + "العملاء لم يتم تحميلهم");
+
+      setTaxRates(taxesRes.status === "fulfilled" ? (taxesRes.value || []) : []);
+      if (taxesRes.status === "rejected") setErr((prev) => (prev ? prev + " | " : "") + "الضرائب لم تُحمل");
+
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr((prev) => (prev ? prev + " | " : "") + (e instanceof Error ? e.message : String(e)));
     } finally {
       setLoading(false);
     }
@@ -137,6 +152,7 @@ export const SalesSettingsPage: React.FC = () => {
         default_ar_account: rest.default_ar_account,
         default_payment_type: rest.default_payment_type,
         stock_on_post_default: rest.stock_on_post_default,
+        allow_negative_stock_default: rest.allow_negative_stock_default,
         default_vat_rate: rest.default_vat_rate,
         prices_include_tax: rest.prices_include_tax,
         auto_post_invoices: rest.auto_post_invoices,
@@ -443,6 +459,19 @@ export const SalesSettingsPage: React.FC = () => {
           >
             <option value="yes">خصم المخزون عند الترحيل</option>
             <option value="no">عدم خصم المخزون عند الترحيل</option>
+          </select>
+        </FieldLabel>
+
+        <FieldLabel label="سياسة الرصيد السالب (افتراضيًا)">
+          <select
+            className={input}
+            value={settings.allow_negative_stock_default ? "yes" : "no"}
+            onChange={(e) =>
+              setField("allow_negative_stock_default", e.target.value === "yes")
+            }
+          >
+            <option value="yes">السماح ببيع المخزون بالسالب (تحذير فقط)</option>
+            <option value="no">منع البيع إذا تجاوز الكمية المتوفرة</option>
           </select>
         </FieldLabel>
       </Section>

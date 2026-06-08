@@ -4,7 +4,7 @@
  * لا تضع عنوان OpenClaw في الواجهة — التوكن والبروكسي على Django.
  */
 /** إذا وُضع عنوان الخادم بدون مسار (مثل http://localhost:8000) يُضاف /api تلقائياً. */
-function resolveApiBase(raw: string): string {
+export function resolveApiBase(raw: string): string {
   const trimmed = raw.replace(/\/+$/, "");
   try {
     const u = new URL(trimmed);
@@ -16,7 +16,7 @@ function resolveApiBase(raw: string): string {
   }
 }
 
-const API_BASE = resolveApiBase(import.meta.env.VITE_API_URL || "http://localhost:8000/api");
+export const API_BASE = resolveApiBase(import.meta.env.VITE_API_URL || "http://localhost:8000/api");
 
 const NETWORK_HINT =
   "تعذر الاتصال بالخادم (شبكة/CORS). تحقق: (1) تشغيل Django (2) VITE_API_URL يشير إلى جذر الخادم أو ينتهي بـ /api " +

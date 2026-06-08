@@ -58,6 +58,8 @@ export type PartnerRow = {
   name: string;
   partner_type: string;
   credit_limit?: string | null;
+  /** M5: customer's linked GL account — enables ledger drill-down. */
+  linked_account?: number | null;
 };
 
 export type CurrRow = { CurrencyID: number; Code: string; Name?: string | null };
@@ -111,6 +113,8 @@ type Props = {
   invoiceList?: SalesInvoiceRow[];
   /** اسم/رقم المستخدم الحالي لشريط الحالة (اختياري). */
   currentUserName?: string;
+  /** M5: فتح الأستاذ العام لحساب العميل المرتبط (drill-down من رصيد العميل). */
+  onOpenGeneralLedger?: (accountId: number) => void;
   salesSettings?: {
     default_customer: number | null;
     default_currency: number | null;
@@ -162,6 +166,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   onInvoiceSaved,
   invoiceList = [],
   currentUserName,
+  onOpenGeneralLedger,
   salesSettings,
 }) => {
   const [draftId, setDraftId] = useState<number | null>(null);
@@ -369,6 +374,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     totalCredit: number;
     balanced: boolean;
     errors: string[];
+    revenue: number;
+    cogs: number;
+    grossProfit: number;
+    marginPct: number;
   } => {
     const errors: string[] = [];
     const out: PreviewLine[] = [];
@@ -377,7 +386,17 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     const tax = totals.taxAmount;
 
     if (grand <= 0) {
-      return { lines: [], totalDebit: 0, totalCredit: 0, balanced: true, errors: [] };
+      return {
+        lines: [],
+        totalDebit: 0,
+        totalCredit: 0,
+        balanced: true,
+        errors: [],
+        revenue: 0,
+        cogs: 0,
+        grossProfit: 0,
+        marginPct: 0,
+      };
     }
 
     // 1) المدين — العميل (آجل) أو الصندوق (نقدي)
@@ -460,18 +479,21 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     }
 
     // 4) COGS / Inventory (إن كان خصم المخزون عند الترحيل)
-    if (stockOnPost) {
-      let cogsTotal = 0;
-      for (const l of lines) {
-        if (l.product === "") continue;
-        const p = productsById.get(Number(l.product));
-        if (!p) continue;
-        const avg = Number(p.avg_cost || 0);
-        const qty = Number(l.quantity || 0);
-        if (avg > 0 && qty > 0) {
-          cogsTotal += avg * qty;
-        }
+    // M5: cost is computed unconditionally so gross profit can be shown even
+    // when stock is not deducted at post-time; the journal lines below are
+    // still only emitted when stock_on_post is enabled.
+    let cogsTotal = 0;
+    for (const l of lines) {
+      if (l.product === "") continue;
+      const p = productsById.get(Number(l.product));
+      if (!p) continue;
+      const avg = Number(p.avg_cost || 0);
+      const qty = Number(l.quantity || 0);
+      if (avg > 0 && qty > 0) {
+        cogsTotal += avg * qty;
       }
+    }
+    if (stockOnPost) {
       if (cogsTotal > 0) {
         out.push({
           accountId: null,
@@ -498,7 +520,21 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         `القيد غير متوازن: مدين ${totalDebit.toFixed(2)} ≠ دائن ${totalCredit.toFixed(2)}`
       );
     }
-    return { lines: out, totalDebit, totalCredit, balanced, errors };
+    // M5: gross profit = net revenue − cost of goods (estimate from WAC).
+    const revenue = net;
+    const grossProfit = revenue - cogsTotal;
+    const marginPct = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
+    return {
+      lines: out,
+      totalDebit,
+      totalCredit,
+      balanced,
+      errors,
+      revenue,
+      cogs: cogsTotal,
+      grossProfit,
+      marginPct,
+    };
   }, [
     invType,
     cashAccountId,
@@ -625,8 +661,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     );
   }, [defaultVatRateId, draftToEditId, draftId]);
 
+  // M5: fetch the customer's balance as soon as a customer is selected (for
+  // both cash and credit invoices) so the current balance + debtor/creditor
+  // status can be shown immediately. The credit-limit warning still only
+  // applies to credit invoices (handled at the display layer).
   useEffect(() => {
-    if (invType !== "credit" || customerId === "") {
+    if (customerId === "") {
       setCreditHint(null);
       return;
     }
@@ -640,7 +680,19 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         .catch(() => setCreditHint(null));
     }, 400);
     return () => clearTimeout(t);
-  }, [invType, customerId, totals.grandTotal, draftId]);
+  }, [customerId, totals.grandTotal, draftId]);
+
+  // ── M4: beforeunload guard ─────────────────────────────────────────────
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (dirtyRef.current && invoiceStatus === "draft") {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [invoiceStatus]);
 
   const markDirty = () => {
     dirtyRef.current = true;
@@ -709,6 +761,116 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     sourceDiscountAmtOverride,
   ]);
 
+  // ── M4: local-draft persistence (Dexie) ────────────────────────────────
+  const localDraftKey = draftId ? String(draftId) : "new";
+
+  const clearLocalDraft = useCallback(async () => {
+    try {
+      await db.invoice_drafts.delete(localDraftKey);
+    } catch {
+      /* best-effort cleanup */
+    }
+  }, [localDraftKey]);
+
+  // Debounced autosave: mirrors the in-progress draft to IndexedDB so an
+  // accidental reload/close does not lose unsaved work. Declared AFTER
+  // buildPayload so the dependency reference is past its TDZ.
+  useEffect(() => {
+    if (!dirtyRef.current || invoiceStatus !== "draft") return;
+    const t = window.setTimeout(() => {
+      void db.invoice_drafts
+        .put({
+          draft_id: localDraftKey,
+          tenant_id: resolveTenantId(),
+          data: JSON.stringify(buildPayload()),
+          updated_at: new Date().toISOString(),
+        })
+        .catch((err) => console.error("Autosave to Dexie failed:", err));
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [buildPayload, localDraftKey, invoiceStatus]);
+
+  // Restore-on-return: for a brand-new (unsaved) invoice, offer to recover the
+  // last autosaved draft instead of silently discarding it.
+  const [recoverableDraft, setRecoverableDraft] = useState<{
+    data: Record<string, unknown>;
+    updated_at: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (draftToEditId != null || draftId != null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const row = await db.invoice_drafts.get("new");
+        if (cancelled || !row?.data) return;
+        const parsed = JSON.parse(row.data) as Record<string, unknown>;
+        const hasContent =
+          Array.isArray(parsed.lines) && (parsed.lines as unknown[]).length > 0;
+        if (hasContent) setRecoverableDraft({ data: parsed, updated_at: row.updated_at });
+      } catch {
+        /* corrupt/absent draft — ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // run once on mount for a fresh invoice
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const hydrateFromLocalDraft = useCallback(
+    (p: Record<string, unknown>) => {
+      const s = (v: unknown, fb = "") => (v == null ? fb : String(v));
+      setCustomerId((p.customer as number) ?? "");
+      if (p.invoice_date) setInvDate(s(p.invoice_date));
+      setDueDate(s(p.due_date));
+      if (p.invoice_type === "cash" || p.invoice_type === "credit")
+        setInvType(p.invoice_type);
+      setCurrencyId((p.currency as number) ?? "");
+      setExchangeRate(s(p.exchange_rate, "1"));
+      setInvoiceDiscount(s(p.invoice_discount, "0"));
+      setStockOnPost(p.stock_on_post !== false);
+      setNotes(s(p.notes));
+      setBookNumber(s(p.book_number, "0"));
+      setSecondDate(s(p.second_date));
+      setLicensedDealerNo(s(p.licensed_dealer_no));
+      setSettlementInvoiceNo(s(p.settlement_invoice_no));
+      setPricesIncludeTax(Boolean(p.prices_include_tax));
+      setDiscountPercent(s(p.discount_percent, "0"));
+      setSourceDiscountPctOverride(
+        p.source_discount_percent_override == null
+          ? ""
+          : s(p.source_discount_percent_override)
+      );
+      setSourceDiscountAmtOverride(
+        p.source_discount_amount_override == null
+          ? ""
+          : s(p.source_discount_amount_override)
+      );
+      if (p.cash_or_bank_account != null)
+        setCashAccountId(p.cash_or_bank_account as number);
+      if (p.revenue_account != null) setRevenueAccountId(p.revenue_account as number);
+      const rawLines = Array.isArray(p.lines) ? (p.lines as Record<string, unknown>[]) : [];
+      if (rawLines.length) {
+        setLines(
+          rawLines.map((ln) => ({
+            key: newLineKey(),
+            id: typeof ln.id === "number" ? ln.id : undefined,
+            product: (ln.product as number) ?? "",
+            quantity: s(ln.quantity, "0"),
+            unit_price: s(ln.unit_price, "0"),
+            line_discount: s(ln.line_discount, "0"),
+            tax_rate:
+              ln.tax_rate === "" || ln.tax_rate == null ? null : (ln.tax_rate as number),
+          }))
+        );
+      }
+      dirtyRef.current = true;
+    },
+    []
+  );
+
   const validateClient = (): string | null => {
     if (customerId === "") return "اختر العميل.";
     if (currencyId === "") return "اختر العملة.";
@@ -722,12 +884,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       const p = Number(l.unit_price);
       if (!(q > 0)) return "الكمية يجب أن تكون أكبر من صفر في كل السطور المكتملة.";
       if (p < 0 || Number.isNaN(p)) return "سعر الوحدة غير صالح.";
-      if (stockOnPost) {
-        const pr = productsById.get(Number(l.product));
-        if (pr && q > Number(pr.quantity_on_hand) + 1e-6) {
-          return `الصنف «${pr.sku}»: الكمية (${q}) تتجاوز المتوفر (${pr.quantity_on_hand}).`;
-        }
-      }
+      // M3: selling below available stock is permitted (business rule).
+      // The backend enforces/logs the negative-stock policy; the client no
+      // longer hard-blocks over-sell here.
     }
     return null;
   };
@@ -760,6 +919,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         }
       }
       dirtyRef.current = false;
+      // M4: the draft is now persisted server-side — drop the local recovery copy.
+      void clearLocalDraft();
+      setRecoverableDraft(null);
       onInvoiceSaved();
     } catch (e) {
       setLocalErr(e instanceof Error ? e.message : "فشل الحفظ");
@@ -797,6 +959,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           ? `تم الترحيل — القيد #${posted.journal}`
           : "تم الترحيل بنجاح."
       );
+      void clearLocalDraft();
+      setRecoverableDraft(null);
       onInvoiceSaved();
     } catch (e) {
       setLocalErr(e instanceof Error ? e.message : "فشل الترحيل");
@@ -1316,6 +1480,38 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       </div>
     ) : null;
 
+  // M4: recover an autosaved-but-unsaved draft (only offered for a fresh invoice).
+  const restoreBanner = recoverableDraft ? (
+    <div className="aseel-banner aseel-banner--ok" role="status">
+      <AlertCircle className="h-4 w-4 shrink-0" />
+      <span>
+        توجد مسودة غير محفوظة محليّاً (
+        {new Date(recoverableDraft.updated_at).toLocaleString("ar")}). هل تريد
+        استعادتها؟
+      </span>
+      <button
+        type="button"
+        className="mr-3 underline font-semibold hover:no-underline"
+        onClick={() => {
+          hydrateFromLocalDraft(recoverableDraft.data);
+          setRecoverableDraft(null);
+        }}
+      >
+        استعادة
+      </button>
+      <button
+        type="button"
+        className="mr-3 underline font-semibold hover:no-underline"
+        onClick={() => {
+          void db.invoice_drafts.delete("new");
+          setRecoverableDraft(null);
+        }}
+      >
+        تجاهل
+      </button>
+    </div>
+  ) : null;
+
   const fld = (label: string, node: React.ReactNode) => (
     <label className="aseel-field">
       <span className="aseel-field-label">{label}</span>
@@ -1767,6 +1963,47 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 )}
               </span>
             </div>
+            {/* M5 — رصيد العميل الحالي + حالة مدين/دائن + فتح الأستاذ العام */}
+            {creditHint &&
+              (() => {
+                const bal = Number(creditHint.open_balance);
+                const isDebtor = bal > 0.005;
+                const isCreditor = bal < -0.005;
+                const statusLabel = isDebtor
+                  ? "مدين"
+                  : isCreditor
+                  ? "دائن"
+                  : "متوازن";
+                const color = isDebtor
+                  ? "#dc2626"
+                  : isCreditor
+                  ? "#16a34a"
+                  : "var(--aseel-text-soft, #6b7280)";
+                const ledgerAcct = selectedCustomer?.linked_account ?? null;
+                const canDrill = Boolean(onOpenGeneralLedger && ledgerAcct);
+                return (
+                  <div className="aseel-total-row">
+                    <span>رصيد العميل</span>
+                    <span className="aseel-total-value" style={{ color }}>
+                      {canDrill ? (
+                        <button
+                          type="button"
+                          className="underline hover:no-underline"
+                          style={{ color }}
+                          title="فتح الأستاذ العام لحساب العميل"
+                          onClick={() => onOpenGeneralLedger!(ledgerAcct as number)}
+                        >
+                          {fmt(Math.abs(bal))} ({statusLabel})
+                        </button>
+                      ) : (
+                        <>
+                          {fmt(Math.abs(bal))} ({statusLabel})
+                        </>
+                      )}
+                    </span>
+                  </div>
+                );
+              })()}
             {invType === "credit" && creditHint && (
               <div
                 className={`aseel-total-row ${
@@ -1776,6 +2013,22 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 <span>الرصيد بعد الفاتورة</span>
                 <span className="aseel-total-value">
                   {fmt(Number(creditHint.projected_balance))}
+                </span>
+              </div>
+            )}
+            {/* M5 — ربح الفاتورة (الإيراد − التكلفة من متوسط التكلفة) */}
+            {journalPreview.revenue > 0 && journalPreview.cogs > 0 && (
+              <div className="aseel-total-row">
+                <span>الربح الإجمالي</span>
+                <span
+                  className="aseel-total-value"
+                  style={{
+                    color:
+                      journalPreview.grossProfit >= 0 ? "#16a34a" : "#dc2626",
+                  }}
+                >
+                  {fmt(journalPreview.grossProfit)} (
+                  {journalPreview.marginPct.toFixed(1)}%)
                 </span>
               </div>
             )}
@@ -1826,6 +2079,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         }
       >
         {banner}
+        {restoreBanner}
         <AseelGrid<DraftLine>
           columns={gridColumns}
           rows={lines}

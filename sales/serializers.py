@@ -44,6 +44,11 @@ def _validate_stock_lines(tenant, lines_data, stock_on_post: bool) -> None:
     """يمنع بيع كمية أكبر من الرصيد عند تفعيل خصم المخزون عند الترحيل."""
     if not stock_on_post or not lines_data:
         return
+    # M3: resolve the global negative-stock policy once (not per line — avoids N+1).
+    # Default to allowing negative stock when no settings row exists yet.
+    from .models import SalesSettings
+    ss = SalesSettings.objects.filter(tenant_id=tenant.TenantID).first()
+    global_allow = ss.allow_negative_stock_default if ss else True
     for row in lines_data:
         d = dict(row) if isinstance(row, dict) else row
         pid = d.get("product")
@@ -61,8 +66,8 @@ def _validate_stock_lines(tenant, lines_data, stock_on_post: bool) -> None:
             raise serializers.ValidationError(
                 {"lines": f"الصنف {prod.sku} لا يتبع نفس الشركة."}
             )
-        # M2-14: allow_negative_stock يتجاوز فحص الرصيد (الخدمة هي المرجع الوحيد)
-        if getattr(prod, "allow_negative_stock", False):
+        # M2-14 + M3: المخزون السالب مسموح إن سمح الإعداد العام أو الصنف (الخدمة هي المرجع الوحيد)
+        if global_allow or getattr(prod, "allow_negative_stock", False):
             continue
         if qty > prod.quantity_on_hand + Decimal("0.0001"):
             raise serializers.ValidationError(
@@ -433,6 +438,7 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "default_ar_account",
             "default_payment_type",
             "stock_on_post_default",
+            "allow_negative_stock_default",
             "default_vat_rate",
             "default_vat_rate_code",
             "default_vat_rate_value",

@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { API_BASE } from '../services/restApi';
 
 export interface OnlineStatus {
   online: boolean;
   lastOnline: Date;
   latencyMs: number;
 }
-
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export function useOnlineStatus(): OnlineStatus {
   const [online, setOnline] = useState(navigator.onLine);
@@ -17,7 +16,7 @@ export function useOnlineStatus(): OnlineStatus {
   const heartbeat = useCallback(async () => {
     const start = performance.now();
     try {
-      const res = await fetch(`${API_BASE}/api/health/`, {
+      const res = await fetch(`${API_BASE}/health/`, {
         method: 'HEAD',
         signal: AbortSignal.timeout(5000),
       });
@@ -25,6 +24,8 @@ export function useOnlineStatus(): OnlineStatus {
         setLatencyMs(Math.round(performance.now() - start));
         setOnline(true);
         lastOnlineRef.current = new Date();
+      } else {
+        setOnline(false);
       }
     } catch {
       setOnline(false);

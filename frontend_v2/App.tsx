@@ -1199,7 +1199,14 @@ const App: React.FC = () => {
           currentUser!.role === "procurement" ||
           currentUser!.role === "manager"
         ) {
-          return <SalesInvoicesPage />;
+          return (
+            <SalesInvoicesPage
+              onOpenGeneralLedger={(id) => {
+                setAccountingGlAccountId(id);
+                setAppView("accounting-general-ledger");
+              }}
+            />
+          );
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 

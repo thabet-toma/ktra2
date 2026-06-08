@@ -65,11 +65,34 @@ frontend_v2/
 ```
 
 ## [ORPHANS & PENDING]
-- [x] Phase 1: PWA Foundation (Manifest, vite-plugin-pwa, UpdatePrompt, offline page)
-- [x] Phase 2: Read-Side Cache + Online/Offline UI (Dexie, cachedApi, useOnlineStatus, OfflineBanner, StalenessBadge) — wired into ItemsManagement + accountingApi.getPartners
-- [x] Phase 3: Employee Guidance UI — primitives + wiring on Year-End, Journal Entry post, VAT statement issue, Cheque transitions, Clearance payment, SalesInvoice post; useStaleConfirm wired in SalesInvoiceEditor
-- [x] Phase 4: Draft-Mode Writes + Sync Queue — mutationClient + Background-Sync + temp-id mapping + BroadcastChannel emit on sync + SalesInvoicesPage shows queued drafts with pending badge
-- [x] Phase 5: Storage Quotas + Multi-Tab + Playwright Tests — quota guard, broadcast sync, 5 Playwright specs (test1+test3 rewritten to drive real DOM)
+- [x] Phase 1: PWA Foundation
+- [x] Phase 2: Read-Side Cache
+- [x] Phase 3: Employee Guidance UI
+- [x] Phase 4: Draft-Mode Writes + Sync Queue
+- [x] Phase 5: Storage Quotas
+- [x] Task 8 - M1 API Error Contract + /api/health/ (exception_handler, health.py, useOnlineStatus)
+- [x] Task 8 - M2 Resilient Composite Loads (SalesSettingsPage → Promise.allSettled)
+- [x] Task 8 - M3 Negative-Stock Policy (allow by default; settings toggle; client block removed)
+- [x] Task 8 - M4 Sales Invoice Draft Safety (beforeunload + Dexie autosave + restore-on-return)
+- [x] Task 8 - M5 Customer Balance / Debtor-Creditor / GL Drill-down + Invoice Profit
+- [ ] Task 8 - M6 Al-Aseel Date Picker + Auto-Expanding Grid + Header Parity
+- [ ] Task 8 - M7 Purchase Invoice Parity
+- [ ] Task 8 - M8 Item Picker UX + Calculator + Payment Placement
+- [ ] Task 8 - M9 Offline Polish (OfflineBanner, useOnlineStatus, writes)
+- [ ] Task 8 - M10 Navigation & Workspace (Sidebar, real-estate, receipt nav)
+- [ ] Task 8 - M11 Logging & Observability
+- [ ] Task 8 - M12 Repo Hygiene (github.zip, legacy frontend)
+
+## [KNOWN_ISSUES]
+- ~~/api/health/ missing → offline indicator broken~~ (Fixed M1)
+- ~~custom_exception_handler returns None on unhandled exc~~ (Fixed M1)
+- ~~Composite screens use Promise.all~~ (Fixed M2: SalesSettingsPage)
+- ~~SalesInvoiceEditor: no autosave, no beforeunload guard~~ (Fixed M4); native date input + no auto-row still pending (M6)
+- ~~Negative-stock blocked by default; business requires allow~~ (Fixed M3: allow by default + settings toggle)
+- ~~Customer balance/debtor-creditor/GL drill-down/profit missing~~ (Fixed M5)
+- OfflineBanner hasOfflineData hardcoded true
+- Purchase currency defaults USD-leaning, grid non-expanding
+- Dexie mirror only covers products + partners (accounts/tax-rates/cheques uncovered)
 
 ## [TASK7 — Phase 1 + 2 review 2026-05-25]
 

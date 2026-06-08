@@ -139,6 +139,11 @@ class SalesSettings(models.Model):
         db_column="StockOnPostDefault",
         help_text="خصم المخزون الافتراضي عند الترحيل",
     )
+    allow_negative_stock_default = models.BooleanField(
+        default=True,
+        db_column="AllowNegativeStockDefault",
+        help_text="السماح ببيع المخزون بالسالب افتراضياً (يمكن تجاوزه على مستوى الصنف)",
+    )
 
     default_vat_rate = models.ForeignKey(
         TaxRate,
