@@ -255,26 +255,54 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
                     {"lines": f"الصنف {prod.sku} لا يتبع نفس الشركة."}
                 )
         _validate_stock_lines(tenant, lines_data, validated_data.get("stock_on_post", True))
-        with transaction.atomic():
-            inv = SalesInvoice.objects.create(**validated_data)
-            for row in lines_data:
-                rw = dict(row)
-                rw.pop("id", None)
-                SalesInvoiceLine.objects.create(tenant=tenant, invoice=inv, **rw)
-            lines = list(inv.lines.select_related("tax_rate", "tax_rate__tax_account"))
-            recalculate_invoice_amounts(inv, lines)
-            SalesInvoiceLine.objects.bulk_update(
-                lines,
-                ["line_total_excl_tax", "line_tax_amount"],
-            )
-            inv.save(
-                update_fields=[
-                    "subtotal_excl_tax",
-                    "tax_amount",
-                    "grand_total",
-                ]
-            )
-        return inv
+        from django.db import IntegrityError
+        try:
+            with transaction.atomic():
+                inv = SalesInvoice.objects.create(**validated_data)
+                for row in lines_data:
+                    rw = dict(row)
+                    rw.pop("id", None)
+                    SalesInvoiceLine.objects.create(tenant=tenant, invoice=inv, **rw)
+                lines = list(inv.lines.select_related("tax_rate", "tax_rate__tax_account"))
+                recalculate_invoice_amounts(inv, lines)
+                SalesInvoiceLine.objects.bulk_update(
+                    lines,
+                    ["line_total_excl_tax", "line_tax_amount"],
+                )
+                inv.save(
+                    update_fields=[
+                        "subtotal_excl_tax",
+                        "tax_amount",
+                        "grand_total",
+                    ]
+                )
+            return inv
+        except IntegrityError:
+            if not inv_num or not str(inv_num).strip():
+                book_num = validated_data.get("book_number", 0)
+                validated_data["invoice_number"] = next_invoice_number(tenant.TenantID, book_num)
+                with transaction.atomic():
+                    inv = SalesInvoice.objects.create(**validated_data)
+                    for row in lines_data:
+                        rw = dict(row)
+                        rw.pop("id", None)
+                        SalesInvoiceLine.objects.create(tenant=tenant, invoice=inv, **rw)
+                    lines = list(inv.lines.select_related("tax_rate", "tax_rate__tax_account"))
+                    recalculate_invoice_amounts(inv, lines)
+                    SalesInvoiceLine.objects.bulk_update(
+                        lines,
+                        ["line_total_excl_tax", "line_tax_amount"],
+                    )
+                    inv.save(
+                        update_fields=[
+                            "subtotal_excl_tax",
+                            "tax_amount",
+                            "grand_total",
+                        ]
+                    )
+                return inv
+            else:
+                raise
 
     def update(self, instance, validated_data):
         if instance.status != SalesInvoice.STATUS_DRAFT:

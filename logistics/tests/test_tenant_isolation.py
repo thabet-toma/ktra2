@@ -22,6 +22,9 @@ class TenantIsolationDealTest(TestCase):
         cur, _ = Currency.objects.get_or_create(Code='ILS', defaults={'Symbol': '₪', 'IsBaseCurrency': True})
         cls.user = User.objects.create_user(username='testuser', password='pass123')
         Token.objects.create(user=cls.user)
+        from tenants.models import UserCompanyMembership
+        UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant_a, role="manager")
+        UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant_b, role="manager")
 
         partner_a = Partner.objects.create(
             tenant=cls.tenant_a, name='Partner A',

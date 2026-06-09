@@ -1,12 +1,13 @@
 # PROJECT_MAP — K.T.R.A
 
 ## [TECH_STACK]
-- **Frontend:** React 19, TypeScript 5.8, Vite 6, Tailwind CSS 4, react-router-dom 7
-- **Backend:** Django 5.x (Python), MySQL (production), SQLite (test)
-- **PWA:** vite-plugin-pwa 1.3, workbox-window 7.4, Dexie 4.4
-- **Testing:** pytest-django, Playwright (E2E)
-- **Icons:** lucide-react
-- **Charts:** recharts
+- **Frontend:** React 19.2, TypeScript 5.8, Vite 6.2, Tailwind CSS 4.3, react-router-dom 7, date-fns 4
+- **Backend:** Django 6.0.1 (latest stable 6.0.6, 2026-06-03; LTS 5.2.15), DRF 3.16, MySQL (prod), SQLite (test)
+- **PWA/Offline:** vite-plugin-pwa 1.3, workbox-window 7.4, Dexie 4.4
+- **Testing:** pytest-django (70 tests, SQLite via `core.test_settings`), Playwright (E2E, advisory in CI)
+- **Logging (task8 M11):** `core/logger_middleware.py` request tracing + `client_logs` sink + console LOGGING config
+- **Icons:** lucide-react · **Charts:** recharts
+- **Version policy (2026-06):** stack is current; recommended optional patch: Django 6.0.1 → 6.0.6. No new deps planned for task9/task10.
 
 ## [SYSTEM_FLOW]
 ```
@@ -82,6 +83,19 @@ frontend_v2/
 - [x] Task 8 - M10 Navigation & Workspace (Sidebar, real-estate, receipt nav)
 - [x] Task 8 - M11 Logging & Observability
 - [x] Task 8 - M12 Repo Hygiene (github.zip, legacy frontend)
+- [x] **Task 9** (completed, QA-verified) - M1 Sales-settings→invoice live binding (eventBus) · M2 Cash/cheque rows under total · M3 Customer GL summary on select (clickable→GL) · M4 Invoice number always visible + next-number endpoint · M5 Unified tabs (AseelTabs + overflow fix) · M6 Contrast + `--aseel-status-*` palette · M7 Logging
+- [x] **Task 10** (completed, QA-verified) - Multi-Entity: UserCompanyMembership(+role) · my-companies/switch API · CompanySwitcher + CompanyContext · create-company + COA template clone · isolation tests (7 passing, cross-company 403 proven) · backfill migration · company-event logging
+- _No open items — task9 + task10 verified and closed by independent QA review 2026-06-09._
+
+## [QA REVIEW — task9 + task10, 2026-06-09]
+Independent verification (Trust Nothing). Backend 77 tests pass · tsc 0 · vite build OK · eslint 0 errors. **Defects found & fixed during review:**
+1. 🔴 **Signup lockout** — `signup_view` created users with no `UserCompanyMembership` → membership check (now enforced) would 403 every request. Fixed: `_attach_default_company()` on signup (+test).
+2. 🟠 **Unauthorized company creation** — `TenantViewSet.create` had no role gate (any user could create companies). Fixed: manager-only with bootstrap exception (+test).
+3. 🟠 **Double-base API bug** — `CompanyContext` (×2) and `SalesInvoiceEditor` next-number used raw `VITE_API_URL`, regressing task8's shared-`API_BASE` fix (breaks when env lacks `/api`). Fixed: routed through `apiGetObject`/`apiPostObject` + new `getNextInvoiceNumber()` helper.
+4. 🟡 **500-masking** — `create()` wrapped everything in `except Exception → 400`. Narrowed to `DjangoValidationError → 400`; unexpected errors now reach the shaped 500 handler with trace_id.
+5. 🟡 **Switcher permanent spinner** — `CompanyContext.loading` derived from `companies.length===0` hung forever for membership-less users. Fixed to reflect real fetch state.
+6. 🧹 Removed dead `perform_create: pass`.
+**Verified working:** cross-company data isolation (403), independent COA + invoice sequences, settings→invoice VAT reflection, cash/cheque rows, clickable customer-balance→GL, invoice number always shown, unified tabs (shared `.aseel-tab` classes + overflow), contrast + status colors.
 
 ## [KNOWN_ISSUES]
 - ~~/api/health/ missing → offline indicator broken~~ (Fixed M1)
@@ -95,6 +109,21 @@ frontend_v2/
 - ~~Purchase currency defaults USD-leaning~~ (Fixed M7: ILS-first default)
 - Dexie mirror only covers products + partners (accounts/tax-rates/cheques uncovered) — future work
 - Note: dev `@types/date-fns` is a deprecated stub (date-fns v4 ships own types); harmless, can be pruned later
+
+### [KNOWN_ISSUES — Task 9 audit, 2026-06-09] (planned, not yet fixed)
+- F1 🔴 Sales settings (VAT) don't reflect on a new invoice — settings fetched once, no invalidation (`SalesInvoiceEditor.tsx:302`).
+- F2 🟠 Cash/cheque payment rows under invoice total not matching Al-Aseel (task8 M8 in repo; **deploy-lag** on live site).
+- F3 🟠 Customer GL summary + drill-down on select reported missing (task8 M5 in repo; deploy-lag; also wants a header summary, not only totals dock).
+- F4 🟠 Invoice number shows `#<pk>` or "— جديدة —", never the real `invoice_number` (`SalesInvoiceEditor.tsx:1952`); no next-number preview endpoint.
+- U5 🔴 Tabs not unified → clipped/hidden. `.aseel-tabs` has no overflow handling; 5 screens use ad-hoc tab systems instead of `AseelDocumentShell`.
+- U6 🟠 Low contrast (`--aseel-ink-soft:#5c5a45` on beige ≈3:1 < AA); no status color semantics (credit/debit/paid/due).
+- **Deploy-lag caveat:** live `smart.ktragroup.com` runs an older build than `main`; M0 redeploy precedes re-audit.
+
+## [MULTI-ENTITY ARCHITECTURE — Task 10 plan]
+- **Strategy: reuse existing `Tenant` as the "company/shop."** Data layer is **already** row-scoped by `tenant_id` (every domain model), COA is `unique_together[tenant,code]`, invoice numbers are per-tenant via `next_invoice_number(tenant_id, book)`. **No new `company_id` column** (rejected — would duplicate isolation).
+- **To build:** `UserCompanyMembership(user, tenant, role)` (per-company role) · membership-backed `_validate_user_tenant_access` · `my-companies`/switch API · top-bar company switcher (reuses `localStorage.tenantId` → `resolveTenantId()`) · login→company-pick gate · `create_company` service that clones a default COA template + seeds `TenantSettings` · scoping-completeness audit + isolation tests · data migration backfilling memberships and attributing legacy rows to "Default Company" (tenant #1).
+- **Confirmed decisions:** single login + switcher · new COA from default template · independent role per company.
+- **Switch point already exists:** `frontend_v2/utils/tenantContext.ts:resolveTenantId()` + `X-Tenant-Id` header + `core/tenant_utils.get_tenant`.
 
 ## [TASK7 — Phase 1 + 2 review 2026-05-25]
 

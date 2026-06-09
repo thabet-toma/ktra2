@@ -1,13 +1,16 @@
 """N0-T4 — Views for TenantSettings + TenantBook + Currency (Group Constants F11)."""
+from django.db import transaction
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
 from core.api_defaults import ApiAuthAndUser
 from core.tenant_utils import get_tenant
-from .models import Currency, TenantBook, TenantSettings
-from .serializers import TenantBookSerializer, TenantSettingsSerializer
+from .models import Currency, TenantBook, TenantSettings, Tenant, UserCompanyMembership
+from .serializers import TenantBookSerializer, TenantSettingsSerializer, TenantSerializer, UserCompanyMembershipSerializer
 
 
 class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):
@@ -130,3 +133,73 @@ class TenantBookViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class TenantViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for Tenant / Companies management.
+    """
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    serializer_class = TenantSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return Tenant.objects.none()
+        if user.is_superuser:
+            return Tenant.objects.all().order_by("CompanyName")
+        return Tenant.objects.filter(memberships__user=user).order_by("CompanyName")
+
+    def _can_create_company(self, user) -> bool:
+        """Manager-only (M4-T3), with a bootstrap exception: a user with no
+        memberships yet may create their first company. Superusers always may."""
+        if user.is_superuser:
+            return True
+        memberships = UserCompanyMembership.objects.filter(user=user)
+        if not memberships.exists():
+            return True  # bootstrapping the first company
+        return memberships.filter(role="manager").exists()
+
+    def create(self, request, *args, **kwargs):
+        if not self._can_create_company(request.user):
+            raise PermissionDenied("فقط المدير يمكنه إنشاء شركة جديدة.")
+        name = request.data.get("CompanyName")
+        if not name:
+            raise DRFValidationError({"CompanyName": "اسم الشركة مطلوب."})
+        from .services import create_company
+        try:
+            tenant = create_company(name, request.user)
+        except DjangoValidationError as e:
+            # Known validation errors → 400; unexpected errors propagate to the
+            # shaped 500 handler (with trace_id) instead of being masked as 400.
+            raise DRFValidationError({"detail": e.messages if hasattr(e, "messages") else str(e)})
+        return Response(TenantSerializer(tenant).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"], url_path="my-companies")
+    def my_companies(self, request):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return Response([])
+        qs = UserCompanyMembership.objects.filter(user=user).select_related("tenant").order_by("tenant__CompanyName")
+        return Response(UserCompanyMembershipSerializer(qs, many=True).data)
+
+    @action(detail=False, methods=["post"], url_path="set-default")
+    def set_default(self, request):
+        user = request.user
+        company_id = request.data.get("company_id")
+        if not company_id:
+            raise DRFValidationError({"company_id": "معرف الشركة مطلوب."})
+        
+        # Verify user belongs to this company
+        membership = UserCompanyMembership.objects.filter(user=user, tenant_id=company_id).first()
+        if not membership:
+            raise DRFValidationError({"company_id": "ليس لديك صلاحية الوصول لهذه الشركة أو أنها غير موجودة."})
+        
+        with transaction.atomic():
+            UserCompanyMembership.objects.filter(user=user).update(is_default=False)
+            membership.is_default = True
+            membership.save(update_fields=["is_default"])
+            
+        return Response({"status": "success", "message": "تم تعيين الشركة الافتراضية بنجاح."})
+

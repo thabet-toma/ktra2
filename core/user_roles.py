@@ -14,14 +14,24 @@ if TYPE_CHECKING:
 def django_user_app_role(user: AbstractUser | None) -> str:
     """نفس منطق الدور الفعلي بعد login (بدون حقول العرض الأخرى)."""
     from django.contrib.auth import get_user_model
-
+    from core.tenant_utils import get_tenant
+    from tenants.models import UserCompanyMembership
     from bridge.models import FirestoreMirrorDoc
 
     User = get_user_model()
     if not user or not user.is_authenticated:
         return ""
 
-    role = "manager" if getattr(user, "is_superuser", False) else "employee"
+    if getattr(user, "is_superuser", False):
+        return "manager"
+
+    tenant = get_tenant()
+    if tenant:
+        membership = UserCompanyMembership.objects.filter(user=user, tenant=tenant).first()
+        if membership:
+            return membership.role
+
+    role = "employee"
     doc = FirestoreMirrorDoc.objects.filter(path=f"users/{user.pk}").first()
     if doc and isinstance(doc.data, dict) and doc.data.get("role"):
         role = str(doc.data["role"]).strip()

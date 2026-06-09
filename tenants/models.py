@@ -165,3 +165,27 @@ class TenantBook(models.Model):
 
     def __str__(self):
         return f"{self.tenant} — {self.document_type} [{self.book_number}]"
+
+
+class UserCompanyMembership(models.Model):
+    ROLE_CHOICES = [
+        ('manager', 'مدير (Manager)'),
+        ('accountant', 'محاسب (Accountant)'),
+        ('staff', 'موظف (Staff)'),
+        ('viewer', 'مستعرض (Viewer)'),
+    ]
+
+    user = models.ForeignKey('auth.User', on_delete=models.CASCADE, related_name='company_memberships', db_column='UserID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='memberships', db_column='TenantID')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='staff', db_column='Role')
+    is_default = models.BooleanField(default=False, db_column='IsDefault')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'user_company_memberships'
+        managed = True
+        unique_together = [['user', 'tenant']]
+
+    def __str__(self):
+        return f"{self.user.username} - {self.tenant.CompanyName} ({self.role})"
+

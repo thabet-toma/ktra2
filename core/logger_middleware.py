@@ -9,6 +9,9 @@ _thread_locals = threading.local()
 def get_current_trace_id():
     return getattr(_thread_locals, 'trace_id', None)
 
+def get_current_request():
+    return getattr(_thread_locals, 'request', None)
+
 class RequestTracingMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
@@ -23,6 +26,7 @@ class RequestTracingMiddleware:
 
         request.trace_id = trace_id
         _thread_locals.trace_id = trace_id
+        _thread_locals.request = request
 
         start_time = time.time()
         try:
@@ -46,3 +50,5 @@ class RequestTracingMiddleware:
             # that reuse the same worker thread.
             if hasattr(_thread_locals, 'trace_id'):
                 del _thread_locals.trace_id
+            if hasattr(_thread_locals, 'request'):
+                del _thread_locals.request

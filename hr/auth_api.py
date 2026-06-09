@@ -1,4 +1,5 @@
 import json
+import logging
 from typing import Any, Dict, Optional
 
 from django.contrib.auth import get_user_model
@@ -11,7 +12,37 @@ from rest_framework.authtoken.models import Token
 
 from bridge.models import FirestoreMirrorDoc
 
+logger = logging.getLogger(__name__)
+
 User = get_user_model()
+
+
+def _attach_default_company(user, is_first_user: bool) -> None:
+    """Attach a new user to the default company so the membership-based
+    tenant-access check (multi-company feature) doesn't lock them out.
+
+    First user → manager; subsequent users → staff. No-op if no tenant exists
+    yet (a fresh system bootstraps its first company via the companies API).
+    """
+    try:
+        from tenants.models import Tenant, UserCompanyMembership
+
+        default_tenant = (
+            Tenant.objects.filter(pk=1).first()
+            or Tenant.objects.order_by("TenantID").first()
+        )
+        if default_tenant is None:
+            return
+        UserCompanyMembership.objects.get_or_create(
+            user=user,
+            tenant=default_tenant,
+            defaults={
+                "role": "manager" if is_first_user else "staff",
+                "is_default": True,
+            },
+        )
+    except Exception:  # noqa: BLE001 — never block signup on membership wiring
+        logger.exception("signup: failed to attach default-company membership for user=%s", user.pk)
 
 
 def _base_payload(user) -> Dict[str, Any]:
@@ -155,6 +186,7 @@ def signup_view(request):
         "employmentStatus": "",
     }
     _sync_user_mirror(user, extra)
+    _attach_default_company(user, is_first_user)
     return JsonResponse({"user": _user_payload(user)}, status=201)
 
 

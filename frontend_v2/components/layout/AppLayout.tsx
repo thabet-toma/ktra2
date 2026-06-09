@@ -14,6 +14,9 @@ import {
   GlobalSearch,
 } from './GlobalSearch';
 import {
+  CompanySwitcher,
+} from './CompanySwitcher';
+import {
   User as UserIcon,
   Calendar,
 } from 'lucide-react';
@@ -58,9 +61,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
            اسم الشركة + السنة المالية يُؤخذان من بيانات المستخدم/التينانت إن وُجدت
            وإلا يظهر اسم عام مع السنة الحالية — بلا hard-code يكسر multi-tenant. */}
       <div className="aseel-titlebar flex-shrink-0">
-        <div className="aseel-company">
-          {(user as any).tenantName || 'K.T.R.A العالمية'}
-          {' '}[ السنة المالية {new Date().getFullYear()} ]
+        <div className="aseel-company flex items-center gap-3">
+          <CompanySwitcher />
+          <span className="opacity-60 text-xs font-semibold">[ السنة المالية {new Date().getFullYear()} ]</span>
         </div>
         <div className="aseel-title-grp">
           <span className="aseel-title-chip">{currentViewLabel}</span>

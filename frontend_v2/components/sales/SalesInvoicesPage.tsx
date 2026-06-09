@@ -35,6 +35,7 @@ import {
 } from "lucide-react";
 import { SalesInvoiceEditor, type PartnerRow, type ProductRow } from "./SalesInvoiceEditor";
 import { resolveTenantId } from "../../utils/tenantContext";
+import { eventBus } from "../../utils/eventBus";
 import {
   AseelDocumentShell,
   AseelDenseTable,
@@ -174,6 +175,20 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const unsubscribe = eventBus.subscribe((event) => {
+      const tenantId = resolveTenantId();
+      if (event.type === "settings") {
+        getSalesSettings().then(setSalesSettings).catch(() => {});
+      } else if (event.type === "partners") {
+        apiGetList<PartnerRow>("partners/", { tenantId }).then(setPartners).catch(() => {});
+      } else if (event.type === "products") {
+        apiGetList<ProductRow>("inventory/products/", { tenantId }).then(setProducts).catch(() => {});
+      }
+    });
+    return unsubscribe;
+  }, []);
 
   // P4-3: pull pending sales-invoice mutations from the offline queue so
   // local drafts show up alongside posted records with a «معلَّقة» badge.
@@ -622,9 +637,11 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             style={{
               background: "var(--aseel-bg, #fffbf5)",
               width: "100%",
-              maxHeight: "100vh",
-              overflow: "auto",
+              height: "100vh",
+              overflow: "hidden",
               position: "relative",
+              display: "flex",
+              flexDirection: "column",
             }}
             onMouseDown={(e) => e.stopPropagation()}
           >

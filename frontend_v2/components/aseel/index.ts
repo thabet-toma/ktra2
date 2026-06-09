@@ -62,3 +62,6 @@ export type { AseelSidePanelProps } from './AseelSidePanel';
 
 export { AseelCalculatorPopover } from './AseelCalculatorPopover';
 
+export { AseelTabs } from './AseelTabs';
+export type { AseelTabItem, AseelTabsProps } from './AseelTabs';
+

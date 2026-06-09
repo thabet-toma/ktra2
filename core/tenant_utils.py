@@ -23,18 +23,11 @@ _single_tenant_checked: bool = False
 
 
 def get_tenant(request=None, *, raise_on_missing: bool = False):
-    """
-    Resolve tenant securely from request.
-
-    Resolution order:
-    1. X-Tenant-Id header (or HTTP_X_TENANT_ID META)
-    2. User's default tenant (if user.profile.tenant_id exists)
-    3. Single-tenant auto-resolve (if only 1 tenant in DB)
-    4. None (or PermissionDenied if raise_on_missing=True)
-
-    SECURITY: Never falls back to Tenant.objects.first() blindly.
-    """
     global _single_tenant_cache, _single_tenant_checked
+
+    if request is None:
+        from core.logger_middleware import get_current_request
+        request = get_current_request()
 
     # ── 1. Try explicit header ──
     if request is not None:
@@ -112,23 +105,21 @@ def get_tenant(request=None, *, raise_on_missing: bool = False):
 
 def _validate_user_tenant_access(request, tenant: Tenant) -> None:
     """
-    Optional: Validates that the authenticated user has access to
-    the requested tenant. Override this with your own logic.
-
-    Currently logs a warning if the user doesn't belong to the tenant.
-    In production, you may want to raise PermissionDenied.
+    Validates that the authenticated user has access to the requested tenant
+    using the UserCompanyMembership model. Superusers bypass this check.
     """
     if not hasattr(request, 'user') or not request.user.is_authenticated:
         return
 
     user = request.user
-    user_tenant_id = getattr(user, 'tenant_id', None)
+    if user.is_superuser:
+        return
 
-    if user_tenant_id and int(user_tenant_id) != tenant.TenantID:
-        # User is trying to access a different tenant!
+    from tenants.models import UserCompanyMembership
+    if not UserCompanyMembership.objects.filter(user=user, tenant=tenant).exists():
         logger.error(
-            "SECURITY ALERT: User %s (tenant=%s) attempted to access tenant=%s. IP=%s",
-            user, user_tenant_id, tenant.TenantID,
+            "SECURITY ALERT: User %s attempted to access unauthorized tenant=%s. IP=%s",
+            user, tenant.TenantID,
             _get_client_ip(request),
         )
         raise PermissionDenied("ليس لديك صلاحية الوصول لهذه الشركة.")

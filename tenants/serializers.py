@@ -1,7 +1,7 @@
 """N0-T4 — Serializers for TenantSettings + TenantBook (Group Constants F11)."""
 from rest_framework import serializers
 
-from .models import Tenant, TenantBook, TenantSettings
+from .models import Tenant, TenantBook, TenantSettings, UserCompanyMembership
 
 
 class TenantSettingsSerializer(serializers.ModelSerializer):
@@ -57,3 +57,18 @@ class TenantBookSerializer(serializers.ModelSerializer):
             "is_active",
         ]
         read_only_fields = ["id", "document_type_label"]
+
+
+class TenantSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Tenant
+        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt"]
+
+
+class UserCompanyMembershipSerializer(serializers.ModelSerializer):
+    tenant = TenantSerializer(read_only=True)
+
+    class Meta:
+        model = UserCompanyMembership
+        fields = ["id", "tenant", "role", "is_default", "created_at"]
+

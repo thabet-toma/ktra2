@@ -1,4 +1,5 @@
 import { resolveTenantId } from "../utils/tenantContext";
+import { eventBus } from "../utils/eventBus";
 import {
   apiDelete,
   apiGetList,
@@ -117,6 +118,15 @@ export async function listSalesInvoices(
 
 export async function getSalesInvoice(id: number): Promise<SalesInvoiceDetail> {
   return apiGetObject(`${BASE}/invoices/${id}/`, { tenantId: tid() });
+}
+
+/** F4: preview the next invoice number for the active tenant/book (non-consuming). */
+export async function getNextInvoiceNumber(book: number): Promise<string> {
+  const data = await apiGetObject<{ next_number?: string }>(
+    `${BASE}/invoices/next-number/?book=${encodeURIComponent(String(book))}`,
+    { tenantId: tid() }
+  );
+  return data?.next_number || "";
 }
 
 export async function createSalesInvoice(
@@ -298,7 +308,13 @@ export async function getSalesSettings(): Promise<SalesSettings> {
 export async function updateSalesSettings(
   body: Partial<SalesSettings>,
 ): Promise<SalesSettings> {
-  return apiPatchObject(`${BASE}/settings/current/`, body, { tenantId: tid() });
+  const settings = await apiPatchObject(`${BASE}/settings/current/`, body, { tenantId: tid() });
+  try {
+    eventBus.publish("settings", tid());
+  } catch (e) {
+    console.error("Failed to publish settings event:", e);
+  }
+  return settings;
 }
 
 export async function getAgingReport(): Promise<

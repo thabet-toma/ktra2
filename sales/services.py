@@ -1346,6 +1346,26 @@ def next_invoice_number(tenant_id: int, book_number: int = 0) -> str:
         return f"{prefix}{seq}"
 
 
+def preview_next_invoice_number(tenant_id: int, book_number: int = 0) -> str:
+    """Gets the next invoice number for preview without incrementing/persisting it."""
+    from tenants.models import TenantBook
+
+    book = TenantBook.objects.filter(
+        tenant_id=tenant_id,
+        document_type='sales_invoice',
+        book_number=book_number
+    ).first()
+
+    next_num = (book.last_used_number + 1) if book else 1
+
+    if book_number == 0:
+        prefix = f"SI-{tenant_id}-"
+    else:
+        prefix = f"SI-{tenant_id}-B{book_number}-"
+
+    return f"{prefix}{next_num}"
+
+
 def convert_quotation_to_invoice(quotation, user=None):
     """إنشاء SalesInvoice من SalesQuotation (T4-01).
 

@@ -4,6 +4,7 @@ import {
   createSalesInvoice,
   duplicateSalesInvoice,
   getCreditPreview,
+  getNextInvoiceNumber,
   getSalesInvoice,
   patchSalesInvoice,
   postSalesInvoice,
@@ -172,6 +173,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   salesSettings,
 }) => {
   const [draftId, setDraftId] = useState<number | null>(null);
+  const [invoiceNumber, setInvoiceNumber] = useState<string>("");
   const [customerId, setCustomerId] = useState<number | "">("");
   const [invDate, setInvDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [dueDate, setDueDate] = useState("");
@@ -298,13 +300,18 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     [accounts]
   );
 
-  /** نسبة ض.ق.م الافتراضية 16% — من سجل VAT16 أو أقرب نسبة 16 في قائمة المبيعات */
+  /** نسبة ض.ق.م الافتراضية من الإعدادات أو الافتراضي 16% */
   const defaultVatRateId = useMemo(() => {
+    if (salesSettings?.default_vat_rate) {
+      const settingRate = Number(salesSettings.default_vat_rate);
+      const bySettings = salesTaxRates.find((t) => Math.abs(Number(t.rate) - settingRate) < 0.02);
+      if (bySettings) return bySettings.id;
+    }
     const byCode = salesTaxRates.find((t) => t.code === "VAT16");
     if (byCode) return byCode.id;
     const byRate = salesTaxRates.find((t) => Math.abs(Number(t.rate) - 16) < 0.02);
     return byRate?.id;
-  }, [salesTaxRates]);
+  }, [salesTaxRates, salesSettings?.default_vat_rate]);
 
   const makeEmptyLine = useCallback((): DraftLine => {
     return {
@@ -364,6 +371,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setStockOnPost(salesSettings.stock_on_post_default);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [salesSettings?.default_customer, salesSettings?.default_currency, salesSettings?.show_journal_preview]);
+
+  useEffect(() => {
+    if (!salesSettings) return;
+    if (draftId || draftToEditId) return;
+    setPricesIncludeTax(Boolean(salesSettings.prices_include_tax));
+  }, [salesSettings?.prices_include_tax, draftId, draftToEditId]);
 
   /** حساب افتراضي للصندوق عند التحويل إلى نقدي. */
   useEffect(() => {
@@ -568,6 +581,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   ]);
 
   const applyDetail = useCallback((d: SalesInvoiceDetail) => {
+    setInvoiceNumber(d.invoice_number || "");
     setCustomerId(d.customer);
     setInvDate(d.invoice_date);
     setDueDate(d.due_date || "");
@@ -632,6 +646,20 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     );
     dirtyRef.current = false;
   }, []);
+
+  const fetchNextInvoiceNumber = useCallback(async (bookNumStr: string) => {
+    try {
+      const next = await getNextInvoiceNumber(Number(bookNumStr) || 0);
+      if (next) setInvoiceNumber(next);
+    } catch (e) {
+      console.warn("Failed to fetch next invoice number preview:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (draftId || draftToEditId) return;
+    fetchNextInvoiceNumber(bookNumber);
+  }, [bookNumber, draftId, draftToEditId, fetchNextInvoiceNumber]);
 
   useEffect(() => {
     if (draftToEditId == null) return;
@@ -1018,6 +1046,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const resetForm = () => {
     setDraftId(null);
+    setInvoiceNumber("");
     setInvoiceStatus("draft");
     setPostedJournalId(null);
     // تطبيق العميل الافتراضي من الإعدادات
@@ -1054,6 +1083,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setSourceDiscountAmtOverride("");
     setMsg(null);
     setLocalErr(null);
+    fetchNextInvoiceNumber("0");
     dirtyRef.current = false;
   };
 
@@ -1934,7 +1964,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     <div
       id="sales-invoice-print"
       dir="rtl"
-      style={{ height: "calc(100vh - 13rem)", minHeight: 560 }}
+      style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}
     >
       <AseelDocumentShell
         title="فاتورة مبيعات"
@@ -1946,32 +1976,70 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         actions={toolbarActions}
         header={
           <>
-            <div className="flex w-full gap-12 max-w-5xl">
-              <div className="flex-1 flex flex-col gap-2">
-                {fld("رقم الفاتورة", <input className="aseel-input" readOnly value={draftId ? `#${draftId}` : "— جديدة —"} />)}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "1px 16px", width: "100%" }}>
+              {/* العمود 1 — بيانات الفاتورة */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
+                {fld("رقم الفاتورة", <input className="aseel-input" readOnly value={invoiceNumber || "— جديدة —"} />)}
                 {fld("التاريخ", <AseelDatePicker className="aseel-input" disabled={readOnly} value={invDate} onChange={(val) => { setInvDate(val); markDirty(); }} />)}
                 {fld("تاريخ الاستحقاق", <AseelDatePicker className="aseel-input" disabled={readOnly} value={dueDate} onChange={(val) => { setDueDate(val); markDirty(); }} />)}
                 {fld("تاريخ ثاني", <AseelDatePicker className="aseel-input" disabled={readOnly} value={secondDate} onChange={(val) => { setSecondDate(val); markDirty(); }} />)}
                 {fld("دفتر", <input className="aseel-input" data-aseel-key="1" type="number" min={0} disabled={readOnly} value={bookNumber} onChange={(e) => { setBookNumber(e.target.value); markDirty(); }} title="0 = ترقيم يدوي · >0 = مسلسل مستقل لكل دفتر" />)}
-                {fld("مشتغل مرخص", <input className="aseel-input" disabled={readOnly} value={licensedDealerNo} onChange={(e) => { setLicensedDealerNo(e.target.value); markDirty(); }} placeholder="رقم المشتغل المرخص" />)}
-                {fld("فاتورة مقاصة", <input className="aseel-input" disabled={readOnly} value={settlementInvoiceNo} onChange={(e) => { setSettlementInvoiceNo(e.target.value); markDirty(); }} placeholder="رقم فاتورة المقاصة" />)}
-                {fld("خصم %", <input className="aseel-input" data-aseel-key="1" type="number" min={0} max={100} step={0.01} disabled={readOnly} value={discountPercent} onChange={(e) => { setDiscountPercent(e.target.value); markDirty(); }} title="نسبة الخصم الإضافية على الفاتورة (بعد خصم المبلغ)" />)}
               </div>
-              <div className="flex-1 flex flex-col gap-2">
+              {/* العمود 2 — العميل والدفع */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
                 {fld("رقم الحساب / العميل", <div className="aseel-pickfield"><input className="aseel-input aseel-input--hl" data-aseel-field="customer" data-aseel-key="1" readOnly disabled={readOnly} value={selectedCustomer ? `#${selectedCustomer.id}` : ""} placeholder="+ للفهرس" onClick={() => !readOnly && setCustomerPickerOpen(true)} /><button type="button" className="aseel-ellipsis" disabled={readOnly} onClick={() => setCustomerPickerOpen(true)} title="فهرس الحسابات (+)">…</button></div>)}
                 {fld("الاسم", <input className="aseel-input" readOnly value={selectedCustomer?.name ?? ""} />)}
+                {selectedCustomer && creditHint && (() => {
+                  const bal = Number(creditHint.open_balance);
+                  const isDebtor = bal > 0.005;
+                  const isCreditor = bal < -0.005;
+                  const statusLabel = isDebtor ? "مدين" : isCreditor ? "دائن" : "متوازن";
+                  const color = isDebtor ? "var(--aseel-status-debit)" : isCreditor ? "var(--aseel-status-credit)" : "var(--aseel-ink-soft)";
+                  const ledgerAcct = selectedCustomer?.linked_account ?? null;
+                  const canDrill = Boolean(onOpenGeneralLedger && ledgerAcct);
+                  return (
+                    <div className="aseel-field" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "2px 4px", background: "var(--aseel-panel)", fontSize: "var(--aseel-fs-sm)" }}>
+                      <span className="aseel-field-label" style={{ fontWeight: "normal" }}>رصيد العميل:</span>
+                      <span style={{ fontWeight: "bold" }}>
+                        {canDrill ? (
+                          <button
+                            type="button"
+                            className="underline hover:no-underline cursor-pointer"
+                            style={{ color, background: "none", border: "none", padding: 0, font: "inherit" }}
+                            title="فتح الأستاذ العام لحساب العميل"
+                            onClick={() => onOpenGeneralLedger!(ledgerAcct as number)}
+                          >
+                            {fmt(Math.abs(bal))} ({statusLabel})
+                          </button>
+                        ) : (
+                          <span style={{ color }}>
+                            {fmt(Math.abs(bal))} ({statusLabel})
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  );
+                })()}
                 {fld("نوع الدفع", <select className="aseel-input" disabled={readOnly} value={invType} onChange={(e) => { setInvType(e.target.value as "cash" | "credit"); markDirty(); }}><option value="credit">آجل (ذمم)</option><option value="cash">نقدي</option></select>)}
                 {invType === "cash" && fld("حساب الصندوق / البنك", <select className="aseel-input" disabled={readOnly} value={cashAccountId} onChange={(e) => { setCashAccountId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}><option value="">— اختر —</option>{cashboxAccounts.map((a) => (<option key={a.id} value={a.id}>{(a.code || "") + " — " + (a.name || "")}</option>))}</select>)}
-                <div className="flex gap-2">
-                  <div className="flex-1">{fld("العملة", <select className="aseel-input" disabled={readOnly} value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}><option value="">—</option>{currencies.map((c) => (<option key={c.CurrencyID} value={c.CurrencyID}>{c.Code} {c.Name ? `— ${c.Name}` : ""}</option>))}</select>)}</div>
-                  <div className="w-24">{fld("سعر العملة", <input className="aseel-input" data-aseel-key="1" disabled={readOnly} value={exchangeRate} onChange={(e) => { setExchangeRate(e.target.value); markDirty(); }} />)}</div>
+              </div>
+              {/* العمود 3 — العملة والحسابات */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
+                <div style={{ display: "flex", gap: "4px" }}>
+                  <div style={{ flex: 1 }}>{fld("العملة", <select className="aseel-input" disabled={readOnly} value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}><option value="">—</option>{currencies.map((c) => (<option key={c.CurrencyID} value={c.CurrencyID}>{c.Code} {c.Name ? `— ${c.Name}` : ""}</option>))}</select>)}</div>
+                  <div style={{ width: "80px" }}>{fld("سعر العملة", <input className="aseel-input" data-aseel-key="1" disabled={readOnly} value={exchangeRate} onChange={(e) => { setExchangeRate(e.target.value); markDirty(); }} />)}</div>
                 </div>
                 {fld("حساب الإيراد", <select className="aseel-input" disabled={readOnly} value={revenueAccountId} onChange={(e) => { setRevenueAccountId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}><option value="">— اختر حساب مبيعات —</option>{revenueAccounts.map((a) => (<option key={a.id} value={a.id}>{(a.code || "") + " — " + (a.name || "")}</option>))}</select>)}
-                <label className="aseel-field aseel-field--inline mt-1"><input type="checkbox" disabled={readOnly} checked={pricesIncludeTax} onChange={(e) => { setPricesIncludeTax(e.target.checked); markDirty(); }} /><span className="aseel-field-label" style={{ flex: "unset" }}>الأسعار تشمل ض.ق.م</span></label>
+                {fld("مشتغل مرخص", <input className="aseel-input" disabled={readOnly} value={licensedDealerNo} onChange={(e) => { setLicensedDealerNo(e.target.value); markDirty(); }} placeholder="رقم المشتغل المرخص" />)}
+                {fld("فاتورة مقاصة", <input className="aseel-input" disabled={readOnly} value={settlementInvoiceNo} onChange={(e) => { setSettlementInvoiceNo(e.target.value); markDirty(); }} placeholder="رقم فاتورة المقاصة" />)}
+                <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  {fld("خصم %", <input className="aseel-input" data-aseel-key="1" type="number" min={0} max={100} step={0.01} disabled={readOnly} value={discountPercent} onChange={(e) => { setDiscountPercent(e.target.value); markDirty(); }} title="نسبة الخصم الإضافية على الفاتورة (بعد خصم المبلغ)" />)}
+                  <label style={{ display: "flex", alignItems: "center", gap: "4px", whiteSpace: "nowrap", fontSize: "var(--aseel-fs-sm)" }}><input type="checkbox" disabled={readOnly} checked={pricesIncludeTax} onChange={(e) => { setPricesIncludeTax(e.target.checked); markDirty(); }} /> الأسعار تشمل ض.ق.م</label>
+                </div>
               </div>
             </div>
             
-            <div className="mt-4 max-w-5xl">
+            <div style={{ marginTop: "2px" }}>
               {fld(
                 "بحث / باركود",
                 <input
@@ -2039,7 +2107,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 min="0"
                 disabled={isPosted}
                 value={invoiceDiscount}
-                onChange={(e) => setInvoiceDiscount(e.target.value)}
+                onChange={(e) => {
+                  setInvoiceDiscount(e.target.value);
+                  markDirty();
+                }}
               />
             </div>
             <div className="aseel-total-row">
@@ -2056,40 +2127,32 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               <span>الضريبة المضافة</span>
               <span className="aseel-total-value">{fmt(totals.taxAmount)}</span>
             </div>
-            {/* M2-T3 — paid breakdown (cash + cheques) */}
-            <div className="aseel-total-row">
-              <span>مدفوع نقدا</span>
-              <span className="aseel-total-value">
-                {fmt(Number(attachedCashAmount) || 0)}
-              </span>
-            </div>
-            <div className="aseel-total-row">
-              <span>مدفوع شيكات</span>
-              <span className="aseel-total-value">
-                {fmt(
-                  attachedCheques.reduce(
-                    (s, c) => s + (Number(c.amount) || 0),
-                    0
-                  )
-                )}
-              </span>
-            </div>
-            {/* M5 — رصيد العميل الحالي + حالة مدين/دائن + فتح الأستاذ العام */}
+            {journalPreview.revenue > 0 && journalPreview.cogs > 0 && (
+              <div className="aseel-total-row">
+                <span>الربح الإجمالي</span>
+                <span
+                  className="aseel-total-value"
+                  style={{
+                    color:
+                      journalPreview.grossProfit >= 0 ? "var(--aseel-status-credit)" : "var(--aseel-status-debit)",
+                  }}
+                >
+                  {fmt(journalPreview.grossProfit)} (
+                  {journalPreview.marginPct.toFixed(1)}%)
+                </span>
+              </div>
+            )}
             {creditHint &&
               (() => {
                 const bal = Number(creditHint.open_balance);
                 const isDebtor = bal > 0.005;
                 const isCreditor = bal < -0.005;
-                const statusLabel = isDebtor
-                  ? "مدين"
-                  : isCreditor
-                  ? "دائن"
-                  : "متوازن";
+                const statusLabel = isDebtor ? "مدين" : isCreditor ? "دائن" : "متوازن";
                 const color = isDebtor
-                  ? "#dc2626"
+                  ? "var(--aseel-status-debit)"
                   : isCreditor
-                  ? "#16a34a"
-                  : "var(--aseel-text-soft, #6b7280)";
+                  ? "var(--aseel-status-credit)"
+                  : "var(--aseel-ink-soft)";
                 const ledgerAcct = selectedCustomer?.linked_account ?? null;
                 const canDrill = Boolean(onOpenGeneralLedger && ledgerAcct);
                 return (
@@ -2099,8 +2162,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                       {canDrill ? (
                         <button
                           type="button"
-                          className="underline hover:no-underline"
-                          style={{ color }}
+                          className="underline hover:no-underline cursor-pointer"
+                          style={{ color, background: "none", border: "none", padding: 0, font: "inherit" }}
                           title="فتح الأستاذ العام لحساب العميل"
                           onClick={() => onOpenGeneralLedger!(ledgerAcct as number)}
                         >
@@ -2127,29 +2190,64 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 </span>
               </div>
             )}
-            {/* M5 — ربح الفاتورة (الإيراد − التكلفة من متوسط التكلفة) */}
-            {journalPreview.revenue > 0 && journalPreview.cogs > 0 && (
-              <div className="aseel-total-row">
-                <span>الربح الإجمالي</span>
-                <span
-                  className="aseel-total-value"
-                  style={{
-                    color:
-                      journalPreview.grossProfit >= 0 ? "#16a34a" : "#dc2626",
-                  }}
-                >
-                  {fmt(journalPreview.grossProfit)} (
-                  {journalPreview.marginPct.toFixed(1)}%)
-                </span>
-              </div>
-            )}
             <div className="aseel-total-row aseel-total-row--grand">
               <span>مبلغ الفاتورة الإجمالي</span>
               <span className="aseel-total-value">{fmt(totals.grandTotal)}</span>
             </div>
-            {/* M2-T3 — متبقي على الحساب */}
+            
+            {/* F2: المدفوع نقداً وشيكات مباشرة تحت الإجمالي */}
             <div className="aseel-total-row">
-              <span>متبقي على الحساب</span>
+              <span>مدفوع نقداً</span>
+              <span className="aseel-total-value">
+                {readOnly || isPosted ? (
+                  fmt(Number(attachedCashAmount) || 0)
+                ) : (
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    className="aseel-input aseel-total-input"
+                    value={attachedCashAmount}
+                    onChange={(e) => {
+                      setAttachedCashAmount(e.target.value);
+                      markDirty();
+                    }}
+                  />
+                )}
+              </span>
+            </div>
+            
+            <div className="aseel-total-row">
+              <span>مدفوع شيكات</span>
+              <span className="aseel-total-value">
+                {readOnly || isPosted ? (
+                  fmt(
+                    attachedCheques.reduce(
+                      (s, c) => s + (Number(c.amount) || 0),
+                      0
+                    )
+                  )
+                ) : (
+                  <button
+                    type="button"
+                    className="underline hover:no-underline text-left cursor-pointer"
+                    style={{ color: "var(--aseel-accent)", background: "none", border: "none", padding: 0, font: "inherit" }}
+                    onClick={() => setActiveTabKey("payments")}
+                    title="تعديل الشيكات المرفقة"
+                  >
+                    {fmt(
+                      attachedCheques.reduce(
+                        (s, c) => s + (Number(c.amount) || 0),
+                        0
+                      )
+                    )}
+                  </button>
+                )}
+              </span>
+            </div>
+            
+            <div className="aseel-total-row">
+              <span>المتبقي على الحساب</span>
               <span className="aseel-total-value">
                 {fmt(
                   Math.max(

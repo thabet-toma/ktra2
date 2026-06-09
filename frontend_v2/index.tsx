@@ -12,6 +12,7 @@ import { StorePage } from './components/store/StorePage';
 import { ProductDetailPage } from './components/store/ProductDetailPage'; // استيراد صفحة التفاصيل
 
 import { AuthProvider } from './contexts/AuthContext';
+import { CompanyProvider } from './contexts/CompanyContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 
 import './styles/index.css';
@@ -27,7 +28,7 @@ root.render(
     <BrowserRouter>
       <Routes>
         {/* مسار App للوحة التحكم والتطبيق الداخلي */}
-        <Route path="/*" element={<AuthProvider><ThemeProvider><App /></ThemeProvider></AuthProvider>} />
+        <Route path="/*" element={<AuthProvider><CompanyProvider><ThemeProvider><App /></ThemeProvider></CompanyProvider></AuthProvider>} />
 
         {/* الصفحات العامة */}
         <Route path="/store" element={<StorePage />} />

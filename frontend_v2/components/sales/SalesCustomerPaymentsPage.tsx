@@ -32,6 +32,7 @@ import {
   AseelDocumentShell,
   useRecordNavigation,
   useAseelKeymap,
+  AseelTabs,
 } from "../aseel";
 
 type Partner = { id: number; name: string };
@@ -734,221 +735,214 @@ const NewPaymentModal: React.FC<{
             </div>
           </div>
 
-          {/* Tabs */}
-          <div className="flex gap-1 border-b aseel-border-soft dark:aseel-border-soft">
-            {[
-              { k: "alloc", l: "التوزيع" },
-              { k: "cheques", l: `الشيكات (${cheques.length})` },
-              { k: "notes", l: "الملاحظات" },
-              { k: "accounts", l: "الحسابات" },
-            ].map((t) => (
-              <button
-                key={t.k}
-                type="button"
-                onClick={() => setActiveTab(t.k as "alloc" | "cheques" | "notes" | "accounts")}
-                className={`px-3 py-2 text-xs font-medium border-b-2 transition-colors ${
-                  activeTab === t.k
-                    ? "aseel-border-soft aseel-text-ink dark:aseel-text-soft"
-                    : "border-transparent aseel-text-soft"
-                }`}
-              >
-                {t.l}
-              </button>
-            ))}
-          </div>
+          {/* Tabs using AseelTabs */}
+          <AseelTabs
+            activeTab={activeTab}
+            onTabChange={(key) => setActiveTab(key as "alloc" | "cheques" | "notes" | "accounts")}
+            tabs={[
+              {
+                key: "alloc",
+                label: "التوزيع",
+                content: (
+                  <div className="border-t aseel-border-soft dark:aseel-border-soft pt-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="font-semibold text-sm">توزيع على الفواتير</h3>
+                      <button
+                        type="button"
+                        onClick={suggestFifo}
+                        disabled={!partnerId || amtNum <= 0}
+                        className="flex items-center gap-1 text-xs px-3 py-1.5 bg-[var(--color-primary)] text-white rounded-lg disabled:opacity-40"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        اقتراح FIFO
+                      </button>
+                    </div>
 
-          {/* Cheques tab — AseelGrid for cheque lines */}
-          {activeTab === "cheques" && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="font-semibold text-sm">تفاصيل الشيكات</h3>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      // N4-T4 (الجديد:29) تَعبئة شيكات متشابهة متكرّرة
-                      const last = cheques[cheques.length - 1];
-                      if (!last || !last.bank_name) {
-                        setError("أضف شيكاً واحداً بكل البيانات أولاً");
-                        return;
-                      }
-                      const months = Number(window.prompt("عدد الشيكات المتتالية (شهور)؟", "3") || "0");
-                      if (months <= 0) return;
-                      const baseDate = new Date(last.due_date || today);
-                      const extra: ChequeLine[] = [];
-                      for (let i = 1; i <= months; i++) {
-                        const d = new Date(baseDate);
-                        d.setMonth(d.getMonth() + i);
-                        extra.push({
-                          ...last,
-                          cheque_number: "",
-                          due_date: d.toISOString().split("T")[0],
-                        });
-                      }
-                      setCheques((cs) => [...cs, ...extra]);
-                      setError(null);
-                    }}
-                    className="flex items-center gap-1 text-xs px-2 py-1 border aseel-border-soft aseel-text-ink rounded"
-                    title="تعبئة شيكات بنفس البنك/المبلغ لشهور متتالية (الجديد:29)"
-                  >
-                    تعبئة متشابهة
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCheques((cs) => [...cs, newChequeLine()])}
-                    className="flex items-center gap-1 text-xs px-2 py-1 aseel-bg-panel text-white rounded"
-                  >
-                    <Plus className="w-3 h-3" /> شيك
-                  </button>
-                </div>
-              </div>
-              {cheques.length === 0 ? (
-                <div className="text-xs aseel-text-soft text-center py-3 border-2 border-dashed aseel-border-soft dark:aseel-border-soft rounded">
-                  لا شيكات — اضغط «شيك» للإضافة
-                </div>
-              ) : (
-                <table className="w-full text-xs">
-                  <thead className="aseel-bg-panel dark:aseel-bg-panel/40">
-                    <tr>
-                      <th className="text-right p-1.5">#</th>
-                      <th className="text-right p-1.5">رقم</th>
-                      <th className="text-right p-1.5">صاحب الشيك</th>
-                      <th className="text-right p-1.5">الاستحقاق</th>
-                      <th className="text-right p-1.5">المبلغ</th>
-                      <th className="text-right p-1.5">البنك</th>
-                      <th className="text-right p-1.5">الفرع</th>
-                      <th className="w-8"></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cheques.map((c, i) => (
-                      <tr key={i} className="border-t aseel-border-soft dark:aseel-border-soft">
-                        <td className="p-1 text-center">{i + 1}</td>
-                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.cheque_number} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, cheque_number: e.target.value } : x))} /></td>
-                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.payee_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, payee_name: e.target.value } : x))} /></td>
-                        <td className="p-1"><input type="date" className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.due_date} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, due_date: e.target.value } : x))} /></td>
-                        <td className="p-1"><input type="number" step="0.01" className="w-full border rounded px-1 py-0.5 text-xs font-mono dark:aseel-bg-panel" value={c.amount} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, amount: e.target.value } : x))} /></td>
-                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.bank_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, bank_name: e.target.value } : x))} /></td>
-                        <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.branch} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, branch: e.target.value } : x))} /></td>
-                        <td className="p-1 text-center">
-                          <button type="button" onClick={() => setCheques((cs) => cs.filter((_, j) => j !== i))} className="aseel-text-soft">
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
+                    {partnerAging.length > 0 && allocations.length === 0 && (
+                      <div className="mb-2 p-2 rounded aseel-bg-panel dark:aseel-bg-panel/20 text-xs aseel-text-ink">
+                        {partnerAging.length} فاتورة مفتوحة للعميل — اضغط "اقتراح FIFO" للتوزيع
+                        التلقائي أو أضف يدوياً.
+                      </div>
+                    )}
 
-          {/* Notes tab */}
-          {activeTab === "notes" && (
-            <div>
-              <label className="block text-xs aseel-text-soft mb-1">ملاحظات السند</label>
-              <textarea
-                rows={4}
-                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-              />
-            </div>
-          )}
-
-          {/* Accounts tab — journal preview placeholder */}
-          {activeTab === "accounts" && (
-            <div className="text-xs aseel-text-soft dark:aseel-text-soft p-3 aseel-bg-panel dark:aseel-bg-panel/40 rounded">
-              معاينة القيد المحاسبي ستَظهر هنا بعد الترحيل. حالياً: Dr {(() => {
-                const a = accounts.find((x) => x.id === cashAccountId);
-                return a ? `${a.code} ${a.name}` : "—";
-              })()} / Cr ذمم العميل {(partners.find((p) => p.id === partnerId)?.name) || "—"}.
-            </div>
-          )}
-
-          {/* Alloc tab (default) — existing UI */}
-          {activeTab === "alloc" && (
-            <div className="border-t aseel-border-soft dark:aseel-border-soft pt-3">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="font-semibold text-sm">توزيع على الفواتير</h3>
-              <button
-                type="button"
-                onClick={suggestFifo}
-                disabled={!partnerId || amtNum <= 0}
-                className="flex items-center gap-1 text-xs px-3 py-1.5 bg-[var(--color-primary)] text-white rounded-lg disabled:opacity-40"
-              >
-                <Sparkles className="w-3 h-3" />
-                اقتراح FIFO
-              </button>
-            </div>
-
-            {partnerAging.length > 0 && allocations.length === 0 && (
-              <div className="mb-2 p-2 rounded aseel-bg-panel dark:aseel-bg-panel/20 text-xs aseel-text-ink">
-                {partnerAging.length} فاتورة مفتوحة للعميل — اضغط "اقتراح FIFO" للتوزيع
-                التلقائي أو أضف يدوياً.
-              </div>
-            )}
-
-            {allocations.length === 0 ? (
-              <div className="text-xs aseel-text-soft text-center py-3 border-2 border-dashed aseel-border-soft dark:aseel-border-soft rounded">
-                لا توزيعات بعد
-              </div>
-            ) : (
-              <table className="w-full text-sm">
-                <thead className="aseel-bg-panel dark:aseel-bg-panel/40">
-                  <tr>
-                    <th className="text-right p-2">الفاتورة</th>
-                    <th className="text-right p-2">المبلغ</th>
-                    <th className="w-10"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {allocations.map((a, idx) => (
-                    <tr key={idx} className="border-t aseel-border-soft dark:aseel-border-soft">
-                      <td className="p-2">
-                        {a.invoice_number || `#${a.invoice}`}
-                      </td>
-                      <td className="p-2">
-                        <input
-                          type="number"
-                          step="0.01"
-                          className="w-full border rounded px-2 py-1 dark:aseel-bg-panel dark:aseel-border-soft"
-                          value={a.amount}
-                          onChange={(e) => updateAlloc(idx, e.target.value)}
-                        />
-                      </td>
-                      <td className="p-1 text-center">
+                    {allocations.length === 0 ? (
+                      <div className="text-xs aseel-text-soft text-center py-3 border-2 border-dashed aseel-border-soft dark:aseel-border-soft rounded">
+                        لا توزيعات بعد
+                      </div>
+                    ) : (
+                      <table className="w-full text-sm">
+                        <thead className="aseel-bg-panel dark:aseel-bg-panel/40">
+                          <tr>
+                            <th className="text-right p-2">الفاتورة</th>
+                            <th className="text-right p-2">المبلغ</th>
+                            <th className="w-10"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {allocations.map((a, idx) => (
+                            <tr key={idx} className="border-t aseel-border-soft dark:aseel-border-soft">
+                              <td className="p-2">
+                                {a.invoice_number || `#${a.invoice}`}
+                              </td>
+                              <td className="p-2">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  className="w-full border rounded px-2 py-1 dark:aseel-bg-panel dark:aseel-border-soft"
+                                  value={a.amount}
+                                  onChange={(e) => updateAlloc(idx, e.target.value)}
+                                />
+                              </td>
+                              <td className="p-1 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => removeAlloc(idx)}
+                                  className="p-1 aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="aseel-bg-panel dark:aseel-bg-panel/40 font-semibold text-sm">
+                          <tr>
+                            <td className="p-2">الإجمالي / المطلوب {fmt(amtNum)}</td>
+                            <td
+                              className={`p-2 ${
+                                Math.abs(diff) < 0.02 ? "aseel-text-ink" : "aseel-text-ink"
+                              }`}
+                            >
+                              {fmt(totalAlloc)}
+                              {Math.abs(diff) >= 0.02 && (
+                                <span className="text-xs mr-2">(فرق {fmt(diff)})</span>
+                              )}
+                            </td>
+                            <td></td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    )}
+                  </div>
+                )
+              },
+              {
+                key: "cheques",
+                label: `الشيكات (${cheques.length})`,
+                content: (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-semibold text-sm">تفاصيل الشيكات</h3>
+                      <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => removeAlloc(idx)}
-                          className="p-1 aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded"
+                          onClick={() => {
+                            // N4-T4 (الجديد:29) تَعبئة شيكات متشابهة متكرّرة
+                            const last = cheques[cheques.length - 1];
+                            if (!last || !last.bank_name) {
+                              setError("أضف شيكاً واحداً بكل البيانات أولاً");
+                              return;
+                            }
+                            const months = Number(window.prompt("عدد الشيكات المتتالية (شهور)؟", "3") || "0");
+                            if (months <= 0) return;
+                            const baseDate = new Date(last.due_date || today);
+                            const extra: ChequeLine[] = [];
+                            for (let i = 1; i <= months; i++) {
+                              const d = new Date(baseDate);
+                              d.setMonth(d.getMonth() + i);
+                              extra.push({
+                                ...last,
+                                cheque_number: "",
+                                due_date: d.toISOString().split("T")[0],
+                              });
+                            }
+                            setCheques((cs) => [...cs, ...extra]);
+                            setError(null);
+                          }}
+                          className="flex items-center gap-1 text-xs px-2 py-1 border aseel-border-soft aseel-text-ink rounded"
+                          title="تعبئة شيكات بنفس البنك/المبلغ لشهور متتالية (الجديد:29)"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          تعبئة متشابهة
                         </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot className="aseel-bg-panel dark:aseel-bg-panel/40 font-semibold text-sm">
-                  <tr>
-                    <td className="p-2">الإجمالي / المطلوب {fmt(amtNum)}</td>
-                    <td
-                      className={`p-2 ${
-                        Math.abs(diff) < 0.02 ? "aseel-text-ink" : "aseel-text-ink"
-                      }`}
-                    >
-                      {fmt(totalAlloc)}
-                      {Math.abs(diff) >= 0.02 && (
-                        <span className="text-xs mr-2">(فرق {fmt(diff)})</span>
-                      )}
-                    </td>
-                    <td></td>
-                  </tr>
-                </tfoot>
-              </table>
-            )}
-          </div>
-          )}
+                        <button
+                          type="button"
+                          onClick={() => setCheques((cs) => [...cs, newChequeLine()])}
+                          className="flex items-center gap-1 text-xs px-2 py-1 aseel-bg-panel text-white rounded"
+                        >
+                          <Plus className="w-3 h-3" /> شيك
+                        </button>
+                      </div>
+                    </div>
+                    {cheques.length === 0 ? (
+                      <div className="text-xs aseel-text-soft text-center py-3 border-2 border-dashed aseel-border-soft dark:aseel-border-soft rounded">
+                        لا شيكات — اضغط «شيك» للإضافة
+                      </div>
+                    ) : (
+                      <table className="w-full text-xs">
+                        <thead className="aseel-bg-panel dark:aseel-bg-panel/40">
+                          <tr>
+                            <th className="text-right p-1.5">#</th>
+                            <th className="text-right p-1.5">رقم</th>
+                            <th className="text-right p-1.5">صاحب الشيك</th>
+                            <th className="text-right p-1.5">الاستحقاق</th>
+                            <th className="text-right p-1.5">المبلغ</th>
+                            <th className="text-right p-1.5">البنك</th>
+                            <th className="text-right p-1.5">الفرع</th>
+                            <th className="w-8"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {cheques.map((c, i) => (
+                            <tr key={i} className="border-t aseel-border-soft dark:aseel-border-soft">
+                              <td className="p-1 text-center">{i + 1}</td>
+                              <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.cheque_number} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, cheque_number: e.target.value } : x))} /></td>
+                              <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.payee_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, payee_name: e.target.value } : x))} /></td>
+                              <td className="p-1"><input type="date" className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.due_date} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, due_date: e.target.value } : x))} /></td>
+                              <td className="p-1"><input type="number" step="0.01" className="w-full border rounded px-1 py-0.5 text-xs font-mono dark:aseel-bg-panel" value={c.amount} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, amount: e.target.value } : x))} /></td>
+                              <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.bank_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, bank_name: e.target.value } : x))} /></td>
+                              <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.branch} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, branch: e.target.value } : x))} /></td>
+                              <td className="p-1 text-center">
+                                <button type="button" onClick={() => setCheques((cs) => cs.filter((_, j) => j !== i))} className="aseel-text-soft">
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                )
+              },
+              {
+                key: "notes",
+                label: "الملاحظات",
+                content: (
+                  <div>
+                    <label className="block text-xs aseel-text-soft mb-1">ملاحظات السند</label>
+                    <textarea
+                      rows={4}
+                      className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
+                      value={notes}
+                      onChange={(e) => setNotes(e.target.value)}
+                    />
+                  </div>
+                )
+              },
+              {
+                key: "accounts",
+                label: "الحسابات",
+                content: (
+                  <div className="text-xs aseel-text-soft dark:aseel-text-soft p-3 aseel-bg-panel dark:aseel-bg-panel/40 rounded">
+                    معاينة القيد المحاسبي ستَظهر هنا بعد الترحيل. حالياً: Dr {(() => {
+                      const a = accounts.find((x) => x.id === cashAccountId);
+                      return a ? `${a.code} ${a.name}` : "—";
+                    })()} / Cr ذمم العميل {(partners.find((p) => p.id === partnerId)?.name) || "—"}.
+                  </div>
+                )
+              }
+            ]}
+          />
 
           {error && (
             <div className="p-2 rounded aseel-bg-panel dark:aseel-bg-panel/20 aseel-text-state text-sm">

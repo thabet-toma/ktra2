@@ -272,6 +272,20 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(data)
 
+    @action(detail=False, methods=["get"], url_path="next-number")
+    def next_number(self, request):
+        """معاينة رقم الفاتورة التالي بدون استهلاكه."""
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"error": "لا يوجد شركة (tenant)."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            book = int(request.query_params.get("book", 0))
+        except (TypeError, ValueError):
+            book = 0
+        from .services import preview_next_invoice_number
+        next_num = preview_next_invoice_number(tenant.TenantID, book)
+        return Response({"next_number": next_num})
+
     @action(detail=True, methods=["post"], url_path="delivery-order")
     def create_delivery_order(self, request, pk=None):
         invoice = self.get_object()

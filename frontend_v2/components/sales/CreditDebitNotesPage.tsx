@@ -21,6 +21,7 @@ import {
   AseelDocumentShell,
   useRecordNavigation,
   useAseelKeymap,
+  AseelTabs,
 } from "../aseel";
 import { RefreshCw } from "lucide-react";
 
@@ -324,101 +325,103 @@ export const CreditDebitNotesPage: React.FC = () => {
               <button onClick={() => setShowForm(false)} className="p-1 hover:aseel-bg-panel rounded"><FileDown className="w-5 h-5" /></button>
             </div>
 
-            {/* N4-T5 tabs */}
-            <div className="flex gap-1 border-b aseel-border-soft mb-3">
-              {[
-                { k: "main", l: "الرئيسية" },
-                { k: "notes", l: "الملاحظات" },
-                { k: "accounts", l: "الحسابات" },
-              ].map((t) => (
-                <button key={t.k} type="button"
-                  onClick={() => setActiveTab(t.k as "main" | "notes" | "accounts")}
-                  className={`px-3 py-1.5 text-xs font-medium border-b-2 ${activeTab === t.k ? "aseel-border-accent aseel-text-accent" : "border-transparent aseel-text-soft"}`}>
-                  {t.l}
-                </button>
-              ))}
-            </div>
+            {/* N4-T5 tabs using AseelTabs */}
+            <AseelTabs
+              activeTab={activeTab}
+              onTabChange={(key) => setActiveTab(key as "main" | "notes" | "accounts")}
+              tabs={[
+                {
+                  key: "main",
+                  label: "الرئيسية",
+                  content: (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium mb-1">النوع</label>
+                        <select value={formType} onChange={(e) => setFormType(e.target.value as "credit" | "debit")} className="w-full border rounded p-1.5 text-sm" data-aseel-key="1">
+                          <option value="credit">إشعار دائن</option>
+                          <option value="debit">إشعار مدين</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">التاريخ</label>
+                        <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full border rounded p-1.5 text-sm" />
+                      </div>
+                      <div className="col-span-2">
+                        <label className="block text-xs font-medium mb-1">الحساب (العميل/المورد)</label>
+                        <select value={formCustomer} onChange={(e) => setFormCustomer(e.target.value)} className="w-full border rounded p-1.5 text-sm" data-aseel-key="1">
+                          <option value="">-- اختر (+) --</option>
+                          {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">رقم فاتورة المقاصة</label>
+                        <input type="text" value={formRelatedInvoice} onChange={(e) => setFormRelatedInvoice(e.target.value)} className="w-full border rounded p-1.5 text-sm font-mono" placeholder="رقم الفاتورة المرتبطة" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">كشف الضريبة</label>
+                        <input type="text" value={formVatStatementNo} onChange={(e) => setFormVatStatementNo(e.target.value)} className="w-full border rounded p-1.5 text-sm" placeholder="رقم كشف الضريبة" />
+                      </div>
 
-            {activeTab === "main" && (
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1">النوع</label>
-                  <select value={formType} onChange={(e) => setFormType(e.target.value as "credit" | "debit")} className="w-full border rounded p-1.5 text-sm" data-aseel-key="1">
-                    <option value="credit">إشعار دائن</option>
-                    <option value="debit">إشعار مدين</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">التاريخ</label>
-                  <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full border rounded p-1.5 text-sm" />
-                </div>
-                <div className="col-span-2">
-                  <label className="block text-xs font-medium mb-1">الحساب (العميل/المورد)</label>
-                  <select value={formCustomer} onChange={(e) => setFormCustomer(e.target.value)} className="w-full border rounded p-1.5 text-sm" data-aseel-key="1">
-                    <option value="">-- اختر (+) --</option>
-                    {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">رقم فاتورة المقاصة</label>
-                  <input type="text" value={formRelatedInvoice} onChange={(e) => setFormRelatedInvoice(e.target.value)} className="w-full border rounded p-1.5 text-sm font-mono" placeholder="رقم الفاتورة المرتبطة" />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">كشف الضريبة</label>
-                  <input type="text" value={formVatStatementNo} onChange={(e) => setFormVatStatementNo(e.target.value)} className="w-full border rounded p-1.5 text-sm" placeholder="رقم كشف الضريبة" />
-                </div>
-
-                {/* المبلغ + ضريبة */}
-                <div className="col-span-2 aseel-bg-panel border aseel-border-soft rounded p-2 mt-2">
-                  <label className="flex items-center gap-2 text-xs mb-2">
-                    <input type="checkbox" checked={formIncludesTax} onChange={(e) => setFormIncludesTax(e.target.checked)} />
-                    المبلغ يشمل قيمة الضريبة المضافة
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
+                      {/* المبلغ + ضريبة */}
+                      <div className="col-span-2 aseel-bg-panel border aseel-border-soft rounded p-2 mt-2">
+                        <label className="flex items-center gap-2 text-xs mb-2">
+                          <input type="checkbox" checked={formIncludesTax} onChange={(e) => setFormIncludesTax(e.target.checked)} />
+                          المبلغ يشمل قيمة الضريبة المضافة
+                        </label>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="block text-[11px] mb-0.5">المبلغ (Space=رصيد)</label>
+                            <input
+                              type="number" step="0.01"
+                              data-aseel-field="remaining-amount"
+                              value={formAmount}
+                              onChange={(e) => setFormAmount(e.target.value)}
+                              className="w-full border rounded p-1 text-sm font-mono"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] mb-0.5">نسبة ض.ق.م %</label>
+                            <input type="number" step="0.01" value={formTaxRate} onChange={(e) => setFormTaxRate(e.target.value)} className="w-full border rounded p-1 text-sm font-mono" />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] mb-0.5">المبلغ بدون ضريبة</label>
+                            <input type="text" readOnly value={amountExcl.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono aseel-bg-panel" />
+                          </div>
+                          <div>
+                            <label className="block text-[11px] mb-0.5">مبلغ الضريبة</label>
+                            <input type="text" readOnly value={taxAmount.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono aseel-bg-panel" />
+                          </div>
+                          <div className="col-span-2">
+                            <label className="block text-[11px] mb-0.5">مبلغ الإشعار الإجمالي</label>
+                            <input type="text" readOnly value={totalAmount.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono font-bold aseel-bg-panel" />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                },
+                {
+                  key: "notes",
+                  label: "الملاحظات",
+                  content: (
                     <div>
-                      <label className="block text-[11px] mb-0.5">المبلغ (Space=رصيد)</label>
-                      <input
-                        type="number" step="0.01"
-                        data-aseel-field="remaining-amount"
-                        value={formAmount}
-                        onChange={(e) => setFormAmount(e.target.value)}
-                        className="w-full border rounded p-1 text-sm font-mono"
-                      />
+                      <label className="block text-xs font-medium mb-1">السبب / الملاحظات</label>
+                      <textarea value={formReason} onChange={(e) => setFormReason(e.target.value)} className="w-full border rounded p-2" rows={6} />
                     </div>
-                    <div>
-                      <label className="block text-[11px] mb-0.5">نسبة ض.ق.م %</label>
-                      <input type="number" step="0.01" value={formTaxRate} onChange={(e) => setFormTaxRate(e.target.value)} className="w-full border rounded p-1 text-sm font-mono" />
+                  )
+                },
+                {
+                  key: "accounts",
+                  label: "الحسابات",
+                  content: (
+                    <div className="text-xs aseel-text-soft p-3 aseel-bg-panel rounded">
+                      معاينة القيد المحاسبي: {formType === "credit" ? "Dr إيراد مرتجعات / Cr ذمم" : "Dr ذمم / Cr إيراد إضافي"} —
+                      المبلغ: {totalAmount.toFixed(2)} (ضمنه ض.ق.م {taxAmount.toFixed(2)}).
                     </div>
-                    <div>
-                      <label className="block text-[11px] mb-0.5">المبلغ بدون ضريبة</label>
-                      <input type="text" readOnly value={amountExcl.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono aseel-bg-panel" />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] mb-0.5">مبلغ الضريبة</label>
-                      <input type="text" readOnly value={taxAmount.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono aseel-bg-panel" />
-                    </div>
-                    <div className="col-span-2">
-                      <label className="block text-[11px] mb-0.5">مبلغ الإشعار الإجمالي</label>
-                      <input type="text" readOnly value={totalAmount.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono font-bold aseel-bg-panel" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "notes" && (
-              <div>
-                <label className="block text-xs font-medium mb-1">السبب / الملاحظات</label>
-                <textarea value={formReason} onChange={(e) => setFormReason(e.target.value)} className="w-full border rounded p-2" rows={6} />
-              </div>
-            )}
-
-            {activeTab === "accounts" && (
-              <div className="text-xs aseel-text-soft p-3 aseel-bg-panel rounded">
-                معاينة القيد المحاسبي: {formType === "credit" ? "Dr إيراد مرتجعات / Cr ذمم" : "Dr ذمم / Cr إيراد إضافي"} —
-                المبلغ: {totalAmount.toFixed(2)} (ضمنه ض.ق.م {taxAmount.toFixed(2)}).
-              </div>
-            )}
+                  )
+                }
+              ]}
+            />
 
             <div className="flex justify-end gap-3 mt-4">
               <button onClick={() => setShowForm(false)} className="px-4 py-2 aseel-bg-panel rounded-lg hover:aseel-bg-grid-head">إلغاء</button>
