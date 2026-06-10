@@ -47,6 +47,7 @@ import {
 } from "../../types";
 import { apiDelete, apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "../../services/restApi";
 import { tryPostPurchaseReceiptFromInvoice } from "../../services/invoiceAccountingBridge";
+import { resolveTenantId } from "../../utils/tenantContext";
 
 // --- Helper: Sanitize Data ---
 export const removeUndefined = <T>(obj: T): T => {
@@ -1235,7 +1236,7 @@ export const itemsService = {
 
   getItemById: async (itemId: string): Promise<Item | null> => {
     try {
-      const p = await apiGetObject<any>(`inventory/products/${itemId}/`, { tenantId: 1 });
+      const p = await apiGetObject<any>(`inventory/products/${itemId}/`, { tenantId: resolveTenantId() });
       return itemsService._mapProductToItem(p);
     } catch {
       return null;
@@ -1245,7 +1246,7 @@ export const itemsService = {
   checkItemHsCodeUnique: async (hsCode: string, excludeItemId?: string): Promise<boolean> => {
     if (!hsCode) return true;
     try {
-      const all = await apiGetList<any>("inventory/products/", { tenantId: 1 });
+      const all = await apiGetList<any>("inventory/products/", { tenantId: resolveTenantId() });
       return !all.some((p: any) => String(p.id) !== String(excludeItemId || "") && (p.hs_code || "") === hsCode);
     } catch {
       return true;
@@ -1256,7 +1257,7 @@ export const itemsService = {
     let alive = true;
     const load = async () => {
       try {
-        const products = await apiGetList<any>("inventory/products/", { tenantId: 1 });
+        const products = await apiGetList<any>("inventory/products/", { tenantId: resolveTenantId() });
         if (alive) callback(products.map((p: any) => itemsService._mapProductToItem(p)));
       } catch {
         if (alive) callback([]);
@@ -1275,15 +1276,15 @@ export const itemsService = {
   },
 
   addItemToDb: async (item: Item) => {
-    await apiPostObject("inventory/products/", itemsService._mapItemToProductPayload(item), { tenantId: 1 });
+    await apiPostObject("inventory/products/", itemsService._mapItemToProductPayload(item), { tenantId: resolveTenantId() });
   },
 
   updateItemInDb: async (item: Item) => {
-    await apiPatchObject(`inventory/products/${item.id}/`, itemsService._mapItemToProductPayload(item), { tenantId: 1 });
+    await apiPatchObject(`inventory/products/${item.id}/`, itemsService._mapItemToProductPayload(item), { tenantId: resolveTenantId() });
   },
 
   deleteItemFromDb: async (itemId: string) => {
-    await apiDelete(`inventory/products/${itemId}/`, { tenantId: 1 });
+    await apiDelete(`inventory/products/${itemId}/`, { tenantId: resolveTenantId() });
   },
 };
 
@@ -1501,7 +1502,7 @@ export const suppliersService = {
     currentSupplierId?: string
   ): Promise<{ isUnique: boolean; field?: string; existingName?: string }> => {
     try {
-      const all = await apiGetList<any>("partners/", { tenantId: 1 });
+      const all = await apiGetList<any>("partners/", { tenantId: resolveTenantId() });
       if (data.email?.trim()) {
         const d = all.find((x) => String(x.id) !== String(currentSupplierId) && (x.email || "").trim() === data.email!.trim());
         if (d) return { isUnique: false, field: "email", existingName: d.name };
@@ -1526,12 +1527,12 @@ export const suppliersService = {
     let alive = true;
     const load = async () => {
       try {
-        const partners = await apiGetList<any>("partners/", { tenantId: 1 });
+        const partners = await apiGetList<any>("partners/", { tenantId: resolveTenantId() });
         let mapped = partners.map((p: any) => suppliersService._mapPartnerToSupplier(p));
 
         // Fallback: if partners list is empty but deals exist, synthesize supplier list from deals.
         if (mapped.length === 0) {
-              const deals = await apiGetList<any>("logistics/deals/", { tenantId: 1 });
+              const deals = await apiGetList<any>("logistics/deals/", { tenantId: resolveTenantId() });
           const byName = new Map<string, Supplier>();
           deals.forEach((d: any) => {
             const rawPartner = d?.partner;
@@ -1563,7 +1564,7 @@ export const suppliersService = {
       } catch (e) {
         // console suppressed
         try {
-          const deals = await apiGetList<any>("logistics/deals/", { tenantId: 1 });
+          const deals = await apiGetList<any>("logistics/deals/", { tenantId: resolveTenantId() });
           const byName = new Map<string, Supplier>();
           deals.forEach((d: any) => {
             const rawPartner = d?.partner;
@@ -1623,7 +1624,7 @@ export const suppliersService = {
       partner_type: suppliersService._mapSupplierTypeToPartnerType(supplier.type),
       is_active: true,
     };
-    const created = await apiPostObject<any>("partners/", payload, { tenantId: 1 });
+    const created = await apiPostObject<any>("partners/", payload, { tenantId: resolveTenantId() });
     return suppliersService._mapPartnerToSupplier(created);
   },
 
@@ -1637,16 +1638,16 @@ export const suppliersService = {
       address: supplier.street || "",
       notes: supplier.notes || "",
       partner_type: suppliersService._mapSupplierTypeToPartnerType(supplier.type),
-    }, { tenantId: 1 });
+    }, { tenantId: resolveTenantId() });
   },
 
   deleteSupplierFromDb: async (supplierId: string) => {
-    await apiDelete(`partners/${supplierId}/`, { tenantId: 1 });
+    await apiDelete(`partners/${supplierId}/`, { tenantId: resolveTenantId() });
   },
 
   getSupplierById: async (supplierId: string): Promise<Supplier | null> => {
     try {
-      const row = await apiGetObject<any>(`partners/${supplierId}/`, { tenantId: 1 });
+      const row = await apiGetObject<any>(`partners/${supplierId}/`, { tenantId: resolveTenantId() });
       return suppliersService._mapPartnerToSupplier(row);
     } catch {
       return null;
@@ -1654,12 +1655,12 @@ export const suppliersService = {
   },
 
   fetchAllSuppliers: async (): Promise<Supplier[]> => {
-    const partners = await apiGetList<any>("partners/", { tenantId: 1 });
+    const partners = await apiGetList<any>("partners/", { tenantId: resolveTenantId() });
     return partners.map((p: any) => suppliersService._mapPartnerToSupplier(p));
   },
 
   getSuppliersFromDb: async (): Promise<Supplier[]> => {
-    const partners = await apiGetList<any>("partners/", { tenantId: 1 });
+    const partners = await apiGetList<any>("partners/", { tenantId: resolveTenantId() });
     return partners.map((p: any) => suppliersService._mapPartnerToSupplier(p));
   },
 

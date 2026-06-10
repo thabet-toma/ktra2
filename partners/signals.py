@@ -8,7 +8,6 @@ from django.db import transaction
 import logging
 from .models import Partner
 from accounting.models import Account, JournalHeader, JournalLine
-from tenants.models import Tenant
 import datetime
 
 logger = logging.getLogger(__name__)
@@ -30,11 +29,14 @@ def manage_partner_account(sender, instance, created, **kwargs):
     """
     # 1. Automatic Account Creation
     if not instance.linked_account:
-        # Determine strict single-tenant context
+        # Tenant must come from the partner itself — never guess a company.
         tenant = instance.tenant
         if not tenant:
-            tenant = Tenant.objects.first() 
-            if not tenant: return 
+            logger.error(
+                "manage_partner_account: partner id=%s has no tenant — skipping account creation",
+                instance.id,
+            )
+            return
 
         parent_acc = None
         expected_parent_code = _expected_parent_code_for_partner_type(
@@ -148,7 +150,11 @@ def create_opening_balance_entry(partner):
     try:
         tenant = partner.tenant
         if not tenant:
-            tenant = Tenant.objects.first()
+            logger.error(
+                "create_opening_balance_entry: partner id=%s has no tenant — skipping",
+                partner.id,
+            )
+            return
 
         opening_offset_account = Account.objects.filter(tenant=tenant, code='3300').first()
         if not opening_offset_account:

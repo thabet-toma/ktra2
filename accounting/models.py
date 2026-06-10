@@ -68,6 +68,11 @@ class Account(models.Model):
 class JournalHeader(models.Model):
     id = models.AutoField(primary_key=True, db_column='JournalID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    # task11 M4: NULL = قيد على مستوى الشركة/الفرع الرئيسي؛ قيمة = قيد فرع
+    # (يغذي تقارير P&L/ميزان المراجعة المستقلة لكل فرع)
+    branch = models.ForeignKey(
+        'tenants.Branch', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='BranchID', related_name='journal_headers')
     transaction_date = models.DateField(null=True, blank=True, db_column='TransactionDate')
     reference_type = models.CharField(max_length=50, null=True, blank=True, db_column='ReferenceType')
     reference_id = models.IntegerField(null=True, blank=True, db_column='ReferenceID')

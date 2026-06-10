@@ -84,6 +84,8 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setLoading(true);
     try {
       localStorage.setItem("tenantId", String(companyId));
+      // task11 M4: الفرع النشط تابع للشركة — تبديل الشركة يمسحه
+      localStorage.removeItem("branchId");
       window.location.reload();
     } catch (e) {
       console.error("Failed to switch company:", e);

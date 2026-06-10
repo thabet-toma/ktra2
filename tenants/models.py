@@ -60,6 +60,8 @@ class TenantSettings(models.Model):
     fax = models.CharField(max_length=50, null=True, blank=True, db_column='Fax')
     email = models.EmailField(null=True, blank=True, db_column='Email')
 
+    logo_url = models.CharField(max_length=500, null=True, blank=True, db_column='LogoUrl')
+
     # أرقام رسمية
     licensed_dealer_no = models.CharField(max_length=50, null=True, blank=True, db_column='LicensedDealerNo')
     income_tax_file_no = models.CharField(max_length=50, null=True, blank=True, db_column='IncomeTaxFileNo')
@@ -100,6 +102,35 @@ class TenantSettings(models.Model):
         return f"Settings — {self.tenant}"
 
 
+# ── task11 M4: Branch (الفرع) ──────────────────────────────────────────
+
+class Branch(models.Model):
+    """فرع تابع لشركة أم.
+
+    التعريف القاطع: الفرع يشارك الشركةَ الأمَّ شجرةَ الحسابات والأصناف
+    والشركاء، لكن فواتيره ومخزونه وتقاريره المالية مستقلة (بُعد branch
+    على SalesInvoice / StockMovement / JournalHeader).
+    """
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='branches', db_column='TenantID')
+    name = models.CharField(max_length=150, db_column='Name')
+    code = models.CharField(
+        max_length=20, db_column='Code',
+        help_text='رمز قصير يدخل في بادئة ترقيم المستندات، مثل MAIN أو NAB')
+    is_main = models.BooleanField(default=False, db_column='IsMain')
+    is_active = models.BooleanField(default=True, db_column='IsActive')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'branches'
+        managed = True
+        unique_together = [['tenant', 'code']]
+
+    def __str__(self):
+        return f"{self.tenant.CompanyName} / {self.name}"
+
+
 # ── N0-T2: TenantBook (أرقام الدفاتر) ──────────────────────────────────
 
 class TenantBook(models.Model):
@@ -124,6 +155,12 @@ class TenantBook(models.Model):
     ]
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    # task11 M4: NULL = دفتر على مستوى الشركة (التوافق القديم)؛ قيمة = دفتر فرع
+    # مستقل بتسلسله الخاص. ملاحظة MySQL: قيود unique لا تمنع تكرار NULL — التفرد
+    # لصفوف NULL محمي تطبيقياً بقفل get_next_number.
+    branch = models.ForeignKey(
+        Branch, on_delete=models.CASCADE, null=True, blank=True,
+        db_column='BranchID', related_name='books')
     document_type = models.CharField(max_length=30, choices=DOCUMENT_TYPES, db_column='DocumentType')
     book_number = models.IntegerField(default=0, db_column='BookNumber')
 
@@ -134,19 +171,24 @@ class TenantBook(models.Model):
     class Meta:
         db_table = 'tenant_books'
         managed = True
-        unique_together = [['tenant', 'document_type', 'book_number']]
+        unique_together = [['tenant', 'branch', 'document_type', 'book_number']]
 
     @classmethod
-    def get_next_number(cls, tenant_id: int, document_type: str, book_number: int = 0) -> int:
+    def get_next_number(
+        cls, tenant_id: int, document_type: str,
+        book_number: int = 0, branch_id: int | None = None,
+    ) -> int:
         """P-H-11: يولد الرقم التالي مع select_for_update لضمان الذرية.
 
         يستخدم قفل الصف (row-level lock) لمنع سباق الرقم المتزامن بين
         المستخدمين. يخلق الدفتر تلقائياً إذا لم يكن موجوداً.
+        task11 M4: branch_id يعزل تسلسل كل فرع عن الآخر.
         """
         from django.db import transaction
         with transaction.atomic():
             book = cls.objects.select_for_update().get_or_create(
                 tenant_id=tenant_id,
+                branch_id=branch_id,
                 document_type=document_type,
                 book_number=book_number,
                 defaults={

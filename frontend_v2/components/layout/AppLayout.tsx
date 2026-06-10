@@ -17,6 +17,9 @@ import {
   CompanySwitcher,
 } from './CompanySwitcher';
 import {
+  BranchSwitcher,
+} from './BranchSwitcher';
+import {
   User as UserIcon,
   Calendar,
 } from 'lucide-react';
@@ -63,6 +66,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
       <div className="aseel-titlebar flex-shrink-0">
         <div className="aseel-company flex items-center gap-3">
           <CompanySwitcher />
+          <BranchSwitcher />
           <span className="opacity-60 text-xs font-semibold">[ السنة المالية {new Date().getFullYear()} ]</span>
         </div>
         <div className="aseel-title-grp">

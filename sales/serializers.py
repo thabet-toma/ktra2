@@ -241,7 +241,8 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
         inv_num = validated_data.get("invoice_number") or ""
         if not str(inv_num).strip():
             book_num = validated_data.get("book_number", 0)
-            validated_data["invoice_number"] = next_invoice_number(tenant.TenantID, book_num)
+            validated_data["invoice_number"] = next_invoice_number(
+                tenant.TenantID, book_num, branch=validated_data.get("branch"))
         if not lines_data:
             raise serializers.ValidationError({"lines": "يجب إضافة بند واحد على الأقل."})
         for row in lines_data:
@@ -280,7 +281,8 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
         except IntegrityError:
             if not inv_num or not str(inv_num).strip():
                 book_num = validated_data.get("book_number", 0)
-                validated_data["invoice_number"] = next_invoice_number(tenant.TenantID, book_num)
+                validated_data["invoice_number"] = next_invoice_number(
+                    tenant.TenantID, book_num, branch=validated_data.get("branch"))
                 with transaction.atomic():
                     inv = SalesInvoice.objects.create(**validated_data)
                     for row in lines_data:

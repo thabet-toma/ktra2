@@ -61,6 +61,20 @@ export interface AseelDocumentShellProps {
   onTabChange?: (key: string) => void;
 }
 
+/** task11 M6: يكتشف children الفارغة (null / <></> / مصفوفات فارغة).
+ * صفحات كثيرة مرّرت محتواها الرئيسي كـ tab سفلي (مقيد بـ max-height:220px)
+ * وتركت منطقة gridwrap المرنة فارغة — فظهر فراغ أبيض ضخم وسط الشاشة
+ * والمحتوى مكبوس بالأسفل. عند غياب محتوى رئيسي حقيقي، تُعرض الـ tabs
+ * ولوحتها داخل المنطقة المرنة بكامل الارتفاع. */
+const isEmptyNode = (node: React.ReactNode): boolean => {
+  if (node == null || node === false || node === '') return true;
+  if (Array.isArray(node)) return node.every(isEmptyNode);
+  if (React.isValidElement(node) && node.type === React.Fragment) {
+    return isEmptyNode((node.props as { children?: React.ReactNode }).children);
+  }
+  return false;
+};
+
 const navBtn = (
   label: string,
   icon: React.ReactNode,
@@ -102,6 +116,29 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
   const activeIdx = controlledTab != null ? tabs.findIndex((t) => t.key === controlledTab) : localTab;
   const effectiveIdx = activeIdx >= 0 ? activeIdx : 0;
   const tab = tabs[effectiveIdx];
+
+  // task11 M6: بلا محتوى رئيسي حقيقي → الـ tabs تشغل المنطقة المرنة كاملة
+  const tabsInMain = tabs.length > 0 && isEmptyNode(children);
+
+  const tabStrip = tabs.length > 0 && (
+    <div className="aseel-tabs" role="tablist">
+      {tabs.map((t, i) => (
+        <button
+          key={t.key}
+          type="button"
+          role="tab"
+          aria-selected={i === effectiveIdx}
+          className={`aseel-tab${i === effectiveIdx ? ' aseel-tab--active' : ''}`}
+          onClick={() => {
+            if (controlledTab != null) { onTabChange?.(t.key); }
+            else { setLocalTab(i); }
+          }}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <div className="aseel-doc" data-skin="aseel">
@@ -150,30 +187,29 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
       <div className="aseel-headband">{header}</div>
 
       {/* Lines / grid */}
-      <div className="aseel-gridwrap">{children}</div>
+      <div className="aseel-gridwrap">
+        {tabsInMain ? (
+          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+            {tabStrip}
+            <div
+              className="aseel-tabpanel"
+              role="tabpanel"
+              style={{ flex: '1 1 0', minHeight: 0, overflow: 'auto' }}
+            >
+              {tab?.content}
+            </div>
+          </div>
+        ) : (
+          children
+        )}
+      </div>
 
-      {/* Bottom: tabs + totals dock */}
-      {(tabs.length > 0 || totals) && (
+      {/* Bottom: tabs + totals dock (الـ tabs هنا فقط عندما يوجد محتوى رئيسي) */}
+      {((tabs.length > 0 && !tabsInMain) || totals) && (
         <div className="aseel-bottom">
-          {tabs.length > 0 && (
+          {tabs.length > 0 && !tabsInMain && (
             <div className="aseel-tabscol">
-              <div className="aseel-tabs" role="tablist">
-                {tabs.map((t, i) => (
-                  <button
-                    key={t.key}
-                    type="button"
-                    role="tab"
-                    aria-selected={i === effectiveIdx}
-                    className={`aseel-tab${i === effectiveIdx ? ' aseel-tab--active' : ''}`}
-                    onClick={() => {
-                      if (controlledTab != null) { onTabChange?.(t.key); }
-                      else { setLocalTab(i); }
-                    }}
-                  >
-                    {t.label}
-                  </button>
-                ))}
-              </div>
+              {tabStrip}
               <div className="aseel-tabpanel" role="tabpanel">
                 {tab?.content}
               </div>

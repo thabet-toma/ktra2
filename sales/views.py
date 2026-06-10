@@ -2,14 +2,14 @@ from datetime import date
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import models, transaction
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
 from core.api_defaults import ApiAuthAndUser
-from core.tenant_utils import get_tenant
+from core.tenant_utils import get_branch, get_tenant
 from .models import (
     CreditDebitNote,
     CustomerPayment,
@@ -63,6 +63,13 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         tenant = get_tenant(self.request)
         if tenant:
             qs = qs.filter(tenant_id=tenant.TenantID)
+            # task11 M4: الفرع النشط يرى فواتيره فقط (الرئيسي يشمل القديمة بلا فرع)
+            branch = get_branch(self.request, tenant)
+            if branch is not None:
+                if branch.is_main:
+                    qs = qs.filter(models.Q(branch=branch) | models.Q(branch__isnull=True))
+                else:
+                    qs = qs.filter(branch=branch)
         status_param = self.request.query_params.get("status")
         if status_param:
             qs = qs.filter(status=status_param)
@@ -96,6 +103,7 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             )
         invoice = serializer.save(
             tenant=tenant,
+            branch=get_branch(self.request, tenant),
             created_by=self.request.user if self.request.user.is_authenticated else None,
         )
         # ترحيل تلقائي إذا فُعِّل الإعداد وطلب المستخدم ذلك (أو auto_post من الـ body)
@@ -283,7 +291,8 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         except (TypeError, ValueError):
             book = 0
         from .services import preview_next_invoice_number
-        next_num = preview_next_invoice_number(tenant.TenantID, book)
+        branch = get_branch(request, tenant)
+        next_num = preview_next_invoice_number(tenant.TenantID, book, branch=branch)
         return Response({"next_number": next_num})
 
     @action(detail=True, methods=["post"], url_path="delivery-order")

@@ -233,6 +233,10 @@ class SalesInvoice(models.Model):
         db_column="TenantID",
         to_field="TenantID",
     )
+    # task11 M4: فواتير مستقلة لكل فرع — NULL = الفرع الرئيسي/مستوى الشركة
+    branch = models.ForeignKey(
+        'tenants.Branch', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='BranchID', related_name='sales_invoices')
     invoice_number = models.CharField(max_length=50, db_column="InvoiceNumber")
     customer = models.ForeignKey(
         Partner,

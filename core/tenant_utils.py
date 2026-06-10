@@ -135,6 +135,40 @@ def _get_client_ip(request) -> str:
     return request.META.get('REMOTE_ADDR', 'unknown')
 
 
+def get_branch(request, tenant=None):
+    """task11 M4 — يحل الفرع النشط من X-Branch-Id.
+
+    يرجع None إذا لم يُرسل الهيدر أو كانت قيمته 0/فارغة (= كل الفروع /
+    مستوى الشركة). يرفض PermissionDenied إذا كان الفرع تابعاً لشركة أخرى.
+    """
+    if request is None:
+        return None
+    bid = request.headers.get('X-Branch-Id') or request.META.get('HTTP_X_BRANCH_ID')
+    if not bid or str(bid).strip() in ('0', 'all', 'null'):
+        return None
+    try:
+        bid_int = int(bid)
+    except (ValueError, TypeError):
+        logger.warning("SECURITY: Malformed X-Branch-Id=%s", bid)
+        return None
+
+    from tenants.models import Branch
+    branch = Branch.objects.filter(pk=bid_int).select_related('tenant').first()
+    if branch is None:
+        logger.warning("X-Branch-Id=%s not found", bid_int)
+        return None
+
+    if tenant is None:
+        tenant = get_tenant(request)
+    if tenant is not None and branch.tenant_id != tenant.pk:
+        logger.error(
+            "SECURITY ALERT: branch %s belongs to tenant %s, not active tenant %s (user=%s)",
+            branch.pk, branch.tenant_id, tenant.pk, getattr(request, 'user', '?'),
+        )
+        raise PermissionDenied("الفرع المحدد لا يتبع الشركة النشطة.")
+    return branch
+
+
 def invalidate_tenant_cache():
     """Call this when tenants are created/deleted to reset the cache."""
     global _single_tenant_cache, _single_tenant_checked

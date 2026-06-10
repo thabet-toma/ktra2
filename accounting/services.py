@@ -19,6 +19,7 @@ def next_document_number(
     tenant_id: int,
     document_type: str,
     book_number: int = 0,
+    branch_id: int | None = None,
 ) -> int:
     """يُولّد الرقم التالي لمستند معين عبر TenantBook مع select_for_update.
 
@@ -36,6 +37,7 @@ def next_document_number(
     with transaction.atomic():
         book, created = TenantBook.objects.select_for_update().get_or_create(
             tenant_id=tenant_id,
+            branch_id=branch_id,
             document_type=document_type,
             book_number=book_number,
             defaults={
@@ -298,15 +300,22 @@ def validate_journal_entry(header, lines_data):
         if header_tenant_id != 0 and account_tenant_id != 0 and account_tenant_id != header_tenant_id:
             raise ValidationError(f"Account {account.name} belongs to a different tenant.")
         
-        # Validate Partner if Present
+        # Validate Partner if Present (scoped to the journal's tenant —
+        # referencing another company's partner would leak across tenants)
         if partner_id:
-            if not Partner.objects.filter(id=partner_id).exists():
-                 raise ValidationError(f"Partner ID {partner_id} does not exist.")
-        
-        # Validate Cost Center if Present
+            partner_qs = Partner.objects.filter(id=partner_id)
+            if header_tenant_id != 0:
+                partner_qs = partner_qs.filter(tenant_id=header_tenant_id)
+            if not partner_qs.exists():
+                raise ValidationError(f"Partner ID {partner_id} does not exist for this tenant.")
+
+        # Validate Cost Center if Present (same tenant scoping)
         if cost_center_id:
-             if not CostCenter.objects.filter(id=cost_center_id).exists():
-                  raise ValidationError(f"Cost Center ID {cost_center_id} does not exist.")
+            cc_qs = CostCenter.objects.filter(id=cost_center_id)
+            if header_tenant_id != 0:
+                cc_qs = cc_qs.filter(tenant_id=header_tenant_id)
+            if not cc_qs.exists():
+                raise ValidationError(f"Cost Center ID {cost_center_id} does not exist for this tenant.")
 
         total_debit += Decimal(str(debit))
         total_credit += Decimal(str(credit))
@@ -393,6 +402,7 @@ def post_journal(
     exchange_rate=Decimal("1"),
     user=None,
     idempotent: bool = True,
+    branch_id: int | None = None,
 ) -> JournalHeader:
     """دالة ترحيل مركزية ذرّية — المسار الوحيد لإنشاء + ترحيل أي قيد محاسبي.
 
@@ -402,6 +412,9 @@ def post_journal(
     - جميع الأسطر تابعة لنفس tenant
     - idempotency عبر (reference_type, reference_id)
     - select_for_update لمنع السباق
+
+    task11 M4: branch_id يَسِم القيد بفرعه — أساس التقارير المالية المستقلة
+    لكل فرع. NULL = قيد على مستوى الشركة/الفرع الرئيسي.
 
     تُرجع JournalHeader مرحّل (is_posted=True) أو القيد الموجود سابقاً إن كان idempotent.
     """
@@ -436,6 +449,7 @@ def post_journal(
 
         jh = JournalHeader.objects.create(
             tenant_id=tenant_id,
+            branch_id=branch_id,
             transaction_date=transaction_date,
             reference_type=reference_type,
             reference_id=reference_id,

@@ -9,8 +9,8 @@ from rest_framework.response import Response
 
 from core.api_defaults import ApiAuthAndUser
 from core.tenant_utils import get_tenant
-from .models import Currency, TenantBook, TenantSettings, Tenant, UserCompanyMembership
-from .serializers import TenantBookSerializer, TenantSettingsSerializer, TenantSerializer, UserCompanyMembershipSerializer
+from .models import Branch, Currency, TenantBook, TenantSettings, Tenant, UserCompanyMembership
+from .serializers import BranchSerializer, TenantBookSerializer, TenantSettingsSerializer, TenantSerializer, UserCompanyMembershipSerializer
 
 
 class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):
@@ -133,6 +133,73 @@ class TenantBookViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class BranchViewSet(viewsets.ModelViewSet):
+    """task11 M4 — فروع الشركة النشطة.
+
+    الفرع يشارك الشركةَ شجرةَ الحسابات/الأصناف/الشركاء، وتُعزل فواتيره
+    ومخزونه وقيوده عبر بُعد branch على المستندات.
+    إنشاء فرع = صلاحية مدير في الشركة النشطة.
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    serializer_class = BranchSerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return Branch.objects.none()
+        return Branch.objects.filter(tenant=tenant).order_by("-is_main", "name")
+
+    def list(self, request, *args, **kwargs):
+        """Plain list (no pagination) — يستهلكها BranchSwitcher."""
+        return Response(BranchSerializer(self.get_queryset(), many=True).data)
+
+    def _require_manager(self, request, tenant):
+        user = request.user
+        if user.is_superuser:
+            return
+        is_manager = UserCompanyMembership.objects.filter(
+            user=user, tenant=tenant, role="manager"
+        ).exists()
+        if not is_manager:
+            raise PermissionDenied("فقط مدير الشركة يمكنه إدارة الفروع.")
+
+    def create(self, request, *args, **kwargs):
+        tenant = get_tenant(request)
+        if not tenant:
+            raise DRFValidationError({"tenant": "لا يوجد شركة محددة."})
+        self._require_manager(request, tenant)
+        from .services import create_branch
+        try:
+            branch = create_branch(
+                tenant,
+                request.data.get("name", ""),
+                request.data.get("code", ""),
+            )
+        except DjangoValidationError as e:
+            raise DRFValidationError({"detail": e.messages if hasattr(e, "messages") else str(e)})
+        return Response(BranchSerializer(branch).data, status=status.HTTP_201_CREATED)
+
+    def perform_update(self, serializer):
+        tenant = get_tenant(self.request)
+        self._require_manager(self.request, tenant)
+        serializer.save(tenant=tenant)
+
+    def destroy(self, request, *args, **kwargs):
+        """حماية البيانات: لا حذف فعلي للفروع — تعطيل فقط (is_active=False)."""
+        tenant = get_tenant(request)
+        if not tenant:
+            raise DRFValidationError({"tenant": "لا يوجد شركة محددة."})
+        self._require_manager(request, tenant)
+        branch = self.get_object()
+        if branch.is_main:
+            raise DRFValidationError({"detail": "لا يمكن تعطيل الفرع الرئيسي."})
+        branch.is_active = False
+        branch.save(update_fields=["is_active"])
+        return Response({"ok": True, "deactivated": True})
 
 
 class TenantViewSet(viewsets.ModelViewSet):

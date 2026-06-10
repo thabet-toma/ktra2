@@ -4,6 +4,7 @@
  * لا تضع عنوان OpenClaw في الواجهة — التوكن والبروكسي على Django.
  */
 import { clientLogger } from "./logger";
+import { resolveBranchId } from "../utils/tenantContext";
 
 /** إذا وُضع عنوان الخادم بدون مسار (مثل http://localhost:8000) يُضاف /api تلقائياً. */
 export function resolveApiBase(raw: string): string {
@@ -59,9 +60,13 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
 
 function getHeaders(extra?: Record<string, string>, withJsonContentType: boolean = true) {
   const token = localStorage.getItem("token");
+  // task11 M4: الفرع النشط يُرسل تلقائياً مع كل طلب — الباك-إند يفلتر
+  // الفواتير/المخزون/التقارير به. غيابه = «كل الفروع».
+  const branchId = resolveBranchId();
   return {
     ...(withJsonContentType ? { "Content-Type": "application/json" } : {}),
     ...(token ? { Authorization: `Token ${token}` } : {}),
+    ...(branchId ? { "X-Branch-Id": String(branchId) } : {}),
     ...(extra || {}),
   };
 }
@@ -189,11 +194,13 @@ export async function apiPostFormData<T = any>(
 ): Promise<T> {
   const url = `${API_BASE}/${path.replace(/^\/+/, "")}`;
   const token = localStorage.getItem("token");
+  const branchId = resolveBranchId();
   const res = await apiFetch(url, {
     method: "POST",
     headers: {
       ...(token ? { Authorization: `Token ${token}` } : {}),
       ...(opts?.tenantId ? { "X-Tenant-Id": String(opts.tenantId) } : {}),
+      ...(branchId ? { "X-Branch-Id": String(branchId) } : {}),
     },
     body: form,
   });

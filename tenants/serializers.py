@@ -1,7 +1,16 @@
 """N0-T4 — Serializers for TenantSettings + TenantBook (Group Constants F11)."""
 from rest_framework import serializers
 
-from .models import Tenant, TenantBook, TenantSettings, UserCompanyMembership
+from .models import Branch, Tenant, TenantBook, TenantSettings, UserCompanyMembership
+
+
+class BranchSerializer(serializers.ModelSerializer):
+    """task11 M4 — فرع تحت شركة أم."""
+
+    class Meta:
+        model = Branch
+        fields = ["id", "name", "code", "is_main", "is_active", "created_at"]
+        read_only_fields = ["id", "is_main", "created_at"]
 
 
 class TenantSettingsSerializer(serializers.ModelSerializer):
@@ -19,6 +28,7 @@ class TenantSettingsSerializer(serializers.ModelSerializer):
             "phone",
             "fax",
             "email",
+            "logo_url",
             # أرقام رسمية
             "licensed_dealer_no",
             "income_tax_file_no",

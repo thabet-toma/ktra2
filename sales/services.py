@@ -854,6 +854,7 @@ def post_sales_invoice(
             currency=invoice.currency,
             exchange_rate=invoice.exchange_rate,
             user=user,
+            branch_id=invoice.branch_id,
         )
 
         invoice.journal = jh
@@ -897,6 +898,7 @@ def post_sales_invoice(
                         movement_date=invoice.invoice_date,
                         notes=f"مرجع {invoice.invoice_number}",
                         tenant=invoice.tenant,
+                        branch=invoice.branch,
                     )
             else:
                 _post_stock_out_for_invoice(invoice, lines, user=user)
@@ -940,6 +942,7 @@ def _post_stock_out_for_invoice(
                 movement_date=invoice.invoice_date,
                 notes=f"بيع فاتورة {invoice.invoice_number}",
                 tenant=invoice.tenant,
+                branch=invoice.branch,
             )
         except ValidationError as e:
             raise ValidationError(f"مخزون الصنف {line.product.sku}: {e}")
@@ -970,6 +973,7 @@ def issue_stock_from_invoice(invoice: SalesInvoice, *, user=None):
                 movement_date=invoice.invoice_date,
                 notes=f"إذن صرف من فاتورة {invoice.invoice_number}",
                 tenant=invoice.tenant,
+                branch=invoice.branch,
             )
         except Exception as e:
             raise ValidationError(f"خطأ في إذن الصرف لصنف {line.product.sku}: {e}")
@@ -1010,6 +1014,7 @@ def deliver_delivery_order(delivery: DeliveryOrder, *, user=None) -> DeliveryOrd
                     currency=inv.currency,
                     exchange_rate=inv.exchange_rate,
                     user=user,
+                    branch_id=inv.branch_id,
                 )
 
         delivery.status = DeliveryOrder.STATUS_DELIVERED
@@ -1328,42 +1333,46 @@ def suggest_fifo_allocations(
     return out
 
 
-def next_invoice_number(tenant_id: int, book_number: int = 0) -> str:
-    """Thin wrapper حول next_document_number() — N8-T4.
+def _invoice_number_prefix(tenant_id: int, book_number: int, branch=None) -> str:
+    """task11 M4: بادئة رقم الفاتورة — رمز الفرع يدخل البادئة لفصل تسلسلات
+    الفروع بصرياً ورقمياً. الفرع الرئيسي/بدون فرع يحافظ على الصيغة القديمة."""
+    parts = [f"SI-{tenant_id}"]
+    if branch is not None and not branch.is_main:
+        parts.append(branch.code)
+    if book_number != 0:
+        parts.append(f"B{book_number}")
+    return "-".join(parts) + "-"
+
+
+def next_invoice_number(tenant_id: int, book_number: int = 0, branch=None) -> str:
+    """Thin wrapper حول next_document_number() — N8-T4 + task11 M4 (فرع).
 
     book_number=0 → manual (any number accepted), generate with tenant prefix.
     book_number>0 → use book prefix for isolated per-book sequence.
+    branch (Branch|None) → تسلسل مستقل لكل فرع (None/رئيسي = مستوى الشركة).
     """
     from accounting.services import next_document_number
 
-    if book_number == 0:
-        prefix = f"SI-{tenant_id}-"
-        seq = next_document_number(tenant_id, 'sales_invoice', book_number=0)
-        return f"{prefix}{seq}"
-    else:
-        prefix = f"SI-{tenant_id}-B{book_number}-"
-        seq = next_document_number(tenant_id, 'sales_invoice', book_number=book_number)
-        return f"{prefix}{seq}"
+    branch_id = branch.pk if (branch is not None and not branch.is_main) else None
+    seq = next_document_number(
+        tenant_id, 'sales_invoice', book_number=book_number, branch_id=branch_id)
+    return f"{_invoice_number_prefix(tenant_id, book_number, branch)}{seq}"
 
 
-def preview_next_invoice_number(tenant_id: int, book_number: int = 0) -> str:
+def preview_next_invoice_number(tenant_id: int, book_number: int = 0, branch=None) -> str:
     """Gets the next invoice number for preview without incrementing/persisting it."""
     from tenants.models import TenantBook
 
+    branch_id = branch.pk if (branch is not None and not branch.is_main) else None
     book = TenantBook.objects.filter(
         tenant_id=tenant_id,
+        branch_id=branch_id,
         document_type='sales_invoice',
         book_number=book_number
     ).first()
 
     next_num = (book.last_used_number + 1) if book else 1
-
-    if book_number == 0:
-        prefix = f"SI-{tenant_id}-"
-    else:
-        prefix = f"SI-{tenant_id}-B{book_number}-"
-
-    return f"{prefix}{next_num}"
+    return f"{_invoice_number_prefix(tenant_id, book_number, branch)}{next_num}"
 
 
 def convert_quotation_to_invoice(quotation, user=None):

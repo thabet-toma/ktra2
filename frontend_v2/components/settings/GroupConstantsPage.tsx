@@ -25,7 +25,8 @@ import {
 } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { getSalesSettings, updateSalesSettings, type SalesSettings } from "../../services/salesApi";
-import { Save, RefreshCw, Database, X } from "lucide-react";
+import { cloudinaryService } from "../../services/cloudinaryService";
+import { Save, RefreshCw, Database, X, Upload } from "lucide-react";
 
 /** ── Types ───────────────────────────────────────────────────────────── */
 
@@ -38,6 +39,7 @@ type TenantSettingsData = {
   phone?: string | null;
   fax?: string | null;
   email?: string | null;
+  logo_url?: string | null;
   licensed_dealer_no?: string | null;
   income_tax_file_no?: string | null;
   default_vat_rate?: string | null;
@@ -108,6 +110,7 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
   const [accounts, setAccounts] = useState<AccountRow[]>([]);
   const [salesSettings, setSalesSettings] = useState<SalesSettings | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
   const [seeding, setSeeding] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [localErr, setLocalErr] = useState<string | null>(null);
@@ -275,6 +278,37 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
       {fld("البريد الإلكتروني", (
         <input className="aseel-input" type="email" value={settings?.email || ""}
           onChange={(e) => upd("email", e.target.value)} />
+      ))}
+      {fld("شعار الشركة", (
+        <span style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0 }}>
+          {settings?.logo_url && (
+            <img src={settings.logo_url} alt="شعار الشركة"
+              style={{ width: 22, height: 22, borderRadius: 4, objectFit: "cover", border: "1px solid var(--aseel-border)" }} />
+          )}
+          <input className="aseel-input" placeholder="رابط الشعار أو ارفع صورة"
+            value={settings?.logo_url || ""}
+            onChange={(e) => upd("logo_url", e.target.value)} />
+          <label className="aseel-toolbtn" style={{ cursor: uploadingLogo ? "wait" : "pointer", whiteSpace: "nowrap" }}>
+            <Upload style={{ width: 13, height: 13 }} />
+            <span>{uploadingLogo ? "جارٍ الرفع…" : "رفع"}</span>
+            <input type="file" accept="image/*" style={{ display: "none" }} disabled={uploadingLogo}
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setUploadingLogo(true);
+                setLocalErr(null);
+                try {
+                  const url = await cloudinaryService.uploadFile(file);
+                  upd("logo_url", url);
+                } catch (err) {
+                  setLocalErr(err instanceof Error ? err.message : "فشل رفع الشعار.");
+                } finally {
+                  setUploadingLogo(false);
+                  e.target.value = "";
+                }
+              }} />
+          </label>
+        </span>
       ))}
       {fld("رقم المشتغل المرخص", (
         <input className="aseel-input" value={settings?.licensed_dealer_no || ""}

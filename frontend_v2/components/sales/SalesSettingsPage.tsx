@@ -14,7 +14,7 @@ import {
 } from "../../services/salesApi";
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
-import { AseelDocumentShell, type AseelToolbarAction, type AseelTab } from "../aseel";
+import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
 
 type AccountOpt = {
   id: number;
@@ -564,10 +564,8 @@ export const SalesSettingsPage: React.FC = () => {
     </div>
   );
 
-  const tabs: AseelTab[] = [
-    { key: "settings", label: "الإعدادات", content: innerContent },
-  ];
-
+  // task11 M6: المحتوى في منطقة gridwrap الرئيسية المرنة — كان محشوراً في
+  // tab سفلي بارتفاع أقصى 220px تاركاً فراغاً أبيض ضخماً وسط الشاشة.
   return (
     <div data-skin="aseel" style={{ height: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
@@ -575,8 +573,9 @@ export const SalesSettingsPage: React.FC = () => {
         state="حسابات افتراضية + ضرائب + شحن"
         actions={toolbarActions}
         header={<></>}
-        tabs={tabs}
-      />
+      >
+        {innerContent}
+      </AseelDocumentShell>
     </div>
   );
 };

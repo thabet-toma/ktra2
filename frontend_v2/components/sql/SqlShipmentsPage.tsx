@@ -3,6 +3,7 @@
  */
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { apiGetList, apiGetObject } from '../../services/restApi';
+import { resolveTenantId } from '../../utils/tenantContext';
 import { SqlDataPageShell } from './SqlDataPageShell';
 import { Eye, RefreshCw } from 'lucide-react';
 import { buildShipmentOptionLabel, ShipmentLabelInput } from '@/utils/shipmentLabel';
@@ -31,7 +32,7 @@ export function SqlShipmentsPage() {
     useEffect(() => {
         let mounted = true;
         setLoading(true); setErr(null);
-        apiGetList<ShipmentRow>('logistics/shipments/', { tenantId: 1 })
+        apiGetList<ShipmentRow>('logistics/shipments/', { tenantId: resolveTenantId() })
             .then(d => mounted && setRows(d))
             .catch(e => mounted && setErr(e instanceof Error ? e.message : String(e)))
             .finally(() => mounted && setLoading(false));
@@ -46,7 +47,7 @@ export function SqlShipmentsPage() {
 
     const openShipment = async (row: ShipmentRow) => {
         setSelected(row); setDetailsOpen(true); setLoadingDetail(true);
-        try { setSelected(await apiGetObject<ShipmentRow>(`logistics/shipments/${row.id}/`, { tenantId: 1 })); }
+        try { setSelected(await apiGetObject<ShipmentRow>(`logistics/shipments/${row.id}/`, { tenantId: resolveTenantId() })); }
         catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
         finally { setLoadingDetail(false); }
     };

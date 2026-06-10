@@ -42,7 +42,6 @@ import {
   useAseelIndexKeymap,
   type DenseColumn,
   type AseelToolbarAction,
-  type AseelTab,
 } from "../aseel";
 
 type CurrOpt = { CurrencyID: number; Code: string };
@@ -575,11 +574,29 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   const paidSum = filteredRows.reduce((s, r) => s + Number(r.amount_paid || 0), 0);
   const balanceSum = totalSum - paidSum;
 
-  const tabs: AseelTab[] = [
-    {
-      key: "list",
-      label: "قائمة الفواتير",
-      content: (
+  // task11 M6: جدول الفواتير في منطقة gridwrap الرئيسية المرنة — كان محشوراً
+  // في tab سفلي بارتفاع أقصى 220px تاركاً فراغاً أبيض ضخماً وسط الشاشة.
+  return (
+    <div data-skin="aseel" style={{ height: "calc(100vh - 5rem)" }}>
+      <AseelDocumentShell
+        title="فواتير المبيعات"
+        state={loading ? "جاري التحميل…" : `${filteredRows.length} من ${rows.length}`}
+        actions={toolbarActions}
+        header={filterBar}
+        status={
+          <>
+            <span className="aseel-status-item">العدد <b>{filteredRows.length}</b></span>
+            <span className="aseel-status-item">الإجمالي <b className="aseel-num">{fmtNum(totalSum)}</b></span>
+            <span className="aseel-status-item">المدفوع <b className="aseel-num">{fmtNum(paidSum)}</b></span>
+            <span
+              className="aseel-status-item"
+              style={{ color: balanceSum > 0 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ok, #2d7d46)" }}
+            >
+              المتبقي <b className="aseel-num">{fmtNum(balanceSum)}</b>
+            </span>
+          </>
+        }
+      >
         <div style={{ padding: "8px" }}>
           {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
           {msg && <div className="aseel-banner" style={{ marginBottom: "8px", color: "var(--aseel-ok, #2d7d46)" }}>{msg}</div>}
@@ -597,32 +614,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             }}
           />
         </div>
-      ),
-    },
-  ];
-
-  return (
-    <div data-skin="aseel" style={{ height: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell
-        title="فواتير المبيعات"
-        state={loading ? "جاري التحميل…" : `${filteredRows.length} من ${rows.length}`}
-        actions={toolbarActions}
-        header={filterBar}
-        tabs={tabs}
-        status={
-          <>
-            <span className="aseel-status-item">العدد <b>{filteredRows.length}</b></span>
-            <span className="aseel-status-item">الإجمالي <b className="aseel-num">{fmtNum(totalSum)}</b></span>
-            <span className="aseel-status-item">المدفوع <b className="aseel-num">{fmtNum(paidSum)}</b></span>
-            <span
-              className="aseel-status-item"
-              style={{ color: balanceSum > 0 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ok, #2d7d46)" }}
-            >
-              المتبقي <b className="aseel-num">{fmtNum(balanceSum)}</b>
-            </span>
-          </>
-        }
-      />
+      </AseelDocumentShell>
 
       {/* Editor overlay — fullscreen modal */}
       {editorOpen && (

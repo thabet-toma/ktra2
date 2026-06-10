@@ -3,6 +3,7 @@
  */
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { apiGetList } from '../../services/restApi';
+import { resolveTenantId } from '../../utils/tenantContext';
 import { SqlDataPageShell } from './SqlDataPageShell';
 import { Eye, RefreshCw } from 'lucide-react';
 import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
@@ -30,7 +31,7 @@ export function SqlPartnersPage() {
     useEffect(() => {
         let mounted = true;
         setLoading(true); setErr(null);
-        apiGetList<PartnerRow>('partners/', { tenantId: 1 })
+        apiGetList<PartnerRow>('partners/', { tenantId: resolveTenantId() })
             .then(d => mounted && setRows(d))
             .catch(e => mounted && setErr(e instanceof Error ? e.message : String(e)))
             .finally(() => mounted && setLoading(false));

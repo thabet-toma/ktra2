@@ -28,11 +28,16 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
     }
 }
 
+import { resolveTenantId } from "../utils/tenantContext";
+
 const getHeaders = () => {
     const token = localStorage.getItem("token");
     return {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Token ${token}` } : {}),
+        // Mapper docs are company-scoped on the backend; always send the
+        // active company so archive/suppliers/deals follow the switcher.
+        "X-Tenant-Id": String(resolveTenantId()),
     };
 };
 
@@ -185,19 +190,28 @@ export const getCountFromServer = async (queryRef: any) => {
     return { data: () => ({ count: docs.length }) };
 };
 
-export const onSnapshot = (ref: any, callback: any) => {
-    if (ref.queryString !== undefined) {
-        getDocs(ref).then(callback);
-    } else {
-        getDoc(ref).then(callback);
-    }
-    const interval = setInterval(() => {
-        if (ref.queryString !== undefined) {
-            getDocs(ref).then(callback).catch(() => {});
-        } else {
-            getDoc(ref).then(callback).catch(() => {});
-        }
-    }, 5000);
+export const onSnapshot = (ref: any, callbackOrObserver: any) => {
+    // Firestore supports both onSnapshot(q, fn) and onSnapshot(q, {next, error}).
+    // Passing the observer object straight into Promise.then() silently ignored
+    // it (then() drops non-function args) — pages using the {next} form never
+    // received data and spun forever.
+    const next: ((snap: any) => void) | undefined =
+        typeof callbackOrObserver === "function"
+            ? callbackOrObserver
+            : callbackOrObserver?.next?.bind(callbackOrObserver);
+    const onError: ((e: unknown) => void) | undefined =
+        typeof callbackOrObserver === "function"
+            ? undefined
+            : callbackOrObserver?.error?.bind(callbackOrObserver);
+
+    const tick = (silent: boolean) => {
+        const p = ref.queryString !== undefined ? getDocs(ref) : getDoc(ref);
+        p.then((snap) => next?.(snap)).catch((e) => {
+            if (!silent) onError?.(e);
+        });
+    };
+    tick(false);
+    const interval = setInterval(() => tick(true), 5000);
     return () => clearInterval(interval);
 };
 

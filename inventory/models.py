@@ -155,6 +155,10 @@ class StockMovement(models.Model):
 
     id = models.AutoField(primary_key=True, db_column='MovementID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)
+    # task11 M4: مخزون مستقل لكل فرع — NULL = حركة على مستوى الشركة/الفرع الرئيسي
+    branch = models.ForeignKey(
+        'tenants.Branch', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='BranchID', related_name='stock_movements')
     product = models.ForeignKey(Product, on_delete=models.PROTECT, db_column='ProductID', related_name='stock_movements')
     movement_type = models.CharField(max_length=20, choices=MOVEMENT_TYPES, db_column='MovementType')
     quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')

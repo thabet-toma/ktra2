@@ -3,6 +3,7 @@
  */
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { apiGetList, apiGetObject, apiPostObject } from '../../services/restApi';
+import { resolveTenantId } from '../../utils/tenantContext';
 import { SqlDataPageShell } from './SqlDataPageShell';
 import { Eye, RefreshCw, Plus } from 'lucide-react';
 import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
@@ -73,7 +74,7 @@ export function SqlDealsPage() {
     useEffect(() => {
         let mounted = true;
         setLoading(true); setErr(null);
-        apiGetList<DealRow>('logistics/deals/', { tenantId: 1 })
+        apiGetList<DealRow>('logistics/deals/', { tenantId: resolveTenantId() })
             .then(d => mounted && setRows(d))
             .catch(e => mounted && setErr(e instanceof Error ? e.message : String(e)))
             .finally(() => mounted && setLoading(false));
@@ -81,7 +82,7 @@ export function SqlDealsPage() {
     }, []);
 
     useEffect(() => {
-        apiGetList<PartnerOption>('partners/', { tenantId: 1 }).then(setPartners).catch(() => setPartners([]));
+        apiGetList<PartnerOption>('partners/', { tenantId: resolveTenantId() }).then(setPartners).catch(() => setPartners([]));
     }, []);
 
     const filtered = useMemo(() => {
@@ -104,14 +105,14 @@ export function SqlDealsPage() {
 
     const openDeal = async (row: DealRow) => {
         setSelected(row); setDetailsOpen(true); setLoadingDetail(true);
-        try { setSelected(await apiGetObject<DealRow>(`logistics/deals/${row.id}/`, { tenantId: 1 })); }
+        try { setSelected(await apiGetObject<DealRow>(`logistics/deals/${row.id}/`, { tenantId: resolveTenantId() })); }
         catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
         finally { setLoadingDetail(false); }
     };
 
     const refreshDeals = async () => {
         setLoading(true);
-        try { setRows(await apiGetList<DealRow>('logistics/deals/', { tenantId: 1 })); }
+        try { setRows(await apiGetList<DealRow>('logistics/deals/', { tenantId: resolveTenantId() })); }
         catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
         finally { setLoading(false); }
     };
@@ -121,7 +122,7 @@ export function SqlDealsPage() {
         if (!createForm.partner) { setErr('اختر المورد أولاً.'); return; }
         setSavingCreate(true); setErr(null);
         try {
-            await apiPostObject('logistics/deals/', { ref_number: createForm.ref_number.trim(), partner: Number(createForm.partner), order_date: createForm.order_date, status: createForm.status, description: createForm.description || null, currency: 1, items: [], payments: [] }, { tenantId: 1 });
+            await apiPostObject('logistics/deals/', { ref_number: createForm.ref_number.trim(), partner: Number(createForm.partner), order_date: createForm.order_date, status: createForm.status, description: createForm.description || null, currency: 1, items: [], payments: [] }, { tenantId: resolveTenantId() });
             setCreateOpen(false);
             setCreateForm({ ref_number: '', partner: '', order_date: new Date().toISOString().slice(0, 10), status: 'Open', description: '' });
             await refreshDeals();

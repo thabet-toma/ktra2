@@ -65,7 +65,52 @@ frontend_v2/
 └── constants/                 # App constants
 ```
 
+## [AUDIT — task11, 2026-06-10] (Staff-Engineer full audit)
+
+### 🔴 حرجة — Data loss / Data isolation
+- **A1. أرشيف الفواتير يعلّق ويُفقد البيانات** — `OldPurchaseInvoice.tsx:173` يستدعي `onSnapshot(q, {next, error})` بصيغة object بينما شيم `sqlApiClient.ts:188` يمرر الـ callback إلى `Promise.then()` — non-function تُتجاهل بصمت ⇒ لا يصل أي رد، الـ spinner أبدي (التعليق). الحذف في `deleteInvoice` (line 138) حذف نهائي hard-delete عبر `/api/mapper/` بلا soft-delete ولا أي عزل.
+- **A2. طبقة mapper بلا عزل tenant إطلاقاً** — `bridge/views.py`: كل مستندات `FirestoreMirrorDoc` (invoices/suppliers/users/...) عالمية لكل الشركات؛ أي مستخدم مصادق يقرأ/يكتب/يحذف أي مسار. `_sync_partner_from_mirror_supplier` يستخدم `Tenant.objects.first()`.
+- **A3. فلتر mapper يقارن boolean بـ string** — `bridge/views.py:135`: `isHistorical__exact=true` يصل كنص `"true"` ويُقارن بـ `True` ⇒ القائمة المفلترة فارغة دائماً.
+- **A4. `tenantId: 1` ثابت** في `components/legacy/firestoreService.ts` (items/partners/deals: ~16 موضعاً) + صفحات `components/sql/*` ⇒ كل شاشات الأصناف/الموردين legacy تقرأ وتكتب شركة 1 مهما كانت الشركة النشطة.
+
+### 🟠 عالية — منطق الشركات/الفروع
+- **B1. لا يوجد مفهوم Branch نهائياً** — لا موديل، لا API، لا UI (grep شامل backend+frontend). المطلوب: فرع = شجرة حسابات مشتركة + فواتير/مخزون/تقارير مستقلة. لا يوجد موديل Warehouse أصلاً — المخزون = `StockMovement` لكل tenant بلا بُعد فرع.
+- **B2. الـ Active Context ثابت في صفحات العرض** — `Dashboard.tsx:46` يطبع «شركة النور للتجارة العالمية» hardcoded؛ `AboutUs.tsx:130,152,252` «شركة كترا KTRA» hardcoded؛ `TenantSettings` لا يحتوي حقل شعار (logo) أصلاً. `CompanySwitcher` بأعلى الشاشة يعمل، لكن محتوى الصفحات لا يتبع الشركة النشطة.
+- **B3. إنشاء شركة موجود وسليم جزئياً** — `tenants/services.create_company` يزرع COA معياري (61 حساباً) + TenantBooks + Membership ولا ينسخ أصنافاً/شركاء (متوافق مع المطلوب)، لكن لا يستدعي `invalidate_tenant_cache()` (single-tenant cache قد يبقى قديماً)، ولا توجد اختبارات تثبت فراغ الأصناف/الموردين.
+
+### 🟡 متوسطة — محاسبية
+- **C1. `validate_journal_entry`** يتحقق من وجود Partner/CostCenter بلا scoping على الـ tenant (`accounting/services.py:302-309`) — يمكن ربط قيد بشريك شركة أخرى.
+- **C2. سليم (مُدقَّق):** القيد المزدوج صارم (`post_journal` يفرض debit==credit بعد quantize + idempotency + select_for_update)؛ ميزان المراجعة/قائمة الدخل tenant-scoped ومتوازنة؛ ترقيم الفواتير per-tenant ذرّي عبر `TenantBook.get_next_number` (select_for_update). ينقصه فقط بُعد الفرع (B1).
+- **C3. الكفالة/الضرائب:** حقول الكفالة موجودة في الصفقات/فواتير الشراء (frontend types). لا منطق محاسبي خلفي لها — تُعرض فقط. تُراجع مع سياسة «الكفالة على المشتري النهائي» عند بناء الفروع (لا تغيير أعمى الآن).
+
+### 🟡 متوسطة — UI/UX (مطابقة للـ screenshots)
+- **D1. فراغ ضخم وسط شاشة فواتير المبيعات** — `SalesInvoicesPage.tsx:606` يضع جدول الفواتير في `tabs` السفلية (مقيدة `max-height:220px` في `index.css:540`) ويترك `children` (منطقة `aseel-gridwrap` المرنة `flex:1`) فارغة ⇒ منطقة بيضاء فارغة تتمدد والجدول مكبوس بالأسفل. نفس النمط في `SalesSettingsPage.tsx:573` (`header={<></>}` والمحتوى كله في tabs).
+- **D2.** بقية شاشات `AseelDocumentShell` (~25 مستهلكاً) تحتاج مسحاً لنفس سوء الاستخدام.
+
+## [MILESTONES — task11] (مرتبة بالأولوية)
+1. **M1 أرشيف الفواتير (data-loss أولاً):** إصلاح onSnapshot object-form + فلتر mapper boolean + عزل tenant للـ mapper + soft-delete.
+2. **M2 Active Context ديناميكي:** logo في TenantSettings + Dashboard/AboutUs/طباعة من إعدادات الشركة النشطة.
+3. **M3 تنظيف العزل:** إزالة tenantId:1 الثابت + إصلاح bridge first() + scoping للـ Partner/CostCenter في القيود.
+4. **M4 ميزة الفروع الحقيقية:** Branch model + بُعد فرع على الفواتير/المخزون/القيود + ترقيم لكل فرع + switcher + تقارير لكل فرع. (قرار موثّق: الأصناف مشتركة على مستوى الشركة مثل شجرة الحسابات.)
+5. **M5 اختبارات التأسيس:** شركة جديدة = COA مزروعة + أصناف/شركاء/فواتير صفر.
+6. **M6 UI:** نقل المحتوى الرئيسي إلى gridwrap + مسح بقية الشاشات + تباين.
+
 ## [ORPHANS & PENDING]
+- [x] **Task 11 — M1** أرشيف الفواتير: onSnapshot observer-form (hang) + soft-delete في mapper + عزل tenant كامل للـ mapper (FK + backfill + membership) + إصلاح فلتر boolean + 8 اختبارات (bridge/tests)
+- [x] **Task 11 — M2** Active company context: `TenantSettings.logo_url` (+migration+serializer) · `useTenantSettings` hook · Dashboard/AboutUs/InvoicePrintView ديناميكية · حقل شعار + رفع في GroupConstants · aboutLinks أصبحت tenant-scoped · (قرار: صفحات ما قبل الدخول تبقى بهوية المنصة KTRA)
+- [x] **Task 11 — M3** إزالة tenantId:1 الثابت (legacy firestoreService ~16 موضعاً + Sql* pages → resolveTenantId) · scoping Partner/CostCenter في validate_journal_entry (+3 اختبارات) · إزالة fallback «Tenant.objects.first()» من partners/signals · invalidate_tenant_cache بعد create_company · (ملاحظة: `default=1` على tenant FKs في الموديلات لا يزال موجوداً — خطر صامت موثق، يتطلب مايغريشن واسعة)
+- [x] **Task 11 — M4** ميزة الفروع: موديل Branch + فرع رئيسي backfill · بُعد branch على SalesInvoice/StockMovement/JournalHeader/TenantBook · ترقيم مستقل لكل فرع (SI-{t}-{CODE}-n) · X-Branch-Id + get_branch (تحقق ملكية) · فلترة فواتير/ميزان/GL بالفرع · BranchViewSet (manager-only، تعطيل لا حذف) · BranchSwitcher بالواجهة · 7 اختبارات. (قرارات: COA/أصناف/شركاء مشتركة tenant-level · الفرع الرئيسي يرى القيود القديمة بلا فرع · متوسط التكلفة موحّد على مستوى الشركة)
+- [x] **Task 11 — M5** اختبارات تأسيس الشركة (4 اختبارات): COA معيارية كاملة بالتسلسل الهرمي · أصناف/شركاء/فواتير صفر · دفاتر 10×15 · عضوية مدير · لا تسرب من شركة قائمة
+- [x] **Task 11 — M6** UI: إصلاح منهجي في `AseelDocumentShell` — children فارغة + tabs ⇒ الـ tabs تشغل المنطقة المرنة كاملة (يصلح ~15 صفحة تقارير دفعة واحدة) · SalesInvoicesPage/SalesSettingsPage نقل المحتوى لـ children · التباين سليم من task9 (ink-soft #353426 + status palette)
+- _Task 11 كامل — لا عناصر مفتوحة. Backend 99 tests · tsc 0 · vite build OK · eslint 0._
+
+## [TASK11 — verification summary 2026-06-10]
+- **M1:** `bridge/tests/test_mapper_isolation.py` 8 اختبارات (عزل + soft-delete + فلتر boolean + عضوية).
+- **M3:** `accounting/tests/test_journal_tenant_scoping.py` 3 اختبارات.
+- **M4:** `tenants/tests/test_branch_isolation.py` 7 اختبارات (COA مشتركة، ترقيم مستقل لكل فرع، رفض فرع شركة أخرى، manager-only، الرئيسي لا يُعطل).
+- **M5:** `tenants/tests/test_company_seeding.py` 4 اختبارات.
+- **ملاحظة نشر:** المايغريشنات الجديدة: bridge 0002 (tenant + backfill→شركة 1) · tenants 0006 (logo) + 0007 (Branch + فرع رئيسي لكل شركة) · accounting 0022 · inventory 0007 · sales 0017. شغّل `python manage.py migrate` على الخادم بعد السحب.
+- **لم يُتحقق في متصفح حي** (يتطلب باك-إند + بيانات على بيئة التشغيل) — التحقق تم عبر الاختبارات + tsc + build. أول فحص يدوي بعد النشر: فتح أرشيف الفواتير، تبديل شركة، إنشاء فرع وفاتورة منه.
 - [x] Phase 1: PWA Foundation
 - [x] Phase 2: Read-Side Cache
 - [x] Phase 3: Employee Guidance UI

@@ -1,7 +1,7 @@
 import logging
 from django.db import transaction
 from django.core.exceptions import ValidationError
-from tenants.models import Tenant, TenantSettings, TenantBook, UserCompanyMembership
+from tenants.models import Branch, Tenant, TenantSettings, TenantBook, UserCompanyMembership
 from accounting.models import Account, Currency
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,10 @@ def create_company(name: str, creator_user) -> Tenant:
             )
             account_map[code] = account
 
+        # 4.5 Main branch — every company starts with one
+        Branch.objects.create(
+            tenant=tenant, name="الفرع الرئيسي", code="MAIN", is_main=True, is_active=True)
+
         # 5. Create UserCompanyMembership
         # If this is the user's only company, make it the default
         is_first = not UserCompanyMembership.objects.filter(user=creator_user).exists()
@@ -131,5 +135,33 @@ def create_company(name: str, creator_user) -> Tenant:
             is_default=is_first
         )
 
+        # The single-tenant auto-resolve cache must reset once a 2nd company exists.
+        from core.tenant_utils import invalidate_tenant_cache
+        invalidate_tenant_cache()
+
         logger.info("Successfully booted new company '%s' (ID: %d) for user %s", tenant.CompanyName, tenant.TenantID, creator_user.username)
         return tenant
+
+
+def create_branch(tenant: Tenant, name: str, code: str) -> Branch:
+    """task11 M4 — إنشاء فرع تحت شركة أم.
+
+    الفرع يشارك الشركة شجرةَ الحسابات والأصناف والشركاء تلقائياً (لأنها
+    على مستوى الـ tenant)، بينما تُعزل فواتيره ومخزونه وقيوده عبر بُعد
+    branch. دفاتر ترقيمه تُنشأ تلقائياً عند أول مستند (get_next_number).
+    """
+    name = (name or "").strip()
+    code = (code or "").strip().upper()
+    if not name:
+        raise ValidationError("اسم الفرع لا يمكن أن يكون فارغاً.")
+    if not code:
+        raise ValidationError("رمز الفرع مطلوب (يدخل في بادئة ترقيم المستندات).")
+    if Branch.objects.filter(tenant=tenant, code=code).exists():
+        raise ValidationError(f"رمز الفرع «{code}» مستخدم مسبقاً في هذه الشركة.")
+
+    branch = Branch.objects.create(tenant=tenant, name=name, code=code, is_active=True)
+    logger.info(
+        "Created branch '%s' (code=%s, id=%d) under tenant %d",
+        name, code, branch.pk, tenant.TenantID,
+    )
+    return branch

@@ -25,6 +25,23 @@ export function resolveTenantId(): number {
 }
 
 /**
+ * task11 M4 — الفرع النشط. null = «كل الفروع» (مستوى الشركة).
+ * يُخزن في localStorage.branchId ويُمسح تلقائياً عند تبديل الشركة.
+ */
+export function resolveBranchId(): number | null {
+  try {
+    const raw = localStorage.getItem("branchId");
+    if (raw != null) {
+      const n = parseInt(raw, 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
  * Returns true once per session if the resolved tenant id appears suspicious
  * (e.g. localStorage has a value that doesn't match VITE_TENANT_ID).
  * Call this from the app shell to surface a one-time console warning.

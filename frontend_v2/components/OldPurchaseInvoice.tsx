@@ -210,11 +210,11 @@ export const OldPurchaseInvoice: React.FC = () => {
                     // البحث في أسماء المنتجات داخل الفاتورة
                     inv.items?.some(item =>
                         (item.name || '').toLowerCase().includes(lowerSearchTerm)
-                    )
-                // البحث في رقم المودل داخل الفاتورة
-                inv.items?.some(item =>
-                    (item.specifications || '').toLowerCase().includes(lowerSearchTerm)
-                );
+                    ) ||
+                    // البحث في رقم المودل داخل الفاتورة
+                    inv.items?.some(item =>
+                        (item.specifications || '').toLowerCase().includes(lowerSearchTerm)
+                    ) || false;
             }
 
             // Supplier filter

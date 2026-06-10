@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-// import { aboutLinksService } from "../services/firestoreService";
 import { fetchUserProfile } from "../services/authService";
+import { useTenantSettings } from "../hooks/useTenantSettings";
+import { useCompany } from "../contexts/CompanyContext";
 import {
   Facebook, Instagram, Youtube, Globe, Music,
   Building2, Globe as GlobeIcon, Target, Users, Shield, TrendingUp,
@@ -67,9 +68,16 @@ const getPlatformName = (type: string) => {
 };
 
 export const AboutUs: React.FC = () => {
-  const [links, setLinks] = useState<LinkItem[]>([]);
+  const [links] = useState<LinkItem[]>([]);
   const [isManager, setIsManager] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+  // M2: هوية الشركة النشطة — الاسم/الشعار/التواصل تتبدل مع الشركة المختارة
+  const { identity } = useTenantSettings();
+  const { currentCompany } = useCompany();
+  const companyName =
+    identity?.company_name_primary || currentCompany?.CompanyName || "الشركة النشطة";
+  const companyTagline = identity?.company_name_sub || "شريكك الموثوق في التجارة والاستيراد";
 
   useEffect(() => {
     const load = async () => {
@@ -92,15 +100,20 @@ export const AboutUs: React.FC = () => {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  // قائمة الروابط التي طلبتها
-  const defaultLinks: LinkItem[] = [
-    { id: '1', type: 'instagram', url: 'https://www.instagram.com/katra_group?igsh=dmRtM3dkNmlrc2kw', createdAt: '' },
-    { id: '2', type: 'tiktok', url: 'https://www.tiktok.com/@ktra.import.group?_r=1&_t=ZS-92CBUzi08iW', createdAt: '' },
-    { id: '3', type: 'website', url: 'https://ktragroup.com', createdAt: '' },
-    { id: '4', type: 'email', url: 'mailto:info@ktra.com', createdAt: '' },
+  // روابط التواصل من إعدادات الشركة النشطة (F11) — لا روابط ثابتة لشركة بعينها
+  const identityLinks: LinkItem[] = [
+    ...(identity?.email
+      ? [{ id: 'email', type: 'email' as const, url: `mailto:${identity.email}`, createdAt: '' }]
+      : []),
+    ...(identity?.phone
+      ? [{ id: 'phone', type: 'phone' as const, url: `tel:${identity.phone}`, createdAt: '' }]
+      : []),
+    ...(identity?.address
+      ? [{ id: 'location', type: 'location' as const, url: `https://maps.google.com/?q=${encodeURIComponent(identity.address)}`, createdAt: '' }]
+      : []),
   ];
 
-  const displayLinks = links.length > 0 ? links : defaultLinks;
+  const displayLinks = links.length > 0 ? links : identityLinks;
 
   // تقصير الروابط الطويلة للعرض
   const shortenUrl = (url: string, type: string) => {
@@ -123,14 +136,18 @@ export const AboutUs: React.FC = () => {
           <div>
             <div className="flex items-center gap-3 mb-4">
               <div className={`p-3 rounded-xl ${theme === 'dark' ? 'bg-blue-900/30' : 'bg-white shadow-md'}`}>
-                <Building2 className={`w-8 h-8 ${theme === 'dark' ? 'text-blue-400' : 'text-blue-600'}`} />
+                {identity?.logo_url ? (
+                  <img src={identity.logo_url} alt={`شعار ${companyName}`} className="w-8 h-8 rounded object-cover" />
+                ) : (
+                  <Building2 className={`w-8 h-8 ${theme === 'dark' ? 'text-blue-400' : 'text-blue-600'}`} />
+                )}
               </div>
               <div>
                 <h1 className="text-3xl md:text-4xl font-bold bg-gradient-to-r from-blue-600 to-[var(--color-primary)] bg-clip-text text-transparent">
-                  شركة كترا KTRA للتجارة العالمية
+                  {companyName}
                 </h1>
                 <p className={`text-lg mt-1 ${theme === 'dark' ? 'text-gray-300' : 'text-gray-600'}`}>
-                  عراقة تتجاوز <span className="font-bold text-yellow-600">العشرين عاماً</span> في عالم الاستيراد
+                  {companyTagline}
                 </p>
               </div>
             </div>
@@ -149,11 +166,15 @@ export const AboutUs: React.FC = () => {
             {/* مقدمة الشركة */}
             <div className="mb-12">
               <p className={`text-lg leading-relaxed mb-6 ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-                تُعدّ <span className="font-bold text-blue-600">شركة كترا KTRA للتجارة العالمية</span> امتداداً لتاريخ عريق يمتد لأكثر من عشرين عاماً في مجال <span className="font-semibold">التصنيع والاستيراد</span> من مصادر عالمية، لا سيما الصين وتركيا.
+                تعمل <span className="font-bold text-blue-600">{companyName}</span> في مجال <span className="font-semibold">التجارة والاستيراد</span>، وتسعى لبناء علاقات موثوقة مع مورديها وعملائها.
               </p>
-              <p className={`text-lg leading-relaxed ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-                نحن لا نستورد بضائع فحسب، بل نستورد ثقة وشراكات طويلة الأمد. نسوّق منتجاتنا في أسواق متنوعة حول العالم، مع تركيز خاص على منطقة <span className="font-semibold">الشرق الأوسط وأفريقيا</span>.
-              </p>
+              {identity?.address && (
+                <p className={`text-lg leading-relaxed ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+                  <MapPin className="inline w-5 h-5 ml-1 text-blue-500" />
+                  <span className="font-semibold">العنوان:</span> {identity.address}
+                  {identity.po_box ? ` — ص.ب ${identity.po_box}` : ''}
+                </p>
+              )}
             </div>
 
             {/* نقاط القوة في بطاقات */}
@@ -164,7 +185,7 @@ export const AboutUs: React.FC = () => {
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {[
-                  { icon: <Award />, title: "خبرة متراكمة", desc: "أكثر من 20 عاماً في التجارة الدولية والاستيراد من أكبر الأسواق العالمية." },
+                  { icon: <Award />, title: "خبرة متراكمة", desc: "خبرة عملية في التجارة الدولية والاستيراد من أكبر الأسواق العالمية." },
                   { icon: <Package />, title: "شبكة موردين موثوقة", desc: "علاقات استراتيجية مع مصانع وموردين معتمدين يلتزمون بأعلى معايير الجودة العالمية." },
                   { icon: <TrendingUp />, title: "أسعار تنافسية", desc: "قدرة فريدة على خفض التكاليف وتقديم عروض سعرية تنافسية دون المساس بالجودة." },
                   { icon: <Shield />, title: "شهادات وجودة", desc: "ضمان حصول المنتجات على الشهادات الدولية اللازمة والالتزام بالمواصفات المطلوبة." },
@@ -249,8 +270,8 @@ export const AboutUs: React.FC = () => {
 
             {/* تذييل الصفحة */}
             <div className={`mt-12 pt-8 border-t text-center ${theme === 'dark' ? 'border-gray-700 text-gray-500' : 'border-gray-200 text-gray-600'}`}>
-              <p>© {new Date().getFullYear()} شركة كترا KTRA للتجارة العالمية. جميع الحقوق محفوظة.</p>
-              <p className="text-sm mt-2">شريكك الموثوق في رحلة الاستيراد العالمية لأكثر من عقدين.</p>
+              <p>© {new Date().getFullYear()} {companyName}. جميع الحقوق محفوظة.</p>
+              <p className="text-sm mt-2">{companyTagline}</p>
               <div className="flex justify-center gap-4 mt-4">
                 {displayLinks.map(link => (
                   <a

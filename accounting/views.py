@@ -13,7 +13,22 @@ from rest_framework.response import Response
 from core.api_defaults import ApiAuthAndUser
 from partners.models import Partner
 from tenants.models import Tenant, Currency
-from core.tenant_utils import get_tenant
+from core.tenant_utils import get_branch, get_tenant
+
+
+def _branch_journal_q(request, tenant, prefix='journal__branch'):
+    """task11 M4 — Q filter للفرع النشط (X-Branch-Id) على القيود.
+
+    بدون هيدر → بلا فلترة (مستوى الشركة). الفرع الرئيسي يشمل القيود القديمة
+    بلا فرع؛ أي فرع آخر يرى قيوده فقط — أساس P&L/ميزان مستقل لكل فرع.
+    """
+    from django.db.models import Q
+    branch = get_branch(request, tenant)
+    if branch is None:
+        return Q()
+    if branch.is_main:
+        return Q(**{prefix: branch}) | Q(**{f'{prefix}__isnull': True})
+    return Q(**{prefix: branch})
 
 from .cashbox import (
     allocate_cash_box_account_code,
@@ -414,12 +429,13 @@ class GeneralLedgerView(viewsets.ViewSet):
         from django.db.models import Sum, F, Q
 
         tenant = get_tenant(request)
+        branch_q = _branch_journal_q(request, tenant)
         opening_data = JournalLine.objects.filter(
             account__in=target_accounts,
             journal__is_posted=True,
             journal__transaction_date__lt=start_date,
             **({"tenant": tenant} if tenant else {}),
-        ).aggregate(
+        ).filter(branch_q).aggregate(
             total_debit=Sum('base_debit'),
             total_credit=Sum('base_credit')
         )
@@ -441,7 +457,12 @@ class GeneralLedgerView(viewsets.ViewSet):
         if not include_unposted:
             query_filters['journal__is_posted'] = True
 
-        transactions = JournalLine.objects.filter(**query_filters).select_related('journal', 'account').order_by('journal__transaction_date', 'journal__id')
+        transactions = (
+            JournalLine.objects.filter(**query_filters)
+            .filter(branch_q)
+            .select_related('journal', 'account')
+            .order_by('journal__transaction_date', 'journal__id')
+        )
 
         # 3. Calculate Running Balance
         results = []
@@ -535,9 +556,11 @@ class TrialBalanceView(viewsets.ViewSet):
             if not include_unposted:
                 opening_filters['journal__is_posted'] = True
 
+            branch_q = _branch_journal_q(request, tenant)
             opening_qs = (
                 JournalLine.objects
                 .filter(**opening_filters)
+                .filter(branch_q)
                 .values('account_id')
                 .annotate(dr=Sum('base_debit'), cr=Sum('base_credit'))
             )
@@ -560,6 +583,7 @@ class TrialBalanceView(viewsets.ViewSet):
             period_qs = (
                 JournalLine.objects
                 .filter(**period_filters)
+                .filter(branch_q)
                 .values('account_id')
                 .annotate(dr=Sum('base_debit'), cr=Sum('base_credit'))
             )

@@ -6,6 +6,8 @@ import { Link } from 'react-router-dom';
 import { Task, User, AppView } from '../types';
 import { QuickActions } from './dashboard/QuickActions';
 import { TasksDistributionChart } from './dashboard/TasksDistributionChart';
+import { useTenantSettings } from '../hooks/useTenantSettings';
+import { useCompany } from '../contexts/CompanyContext';
 
 interface DashboardProps {
     tasks: Task[];
@@ -15,6 +17,13 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ tasks, users, onNavigate, currentUser }) => {
+    // M2: هوية الشركة النشطة — لا أسماء ثابتة
+    const { identity } = useTenantSettings();
+    const { currentCompany } = useCompany();
+    const companyName =
+        identity?.company_name_primary || currentCompany?.CompanyName || 'الشركة النشطة';
+    const companySub = identity?.company_name_sub || 'نظام إدارة عمليات الاستيراد والمشتريات المتكامل';
+
     const totalTasks = tasks.length;
     const completedTasks = tasks.filter(t => t.status === 'COMPLETED').length;
     const pendingTasks = tasks.filter(t => ['NEW', 'IN_PROGRESS', 'WAITING_FOR_REVIEW'].includes(t.status)).length;
@@ -42,10 +51,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ tasks, users, onNavigate, 
                     <TasksDistributionChart tasks={tasks} />
 
                     <div style={{ background: 'var(--aseel-accent, #1857a4)', borderRadius: 8, padding: '12px 16px', color: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
-                        <div>
-                            <div style={{ fontWeight: 700, fontSize: 'var(--aseel-fs-base, 13px)' }}>شركة النور للتجارة العالمية</div>
-                            <div style={{ fontSize: 'var(--aseel-fs-sm, 11px)', opacity: 0.9, marginTop: 3 }}>
-                                نظام إدارة عمليات الاستيراد والمشتريات المتكامل
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            {identity?.logo_url && (
+                                <img
+                                    src={identity.logo_url}
+                                    alt={`شعار ${companyName}`}
+                                    style={{ width: 36, height: 36, borderRadius: 6, objectFit: 'cover', background: '#fff' }}
+                                />
+                            )}
+                            <div>
+                                <div style={{ fontWeight: 700, fontSize: 'var(--aseel-fs-base, 13px)' }}>{companyName}</div>
+                                <div style={{ fontSize: 'var(--aseel-fs-sm, 11px)', opacity: 0.9, marginTop: 3 }}>
+                                    {companySub}
+                                </div>
                             </div>
                         </div>
                         <Link

@@ -1,14 +1,37 @@
 import json
+import logging
 import re
 import uuid
 
 from django.http import JsonResponse
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.authtoken.models import Token
 
 from .models import FirestoreMirrorDoc
+
+logger = logging.getLogger(__name__)
+
+# Collections that are NOT company-scoped (auth / HR / public content).
+# Everything else stored through /api/mapper/ belongs to exactly one company.
+GLOBAL_COLLECTIONS = {
+    'users',
+    'tasks',
+    'attendanceSessions',
+    'attendanceRecords',
+    'pointsHistory',
+    'publicGallery',
+}
+
+
+def _root_collection(path: str) -> str:
+    return path.strip('/').split('/')[0] if path else ''
+
+
+def _is_tenant_scoped(path: str) -> bool:
+    return _root_collection(path) not in GLOBAL_COLLECTIONS
 
 
 def _map_supplier_type_to_partner_type(supplier_type: str | None) -> str:
@@ -24,17 +47,16 @@ def _map_supplier_type_to_partner_type(supplier_type: str | None) -> str:
     }.get(supplier_type or "factory", "Supplier")
 
 
-def _sync_partner_from_mirror_supplier(supplier_data: dict) -> None:
+def _sync_partner_from_mirror_supplier(supplier_data: dict, tenant) -> None:
     """
     Ensure SQL Partner exists for a mirror supplier doc, so accounting COA tree works.
     This keeps frontend_v2 mirror suppliers and accounting partners in sync.
     """
     try:
         from partners.models import Partner
-        from tenants.models import Tenant, Currency
+        from tenants.models import Currency
 
-        tenant = Tenant.objects.first()
-        if not tenant:
+        if tenant is None:
             return
 
         supplier_type = supplier_data.get("type")
@@ -84,7 +106,7 @@ def _sync_partner_from_mirror_supplier(supplier_data: dict) -> None:
         else:
             Partner.objects.create(tenant=tenant, name=name, **defaults)
     except Exception:
-        # Never break mapper writes due to sync problems.
+        logger.warning("mapper: supplier→partner sync failed", exc_info=True)
         return
 
 
@@ -95,16 +117,37 @@ def _parse_ordering(request):
     return raw, 'asc'
 
 
-def _list_under_prefix(prefix: str, request):
+def _filter_value_matches(doc_value, query_value: str) -> bool:
+    """Coerce-compare a JSON doc value against a query-string value.
+
+    Query params always arrive as strings ("true", "5") while mirror docs hold
+    real JSON types (True, 5). Direct == comparison silently filtered
+    everything out (the archive's isHistorical filter never matched).
+    """
+    if isinstance(doc_value, bool):
+        return str(doc_value).lower() == str(query_value).strip().lower()
+    if doc_value is None:
+        return query_value in ('', 'null', 'None')
+    return str(doc_value) == str(query_value)
+
+
+def _list_under_prefix(prefix: str, request, tenant):
     base = prefix.rstrip('/')
     pattern = re.compile(r'^' + re.escape(base) + r'/([^/]+)$')
     qs = FirestoreMirrorDoc.objects.filter(path__startswith=f'{base}/')
+    if _is_tenant_scoped(base):
+        qs = qs.filter(tenant=tenant)
+
+    include_deleted = request.GET.get('include_deleted') == '1'
+
     rows = []
     for row in qs:
         m = pattern.match(row.path)
         if not m:
             continue
         payload = dict(row.data)
+        if not include_deleted and payload.get('deleted'):
+            continue
         payload.setdefault('id', m.group(1))
         rows.append((row, payload))
 
@@ -123,7 +166,7 @@ def _list_under_prefix(prefix: str, request):
 
     filters = {}
     for key in request.GET.keys():
-        if key in ('ordering', 'limit'):
+        if key in ('ordering', 'limit', 'include_deleted'):
             continue
         if '__' not in key:
             continue
@@ -132,7 +175,10 @@ def _list_under_prefix(prefix: str, request):
             filters[field] = request.GET.get(key)
 
     if filters:
-        out = [r for r in out if all(r.get(k) == v for k, v in filters.items())]
+        out = [
+            r for r in out
+            if all(_filter_value_matches(r.get(k), v) for k, v in filters.items())
+        ]
 
     lim = request.GET.get('limit')
     if lim:
@@ -143,9 +189,31 @@ def _list_under_prefix(prefix: str, request):
     return out
 
 
-def _auth_ok(request):
+def _resolve_user(request):
+    """Attach the token's user to the request so tenant membership checks work.
+
+    MapperView is a plain Django View (no DRF authentication), so request.user
+    would otherwise stay AnonymousUser and get_tenant() would skip the
+    membership validation entirely.
+    """
     token_key = request.headers.get('Authorization', '').replace('Token ', '').strip()
-    return bool(token_key and Token.objects.filter(key=token_key).exists())
+    if not token_key:
+        return None
+    token = Token.objects.select_related('user').filter(key=token_key).first()
+    if token is None:
+        return None
+    request.user = token.user
+    return token.user
+
+
+def _resolve_tenant(request):
+    """Tenant for this mapper request (validated against membership)."""
+    from django.core.exceptions import PermissionDenied
+    from core.tenant_utils import get_tenant
+    try:
+        return get_tenant(request), None
+    except PermissionDenied as e:
+        return None, JsonResponse({'detail': str(e)}, status=403)
 
 
 def _sync_django_user_active_from_user_mirror(path: str, data: dict) -> None:
@@ -179,30 +247,72 @@ def _sync_django_user_active_from_user_mirror(path: str, data: dict) -> None:
 
 @method_decorator(csrf_exempt, name='dispatch')
 class MapperView(View):
-    def get(self, request, subpath):
-        if not _auth_ok(request):
-            return JsonResponse({'detail': 'Authentication credentials were not provided.'}, status=401)
+    """Firestore-style document API over MySQL.
 
+    Tenant rules:
+      - Business collections (anything not in GLOBAL_COLLECTIONS) are scoped to
+        the request tenant (X-Tenant-Id header, membership-validated).
+      - Reading/writing/deleting a doc owned by another tenant → 404.
+    Data safety:
+      - DELETE is always a soft-delete (data.deleted = true). Lists exclude
+        deleted docs unless ?include_deleted=1. No hard-delete path exists.
+    """
+
+    def _gate(self, request, path: str):
+        """Auth + tenant resolution. Returns (tenant, error_response)."""
+        user = _resolve_user(request)
+        if user is None:
+            return None, JsonResponse(
+                {'detail': 'Authentication credentials were not provided.'}, status=401
+            )
+        tenant, err = _resolve_tenant(request)
+        if err is not None:
+            return None, err
+        if _is_tenant_scoped(path) and tenant is None:
+            return None, JsonResponse(
+                {'detail': 'لم يتم تحديد الشركة. أرسل X-Tenant-Id في الهيدر.'}, status=400
+            )
+        return tenant, None
+
+    def _get_doc_checked(self, path: str, tenant):
+        """Fetch a doc enforcing tenant ownership. Returns (doc, error_response)."""
+        try:
+            doc = FirestoreMirrorDoc.objects.get(path=path)
+        except FirestoreMirrorDoc.DoesNotExist:
+            return None, JsonResponse({'detail': 'Not found'}, status=404)
+        if _is_tenant_scoped(path) and doc.tenant_id is not None \
+                and tenant is not None and doc.tenant_id != tenant.pk:
+            # Hide other tenants' docs entirely.
+            return None, JsonResponse({'detail': 'Not found'}, status=404)
+        return doc, None
+
+    def get(self, request, subpath):
         path = subpath.strip('/')
+        tenant, err = self._gate(request, path)
+        if err:
+            return err
+
         segments = [s for s in path.split('/') if s]
         if not segments:
             return JsonResponse({'detail': 'Not found'}, status=404)
 
         if len(segments) % 2 == 1:
-            rows = _list_under_prefix('/'.join(segments), request)
+            rows = _list_under_prefix('/'.join(segments), request, tenant)
             return JsonResponse(rows, safe=False)
 
-        try:
-            doc = FirestoreMirrorDoc.objects.get(path=path)
-        except FirestoreMirrorDoc.DoesNotExist:
+        doc, err = self._get_doc_checked(path, tenant)
+        if err:
+            return err
+        if doc.data.get('deleted') and request.GET.get('include_deleted') != '1':
             return JsonResponse({'detail': 'Not found'}, status=404)
         return JsonResponse(doc.data)
 
     def post(self, request, subpath):
-        if not _auth_ok(request):
-            return JsonResponse({'detail': 'Authentication credentials were not provided.'}, status=401)
-
         prefix = subpath.strip('/')
+        tenant, err = self._gate(request, prefix)
+        if err:
+            return err
+
         segments = [s for s in prefix.split('/') if s]
         if len(segments) % 2 != 1:
             return JsonResponse({'detail': 'Collection POST requires odd segment path'}, status=400)
@@ -217,10 +327,20 @@ class MapperView(View):
         full_path = f'{prefix}/{doc_id}'
         data = {k: v for k, v in body.items() if k != 'id'}
         data['id'] = doc_id
-        FirestoreMirrorDoc.objects.update_or_create(path=full_path, defaults={'data': data})
+
+        existing = FirestoreMirrorDoc.objects.filter(path=full_path).first()
+        if existing is not None and _is_tenant_scoped(full_path) \
+                and existing.tenant_id is not None and tenant is not None \
+                and existing.tenant_id != tenant.pk:
+            return JsonResponse({'detail': 'Not found'}, status=404)
+
+        FirestoreMirrorDoc.objects.update_or_create(
+            path=full_path,
+            defaults={'data': data, 'tenant': tenant if _is_tenant_scoped(full_path) else None},
+        )
         # Auto-sync mirror suppliers to SQL partners
-        if prefix == "suppliers":
-            _sync_partner_from_mirror_supplier(data)
+        if segments[0] == "suppliers":
+            _sync_partner_from_mirror_supplier(data, tenant)
         return JsonResponse({'id': doc_id})
 
     def put(self, request, subpath):
@@ -230,10 +350,11 @@ class MapperView(View):
         return self._write(request, subpath, merge=True)
 
     def _write(self, request, subpath, merge: bool):
-        if not _auth_ok(request):
-            return JsonResponse({'detail': 'Authentication credentials were not provided.'}, status=401)
-
         path = subpath.strip('/')
+        tenant, err = self._gate(request, path)
+        if err:
+            return err
+
         segments = [s for s in path.split('/') if s]
         if len(segments) % 2 != 0:
             return JsonResponse({'detail': 'Document path must have even segment count'}, status=400)
@@ -244,7 +365,20 @@ class MapperView(View):
         if not isinstance(body, dict):
             return JsonResponse({'detail': 'Document body must be a JSON object'}, status=400)
 
-        doc, _ = FirestoreMirrorDoc.objects.get_or_create(path=path, defaults={'data': {}})
+        doc = FirestoreMirrorDoc.objects.filter(path=path).first()
+        if doc is not None:
+            if _is_tenant_scoped(path) and doc.tenant_id is not None \
+                    and tenant is not None and doc.tenant_id != tenant.pk:
+                return JsonResponse({'detail': 'Not found'}, status=404)
+        else:
+            doc = FirestoreMirrorDoc(
+                path=path,
+                data={},
+                tenant=tenant if _is_tenant_scoped(path) else None,
+            )
+
+        if _is_tenant_scoped(path) and doc.tenant_id is None and tenant is not None:
+            doc.tenant = tenant  # adopt legacy/unowned docs on first write
         if merge:
             doc.data = {**doc.data, **body}
         else:
@@ -253,12 +387,27 @@ class MapperView(View):
         _sync_django_user_active_from_user_mirror(path, doc.data)
         # Auto-sync mirror suppliers to SQL partners
         if segments and segments[0] == "suppliers" and len(segments) == 2:
-            _sync_partner_from_mirror_supplier(doc.data)
+            _sync_partner_from_mirror_supplier(doc.data, tenant)
         return JsonResponse({'ok': True, 'id': segments[-1]})
 
     def delete(self, request, subpath):
-        if not _auth_ok(request):
-            return JsonResponse({'detail': 'Authentication credentials were not provided.'}, status=401)
         path = subpath.strip('/')
-        FirestoreMirrorDoc.objects.filter(path=path).delete()
-        return JsonResponse({'ok': True})
+        tenant, err = self._gate(request, path)
+        if err:
+            return err
+
+        doc, err = self._get_doc_checked(path, tenant)
+        if err:
+            # Deleting a non-existent doc was previously a silent no-op success;
+            # keep that contract so callers don't break on retries.
+            return JsonResponse({'ok': True})
+
+        # Data safety: soft-delete only. Financial/business documents are never
+        # physically removed through the API.
+        doc.data = {**doc.data, 'deleted': True, 'deletedAt': timezone.now().isoformat()}
+        doc.save(update_fields=['data', 'updated_at'])
+        logger.info(
+            "mapper soft-delete: path=%s tenant=%s user=%s",
+            path, getattr(tenant, 'pk', None), getattr(request.user, 'username', '?'),
+        )
+        return JsonResponse({'ok': True, 'soft_deleted': True})

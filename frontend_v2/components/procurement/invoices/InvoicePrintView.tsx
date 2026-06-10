@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { Invoice, User, Supplier } from '../../../types';
 import { formatTaxPercentLabel } from '../../../utils/sqlMoneyRound';
+import { useTenantSettings } from '../../../hooks/useTenantSettings';
 import { Printer, X, MapPin, Phone, Mail, FileText, Building2, Truck, Hash, Calendar, DollarSign, CreditCard, Edit, ExternalLink, Box } from 'lucide-react';
 
 interface InvoicePrintViewProps {
@@ -13,6 +14,8 @@ interface InvoicePrintViewProps {
 
 export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, currentUser, supplier, onClose, onEdit }) => {
     const componentRef = useRef<HTMLDivElement>(null);
+    // M2: هوية الشركة النشطة في ترويسة الطباعة
+    const { identity } = useTenantSettings();
 
     const handlePrint = () => {
         window.print();
@@ -109,11 +112,23 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                 {/* 1. Header */}
                 <div className="flex justify-between items-center border-b-2 aseel-border-soft pb-4 mb-4">
                     <div className="flex gap-4 items-center">
-                        <div className="aseel-bg-panel text-white p-3 rounded-xl">
-                            <FileText size={28} />
-                        </div>
+                        {identity?.logo_url ? (
+                            <img src={identity.logo_url} alt="شعار الشركة" className="w-14 h-14 rounded-xl object-cover border aseel-border-soft" />
+                        ) : (
+                            <div className="aseel-bg-panel text-white p-3 rounded-xl">
+                                <FileText size={28} />
+                            </div>
+                        )}
                         <div>
-                            <h1 className="text-2xl font-black aseel-text-ink leading-none">فاتورة مشتريات</h1>
+                            {identity?.company_name_primary && (
+                                <div className="text-lg font-black aseel-text-ink leading-tight">{identity.company_name_primary}</div>
+                            )}
+                            {(identity?.address || identity?.phone) && (
+                                <div className="text-[10px] aseel-text-soft">
+                                    {[identity?.address, identity?.phone && `هاتف: ${identity.phone}`].filter(Boolean).join(' — ')}
+                                </div>
+                            )}
+                            <h1 className={`font-black aseel-text-ink leading-none ${identity?.company_name_primary ? 'text-base mt-1' : 'text-2xl'}`}>فاتورة مشتريات</h1>
                             <p className="text-xs font-bold aseel-text-soft mt-1">PURCHASE INVOICE - {invoice.currency === 'ILS' ? 'NIS' : 'USD'}</p>
                         </div>
                     </div>
