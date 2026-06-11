@@ -1,4 +1,5 @@
 import datetime
+import logging
 from decimal import Decimal
 
 from rest_framework import viewsets, status
@@ -42,6 +43,8 @@ from .landed_cost import (
 )
 from .services import attach_pi_payment_voucher
 
+logger = logging.getLogger(__name__)
+
 
 class LogisticsDealViewSet(BaseTenantViewSet):
     queryset = LogisticsDeal.objects.all().order_by('-order_date')
@@ -61,10 +64,28 @@ class LogisticsDealViewSet(BaseTenantViewSet):
             )
         )
 
+    @staticmethod
+    def _next_deal_ref(tenant):
+        """D-#### تالٍ لكل الشركة — يشمل المحذوف ناعماً لأن قيد الفريدة يشمله."""
+        import re
+        nums = [0]
+        refs = LogisticsDeal.all_objects.filter(tenant=tenant).values_list('ref_number', flat=True)
+        for r in refs:
+            m = re.match(r'^D-(\d+)$', str(r or ''))
+            if m:
+                nums.append(int(m.group(1)))
+        return f"D-{max(nums) + 1:04d}"
+
     def perform_create(self, serializer):
-        kwargs = {'tenant': get_tenant(self.request)}
+        tenant = get_tenant(self.request)
+        kwargs = {'tenant': tenant}
         if self.request.user.is_authenticated:
             kwargs['created_by'] = self.request.user
+        # الترقيم كان client-side فقط (max+1 في المتصفح) — سباق مستخدمين يصطدم
+        # بـ unique(tenant, ref_number) ويرجع 500 (T12-B4). الخادم يولّد/يصحّح.
+        ref = str(serializer.validated_data.get('ref_number') or '').strip()
+        if not ref or LogisticsDeal.all_objects.filter(tenant=tenant, ref_number=ref).exists():
+            kwargs['ref_number'] = self._next_deal_ref(tenant)
         serializer.save(**kwargs)
 
     @action(detail=True, methods=['post'])
@@ -663,7 +684,8 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
             return Response({'error': 'deal_id مطلوب'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            deal = LogisticsDeal.objects.get(pk=deal_id)
+            # نفس tenant الشحنة حصراً — كان الجلب بلا فلتر يسمح بربط صفقة شركة أخرى (T12-B2)
+            deal = LogisticsDeal.objects.get(pk=deal_id, tenant=shipment.tenant)
             # Prevent same deal on multiple active shipments
             existing = LogisticsShipmentDeal.objects.filter(deal=deal).first()
             if existing:
@@ -672,6 +694,11 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
             LogisticsShipmentDeal.objects.create(shipment=shipment, deal=deal)
+            # توزيع حصص الشحن فوراً — كانت تبقى 0.00 حتى استدعاء يدوي (T12-B1)
+            try:
+                redistribute_shipment_deal_allocations(shipment)
+            except Exception:
+                logger.exception('redistribute after add_deal failed (shipment=%s)', shipment.pk)
             # حالة الشحن تُحدَّد عبر shipping_workflow_status (إشارة sync_deal_workflow_on_shipment_link)
             return Response({'status': 'تم ربط الصفقة بالشحنة بنجاح'}, status=status.HTTP_200_OK)
         except LogisticsDeal.DoesNotExist:
@@ -711,6 +738,12 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
             link.delete()
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        # إعادة توزيع الحصص على الصفقات المتبقية (T12-B1)
+        try:
+            redistribute_shipment_deal_allocations(shipment)
+        except Exception:
+            logger.exception('redistribute after remove_deal failed (shipment=%s)', shipment.pk)
 
         return Response({'status': 'تم فك ربط الصفقة بنجاح', 'deal_id': deal_pk}, status=status.HTTP_200_OK)
 
@@ -1519,6 +1552,9 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         d = params.get('deal')
         if d:
             qs = qs.filter(deal_id=d)
+        sh = params.get('shipment')
+        if sh:
+            qs = qs.filter(shipment_id=sh)
         df = params.get('date_from')
         if df:
             qs = qs.filter(invoice_date__gte=df)

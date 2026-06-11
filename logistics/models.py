@@ -128,11 +128,15 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
         ]
 
     # ── State Machine: valid transitions for shipping_workflow_status ──
+    # المراحل الثلاث الأولى يدوية بعقد الواجهة («اختيار يدوي للمراحل الثلاث
+    # الأولى») — التنقل بينها حر من None أو من بعضها. ما بعدها يتقدم تلقائياً
+    # من النظام (ربط شحنة/تخليص/فاتورة) عبر bulk .update().
+    MANUAL_WF_STAGES = frozenset({'sw_mfg_start', 'sw_wait_agent_ship', 'sw_wait_intl_ship'})
     VALID_TRANSITIONS = {
-        None: ['sw_mfg_start'],
-        'sw_mfg_start': ['sw_wait_agent_ship'],
-        'sw_wait_agent_ship': ['sw_wait_intl_ship'],
-        'sw_wait_intl_ship': ['sw_wait_arrival'],
+        None: ['sw_mfg_start', 'sw_wait_agent_ship', 'sw_wait_intl_ship'],
+        'sw_mfg_start': ['sw_wait_agent_ship', 'sw_wait_intl_ship'],
+        'sw_wait_agent_ship': ['sw_mfg_start', 'sw_wait_intl_ship'],
+        'sw_wait_intl_ship': ['sw_mfg_start', 'sw_wait_agent_ship', 'sw_wait_arrival'],
         'sw_wait_arrival': ['sw_wait_clearance'],
         'sw_wait_clearance': ['sw_released'],
         'sw_released': [],  # terminal state
@@ -211,13 +215,16 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
     def _sync_legacy_status_fields(self):
         """Force status/order_status/payment_status to reflect canonical state.
         Called from save(); also runnable as a one-shot via the migration."""
-        sw = self.shipping_workflow_status
-        derived_status = self._STATUS_FROM_WORKFLOW.get(sw)
-        if derived_status is not None:
-            self.status = derived_status
-        derived_order = self._ORDER_STATUS_FROM_WORKFLOW.get(sw)
-        if derived_order is not None:
-            self.order_status = derived_order
+        # الإلغاء حالة طرفية يضبطها المستخدم صراحةً — الاشتقاق من workflow كان
+        # يدوسها بصمت فيبدو زر «إلغاء الصفقة» بلا أثر (task12 T12-A2).
+        if self.status != 'Cancelled':
+            sw = self.shipping_workflow_status
+            derived_status = self._STATUS_FROM_WORKFLOW.get(sw)
+            if derived_status is not None:
+                self.status = derived_status
+            derived_order = self._ORDER_STATUS_FROM_WORKFLOW.get(sw)
+            if derived_order is not None:
+                self.order_status = derived_order
         # payment_status from remaining_amount (no payment posting required —
         # `recalculate_deal_payment_status` keeps remaining_amount fresh).
         rem = self.remaining_amount if self.remaining_amount is not None else 0

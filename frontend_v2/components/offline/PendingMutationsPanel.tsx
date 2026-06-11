@@ -51,7 +51,8 @@ export default function PendingMutationsPanel() {
   };
 
   let chipBg = "bg-green-100 text-green-800 dark:bg-green-950/20 dark:text-green-400";
-  let chipText = "مزامنة نشطة / متصل";
+  // خمول + متصل = «متصل» فقط — «مزامنة نشطة» كانت مضللة بلا أي عملية جارية (T12-C3)
+  let chipText = "متصل";
   let chipDot = "bg-green-500";
 
   if (!online && pendingCount === 0 && failedCount === 0 && syncingCount === 0) {

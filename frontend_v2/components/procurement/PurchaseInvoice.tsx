@@ -137,6 +137,8 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
   /** جاري جلب فاتورة من المسار (رقم) */
   const [invoiceRouteLoading, setInvoiceRouteLoading] = useState(initialInvoiceRouteLoading);
   const [showImportModal, setShowImportModal] = useState(false);
+  /** فتح مودال الاستيراد مسبق الاختيار — يصل من شاشة الاستيراد: /purchase-invoices?import_shipment=N (T12-A4) */
+  const [importShipmentId, setImportShipmentId] = useState<number | null>(null);
   const [importing, setImporting] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
   const [printInvoice, setPrintInvoice] = useState<Invoice | null>(null);
@@ -218,6 +220,18 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
   useEffect(() => {
     void applyLocationToView();
   }, [applyLocationToView]);
+
+  useEffect(() => {
+    const sp = new URLSearchParams(location.search);
+    const sid = Number(sp.get("import_shipment"));
+    if (Number.isFinite(sid) && sid > 0) {
+      setImportShipmentId(sid);
+      setShowImportModal(true);
+      // إزالة البارامتر حتى لا يُعاد فتح المودال عند كل تنقّل
+      sp.delete("import_shipment");
+      navigate({ pathname: location.pathname, search: sp.toString() }, { replace: true });
+    }
+  }, [location.search, location.pathname, navigate]);
 
   // --- Handlers ---
   const handleCreateNew = () => {
@@ -505,9 +519,10 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
       {showImportModal && (
         <ClearanceImportModal
           isOpen={showImportModal}
-          onClose={() => setShowImportModal(false)}
+          onClose={() => { setShowImportModal(false); setImportShipmentId(null); }}
           onImport={handleImportFromClearance}
           currentUser={currentUser}
+          initialShipmentId={importShipmentId}
         />
       )}
 

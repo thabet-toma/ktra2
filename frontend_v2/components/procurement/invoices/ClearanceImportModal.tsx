@@ -122,6 +122,8 @@ interface ClearanceImportModalProps {
     /** يُستدعى بعد نجاح الاستيراد من الخادم (تحديث مسار الشحنة + الصفقات) */
     onImport: (ctx: ShipmentImportContext, meta: { createdCount: number }) => void;
     currentUser: User;
+    /** اختيار مسبق لتخليص شحنة معيّنة — يصل من زر «تحويل إلى فاتورة شراء» في شاشة الاستيراد */
+    initialShipmentId?: number | null;
 }
 
 export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
@@ -129,6 +131,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
     onClose,
     onImport,
     currentUser: _currentUser,
+    initialShipmentId = null,
 }) => {
     const [clearances, setClearances] = useState<ClearanceRow[]>([]);
     const [allDeals, setAllDeals] = useState<Deal[]>([]);
@@ -172,6 +175,13 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
             unsubDeals();
         };
     }, [isOpen, refreshClearances]);
+
+    // اختيار مسبق: تخليص الشحنة القادمة من شاشة الاستيراد (T12-A4)
+    useEffect(() => {
+        if (!isOpen || !initialShipmentId || selectedClearance) return;
+        const match = clearances.find((c) => Number(c.shipment) === Number(initialShipmentId));
+        if (match) setSelectedClearance(match);
+    }, [isOpen, initialShipmentId, clearances, selectedClearance]);
 
     useEffect(() => {
         if (!isOpen || !selectedClearance) {

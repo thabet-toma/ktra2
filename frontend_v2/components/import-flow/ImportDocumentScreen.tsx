@@ -6,7 +6,7 @@ import { resolveTenantId } from "@/utils/tenantContext";
 import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox } from "@/services/clearanceApi";
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
-import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment } from "@/services/localShippingApi";
+import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, importLocalShipmentToInvoice } from "@/services/localShippingApi";
 import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab } from "@/components/aseel";
 import { CompactTimeline } from "./CompactTimeline";
 import OfflineGuard from "@/components/offline/OfflineGuard";
@@ -383,6 +383,21 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     }
   }, [shipment]);
 
+  const handleRedistributeAllocations = useCallback(async () => {
+    if (!shipment) return;
+    setSaving(true); setError(null);
+    try {
+      await apiPostObject(`logistics/shipments/${shipment.id}/recalculate-distribution/`, {}, { tenantId: tid() });
+      const refreshed = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${shipment.id}/`, { tenantId: tid() });
+      setShipment(refreshed);
+      setShipmentForm({ ...refreshed });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [shipment]);
+
   const handleUpdateAllocation = useCallback(async (dealId: number, newAlloc: number) => {
     if (!shipment) return;
     setSaving(true); setError(null);
@@ -499,6 +514,20 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     }
   }, []);
 
+  /** نقل تكلفة النقل المحلي إلى فاتورة الشراء المحوّلة كرسم (T12-A5 — كان المسار غير مكشوف في أي شاشة) */
+  const handleImportLocalToInvoice = useCallback(async (id: number, invoiceId: number) => {
+    if (!window.confirm("نقل تكلفة هذا النقل المحلي إلى فاتورة الشراء كرسم؟ سيُحتسب ضمن تكلفة الفاتورة عند ترحيلها.")) return;
+    setSaving(true); setError(null);
+    try {
+      const res = await importLocalShipmentToInvoice(id, invoiceId);
+      setLocalShipments((prev) => prev.map((l) => l.id === id ? { ...l, purchase_invoice: invoiceId, purchase_invoice_number: res.invoice_number } : l));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
   // ── E: Payment helpers ──
   const reloadPayments = useCallback(async () => {
     if (!clearance) return;
@@ -550,14 +579,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const checkConvertedInvoice = useCallback(async () => {
     if (!shipment || !shipment.id) return;
     try {
-      const invoices = await apiGetList<{ id: number; invoice_number: string }>(
+      // الخادم يفلتر بـ shipment (أُضيف في task12) — أي فاتورة راجعة تخص هذه الشحنة
+      const invoices = await apiGetList<{ id: number; invoice_number: string; shipment?: number }>(
         "logistics/purchase-invoices/",
         { tenantId: tid(), query: { shipment: shipment.id } },
       );
-      const converted = invoices.find((inv: any) => {
-        const typed = inv as { converted_from_shipment?: number };
-        return typed.converted_from_shipment === shipment.id;
-      });
+      const converted = invoices.find((inv) => Number(inv.shipment) === Number(shipment.id)) || invoices[0];
       if (converted && converted.id) setConvertedPiId(converted.id);
     } catch { /* ignore */ }
   }, [shipment]);
@@ -671,7 +698,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     <div style={{ padding: "4px 8px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>الصفقات المرتبطة ({shipmentDeals.length})</h4>
-        <button type="button" className="aseel-toolbtn" onClick={() => void openLinkPicker()} disabled={!shipment || saving}>+ ربط صفقة</button>
+        <span style={{ display: "inline-flex", gap: 4 }}>
+          <button type="button" className="aseel-toolbtn" onClick={() => void handleRedistributeAllocations()} disabled={!shipment || saving || shipmentDeals.length === 0} title="توزيع تكلفة الشحن الدولي على الصفقات حسب الحجم/الوزن">⟳ إعادة توزيع الحصص</button>
+          <button type="button" className="aseel-toolbtn" onClick={() => void openLinkPicker()} disabled={!shipment || saving}>+ ربط صفقة</button>
+        </span>
       </div>
       {linkPickerOpen && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.3)" }}>
@@ -852,8 +882,17 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.status || "—"}</td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.is_posted ? "✓" : "—"}</td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>
-                {!ls.is_posted && (
-                  <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handlePostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }}>ترحيل</button>
+                {ls.purchase_invoice ? (
+                  <span className="aseel-text-soft" style={{ fontSize: "11px" }} title="نُقلت التكلفة إلى الفاتورة كرسم">في الفاتورة {ls.purchase_invoice_number || `#${ls.purchase_invoice}`}</span>
+                ) : (
+                  <span style={{ display: "inline-flex", gap: 4 }}>
+                    {!ls.is_posted && convertedPiId && (
+                      <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handleImportLocalToInvoice(ls.id, convertedPiId); }} disabled={saving} style={{ fontSize: "11px" }} title="نقل التكلفة إلى فاتورة الشراء كرسم — بدون قيد مستقل">إلى الفاتورة</button>
+                    )}
+                    {!ls.is_posted && (
+                      <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handlePostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }} title="قيد مصروف مستقل (مدين شحن محلي / دائن الناقل أو الصندوق). بعد الترحيل لا يمكن نقله إلى الفاتورة.">ترحيل</button>
+                    )}
+                  </span>
                 )}
               </td>
             </tr>
@@ -863,6 +902,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           )}
         </tbody>
       </table>
+      {localShipments.some((l) => !l.is_posted && !l.purchase_invoice) && (
+        <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", padding: "4px 0" }}>
+          {convertedPiId
+            ? "«إلى الفاتورة» يضيف التكلفة كرسم على فاتورة الشراء (يُرسمل مع التكلفة عند ترحيل الفاتورة). «ترحيل» ينشئ قيد مصروف مستقلاً — ولا يمكن بعده النقل إلى الفاتورة."
+            : "لمّا تُنشأ فاتورة الشراء (زر «تحويل إلى فاتورة شراء») يظهر هنا خيار نقل تكلفة النقل المحلي إليها كرسم بدل قيد مصروف مستقل."}
+        </p>
+      )}
       {localForm && (
         <div style={{ marginTop: 8, border: "1px solid var(--aseel-border, #ddd)", padding: 8, borderRadius: 4 }}>
           <h5 style={{ fontWeight: 600, marginBottom: 4, fontSize: "var(--aseel-fs-sm, 12px)" }}>
@@ -1010,7 +1056,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         if (convertedPiId) {
           window.open(`/purchase-invoices/${convertedPiId}`, "_blank");
         } else if (shipment?.id) {
-          window.open(`/purchase-invoices/new?shipment=${shipment.id}`, "_blank");
+          // كان يفتح /purchase-invoices/new?shipment= ولا أحد يقرأ البارامتر (T12-A4)
+          // — الآن يفتح مودال «استيراد من تخليص جمركي» مسبق الاختيار على هذه الشحنة.
+          window.open(`/purchase-invoices?import_shipment=${shipment.id}`, "_blank");
         }
       },
       disabled: !shipment?.id || shipment?.shipment_type === "transport" || saving,

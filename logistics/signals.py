@@ -15,6 +15,7 @@ from .models import (
     LogisticsShipment,
     LogisticsShipmentDeal,
     LogisticsClearance,
+    PurchaseInvoice,
 )
 from accounting.models import JournalHeader, JournalLine
 
@@ -256,6 +257,23 @@ def sync_deal_workflow_on_clearance(sender, instance, created, **kwargs):
 @receiver(post_delete, sender=LogisticsShipmentDeal)
 def resync_shipment_totals_on_deal_unlink(sender, instance, **kwargs):
     _resync_shipment_totals_from_deals(instance.shipment_id)
+
+
+@receiver(post_save, sender=PurchaseInvoice)
+def release_deal_on_purchase_invoice(sender, instance, created, **kwargs):
+    """حفظ فاتورة شراء مرتبطة بصفقة → الصفقة «مفرج عنها» (sw_released).
+
+    يكمل وعد الواجهة في DealStageControl — كانت المرحلة النهائية لا تُضبط من
+    أي مسار (task12 T12-A3). bulk .update() يتجاوز حارس FSM عمداً مثل بقية
+    التقدّم البرمجي، ثم نزامن أعمدة الكاش (status/order_status).
+    """
+    if not created or not instance.deal_id:
+        return
+    changed = LogisticsDeal.objects.filter(pk=instance.deal_id).exclude(
+        shipping_workflow_status="sw_released"
+    ).update(shipping_workflow_status="sw_released")
+    if changed:
+        recalculate_deal_payment_status(instance.deal_id)
 
 
 @receiver(post_save, sender=LogisticsShipment)

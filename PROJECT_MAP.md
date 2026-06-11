@@ -126,6 +126,52 @@ frontend_v2/
 - [ ] `default=1` على tenant FKs (chip مفتوح) · توحيد آلتي حالات الشيك (حذف change_status legacy) · SECRET_KEY الافتراضي في الريبو (يُفضَّل فرض env في الإنتاج).
 - _Backend **118 tests** · tsc 0 · vite build OK · eslint 0 — 2026-06-11._
 
+## [AUDIT — task12, 2026-06-11] (الاستيراد end-to-end + إدارة الشركات — مطابق لسكرينشوتات المالك)
+نطاق الجولة: مسار الاستيراد كاملاً (صفقة → شحنة → تخليص → نقل محلي → فاتورة شراء → بيع) + إدارة الشركات/الأعضاء. النسخ مثبتة وحديثة (2026-06): Django 6.0.1 / DRF 3.16 / React 19.2 / Vite 6.2 — لا تبعيات جديدة مطلوبة.
+
+### 🔴 Blockers — منطق مسار الاستيراد
+- **T12-A1 محدد المراحل مكسور (سكرينشوت ٤):** `DealStageControl` يعرض ٣ مراحل يدوية حرة («اختر واحدة من المراحل الثلاث الأولى يدوياً») بينما `LogisticsDeal.VALID_TRANSITIONS` (logistics/models.py:131) يسمح فقط بالتسلسل الصارم None→sw_mfg_start→… ⇒ اختيار المرحلة ٢ أو ٣ على صفقة جديدة يُرفض دائماً (400) والقائمة ترتد إلى «اختر المرحلة». السبب الجذري: تناقض عقد UI/FSM.
+- **T12-A2 إلغاء الصفقة لا يثبت:** PATCH status=Cancelled → `save()` → `_sync_legacy_status_fields` (models.py:211) يشتق status من `_STATUS_FROM_WORKFLOW` (None→'Open') ويدوس Cancelled بصمت ⇒ زر «إلغاء الصفقة» بلا أثر.
+- **T12-A3 المرحلة النهائية sw_released لا تُضبط أبداً:** grep كامل — لا يوجد أي كود يكتب sw_released رغم وعد الواجهة «عند حفظ فاتورة مرتبطة → مفرج عنها». الصفقات لا تصل نهاية الخط أبداً.
+- **T12-A4 زر «تحويل إلى فاتورة شراء» مسار ميت (ImportDocumentScreen):** يفتح `/purchase-invoices/new?shipment=X` لكن لا `PurchaseInvoice.tsx` ولا `InvoiceForm.tsx` يقرآن البارامتر ⇒ نموذج فارغ بلا أي ربط. كذلك `checkConvertedInvoice` يفلتر بـ`converted_from_shipment` الذي **لا يُكتب في أي مسار خادم**، و`get_queryset` لا يدعم فلتر `shipment` أصلاً ⇒ اختصار «فاتورة #N» لا يظهر أبداً. المسار الفعلي الوحيد: مودال «استيراد من تخليص جمركي» في قائمة الفواتير.
+- **T12-A5 النقل المحلي خارج نسب الفاتورة:** `build_purchase_invoice_row` يجمع شحنة+تخليص فقط؛ سجلات `LocalShipment` لا تدخل إلا يدوياً عبر `import-to-invoice` غير المكشوف في أي شاشة، وزر «ترحيل» المعروض في تبويب النقل المحلي **يقفل** import-to-invoice لاحقاً («لا يمكن استيراد شحن مُرحَّل»). ⇒ خط البيانات تخليص→نقل محلي→فاتورة مقطوع عملياً في UI.
+
+### 🟠 عالية
+- **T12-B1 حصص الشحن صفر (سكرينشوت ١):** `add_deal` يُنشئ `LogisticsShipmentDeal` بدون استدعاء `redistribute_shipment_deal_allocations` ⇒ «مجموع الحصص 0.00 مقابل إجمالي 781.10». و`remove_deal` لا يعيد التوزيع كذلك.
+- **T12-B2 تسريب عابر للشركات في add_deal:** `LogisticsDeal.objects.get(pk=deal_id)` بلا فلتر tenant — يمكن ربط صفقة شركة أخرى بشحنتك.
+- **T12-B3 TenantViewSet بلا حواجز تعديل/حذف:** create فقط مُسوَّر؛ أي عضو (حتى viewer على مستوى الشركة) يستطيع إعادة تسمية الشركة أو **حذفها هرد-دليت** (destroy الموروث). لا يوجد أي endpoint لإدارة الأعضاء (إضافة/دور/إزالة) رغم وجود ROLE_CHOICES (manager/accountant/staff/viewer) — ولا أي UI (CompanySwitcher = إنشاء/تبديل فقط).
+- **T12-B4 ترقيم الصفقات client-side:** `getNextDealNumber` يحسب max(D-n)+1 في المتصفح ⇒ سباق بين مستخدمين يصطدم بـ`unique(tenant,ref_number)` ويرجع 500.
+
+### 🟡 متوسطة — UX
+- **T12-C1 حقل المورد يعرض #45 خام (سكرينشوت ٣):** DealForm.tsx:865 يعرض `#${id}` بدل الاسم؛ والاسم في حقل منفصل «الاسم» — ازدواجية مع SupplierSearch داخل تبويب البيانات الأساسية.
+- **T12-C2 تناقض رقم الصفقة الجديد (سكرينشوت ٢):** الهيدر «— جديدة —» بينما شريط الحالة والتبويب يعرضان D-0001 المولّد مسبقاً.
+- **T12-C3 شارة «مزامنة نشطة / متصل» (سكرينشوت ٥):** نص مضلل في وضع الخمول (لا مزامنة جارية) — يجب «متصل» فقط.
+- **T12-C4 حالة completed بلا تسمية في DealForm:** `getOperationalStatus('completed')` يسقط إلى «أولية».
+- **T12-C5 تخطيط الصناديق المستقلة التمرير:** متبقٍ على مستوى المنصة (أُصلح جزئياً في task11-M6) — يتطلب جولة تصميم مخصصة بمتصفح حي؛ موثق هنا كـ pending وليس ضمن نطاق الكود الأعمى لهذه الجولة.
+
+### مُدقَّق وسليم (لا تغيير)
+- إشارات تقدم المراحل التلقائية (ربط شحنة→sw_wait_arrival، إنشاء تخليص→sw_wait_clearance) تعمل بـbulk update مقصود يتجاوز الحارس ✓ · محرك landed-cost (Decimal + penny-balancing + dual share value/volume) سليم رياضياً ✓ · استيراد التخليص يفرض اكتمال دفع الشحن بالدولار مع تجاوز مدير ✓ · exception handler يحول DjangoValidationError إلى 400 برسالة عربية ✓ · عزل tenant على Deal/Shipment/Clearance/PI viewsets (عدا B2) ✓.
+
+### [MILESTONES — task12]
+1. **M1 آلة مراحل الصفقة:** سماح حر بين المراحل اليدوية الثلاث (+من None)، حارس إلغاء يثبّت Cancelled، sw_released عند إنشاء فاتورة مرتبطة بالصفقة، تسمية completed. ✅ قبول: اختيار أي مرحلة يدوية على صفقة جديدة يثبت ويُعاد تحميله؛ الإلغاء يبقى بعد refetch؛ استيراد فاتورة يجعل الصفقة «مفرج عنها». اختبارات backend.
+2. **M2 حصص الشحن:** إعادة توزيع تلقائي في add_deal/remove_deal + tenant scoping + زر إعادة توزيع في تبويب الصفقات. ✅ قبول: ربط صفقتين ⇒ مجموع الحصص = إجمالي الشحن.
+3. **M3 خط النسب إلى الفاتورة:** زر التحويل يفتح مودال الاستيراد مُسبق الاختيار على تخليص الشحنة؛ كتابة converted_from_shipment + فلتر shipment في القائمة (اختصار «فاتورة #N» يعمل)؛ كشف «استيراد إلى الفاتورة» للنقل المحلي غير المرحّل مع تلميح ترتيب العمليات. ✅ قبول: من شاشة الاستيراد يمكن إنشاء الفاتورة ورؤيتها، ونقل تكلفة النقل المحلي إليها كرسم.
+4. **M4 إدارة الشركة والأعضاء:** manager-only على تعديل الشركة، منع الحذف الهرد، endpoints أعضاء (list/add/change-role/remove مع حماية آخر مدير)، UI: إعادة تسمية + إدارة أعضاء من CompanySwitcher. ✅ قبول: عضو staff لا يعدّل/يحذف؛ مدير يضيف عضواً بدور ويظهر فوراً.
+5. **M5 ترقيم خادمي + UX صغيرة:** توليد ref_number في perform_create عند الغياب/التكرار؛ عرض اسم المورد؛ توحيد عرض رقم الصفقة الجديد؛ نص الشارة «متصل». ✅ قبول: tsc/build/eslint نظيف + اختبارات الترقيم.
+
+### [EXECUTION — task12, 2026-06-11] (كل المعالم منفّذة)
+- **M1:** `MANUAL_WF_STAGES` + توسيع `VALID_TRANSITIONS` (حر بين الثلاث اليدوية، sw_wait_intl_ship→sw_wait_arrival يبقى) · حارس Cancelled في `_sync_legacy_status_fields` · إشارة `release_deal_on_purchase_invoice` (PI مرتبطة بصفقة → sw_released + مزامنة الكاش) · DealForm: حالة completed «مكتملة — مفرج عنها».
+- **M2:** add_deal/remove_deal يستدعيان `redistribute_shipment_deal_allocations` + `tenant=shipment.tenant` في جلب الصفقة · زر «⟳ إعادة توزيع الحصص» في تبويب الصفقات (ImportDocumentScreen).
+- **M3:** زر التحويل → `/purchase-invoices?import_shipment=N` → المودال يفتح مسبق الاختيار (prop `initialShipmentId`) · `converted_from_shipment` يُكتب في `import_invoices_from_clearance` · فلتر `?shipment=` في PurchaseInvoiceViewSet · تبويب النقل المحلي: زر «إلى الفاتورة» (import-to-invoice) عند وجود فاتورة محوّلة + تلميح ترتيب «إلى الفاتورة قبل الترحيل» + عرض «في الفاتورة X» بعد النقل.
+- **M4:** TenantViewSet: update/partial_update مدير فقط، destroy محظور (400) · `GET|POST /tenants/companies/{id}/members/` + `members/change-role/` + `members/remove/` مع حماية آخر مدير · `CompanyManagementModal` (إعادة تسمية + جدول أعضاء + إضافة بدور) من زر «إدارة الشركة» في CompanySwitcher · تسمية دور «مستعرض» أُضيفت.
+- **M5:** `perform_create` للصفقات يولّد/يصحّح `D-####` (يشمل soft-deleted) و`ref_number` صار اختيارياً بالـ serializer · حقل المورد يعرض الاسم (وID في tooltip) · رقم الصفقة الجديد «D-000N (جديدة)» بدل «— جديدة —» · شارة المزامنة «متصل» عند الخمول.
+- **تحقق:** backend **140 tests** (118 سابقة + 22 جديدة: test_deal_workflow_machine 11 + test_company_admin 11) · tsc 0 · vite build OK · eslint 0 errors. لم يُتحقق في متصفح حي (يتطلب باك-إند بيانات) — فحص ما بعد النشر: محدد المراحل على صفقة جديدة، إلغاء صفقة، ربط صفقتين بشحنة (الحصص)، زر التحويل من شاشة الاستيراد، «إدارة الشركة» للمدير ولموظف.
+
+### [ORPHANS & PENDING — task12 المتبقي]
+- [ ] T12-C5 توحيد تمرير الصفحة (الصناديق المستقلة التمرير) — جولة تصميم بمتصفح حي على الشاشات الفعلية، لا تغيير أعمى.
+- [ ] الفواتير القديمة (قبل task12) بلا `converted_from_shipment` — الاختصار يعمل لها عبر fallback مطابقة `shipment` في checkConvertedInvoice (لا backfill مطلوب).
+- (موروث من R2: VAT الإشعار الدائن · سياسة الكفالة · `default=1` على tenant FKs · حذف change_status القديمة · فرض SECRET_KEY من env.)
+
 ## [TASK11 — verification summary 2026-06-10]
 - **M1:** `bridge/tests/test_mapper_isolation.py` 8 اختبارات (عزل + soft-delete + فلتر boolean + عضوية).
 - **M3:** `accounting/tests/test_journal_tenant_scoping.py` 3 اختبارات.

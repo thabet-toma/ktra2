@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useCompany, Tenant } from "../../contexts/CompanyContext";
-import { Building, Plus, ChevronDown, Check, Loader2 } from "lucide-react";
+import { Building, Plus, ChevronDown, Check, Loader2, Settings2 } from "lucide-react";
+import { CompanyManagementModal, ROLE_LABELS } from "./CompanyManagementModal";
 
 export const CompanySwitcher: React.FC = () => {
-  const { companies, currentCompany, switchCompany, createCompany, loading } = useCompany();
+  const { companies, currentCompany, switchCompany, createCompany, loading, refreshCompanies } = useCompany();
   const [isOpen, setIsOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [showManageModal, setShowManageModal] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +94,7 @@ export const CompanySwitcher: React.FC = () => {
                       {membership.tenant.CompanyName}
                     </span>
                     <span className="text-[11px] opacity-60">
-                      الدور: {membership.role === "manager" ? "مدير" : membership.role === "accountant" ? "محاسب" : "موظف"}
+                      الدور: {ROLE_LABELS[membership.role] || membership.role}
                     </span>
                   </div>
                   {isActive && <Check className="w-4 h-4 text-[var(--aseel-accent)]" />}
@@ -101,7 +103,21 @@ export const CompanySwitcher: React.FC = () => {
             })}
           </div>
 
-          <div className="border-t border-[var(--aseel-border-soft)] p-1.5 bg-[var(--aseel-panel)]">
+          <div className="border-t border-[var(--aseel-border-soft)] p-1.5 bg-[var(--aseel-panel)] space-y-1.5">
+            {currentCompany && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowManageModal(true);
+                  setIsOpen(false);
+                }}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-bold rounded-lg border border-[var(--aseel-border)] hover:bg-[var(--aseel-panel-hover)] transition-colors duration-150 focus:outline-none"
+                style={{ color: "var(--aseel-ink)" }}
+              >
+                <Settings2 className="w-3.5 h-3.5" />
+                <span>إدارة الشركة (الاسم والأعضاء)</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -115,6 +131,17 @@ export const CompanySwitcher: React.FC = () => {
             </button>
           </div>
         </div>
+      )}
+
+      {/* Company Management Modal — task12 M4 */}
+      {showManageModal && currentCompany && (
+        <CompanyManagementModal
+          isOpen={showManageModal}
+          onClose={() => setShowManageModal(false)}
+          tenant={currentCompany}
+          myRole={companies.find((m) => m.tenant.TenantID === currentCompany.TenantID)?.role || "staff"}
+          onChanged={refreshCompanies}
+        />
       )}
 
       {/* Create Company Modal */}

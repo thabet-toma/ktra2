@@ -66,6 +66,7 @@ type OperationalStatus =
   | "shipping_preparation"
   | "shipping_in_progress"
   | "shipped"
+  | "completed"
   | "cancelled";
 
 type PaymentStatus =
@@ -615,17 +616,18 @@ export const DealForm: React.FC<DealFormProps> = ({
     if (status === "shipping_preparation") return "shipping_preparation";
     if (status === "shipping_in_progress") return "shipping_in_progress";
     if (status === "shipped") return "shipped";
+    if (status === "completed") return "completed";
     if (status === "cancelled") return "cancelled";
     return "initial";
   };
 
   const getOperationalStatusText = (status: OperationalStatus): string => {
-    const m: Record<OperationalStatus, string> = { initial: "أولية", manufacturing_started: "قيد التصنيع", production_completed: "تم التصنيع", shipping_preparation: "تجهيز الشحن", shipping_in_progress: "جاري الشحن", shipped: "تم الشحن", cancelled: "ملغاة" };
+    const m: Record<OperationalStatus, string> = { initial: "أولية", manufacturing_started: "قيد التصنيع", production_completed: "تم التصنيع", shipping_preparation: "تجهيز الشحن", shipping_in_progress: "جاري الشحن", shipped: "تم الشحن", completed: "مكتملة — مفرج عنها", cancelled: "ملغاة" };
     return m[status] || status;
   };
 
   const getOperationalStatusStyles = (status: OperationalStatus): string => {
-    const s: Record<OperationalStatus, string> = { initial: "aseel-bg-panel aseel-text-ink aseel-border-soft", manufacturing_started: "aseel-bg-accent-bg aseel-text-accent aseel-border-accent", production_completed: "bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]", shipping_preparation: "aseel-bg-panel aseel-text-ink aseel-border-soft", shipping_in_progress: "bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]", shipped: "bg-green-50 text-green-700 aseel-border-soft", cancelled: "aseel-bg-panel aseel-text-state aseel-border-soft" };
+    const s: Record<OperationalStatus, string> = { initial: "aseel-bg-panel aseel-text-ink aseel-border-soft", manufacturing_started: "aseel-bg-accent-bg aseel-text-accent aseel-border-accent", production_completed: "bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]", shipping_preparation: "aseel-bg-panel aseel-text-ink aseel-border-soft", shipping_in_progress: "bg-[var(--color-surface-2)] text-[var(--color-primary)] border-[var(--color-border)]", shipped: "bg-green-50 text-green-700 aseel-border-soft", completed: "bg-green-50 text-green-700 aseel-border-soft", cancelled: "aseel-bg-panel aseel-text-state aseel-border-soft" };
     return s[status] || s["initial"];
   };
 
@@ -856,13 +858,13 @@ export const DealForm: React.FC<DealFormProps> = ({
         actions={toolbarActions}
         header={
           <>
-            {fld("رقم الصفقة", <input className="aseel-input" readOnly value={formData.id ? `#${formData.dealNumber || formData.id}` : "— جديدة —"} />)}
+            {fld("رقم الصفقة", <input className="aseel-input" readOnly value={formData.dealNumber ? (formData.id ? formData.dealNumber : `${formData.dealNumber} (جديدة)`) : "— جديدة —"} />)}
             {fld("التاريخ", <input className="aseel-input" type="date" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.dealDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, dealDate: e.target.value }))} />)}
             {fld("الساعة", <input className="aseel-input" type="time" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).transactionTime || ""} onChange={(e) => setFormData(prev => ({ ...prev, transactionTime: e.target.value }) as any)} />)}
             {fld("تاريخ ثاني", <input className="aseel-input" type="date" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).secondDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, secondDate: e.target.value }) as any)} />)}
             {fld("تاريخ الاستحقاق", <input className="aseel-input" type="date" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.dueDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, dueDate: e.target.value }))} />)}
             {fld("المورد", <div className="aseel-pickfield">
-              <input className="aseel-input aseel-input--hl" data-aseel-field="supplier" data-aseel-key="1" readOnly disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={selectedSupplier ? `#${selectedSupplier.id}` : ""} placeholder="+ للفهرس" onClick={() => { if (formData.status !== 'shipped' && formData.status !== 'cancelled') setShowSupplierPicker(true); }} />
+              <input className="aseel-input aseel-input--hl" data-aseel-field="supplier" data-aseel-key="1" readOnly disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={selectedSupplier?.tradeName || selectedSupplier?.alias || formData.supplierName || formData.factoryName || (formData.supplierId ? `#${formData.supplierId}` : "")} title={formData.supplierId ? `معرف المورد: ${formData.supplierId}` : undefined} placeholder="+ للفهرس" onClick={() => { if (formData.status !== 'shipped' && formData.status !== 'cancelled') setShowSupplierPicker(true); }} />
               <button type="button" className="aseel-ellipsis" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} onClick={() => setShowSupplierPicker(true)} title="فهرس الموردين (+)">…</button>
             </div>)}
             {fld("الاسم", <input className="aseel-input" readOnly value={selectedSupplier?.tradeName || formData.factoryName || ""} />)}

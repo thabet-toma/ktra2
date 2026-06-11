@@ -243,6 +243,117 @@ class TenantViewSet(viewsets.ModelViewSet):
             raise DRFValidationError({"detail": e.messages if hasattr(e, "messages") else str(e)})
         return Response(TenantSerializer(tenant).data, status=status.HTTP_201_CREATED)
 
+    # ── إدارة الشركة (task12 M4) ──
+    def _require_company_manager(self, request, tenant):
+        user = request.user
+        if user.is_superuser:
+            return
+        if not UserCompanyMembership.objects.filter(user=user, tenant=tenant, role="manager").exists():
+            raise PermissionDenied("فقط مدير الشركة يمكنه تنفيذ هذا الإجراء.")
+
+    def update(self, request, *args, **kwargs):
+        """تعديل بيانات الشركة (الاسم…) — كان مفتوحاً لأي عضو (T12-B3)."""
+        self._require_company_manager(request, self.get_object())
+        return super().update(request, *args, **kwargs)
+
+    def partial_update(self, request, *args, **kwargs):
+        self._require_company_manager(request, self.get_object())
+        return super().partial_update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        """حماية البيانات: لا حذف فعلي للشركات من الـ API (كان hard-delete مفتوحاً لأي عضو)."""
+        raise DRFValidationError({"detail": "حذف الشركة غير متاح من النظام. تواصل مع إدارة المنصة."})
+
+    @staticmethod
+    def _member_payload(m):
+        return {
+            "membership_id": m.id,
+            "user_id": m.user_id,
+            "username": m.user.username,
+            "email": m.user.email or "",
+            "full_name": (f"{m.user.first_name} {m.user.last_name}").strip(),
+            "role": m.role,
+            "is_default": m.is_default,
+            "created_at": m.created_at,
+        }
+
+    @action(detail=True, methods=["get", "post"], url_path="members")
+    def members(self, request, pk=None):
+        """GET: قائمة أعضاء الشركة (لأي عضو). POST: إضافة عضو بدور (مدير فقط).
+
+        body (POST): {"username_or_email": "...", "role": "manager|accountant|staff|viewer"}
+        """
+        tenant = self.get_object()
+        if request.method == "GET":
+            qs = UserCompanyMembership.objects.filter(tenant=tenant).select_related("user").order_by("user__username")
+            return Response([self._member_payload(m) for m in qs])
+
+        self._require_company_manager(request, tenant)
+        from django.contrib.auth.models import User as AuthUser
+        from django.db.models import Q
+
+        ident = str(request.data.get("username_or_email") or "").strip()
+        role = str(request.data.get("role") or "staff").strip()
+        valid_roles = {r for r, _ in UserCompanyMembership.ROLE_CHOICES}
+        if role not in valid_roles:
+            raise DRFValidationError({"role": f"دور غير صالح. المسموح: {sorted(valid_roles)}"})
+        if not ident:
+            raise DRFValidationError({"username_or_email": "اسم المستخدم أو البريد مطلوب."})
+        target = AuthUser.objects.filter(Q(username__iexact=ident) | Q(email__iexact=ident)).first()
+        if not target:
+            raise DRFValidationError({"username_or_email": "لا يوجد مستخدم بهذا الاسم/البريد. يجب أن يسجّل حسابه أولاً."})
+        membership, created = UserCompanyMembership.objects.get_or_create(
+            user=target, tenant=tenant, defaults={"role": role}
+        )
+        if not created:
+            raise DRFValidationError({"username_or_email": "المستخدم عضو في الشركة بالفعل."})
+        return Response(self._member_payload(membership), status=status.HTTP_201_CREATED)
+
+    def _get_member_or_400(self, tenant, request):
+        mid = request.data.get("membership_id")
+        try:
+            mid = int(mid)
+        except (TypeError, ValueError):
+            raise DRFValidationError({"membership_id": "membership_id مطلوب."})
+        m = UserCompanyMembership.objects.filter(id=mid, tenant=tenant).select_related("user").first()
+        if not m:
+            raise DRFValidationError({"membership_id": "العضوية غير موجودة في هذه الشركة."})
+        return m
+
+    @staticmethod
+    def _assert_not_last_manager(tenant, membership):
+        if membership.role != "manager":
+            return
+        others = UserCompanyMembership.objects.filter(tenant=tenant, role="manager").exclude(id=membership.id)
+        if not others.exists():
+            raise DRFValidationError({"detail": "لا يمكن إزالة/تخفيض آخر مدير في الشركة."})
+
+    @action(detail=True, methods=["post"], url_path="members/change-role")
+    def change_member_role(self, request, pk=None):
+        """body: {"membership_id": n, "role": "..."} — مدير فقط، مع حماية آخر مدير."""
+        tenant = self.get_object()
+        self._require_company_manager(request, tenant)
+        m = self._get_member_or_400(tenant, request)
+        role = str(request.data.get("role") or "").strip()
+        valid_roles = {r for r, _ in UserCompanyMembership.ROLE_CHOICES}
+        if role not in valid_roles:
+            raise DRFValidationError({"role": f"دور غير صالح. المسموح: {sorted(valid_roles)}"})
+        if role != "manager":
+            self._assert_not_last_manager(tenant, m)
+        m.role = role
+        m.save(update_fields=["role"])
+        return Response(self._member_payload(m))
+
+    @action(detail=True, methods=["post"], url_path="members/remove")
+    def remove_member(self, request, pk=None):
+        """body: {"membership_id": n} — مدير فقط، مع حماية آخر مدير."""
+        tenant = self.get_object()
+        self._require_company_manager(request, tenant)
+        m = self._get_member_or_400(tenant, request)
+        self._assert_not_last_manager(tenant, m)
+        m.delete()
+        return Response({"ok": True})
+
     @action(detail=False, methods=["get"], url_path="my-companies")
     def my_companies(self, request):
         user = request.user

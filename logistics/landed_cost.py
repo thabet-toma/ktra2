@@ -981,6 +981,8 @@ def import_invoices_from_clearance(
                 partner_id=payload['partner'],
                 deal_id=payload['deal'],
                 shipment_id=payload['shipment'],
+                # كان لا يُكتب أبداً فاختصار «فاتورة #N» في شاشة الاستيراد لا يظهر (T12-A4)
+                converted_from_shipment_id=payload['shipment'],
                 clearance_id=payload['clearance'],
                 currency_id=payload['currency'],
                 exchange_rate=payload['exchange_rate'],

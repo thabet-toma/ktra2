@@ -370,6 +370,8 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
         model = LogisticsDeal
         fields = '__all__'
         read_only_fields = ['id', 'tenant', 'created_by', 'is_posted', 'journal', 'total_amount']
+        # الترقيم خادمي عند الغياب/التكرار (T12-B4) — perform_create يولّد D-####
+        extra_kwargs = {'ref_number': {'required': False, 'allow_blank': True}}
 
     def get_quote_images(self, obj):
         try:
