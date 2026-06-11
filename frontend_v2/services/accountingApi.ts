@@ -1,14 +1,22 @@
 /**
  * محاسبة SQL عبر Django REST — نفس مسارات frontend v1 (MUI).
  */
+import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
+
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const ACC = `${API_BASE}/accounting`;
 
 const headers = (): HeadersInit => {
   const token = localStorage.getItem("token");
+  // task11 R2: بدون X-Tenant-Id كانت كل نداءات المحاسبة تعتمد على
+  // auto-resolve أحادي الشركة — لحظة وجود شركة ثانية يتعطل ويرجع الباك-إند
+  // قوائم فارغة (شجرة حسابات «صفر» التي رآها المالك).
+  const branchId = resolveBranchId();
   return {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Token ${token}` } : {}),
+    "X-Tenant-Id": String(resolveTenantId()),
+    ...(branchId ? { "X-Branch-Id": String(branchId) } : {}),
   };
 };
 
@@ -176,6 +184,17 @@ export const accountingApi = {
       body: JSON.stringify(body),
     });
     await handle(res, "createCheque");
+    return res.json();
+  },
+
+  /** task11 R2-A3: تحويل حالة الشيك عبر آلة الانتقالات + القيد المحاسبي */
+  transferCheque: async (id: number, body: Record<string, unknown>) => {
+    const res = await fetch(`${ACC}/cheques/${id}/transfer/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "transferCheque");
     return res.json();
   },
 

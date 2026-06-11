@@ -13,8 +13,9 @@ const CHEQUE_STATUSES = [
   { v: "Draft", l: "مسودة" },
   { v: "Under_Collection", l: "قيد التحصيل" },
   { v: "Collected", l: "محصّل" },
-  { v: "Bounced", l: "مرتجع" },
-  { v: "Returned", l: "معاد" },
+  { v: "Bounced", l: "مرتد" },
+  { v: "Returned", l: "معاد للعميل" },
+  { v: "Settled", l: "مسوّى نقداً" },
 ];
 
 const DIRECTIONS = [
@@ -50,11 +51,30 @@ export const AccountingChequesPage: React.FC = () => {
   const [filterDueTo, setFilterDueTo] = useState("");
   const [filterPartner, setFilterPartner] = useState("");
 
-  // Transfer dialog
+  // Transfer dialog — task11 R2-A3: الحركة (وليست الحالة) هي ما يُرسل للسيرفر،
+  // فيمر التحويل بآلة الانتقالات ويُرحَّل القيد المحاسبي المرافق.
   const [transferCheque, setTransferCheque] = useState<ChequeDto | null>(null);
-  const [newStatus, setNewStatus] = useState("");
+  const [newMovement, setNewMovement] = useState("");
   const [transferDate, setTransferDate] = useState(new Date().toISOString().split("T")[0]);
   const [transferNotes, setTransferNotes] = useState("");
+
+  const CHEQUE_MOVES: Record<string, { v: string; l: string }[]> = {
+    Draft: [
+      { v: "deposit", l: "إيداع للتحصيل (بنك)" },
+      { v: "withdraw", l: "تحصيل مباشر" },
+    ],
+    Under_Collection: [
+      { v: "collect", l: "تحصيل — دخل الصندوق/البنك" },
+      { v: "bounce", l: "ارتداد — إعادة الذمم على العميل" },
+    ],
+    Bounced: [
+      { v: "return_to_customer", l: "إعادة الورقة للعميل" },
+      { v: "settle", l: "تسوية نقدية" },
+    ],
+    Collected: [],
+    Returned: [],
+    Settled: [],
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,14 +148,12 @@ export const AccountingChequesPage: React.FC = () => {
   };
 
   const doTransfer = async () => {
-    if (!transferCheque || !newStatus) return;
+    if (!transferCheque || !newMovement) return;
     try {
-      await accountingApi.updateCheque(transferCheque.id, {
-        ...transferCheque,
-        status: newStatus,
-        notes: transferNotes
-          ? `${transferCheque.notes || ""}\n[${transferDate}] ${transferNotes}`.trim()
-          : transferCheque.notes,
+      await accountingApi.transferCheque(transferCheque.id, {
+        movement_type: newMovement,
+        movement_date: transferDate,
+        notes: transferNotes,
       });
       setTransferCheque(null);
       setTransferNotes("");
@@ -203,7 +221,7 @@ export const AccountingChequesPage: React.FC = () => {
           onClick={(e) => {
             e.stopPropagation();
             setTransferCheque(r);
-            setNewStatus(r.status);
+            setNewMovement("");
             setTransferDate(new Date().toISOString().split("T")[0]);
             setTransferNotes("");
           }}
@@ -389,10 +407,18 @@ export const AccountingChequesPage: React.FC = () => {
                 الحالة الحالية: <strong>{CHEQUE_STATUSES.find((s) => s.v === transferCheque.status)?.l || transferCheque.status}</strong>
               </div>
               <div className="aseel-field">
-                <label className="aseel-field-label">الحالة الجديدة</label>
-                <select className="aseel-input" value={newStatus} onChange={(e) => setNewStatus(e.target.value)}>
-                  {CHEQUE_STATUSES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
+                <label className="aseel-field-label">الحركة</label>
+                <select className="aseel-input" value={newMovement} onChange={(e) => setNewMovement(e.target.value)}>
+                  <option value="">— اختر الحركة —</option>
+                  {(CHEQUE_MOVES[transferCheque.status] || []).map((m) => (
+                    <option key={m.v} value={m.v}>{m.l}</option>
+                  ))}
                 </select>
+                {(CHEQUE_MOVES[transferCheque.status] || []).length === 0 && (
+                  <span style={{ fontSize: "0.75rem", color: "var(--aseel-ink-soft)" }}>
+                    حالة نهائية — لا حركات متاحة من «{CHEQUE_STATUSES.find((s) => s.v === transferCheque.status)?.l}»
+                  </span>
+                )}
               </div>
               <div className="aseel-field">
                 <label className="aseel-field-label">تاريخ التحويل</label>

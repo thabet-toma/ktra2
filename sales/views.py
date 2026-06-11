@@ -142,9 +142,12 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             return Response({"error": "لا يوجد شركة (tenant)."}, status=status.HTTP_400_BAD_REQUEST)
         try:
             with transaction.atomic():
+                dup_branch = get_branch(request, tenant) or src.branch
                 inv = SalesInvoice.objects.create(
                     tenant=tenant,
-                    invoice_number=next_invoice_number(tenant.TenantID, getattr(src, "book_number", 0)),
+                    branch=dup_branch,
+                    invoice_number=next_invoice_number(
+                        tenant.TenantID, getattr(src, "book_number", 0), branch=dup_branch),
                     customer=src.customer,
                     invoice_date=date.today(),
                     due_date=src.due_date,

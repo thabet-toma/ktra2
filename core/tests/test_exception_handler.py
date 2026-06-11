@@ -8,6 +8,11 @@ from core.exception_handler import custom_exception_handler
 
 
 class _RaisingView(APIView):
+    # موضوع الاختبار هو exception handler لا المصادقة — الافتراضي العام أصبح
+    # IsAuthenticated (task11 R2-B) فنعفي هذه الـ view التجريبية صراحةً.
+    authentication_classes = []
+    permission_classes = []
+
     def get(self, request):
         raise DjangoVE("هذا حقل مطلوب")
 

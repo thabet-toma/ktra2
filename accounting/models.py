@@ -196,6 +196,7 @@ class Cheque(models.Model):
         ('Collected', 'Collected'),
         ('Bounced', 'Bounced'),
         ('Returned', 'Returned'),
+        ('Settled', 'Settled'),
     ]
 
     id = models.AutoField(primary_key=True, db_column='ChequeID')

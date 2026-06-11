@@ -164,17 +164,26 @@ def recalculate_invoice_amounts(invoice: SalesInvoice, lines: list[SalesInvoiceL
     disc = Decimal(str(invoice.invoice_discount or 0))
     if sub > 0 and disc > sub:
         disc = sub
-    ratio = ((sub - disc) / sub) if sub > 0 else Decimal(0)
-    excl_after = (sub - disc).quantize(DEC) if sub > 0 else Decimal("0.00")
 
+    # task11 R2-A1: الخصم النسبي يُوزَّع على الأسطر مثل الخصم المقطوع.
+    # سابقاً كان يُطبّق على الترويسة فقط ⇒ الأسطر (وقيد الإيراد) أعلى من
+    # الإجمالي ⇒ قيد غير متوازن يفشل ترحيله، والضريبة محسوبة قبل الخصم
+    # النسبي (قاعدة VAT خاطئة). الآن: نسبة موحّدة = بعد الخصمين معاً،
+    # والضريبة تُحسب بعد كل الخصومات.
     pct = Decimal(str(getattr(invoice, "discount_percent", 0) or 0))
-    if pct > 0:
-        excl_after = (excl_after * (Decimal("100") - pct) / Decimal("100")).quantize(DEC)
+    if pct < 0:
+        pct = Decimal("0")
+    if pct > 100:
+        pct = Decimal("100")
+    effective = (sub - disc) * (Decimal("100") - pct) / Decimal("100") if sub > 0 else Decimal("0")
+    ratio = (effective / sub) if sub > 0 else Decimal(0)
 
+    excl_sum = Decimal("0.00")
     tax_sum = Decimal("0.00")
     for line, orig_n in pairs:
         adj_net = (orig_n * ratio).quantize(DEC) if sub > 0 else Decimal("0.00")
         line.line_total_excl_tax = adj_net
+        excl_sum += adj_net
         if line.tax_rate_id and line.tax_rate:
             t = (adj_net * Decimal(str(line.tax_rate.rate)) / Decimal("100")).quantize(DEC)
         else:
@@ -182,9 +191,10 @@ def recalculate_invoice_amounts(invoice: SalesInvoice, lines: list[SalesInvoiceL
         line.line_tax_amount = t
         tax_sum += t
 
-    invoice.subtotal_excl_tax = excl_after
+    # الترويسة = مجموع الأسطر بالقرش — يضمن توازن القيد دائماً بلا انحراف تقريب
+    invoice.subtotal_excl_tax = excl_sum.quantize(DEC)
     invoice.tax_amount = tax_sum.quantize(DEC)
-    invoice.grand_total = (excl_after + invoice.tax_amount).quantize(DEC)
+    invoice.grand_total = (invoice.subtotal_excl_tax + invoice.tax_amount).quantize(DEC)
 
 
 def _resolve_ar_account(invoice: SalesInvoice) -> Account:
@@ -1662,11 +1672,19 @@ def build_vat_statement(
         total_sales_vat = Decimal('0.00')
         total_purchase_vat = Decimal('0.00')
 
+        # task11 R2-A2: المراجيع تُخصم لا تُضاف — مرجع البيع يخفّض ضريبة
+        # المخرجات ومرجع الشراء يخفّض ضريبة المدخلات (كانت تُجمع موجبة
+        # فيتضخم الكشف من الجهتين).
         for inv in invoices:
-            if inv.invoice_kind in (SalesInvoice.INVOICE_KIND_SALE, SalesInvoice.INVOICE_KIND_SALE_RETURN):
-                total_sales_vat += Decimal(str(inv.tax_amount or 0))
-            else:
-                total_purchase_vat += Decimal(str(inv.tax_amount or 0))
+            amt = Decimal(str(inv.tax_amount or 0))
+            if inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE:
+                total_sales_vat += amt
+            elif inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+                total_sales_vat -= amt
+            elif inv.invoice_kind == SalesInvoice.INVOICE_KIND_PURCHASE:
+                total_purchase_vat += amt
+            else:  # purchase_return
+                total_purchase_vat -= amt
 
         net_vat = (total_sales_vat - total_purchase_vat).quantize(Decimal('0.01'))
         stmt_no = f"VAT-{next_document_number(tenant_id, 'vat_statement')}"

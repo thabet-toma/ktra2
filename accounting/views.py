@@ -123,6 +123,41 @@ class ChequeViewSet(viewsets.ModelViewSet):
             raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
         serializer.save(tenant=tenant)
 
+    def update(self, request, *args, **kwargs):
+        # task11 R2-A3: تغيير الحالة بـ PATCH خام كان يتجاوز آلة الانتقالات
+        # والقيود المحاسبية — الحالة تتغير حصراً عبر transfer/.
+        instance = self.get_object()
+        new_status = request.data.get("status")
+        if new_status and str(new_status) != instance.status:
+            return Response(
+                {"detail": "تغيير حالة الشيك يتم عبر «تحويل» (POST /cheques/{id}/transfer/) "
+                           "حتى يُسجَّل القيد المحاسبي وحركة الشيك."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().update(request, *args, **kwargs)
+
+    @action(detail=True, methods=["post"], url_path="transfer")
+    def transfer(self, request, pk=None):
+        """تحويل حالة الشيك مع القيد المحاسبي (collect/bounce/settle/...)."""
+        from .services import transfer_cheque
+        cheque = self.get_object()
+        movement_type = (request.data.get("movement_type") or "").strip()
+        if not movement_type:
+            raise ValidationError({"movement_type": "نوع الحركة مطلوب."})
+        try:
+            cheque = transfer_cheque(
+                cheque.pk,
+                movement_type,
+                user=request.user,
+                notes=(request.data.get("notes") or "")[:500],
+                account_id=request.data.get("account_id"),
+                movement_date=request.data.get("movement_date") or None,
+            )
+        except DjangoValidationError as e:
+            raise ValidationError(
+                {"detail": e.messages if hasattr(e, "messages") else str(e)})
+        return Response(ChequeSerializer(cheque).data)
+
 class JournalViewSet(viewsets.ModelViewSet):
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]

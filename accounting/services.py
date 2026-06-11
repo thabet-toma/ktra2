@@ -669,16 +669,139 @@ STATUS_MAP = {
 }
 
 
-def transfer_cheque(cheque_id, movement_type, *, user=None, notes=''):
+def _resolve_cheque_under_collection_account(tenant_id: int):
+    """حساب «شيكات برسم التحصيل» — نفس منطق ترحيل الفاتورة (M2-T3)."""
+    from django.db.models import Q
+    from sales.models import SalesSettings
+    ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
+    if ss and ss.default_cheques_under_collection_account_id:
+        return ss.default_cheques_under_collection_account
+    return (
+        Account.objects.filter(tenant_id=tenant_id, account_type="Asset", is_active=True)
+        .filter(Q(code__startswith="1106") | Q(name__icontains="شيكات"))
+        .first()
+    )
+
+
+def _resolve_cheque_cash_account(tenant_id: int, account_id=None):
+    """حساب الصندوق/البنك لوجهة التحصيل — صريح أو افتراضي الإعدادات."""
+    from sales.models import SalesSettings
+    if account_id:
+        acc = Account.objects.filter(pk=account_id, tenant_id=tenant_id, is_active=True).first()
+        if not acc:
+            raise ValidationError("حساب الصندوق/البنك المحدد غير موجود أو لا يتبع هذه الشركة.")
+        return acc
+    ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
+    if ss and ss.default_cash_account_id:
+        return ss.default_cash_account
+    raise ValidationError(
+        "حدّد حساب الصندوق/البنك للتحويل، أو عيّن default_cash_account في إعدادات المبيعات."
+    )
+
+
+def _resolve_cheque_ar_account(cheque):
+    """حساب ذمم العميل لارتداد/تسوية الشيك."""
+    from sales.models import SalesSettings
+    partner = cheque.partner or (cheque.sales_invoice.customer if cheque.sales_invoice_id else None)
+    if partner is None:
+        raise ValidationError("الشيك بلا عميل مرتبط — لا يمكن تحديد حساب الذمم.")
+    if partner.linked_account_id:
+        return partner.linked_account, partner
+    if partner.group_id and partner.group.account_receivable_id:
+        return partner.group.account_receivable, partner
+    ss = SalesSettings.objects.filter(tenant_id=cheque.tenant_id).first()
+    if ss and ss.default_ar_account_id:
+        return ss.default_ar_account, partner
+    raise ValidationError("لا يوجد حساب ذمم للعميل المرتبط بالشيك.")
+
+
+def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
+                    account_id=None, movement_date=None):
+    """task11 R2-A3 — تحويل حالة شيك مع القيد المحاسبي المرافق.
+
+    كانت آلة الحالات بلا قيود محاسبية (والواجهة تتجاوزها أصلاً بـ PATCH خام)
+    فتبقى المبالغ في «شيكات برسم التحصيل» للأبد. القيود الآن:
+      - collect / withdraw : مدين صندوق/بنك ÷ دائن شيكات برسم التحصيل
+      - bounce             : مدين ذمم العميل ÷ دائن شيكات برسم التحصيل
+      - settle             : مدين صندوق/بنك ÷ دائن ذمم العميل
+      - deposit / return_to_customer : حركة ورقية — بلا قيد
+    يُرحَّل القيد فقط إذا كان الشيك داخل الدفاتر أصلاً (مربوط بفاتورة أو
+    سند قبض) — الشيكات المستقلة legacy تتحول حالتها فقط مع تحذير في اللوغ.
+    Idempotent عبر (CHEQUE_<MOVE>, cheque_id).
+    """
+    import datetime as _dt
     from .models import Cheque, ChequeMovement
-    cheque = Cheque.objects.select_related('tenant').get(pk=cheque_id)
+
+    cheque = Cheque.objects.select_related(
+        'tenant', 'partner', 'partner__group', 'sales_invoice', 'currency',
+    ).get(pk=cheque_id)
     allowed = VALID_TRANSITIONS.get(cheque.status, set())
     if movement_type not in allowed:
         raise ValidationError(
             f"لا يمكن تنفيذ «{movement_type}» على شيك بحالة «{cheque.status}»."
         )
     next_status = STATUS_MAP[movement_type]
+    when = movement_date or _dt.date.today()
+    amount = Decimal(str(cheque.amount or 0)).quantize(Decimal("0.01"))
+
+    # GL يخص الشيكات الواردة المسجلة دفترياً فقط
+    in_books = bool(cheque.sales_invoice_id or cheque.customer_payment_id)
+    needs_gl = (
+        movement_type in ('collect', 'withdraw', 'bounce', 'settle')
+        and cheque.direction == 'Incoming'
+        and amount > 0
+    )
+    if needs_gl and not in_books:
+        logging.getLogger(__name__).warning(
+            "transfer_cheque: cheque %s has no invoice/payment link — status-only transfer",
+            cheque.pk,
+        )
+        needs_gl = False
+
+    journal = None
     with transaction.atomic():
+        if needs_gl:
+            branch_id = cheque.sales_invoice.branch_id if cheque.sales_invoice_id else None
+            if movement_type in ('collect', 'withdraw'):
+                uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
+                if not uc:
+                    raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1106).")
+                cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
+                dr, cr = cash, uc
+                desc = f"تحصيل شيك {cheque.cheque_number}"
+                partner_id = cheque.partner_id
+            elif movement_type == 'bounce':
+                uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
+                if not uc:
+                    raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1106).")
+                ar, partner = _resolve_cheque_ar_account(cheque)
+                dr, cr = ar, uc
+                desc = f"ارتداد شيك {cheque.cheque_number} — إعادة الذمم على العميل"
+                partner_id = partner.pk
+            else:  # settle
+                ar, partner = _resolve_cheque_ar_account(cheque)
+                cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
+                dr, cr = cash, ar
+                desc = f"تسوية شيك مرتد {cheque.cheque_number}"
+                partner_id = partner.pk
+
+            journal = post_journal(
+                tenant_id=cheque.tenant_id,
+                transaction_date=when,
+                reference_type=f"CHEQUE_{movement_type.upper()}",
+                reference_id=cheque.pk,
+                description=desc,
+                lines_data=[
+                    {"account": dr.pk, "partner": partner_id,
+                     "debit": amount, "credit": Decimal("0"), "description": desc},
+                    {"account": cr.pk, "partner": partner_id,
+                     "debit": Decimal("0"), "credit": amount, "description": desc},
+                ],
+                currency=cheque.currency,
+                user=user,
+                branch_id=branch_id,
+            )
+
         ChequeMovement.objects.create(
             cheque=cheque,
             movement_type=movement_type,
@@ -693,7 +816,10 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes=''):
             action='UPDATE',
             model_name='Cheque',
             object_id=cheque.id,
-            change_details=f"Cheque status → {next_status} via {movement_type}",
+            change_details=(
+                f"Cheque status → {next_status} via {movement_type}"
+                + (f" (journal {journal.id})" if journal else "")
+            ),
         )
     return cheque
 

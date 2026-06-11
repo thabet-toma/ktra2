@@ -35,7 +35,9 @@ SECRET_KEY = os.environ.get(
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# task11 R2-B: كان True ثابتاً — أي خطأ على الإنتاج يكشف traceback كاملاً
+# (إعدادات، مسارات، استعلامات). الآن آمن افتراضياً: فعّل DJANGO_DEBUG=1 للتطوير المحلي.
+DEBUG = os.environ.get("DJANGO_DEBUG", "0").lower() in ("1", "true", "yes")
 
 ALLOWED_HOSTS = [
     'smart.ktragroup.com',
@@ -267,6 +269,12 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
+    ],
+    # task11 R2-B: دور «مستعرض» قراءة فقط — يشمل الـ viewsets التي لا تعرّف
+    # permission_classes صراحةً (inventory/partners القديمة).
+    "DEFAULT_PERMISSION_CLASSES": [
+        "rest_framework.permissions.IsAuthenticated",
+        "core.permissions.TenantRolePermission",
     ],
     'EXCEPTION_HANDLER': 'core.exception_handler.custom_exception_handler',
 }

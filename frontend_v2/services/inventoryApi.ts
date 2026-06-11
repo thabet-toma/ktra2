@@ -1,11 +1,17 @@
+import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
+
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const INV = `${API_BASE}/inventory`;
 
 const headers = (): HeadersInit => {
   const token = localStorage.getItem("token");
+  // task11 R2: الشركة النشطة + الفرع النشط مع كل طلب مخزون
+  const branchId = resolveBranchId();
   return {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Token ${token}` } : {}),
+    "X-Tenant-Id": String(resolveTenantId()),
+    ...(branchId ? { "X-Branch-Id": String(branchId) } : {}),
   };
 };
 
