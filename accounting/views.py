@@ -136,7 +136,8 @@ class JournalViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         tenant = get_tenant(self.request)
-        qs = JournalHeader.objects.all() if tenant is None else JournalHeader.objects.filter(tenant=tenant)
+        # task11 M7: كان tenant=None → all() — قيود كل الشركات تتسرب
+        qs = JournalHeader.objects.none() if tenant is None else JournalHeader.objects.filter(tenant=tenant)
         qs = qs.order_by("-transaction_date", "-id")
         params = getattr(self.request, "query_params", {})
         rt = (params.get("reference_type") or "").strip()

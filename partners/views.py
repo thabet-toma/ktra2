@@ -22,6 +22,14 @@ class PartnerViewSet(viewsets.ModelViewSet):
     def _get_tenant(self):
         return get_tenant(self.request)
 
+    def get_queryset(self):
+        # task11 M7: القراءة كانت بلا فلترة tenant — موردو/زبائن كل الشركات
+        # كانوا يظهرون لأي شركة. .none() عند غياب الشركة حتى لا يتسرب شيء.
+        tenant = self._get_tenant()
+        if not tenant:
+            return Partner.objects.none()
+        return super().get_queryset().filter(tenant=tenant)
+
     def _handle_bank_accounts(self, partner, bank_accounts_data, tenant):
         """
         Synchronizes bank accounts for a partner.

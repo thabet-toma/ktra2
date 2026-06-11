@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 
 # Collections that are NOT company-scoped (auth / HR / public content).
 # Everything else stored through /api/mapper/ belongs to exactly one company.
+# task11 M7: «tasks» أصبحت tenant-scoped — كانت global فظهرت مهام الشركة
+# القديمة في الصفحة الرئيسية لأي شركة جديدة.
 GLOBAL_COLLECTIONS = {
     'users',
-    'tasks',
     'attendanceSessions',
     'attendanceRecords',
     'pointsHistory',

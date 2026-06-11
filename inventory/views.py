@@ -18,7 +18,11 @@ class CategoryViewSet(viewsets.ModelViewSet):
     serializer_class = CategorySerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        # task11 M7: تصنيفات كل الشركات كانت تظهر لأي شركة
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return ProductCategory.objects.none()
+        queryset = super().get_queryset().filter(tenant=tenant)
         root_only = self.request.query_params.get('root_only') == 'true'
         if root_only:
             from django.db.models import Q
@@ -39,6 +43,14 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def _get_tenant(self):
         return get_tenant(self.request)
+
+    def get_queryset(self):
+        # task11 M7: الأصناف كانت بلا فلترة tenant في القراءة —
+        # أصناف كل الشركات تظهر للشركة الجديدة. .none() عند غياب الشركة.
+        tenant = self._get_tenant()
+        if not tenant:
+            return Product.objects.none()
+        return super().get_queryset().filter(tenant=tenant)
 
     def _handle_attachments(self, product, data, tenant):
         from core.models import SystemAttachment
@@ -89,6 +101,21 @@ class StockMovementViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
+        # task11 M7: حركات المخزون كانت بلا فلترة tenant في القراءة
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return StockMovement.objects.none()
+        qs = qs.filter(tenant=tenant)
+        # task11 M4: مخزون مستقل لكل فرع — الفرع النشط يرى حركاته فقط
+        # (الرئيسي يشمل الحركات القديمة بلا فرع)
+        from core.tenant_utils import get_branch
+        branch = get_branch(self.request, tenant)
+        if branch is not None:
+            from django.db.models import Q
+            if branch.is_main:
+                qs = qs.filter(Q(branch=branch) | Q(branch__isnull=True))
+            else:
+                qs = qs.filter(branch=branch)
         params = self.request.query_params
         pid = params.get('product')
         if pid:
