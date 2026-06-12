@@ -935,6 +935,12 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     # P-H-1: exposed for payment-voucher endpoint (read-only)
     cheques = serializers.SerializerMethodField()
     invoice_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    from tenants.models import Currency
+    currency = serializers.SlugRelatedField(
+        slug_field='Code',
+        queryset=Currency.objects.all(),
+        required=True
+    )
 
     class Meta:
         model = PurchaseInvoice
