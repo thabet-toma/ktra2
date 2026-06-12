@@ -24,6 +24,9 @@ import {
   suppliersService,
 } from "@/services/firestoreService";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
+import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
+import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
+import { SupplierModal } from "@/components/common/SupplierModal";
 import { mapPurchaseInvoiceDtoToInvoice } from "@/utils/mapPurchaseInvoiceDto";
 import { dealsService } from "@/services/dealsService";
 import { shipmentsService } from "@/services/shipmentsService";
@@ -49,6 +52,7 @@ import {
   AseelDocumentShell,
   AseelGrid,
   AseelIndexPicker,
+  AseelAutocomplete,
   useRecordNavigation,
   useAseelKeymap,
   type AseelGridColumn,
@@ -72,7 +76,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   currentUser,
   onCancel,
   onSave,
-  allDbItems,
+  allDbItems: initialDbItems,
   dealData,
   readOnly = false,
 }) => {
@@ -83,6 +87,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [saving, setSaving] = useState(false);
   const [recalcBusy, setRecalcBusy] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
+  
+  const [allDbItems, setAllDbItems] = useState<Item[]>(initialDbItems);
+  const [showSupplierPicker, setShowSupplierPicker] = useState(false);
+  const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
   const [showItemSearch, setShowItemSearch] = useState(false);
   const [activeItemSearchIndex, setActiveItemSearchIndex] = useState<number | null>(null);
   /** بيانات الفاتورة والمورد — تُعرض من رأس الصفحة عند الضغط على «تفاصيل» */
@@ -114,7 +122,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   // M4-T1: Aseel Navigation for invoices
   const [invoicesList, setInvoicesList] = useState<any[]>([]);
-  const [showSupplierPicker, setShowSupplierPicker] = useState(false);
 
   const nav = useRecordNavigation<any>({
     items: invoicesList,
@@ -444,7 +451,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     setShowItemSearch(true);
   };
 
-  const handleItemSelect = (item: Item, lastPrice?: number) => {
+  /* task13 M5: منطق تعبئة السطر مشترك بين المنتقي المدمج والفهرس الكامل */
+  const applyItemAt = (index: number | null, item: Item, lastPrice?: number) => {
     const newItem: InvoiceItem = {
       id: crypto.randomUUID(),
       itemId: item.id,
@@ -460,15 +468,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     };
 
     let updatedItems = [...(formData.items || [])];
-    if (activeItemSearchIndex !== null && activeItemSearchIndex < updatedItems.length) {
-      newItem.id = updatedItems[activeItemSearchIndex].id;
-      updatedItems[activeItemSearchIndex] = newItem;
+    if (index !== null && index < updatedItems.length) {
+      newItem.id = updatedItems[index].id;
+      updatedItems[index] = newItem;
     } else {
       updatedItems.push(newItem);
     }
 
     const lastLineIndex = updatedItems.length - 1;
-    if (activeItemSearchIndex === lastLineIndex || activeItemSearchIndex === null) {
+    if (index === lastLineIndex || index === null) {
       updatedItems.push({
         id: crypto.randomUUID(),
         itemId: "",
@@ -484,6 +492,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
 
     recalculateTotals({ items: updatedItems });
+  };
+
+  const handleItemSelect = (item: Item, lastPrice?: number) => {
+    applyItemAt(activeItemSearchIndex, item, lastPrice);
     setShowItemSearch(false);
     setActiveItemSearchIndex(null);
   };
@@ -835,10 +847,40 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         setActiveItemSearchIndex(rowIndex);
         setShowItemSearch(true);
       }}
-      title="اختر صنفاً (+ فهرس الأصناف)"
+      title="فهرس الأصناف الكامل (+)"
     >
-      {row.itemId ? `#${row.itemId}` : "— اختر صنفاً —"}
+      {row.itemId ? `#${row.itemId}` : "…"}
     </button>
+  );
+
+  /* task13 M5: منتقي مدمج في خلية اسم الصنف (يحل محل المودال كمسار أساسي) */
+  const itemOptions = useMemo(
+    () => allDbItems.map((it) => ({
+      id: it.id,
+      label: it.name,
+      sub: it.modelNumber || it.categoryName || "",
+    })),
+    [allDbItems],
+  );
+
+  const renderItemNameCell = (row: InvoiceItem, rowIndex: number) => (
+    <AseelAutocomplete
+      value={row.name || ""}
+      options={itemOptions}
+      disabled={readOnly || formData.isHistorical}
+      placeholder="اكتب اسم الصنف…"
+      onPick={(id) => {
+        const it = allDbItems.find((x) => String(x.id) === String(id));
+        if (it) applyItemAt(rowIndex, it);
+      }}
+      onFreeText={(t) => {
+        const updated = [...(formData.items || [])];
+        if (rowIndex < updated.length) {
+          updated[rowIndex] = { ...updated[rowIndex], itemId: "", name: t };
+          recalculateTotals({ items: updated });
+        }
+      }}
+    />
   );
 
   const renderDeleteCell = (row: InvoiceItem) =>
@@ -854,6 +896,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     );
 
   itemColumns[1].render = renderItemIdCell;
+  itemColumns[2].render = renderItemNameCell;
   itemColumns[7].render = renderDeleteCell;
 
   /* ───────────── تبويبات ───────────── */
@@ -1054,7 +1097,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     <div
       id="purchase-invoice-print"
       dir="rtl"
-      style={{ height: "calc(100vh - 13rem)", minHeight: 560 }}
     >
     <AseelDocumentShell
       title="فاتورة الشراء"
@@ -1284,12 +1326,33 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       ]}
       getRowKey={(r) => r.id}
       searchValue={(r) => `${r.id} ${r.tradeName || ""} ${r.city || ""}`}
+      actionButton={
+        <button
+          type="button"
+          onClick={() => setShowAddSupplierModal(true)}
+          className="flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+        >
+          <Plus className="w-4 h-4" /> إضافة مورد
+        </button>
+      }
       onSelect={(r) => {
         setFormData((prev) => ({ ...prev, supplierId: r.id, factoryName: r.tradeName }));
         setShowSupplierPicker(false);
       }}
       onClose={() => setShowSupplierPicker(false)}
     />
+
+    {showAddSupplierModal && (
+      <SupplierModal
+        isOpen={showAddSupplierModal}
+        onClose={() => setShowAddSupplierModal(false)}
+        onSaveSuccess={(newSupplier) => {
+          setShowAddSupplierModal(false);
+          setFormData((prev) => ({ ...prev, supplierId: newSupplier.id, factoryName: newSupplier.tradeName || newSupplier.alias || "" }));
+          setShowSupplierPicker(false);
+        }}
+      />
+    )}
 
     {showItemSearch && (
       <ItemSearchModal

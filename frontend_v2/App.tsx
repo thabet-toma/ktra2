@@ -121,6 +121,73 @@ import { useLocation, useNavigate } from "react-router-dom";
 type SourcingView = "search" | "loading" | "results";
 type AuthView = "login" | "signup";
 
+/**
+ * task14 M1 (DEF-B1): جدول مسار↔شاشة واحد — مصدر الحقيقة للاتجاهين.
+ * كل صفحة أساسية (الشريط الجانبي) لها URL فريد قابل للحفظ والمشاركة؛
+ * المسارات ذات المعرّف (deals/:id، accounting/journals/:id، import-flow/:id،
+ * purchase-invoices/:id، shipments/:id) تبقى حالات خاصة في setViewAndSyncPath
+ * وتأثير التحليل العكسي أدناه.
+ */
+const VIEW_PATHS: Partial<Record<AppView, string>> = {
+  dashboard: "/dashboard",
+  tasks: "/tasks",
+  "task-management": "/task-management",
+  "smart-assistant": "/assistant",
+  users: "/users",
+  attendance: "/attendance",
+  "employee-notes": "/employee-notes",
+  "points-management": "/points-management",
+  "points-history": "/points-history",
+  "sales-invoices": "/sales/invoices",
+  "sales-quotations": "/sales/quotations",
+  "credit-debit-notes": "/sales/credit-debit-notes",
+  "sales-return": "/sales/returns",
+  "purchase-return": "/purchase-returns",
+  "sales-customer-payments": "/sales/customer-payments",
+  "supplier-payments": "/supplier-payments",
+  "sales-customers": "/sales/customers",
+  "sales-settings": "/sales/settings",
+  "purchase-invoices": "/purchase-invoices",
+  "old-invoices": "/old-invoices",
+  "price-offers": "/price-offers",
+  "deals-management": "/deals",
+  "items-management": "/items",
+  "supplier-management": "/suppliers",
+  "import-flow": "/import-flow",
+  "shipments-management": "/shipments",
+  "customs-clearance": "/clearance",
+  "local-shipping": "/local-shipping",
+  "stock-levels": "/stock-levels",
+  "stock-movements": "/stock-movements",
+  "accounting-coa": "/accounting/coa",
+  "accounting-journals": "/accounting/journals",
+  "accounting-cheques": "/accounting/cheques",
+  "accounting-general-ledger": "/accounting/general-ledger",
+  "accounting-trial-balance": "/accounting/trial-balance",
+  "accounting-vat-report": "/accounting/vat-report",
+  "accounting-landed-cost": "/accounting/landed-cost",
+  "accounting-fiscal-periods": "/accounting/fiscal-periods",
+  "accounting-exchange-rates": "/accounting/exchange-rates",
+  "accounting-balance-sheet": "/accounting/balance-sheet",
+  "accounting-income-statement": "/accounting/income-statement",
+  "accounting-vat-statements": "/accounting/vat-statements",
+  "accounting-year-end-close": "/accounting/year-end-close",
+  "property-rental": "/property-rental",
+  "cash-boxes": "/cash-boxes",
+  reports: "/reports",
+  gallery: "/gallery",
+  settings: "/settings",
+  sourcing: "/sourcing",
+  store: "/store",
+  "group-constants": "/group-constants",
+  "aseel-kit": "/aseel-kit",
+  "aseel-sales": "/aseel-sales",
+};
+
+const PATH_TO_VIEW: Record<string, AppView> = Object.fromEntries(
+  (Object.entries(VIEW_PATHS) as [AppView, string][]).map(([view, path]) => [path, view])
+);
+
 const App: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -158,22 +225,15 @@ const App: React.FC = () => {
         navigate("/assistant", { replace: false });
       } else if (view === "import-flow") {
         navigate(targetId ? `/import-flow/${encodeURIComponent(targetId)}` : "/import-flow", { replace: false });
-      } else if (view === "customs-clearance") {
-        navigate("/clearance", { replace: false });
       } else if (view === "purchase-invoices") {
         if (targetId && targetId !== "list") {
           navigate(`/purchase-invoices/${encodeURIComponent(targetId)}`, { replace: false });
         } else {
           navigate("/purchase-invoices", { replace: false });
         }
-      } else if (view === "sales-invoices") {
-        navigate("/sales/invoices", { replace: false });
-      } else if (view === "sales-customers") {
-        navigate("/sales/customers", { replace: false });
-      } else if (view === "sales-settings") {
-        navigate("/sales/settings", { replace: false });
       } else {
-        navigate("/", { replace: false });
+        // task14 M1: بقية الشاشات كلها عبر الجدول — URL فريد لكل صفحة
+        navigate(VIEW_PATHS[view] ?? "/", { replace: false });
       }
       setAppView(view);
     },
@@ -367,44 +427,12 @@ const App: React.FC = () => {
       setAppView("shipments-management");
       return;
     }
-    if (path === "/accounting/journals") {
-      setAppView("accounting-journals");
-      return;
-    }
-    if (path === "/assistant") {
-      setAppView("smart-assistant");
-      return;
-    }
-    if (path === "/aseel-kit") {
-      setAppView("aseel-kit");
-      return;
-    }
-    if (path === "/aseel-sales") {
-      setAppView("aseel-sales");
-      return;
-    }
-    if (path === "/clearance") {
-      setAppView("customs-clearance");
-      return;
-    }
     if (path.startsWith("/import-flow/")) {
       setAppView("import-flow");
       return;
     }
     if (path === "/purchase-invoices" || path.startsWith("/purchase-invoices/")) {
       setAppView("purchase-invoices");
-      return;
-    }
-    if (path === "/sales/customers" || path.startsWith("/sales/customers")) {
-      setAppView("sales-customers");
-      return;
-    }
-    if (path === "/sales/invoices" || path.startsWith("/sales/invoices")) {
-      setAppView("sales-invoices");
-      return;
-    }
-    if (path === "/sales/settings" || path.startsWith("/sales/settings")) {
-      setAppView("sales-settings");
       return;
     }
     const journalMatch = path.match(/^\/accounting\/journals\/(.+)$/);
@@ -418,6 +446,12 @@ const App: React.FC = () => {
         if (!isNaN(jid)) setAccountingJournalId(jid);
       }
       setAppView("accounting-journal-entry");
+      return;
+    }
+    // task14 M1: بقية الصفحات — مطابقة مباشرة من جدول المسارات
+    const mappedView = PATH_TO_VIEW[path];
+    if (mappedView) {
+      setAppView(mappedView);
       return;
     }
     if (viewParam) {
@@ -1702,7 +1736,7 @@ const App: React.FC = () => {
       {/* N0-T5: F11 modal portal لثوابت المجموعة */}
       {groupConstantsOpen && (
         <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setGroupConstantsOpen(false)}>
-          <div className="w-full max-w-6xl h-[90vh] bg-white rounded-lg shadow-xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+          <div className="w-full max-w-6xl h-[90vh] bg-white rounded-lg shadow-xl overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <GroupConstantsPage
               currentUserName={currentUser?.name}
               onClose={() => setGroupConstantsOpen(false)}

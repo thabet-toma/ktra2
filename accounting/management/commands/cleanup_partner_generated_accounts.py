@@ -15,7 +15,9 @@ class Command(BaseCommand):
     )
 
     # Parent accounts where partner child accounts are expected to live.
-    PARTNER_PARENT_CODES = ["1103", "2101", "2102", "2103", "2104"]
+    # task13 M2: legacy parents (2102-2104) kept for historical cleanup;
+    # 2106-2108 are the dedicated logistics-partner payable parents.
+    PARTNER_PARENT_CODES = ["1103", "2101", "2102", "2103", "2104", "2106", "2107", "2108"]
 
     def add_arguments(self, parser):
         parser.add_argument(

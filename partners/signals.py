@@ -13,12 +13,14 @@ import datetime
 logger = logging.getLogger(__name__)
 
 def _expected_parent_code_for_partner_type(partner_type: str) -> str | None:
+    # task13 M2: الأكواد القديمة 2102/2103/2104 كانت قروضاً/مستحقات/ضريبة مخرجات
+    # في الشجرة المعيارية — حسابات الشركاء صارت تحت آباء ذمم مخصصين.
     return {
-        "Supplier": "2101",         # Accounts Payable
-        "Customer": "1103",         # Accounts Receivable
-        "FreightForwarder": "2102",
-        "CustomsBroker": "2103",
-        "LocalTransporter": "2104",
+        "Supplier": "2101",          # الدائنون التجاريون
+        "Customer": "1103",          # المدينون التجاريون
+        "FreightForwarder": "2106",  # ذمم وكلاء الشحن
+        "CustomsBroker": "2107",     # ذمم المخلصين الجمركيين
+        "LocalTransporter": "2108",  # ذمم النقل المحلي
     }.get(partner_type)
 
 @receiver(post_save, sender=Partner)

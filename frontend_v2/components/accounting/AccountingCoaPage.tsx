@@ -5,7 +5,7 @@ import {
   AseelDocumentShell,
   useAseelIndexKeymap,
 } from "../aseel";
-import type { AseelToolbarAction, AseelTab } from "../aseel";
+import type { AseelToolbarAction } from "../aseel";
 import {
   ChevronDown,
   ChevronLeft,
@@ -673,10 +673,6 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
     </>
   );
 
-  const shellTabs: AseelTab[] = [
-    { key: "tree", label: "شجرة الحسابات", content: treeContent },
-  ];
-
   const headerBand = (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center" }}>
       <div className="aseel-field" style={{ flex: "1", minWidth: "220px" }}>
@@ -698,11 +694,11 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
 
   return (
     <div data-skin="aseel">
+      {/* task13 M6: الشجرة محتوى مباشر — كان tab وحيد يكرر العنوان للمرة الثالثة */}
       <AseelDocumentShell
         title="شجرة الحسابات"
         actions={shellActions}
         header={headerBand}
-        tabs={shellTabs}
         status={
           <span className="aseel-status-item">
             <FolderTree className="w-3 h-3" />
@@ -710,7 +706,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
           </span>
         }
       >
-        <></>
+        {treeContent}
       </AseelDocumentShell>
     </div>
   );

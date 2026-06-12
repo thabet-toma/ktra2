@@ -376,11 +376,13 @@ tbody td {
   --aseel-status-due: #ef6c00;
 }
 
+/* task13 M3: المستند تدفقٌ طبيعي يكبر بمحتواه — سكرولر الصفحة الوحيد هو
+   main.app-content. (كان height:100% + مناطق overflow داخلية ⇒ 4 سكرولات
+   متداخلة: headband / gridwrap / bottom / totals — عيب #1 عند المالك.) */
 [data-skin="aseel"] .aseel-doc {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
+  min-height: 100%;
   background: var(--aseel-bg);
   color: var(--aseel-ink);
   font-family: var(--aseel-font);
@@ -412,6 +414,13 @@ tbody td {
 [data-skin="aseel"] .aseel-company { color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); text-align: start; }
 
 /* ── Command toolbar ── */
+/* task13 M3: شريط الأوامر يلتصق بأعلى سكرولر الصفحة — أزرار الحفظ/الطباعة
+   تبقى في المتناول أثناء تمرير النموذج الطويل (نمط دفترة). */
+[data-skin="aseel"] .aseel-doc .aseel-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
 [data-skin="aseel"] .aseel-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -449,8 +458,6 @@ tbody td {
   padding: 3px 8px;
   background: var(--aseel-panel);
   border-bottom: 1px solid var(--aseel-border-soft);
-  overflow-y: auto;
-  max-height: 160px;
 }
 [data-skin="aseel"] .aseel-field { display: flex; align-items: center; gap: 4px; }
 [data-skin="aseel"] .aseel-field-label {
@@ -485,10 +492,12 @@ tbody td {
 [data-skin="aseel"] .aseel-input--hl { background: var(--aseel-field-hl); }
 
 /* ── Grid area ── */
+/* task13 M3: ينمو بمحتواه (flex-basis:auto) ويملأ الفراغ عند قصره؛
+   overflow-x فقط للجداول العريضة — لا سكرول عمودي داخلي. */
 [data-skin="aseel"] .aseel-gridwrap {
-  flex: 1 1 0;
+  flex: 1 0 auto;
   min-height: 120px;
-  overflow: auto;
+  overflow-x: auto;
   background: #ffffff;
   border-top: 1px solid var(--aseel-border);
   border-bottom: 1px solid var(--aseel-border);
@@ -537,7 +546,8 @@ tbody td {
 [data-skin="aseel"] .aseel-num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ── Bottom tabs + totals dock ── */
-[data-skin="aseel"] .aseel-bottom { display: flex; align-items: stretch; gap: 6px; background: var(--aseel-panel); border-top: 1px solid var(--aseel-border-soft); padding: 2px 6px 3px; flex-shrink: 0; overflow-y: auto; max-height: 220px; }
+/* task13 M3: بلا max-height ولا سكرول داخلي — محتوى التبويبات يكبر بطبيعته */
+[data-skin="aseel"] .aseel-bottom { display: flex; align-items: stretch; gap: 6px; background: var(--aseel-panel); border-top: 1px solid var(--aseel-border-soft); padding: 2px 6px 3px; flex-shrink: 0; }
 [data-skin="aseel"] .aseel-tabscol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* Tabs row: scrolls horizontally when there are too many tabs to fit, so
    "البيانات الأساسية / الشروط والشحن / الدفعات" never get clipped off-screen. */
@@ -550,19 +560,30 @@ tbody td {
 }
 [data-skin="aseel"] .aseel-tabs::-webkit-scrollbar { height: 4px; }
 [data-skin="aseel"] .aseel-tabs::-webkit-scrollbar-thumb { background: var(--aseel-border); border-radius: 2px; }
+/* task13 M4: كانت التبويبات «مخفية» — خلفية #e4e1d0 على لوحة #f2f0e4 بخط 11px
+   (تباين شبه معدوم، عيب #2/#3 عند المالك). الآن: حدود واضحة، خط أكبر،
+   والنشط مميز بشريط علوي بلون الـ accent. */
 [data-skin="aseel"] .aseel-tab {
-  padding: 3px 12px;
-  background: #e4e1d0;
-  border: 1px solid var(--aseel-border-soft);
+  padding: 5px 14px;
+  background: #dbd8c4;
+  border: 1px solid var(--aseel-border);
   border-bottom: none;
   border-radius: var(--aseel-radius) var(--aseel-radius) 0 0;
-  color: var(--aseel-ink-soft);
-  font-size: var(--aseel-fs-sm);
+  color: var(--aseel-ink);
+  font-size: var(--aseel-fs);
+  font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
 }
-[data-skin="aseel"] .aseel-tab--active { background: var(--aseel-field); color: var(--aseel-ink); font-weight: 700; }
+[data-skin="aseel"] .aseel-tab:hover:not(.aseel-tab--active) { background: #dceaf6; border-color: var(--aseel-accent-bd); }
+[data-skin="aseel"] .aseel-tab--active {
+  background: var(--aseel-field);
+  color: var(--aseel-accent);
+  font-weight: 700;
+  border-color: var(--aseel-accent-bd);
+  box-shadow: inset 0 2px 0 var(--aseel-accent);
+}
 [data-skin="aseel"] .aseel-tabpanel {
   border: 1px solid var(--aseel-border-soft);
   background: var(--aseel-field);
@@ -571,15 +592,50 @@ tbody td {
 }
 [data-skin="aseel"] .aseel-totals {
   flex: 0 0 240px;
+  align-self: flex-start;
   background: var(--aseel-panel);
   border: 1px solid var(--aseel-border-soft);
   border-radius: var(--aseel-radius);
   padding: 3px 6px;
-  overflow-y: auto;
 }
 [data-skin="aseel"] .aseel-total-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0; font-size: var(--aseel-fs-sm); line-height: 1.4; }
 [data-skin="aseel"] .aseel-total-row--grand { border-top: 1px solid var(--aseel-border); margin-top: 2px; padding-top: 2px; font-weight: 700; font-size: var(--aseel-fs); }
 [data-skin="aseel"] .aseel-total-value { min-width: 90px; text-align: left; background: var(--aseel-field); border: 1px solid var(--aseel-border); border-radius: var(--aseel-radius); padding: 0 4px; font-variant-numeric: tabular-nums; }
+
+/* ── task13 M5: القائمة المنسدلة لمنتقي الأصناف المدمج ──
+   تُرسم على body عبر portal (خارج نطاق data-skin) فالألوان مضمّنة هنا. */
+.aseel-autocomplete-pop {
+  z-index: 10000;
+  max-height: 260px;
+  overflow-y: auto;
+  background: #fcfcec;
+  border: 1px solid #9e9c7e;
+  border-radius: 2px;
+  box-shadow: 0 4px 14px rgba(43, 43, 28, 0.25);
+  font-family: 'Tahoma', 'Segoe UI', 'IBM Plex Sans Arabic', system-ui, sans-serif;
+  font-size: 12px;
+  color: #2b2b1c;
+}
+.aseel-autocomplete-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #e6e4d2;
+  text-align: start;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.aseel-autocomplete-row--sel { background: #cbd9e8; }
+.aseel-autocomplete-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aseel-autocomplete-sub { color: #6b6952; font-size: 11px; flex-shrink: 0; }
+.aseel-autocomplete-empty { padding: 8px; color: #6b6952; text-align: center; }
+.aseel-autocomplete-row--create { color: #2f5f8f; font-weight: 700; justify-content: flex-start; border-bottom: none; }
 
 /* ── Status bar ── */
 [data-skin="aseel"] .aseel-statusbar {

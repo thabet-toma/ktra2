@@ -567,7 +567,7 @@ export const SalesSettingsPage: React.FC = () => {
   // task11 M6: المحتوى في منطقة gridwrap الرئيسية المرنة — كان محشوراً في
   // tab سفلي بارتفاع أقصى 220px تاركاً فراغاً أبيض ضخماً وسط الشاشة.
   return (
-    <div data-skin="aseel" style={{ height: "calc(100vh - 5rem)" }}>
+    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title="إعدادات فواتير المبيعات"
         state="حسابات افتراضية + ضرائب + شحن"

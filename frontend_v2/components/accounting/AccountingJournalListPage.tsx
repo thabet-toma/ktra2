@@ -346,7 +346,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
   ];
 
   return (
-    <div data-skin="aseel" style={{ height: "calc(100vh - 5rem)" }}>
+    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title="دفتر اليومية"
         state={loading ? "جاري التحميل…" : `${rows.length} قيد`}

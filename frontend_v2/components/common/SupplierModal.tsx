@@ -401,6 +401,16 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600"
                                     />
                                 </div>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1.5">حد الائتمان</label>
+                                    <input
+                                        type="number"
+                                        value={currentSupplier.creditLimit || ''}
+                                        onChange={e => setCurrentSupplier({ ...currentSupplier, creditLimit: parseFloat(e.target.value) || 0 })}
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600"
+                                        placeholder="0.00"
+                                    />
+                                </div>
                             </div>
                         </div>
                     </div>

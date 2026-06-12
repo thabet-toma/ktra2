@@ -1,17 +1,34 @@
 import datetime
 from decimal import Decimal
 
-from rest_framework import viewsets, status
+from django.db import IntegrityError, transaction
+from rest_framework import filters, serializers, viewsets, status
 from rest_framework.decorators import action
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from .models import ProductCategory, Product, UnitOfMeasure, StockMovement
 from .serializers import (
     CategorySerializer, ProductSerializer, UnitOfMeasureSerializer,
     StockMovementSerializer,
 )
-from .services import record_stock_movement
+from .services import generate_next_sku, record_stock_movement
 from tenants.models import Tenant
 from core.tenant_utils import get_tenant
+
+
+class OptionalPageNumberPagination(PageNumberPagination):
+    """
+    task14 M2 (DEF-A5): ترقيم صفحات opt-in — يُفعَّل فقط بوجود ?page=
+    حتى لا تنكسر الشاشات القائمة التي تتوقع مصفوفة خام بلا غلاف.
+    """
+    page_size = 50
+    page_size_query_param = 'page_size'
+    max_page_size = 200
+
+    def paginate_queryset(self, queryset, request, view=None):
+        if 'page' not in request.query_params:
+            return None
+        return super().paginate_queryset(queryset, request, view)
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = ProductCategory.objects.all().order_by('name')
@@ -38,8 +55,14 @@ class UnitOfMeasureViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = UnitOfMeasureSerializer
 
 class ProductViewSet(viewsets.ModelViewSet):
-    queryset = Product.objects.all().order_by('name_ar')
+    # task14 M2 (DEF-A5): ترتيب افتراضي حتمي «الأحدث أولاً» + بحث/فرز/ترقيم خادمي
+    queryset = Product.objects.all().select_related('category')
     serializer_class = ProductSerializer
+    pagination_class = OptionalPageNumberPagination
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ['sku', 'barcode', 'name_ar', 'name_en', 'category__name']
+    ordering_fields = ['id', 'sku', 'name_ar', 'quantity_on_hand', 'avg_cost', 'created_at']
+    ordering = ['-id']
 
     def _get_tenant(self):
         return get_tenant(self.request)
@@ -50,7 +73,18 @@ class ProductViewSet(viewsets.ModelViewSet):
         tenant = self._get_tenant()
         if not tenant:
             return Product.objects.none()
-        return super().get_queryset().filter(tenant=tenant)
+        qs = super().get_queryset().filter(tenant=tenant)
+        params = self.request.query_params
+        category_id = params.get('category')
+        if category_id:
+            qs = qs.filter(category_id=category_id)
+        created_from = params.get('created_from')
+        if created_from:
+            qs = qs.filter(created_at__date__gte=created_from)
+        created_to = params.get('created_to')
+        if created_to:
+            qs = qs.filter(created_at__date__lte=created_to)
+        return qs
 
     def _handle_attachments(self, product, data, tenant):
         from core.models import SystemAttachment
@@ -70,11 +104,36 @@ class ProductViewSet(viewsets.ModelViewSet):
                     file_path=image_url
                 )
 
+    def _validate_category_tenant(self, serializer, tenant):
+        # DEF-A1: التصنيف FK يجب أن يكون من نفس الشركة
+        category = serializer.validated_data.get('category')
+        if category and category.tenant_id != tenant.pk:
+            raise serializers.ValidationError({'category': 'التصنيف غير موجود لهذه الشركة.'})
+
     def create(self, request, *args, **kwargs):
         tenant = self._get_tenant()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        product = serializer.save(tenant=tenant)
+        self._validate_category_tenant(serializer, tenant)
+
+        # task14 M2 (DEF-A2): SKU يولَّد خادمياً عند الغياب — مع إعادة محاولة عند السباق
+        explicit_sku = (serializer.validated_data.get('sku') or '').strip()
+        if explicit_sku:
+            if Product.objects.filter(tenant=tenant, sku=explicit_sku).exists():
+                raise serializers.ValidationError({'sku': 'رقم الصنف مستخدم مسبقاً لهذه الشركة.'})
+            product = serializer.save(tenant=tenant, sku=explicit_sku)
+        else:
+            product = None
+            for _ in range(5):
+                try:
+                    with transaction.atomic():
+                        product = serializer.save(tenant=tenant, sku=generate_next_sku(tenant))
+                    break
+                except IntegrityError:
+                    continue
+            if product is None:
+                raise serializers.ValidationError({'sku': 'تعذّر توليد رقم صنف — أعد المحاولة.'})
+
         self._handle_attachments(product, request.data, tenant)
         return Response(self.get_serializer(product).data, status=status.HTTP_201_CREATED)
 
@@ -83,6 +142,16 @@ class ProductViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         serializer = self.get_serializer(instance, data=request.data, partial=kwargs.get('partial', False))
         serializer.is_valid(raise_exception=True)
+        self._validate_category_tenant(serializer, tenant)
+        # task14 M2: SKU فارغ في التعديل = «أبقِ الرقم الحالي» — لا تمسحه
+        new_sku = (serializer.validated_data.get('sku') or '').strip()
+        if 'sku' in serializer.validated_data:
+            if not new_sku:
+                serializer.validated_data.pop('sku')
+            elif new_sku != instance.sku and Product.objects.filter(
+                tenant=tenant, sku=new_sku
+            ).exclude(pk=instance.pk).exists():
+                raise serializers.ValidationError({'sku': 'رقم الصنف مستخدم مسبقاً لهذه الشركة.'})
         product = serializer.save()
         self._handle_attachments(product, request.data, tenant)
         return Response(self.get_serializer(product).data)

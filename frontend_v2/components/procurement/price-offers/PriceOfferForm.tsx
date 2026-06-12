@@ -248,7 +248,7 @@ export const PriceOfferForm: React.FC<Props> = ({
   );
 
   return (
-    <div dir="rtl" style={{ height: "calc(100vh - 13rem)", minHeight: 560 }}>
+    <div dir="rtl">
       <AseelDocumentShell
         title="عرض سعر / طلبية"
         state={`${STATUS_LABELS[status]} — ${OFFER_TYPES.find((t) => t.v === offerType)?.l ?? offerType}`}

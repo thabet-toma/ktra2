@@ -186,16 +186,13 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
       {/* Header field band */}
       <div className="aseel-headband">{header}</div>
 
-      {/* Lines / grid */}
+      {/* Lines / grid — task13 M3: تدفق طبيعي بلا سكرول داخلي (سكرولر
+          الصفحة الوحيد في main.app-content) */}
       <div className="aseel-gridwrap">
         {tabsInMain ? (
-          <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
             {tabStrip}
-            <div
-              className="aseel-tabpanel"
-              role="tabpanel"
-              style={{ flex: '1 1 0', minHeight: 0, overflow: 'auto' }}
-            >
+            <div className="aseel-tabpanel" role="tabpanel" style={{ flex: '1 0 auto' }}>
               {tab?.content}
             </div>
           </div>

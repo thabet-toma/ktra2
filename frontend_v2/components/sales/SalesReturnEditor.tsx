@@ -303,7 +303,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
   ];
 
   return (
-    <div data-skin="aseel" style={{ height: "calc(100vh - 5rem)" }}>
+    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title="مرجع البيع (Sale Return)"
         state={originalInvoiceId ? `للفاتورة #${originalInvoiceId}` : "مرجع جديد"}

@@ -670,16 +670,21 @@ STATUS_MAP = {
 
 
 def _resolve_cheque_under_collection_account(tenant_id: int):
-    """حساب «شيكات برسم التحصيل» — نفس منطق ترحيل الفاتورة (M2-T3)."""
+    """حساب «شيكات برسم التحصيل» — نفس منطق ترحيل الفاتورة (M2-T3).
+
+    task13 M2: البحث القديم بـ code__startswith="1106" كان يلتقط
+    «دفعات مقدمة للموردين» في الشجرة المعيارية ⇒ ترحيل خاطئ.
+    الآن: إعدادات المبيعات ← الحساب المبذور 1107 ← مطابقة الاسم.
+    """
     from django.db.models import Q
     from sales.models import SalesSettings
     ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
     if ss and ss.default_cheques_under_collection_account_id:
         return ss.default_cheques_under_collection_account
+    base = Account.objects.filter(tenant_id=tenant_id, account_type="Asset", is_active=True)
     return (
-        Account.objects.filter(tenant_id=tenant_id, account_type="Asset", is_active=True)
-        .filter(Q(code__startswith="1106") | Q(name__icontains="شيكات"))
-        .first()
+        base.filter(code="1107").first()
+        or base.filter(name__icontains="شيكات").first()
     )
 
 
@@ -765,7 +770,7 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             if movement_type in ('collect', 'withdraw'):
                 uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
                 if not uc:
-                    raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1106).")
+                    raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
                 cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
                 dr, cr = cash, uc
                 desc = f"تحصيل شيك {cheque.cheque_number}"
@@ -773,7 +778,7 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             elif movement_type == 'bounce':
                 uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
                 if not uc:
-                    raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1106).")
+                    raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
                 ar, partner = _resolve_cheque_ar_account(cheque)
                 dr, cr = ar, uc
                 desc = f"ارتداد شيك {cheque.cheque_number} — إعادة الذمم على العميل"

@@ -107,7 +107,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
   ];
 
   return (
-    <div id="clearance-print" dir="rtl" style={{ height: "calc(100vh - 13rem)", minHeight: 560 }}>
+    <div id="clearance-print" dir="rtl">
       <AseelDocumentShell
         title="فاتورة البيان الجمركي"
         state={selected ? `بيان #${selected.declaration_number || selected.id}` : "قائمة"}

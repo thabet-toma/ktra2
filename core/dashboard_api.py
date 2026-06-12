@@ -27,12 +27,15 @@ def _f(val):
 
 @api_view(['GET'])
 def trade_dashboard(request):
+    # task13 M1: every queryset below MUST be tenant-scoped. A missing tenant
+    # returns the all-zero payload instead of leaking cross-company aggregates.
     tenant = _get_tenant(request)
     today = datetime.date.today()
     month_start = today.replace(day=1)
 
     # ─── Deals ───────────────────────────────────────────────────
-    deals_qs = LogisticsDeal.objects.filter(is_deleted=False)
+    deals_qs = LogisticsDeal.objects.filter(is_deleted=False, tenant=tenant) \
+        if tenant else LogisticsDeal.objects.none()
     total_deals = deals_qs.count()
     open_deals = deals_qs.filter(status='Open').count()
     shipped_deals = deals_qs.filter(status='Shipped').count()
@@ -59,7 +62,8 @@ def trade_dashboard(request):
     )
 
     # ─── Shipments ───────────────────────────────────────────────
-    ship_qs = LogisticsShipment.objects.all()
+    ship_qs = LogisticsShipment.objects.filter(tenant=tenant) \
+        if tenant else LogisticsShipment.objects.none()
     total_shipments = ship_qs.count()
     in_transit = ship_qs.filter(status='In-Transit').count()
     arrived = ship_qs.filter(status='Arrived').count()
@@ -73,7 +77,10 @@ def trade_dashboard(request):
     )
 
     # ─── Payments ────────────────────────────────────────────────
-    pay_qs = LogisticsPayment.objects.filter(is_deleted=False)
+    # LogisticsPayment has no tenant FK — scoped through its deal/shipment.
+    pay_qs = LogisticsPayment.objects.filter(is_deleted=False).filter(
+        Q(deal__tenant=tenant) | Q(shipment__tenant=tenant)
+    ) if tenant else LogisticsPayment.objects.none()
     total_payments = pay_qs.count()
     posted_payments = pay_qs.filter(is_posted=True).count()
     total_paid = _f(
@@ -85,7 +92,8 @@ def trade_dashboard(request):
     )
 
     # ─── Invoices (SQL) ──────────────────────────────────────────
-    inv_qs = PurchaseInvoice.objects.all()
+    inv_qs = PurchaseInvoice.objects.filter(tenant=tenant) \
+        if tenant else PurchaseInvoice.objects.none()
     total_invoices = inv_qs.count()
     posted_invoices = inv_qs.filter(is_posted=True).count()
     draft_invoices = inv_qs.filter(status='draft').count()
@@ -100,38 +108,41 @@ def trade_dashboard(request):
     )
 
     # ─── Inventory ───────────────────────────────────────────────
-    products_in_stock = Product.objects.filter(quantity_on_hand__gt=0).count()
-    total_products = Product.objects.count()
+    prod_qs = Product.objects.filter(tenant=tenant) \
+        if tenant else Product.objects.none()
+    products_in_stock = prod_qs.filter(quantity_on_hand__gt=0).count()
+    total_products = prod_qs.count()
     inventory_value = _f(
-        Product.objects.filter(quantity_on_hand__gt=0)
+        prod_qs.filter(quantity_on_hand__gt=0)
         .aggregate(
             val=Sum(F('quantity_on_hand') * F('avg_cost'))
         )['val']
     )
-    low_stock = Product.objects.filter(
+    low_stock_qs = prod_qs.filter(
         quantity_on_hand__gt=0,
         min_stock_level__gt=0,
         quantity_on_hand__lte=F('min_stock_level'),
-    ).count()
-    out_of_stock = Product.objects.filter(
+    )
+    low_stock = low_stock_qs.count()
+    out_of_stock = prod_qs.filter(
         min_stock_level__gt=0,
         quantity_on_hand__lte=0,
     ).count()
 
-    movements_this_month = StockMovement.objects.filter(
+    movements_qs = StockMovement.objects.filter(tenant=tenant) \
+        if tenant else StockMovement.objects.none()
+    movements_this_month = movements_qs.filter(
         movement_date__gte=month_start,
     ).count()
 
     low_stock_items = list(
-        Product.objects.filter(
-            quantity_on_hand__gt=0,
-            min_stock_level__gt=0,
-            quantity_on_hand__lte=F('min_stock_level'),
-        ).values('id', 'sku', 'name_ar', 'quantity_on_hand', 'min_stock_level')[:10]
+        low_stock_qs.values('id', 'sku', 'name_ar', 'quantity_on_hand', 'min_stock_level')[:10]
     )
 
     # ─── Accounting ──────────────────────────────────────────────
-    journals_this_month = JournalHeader.objects.filter(
+    journals_qs = JournalHeader.objects.filter(tenant=tenant) \
+        if tenant else JournalHeader.objects.none()
+    journals_this_month = journals_qs.filter(
         transaction_date__gte=month_start, is_posted=True,
     ).count()
 

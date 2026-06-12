@@ -35,10 +35,12 @@ import {
   CreditCard,
 } from "lucide-react";
 import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
+import { SupplierModal } from "../common/SupplierModal";
 import {
   AseelDocumentShell,
   AseelGrid,
   AseelIndexPicker,
+  AseelAutocomplete,
   useAseelKeymap,
   useRecordNavigation,
   type AseelGridColumn,
@@ -234,6 +236,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [lastKey, setLastKey] = useState<string>("—");
   /** فهرس الحسابات (العميل) منبثق بمفتاح + أو زر «…». */
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const navLoadingRef = useRef(false);
 
   const dirtyRef = useRef(false);
@@ -1390,21 +1393,39 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     else if (key === "line_discount") updateLine(row.key, { line_discount: value });
   };
 
-  const renderProductCell = (row: DraftLine) => {
-    const pr = row.product ? productsById.get(Number(row.product)) : undefined;
-    return (
+  /* task13 M5: منتقي مدمج — الكتابة في الخلية تفلتر الأصناف فورياً وتعبئ
+     السطر (المودال الكامل يبقى متاحاً من زر «…» واختصار +). لا خيار «صنف حر»
+     هنا لأن سطر فاتورة المبيعات يتطلب صنفاً معرّفاً في المخزون. */
+  const productOptions = useMemo(
+    () => products.map((p) => ({
+      id: p.id,
+      label: formatProductPrimaryName(p),
+      sub: `${p.sku || ""} · رصيد ${Number(p.quantity_on_hand) || 0}`,
+    })),
+    [products],
+  );
+
+  const renderProductCell = (row: DraftLine) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+      <AseelAutocomplete
+        value={(() => {
+          const pr = row.product ? productsById.get(Number(row.product)) : undefined;
+          return pr ? formatProductPrimaryName(pr) : "";
+        })()}
+        options={productOptions}
+        disabled={readOnly}
+        placeholder="اكتب اسم الصنف…"
+        onPick={(id) => void onSelectProduct(row.key, Number(id))}
+      />
       <button
         type="button"
-        className="aseel-cell-picker"
+        className="aseel-ellipsis"
         disabled={readOnly}
-        data-aseel-key="1"
         onClick={() => setProductPickerLineKey(row.key)}
-        title="اختر صنفاً (+ فهرس الأصناف)"
-      >
-        {pr ? formatProductPrimaryName(pr) : "— اختر صنفاً —"}
-      </button>
-    );
-  };
+        title="فهرس الأصناف الكامل (+)"
+      >…</button>
+    </div>
+  );
 
   const renderTaxCell = (row: DraftLine) => {
     const isEdit = taxEditKey === row.key;
@@ -2318,6 +2339,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         ]}
         getRowKey={(r) => r.id}
         searchValue={(r) => `${r.id} ${r.name}`}
+        actionButton={
+          <button
+            type="button"
+            onClick={() => setShowAddCustomerModal(true)}
+            className="flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" /> إضافة عميل
+          </button>
+        }
         onSelect={(r) => {
           setCustomerId(r.id);
           markDirty();
@@ -2325,6 +2355,20 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         }}
         onClose={() => setCustomerPickerOpen(false)}
       />
+
+      {showAddCustomerModal && (
+        <SupplierModal
+          isOpen={showAddCustomerModal}
+          onClose={() => setShowAddCustomerModal(false)}
+          onSaveSuccess={(newPartner) => {
+            setShowAddCustomerModal(false);
+            setCustomerId(newPartner.id!);
+            setCustomerPickerOpen(false);
+            // It will trigger reload of partners in parent eventually via eventBus or manual trigger
+            // For now just selecting the ID is fine
+          }}
+        />
+      )}
 
       {/* فهرس الأصناف */}
       <SalesProductPickerModal

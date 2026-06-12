@@ -27,19 +27,33 @@ class ProductSerializer(serializers.ModelSerializer):
 
     stock_status = serializers.SerializerMethodField()
 
+    # task14 M2 (DEF-A2): رقم الصنف اختياري — يولَّد خادمياً عند الغياب
+    sku = serializers.CharField(max_length=50, required=False, allow_blank=True)
+
     class Meta:
         model = Product
         fields = [
-            'id', 'tenant', 'sku', 'barcode', 'name_ar', 'name_en', 
-            'category', 'category_name', 'uom_id', 'uom_name', 
-            'weight_kg', 'volume_cbm', 'hs_code', 'min_stock_level', 
+            'id', 'tenant', 'sku', 'barcode', 'name_ar', 'name_en',
+            'category', 'category_name', 'uom_id', 'uom_name',
+            'weight_kg', 'volume_cbm', 'hs_code', 'min_stock_level',
             'is_serialized', 'is_service',
             'is_for_sale_online', 'online_price', 'online_description',
             'quantity_on_hand', 'avg_cost',
             'stock_status',
+            'created_at',
             'attachments',
         ]
-        read_only_fields = ['id', 'tenant', 'quantity_on_hand', 'avg_cost']
+        read_only_fields = ['id', 'tenant', 'quantity_on_hand', 'avg_cost', 'created_at']
+
+    def validate(self, attrs):
+        # task14 M2 (DEF-A2/A3): الاسم هو الحقل الإلزامي الوحيد — والخطأ يسمّي حقله الحقيقي
+        name_ar = attrs.get('name_ar', getattr(self.instance, 'name_ar', None))
+        name_en = attrs.get('name_en', getattr(self.instance, 'name_en', None))
+        if not ((name_ar or '').strip() or (name_en or '').strip()):
+            raise serializers.ValidationError(
+                {'name_ar': 'اسم الصنف مطلوب — أدخل الاسم بالعربية أو بالإنجليزية.'}
+            )
+        return attrs
 
     def get_attachments(self, obj):
         try:

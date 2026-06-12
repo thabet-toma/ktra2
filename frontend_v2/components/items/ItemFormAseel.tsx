@@ -14,6 +14,7 @@ import {
   type AseelToolbarAction,
 } from "../aseel";
 import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Info } from "lucide-react";
+import { CategoryPicker } from "../inventory/CategoryPicker";
 
 const pendingN8 = (msg: string) => (
   <div className="aseel-banner" style={{
@@ -51,7 +52,7 @@ type FormState = {
   sale_account: string; sale_return_account: string;
   purchase_account: string; purchase_return_account: string;
   supplier_account: string; ending_inventory_account: string;
-  category_name: string; item_type: string;
+  category: number | null; category_name: string; item_type: string;
   bonus_after_qty: string; bonus_every_qty: string;
   components: ComponentLine[];
 };
@@ -67,7 +68,7 @@ const blankForm = (): FormState => ({
   sale_account: "", sale_return_account: "",
   purchase_account: "", purchase_return_account: "",
   supplier_account: "", ending_inventory_account: "",
-  category_name: "", item_type: "goods",
+  category: null, category_name: "", item_type: "goods",
   bonus_after_qty: "", bonus_every_qty: "1",
   components: [],
 });
@@ -109,6 +110,7 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
       min_stock_level: p.min_stock_level != null ? String(p.min_stock_level) : "",
       max_stock_level: p.max_stock_level != null ? String(p.max_stock_level) : "",
       reorder_level: p.reorder_level != null ? String(p.reorder_level) : "",
+      category: p.category ? Number(p.category) : null,
       category_name: String(p.category_name ?? ""),
       item_type: String(p.item_type ?? "goods"),
       sale_tiers: (p.sale_tiers as PriceTier[] | undefined) ?? prev.sale_tiers,
@@ -132,18 +134,19 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
   }, [productId, applyProduct]);
 
   const handleSave = async () => {
-    if (!form.sku.trim()) { setErr("رقم الصنف مطلوب."); return; }
+    if (!form.name_ar.trim() && !form.name_en.trim()) { setErr("اسم الصنف مطلوب."); return; }
     setSaving(true); setErr(null); setMsg(null);
     try {
       // ProductSerializer.Meta.fields only — أي حقول إضافية سيَتجاهلها DRF بصمت.
       // الحقول المتأخرة (catalog_no, item_type, sale_tiers, *_account_override, …)
       // ستُضاف عند تَنفيذ N8-T9 + N8-T10.
-      const payload = {
-        sku: form.sku,
+      const payload: Record<string, unknown> = {
         name_ar: form.name_ar || null,
         name_en: form.name_en || null,
         min_stock_level: form.min_stock_level ? Number(form.min_stock_level) : null,
+        category: form.category,
       };
+      if (form.sku.trim()) payload.sku = form.sku.trim();
       if (currentId) {
         await inventoryApi.updateProduct(currentId, payload);
         setMsg("تم الحفظ.");
@@ -198,8 +201,8 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
   // ── صفحة 1: بيانات عامة ──
   const tabGeneral = (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, padding: "8px 4px" }}>
-      {fld("رقم الصنف *", <input className="aseel-input aseel-input--hl" value={form.sku}
-        onChange={(e) => patch("sku", e.target.value)} title="استخدم + للرقم التالي" />)}
+      {fld("رقم الصنف (يولد تلقائياً إن ترك فارغاً)", <input className="aseel-input aseel-input--hl" value={form.sku}
+        onChange={(e) => patch("sku", e.target.value)} placeholder="تلقائي..." />)}
       {fld("رقم الكتلوج", <input className="aseel-input" value={form.catalog_no}
         onChange={(e) => patch("catalog_no", e.target.value)} />)}
       {fld("نوع الصنف", <select className="aseel-input" value={form.item_type}
@@ -214,8 +217,10 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
         onChange={(e) => patch("description", e.target.value)} />, 2)}
       {fld("الموقع (الرف)", <input className="aseel-input" value={form.location}
         onChange={(e) => patch("location", e.target.value)} />)}
-      {fld("التصنيف", <input className="aseel-input" value={form.category_name}
-        onChange={(e) => patch("category_name", e.target.value)} />)}
+      {fld("التصنيف", <CategoryPicker value={form.category} onChange={(id, name) => {
+        patch("category", id);
+        if (name) patch("category_name", name);
+      }} />)}
       {fld("الوحدة الرئيسية", <input className="aseel-input" value={form.uom_primary}
         onChange={(e) => patch("uom_primary", e.target.value)} placeholder="عدد، كيلو، لتر…" />)}
       {fld("وحدة 2", <input className="aseel-input" value={form.uom2}
@@ -395,7 +400,7 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
   );
 
   return (
-    <div dir="rtl" style={{ height: "calc(100vh - 13rem)", minHeight: 560 }}>
+    <div dir="rtl">
       <AseelDocumentShell
         title="كارت الصنف"
         state={currentId ? `صنف #${currentId}` : "صنف جديد"}

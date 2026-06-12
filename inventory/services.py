@@ -17,6 +17,23 @@ logger = logging.getLogger(__name__)
 INBOUND_TYPES = {'IN', 'ADJUST_IN', 'RETURN_IN'}
 OUTBOUND_TYPES = {'OUT', 'ADJUST_OUT', 'RETURN_OUT'}
 
+# task14 M2 (DEF-A2/A4): توليد رقم صنف خادمي قصير — أرقام صرفة تسلسلية لكل شركة
+SKU_PAD = 6
+
+
+def generate_next_sku(tenant) -> str:
+    """
+    أعلى SKU رقمي-صرف للشركة + 1، بصيغة مبطّنة بالأصفار (مثل 000124).
+    أرقام الهجرة القديمة (FB-…) لا تدخل في التسلسل. التفرّد النهائي يضمنه
+    قيد unique(tenant, sku) — المستدعي يعيد المحاولة عند IntegrityError.
+    """
+    numeric_skus = (
+        Product.objects.filter(tenant=tenant, sku__regex=r'^\d+$')
+        .values_list('sku', flat=True)
+    )
+    highest = max((int(s) for s in numeric_skus), default=0)
+    return str(highest + 1).zfill(SKU_PAD)
+
 
 def record_stock_movement(
     *,

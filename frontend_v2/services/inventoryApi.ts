@@ -38,8 +38,49 @@ async function asList(res: Response): Promise<any[]> {
 export const inventoryApi = {
   // ─── Products ───
 
-  getProducts: () =>
-    fetch(`${INV}/products/`, { headers: headers() }).then(asList),
+  getProducts: (params?: Record<string, string | number>) => {
+    const q = params && Object.keys(params).length
+      ? `?${new URLSearchParams(params as Record<string, string>)}`
+      : "";
+    return fetch(`${INV}/products/${q}`, { headers: headers() }).then(async (res) => {
+      await handle(res, "inventory");
+      const data = await res.json();
+      return data; // Return full response (might be paginated: {results: [], count: ...})
+    });
+  },
+
+  // ─── Categories ───
+
+  getCategories: () =>
+    fetch(`${INV}/categories/`, { headers: headers() }).then(asList),
+
+  createCategory: async (body: Record<string, unknown>) => {
+    const res = await fetch(`${INV}/categories/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "createCategory");
+    return res.json();
+  },
+
+  updateCategory: async (id: number, body: Record<string, unknown>) => {
+    const res = await fetch(`${INV}/categories/${id}/`, {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "updateCategory");
+    return res.json();
+  },
+
+  deleteCategory: async (id: number) => {
+    const res = await fetch(`${INV}/categories/${id}/`, {
+      method: "DELETE",
+      headers: headers(),
+    });
+    await handle(res, "deleteCategory");
+  },
 
   getProduct: async (id: number) => {
     const res = await fetch(`${INV}/products/${id}/`, { headers: headers() });

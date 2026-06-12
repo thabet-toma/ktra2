@@ -22,6 +22,10 @@ COA_DATA = [
     ('1104', 'المخزون (Inventory)', 'Asset', '11'),
     ('1105', 'ضريبة القيمة المضافة - مدخلات (VAT Input)', 'Asset', '11'),
     ('1106', 'دفعات مقدمة للموردين (Supplier Advances)', 'Asset', '11'),
+    # task13 M2: حسابات تشغيلية كانت مفقودة — دورة الشيكات وربط الصناديق
+    # كانا يفشلان أو يرحّلان على حسابات خاطئة في أي شركة جديدة.
+    ('1107', 'شيكات برسم التحصيل (Cheques Under Collection)', 'Asset', '11'),
+    ('1110', 'صناديق النقدية (Cash Boxes)', 'Asset', '11'),
     ('12', 'الأصول الثابتة (Fixed Assets)', 'Asset', '1'),
     ('1201', 'الأراضي (Land)', 'Asset', '12'),
     ('1202', 'المباني (Buildings)', 'Asset', '12'),
@@ -35,6 +39,11 @@ COA_DATA = [
     ('2103', 'مصاريف مستحقة (Accrued Expenses)', 'Liability', '21'),
     ('2104', 'ضريبة القيمة المضافة - مخرجات (VAT Output)', 'Liability', '21'),
     ('2105', 'رسوم جمركية مستحقة (Customs Duties Payable)', 'Liability', '21'),
+    # task13 M2: آباء مخصصون لذمم شركاء اللوجستيات — كانت حسابات وكلاء الشحن
+    # والمخلصين والنقل المحلي تُنشأ تحت القروض/المستحقات/ضريبة المخرجات (!).
+    ('2106', 'ذمم وكلاء الشحن (Freight Forwarders Payable)', 'Liability', '21'),
+    ('2107', 'ذمم المخلصين الجمركيين (Customs Brokers Payable)', 'Liability', '21'),
+    ('2108', 'ذمم النقل المحلي (Local Transporters Payable)', 'Liability', '21'),
     ('22', 'الالتزامات غير المتداولة (Non-current Liabilities)', 'Liability', '2'),
     ('2201', 'قروض طويلة الأجل (Long-term Loans)', 'Liability', '22'),
 
@@ -67,6 +76,35 @@ COA_DATA = [
     ('5306', 'رسوم موانئ / تخزين (Port & Storage Fees)', 'Expense', '53'),
     ('5307', 'رسوم استيراد متنوعة (Misc. Import Fees)', 'Expense', '53'),
 ]
+
+def ensure_operational_accounts(tenant) -> list[str]:
+    """task13 M2 — يضمن وجود الحسابات التشغيلية في شجرة قائمة (idempotent).
+
+    الشركات المبذورة قبل task13 تنقصها حسابات تتوقعها مسارات الترحيل:
+    1107 شيكات برسم التحصيل، 1110 صناديق النقدية، 2106-2108 ذمم شركاء
+    اللوجستيات. لا يُنشأ حساب إذا غاب أبوه (شجرة غير معيارية) — لا دمج أعمى.
+    يعيد قائمة الأكواد المُنشأة.
+    """
+    needed = [row for row in COA_DATA if row[0] in
+              ("1107", "1110", "2106", "2107", "2108")]
+    created = []
+    for code, acc_name, acc_type, parent_code in needed:
+        if Account.objects.filter(tenant=tenant, code=code).exists():
+            continue
+        parent = Account.objects.filter(tenant=tenant, code=parent_code).first()
+        if parent is None:
+            logger.warning(
+                "ensure_operational_accounts: tenant=%s missing parent %s — skipped %s",
+                tenant.TenantID, parent_code, code,
+            )
+            continue
+        Account.objects.create(
+            tenant=tenant, code=code, name=acc_name,
+            account_type=acc_type, parent=parent, is_active=True,
+        )
+        created.append(code)
+    return created
+
 
 def create_company(name: str, creator_user) -> Tenant:
     """

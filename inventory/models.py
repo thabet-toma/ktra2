@@ -84,6 +84,9 @@ class Product(models.Model):
     online_price = models.DecimalField(max_digits=18, decimal_places=2, blank=True, null=True, db_column='OnlinePrice')
     online_description = models.TextField(blank=True, null=True, db_column='OnlineDescription')
 
+    # task14 M2 (DEF-A5): فلتر الفترة + ترتيب «الأحدث أولاً» — القديم يأخذ تاريخ الترحيل
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
     quantity_on_hand = models.DecimalField(
         max_digits=18, decimal_places=4, default=0, db_column='QuantityOnHand',
     )

@@ -23,17 +23,22 @@ export const ItemsManagement: React.FC<{ user?: unknown }> = () => {
   const [view, setView] = useState<View>("list");
   const [editId, setEditId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const pageSize = 50;
   // Phase 2 wiring: track when the list was last refreshed from the server,
   // and whether the current render is being served from the offline cache.
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [fromCache, setFromCache] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (currentPage = 1, currentSearch = search) => {
     setLoading(true);
     setErr(null);
     try {
-      const rows = (await inventoryApi.getProducts()) as SqlProduct[];
-      setProducts(rows);
+      const data = await inventoryApi.getProducts({ page: currentPage, page_size: pageSize, search: currentSearch });
+      const rows = Array.isArray(data) ? data : (data.results ?? []);
+      setProducts(rows as SqlProduct[]);
+      setTotal(data.count ?? rows.length);
       const now = new Date().toISOString();
       setLastSync(now);
       setFromCache(false);
@@ -69,9 +74,9 @@ export const ItemsManagement: React.FC<{ user?: unknown }> = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [pageSize]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(page, search); }, [load, page]);
 
   const filtered = products.filter((p) => {
     if (!search) return true;
@@ -84,7 +89,11 @@ export const ItemsManagement: React.FC<{ user?: unknown }> = () => {
   });
 
   const columns: DenseColumn<SqlProduct>[] = [
-    { key: "sku", header: "رقم الصنف", width: "110px", render: (p) => <b>{p.sku}</b> },
+    { key: "sku", header: "رقم الصنف", width: "110px", render: (p) => (
+        <b title={p.sku} style={{ display: "inline-block", maxWidth: "90px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "bottom" }}>
+          {p.sku}
+        </b>
+    ) },
     { key: "name_ar", header: "اسم الصنف", render: (p) => <>{p.name_ar || p.name_en || "—"}</> },
     { key: "cat", header: "التصنيف", width: "140px", render: (p) => <>{p.category_name || "—"}</> },
     { key: "qty", header: "الكمية", width: "80px", align: "center", numeric: true,
@@ -148,8 +157,9 @@ export const ItemsManagement: React.FC<{ user?: unknown }> = () => {
         <div style={{ flex: 1 }} />
         <input className="aseel-input" style={{ width: 200 }}
           placeholder="بحث SKU / الاسم…"
-          value={search} onChange={(e) => setSearch(e.target.value)} />
-        <button className="aseel-toolbtn" onClick={load} title="تحديث">
+          value={search} onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { setPage(1); load(1, search); } }} />
+        <button className="aseel-toolbtn" onClick={() => { setPage(1); load(1, search); }} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
         <button className="aseel-toolbtn" onClick={() => { setEditId(null); setView("form"); }} title="إضافة صنف (Ctrl+Ins)">
@@ -161,11 +171,15 @@ export const ItemsManagement: React.FC<{ user?: unknown }> = () => {
 
       <AseelDenseTable<SqlProduct>
         columns={columns}
-        rows={filtered}
+        rows={products} // search is server-side now
         getRowKey={(p) => p.id}
         loading={loading}
         emptyHint="لا توجد أصناف"
         onRowDoubleClick={(p) => { setEditId(p.id); setView("form"); }}
+        pagination={total > pageSize ? {
+          page, pageSize, total,
+          onChange: (p) => setPage(p)
+        } : undefined}
       />
     </div>
   );

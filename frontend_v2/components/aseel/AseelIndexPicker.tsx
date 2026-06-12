@@ -26,6 +26,8 @@ export interface AseelIndexPickerProps<T> {
   searchValue?: (row: T) => string;
   onSelect: (row: T) => void;
   onClose: () => void;
+  /** Custom button rendered next to the search box (e.g. Add Item) */
+  actionButton?: React.ReactNode;
 }
 
 export function AseelIndexPicker<T>({
@@ -37,6 +39,7 @@ export function AseelIndexPicker<T>({
   searchValue,
   onSelect,
   onClose,
+  actionButton,
 }: AseelIndexPickerProps<T>) {
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
@@ -101,15 +104,16 @@ export function AseelIndexPicker<T>({
             <X />
           </button>
         </div>
-        <div style={{ padding: '6px 10px' }}>
+        <div style={{ padding: '6px 10px', display: 'flex', gap: '8px' }}>
           <input
             ref={searchRef}
             className="aseel-input"
             placeholder="بحث… (Enter اختيار · * تالي · - سابق · Esc خروج)"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            style={{ width: '100%' }}
+            style={{ flex: 1 }}
           />
+          {actionButton}
         </div>
         <div className="aseel-picker-body">
           <table className="aseel-grid">

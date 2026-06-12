@@ -558,7 +558,7 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
     <div
       dir="rtl"
       data-skin="aseel"
-      style={{ height: "calc(100vh - 6rem)", display: "flex", flexDirection: "column" }}
+      style={{ minHeight: "100%", display: "flex", flexDirection: "column" }}
     >
       <AseelDocumentShell
         title="ثوابت المجموعة"

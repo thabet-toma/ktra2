@@ -16,7 +16,7 @@ from django.db import transaction
 
 from accounting.models import Account
 from tenants.models import Branch, Tenant, TenantBook, TenantSettings
-from tenants.services import COA_DATA
+from tenants.services import COA_DATA, ensure_operational_accounts
 
 
 class Command(BaseCommand):
@@ -63,6 +63,11 @@ class Command(BaseCommand):
                             account_type=acc_type, parent=parent, is_active=True,
                         )
                     fixed.append(f"coa({len(COA_DATA)})")
+
+                # 3b) الحسابات التشغيلية الناقصة في الشجرات القائمة (task13 M2)
+                added_codes = ensure_operational_accounts(tenant)
+                if added_codes:
+                    fixed.append(f"ops-accounts(+{','.join(added_codes)})")
 
                 # 4) دفاتر الترقيم (تُستكمل الناقصة فقط)
                 created_books = 0

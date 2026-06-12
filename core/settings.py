@@ -308,11 +308,9 @@ CASH_BOX_CAPITAL_ACCOUNT_CODE = os.environ.get("CASH_BOX_CAPITAL_ACCOUNT_CODE", 
 DEFAULT_CASH_BOX_EXTERNAL_ID = os.environ.get("DEFAULT_CASH_BOX_EXTERNAL_ID", "").strip()
 
 # مفتاح API للـ AI Agent — يُرسل في هيدر X-Agent-Key لحماية نقطة الاستعلام
-# غيّر القيمة في .env إلى مفتاح قوي وسري في الإنتاج
-AGENT_DB_API_KEY = os.environ.get(
-    "AGENT_DB_API_KEY",
-    "ktra-agent-2025-secret-key",
-).strip()
+# task13 M1: لا قيمة افتراضية — مفتاح مكشوف في الريبو = استعلامات SELECT
+# عابرة للشركات بلا مصادقة. عند غياب env يرفض الـ endpoint كل الطلبات (401).
+AGENT_DB_API_KEY = os.environ.get("AGENT_DB_API_KEY", "").strip()
 
 # ── Test database: SQLite in-memory (MySQL user lacks CREATE DATABASE) ──
 if 'test' in sys.argv:

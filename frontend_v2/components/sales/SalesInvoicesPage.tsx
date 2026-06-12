@@ -577,7 +577,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   // task11 M6: جدول الفواتير في منطقة gridwrap الرئيسية المرنة — كان محشوراً
   // في tab سفلي بارتفاع أقصى 220px تاركاً فراغاً أبيض ضخماً وسط الشاشة.
   return (
-    <div data-skin="aseel" style={{ height: "calc(100vh - 5rem)" }}>
+    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title="فواتير المبيعات"
         state={loading ? "جاري التحميل…" : `${filteredRows.length} من ${rows.length}`}

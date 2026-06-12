@@ -647,7 +647,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   return (
     <div
       data-skin="aseel"
-      style={{ height: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
+      style={{ minHeight: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
     >
     <AseelDocumentShell
       title="قيود المحاسبة"

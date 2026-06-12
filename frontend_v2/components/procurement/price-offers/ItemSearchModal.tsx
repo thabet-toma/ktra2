@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { Item, SupplierItemPrice } from '../../../types';
-import { Package, X, Search, Hash, DollarSign } from 'lucide-react';
+import { Package, X, Search, Hash, DollarSign, Plus } from 'lucide-react';
 import { collection, query, where, orderBy, getDocs, limit, db } from "../../../services/sqlApiClient";
+import { ItemQuickCreateModal } from '../../items/ItemQuickCreateModal';
 
 interface ItemSearchModalProps {
     isOpen: boolean;
@@ -15,6 +16,7 @@ export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClos
     const [searchQuery, setSearchQuery] = useState('');
     const [itemPrices, setItemPrices] = useState<Record<string, number>>({});
     const [loadingPrices, setLoadingPrices] = useState(false);
+    const [showAddItem, setShowAddItem] = useState(false);
 
     // Filter items based on search
     const filteredItems = useMemo(() => {
@@ -94,16 +96,25 @@ export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClos
                 </div>
 
                 <div className="p-4 border-b aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel">
-                    <div className="relative">
-                        <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 aseel-text-soft dark:aseel-text-soft" />
-                        <input
-                            type="text"
-                            placeholder="ابحث باسم المنتج، رقم الموديل، أو الفئة..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="w-full pr-10 pl-4 py-3 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent transition-all"
-                            autoFocus
-                        />
+                    <div className="relative flex items-center gap-2">
+                        <div className="relative flex-1">
+                            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 aseel-text-soft dark:aseel-text-soft" />
+                            <input
+                                type="text"
+                                placeholder="ابحث باسم المنتج، رقم الموديل، أو الفئة..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full pr-10 pl-4 py-3 rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent transition-all"
+                                autoFocus
+                            />
+                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setShowAddItem(true)}
+                            className="flex items-center gap-1 px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+                        >
+                            <Plus className="w-5 h-5" /> إضافة صنف
+                        </button>
                     </div>
                 </div>
 
@@ -171,6 +182,18 @@ export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClos
                     )}
                 </div>
             </div>
+
+            {showAddItem && (
+                <ItemQuickCreateModal
+                    isOpen={showAddItem}
+                    onClose={() => setShowAddItem(false)}
+                    onSaved={(newProduct) => {
+                        setShowAddItem(false);
+                        onSelectItem(newProduct, undefined);
+                        onClose();
+                    }}
+                />
+            )}
         </div>
     );
 };

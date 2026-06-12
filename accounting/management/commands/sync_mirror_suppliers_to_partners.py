@@ -64,9 +64,9 @@ class Command(BaseCommand):
         expected_parent = {
             "Supplier": "2101",
             "Customer": "1103",
-            "FreightForwarder": "2102",
-            "CustomsBroker": "2103",
-            "LocalTransporter": "2104",
+            "FreightForwarder": "2106",
+            "CustomsBroker": "2107",
+            "LocalTransporter": "2108",
         }
 
         created = 0

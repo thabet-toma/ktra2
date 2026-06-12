@@ -1,0 +1,122 @@
+"""task14 M2 (DEF-A2/A3/A4/A5) — Product API:
+توليد SKU خادمي، الاسم فقط إلزامي، أخطاء بحقلها الصحيح،
+ترتيب حتمي + بحث + فلتر فترة + ترقيم صفحات opt-in، وعزل الشركات.
+"""
+import datetime
+
+from django.contrib.auth.models import User
+from rest_framework.test import APITestCase
+
+from inventory.models import Product, ProductCategory
+from tenants.services import create_company
+
+PRODUCTS_URL = "/api/inventory/products/"
+
+
+class ProductApiTest(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner_a = User.objects.create_user(username="items_a", password="x")
+        cls.owner_b = User.objects.create_user(username="items_b", password="x")
+        cls.t_a = create_company("شركة الأصناف أ", cls.owner_a)
+        cls.t_b = create_company("شركة الأصناف ب", cls.owner_b)
+
+    def _auth(self, user=None, tenant=None):
+        self.client.force_authenticate(user=user or self.owner_a)
+        self._tenant_id = str((tenant or self.t_a).TenantID)
+
+    def _post(self, payload):
+        return self.client.post(PRODUCTS_URL, payload, format="json",
+                                HTTP_X_TENANT_ID=self._tenant_id)
+
+    def _get(self, query=""):
+        return self.client.get(PRODUCTS_URL + query, HTTP_X_TENANT_ID=self._tenant_id)
+
+    # ── DEF-A2: الاسم فقط إلزامي + SKU خادمي ──
+    def test_create_with_name_only_generates_sku(self):
+        self._auth()
+        res = self._post({"name_ar": "صنف بالاسم فقط"})
+        assert res.status_code == 201, res.content[:300]
+        data = res.json()
+        assert data["sku"] == "000001"
+        assert data["created_at"]
+
+    def test_sku_sequence_increments_and_ignores_legacy_fb(self):
+        self._auth()
+        Product.objects.create(tenant=self.t_a, sku="FB-d5cc09e9-7cb0", name_ar="مهاجر قديم")
+        first = self._post({"name_ar": "أول"}).json()
+        second = self._post({"name_en": "second"}).json()
+        assert first["sku"] == "000001"
+        assert second["sku"] == "000002"
+
+    def test_sku_sequence_is_per_tenant(self):
+        self._auth()
+        assert self._post({"name_ar": "أ-1"}).json()["sku"] == "000001"
+        self._auth(user=self.owner_b, tenant=self.t_b)
+        assert self._post({"name_ar": "ب-1"}).json()["sku"] == "000001"
+
+    # ── DEF-A3: أخطاء دقيقة بحقلها ──
+    def test_missing_name_yields_field_specific_error(self):
+        self._auth()
+        res = self._post({"sku": "X-1"})
+        assert res.status_code == 400
+        body = res.json()
+        payload = body.get("error", {}).get("details", body)
+        assert "name_ar" in str(payload)
+        assert "اسم الصنف مطلوب" in str(payload)
+
+    def test_duplicate_explicit_sku_yields_sku_field_error(self):
+        self._auth()
+        assert self._post({"name_ar": "الأصل", "sku": "DUP-1"}).status_code == 201
+        res = self._post({"name_ar": "المكرر", "sku": "DUP-1"})
+        assert res.status_code == 400
+        assert "sku" in str(res.json())
+
+    def test_cross_tenant_category_rejected(self):
+        self._auth()
+        foreign_cat = ProductCategory.objects.create(tenant=self.t_b, name="تصنيف الشركة الأخرى")
+        res = self._post({"name_ar": "صنف", "category": foreign_cat.id})
+        assert res.status_code == 400
+        assert "category" in str(res.json())
+
+    # ── DEF-A5: ترتيب حتمي + بحث + فترة + ترقيم opt-in ──
+    def test_default_ordering_is_newest_first(self):
+        self._auth()
+        self._post({"name_ar": "الأقدم"})
+        self._post({"name_ar": "الأحدث"})
+        rows = self._get().json()
+        assert isinstance(rows, list)
+        assert rows[0]["name_ar"] == "الأحدث"
+        assert rows[0]["id"] > rows[1]["id"]
+
+    def test_search_filters_by_name_and_sku(self):
+        self._auth()
+        self._post({"name_ar": "مكيف سبليت"})
+        self._post({"name_ar": "ثلاجة", "sku": "FRIDGE-9"})
+        by_name = self._get("?search=سبليت").json()
+        assert len(by_name) == 1 and by_name[0]["name_ar"] == "مكيف سبليت"
+        by_sku = self._get("?search=FRIDGE").json()
+        assert len(by_sku) == 1 and by_sku[0]["name_ar"] == "ثلاجة"
+
+    def test_created_period_filter(self):
+        self._auth()
+        self._post({"name_ar": "اليوم"})
+        tomorrow = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+        assert self._get(f"?created_from={tomorrow}").json() == []
+        assert len(self._get(f"?created_to={tomorrow}").json()) == 1
+
+    def test_pagination_is_opt_in(self):
+        self._auth()
+        for i in range(3):
+            self._post({"name_ar": f"صنف {i}"})
+        plain = self._get().json()
+        assert isinstance(plain, list) and len(plain) == 3
+        paged = self._get("?page=1&page_size=2").json()
+        assert paged["count"] == 3
+        assert len(paged["results"]) == 2
+
+    def test_read_isolation_unchanged(self):
+        self._auth()
+        self._post({"name_ar": "سري لشركة أ"})
+        self._auth(user=self.owner_b, tenant=self.t_b)
+        assert self._get().json() == []

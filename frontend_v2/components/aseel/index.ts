@@ -65,3 +65,7 @@ export { AseelCalculatorPopover } from './AseelCalculatorPopover';
 export { AseelTabs } from './AseelTabs';
 export type { AseelTabItem, AseelTabsProps } from './AseelTabs';
 
+// task13 M5 — المنتقي المدمج (يستبدل مودالات اختيار الأصناف كمسار أساسي)
+export { AseelAutocomplete } from './AseelAutocomplete';
+export type { AseelAutocompleteOption, AseelAutocompleteProps } from './AseelAutocomplete';
+

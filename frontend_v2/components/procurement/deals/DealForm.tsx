@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Deal,
   DealPayment,
@@ -18,6 +18,7 @@ import {
   useAseelKeymap,
   AseelIndexPicker,
   AseelGrid,
+  AseelAutocomplete,
   type AseelGridColumn,
   type AseelToolbarAction,
 } from "../../aseel";
@@ -55,6 +56,7 @@ import { ActivityLog } from "./ActivityLog";
 import { InstallmentManager } from "./InstallmentManager";
 import { PaymentProgress } from "./PaymentProgress";
 import { SupplierViewModal } from "@/components/common/SupplierViewModal";
+import { SupplierModal } from "@/components/common/SupplierModal";
 import { DealPrintView } from "./DealPrintView";
 import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
 import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
@@ -158,6 +160,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   const [loading, setLoading] = useState(false);
   const [dealsList, setDealsList] = useState<Deal[]>([]);
   const [showSupplierPicker, setShowSupplierPicker] = useState(false);
+  const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
 
   const nav = useRecordNavigation<Deal>({
@@ -719,8 +722,8 @@ export const DealForm: React.FC<DealFormProps> = ({
   const removeRow = (key: string) => { recalculateTotals(items.filter((i) => i.id !== key)); };
 
   const renderItemIdCell = (row: DealItem) => (
-    <button type="button" className="aseel-cell-picker" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} data-aseel-key="1" onClick={() => setShowItemSearch(true)} title="اختر صنفاً (+ فهرس الأصناف)">
-      {row.itemId ? `#${row.itemId}` : "— اختر صنفاً —"}
+    <button type="button" className="aseel-cell-picker" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} data-aseel-key="1" onClick={() => setShowItemSearch(true)} title="فهرس الأصناف الكامل (+)">
+      {row.itemId ? `#${row.itemId}` : "…"}
     </button>
   );
 
@@ -729,7 +732,60 @@ export const DealForm: React.FC<DealFormProps> = ({
       <button type="button" className="aseel-iconbtn aseel-iconbtn--danger" onClick={() => removeRow(row.id)} title="حذف السطر"><Trash2 className="h-3 w-3" /></button>
     );
 
+  /* task13 M5: منتقي مدمج في خلية اسم الصنف — الكتابة تفلتر فورياً وتعبئ
+     السطر نفسه (المودال القديم كان يضيف سطراً جديداً دائماً ويأكل الشاشة).
+     زر «#» في عمود رقم الصنف يبقى فاتحاً الفهرس الكامل كمسار ثانوي. */
+  const itemOptions = useMemo(
+    () => allDbItems.map((it) => ({
+      id: it.id,
+      label: it.name,
+      sub: it.modelNumber || it.categoryName || "",
+    })),
+    [allDbItems],
+  );
+
+  const fillRowWithItem = (rowId: string, item: Item) => {
+    const idx = items.findIndex((i) => i.id === rowId);
+    if (idx < 0) return;
+    const updated = [...items];
+    const prev = updated[idx];
+    const quantity = prev.quantity || 1;
+    const unitPrice = prev.unitPrice || 0;
+    updated[idx] = {
+      ...prev, itemId: item.id, name: item.name, categoryId: item.categoryId,
+      categoryName: item.categoryName,
+      specifications: item.specifications || item.modelNumber || prev.specifications || "",
+      hsCodePrimary: item.hsCodePrimary, modelNumber: item.modelNumber,
+      imageUrls: item.imageUrls || [], factoryImageUrl: item.imageUrls?.[0],
+      quantity, unitPrice, totalPrice: quantity * unitPrice,
+    };
+    recalculateTotals(updated);
+  };
+
+  const setRowFreeName = (rowId: string, text: string) => {
+    const idx = items.findIndex((i) => i.id === rowId);
+    if (idx < 0) return;
+    const updated = [...items];
+    updated[idx] = { ...updated[idx], itemId: "", name: text };
+    recalculateTotals(updated);
+  };
+
+  const renderItemNameCell = (row: DealItem) => (
+    <AseelAutocomplete
+      value={row.name || ""}
+      options={itemOptions}
+      disabled={formData.status === 'shipped' || formData.status === 'cancelled'}
+      placeholder="اكتب اسم الصنف…"
+      onPick={(id) => {
+        const it = allDbItems.find((x) => String(x.id) === String(id));
+        if (it) fillRowWithItem(row.id, it);
+      }}
+      onFreeText={(t) => setRowFreeName(row.id, t)}
+    />
+  );
+
   itemColumns[1].render = renderItemIdCell;
+  itemColumns[2].render = renderItemNameCell;
   itemColumns[7].render = renderDeleteCell;
 
   /* ───────────── تبويبات ───────────── */
@@ -850,7 +906,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   ];
 
   return (
-    <div id="deal-print" dir="rtl" style={{ height: "calc(100vh - 13rem)", minHeight: 560 }}>
+    <div id="deal-print" dir="rtl">
       <AseelDocumentShell
         title="صفقة استيراد"
         state={formData.id ? `صفقة ${formData.dealNumber || `#${formData.id}`}` : "صفقة جديدة"}
@@ -949,9 +1005,30 @@ export const DealForm: React.FC<DealFormProps> = ({
         ]}
         getRowKey={(r) => r.id}
         searchValue={(r) => `${r.id} ${r.tradeName || ""} ${r.city || ""}`}
+        actionButton={
+          <button
+            type="button"
+            onClick={() => setShowAddSupplierModal(true)}
+            className="flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
+          >
+            <Plus className="w-4 h-4" /> إضافة مورد
+          </button>
+        }
         onSelect={(r) => { setFormData({ ...formData, supplierId: r.id, supplierName: r.tradeName || r.alias || "" }); setShowSupplierPicker(false); }}
         onClose={() => setShowSupplierPicker(false)}
       />
+
+      {showAddSupplierModal && (
+        <SupplierModal
+          isOpen={showAddSupplierModal}
+          onClose={() => setShowAddSupplierModal(false)}
+          onSaveSuccess={(newSupplier) => {
+            setShowAddSupplierModal(false);
+            setFormData({ ...formData, supplierId: newSupplier.id, supplierName: newSupplier.tradeName || newSupplier.alias || "" });
+            setShowSupplierPicker(false);
+          }}
+        />
+      )}
 
       {showItemSearch && (
         <ItemSearchModal isOpen={showItemSearch} onClose={() => setShowItemSearch(false)} onSelectItem={(item, price) => { handleAddItemFromModal(item, price); }} items={allDbItems} supplierId={formData.supplierId} />

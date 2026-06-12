@@ -5,7 +5,8 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
-import { RefreshCw, Search } from "lucide-react";
+import { RefreshCw, Search, Plus } from "lucide-react";
+import { SupplierModal } from "../common/SupplierModal";
 
 type Partner = {
   id: number;
@@ -33,6 +34,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<number | null>(initialPartnerId ?? null);
+  const [showAddModal, setShowAddModal] = useState(false);
 
   useEffect(() => {
     if (initialPartnerId != null) {
@@ -95,6 +97,9 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
         <button className="aseel-toolbtn" onClick={load} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
+        <button className="aseel-toolbtn" onClick={() => setShowAddModal(true)} title="إضافة مورد">
+          <Plus className="h-4 w-4" /> إضافة
+        </button>
       </div>
 
       {err && <div className="aseel-banner aseel-banner--err">{err}</div>}
@@ -109,6 +114,17 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
         onSelect={(k) => setSelected(k as number | null)}
         emptyHint="لا يوجد موردون"
       />
+
+      {showAddModal && (
+        <SupplierModal
+          isOpen={showAddModal}
+          onClose={() => setShowAddModal(false)}
+          onSaveSuccess={() => {
+            setShowAddModal(false);
+            load();
+          }}
+        />
+      )}
     </div>
   );
 };

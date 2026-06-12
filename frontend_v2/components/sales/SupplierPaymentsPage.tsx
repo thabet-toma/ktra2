@@ -278,7 +278,7 @@ export const SupplierPaymentsPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel" style={{ height: "calc(100vh - 5rem)" }}>
+    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title="سندات الصرف للموردين"
         state={`${filtered.length} سند`}

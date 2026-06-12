@@ -1,5 +1,6 @@
 import React, { useMemo, useState, useEffect } from "react";
-import { Search, X, Package } from "lucide-react";
+import { Search, X, Package, Plus } from "lucide-react";
+import { ItemQuickCreateModal } from "../items/ItemQuickCreateModal";
 
 /** نفس حقول المنتج في فاتورة المبيعات — منفصل لتفادي تبعية دائرية */
 export type SalesProductPickerItem = {
@@ -47,6 +48,7 @@ export const SalesProductPickerModal: React.FC<Props> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [showAddModal, setShowAddModal] = useState(false);
   const activeItemRef = React.useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -135,16 +137,25 @@ export const SalesProductPickerModal: React.FC<Props> = ({
         </div>
 
         <div className="p-3 border-b aseel-border-soft dark:aseel-border-soft">
-          <div className="relative">
-            <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 aseel-text-soft" />
-            <input
-              type="text"
-              autoFocus
-              placeholder="بحث: اسم، SKU، باركود..."
-              className="w-full pl-3 pr-10 py-2.5 aseel-bg-panel dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+          <div className="relative flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 aseel-text-soft" />
+              <input
+                type="text"
+                autoFocus
+                placeholder="بحث: اسم، SKU، باركود..."
+                className="w-full pl-3 pr-10 py-2.5 aseel-bg-panel dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-1 px-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-medium transition-colors whitespace-nowrap"
+            >
+              <Plus className="w-4 h-4" /> إضافة صنف
+            </button>
           </div>
         </div>
 
@@ -212,6 +223,20 @@ export const SalesProductPickerModal: React.FC<Props> = ({
           </button>
         </div>
       </div>
+      {showAddModal && (
+        <ItemQuickCreateModal
+          isOpen={showAddModal}
+          onClose={() => setShowAddModal(false)}
+          onSaved={(newProduct) => {
+            setShowAddModal(false);
+            // Ideally we'd add it to the products list locally and select it
+            // but since products is passed as prop, we can just trigger onSelect
+            // and the parent should refetch products.
+            onSelect(newProduct.id);
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 };

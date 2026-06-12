@@ -80,6 +80,8 @@ def _sync_partner_from_mirror_supplier(supplier_data: dict, tenant) -> None:
         if currency_code:
             currency = Currency.objects.filter(Code=currency_code).first()
 
+        credit_limit = supplier_data.get("creditLimit") or None
+
         defaults = {
             "legal_name": legal_name,
             "partner_type": partner_type,
@@ -88,6 +90,7 @@ def _sync_partner_from_mirror_supplier(supplier_data: dict, tenant) -> None:
             "opening_balance": opening_balance,
             "opening_balance_date": opening_balance_date,
             "currency": currency,
+            "credit_limit": credit_limit,
         }
 
         existing = (
@@ -108,6 +111,56 @@ def _sync_partner_from_mirror_supplier(supplier_data: dict, tenant) -> None:
             Partner.objects.create(tenant=tenant, name=name, **defaults)
     except Exception:
         logger.warning("mapper: supplier→partner sync failed", exc_info=True)
+        return
+
+
+def _sync_product_from_mirror_item(item_data: dict, tenant, doc_id: str) -> None:
+    """
+    Ensure SQL Product exists for a mirror item doc.
+    """
+    try:
+        from inventory.models import Product
+        from inventory.services import generate_next_sku
+
+        if tenant is None:
+            return
+
+        name = (item_data.get("name_ar") or item_data.get("name") or "New Item").strip()
+        
+        # Generate SKU if not provided or if it's a firebase UUID
+        sku = item_data.get("sku")
+        if not sku or sku.startswith("FB-"):
+            sku = generate_next_sku(tenant)
+            
+        defaults = {
+            "name_ar": name,
+            "sku": sku,
+            "uom_primary": item_data.get("uom_primary") or "عدد",
+        }
+
+        # Check by mirror doc_id stored in a field, or just match by name/sku if we didn't store it.
+        # But wait, the simplest is matching by SKU if it was passed, or create new.
+        sql_id = item_data.get("sqlProductId")
+
+        if sql_id:
+            Product.objects.update_or_create(id=sql_id, tenant=tenant, defaults=defaults)
+        else:
+            # If no sql_id, try to find by SKU, else create
+            p = Product.objects.filter(tenant=tenant, sku=sku).first()
+            if p:
+                for k, v in defaults.items():
+                    setattr(p, k, v)
+                p.save()
+            else:
+                p = Product.objects.create(tenant=tenant, **defaults)
+            
+            # Optionally write back sqlProductId to the dict so caller knows?
+            # We are in the mapper, we can mutate doc.data before save? Yes, if we hook before save.
+            item_data["sqlProductId"] = p.id
+            item_data["sku"] = p.sku
+
+    except Exception:
+        logger.warning("mapper: item→product sync failed", exc_info=True)
         return
 
 
@@ -335,13 +388,16 @@ class MapperView(View):
                 and existing.tenant_id != tenant.pk:
             return JsonResponse({'detail': 'Not found'}, status=404)
 
+        # Auto-sync mirror suppliers to SQL partners
+        if segments[0] == "suppliers":
+            _sync_partner_from_mirror_supplier(data, tenant)
+        elif segments[0] == "items":
+            _sync_product_from_mirror_item(data, tenant, doc_id)
+        
         FirestoreMirrorDoc.objects.update_or_create(
             path=full_path,
             defaults={'data': data, 'tenant': tenant if _is_tenant_scoped(full_path) else None},
         )
-        # Auto-sync mirror suppliers to SQL partners
-        if segments[0] == "suppliers":
-            _sync_partner_from_mirror_supplier(data, tenant)
         return JsonResponse({'id': doc_id})
 
     def put(self, request, subpath):
@@ -384,11 +440,15 @@ class MapperView(View):
             doc.data = {**doc.data, **body}
         else:
             doc.data = body
-        doc.save()
+
         _sync_django_user_active_from_user_mirror(path, doc.data)
         # Auto-sync mirror suppliers to SQL partners
         if segments and segments[0] == "suppliers" and len(segments) == 2:
             _sync_partner_from_mirror_supplier(doc.data, tenant)
+        elif segments and segments[0] == "items" and len(segments) == 2:
+            _sync_product_from_mirror_item(doc.data, tenant, segments[1])
+
+        doc.save()
         return JsonResponse({'ok': True, 'id': segments[-1]})
 
     def delete(self, request, subpath):
