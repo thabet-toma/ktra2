@@ -934,6 +934,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     )
     # P-H-1: exposed for payment-voucher endpoint (read-only)
     cheques = serializers.SerializerMethodField()
+    invoice_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     class Meta:
         model = PurchaseInvoice

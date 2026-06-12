@@ -373,6 +373,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         grand_total: roundSqlMoney2(payload.grandTotal ?? 0),
         local_payments_json: payload.localPayments || null,
         conversion_metadata_json: payload.conversionMetadata || null,
+        currency: payload.currency || 'ILS',
         status: payload.status || 'draft',
         notes: payload.notes || null,
         supplier_invoice_number: payload.supplierInvoiceNumber || null,
