@@ -508,6 +508,8 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
                   invoiceId={Number(currentInvoice.id)}
                   onPosted={() => {
                     void loadInvoices();
+                    // task16 C11: العودة للصفحة الرئيسية بعد إتمام الترحيل
+                    navigate("/dashboard");
                   }}
                 />
               </div>

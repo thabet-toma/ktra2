@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { StockMovementDto, SqlProduct } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { Plus, RefreshCw, X, Save, Loader2, Warehouse as WhIcon } from "lucide-react";
 import { WarehousesManager } from "./WarehousesManager";
+import { invoicePathForReference, productPath } from "../../utils/entityLinks";
 
 const TYPES: Record<string, string> = {
   IN: "استلام", OUT: "صرف",
@@ -31,6 +33,7 @@ const blankForm = (): FormState => ({
 });
 
 export const StockMovementsPage: React.FC = () => {
+  const navigate = useNavigate();
   const [movements, setMovements] = useState<StockMovementDto[]>([]);
   const [products, setProducts] = useState<SqlProduct[]>([]);
   const [loading, setLoading] = useState(false);
@@ -101,7 +104,19 @@ export const StockMovementsPage: React.FC = () => {
     { key: "sku", header: "SKU", width: "100px",
       render: (m) => <>{m.product_sku}</> },
     { key: "name", header: "الصنف",
-      render: (m) => <>{m.product_name}</> },
+      render: (m) => (
+        // task16 A4: اسم الصنف رابط يفتح صفحة الأصناف
+        m.product_name ? (
+          <button
+            type="button"
+            className="text-blue-700 hover:underline text-right"
+            onClick={() => navigate(productPath())}
+            title="فتح الأصناف"
+          >
+            {m.product_name}
+          </button>
+        ) : <>—</>
+      ) },
     { key: "type", header: "النوع", width: "90px",
       render: (m) => {
         const label = m.movement_type_display || TYPES[m.movement_type] || m.movement_type;
@@ -116,7 +131,22 @@ export const StockMovementsPage: React.FC = () => {
     { key: "total", header: "الإجمالي", width: "110px", align: "center", numeric: true,
       render: (m) => <>{fmt(m.total_cost)}</> },
     { key: "ref", header: "المرجع", width: "90px",
-      render: (m) => <>{m.reference_type_display || m.reference_type}</> },
+      render: (m) => {
+        // task16 A5: مرجع الفاتورة في حركات المخزن رابط يفتح الفاتورة
+        const href = invoicePathForReference(m.reference_type, m.reference_id);
+        const label = m.reference_type_display || m.reference_type;
+        if (!href) return <>{label}</>;
+        return (
+          <button
+            type="button"
+            className="text-blue-700 hover:underline"
+            onClick={() => navigate(href)}
+            title="فتح الفاتورة المرتبطة"
+          >
+            {label}{m.reference_id ? ` #${m.reference_id}` : ""}
+          </button>
+        );
+      } },
     { key: "notes", header: "ملاحظات",
       render: (m) => <>{m.notes || "—"}</> },
   ];

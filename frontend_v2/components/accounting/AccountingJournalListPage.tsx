@@ -4,8 +4,10 @@
  * Ref: المحاسبة.txt:48-69
  */
 import React, { useEffect, useState, useCallback, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { accountingApi } from "../../services/accountingApi";
 import { Plus, RefreshCw, Printer } from "lucide-react";
+import { invoicePathForReference } from "../../utils/entityLinks";
 import {
   AseelDenseTable,
   AseelDocumentShell,
@@ -92,6 +94,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
   onNew,
   onOpen,
 }) => {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<JournalListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -200,12 +203,27 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       key: "ref_type",
       header: "النوع",
       width: "120px",
-      render: (r) => (
-        <span className="text-xs text-[var(--aseel-ink-soft)]">
-          {refLabel(r.reference_type)}
-          {r.reference_id ? ` #${r.reference_id}` : ""}
-        </span>
-      ),
+      render: (r) => {
+        // task16 A6: مرجع فاتورة البيع/الشراء في القيد رابط يفتح الفاتورة
+        const href = invoicePathForReference(r.reference_type, r.reference_id);
+        const label = `${refLabel(r.reference_type)}${r.reference_id ? ` #${r.reference_id}` : ""}`;
+        if (!href) {
+          return <span className="text-xs text-[var(--aseel-ink-soft)]">{label}</span>;
+        }
+        return (
+          <button
+            type="button"
+            className="text-xs text-blue-700 hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(href);
+            }}
+            title="فتح الفاتورة المرتبطة"
+          >
+            {label}
+          </button>
+        );
+      },
     },
     {
       key: "status",

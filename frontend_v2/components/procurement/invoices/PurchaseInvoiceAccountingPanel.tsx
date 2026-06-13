@@ -258,13 +258,19 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
       });
 
     const creditTotal = grand + feeTotal;
-    const creditLabel =
-      paymentType === "cash"
-        ? `صندوق/بنك (${
-            accounts.find((a) => a.id === cashAccountId)?.code || "—"
-          })`
-        : `ذمم مورد (${invoice.partner_name || "—"})`;
-    lines.push({ account: creditLabel, debit: 0, credit: creditTotal });
+    const supplierLabel = `ذمم مورد (${invoice.partner_name || "—"})`;
+    
+    // إثبات الفاتورة على حساب المورد
+    lines.push({ account: supplierLabel, debit: 0, credit: creditTotal, note: "إثبات الفاتورة" });
+
+    // تسوية الدفعة النقدية إن وجدت
+    if (paymentType === "cash") {
+      const cashLabel = `صندوق/بنك (${
+        accounts.find((a) => a.id === cashAccountId)?.code || "—"
+      })`;
+      lines.push({ account: supplierLabel, debit: creditTotal, credit: 0, note: "تسوية ذمم (دفع نقدي)" });
+      lines.push({ account: cashLabel, debit: 0, credit: creditTotal, note: "دفع نقدي" });
+    }
 
     const totalDebit = lines.reduce((s, l) => s + l.debit, 0);
     const totalCredit = lines.reduce((s, l) => s + l.credit, 0);
@@ -307,6 +313,32 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 justify-end">
+          {/* task16 C10: الإجمالي + المتبقي + حالة الدفع */}
+          <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="إجمالي الفاتورة">
+            الإجمالي: {Number(invoice.grand_total || 0).toLocaleString()} {invoice.currency_code || ""}
+          </span>
+          <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="المبلغ المتبقي">
+            المتبقي: {Number(invoice.remaining_balance ?? invoice.grand_total ?? 0).toLocaleString()} {invoice.currency_code || ""}
+          </span>
+          {invoice.payment_status && (
+            <span
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft ${
+                invoice.payment_status === "paid"
+                  ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                  : invoice.payment_status === "partially_paid"
+                    ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+                    : "aseel-bg-panel aseel-text-state"
+              }`}
+              title="حالة الدفع"
+            >
+              {invoice.payment_status_display ||
+                (invoice.payment_status === "paid"
+                  ? "مدفوعة"
+                  : invoice.payment_status === "partially_paid"
+                    ? "مدفوعة جزئياً"
+                    : "غير مدفوعة")}
+            </span>
+          )}
           {invoice.receipt_status && (
             <span
               className={`px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel ${

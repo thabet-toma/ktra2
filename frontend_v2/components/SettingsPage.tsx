@@ -2,9 +2,14 @@
  * N7-T7 — SettingsPage — Aseel form sections
  */
 import React, { useState, useEffect } from 'react';
-import { User } from '../types';
+import { User, AppView } from '../types';
 import { updateUserInDb } from '../services/firestoreService';
 import { changeUserPassword } from '../services/authService';
+import {
+    SHORTCUTABLE_VIEWS,
+    getQuickShortcuts,
+    setQuickShortcuts,
+} from '../utils/quickShortcuts';
 
 interface SettingsPageProps {
     user: User;
@@ -23,6 +28,16 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
     const [loadingProfile, setLoadingProfile] = useState(false);
     const [loadingPassword, setLoadingPassword] = useState(false);
+    // task16 D14: اختصارات الوصول السريع المختارة
+    const [quickShortcuts, setQuickShortcutsState] = useState<AppView[]>(() => getQuickShortcuts());
+
+    const toggleShortcut = (view: AppView) => {
+        setQuickShortcutsState((prev) => {
+            const next = prev.includes(view) ? prev.filter((v) => v !== view) : [...prev, view];
+            setQuickShortcuts(next);
+            return next;
+        });
+    };
 
     useEffect(() => {
         setProfileForm({
@@ -182,6 +197,26 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
                     </div>
                 </div>
             </form>
+
+            {/* task16 D14: اختصارات الوصول السريع في الشريط العلوي */}
+            <div style={sectionStyle}>
+                <div style={sectionTitleStyle}>اختصارات الوصول السريع (الشريط العلوي)</div>
+                <p style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)', marginBottom: 12 }}>
+                    اختر الشاشات التي تظهر كأزرار اختصار أعلى الصفحة للوصول السريع.
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    {SHORTCUTABLE_VIEWS.map((s) => (
+                        <label key={s.view} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>
+                            <input
+                                type="checkbox"
+                                checked={quickShortcuts.includes(s.view)}
+                                onChange={() => toggleShortcut(s.view)}
+                            />
+                            {s.label}
+                        </label>
+                    ))}
+                </div>
+            </div>
 
             {/* P5-T1-b: إدارة التخزين المحلي */}
             <div className="aseel-form-section" style={{ marginTop: 20 }}>

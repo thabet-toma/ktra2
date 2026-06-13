@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Invoice, Item, Supplier } from "@/types";
 import { formatInvoiceImportLogisticsLine } from "@/utils/invoiceConversionUtils";
 import {
@@ -57,6 +58,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   items,
   suppliers,
 }) => {
+  const navigate = useNavigate();
   const [selectedInvoiceForDetails, setSelectedInvoiceForDetails] = useState<string | null>(null);
   const [expandedInvoices, setExpandedInvoices] = useState<Set<string>>(new Set());
 
@@ -536,9 +538,15 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                       <span className="text-sm font-bold aseel-text-ink dark:aseel-text-soft">
                         رقم الفاتورة:
                       </span>
-                      <span className="text-xs px-2 py-1 rounded-full aseel-bg-accent-bg dark:aseel-bg-panel/30 aseel-text-accent dark:aseel-text-soft border aseel-border-accent dark:aseel-border-soft/50">
+                      {/* task16 A7: رقم فاتورة الشراء نفسه رابط يفتح الفاتورة */}
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onView(invoice); }}
+                        className="text-xs px-2 py-1 rounded-full aseel-bg-accent-bg dark:aseel-bg-panel/30 text-blue-700 hover:underline border aseel-border-accent dark:aseel-border-soft/50"
+                        title="فتح الفاتورة"
+                      >
                         {invoice.invoiceNumber || "غير معروف"}
-                      </span>
+                      </button>
                       {invoice.invoiceName && (
                         <span className="text-sm font-bold aseel-text-ink dark:aseel-text-soft">
                           {invoice.invoiceName}
@@ -680,7 +688,15 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                         <div>
                           <h4 className="text-sm font-bold aseel-text-ink dark:text-white flex items-center gap-2">
                             <User className="w-3 h-3 aseel-text-soft" />
-                            {supplierDisplayName}
+                            {/* task16 A4: اسم المورد رابط يفتح صفحة الموردين */}
+                            <button
+                              type="button"
+                              className="hover:underline text-blue-700"
+                              onClick={(e) => { e.stopPropagation(); navigate("/suppliers"); }}
+                              title="فتح الموردين"
+                            >
+                              {supplierDisplayName}
+                            </button>
                           </h4>
                         </div>
                         {/* باقي التفاصيل... */}

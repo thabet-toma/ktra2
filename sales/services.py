@@ -642,59 +642,82 @@ def post_sales_invoice(
                 f"يتجاوز مبلغ الفاتورة {grand}."
             )
 
+        # ── خصم المصدر (يُحسب مبكراً ليُخصم من التحصيل النقدي) ───────────────
+        # خصم المصدر = الجزء الذي يحتجزه العميل كاستقطاع ضريبي ضد البائع
+        # (Aseel «خصم مصدر»). أولوية: تجاوز الفاتورة (مبلغ ثم نسبة) ← افتراضي
+        # العميل (مبلغ ثم نسبة). يُرحَّل سطره وتُخفَّض الذمم في كتلة الـ G6 أدناه.
+        src_disc_amt = Decimal("0.00")
+        src_disc_pct_used = Decimal("0.00")
+        if invoice.source_discount_amount_override is not None:
+            src_disc_amt = Decimal(str(invoice.source_discount_amount_override)).quantize(DEC)
+        elif invoice.source_discount_percent_override is not None:
+            src_disc_pct_used = Decimal(str(invoice.source_discount_percent_override))
+            src_disc_amt = (grand * src_disc_pct_used / Decimal("100")).quantize(DEC)
+        elif invoice.customer:
+            cust_amt = Decimal(str(getattr(invoice.customer, "source_discount_amount", 0) or 0))
+            cust_pct = Decimal(str(getattr(invoice.customer, "source_discount_percent", 0) or 0))
+            if cust_amt > 0:
+                src_disc_amt = cust_amt
+            elif cust_pct > 0:
+                src_disc_pct_used = cust_pct
+                src_disc_amt = (grand * src_disc_pct_used / Decimal("100")).quantize(DEC)
+        if src_disc_amt > grand:
+            src_disc_amt = grand
+
+        # ── Section B: القيد يمرّ دائماً عبر حساب ذمم العميل ──────────────────
+        # حتى البيع النقدي يُقيَّد أولاً على ذمم العميل بكامل القيمة، ثم يُسوَّى
+        # التحصيل (نقدي/شيكات) بحركة دائنة على نفس الحساب — كي يعكس كشف حساب
+        # العميل والأعمار كل الحركات (المطلب المحاسبي للمالك). journal_lines[0]
+        # هو دائماً سطر الذمم بكامل الإجمالي ليبقى مرجع تخفيض خصم المصدر ثابتاً.
+        ar = _resolve_ar_account(invoice)
+        journal_lines.append(
+            {
+                "account": ar.id,
+                "partner": invoice.customer_id,
+                "debit": grand,
+                "credit": Decimal("0"),
+                "description": f"ذمم — {invoice.invoice_number}",
+            }
+        )
+
+        # المبلغ النقدي المُحصَّل وقت الفاتورة + حسابه
         if invoice.invoice_type == SalesInvoice.INVOICE_CASH:
-            cash = invoice.cash_or_bank_account
-            if not cash:
+            cash_account = invoice.cash_or_bank_account
+            if not cash_account:
                 raise ValidationError("فواتير النقدي تتطلب حساب صندوق/بنك (cash_or_bank_account).")
-            # Cash invoice: primary cash line = grand − cheques_total (cheques
-            # go to under-collection bucket). attached_cash on cash invoices is
-            # redundant — its account is the same as cash_or_bank_account.
-            primary_debit = (grand - cheques_total).quantize(DEC)
-            if primary_debit > 0:
-                journal_lines.append(
-                    {
-                        "account": cash.id,
-                        "partner": invoice.customer_id,
-                        "debit": primary_debit,
-                        "credit": Decimal("0"),
-                        "description": f"تحصيل نقدي — {invoice.invoice_number}",
-                    }
-                )
+            # العميل يدفع نقداً صافي ما يتبقى بعد الشيكات وخصم المصدر
+            collected_cash = (grand - cheques_total - src_disc_amt).quantize(DEC)
         else:
-            ar = _resolve_ar_account(invoice)
-            ar_debit = (grand - attached_total).quantize(DEC)
-            # NOTE: We always emit the AR line first so the source-discount
-            # logic below can adjust its debit. If everything is paid (cash +
-            # cheques == grand), AR debit is 0 — we still emit a placeholder
-            # so source-discount reduction logic has a stable target index.
+            cash_account = invoice.attached_cash_account
+            collected_cash = attached_cash
+
+        # تسوية التحصيل النقدي عبر الذمم (مدين صندوق / دائن ذمم)
+        if collected_cash > 0:
+            if not cash_account:
+                raise ValidationError(
+                    "السند المرفق فيه مبلغ نقدي لكن لم يُحدَّد حساب الصندوق "
+                    "(attached_cash_account)."
+                )
+            journal_lines.append(
+                {
+                    "account": cash_account.id,
+                    "partner": invoice.customer_id,
+                    "debit": collected_cash,
+                    "credit": Decimal("0"),
+                    "description": f"تحصيل نقدي — {invoice.invoice_number}",
+                }
+            )
             journal_lines.append(
                 {
                     "account": ar.id,
                     "partner": invoice.customer_id,
-                    "debit": ar_debit if ar_debit > 0 else Decimal("0"),
-                    "credit": Decimal("0"),
-                    "description": f"ذمم — {invoice.invoice_number}",
+                    "debit": Decimal("0"),
+                    "credit": collected_cash,
+                    "description": f"تسوية ذمم (نقدي) — {invoice.invoice_number}",
                 }
             )
-            # Attached cash (different cashbox than the AR resolution)
-            if attached_cash > 0:
-                pay_acc = invoice.attached_cash_account
-                if not pay_acc:
-                    raise ValidationError(
-                        "السند المرفق فيه مبلغ نقدي لكن لم يُحدَّد حساب الصندوق "
-                        "(attached_cash_account)."
-                    )
-                journal_lines.append(
-                    {
-                        "account": pay_acc.id,
-                        "partner": invoice.customer_id,
-                        "debit": attached_cash,
-                        "credit": Decimal("0"),
-                        "description": f"مدفوع نقدا — {invoice.invoice_number}",
-                    }
-                )
 
-        # Cheques bucket (شيكات برسم التحصيل) — both cash and credit invoices.
+        # تسوية الشيكات عبر الذمم (مدين شيكات برسم التحصيل / دائن ذمم)
         if cheques_total > 0:
             ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
             uc_acc = (
@@ -725,6 +748,15 @@ def post_sales_invoice(
                     "debit": cheques_total,
                     "credit": Decimal("0"),
                     "description": f"مدفوع شيكات — {invoice.invoice_number}",
+                }
+            )
+            journal_lines.append(
+                {
+                    "account": ar.id,
+                    "partner": invoice.customer_id,
+                    "debit": Decimal("0"),
+                    "credit": cheques_total,
+                    "description": f"تسوية ذمم (شيكات) — {invoice.invoice_number}",
                 }
             )
 
@@ -768,26 +800,9 @@ def post_sales_invoice(
         #   2. invoice.source_discount_percent_override (% of grand_total)
         #   3. customer.source_discount_amount  (default amount)
         #   4. customer.source_discount_percent (default % of grand_total)
-        src_disc_amt = Decimal("0.00")
-        src_disc_pct_used = Decimal("0.00")
-        if invoice.source_discount_amount_override is not None:
-            src_disc_amt = Decimal(str(invoice.source_discount_amount_override)).quantize(DEC)
-        elif invoice.source_discount_percent_override is not None:
-            src_disc_pct_used = Decimal(str(invoice.source_discount_percent_override))
-            src_disc_amt = (grand * src_disc_pct_used / Decimal("100")).quantize(DEC)
-        elif invoice.customer:
-            cust_amt = Decimal(str(getattr(invoice.customer, "source_discount_amount", 0) or 0))
-            cust_pct = Decimal(str(getattr(invoice.customer, "source_discount_percent", 0) or 0))
-            if cust_amt > 0:
-                src_disc_amt = cust_amt
-            elif cust_pct > 0:
-                src_disc_pct_used = cust_pct
-                src_disc_amt = (grand * src_disc_pct_used / Decimal("100")).quantize(DEC)
-
-        # Clamp: cannot exceed the receivable/cash debit
-        if src_disc_amt > grand:
-            src_disc_amt = grand
-
+        # NOTE: `src_disc_amt`/`src_disc_pct_used` are computed earlier (before
+        # the AR/cash settlement block) so the cash collection can net the
+        # withheld amount. Here we only emit the line + reduce the AR debit.
         if src_disc_amt > 0:
             ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
             disc_acct = None
@@ -818,12 +833,11 @@ def post_sales_invoice(
                 "credit": Decimal("0"),
                 "description": f"خصم مصدر{desc_pct} — {invoice.invoice_number}",
             })
-            # REDUCE the receivable/cash debit line by src_disc_amt — customer
-            # actually owes (or pays) `grand − src_disc_amt`; the rest is now a
-            # claim on the tax authority.  Journal remains balanced because we
-            # added a Dr of the same amount on the source-discount account.
-            # The first journal line is always AR (credit invoice) or cash (cash
-            # invoice) — both built immediately above with `debit=grand`.
+            # REDUCE the AR debit line by src_disc_amt — customer actually owes
+            # `grand − src_disc_amt`; the rest is now a claim on the tax
+            # authority. Journal remains balanced because we added a Dr of the
+            # same amount on the source-discount account. journal_lines[0] is
+            # always the full-grand AR line (built above for every invoice type).
             recv_line = journal_lines[0]
             recv_line["debit"] = (Decimal(str(recv_line["debit"])) - src_disc_amt).quantize(DEC)
 
@@ -869,12 +883,14 @@ def post_sales_invoice(
 
         invoice.journal = jh
         invoice.status = SalesInvoice.STATUS_POSTED
-        # M2-T3: amount_paid reflects what came in with the invoice itself
-        # (cash + cheques). Subsequent CustomerPayments will add on top of this
-        # via post_customer_payment's allocation logic.
-        if attached_total > 0:
+        # M2-T3: amount_paid reflects what came in with the invoice itself.
+        # Section B: includes the cash collected on a cash invoice (settled via
+        # AR) + attached cheques. Subsequent CustomerPayments add on top via
+        # post_customer_payment's allocation logic.
+        settled_total = (collected_cash + cheques_total).quantize(DEC)
+        if settled_total > 0:
             invoice.amount_paid = (
-                Decimal(str(invoice.amount_paid or 0)) + attached_total
+                Decimal(str(invoice.amount_paid or 0)) + settled_total
             ).quantize(DEC)
             invoice.save(update_fields=["journal", "status", "amount_paid"])
         else:

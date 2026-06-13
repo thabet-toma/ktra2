@@ -227,8 +227,10 @@ export const SalesSettingsPage: React.FC = () => {
       </div>
 
       {msg && (
-        <div className="rounded aseel-bg-panel aseel-text-ink dark:aseel-bg-panel/30 dark:aseel-text-soft text-sm px-3 py-2">
-          {msg}
+        // task16 D12: تأكيد «حُفظ بنجاح» واضح (بنر نجاح أخضر + علامة)
+        <div className="aseel-banner aseel-banner--ok" role="status" aria-live="polite">
+          <Info className="h-4 w-4 shrink-0" />
+          <span>{msg}</span>
         </div>
       )}
       {err && (

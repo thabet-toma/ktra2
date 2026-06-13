@@ -435,6 +435,12 @@ const App: React.FC = () => {
       setAppView("purchase-invoices");
       return;
     }
+    // task16 A8: قائمة فواتير المبيعات وتفصيل فاتورة واحدة مساران مستقلان.
+    // المحرر يُفتح داخل SalesInvoicesPage حسب الـ id في المسار.
+    if (path === "/sales/invoices" || path.startsWith("/sales/invoices/")) {
+      setAppView("sales-invoices");
+      return;
+    }
     const journalMatch = path.match(/^\/accounting\/journals\/(.+)$/);
     if (journalMatch) {
       const seg = journalMatch[1];

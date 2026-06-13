@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct, StockSummaryResponse } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Download, Printer } from "lucide-react";
 
 const fmt = (n: number | string) =>
   Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -17,6 +17,8 @@ export const StockLevelsPage: React.FC = () => {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<"" | "low" | "out" | "over">("");
   const [filterCategory, setFilterCategory] = useState<string>("");
+  // task16 E18: اختيار الأصناف للتصدير
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,6 +61,112 @@ export const StockLevelsPage: React.FC = () => {
     return true;
   });
 
+  // task16 E18: تصدير رصيد المخزون إلى CSV — المختار، وإلا كل المعروض
+  const STATUS_AR: Record<string, string> = {
+    out_of_stock: "نفذ", low_stock: "منخفض", in_stock: "متوفر",
+  };
+  const toggleOne = (id: number) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const allFilteredSelected = filtered.length > 0 && filtered.every((p) => selectedIds.has(p.id));
+  const toggleAll = () =>
+    setSelectedIds((prev) => {
+      if (filtered.every((p) => prev.has(p.id))) {
+        const next = new Set(prev);
+        filtered.forEach((p) => next.delete(p.id));
+        return next;
+      }
+      const next = new Set(prev);
+      filtered.forEach((p) => next.add(p.id));
+      return next;
+    });
+
+  const printPdf = () => {
+    const rowsToExport = selectedIds.size > 0
+      ? filtered.filter((p) => selectedIds.has(p.id))
+      : filtered;
+    if (rowsToExport.length === 0) return;
+
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('الرجاء السماح بالنوافذ المنبثقة (Pop-ups) للطباعة');
+      return;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    
+    let html = `
+      <html dir="rtl" lang="ar">
+        <head>
+          <title>أرصدة المخزون - ${today}</title>
+          <style>
+            body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; color: #111827; }
+            h2 { text-align: center; color: #1857a4; margin-bottom: 5px; }
+            .subtitle { text-align: center; color: #6b7280; margin-bottom: 20px; font-size: 14px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+            th, td { border: 1px solid #e5e7eb; padding: 10px 12px; text-align: right; }
+            th { background-color: #f9fafb; color: #374151; font-weight: 600; }
+            tr:nth-child(even) { background-color: #fcfcfd; }
+            .num { text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+            .danger { color: #dc2626; font-weight: bold; }
+            @media print {
+              body { padding: 0; }
+              @page { margin: 1.5cm; }
+            }
+          </style>
+        </head>
+        <body>
+          <h2>تقرير أرصدة المخزون</h2>
+          <div class="subtitle">التاريخ: ${today}</div>
+          <table>
+            <thead>
+              <tr>
+                <th>البضاعة (الصنف)</th>
+                <th>الكمية المتبقية</th>
+                <th>متوسط التكلفة</th>
+                <th>الحد الأدنى</th>
+              </tr>
+            </thead>
+            <tbody>
+    `;
+
+    rowsToExport.forEach(p => {
+      const name = p.name_ar || p.name_en || p.sku || '—';
+      const qty = Number(p.quantity_on_hand);
+      const avgCost = Number(p.avg_cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const minStock = p.min_stock_level ?? '—';
+      const isLow = qty <= (p.min_stock_level || 0);
+      
+      html += `
+        <tr>
+          <td>${name} <br><span style="color:#6b7280; font-size:12px">${p.sku}</span></td>
+          <td class="num ${isLow ? 'danger' : ''}" style="direction: ltr">${qty}</td>
+          <td class="num" style="direction: ltr">${avgCost}</td>
+          <td class="num" style="direction: ltr">${minStock}</td>
+        </tr>
+      `;
+    });
+
+    html += `
+            </tbody>
+          </table>
+          <script>
+            window.onload = () => {
+              window.print();
+            };
+          </script>
+        </body>
+      </html>
+    `;
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
+
   const statusCell = (p: SqlProduct) => {
     if (p.stock_status === "out_of_stock")
       return <span style={{ color: "var(--aseel-danger, #c00)" }}>نفذ</span>;
@@ -68,6 +176,20 @@ export const StockLevelsPage: React.FC = () => {
   };
 
   const columns: DenseColumn<SqlProduct>[] = [
+    {
+      key: "sel",
+      header: "✓",
+      width: "36px",
+      align: "center",
+      render: (p) => (
+        <input
+          type="checkbox"
+          checked={selectedIds.has(p.id)}
+          onChange={() => toggleOne(p.id)}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ),
+    },
     { key: "sku", header: "SKU", width: "110px" },
     { key: "name", header: "الصنف", render: (p) => <>{p.name_ar || p.name_en || "—"}</> },
     { key: "cat", header: "التصنيف", width: "130px", render: (p) => <>{p.category_name || "—"}</> },
@@ -137,6 +259,20 @@ export const StockLevelsPage: React.FC = () => {
           <option value="out">نفذ</option>
           <option value="over">فوق الحد الأقصى</option>
         </select>
+        <label className="aseel-status-item" style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }} title="تحديد/إلغاء كل المعروض">
+          <input type="checkbox" checked={allFilteredSelected} onChange={toggleAll} />
+          تحديد الكل
+        </label>
+        <button
+          className="aseel-toolbtn"
+          onClick={printPdf}
+          disabled={filtered.length === 0}
+          title={selectedIds.size > 0 ? `طباعة ${selectedIds.size} صنف مختار` : "طباعة كل المعروض"}
+          style={{ display: "flex", alignItems: "center", gap: 4 }}
+        >
+          <Printer className="h-4 w-4" />
+          طباعة / PDF{selectedIds.size > 0 ? ` (${selectedIds.size})` : ""}
+        </button>
         <button className="aseel-toolbtn" onClick={load} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>

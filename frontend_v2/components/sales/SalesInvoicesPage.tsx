@@ -10,6 +10,7 @@
  * F6 = focus search
  */
 import React, { useCallback, useEffect, useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   listSalesInvoices,
   postSalesInvoice,
@@ -80,6 +81,8 @@ type SalesInvoicesPageProps = {
 export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   onOpenGeneralLedger,
 }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const [rows, setRows] = useState<ExtRow[]>([]);
   const [partners, setPartners] = useState<PartnerRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -238,15 +241,41 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     return true;
   });
 
+  // task16 A8: قائمة الفواتير (/sales/invoices) وتفصيل فاتورة واحدة
+  // (/sales/invoices/:id) لهما مساران مستقلان — الـ URL هو مصدر الحقيقة لفتح
+  // المحرر. فتح/إغلاق المحرر يتم عبر التنقّل، وتأثير المزامنة أدناه يضبط الحالة.
   const openNew = () => {
-    setDraftToEditId(null);
-    setEditorOpen(true);
+    navigate("/sales/invoices/new");
   };
 
   const openEdit = (id: number) => {
-    setDraftToEditId(id);
-    setEditorOpen(true);
+    navigate(`/sales/invoices/${id}`);
   };
+
+  const closeEditor = () => {
+    navigate("/sales/invoices");
+  };
+
+  // مزامنة حالة المحرر من الـ URL (deep-link / back-forward / رابط رقم الفاتورة)
+  useEffect(() => {
+    const m = (location.pathname || "").match(/^\/sales\/invoices\/(.+?)\/?$/);
+    const seg = m ? decodeURIComponent(m[1]) : "";
+    if (!seg) {
+      setEditorOpen(false);
+      setDraftToEditId(null);
+      return;
+    }
+    if (seg === "new") {
+      setDraftToEditId(null);
+      setEditorOpen(true);
+      return;
+    }
+    const id = parseInt(seg, 10);
+    if (!Number.isNaN(id)) {
+      setDraftToEditId(id);
+      setEditorOpen(true);
+    }
+  }, [location.pathname]);
 
   useAseelIndexKeymap({
     F2: () => {
@@ -303,9 +332,8 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     try {
       const d = await duplicateSalesInvoice(id);
       setMsg(`نسخة مسودة ${d.invoice_number}`);
-      setDraftToEditId(d.id);
-      setEditorOpen(true);
       await load();
+      navigate(`/sales/invoices/${d.id}`);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل النسخ");
     }
@@ -338,7 +366,22 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               aria-label="مسوَّدة معلَّقة"
             />
           )}
-          {r.invoice_number}
+          {/* task16 A7: رقم الفاتورة نفسه رابط يفتح الفاتورة */}
+          {(r as ExtRow & { __pending?: boolean }).__pending ? (
+            r.invoice_number
+          ) : (
+            <button
+              type="button"
+              className="text-blue-700 hover:underline"
+              onClick={(e) => {
+                e.stopPropagation();
+                openEdit(r.id);
+              }}
+              title="فتح الفاتورة"
+            >
+              {r.invoice_number}
+            </button>
+          )}
         </span>
       ),
     },
@@ -352,7 +395,17 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     {
       key: "customer",
       header: "العميل",
-      render: (r) => <span className="text-xs">{r.customer_name || `#${r.customer}`}</span>,
+      render: (r) => (
+        // task16 A4: اسم العميل رابط يفتح صفحة العملاء
+        <button
+          type="button"
+          className="text-xs text-blue-700 hover:underline"
+          onClick={(e) => { e.stopPropagation(); navigate("/sales/customers"); }}
+          title="فتح العملاء"
+        >
+          {r.customer_name || `#${r.customer}`}
+        </button>
+      ),
     },
     {
       key: "invoice_type",
@@ -622,7 +675,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
           className="fixed inset-0 z-[60] bg-black/40"
           style={{ display: "flex", alignItems: "stretch", justifyContent: "stretch" }}
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget) setEditorOpen(false);
+            if (e.target === e.currentTarget) closeEditor();
           }}
         >
           <div
@@ -640,7 +693,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             <button
               type="button"
               className="aseel-toolbtn aseel-toolbtn--danger"
-              onClick={() => setEditorOpen(false)}
+              onClick={closeEditor}
               style={{ position: "absolute", top: "8px", left: "8px", zIndex: 5 }}
             >
               ✕ إغلاق
@@ -653,7 +706,10 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               taxRates={taxRates}
               draftToEditId={draftToEditId}
               onDraftEditConsumed={() => setDraftToEditId(null)}
-              onInvoiceSaved={() => { setEditorOpen(false); load(); }}
+              onClose={closeEditor}
+              onInvoiceSaved={() => {
+                closeEditor();
+              }}
               invoiceList={rows}
               onOpenGeneralLedger={onOpenGeneralLedger}
               salesSettings={salesSettings}

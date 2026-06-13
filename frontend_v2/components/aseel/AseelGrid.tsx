@@ -1,5 +1,4 @@
-import React, { useCallback, useState } from 'react';
-import { AseelCalculatorPopover } from './AseelCalculatorPopover';
+import React, { useCallback } from 'react';
 
 export interface AseelGridColumn<T> {
   key: string;
@@ -37,14 +36,6 @@ export function AseelGrid<T>({
   variant = 'items',
   emptyHint = 'لا توجد بنود — ابدأ الإدخال',
 }: AseelGridProps<T>) {
-  const [calcState, setCalcState] = useState<{
-    rowIndex: number;
-    columnKey: string;
-    initialValue: string | number;
-    x: number;
-    y: number;
-  } | null>(null);
-
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>, rowIndex: number) => {
       const td = (e.target as HTMLElement).closest('td');
@@ -75,22 +66,6 @@ export function AseelGrid<T>({
     },
     [rows.length, onAddRow],
   );
-
-  const handleDoubleClick = (
-    e: React.MouseEvent<HTMLInputElement>,
-    ri: number,
-    columnKey: string,
-    currentVal: any
-  ) => {
-    const rect = (e.target as HTMLElement).getBoundingClientRect();
-    setCalcState({
-      rowIndex: ri,
-      columnKey: columnKey,
-      initialValue: currentVal ?? '',
-      x: rect.left,
-      y: rect.bottom + window.scrollY,
-    });
-  };
 
   return (
     <div className="relative">
@@ -138,11 +113,6 @@ export function AseelGrid<T>({
                           value={val == null ? '' : String(val)}
                           onChange={(e) => onChange(ri, c.key, e.target.value)}
                           onKeyDown={(e) => handleKeyDown(e, ri)}
-                          onDoubleClick={
-                            c.type === 'number'
-                              ? (e) => handleDoubleClick(e, ri, c.key, val)
-                              : undefined
-                          }
                         />
                       )}
                     </td>
@@ -153,21 +123,6 @@ export function AseelGrid<T>({
           )}
         </tbody>
       </table>
-
-      {calcState && (
-        <AseelCalculatorPopover
-          initialValue={calcState.initialValue}
-          x={calcState.x}
-          y={calcState.y}
-          onConfirm={(result) => {
-            if (onChange) {
-              onChange(calcState.rowIndex, calcState.columnKey, String(result));
-            }
-            setCalcState(null);
-          }}
-          onClose={() => setCalcState(null)}
-        />
-      )}
     </div>
   );
 }

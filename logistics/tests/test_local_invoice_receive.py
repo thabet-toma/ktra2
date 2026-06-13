@@ -74,6 +74,47 @@ class LocalInvoiceReceiveTest(APITestCase):
         inv_acc = Account.objects.get(tenant=self.tenant, code="1104")
         assert jh.lines.filter(account=inv_acc, debit=Decimal("5000.00")).exists()
 
+    def test_credit_receive_credits_supplier_ap(self):
+        # Section B: استلام فاتورة آجلة يدائن ذمم المورد (2101) لا الصندوق
+        inv, item = self._make_invoice(qty="2", price="100")  # gross 200
+        res = self.client.post(
+            f"/api/logistics/purchase-invoices/{inv.pk}/receive/",
+            {"lines": [{"item_id": item.pk, "quantity": 2, "warehouse_id": self.warehouse.pk}]},
+            format="json", **self._auth())
+        assert res.status_code == 200, res.content
+        inv.refresh_from_db()
+        from logistics.services import _resolve_ap_account
+        ap = _resolve_ap_account(inv.partner)
+        assert inv.journal.lines.filter(account=ap, credit=Decimal("200.00")).exists(), \
+            "استلام الفاتورة الآجلة يجب أن يدائن ذمم المورد"
+
+    def test_cash_receive_routes_through_supplier_ap(self):
+        # Section B: استلام فاتورة نقدية يمرّ عبر ذمم المورد ثم يُسوّى بالصندوق
+        cash = Account.objects.create(
+            tenant=self.tenant, code="1101-R", name="الصندوق الرئيسي",
+            account_type="Asset", is_active=True)
+        inv, item = self._make_invoice(qty="1", price="55")  # gross 55
+        inv.payment_type = PurchaseInvoice.PAYMENT_TYPE_CASH
+        inv.cash_or_bank_account = cash
+        inv.save(update_fields=["payment_type", "cash_or_bank_account"])
+
+        res = self.client.post(
+            f"/api/logistics/purchase-invoices/{inv.pk}/receive/",
+            {"lines": [{"item_id": item.pk, "quantity": 1, "warehouse_id": self.warehouse.pk}]},
+            format="json", **self._auth())
+        assert res.status_code == 200, res.content
+        inv.refresh_from_db()
+        jl = list(inv.journal.lines.all())
+        assert sum(l.debit for l in jl) == sum(l.credit for l in jl)  # متوازن
+        from logistics.services import _resolve_ap_account
+        ap = _resolve_ap_account(inv.partner)
+        ap_lines = [l for l in jl if l.account_id == ap.id]
+        # ذمم المورد تُدان وتُدائن بنفس القيمة (يمرّ عبرها ثم يُسوّى)
+        assert sum(l.credit for l in ap_lines) == Decimal("55.00")
+        assert sum(l.debit for l in ap_lines) == Decimal("55.00")
+        # الصندوق يُدائن بالمبلغ المدفوع
+        assert sum(l.credit for l in jl if l.account_id == cash.id) == Decimal("55.00")
+
     def test_zero_value_receive_reflects_stock_without_journal(self):
         # فاتورة كمية فقط (بلا أسعار) — الاستلام ينعكس على المخزن بلا قيد محاسبي
         inv = PurchaseInvoice.objects.create(

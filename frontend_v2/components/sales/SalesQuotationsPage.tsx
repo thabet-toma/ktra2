@@ -312,8 +312,8 @@ export const SalesQuotationsPage: React.FC = () => {
   const productOptions = React.useMemo(
     () => products.map((p) => ({
       id: p.id,
-      label: p.name_ar || p.name_en || p.name || p.sku || `#${p.id}`,
-      sub: `${p.sku || ""} · رصيد ${p.quantity_on_hand || 0}`,
+      label: formatProductPrimaryName(p),
+      sub: `رصيد ${p.quantity_on_hand || 0}`,
     })),
     [products]
   );
@@ -497,7 +497,10 @@ export const SalesQuotationsPage: React.FC = () => {
                       <td className="p-2">
                         <div style={{ display: "flex", alignItems: "center", gap: 2, minWidth: "250px" }}>
                           <AseelAutocomplete
-                            value={l.product_name}
+                            value={(() => {
+                              const pr = products.find(p => String(p.id) === String(l.product_id));
+                              return pr ? formatProductPrimaryName(pr) : l.product_name;
+                            })()}
                             options={productOptions}
                             disabled={false}
                             placeholder="اكتب اسم الصنف…"
@@ -506,7 +509,7 @@ export const SalesQuotationsPage: React.FC = () => {
                               if (prod) {
                                 handleLineUpdate(idx, {
                                   product_id: String(id),
-                                  product_name: prod.name_ar || prod.name_en || prod.name || prod.sku || `#${prod.id}`,
+                                  product_name: formatProductPrimaryName(prod),
                                   unit_price: prod.unit_price || "0"
                                 });
                               } else {
@@ -551,7 +554,7 @@ export const SalesQuotationsPage: React.FC = () => {
                   const prod = products.find(p => p.id === productId);
                   handleLineChange(productPickerLineIdx, "product_id", String(productId));
                   if (prod) {
-                    handleLineChange(productPickerLineIdx, "product_name", prod.name);
+                    handleLineChange(productPickerLineIdx, "product_name", formatProductPrimaryName(prod));
                     handleLineChange(productPickerLineIdx, "unit_price", prod.unit_price || "0");
                   }
                   setProductPickerLineIdx(null);

@@ -19,10 +19,17 @@ import {
 import {
   BranchSwitcher,
 } from './BranchSwitcher';
+import { AseelCalculatorButton } from '../aseel';
 import {
   User as UserIcon,
   Calendar,
+  Zap,
 } from 'lucide-react';
+import {
+  getQuickShortcuts,
+  labelForShortcut,
+  QUICK_SHORTCUTS_EVENT,
+} from '../../utils/quickShortcuts';
 
 interface AppLayoutProps {
   user: User;
@@ -41,6 +48,17 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   onOpenGroupConstants,
 }) => {
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
+  // task16 D14: اختصارات الوصول السريع (قابلة للتهيئة من الإعدادات)
+  const [shortcuts, setShortcuts] = useState<AppView[]>(() => getQuickShortcuts());
+  useEffect(() => {
+    const refresh = () => setShortcuts(getQuickShortcuts());
+    window.addEventListener(QUICK_SHORTCUTS_EVENT, refresh);
+    window.addEventListener('storage', refresh);
+    return () => {
+      window.removeEventListener(QUICK_SHORTCUTS_EVENT, refresh);
+      window.removeEventListener('storage', refresh);
+    };
+  }, []);
 
   // N0-T5: F11 global keymap → يفتح GroupConstantsPage كـ modal portal
   useEffect(() => {
@@ -66,6 +84,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         </div>
         <div className="flex items-center gap-2 ms-auto">
           <GlobalSearch userRole={user.role} onNavigate={onNavigate} />
+          {/* task16 E15: حاسبة بأيقونة — تفتح عند الطلب فقط */}
+          <AseelCalculatorButton />
           <DensitySwitch value={density} onChange={setDensity} />
           <ThemeToggle />
         </div>
@@ -80,6 +100,26 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             <div className="aseel-toolgrp">
               <Breadcrumb activeView={activeView} />
             </div>
+            {/* task16 D14: اختصارات الوصول السريع القابلة للتهيئة */}
+            {shortcuts.length > 0 && (
+              <div className="aseel-toolgrp ms-auto flex items-center gap-1" title="اختصارات سريعة (تُهيّأ من الإعدادات)">
+                <Zap className="w-3.5 h-3.5 text-[var(--color-primary)]" />
+                {shortcuts.map((v) => (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => onNavigate(v)}
+                    className={`px-2 py-1 text-xs rounded transition-colors ${
+                      activeView === v
+                        ? 'bg-[var(--color-primary)] text-white'
+                        : 'text-[var(--color-text)] hover:bg-[var(--color-surface-2)]'
+                    }`}
+                  >
+                    {labelForShortcut(v)}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <main className="app-content overflow-auto flex-1">

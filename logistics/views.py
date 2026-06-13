@@ -1807,13 +1807,16 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
           مدين: ضريبة مدخلات (1105)    = tax_amount                    (إن > 0)
           مدين: حساب مصروف لكل رسم     = fee.amount                    (لكل PurchaseInvoiceFee)
              └─ إن كان capitalize_to_inventory=True يُضاف للمخزون بدل المصروف
-          دائن: ذمم المورد (partner.linked_account) أو صندوق/بنك       = إجمالي + مجموع الرسوم
+          دائن: ذمم المورد (partner.linked_account)                    = إجمالي + مجموع الرسوم
+          (Section B) ثم تسوية الدفعة النقدية عبر ذمم المورد:
+          مدين: ذمم المورد / دائن: صندوق/بنك                            = المبلغ المدفوع نقداً
 
         القواعد:
           - يُستدعى validate_journal_entry قبل الحفظ — يرفض أي قيد غير متوازن.
           - tax_amount > 0 يتطلب حساب VAT Input (1105) أو TaxRate بـ direction=purchase؛
             وإلا يُرفض الترحيل بدل السكوت عن الفرق.
-          - payment_type='cash' يتطلب cash_or_bank_account ويَستبدل AP بالصندوق.
+          - الحساب الدائن دائماً ذمم المورد (subledger)؛ payment_type='cash' (أو
+            attached_cash_amount جزئي) يضيف تسوية نقدية تُفرّغ الذمم — لا يتجاوزها.
         """
         invoice = self.get_object()
         if invoice.is_posted:
@@ -1825,23 +1828,24 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         tenant = invoice.tenant or self._get_tenant()
         partner = invoice.partner
 
-        # ─── 1) تحديد الحساب الدائن (AP أو صندوق/بنك) ───────────────────────────
+        # ─── 1) الحساب الدائن دائماً = ذمم المورد (subledger) ───────────────────
+        # Section B: حتى الشراء النقدي يُقيَّد أولاً على ذمم المورد، ثم تُسوَّى
+        # الدفعة النقدية بحركة ثانية (مدين ذمم المورد / دائن صندوق) في نفس القيد
+        # — كي يعكس كشف حساب المورد والأعمار كل الحركات.
         payment_type = getattr(invoice, 'payment_type', 'credit') or 'credit'
-        credit_account = None
-        if payment_type == 'cash':
-            credit_account = invoice.cash_or_bank_account
-            if not credit_account:
-                return Response(
-                    {'error': 'فاتورة شراء نقدية تتطلب اختيار حساب صندوق/بنك.'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-        else:
-            credit_account = partner.linked_account
-            if not credit_account:
-                return Response(
-                    {'error': 'المورد بلا حساب محاسبي مربوط. اربط المورد بحساب ذمم (Trade Payables) أولاً.'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
+        credit_account = partner.linked_account
+        if not credit_account:
+            return Response(
+                {'error': 'المورد بلا حساب محاسبي مربوط. اربط المورد بحساب ذمم (Trade Payables) أولاً.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # حساب الصندوق/البنك للتسوية النقدية (مطلوب للنقدي، اختياري للدفعة الجزئية)
+        cash_account = invoice.cash_or_bank_account
+        if payment_type == 'cash' and not cash_account:
+            return Response(
+                {'error': 'فاتورة شراء نقدية تتطلب اختيار حساب صندوق/بنك.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # ─── 2) حساب المخزون/المشتريات — P-H-7: عبر _resolve_line_account ──
         inventory_account = None
@@ -2004,12 +2008,37 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             'debit': Decimal('0'),
             'credit': credit_total.quantize(Decimal('0.01')),
             'partner': partner.id,
-            'description': (
-                f"صندوق/بنك — {invoice.invoice_number}"
-                if payment_type == 'cash'
-                else f"ذمم مورد — {invoice.invoice_number}"
-            )[:500],
+            'description': f"ذمم مورد — {invoice.invoice_number}"[:500],
         })
+
+        # ─── تسوية الدفعة النقدية عبر ذمم المورد (مدين ذمم / دائن صندوق) ────────
+        attached_cash = Decimal(str(getattr(invoice, 'attached_cash_amount', 0) or 0))
+        if payment_type == 'cash':
+            paid_cash = credit_total
+        else:
+            paid_cash = attached_cash if attached_cash > 0 else Decimal('0')
+            if paid_cash > credit_total:
+                paid_cash = credit_total
+        if paid_cash > 0:
+            if not cash_account:
+                return Response(
+                    {'error': 'دفعة نقدية على فاتورة الشراء تتطلب حساب صندوق/بنك.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            lines_payload.append({
+                'account': credit_account.id,
+                'debit': paid_cash.quantize(Decimal('0.01')),
+                'credit': Decimal('0'),
+                'partner': partner.id,
+                'description': f"تسوية ذمم (نقدي) — {invoice.invoice_number}"[:500],
+            })
+            lines_payload.append({
+                'account': cash_account.id,
+                'debit': Decimal('0'),
+                'credit': paid_cash.quantize(Decimal('0.01')),
+                'partner': partner.id,
+                'description': f"دفع نقدي — {invoice.invoice_number}"[:500],
+            })
 
         # ─── 6) الترحيل المركزي ─────────────────────────────────────────────────
         try:

@@ -356,11 +356,27 @@ class ChequeSerializer(serializers.ModelSerializer):
 class CashBoxLedgerAccountSerializer(serializers.ModelSerializer):
     account_id = serializers.IntegerField(source="account.id", read_only=True)
     account_code = serializers.CharField(source="account.code", read_only=True)
+    # task16 E16: رصيد الصندوق الحقيقي من دفتر الأستاذ (مدين − دائن للقيود المرحَّلة)
+    # — كان العرض يعتمد رصيداً مخزّناً في mirror لا يتحدّث أبداً ⇒ يبقى صفراً.
+    balance = serializers.SerializerMethodField()
 
     class Meta:
         model = CashBoxLedgerAccount
-        fields = ["id", "external_id", "name", "currency_code", "account_id", "account_code"]
-        read_only_fields = ["id", "account_id", "account_code"]
+        fields = ["id", "external_id", "name", "currency_code", "account_id", "account_code", "balance"]
+        read_only_fields = ["id", "account_id", "account_code", "balance"]
+
+    def get_balance(self, obj):
+        from django.db.models import Sum, DecimalField
+        from django.db.models.functions import Coalesce
+        if not obj.account_id:
+            return "0.00"
+        agg = JournalLine.objects.filter(
+            account_id=obj.account_id, journal__is_posted=True,
+        ).aggregate(
+            d=Coalesce(Sum("debit"), 0, output_field=DecimalField(max_digits=18, decimal_places=2)),
+            c=Coalesce(Sum("credit"), 0, output_field=DecimalField(max_digits=18, decimal_places=2)),
+        )
+        return str((agg["d"] or 0) - (agg["c"] or 0))
 
 
 class ExchangeRateSerializer(serializers.ModelSerializer):

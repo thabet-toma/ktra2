@@ -930,6 +930,11 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     receipt_status_display = serializers.CharField(source='get_receipt_status_display', read_only=True)
     is_local = serializers.SerializerMethodField()
+    # task16 C10: المبلغ المدفوع + المتبقي + حالة الدفع (مدفوعة/جزئياً/غير مدفوعة)
+    amount_paid = serializers.SerializerMethodField()
+    remaining_balance = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
+    payment_status_display = serializers.SerializerMethodField()
     cash_or_bank_account_name = serializers.CharField(
         source='cash_or_bank_account.name', read_only=True, default=None,
     )
@@ -968,6 +973,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             # firestore_id: dropped in P-K-3 (migration 0042).
             'status', 'status_display', 'notes',
             'receipt_status', 'receipt_status_display', 'is_local',
+            'amount_paid', 'remaining_balance', 'payment_status', 'payment_status_display',
             'supplier_invoice_number', 'factory_name',
             'is_posted', 'journal', 'journal_id_display',
             'items', 'fees', 'cheques',
@@ -978,6 +984,46 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     def get_is_local(self, obj):
         """فاتورة محلية = غير مستوردة (بلا صفقة/شحنة/تخليص) — قابلة للاستلام للمخزن."""
         return not (obj.deal_id or obj.shipment_id or obj.clearance_id)
+
+    def _computed_amount_paid(self, obj) -> Decimal:
+        """المدفوع = نقدي مرفق + دفعات صريحة؛ والفاتورة النقدية المرحَّلة مدفوعة بالكامل."""
+        grand = Decimal(str(obj.grand_total or 0))
+        paid = Decimal(str(obj.attached_cash_amount or 0))
+        try:
+            paid += sum((Decimal(str(p.amount or 0)) for p in obj.payments.all()), Decimal('0'))
+        except Exception:
+            pass
+        if obj.payment_type == 'cash' and obj.is_posted:
+            # تسوية الشراء النقدي (Section B) تُفرّغ ذمم المورد بالكامل
+            paid = max(paid, grand)
+        if grand and paid > grand:
+            paid = grand
+        return paid.quantize(Decimal('0.01'))
+
+    def get_amount_paid(self, obj):
+        return str(self._computed_amount_paid(obj))
+
+    def get_remaining_balance(self, obj):
+        grand = Decimal(str(obj.grand_total or 0))
+        return str((grand - self._computed_amount_paid(obj)).quantize(Decimal('0.01')))
+
+    def get_payment_status(self, obj):
+        grand = Decimal(str(obj.grand_total or 0))
+        paid = self._computed_amount_paid(obj)
+        if grand <= 0:
+            return 'unpaid'
+        if paid >= grand - Decimal('0.01'):
+            return 'paid'
+        if paid > 0:
+            return 'partially_paid'
+        return 'unpaid'
+
+    def get_payment_status_display(self, obj):
+        return {
+            'paid': 'مدفوعة',
+            'partially_paid': 'مدفوعة جزئياً',
+            'unpaid': 'غير مدفوعة',
+        }.get(self.get_payment_status(obj), 'غير مدفوعة')
 
     def validate(self, attrs):
         payment_type = attrs.get('payment_type') or (

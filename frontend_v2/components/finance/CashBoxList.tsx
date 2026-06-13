@@ -120,7 +120,11 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                             <div>
                                 <p className="text-xs text-gray-400 mb-1">الرصيد الحالي</p>
                                 <p className="text-2xl font-bold text-gray-900 dark:text-white">
-                                    {box.currentBalance.toLocaleString()} <span className="text-sm font-normal text-gray-500">{box.currency}</span>
+                                    {/* task16 E16: الرصيد من دفتر الأستاذ (إن وُجد حساب مربوط) بدل الرصيد المخزّن الذي يبقى صفراً */}
+                                    {(ledgerByExt[box.id]?.balance != null
+                                        ? Number(ledgerByExt[box.id].balance)
+                                        : box.currentBalance
+                                    ).toLocaleString()} <span className="text-sm font-normal text-gray-500">{box.currency}</span>
                                 </p>
                             </div>
                             <div className="text-blue-600 hover:text-blue-700 text-sm font-medium flex items-center">

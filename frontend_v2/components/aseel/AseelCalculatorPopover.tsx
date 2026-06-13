@@ -7,6 +7,8 @@ interface AseelCalculatorPopoverProps {
   y: number;
   onConfirm: (val: number) => void;
   onClose: () => void;
+  /** task16 E15: حاسبة مستقلة (من أيقونة الشريط) — «=» تعرض الناتج ولا تملأ خلية */
+  standalone?: boolean;
 }
 
 export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
@@ -15,6 +17,7 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
   y,
   onConfirm,
   onClose,
+  standalone = false,
 }) => {
   const [expression, setExpression] = useState(() => {
     const v = Number(initialValue);
@@ -49,7 +52,13 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
       // eslint-disable-next-line no-eval
       const result = eval(expression);
       if (typeof result === "number" && !isNaN(result) && isFinite(result)) {
-        onConfirm(Number(result.toFixed(4)));
+        const rounded = Number(result.toFixed(4));
+        if (standalone) {
+          // حاسبة مستقلة: اعرض الناتج وأبقِ النافذة لمواصلة الحساب
+          setExpression(String(rounded));
+        } else {
+          onConfirm(rounded);
+        }
       } else {
         alert("تعبير غير صالح");
       }

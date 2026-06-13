@@ -25,9 +25,11 @@ type Props = {
 export function formatProductPrimaryName(p: SalesProductPickerItem): string {
   const ar = (p.name_ar || "").trim();
   const en = (p.name_en || "").trim();
+  const n = ((p as any).name || "").trim();
   if (ar && en) return `${ar} — ${en}`;
   if (ar) return ar;
   if (en) return en;
+  if (n) return n;
   return p.sku || `صنف #${p.id}`;
 }
 

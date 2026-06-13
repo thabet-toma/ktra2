@@ -33,9 +33,10 @@ import {
   Trash2,
   X,
   CreditCard,
+  ArrowRight,
 } from "lucide-react";
 import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
-import { SupplierModal } from "../common/SupplierModal";
+import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
 import {
   AseelDocumentShell,
   AseelGrid,
@@ -114,6 +115,8 @@ type Props = {
   draftToEditId: number | null;
   onDraftEditConsumed: () => void;
   onInvoiceSaved: () => void;
+  /** task16: العودة لقائمة الفواتير (زر صريح في الشريط + إغلاق المحرر). */
+  onClose?: () => void;
   /** قائمة الفواتير الحالية (لتنقّل السجلات الأول/السابق/التالي/الأخير). */
   invoiceList?: SalesInvoiceRow[];
   /** اسم/رقم المستخدم الحالي لشريط الحالة (اختياري). */
@@ -169,6 +172,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   draftToEditId,
   onDraftEditConsumed,
   onInvoiceSaved,
+  onClose,
   invoiceList = [],
   currentUserName,
   onOpenGeneralLedger,
@@ -433,10 +437,25 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       };
     }
 
-    // 1) المدين — العميل (آجل) أو الصندوق (نقدي)
+    // 1) المدين — دائماً يُقيّد على ذمم العميل أولاً
+    const custName =
+      customerId !== "" ? customers.find((c) => c.id === Number(customerId))?.name : "";
+    const arLabel = custName
+      ? `ذمم مدينة — ${custName}`
+      : "ذمم مدينة (سيُحدَّد تلقائياً من linked_account للعميل)";
+    
+    out.push({
+      accountId: null,
+      accountLabel: arLabel,
+      debit: grand,
+      credit: 0,
+      description: "إثبات ذمم",
+    });
+
+    // 2) تسوية الدفعة النقدية إن وجدت
     if (invType === "cash") {
       if (cashAccountId === "") {
-        errors.push("اختر حساب الصندوق/البنك لفاتورة نقدية.");
+        errors.push("لم يُحدَّد حساب الصندوق/البنك الافتراضي — عيّنه في إعدادات المبيعات.");
       } else {
         const a = accountsById.get(Number(cashAccountId));
         out.push({
@@ -446,24 +465,19 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           credit: 0,
           description: "تحصيل نقدي",
         });
+        out.push({
+          accountId: null,
+          accountLabel: arLabel,
+          debit: 0,
+          credit: grand,
+          description: "تسوية ذمم (تحصيل نقدي)",
+        });
       }
-    } else {
-      const custName =
-        customerId !== "" ? customers.find((c) => c.id === Number(customerId))?.name : "";
-      out.push({
-        accountId: null,
-        accountLabel: custName
-          ? `ذمم مدينة — ${custName}`
-          : "ذمم مدينة (سيُحدَّد تلقائياً من linked_account للعميل)",
-        debit: grand,
-        credit: 0,
-        description: "ذمم",
-      });
     }
 
     // 2) الدائن — الإيراد
     if (revenueAccountId === "") {
-      errors.push("اختر حساب الإيراد (Sales Revenue).");
+      errors.push("لم يُحدَّد حساب الإيراد الافتراضي — عيّنه في إعدادات المبيعات.");
     } else if (net > 0) {
       const a = accountsById.get(Number(revenueAccountId));
       out.push({
@@ -924,8 +938,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     if (customerId === "") return "اختر العميل.";
     if (currencyId === "") return "اختر العملة.";
     if (invType === "cash" && cashAccountId === "")
-      return "فواتير النقدي تتطلب حساب صندوق/بنك.";
-    if (revenueAccountId === "") return "اختر حساب الإيراد (مبيعات).";
+      return "حساب الصندوق/البنك غير مُعيَّن في إعدادات المبيعات.";
+    if (revenueAccountId === "") return "حساب الإيراد غير مُعيَّن في إعدادات المبيعات.";
     const filled = lines.filter((l) => l.product !== "");
     if (!filled.length) return "أضف بنداً واحداً على الأقل.";
     for (const l of filled) {
@@ -1514,6 +1528,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   gridColumns[8].render = renderDeleteCell;
 
   const toolbarActions: AseelToolbarAction[] = [
+    // task16: زر صريح للعودة لقائمة الفواتير (إلى جانب ✕ إغلاق في الإطار)
+    ...(onClose
+      ? [{ key: "back", label: "الفواتير", icon: <ArrowRight />, onClick: onClose } as AseelToolbarAction]
+      : []),
     { key: "new", label: "إضافة", icon: <Plus />, onClick: resetForm },
     {
       key: "save",
@@ -2042,7 +2060,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                   );
                 })()}
                 {fld("نوع الدفع", <select className="aseel-input" disabled={readOnly} value={invType} onChange={(e) => { setInvType(e.target.value as "cash" | "credit"); markDirty(); }}><option value="credit">آجل (ذمم)</option><option value="cash">نقدي</option></select>)}
-                {invType === "cash" && fld("حساب الصندوق / البنك", <select className="aseel-input" disabled={readOnly} value={cashAccountId} onChange={(e) => { setCashAccountId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}><option value="">— اختر —</option>{cashboxAccounts.map((a) => (<option key={a.id} value={a.id}>{(a.code || "") + " — " + (a.name || "")}</option>))}</select>)}
+                {/* task16 D13: حساب الصندوق/البنك يُقرأ من إعدادات المبيعات (default_cash_account) — أُزيل المحدد من الفاتورة */}
               </div>
               {/* العمود 3 — العملة والحسابات */}
               <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
@@ -2050,7 +2068,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                   <div style={{ flex: 1 }}>{fld("العملة", <select className="aseel-input" disabled={readOnly} value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}><option value="">—</option>{currencies.map((c) => (<option key={c.CurrencyID} value={c.CurrencyID}>{c.Code} {c.Name ? `— ${c.Name}` : ""}</option>))}</select>)}</div>
                   <div style={{ width: "80px" }}>{fld("سعر العملة", <input className="aseel-input" data-aseel-key="1" disabled={readOnly} value={exchangeRate} onChange={(e) => { setExchangeRate(e.target.value); markDirty(); }} />)}</div>
                 </div>
-                {fld("حساب الإيراد", <select className="aseel-input" disabled={readOnly} value={revenueAccountId} onChange={(e) => { setRevenueAccountId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}><option value="">— اختر حساب مبيعات —</option>{revenueAccounts.map((a) => (<option key={a.id} value={a.id}>{(a.code || "") + " — " + (a.name || "")}</option>))}</select>)}
+                {/* task16 D13: حساب الإيراد يُقرأ من إعدادات المبيعات (default_revenue_account_product) — أُزيل المحدد من الفاتورة */}
                 {fld("مشتغل مرخص", <input className="aseel-input" disabled={readOnly} value={licensedDealerNo} onChange={(e) => { setLicensedDealerNo(e.target.value); markDirty(); }} placeholder="رقم المشتغل المرخص" />)}
                 {fld("فاتورة مقاصة", <input className="aseel-input" disabled={readOnly} value={settlementInvoiceNo} onChange={(e) => { setSettlementInvoiceNo(e.target.value); markDirty(); }} placeholder="رقم فاتورة المقاصة" />)}
                 <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -2357,15 +2375,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       />
 
       {showAddCustomerModal && (
-        <SupplierModal
+        // task16: إصلاح — كان يفتح SupplierModal (يُنشئ مورداً!)؛ الآن يُنشئ عميلاً
+        <CustomerQuickAddModal
           isOpen={showAddCustomerModal}
           onClose={() => setShowAddCustomerModal(false)}
-          onSaveSuccess={(newPartner) => {
+          onSaveSuccess={(newCustomer) => {
             setShowAddCustomerModal(false);
-            setCustomerId(newPartner.id!);
+            setCustomerId(newCustomer.id);
+            markDirty();
             setCustomerPickerOpen(false);
-            // It will trigger reload of partners in parent eventually via eventBus or manual trigger
-            // For now just selecting the ID is fine
           }}
         />
       )}

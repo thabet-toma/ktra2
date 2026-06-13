@@ -169,35 +169,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             {showText && <span className="mr-2 text-right flex-1">المساعد الذكي</span>}
           </button>
 
-          {/* إدارة الموظفين */}
-          <div className="space-y-0.5">
-            <button
-              onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); setUserManagementExpanded(!userManagementExpanded); }}
-              className={`flex items-center justify-between w-full p-2 text-sm rounded ${userManagementExpanded ? "bg-[var(--color-surface-2)] text-[var(--color-primary)]" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
-              title="إدارة الموظفين"
-            >
-              <div className="flex items-center">
-                <Users className="h-4 w-4 flex-shrink-0" />
-                {showText && <span className="mr-2">إدارة الموظفين</span>}
-              </div>
-              {showText && (userManagementExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
-            </button>
-            {userManagementExpanded && showText && (
-              <div className="mr-3 pr-2 border-r border-[var(--color-border)] space-y-0.5 mt-0.5">
-                {userManagementLinks.filter(l => l.roles.includes(user.role)).map(link => (
-                  <button
-                    key={link.view}
-                    onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
-                    className={`flex items-center w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-blue-600 font-bold bg-blue-50 dark:bg-blue-900/20" : "text-gray-500 hover:text-blue-600"}`}
-                  >
-                    <span className="ml-2">{link.icon}</span>
-                    {link.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
           {/* المبيعات (منفصل عن المشتريات) */}
           {(user.role === 'manager' || user.role === 'procurement') && (
             <div className="space-y-1">
@@ -336,6 +307,35 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             <SettingsIcon className="h-6 w-6 flex-shrink-0" />
             {showText && <span className="mr-3 text-right flex-1">الإعدادات</span>}
           </button>
+
+          {/* task16 E19: إدارة الموظفين في أسفل الشريط الجانبي */}
+          <div className="space-y-0.5">
+            <button
+              onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); setUserManagementExpanded(!userManagementExpanded); }}
+              className={`flex items-center justify-between w-full p-2 text-sm rounded ${userManagementExpanded ? "bg-[var(--color-surface-2)] text-[var(--color-primary)]" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+              title="إدارة الموظفين"
+            >
+              <div className="flex items-center">
+                <Users className="h-4 w-4 flex-shrink-0" />
+                {showText && <span className="mr-2">إدارة الموظفين</span>}
+              </div>
+              {showText && (userManagementExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+            </button>
+            {userManagementExpanded && showText && (
+              <div className="mr-3 pr-2 border-r border-[var(--color-border)] space-y-0.5 mt-0.5">
+                {userManagementLinks.filter(l => l.roles.includes(user.role)).map(link => (
+                  <button
+                    key={link.view}
+                    onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
+                    className={`flex items-center w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-blue-600 font-bold bg-blue-50 dark:bg-blue-900/20" : "text-gray-500 hover:text-blue-600"}`}
+                  >
+                    <span className="ml-2">{link.icon}</span>
+                    {link.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
           <button
             onClick={() => { window.history.pushState({}, '', '/about-us'); window.dispatchEvent(new PopStateEvent('popstate')); if (isMobile) setIsMobileMenuOpen(false); }}

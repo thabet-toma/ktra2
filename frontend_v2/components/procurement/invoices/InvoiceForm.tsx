@@ -926,6 +926,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         suppliers={suppliers}
         readOnly={readOnly || formData.isHistorical}
         items={formData.items}
+        onOpenAddSupplier={() => setShowAddSupplierModal(true)}
       />
     </div>
   );

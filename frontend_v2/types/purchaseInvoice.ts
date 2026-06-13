@@ -90,6 +90,11 @@ export interface PurchaseInvoiceDto {
   receipt_status?: ReceiptStatus;
   receipt_status_display?: string;
   is_local?: boolean;
+  // task16 C10: حالة الدفع + المبلغ المدفوع + المتبقي (محسوبة في الخادم)
+  amount_paid?: string;
+  remaining_balance?: string;
+  payment_status?: "paid" | "partially_paid" | "unpaid";
+  payment_status_display?: string;
   notes?: string | null;
   supplier_invoice_number?: string | null;
   factory_name?: string | null;

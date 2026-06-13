@@ -65,6 +65,45 @@ frontend_v2/
 └── constants/                 # App constants
 ```
 
+## [AUDIT — task16, 2026-06-13] (Surgical sweep — Section B accounting first, then UX/nav)
+
+### B. القيد المزدوج يمرّ دائماً عبر الـ subledger (مُنفَّذ + مُختبَر)
+- **السبب الجذري (مُتحقَّق بالكود لا بالوصف):** كل من `post_sales_invoice` (sales/services.py) و`PurchaseInvoiceViewSet.post_to_accounting` (logistics/views.py:1801) كانا **يربطان الـ subledger في القيد الآجل فقط**؛ أما البيع/الشراء النقدي فكان يدين/يدائن الصندوق مباشرة ويتجاوز حساب العميل/المورد ⇒ كشف الحساب والأعمار لا يعكس الحركات النقدية. (القيد كان متوازناً وصحيح الحسابات الأخرى — لذلك لم نُعد كتابة الدالة، بل صوّبنا مسار النقدي فقط.)
+- **الإصلاح (Section B):**
+  - **مبيعات:** يُقيَّد دائماً Dr ذمم العميل بكامل الإجمالي / Cr إيراد+ضريبة، ثم تُسوَّى التحصيلات (نقدي: Dr صندوق/Cr ذمم؛ شيكات: Dr شيكات برسم التحصيل/Cr ذمم) في نفس السند. خصم المصدر يُحسب مبكراً ليُخصم من صافي التحصيل النقدي. `amount_paid` يشمل الآن النقدي المُحصَّل على الفاتورة النقدية.
+  - **مشتريات:** الحساب الدائن دائماً ذمم المورد (subledger)؛ `payment_type='cash'` (أو `attached_cash_amount` جزئي) يضيف تسوية Dr ذمم المورد / Cr صندوق تُفرّغ الذمم دون تجاوزها.
+- **تحقق:** اختباران جديدان (`sales/tests/test_subledger_routing.py` + `logistics/tests/test_pi_subledger_routing.py`) يثبتان لمس الـ subledger (Dr كامل + Cr تسوية) وتوازن القيد · **الحزمة كاملة 169/169 خضراء** (167 + 2).
+
+### بقية البنود — تتبّع التنفيذ
+**مُنفَّذ ومُتحقَّق (tsc 0 · vite build OK):**
+- [x] **A5** مرجع الفاتورة في حركات المخزن رابط (StockMovementsPage) — عبر `utils/entityLinks.invoicePathForReference`.
+- [x] **A6** مرجع فاتورة البيع/الشراء في قائمة قيود اليومية رابط (AccountingJournalListPage).
+- [x] **A7** رقم فاتورة المبيعات نفسه رابط يفتح الفاتورة (SalesInvoicesPage).
+- [x] **A8** قائمة فواتير المبيعات `/sales/invoices` وتفصيل واحدة `/sales/invoices/:id` مساران مستقلان (URL مصدر الحقيقة لفتح المحرر؛ deep-link/back-forward) + فرع التحليل العكسي في App.tsx.
+- [x] **C11 (مبيعات)** العودة لـ `/dashboard` بعد حفظ الفاتورة (onInvoiceSaved).
+- [x] **D12** بنر نجاح «حُفظ بنجاح» واضح في إعدادات المبيعات (aseel-banner--ok + role=status).
+- [x] **E17** منتقي صنف عرض السعر كان يحمّل `getAccounts` (شجرة الحسابات) ⇒ صُحِّح إلى `inventory/products` (SalesQuotationsPage).
+- [x] **E19** نقل «إدارة الموظفين» لأسفل الشريط الجانبي (Sidebar).
+
+**مُنفَّذ ومُتحقَّق (الدفعة الثانية — tsc 0 · vite build OK · backend 169):**
+- [x] **A4** روابط الكيانات: اسم الصنف (حركات المخزون)→`/items` · اسم العميل (قائمة فواتير المبيعات)→`/sales/customers` · اسم المورد (قائمة فواتير الشراء)→`/suppliers` عبر `utils/entityLinks.{productPath,customerPath,supplierPath}`. (ملاحظة: لا مسارات تفصيل مستقلة لكل كيان حالياً — الروابط تفتح صفحة الإدارة؛ يمكن توجيهها لصفحة تفصيل لاحقاً دون تغيير المستهلكين.)
+- [x] **C9** إضافة مورد inline من حقل البحث في فاتورة الشراء (`InvoiceBasicInfo` يمرّر `onOpenAddModal`→`SupplierModal` القائم في `InvoiceForm`).
+- [x] **C10** حالة الدفع (مدفوعة/جزئياً/غير مدفوعة) + الإجمالي + المتبقي — محسوبة في `PurchaseInvoiceSerializer` (amount_paid/remaining_balance/payment_status) ومعروضة في لوحة المحاسبة.
+- [x] **C11 (شراء)** العودة لـ `/dashboard` بعد إتمام ترحيل فاتورة الشراء (onPosted).
+- [x] **D13** أُزيل محددا حساب الإيراد وحساب الصندوق من `SalesInvoiceEditor` — يُقرآن من إعدادات المبيعات (default_revenue_account_product/default_cash_account)؛ رسائل التحقق تُحيل للإعدادات.
+- [x] **D14** اختصارات شريط علوي قابلة للتهيئة: `utils/quickShortcuts` + شريط في `AppLayout` + قسم تهيئة في `SettingsPage` (تخزين محلي + بثّ حدث للتحديث الفوري).
+- [x] **E15** الحاسبة: أُزيل الفتح التلقائي بالنقر المزدوج من `AseelGrid`؛ أُضيفت أيقونة حاسبة في الشريط العلوي (`AseelCalculatorButton` + وضع `standalone` في الـ popover).
+- [x] **E16** رصيد الصندوق: أُضيف حقل `balance` محسوب من دفتر الأستاذ (مدين−دائن للقيود المرحَّلة) في `CashBoxLedgerAccountSerializer`؛ `CashBoxList` يعرضه بدل الرصيد المخزّن الصفري.
+- [x] **E18** تصدير رصيد المخزون CSV (مع BOM للعربية) + اختيار الأصناف بمربعات + «تحديد الكل» في `StockLevelsPage`.
+
+**إصلاحات ما بعد التشغيل (بلاغ المالك بالصور على localhost):**
+- زر «العودة للفواتير» الصريح أُضيف لشريط محرر فاتورة المبيعات (`SalesInvoiceEditor` toolbar `back` action + `onClose` prop) — كان فقط ✕ إغلاق صغير بزاوية الإطار.
+- 🔴 **زر «إضافة عميل» كان يفتح `SupplierModal` (يُنشئ مورداً!):** في `SalesInvoiceEditor` كان مودال إضافة العميل = `SupplierModal` (عنوان «إضافة مورد جديد» + `suppliersService.addSupplierToDb`) ⇒ يُنشئ Supplier لا Customer. الإصلاح: `CustomerQuickAddModal` جديد يُنشئ شريكاً `partner_type=Customer` عبر `POST partners/` (نفس مسار صفحة العملاء) + `eventBus.publish("partners")` لتحديث القوائم + اختيار العميل تلقائياً.
+- 🔴 **Section B ناقص — مسار «استلام بضاعة الفاتورة» كان يتجاوز ذمم المورد:** الإصلاح الأصلي غطّى `post_to_accounting` لكن `receive_purchase_invoice` (logistics/services.py، مسار task15 الفعلي للفواتير المحلية) بقي يدائن الصندوق مباشرة للنقدي ⇒ القيد #290 (Dr مخزون 1104 / Cr نقدية 1101) بلا حساب المورد. الآن: يدائن دائماً ذمم المورد بكامل القيمة، ثم يُسوّي النقدي (Dr ذمم المورد / Cr صندوق). +2 اختبار (`test_local_invoice_receive`: آجل يدائن AP · نقدي يمرّ عبر AP ويُسوّى). **backend 171**.
+- **A7 (شراء):** رقم فاتورة الشراء في القائمة (`InvoiceList`) صار رابطاً يفتح الفاتورة (`onView`) — كان مقتصراً على فواتير المبيعات.
+
+**تحقق نهائي:** backend **169/169** · tsc 0 · vite build OK. لم يُتحقق في متصفح حي للشاشات الداخلية (تتطلب باك-إند+تسجيل دخول — نفس قيد المهام السابقة)؛ التحقق عبر الاختبارات + الأنواع + البناء.
+
 ## [AUDIT — task11, 2026-06-10] (Staff-Engineer full audit)
 
 ### 🔴 حرجة — Data loss / Data isolation

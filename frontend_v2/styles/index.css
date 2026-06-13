@@ -632,8 +632,8 @@ tbody td {
   color: inherit;
 }
 .aseel-autocomplete-row--sel { background: #cbd9e8; }
-.aseel-autocomplete-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.aseel-autocomplete-sub { color: #6b6952; font-size: 11px; flex-shrink: 0; }
+.aseel-autocomplete-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+.aseel-autocomplete-sub { color: #6b6952; font-size: 11px; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
 .aseel-autocomplete-empty { padding: 8px; color: #6b6952; text-align: center; }
 .aseel-autocomplete-row--create { color: #2f5f8f; font-weight: 700; justify-content: flex-start; border-bottom: none; }
 

@@ -49,6 +49,8 @@ export type CashBoxLedgerLink = {
   currency_code: string;
   account_id: number;
   account_code: string;
+  /** task16 E16: رصيد دفتر الأستاذ الحقيقي (مدين − دائن، قيود مرحَّلة) */
+  balance?: string;
 };
 
 export const accountingApi = {

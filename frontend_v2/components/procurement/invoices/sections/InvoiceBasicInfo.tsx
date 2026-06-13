@@ -21,6 +21,8 @@ interface InvoiceBasicInfoProps {
   suppliers: Supplier[];
   readOnly?: boolean;
   items?: any[];
+  /** task16 C9: فتح مودال إضافة مورد inline من حقل البحث عن المورد */
+  onOpenAddSupplier?: () => void;
 }
 
 export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
@@ -29,6 +31,7 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
   suppliers,
   readOnly,
   items = [],
+  onOpenAddSupplier,
 }) => {
   const [supplierSearch, setSupplierSearch] = useState("");
   const [showDetails, setShowDetails] = useState(false);
@@ -114,6 +117,7 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
               onSearchChange={setSupplierSearch}
               onSelectSupplier={handleSelectSupplier}
               onClearSupplier={() => setData({ ...data, supplierId: "", factoryName: "" })}
+              onOpenAddModal={readOnly ? undefined : onOpenAddSupplier}
               type="factory"
             />
           </div>
