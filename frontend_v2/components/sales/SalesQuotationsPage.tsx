@@ -27,14 +27,19 @@ import {
   type SalesQuotationDetail,
 } from "../../services/salesApi";
 import { accountingApi } from "../../services/accountingApi";
+import { apiGetList } from "../../services/restApi";
+import { resolveTenantId } from "../../utils/tenantContext";
+import type { SqlProduct } from "../../types/inventory";
 import {
   AseelDocumentShell,
   useRecordNavigation,
   useAseelKeymap,
+  AseelAutocomplete,
 } from "../aseel";
+import { SalesProductPickerModal, type SalesProductPickerItem, formatProductPrimaryName } from "./SalesProductPickerModal";
 
 type Partner = { id: number; name: string };
-type Product = { id: number; name: string; unit_price?: string };
+type Product = SalesProductPickerItem & { name: string; unit_price?: string };
 
 type LineState = {
   id?: number;
@@ -70,6 +75,8 @@ export const SalesQuotationsPage: React.FC = () => {
   const [formLines, setFormLines] = useState<LineState[]>([{
     id: undefined, product_id: "", product_name: "", quantity: "1", unit_price: "", discount: "0", tax_rate: "0", total: "0"
   }]);
+
+  const [productPickerLineIdx, setProductPickerLineIdx] = useState<number | null>(null);
 
   // Aseel Navigation
   const [showPartnerPicker, setShowPartnerPicker] = useState(false);
@@ -139,14 +146,31 @@ export const SalesQuotationsPage: React.FC = () => {
     setLoading(true);
     setErr(null);
     try {
+      // task16 E17: منتقي الصنف في عرض السعر كان يحمّل شجرة الحسابات
+      // (getAccounts) بدل الأصناف — يُصحَّح إلى أصناف المخزون (inventory/products).
+      const tenantId = resolveTenantId();
       const [qs, parts, prods] = await Promise.all([
         listQuotations(),
         accountingApi.getPartners() as Promise<Partner[]>,
-        accountingApi.getAccounts() as Promise<Product[]>,
+        apiGetList<SqlProduct & { sale_price?: string; selling_price?: string }>(
+          "inventory/products/",
+          { tenantId }
+        ),
       ]);
       setQuotations(qs || []);
       setPartners(parts || []);
-      setProducts(prods || []);
+      setProducts(
+        (prods || []).map((p: any) => ({
+          id: p.id,
+          sku: p.sku || "",
+          barcode: p.barcode,
+          quantity_on_hand: String(p.quantity_on_hand || "0"),
+          name_ar: p.name_ar || p.name || "",
+          name_en: p.name_en || "",
+          name: p.name_ar || p.name_en || p.name || p.sku || `#${p.id}`,
+          unit_price: p.sale_price ?? p.selling_price ?? p.unit_price ?? "",
+        }))
+      );
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
     } finally {
@@ -182,17 +206,23 @@ export const SalesQuotationsPage: React.FC = () => {
   };
 
   const handleLineChange = (idx: number, field: string, value: string) => {
-    const updated = [...formLines];
-    updated[idx] = { ...updated[idx], [field]: value };
-    // Recalculate total
-    const qty = Number(updated[idx].quantity) || 0;
-    const price = Number(updated[idx].unit_price) || 0;
-    const disc = Number(updated[idx].discount) || 0;
-    const tax = Number(updated[idx].tax_rate) || 0;
-    const subtotal = qty * price - disc;
-    const taxAmt = subtotal * (tax / 100);
-    updated[idx].total = String(subtotal + taxAmt);
-    setFormLines(updated);
+    handleLineUpdate(idx, { [field]: value });
+  };
+
+  const handleLineUpdate = (idx: number, updates: Partial<LineState>) => {
+    setFormLines((prev) => {
+      const updated = [...prev];
+      updated[idx] = { ...updated[idx], ...updates };
+      // Recalculate total
+      const qty = Number(updated[idx].quantity) || 0;
+      const price = Number(updated[idx].unit_price) || 0;
+      const disc = Number(updated[idx].discount) || 0;
+      const tax = Number(updated[idx].tax_rate) || 0;
+      const subtotal = qty * price - disc;
+      const taxAmt = subtotal * (tax / 100);
+      updated[idx].total = String(subtotal + taxAmt);
+      return updated;
+    });
   };
 
   const handleSave = async () => {
@@ -278,6 +308,15 @@ export const SalesQuotationsPage: React.FC = () => {
     };
     return map[s] || "aseel-bg-panel aseel-text-ink";
   };
+
+  const productOptions = React.useMemo(
+    () => products.map((p) => ({
+      id: p.id,
+      label: p.name_ar || p.name_en || p.name || p.sku || `#${p.id}`,
+      sub: `${p.sku || ""} · رصيد ${p.quantity_on_hand || 0}`,
+    })),
+    [products]
+  );
 
   const subtotal = formLines.reduce((s, l) => s + (Number(l.total) || 0), 0);
 
@@ -443,7 +482,7 @@ export const SalesQuotationsPage: React.FC = () => {
               <table className="w-full text-sm border">
                 <thead className="aseel-bg-panel">
                   <tr>
-                    <th className="text-right p-2">المنتج</th>
+                    <th className="text-right p-2" style={{ minWidth: "250px" }}>المنتج</th>
                     <th className="text-right p-2">الكمية</th>
                     <th className="text-right p-2">السعر</th>
                     <th className="text-right p-2">الخصم</th>
@@ -456,22 +495,32 @@ export const SalesQuotationsPage: React.FC = () => {
                   {formLines.map((l, idx) => (
                     <tr key={idx} className="border-t">
                       <td className="p-2">
-                        <select
-                          value={l.product_id}
-                          onChange={(e) => {
-                            const prod = products.find(p => String(p.id) === e.target.value);
-                            handleLineChange(idx, "product_id", e.target.value);
-                            if (prod) {
-                              handleLineChange(idx, "product_name", prod.name);
-                              handleLineChange(idx, "unit_price", prod.unit_price || "0");
-                            }
-                          }}
-                          className="w-full border rounded p-1 text-sm"
-                          data-aseel-key="1"
-                        >
-                          <option value="">-- اختر --</option>
-                          {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
+                        <div style={{ display: "flex", alignItems: "center", gap: 2, minWidth: "250px" }}>
+                          <AseelAutocomplete
+                            value={l.product_name}
+                            options={productOptions}
+                            disabled={false}
+                            placeholder="اكتب اسم الصنف…"
+                            onPick={(id) => {
+                              const prod = products.find(p => String(p.id) === String(id));
+                              if (prod) {
+                                handleLineUpdate(idx, {
+                                  product_id: String(id),
+                                  product_name: formatProductPrimaryName(prod),
+                                  unit_price: prod.unit_price || "0"
+                                });
+                              } else {
+                                handleLineUpdate(idx, { product_id: String(id) });
+                              }
+                            }}
+                          />
+                          <button
+                            type="button"
+                            className="px-2 border rounded aseel-bg-field hover:aseel-bg-panel text-sm"
+                            onClick={() => setProductPickerLineIdx(idx)}
+                            title="فهرس الأصناف الكامل (+)"
+                          >…</button>
+                        </div>
                       </td>
                       <td className="p-2"><input type="number" value={l.quantity} onChange={(e) => handleLineChange(idx, "quantity", e.target.value)} className="w-full border rounded p-1 text-sm" /></td>
                       <td className="p-2"><input type="number" value={l.unit_price} onChange={(e) => handleLineChange(idx, "unit_price", e.target.value)} className="w-full border rounded p-1 text-sm" /></td>
@@ -493,6 +542,24 @@ export const SalesQuotationsPage: React.FC = () => {
                 {saving ? "جاري الحفظ..." : "حفظ"}
               </button>
             </div>
+            
+            {productPickerLineIdx !== null && (
+              <SalesProductPickerModal
+                isOpen={true}
+                products={products}
+                onSelect={(productId) => {
+                  const prod = products.find(p => p.id === productId);
+                  handleLineChange(productPickerLineIdx, "product_id", String(productId));
+                  if (prod) {
+                    handleLineChange(productPickerLineIdx, "product_name", prod.name);
+                    handleLineChange(productPickerLineIdx, "unit_price", prod.unit_price || "0");
+                  }
+                  setProductPickerLineIdx(null);
+                }}
+                onClose={() => setProductPickerLineIdx(null)}
+              />
+            )}
+            
           </div>
         </div>
       )}
