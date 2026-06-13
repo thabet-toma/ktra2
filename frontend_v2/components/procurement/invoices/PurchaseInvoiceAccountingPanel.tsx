@@ -17,13 +17,22 @@ import {
   Calculator,
   Send,
   RefreshCw,
+  PackageCheck,
 } from "lucide-react";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { accountingApi } from "@/services/accountingApi";
 import type {
   PurchaseInvoiceDto,
   PurchaseInvoiceFeeDto,
+  ReceiptStatus,
 } from "@/types/purchaseInvoice";
+import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
+
+const RECEIPT_BADGE: Record<ReceiptStatus, { label: string; cls: string }> = {
+  not_received: { label: "غير مستلمة", cls: "aseel-text-state" },
+  partially_received: { label: "مستلمة جزئياً", cls: "aseel-text-ink" },
+  received: { label: "مستلمة", cls: "aseel-text-soft" },
+};
 
 interface AccountDto {
   id: number;
@@ -62,6 +71,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   const [posting, setPosting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [showReceive, setShowReceive] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -296,7 +306,28 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 justify-end">
+          {invoice.receipt_status && (
+            <span
+              className={`px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel ${
+                RECEIPT_BADGE[invoice.receipt_status]?.cls || ""
+              }`}
+              title="حالة استلام البضاعة للمخزن"
+            >
+              {invoice.receipt_status_display ||
+                RECEIPT_BADGE[invoice.receipt_status]?.label}
+            </span>
+          )}
+          {invoice.is_local && invoice.receipt_status !== "received" && (
+            <button
+              onClick={() => setShowReceive(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white rounded-full text-sm font-medium"
+              title="استلام البضاعة وعكسها على المستودع"
+            >
+              <PackageCheck className="w-4 h-4" />
+              استلام البضاعة
+            </button>
+          )}
           <button
             onClick={reload}
             className="p-2 aseel-text-soft dark:aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded-lg"
@@ -581,6 +612,18 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           </div>
         )}
       </div>
+
+      {showReceive && (
+        <ReceiveGoodsModal
+          invoice={invoice}
+          onClose={() => setShowReceive(false)}
+          onReceived={async () => {
+            setShowReceive(false);
+            setSuccess("✅ تم استلام البضاعة وعكسها على المستودع.");
+            await reload();
+          }}
+        />
+      )}
     </div>
   );
 };

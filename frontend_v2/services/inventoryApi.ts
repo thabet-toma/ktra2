@@ -82,6 +82,43 @@ export const inventoryApi = {
     await handle(res, "deleteCategory");
   },
 
+  // ─── Warehouses (المستودعات) ───
+
+  getWarehouses: (params?: Record<string, string>) => {
+    const q = params && Object.keys(params).length
+      ? `?${new URLSearchParams(params)}`
+      : "";
+    return fetch(`${INV}/warehouses/${q}`, { headers: headers() }).then(asList);
+  },
+
+  createWarehouse: async (body: Record<string, unknown>) => {
+    const res = await fetch(`${INV}/warehouses/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "createWarehouse");
+    return res.json();
+  },
+
+  updateWarehouse: async (id: number, body: Record<string, unknown>) => {
+    const res = await fetch(`${INV}/warehouses/${id}/`, {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "updateWarehouse");
+    return res.json();
+  },
+
+  deleteWarehouse: async (id: number) => {
+    const res = await fetch(`${INV}/warehouses/${id}/`, {
+      method: "DELETE",
+      headers: headers(),
+    });
+    await handle(res, "deleteWarehouse");
+  },
+
   getProduct: async (id: number) => {
     const res = await fetch(`${INV}/products/${id}/`, { headers: headers() });
     await handle(res, "getProduct");

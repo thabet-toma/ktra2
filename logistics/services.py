@@ -121,3 +121,217 @@ def attach_pi_payment_voucher(
                 notes=c.get("notes") or "",
                 created_by=user if user and not getattr(user, "is_anonymous", False) else None,
             )
+
+
+def _resolve_inventory_account(tenant) -> Account:
+    """حساب المخزون لقيد استلام البضاعة — 1104 ثم مخزون بالاسم ثم أصل."""
+    acc = (
+        Account.objects.filter(tenant=tenant, code="1104").first()
+        or Account.objects.filter(
+            tenant=tenant, account_type="Asset", name__icontains="مخزون",
+        ).first()
+        or Account.objects.filter(
+            tenant=tenant, account_type="Asset", is_active=True,
+        ).first()
+    )
+    if not acc:
+        raise ValidationError(
+            "لم يُعثر على حساب مخزون (1104). أكمل شجرة الحسابات أولاً."
+        )
+    return acc
+
+
+def _resolve_vat_input_account(tenant) -> Account:
+    """حساب ضريبة المدخلات (1105) — مطلوب عند وجود ضريبة على الاستلام."""
+    acc = (
+        Account.objects.filter(tenant=tenant, code="1105").first()
+        or Account.objects.filter(
+            tenant=tenant, account_type="Asset", name__icontains="ضريبة",
+        ).first()
+    )
+    if not acc or acc.account_type != "Asset":
+        raise ValidationError(
+            "ضريبة المدخلات > 0 تتطلب حساب «1105 ضريبة مدخلات» من نوع Asset."
+        )
+    return acc
+
+
+def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement_date=None):
+    """استلام بضاعة فاتورة شراء محلية إلى المخزن (انعكاس على المستودع + قيد).
+
+    حصري للفواتير المحلية (غير مستوردة: بلا صفقة/شحنة/تخليص) — مسار الاستيراد
+    يستلم البضاعة عبر تخليص الشحنة، لا من هنا.
+
+    lines: قائمة [{'item_id': int, 'quantity': Decimal, 'warehouse_id': int}].
+    لكل بند ذي صنف مخزون: تُنشأ حركة IN (متوسط مرجح) موسومة بالفرع والمستودع،
+    ويُحدَّث received_quantity. ثم يُرحَّل قيد استلام للقيمة المستلمة في هذا النداء
+    (مدين مخزون + ضريبة مدخلات / دائن ذمم المورد أو صندوق/بنك).
+
+    العملية ذرّية. إعادة الإرسال مرفوضة ضمنياً: لا يمكن استلام أكثر من المطلوب،
+    فإن استُلمت الكميات كلها يرفض النداء التالي «لا يوجد ما يُستلَم».
+    """
+    import datetime
+    import logging
+    from inventory.models import Warehouse
+    from inventory.services import record_stock_movement
+    from accounting.services import post_journal
+    from .models import PurchaseInvoice
+
+    logger = logging.getLogger(__name__)
+
+    if invoice.deal_id or invoice.shipment_id or invoice.clearance_id:
+        raise ValidationError(
+            "هذه فاتورة مستوردة — يتم استلام بضاعتها من تخليص الشحنة، لا من الفاتورة."
+        )
+
+    if not lines:
+        raise ValidationError("حدّد البنود والكميات المراد استلامها.")
+
+    if movement_date is None:
+        movement_date = invoice.invoice_date or datetime.date.today()
+
+    base_factor = Decimal(str(invoice.exchange_rate or 1))
+    items_by_id = {it.id: it for it in invoice.items.select_related('product').all()}
+
+    inv_net = Decimal('0')   # صافي قيمة المخزون المستلمة (بالعملة الأساس)
+    inv_vat = Decimal('0')   # ضريبة المدخلات على المستلَم
+    movements = []
+
+    with transaction.atomic():
+        for raw in lines:
+            item_id = raw.get('item_id')
+            item = items_by_id.get(int(item_id)) if item_id is not None else None
+            if not item:
+                raise ValidationError(f"البند {item_id} لا ينتمي لهذه الفاتورة.")
+            if not item.product_id:
+                raise ValidationError(
+                    f"البند «{item.name}» بلا صنف مخزون مربوط — لا يمكن استلامه."
+                )
+
+            try:
+                qty = Decimal(str(raw.get('quantity', 0)))
+            except Exception:
+                raise ValidationError(f"كمية غير صالحة للبند «{item.name}».")
+            if qty <= 0:
+                continue
+
+            ordered = Decimal(str(item.quantity or 0))
+            already = Decimal(str(item.received_quantity or 0))
+            remaining = ordered - already
+            if qty > remaining:
+                raise ValidationError(
+                    f"البند «{item.name}»: الكمية المطلوب استلامها ({qty}) "
+                    f"تتجاوز المتبقي ({remaining})."
+                )
+
+            wh = Warehouse.objects.filter(
+                pk=raw.get('warehouse_id'), tenant=invoice.tenant
+            ).first()
+            if not wh:
+                raise ValidationError(f"المستودع المحدد للبند «{item.name}» غير موجود.")
+
+            unit_price = Decimal(str(item.unit_price or 0))
+            if unit_price <= 0:
+                # احتياطي: اشتقاق تكلفة الوحدة من إجمالي السطر إن كان سعر الوحدة صفراً
+                total_price = Decimal(str(item.total_price or 0))
+                if total_price > 0 and ordered > 0:
+                    unit_price = total_price / ordered
+            unit_cost = (unit_price * base_factor)
+            line_net = (qty * unit_cost).quantize(DEC)
+            vat_pct = Decimal(str(item.vat_percent or 0)) if item.is_taxable else Decimal('0')
+            line_vat = (line_net * vat_pct / Decimal('100')).quantize(DEC)
+
+            mv = record_stock_movement(
+                product=item.product,
+                movement_type='IN',
+                quantity=qty,
+                unit_cost=unit_cost,
+                reference_type='PURCHASE_INVOICE',
+                reference_id=invoice.id,
+                partner=invoice.partner,
+                movement_date=movement_date,
+                notes=f"استلام فاتورة {invoice.invoice_number} | مستودع {wh.name}",
+                tenant=invoice.tenant,
+                branch=branch,
+                warehouse=wh,
+            )
+            movements.append(mv)
+
+            item.received_quantity = already + qty
+            item.warehouse = wh.name
+            item.save(update_fields=['received_quantity', 'warehouse'])
+
+            inv_net += line_net
+            inv_vat += line_vat
+
+        if not movements:
+            raise ValidationError("لا يوجد ما يُستلَم — تحقق من الكميات.")
+
+        # ── ترحيل قيد الاستلام للقيمة المستلمة في هذا النداء ──
+        # استلام بقيمة صفرية (فاتورة كمية فقط بلا أسعار) مشروع: ينعكس على المخزن
+        # دون قيد محاسبي (لا قيد فارغ يُرفض من post_journal).
+        gross = (inv_net + inv_vat).quantize(DEC)
+        journal = None
+        if gross > 0:
+            inventory_account = _resolve_inventory_account(invoice.tenant)
+            lines_payload = [
+                {'account': inventory_account.id, 'debit': inv_net, 'credit': Decimal('0'),
+                 'partner': invoice.partner_id},
+            ]
+            if inv_vat > 0:
+                vat_acc = _resolve_vat_input_account(invoice.tenant)
+                lines_payload.append({
+                    'account': vat_acc.id, 'debit': inv_vat, 'credit': Decimal('0'),
+                    'partner': invoice.partner_id,
+                })
+
+            if invoice.payment_type == PurchaseInvoice.PAYMENT_TYPE_CASH:
+                if not invoice.cash_or_bank_account_id:
+                    raise ValidationError("فاتورة نقدية بلا حساب صندوق/بنك محدد.")
+                credit_account_id = invoice.cash_or_bank_account_id
+            else:
+                credit_account_id = _resolve_ap_account(invoice.partner).id
+            lines_payload.append({
+                'account': credit_account_id, 'debit': Decimal('0'), 'credit': gross,
+                'partner': invoice.partner_id,
+            })
+
+            journal = post_journal(
+                tenant_id=invoice.tenant_id,
+                transaction_date=movement_date,
+                reference_type='PURCHASE_INVOICE',
+                reference_id=invoice.id,
+                description=f"استلام بضاعة فاتورة {invoice.invoice_number} | {invoice.partner.name}"[:500],
+                lines_data=lines_payload,
+                branch_id=branch.id if branch else None,
+                user=user if user and not getattr(user, 'is_anonymous', False) else None,
+                idempotent=False,
+            )
+
+        # ── تحديث حالة الاستلام للفاتورة ──
+        product_items = [it for it in items_by_id.values() if it.product_id]
+        fully = all(
+            Decimal(str(it.received_quantity or 0)) >= Decimal(str(it.quantity or 0))
+            for it in product_items
+        )
+        any_received = any(
+            Decimal(str(it.received_quantity or 0)) > 0 for it in product_items
+        )
+        invoice.receipt_status = (
+            PurchaseInvoice.RECEIPT_FULL if fully
+            else PurchaseInvoice.RECEIPT_PARTIAL if any_received
+            else PurchaseInvoice.RECEIPT_NOT
+        )
+        update_fields = ['receipt_status']
+        if journal is not None and not invoice.is_posted:
+            invoice.is_posted = True
+            invoice.journal = journal
+            update_fields += ['is_posted', 'journal']
+        invoice.save(update_fields=update_fields)
+
+    logger.info(
+        "Purchase invoice #%s received: %d movement(s), receipt_status=%s, journal=%s",
+        invoice.id, len(movements), invoice.receipt_status,
+        journal.id if journal else None,
+    )
+    return {'movements': movements, 'journal': journal, 'receipt_status': invoice.receipt_status}

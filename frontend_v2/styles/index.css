@@ -1075,6 +1075,64 @@ tbody td {
   }
 }
 
+/* ════════════════════════════════════════════════════════════════
+   الريسبونسيف للهواتف — جولة شاملة (mobile-first polish)
+   تستهدف هيكل القشرة المشترك (titlebar/toolbar/statusbar/الجداول/
+   المنتقيات) فيُحسِّن كل الشاشات دفعة واحدة دون لمس منطق أي صفحة.
+   ════════════════════════════════════════════════════════════════ */
+@media (max-width: 767px) {
+  /* الشريط العلوي يلتف ويترك مساحة للهيدر العائم لزر القائمة (h-14) */
+  [data-skin="aseel"] .aseel-titlebar {
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding: 6px 8px;
+    padding-top: 60px;
+  }
+  [data-skin="aseel"] .aseel-company {
+    flex-wrap: wrap;
+    gap: 6px;
+    width: 100%;
+  }
+  /* أدوات اليمين (بحث/كثافة/سمة) تأخذ سطراً كاملاً وتتمدد */
+  [data-skin="aseel"] .aseel-titlebar > .ms-auto {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  /* شريط الحالة السفلي مخفي على الجوال (زخرفي) لتوفير مساحة الشاشة */
+  [data-skin="aseel"] .aseel-statusbar { display: none; }
+
+  /* الجداول الكثيفة: تمرير أفقي بدل ضغط الأعمدة */
+  [data-skin="aseel"] .aseel-gridwrap,
+  [data-skin="aseel"] .aseel-grid-wrap,
+  [data-skin="aseel"] .aseel-doc .aseel-bottom,
+  [data-skin="aseel"] .aseel-dense-table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  [data-skin="aseel"] .aseel-grid { min-width: max-content; }
+
+  /* أشرطة الأدوات تلتف وتكبر مساحة اللمس */
+  [data-skin="aseel"] .aseel-toolbar { flex-wrap: wrap; gap: 3px; padding: 3px 6px; }
+  [data-skin="aseel"] .aseel-toolbtn { min-height: 34px; }
+
+  /* المنتقيات الجانبية تصبح بملء العرض على الجوال */
+  [data-skin="aseel"] .aseel-picker {
+    width: 100vw !important;
+    max-width: 100vw;
+  }
+  [data-skin="aseel"] .aseel-picker-mask { justify-content: stretch; }
+
+  /* حقول الإدخال أطول للمس + خط 16px يمنع التكبير التلقائي في iOS */
+  [data-skin="aseel"] .aseel-input,
+  [data-skin="aseel"] .aseel-doc input:not([type="checkbox"]):not([type="radio"]),
+  [data-skin="aseel"] .aseel-doc select {
+    min-height: 38px;
+    font-size: 16px;
+  }
+}
+
 /* ── N9-T5: Print CSS ─────────────────────────────────── */
 @media print {
   [data-skin="aseel"] .aseel-sidebar,

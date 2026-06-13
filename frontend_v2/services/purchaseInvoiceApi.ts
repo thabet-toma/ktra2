@@ -176,6 +176,24 @@ export const purchaseInvoiceApi = {
     return res.json();
   },
 
+  /** استلام بضاعة فاتورة محلية للمخزن — كل سطر: البند + الكمية + المستودع */
+  receive: async (
+    id: number,
+    lines: { item_id: number; quantity: number; warehouse_id: number }[]
+  ): Promise<{
+    receipt_status: string;
+    journal_id: number;
+    movements_created: number;
+  }> => {
+    const res = await safeFetch(`${BASE}/${id}/receive/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ lines }),
+    });
+    await handle(res, "receiveGoods");
+    return res.json();
+  },
+
   recalculateLandedCost: async (body: {
     shipment_id?: number;
     clearance_id?: number;

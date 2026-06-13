@@ -137,6 +137,42 @@ class Product(models.Model):
         return self.name_ar or self.name_en or self.sku
 
 
+class Warehouse(models.Model):
+    """مستودع مستقل لكل شركة — وجهة استلام البضاعة وبُعد على حركات المخزون.
+
+    منفصل عن «الفرع» (tenants.Branch): الفرع وحدة محاسبية مستقلة، بينما المستودع
+    موقع تخزين فعلي يمكن أن يتعدد داخل الفرع الواحد. حركة المخزون تحمل البُعدين معاً.
+    """
+    id = models.AutoField(primary_key=True, db_column='WarehouseID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID', related_name='warehouses')
+    branch = models.ForeignKey(
+        'tenants.Branch', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='BranchID', related_name='warehouses',
+        help_text='الفرع الذي يتبع له المستودع (اختياري)')
+    name = models.CharField(max_length=150, db_column='Name')
+    code = models.CharField(max_length=30, blank=True, default='', db_column='Code')
+    location = models.CharField(max_length=255, blank=True, default='', db_column='Location')
+    is_default = models.BooleanField(default=False, db_column='IsDefault')
+    is_active = models.BooleanField(default=True, db_column='IsActive')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'warehouses'
+        managed = True
+        ordering = ['-is_default', 'name']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tenant', 'code'],
+                condition=~models.Q(code=''),
+                name='idx_tenant_warehouse_code',
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class StockMovement(models.Model):
     MOVEMENT_TYPES = [
         ('IN', 'استلام بضاعة'),
@@ -154,6 +190,7 @@ class StockMovement(models.Model):
         ('MANUAL', 'يدوي'),
         ('SALE', 'بيع'),
         ('STOCK_ISSUE', 'إذن صرف'),
+        ('PURCHASE_INVOICE', 'فاتورة شراء'),
     ]
 
     id = models.AutoField(primary_key=True, db_column='MovementID')
@@ -162,6 +199,11 @@ class StockMovement(models.Model):
     branch = models.ForeignKey(
         'tenants.Branch', on_delete=models.PROTECT, null=True, blank=True,
         db_column='BranchID', related_name='stock_movements')
+    # وجهة/مصدر البضاعة الفعلي — NULL = حركة قديمة قبل تفعيل المستودعات
+    warehouse = models.ForeignKey(
+        'Warehouse', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='WarehouseID', related_name='stock_movements',
+        help_text='المستودع الذي وصلت إليه/خرجت منه البضاعة')
     product = models.ForeignKey(Product, on_delete=models.PROTECT, db_column='ProductID', related_name='stock_movements')
     movement_type = models.CharField(max_length=20, choices=MOVEMENT_TYPES, db_column='MovementType')
     quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')

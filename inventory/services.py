@@ -48,6 +48,7 @@ def record_stock_movement(
     notes: str = '',
     tenant=None,
     branch=None,
+    warehouse=None,
 ) -> StockMovement:
     """
     Record a stock movement and update Product stock/cost atomically.
@@ -118,6 +119,7 @@ def record_stock_movement(
         movement = StockMovement.objects.create(
             tenant=tenant or prod.tenant,
             branch=branch,
+            warehouse=warehouse,
             product=prod,
             movement_type=movement_type,
             quantity=quantity,

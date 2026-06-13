@@ -275,6 +275,30 @@ Stack مثبت وحديث (مُدقَّق بنفس التاريخ في task13): 
 - [x] M5 الإضافة السريعة الموحدة — منفَّذ ومُتحقَّق.
 - [x] M6 تحقق ختامي — منفَّذ ومُتحقَّق (159 اختبار، 0 أخطاء).
 
+## [AUDIT — task15, 2026-06-13] (استلام الفاتورة المحلية للمخزن + مستودعات + ريسبونسيف)
+طلب المالك: (1) الفاتورة المحلية (غير المستوردة) لها حالتا «مستلمة/غير مستلمة» و«مدفوع/غير مدفوع» وخيار استلام داخل الفاتورة يحدد الكمية والمستودع وينعكس على المخزن. (2) عيب تصميمي من صورة. (3) ريسبونسيف احترافي للهاتف.
+
+### الأسباب الجذرية (مُتحقَّق منها بالكود)
+- **T15-A1 (لا مسار مخزون للفاتورة المحلية):** المسار الوحيد لاستلام البضاعة كان `receive_shipment_stock` (inventory/services.py) ويعمل **فقط للشحنات المخلَّصة**؛ و`PurchaseInvoice.post_to_accounting` معطّل ويحوّل لـ purchase-receipts (بالمبلغ فقط، بلا حركات صنف). ⇒ الفاتورة المحلية لا تنعكس على المخزن إطلاقاً.
+- **T15-A2 (لا بُعد «مستلمة»):** حالات `PurchaseInvoice.status` كلها مالية؛ لا حقل receipt.
+- **T15-A3 (لا موديل Warehouse):** الموجود `Branch` فقط؛ حقل `PurchaseInvoiceItem.warehouse` نص حر. (قرار المالك: موديل Warehouse جديد مستقل.)
+
+### [EXECUTION — task15]
+- **M1 المستودعات (Warehouse):** موديل `inventory.Warehouse` (tenant + branch اختياري + code + is_default + is_active) · `StockMovement.warehouse` FK (PROTECT, nullable) + REFERENCE_TYPE جديد `PURCHASE_INVOICE` · مايغريشن `inventory/0009` + بذر «المستودع الرئيسي» لكل شركة قائمة · بذر في `create_company` · `WarehouseViewSet` CRUD معزول بالشركة (الحذف=تعطيل، أول مستودع=افتراضي تلقائياً) + serializer + route `/api/inventory/warehouses/` · `record_stock_movement(... warehouse=)`.
+- **M2 الاستلام للفاتورة المحلية:** `PurchaseInvoice.receipt_status` (not/partially/received) + `PurchaseInvoiceItem.received_quantity` (مايغريشن `logistics/0043`) · خدمة `receive_purchase_invoice` (حصرية للفواتير غير المستوردة): لكل بند → حركة IN (WAC) موسومة بالفرع+المستودع، تحديث received_quantity، ثم ترحيل قيد استلام (Dr مخزون 1104 + ضريبة مدخلات 1105 / Cr ذمم المورد 2101 أو صندوق) عبر `post_journal`؛ ذرّية وإعادة الإرسال مرفوضة ضمنياً (لا تتجاوز المطلوب) · action `POST /purchase-invoices/{id}/receive/` · السيريالايزر يكشف `receipt_status`/`is_local`/`received_quantity`.
+- **M3 الواجهة:** `ReceiveGoodsModal` (اختيار كمية+مستودع لكل بند، افتراضات ذكية) + شارة حالة الاستلام وزر «استلام البضاعة» في `PurchaseInvoiceAccountingPanel` (يظهر فقط للفاتورة المحلية غير المكتملة الاستلام) · `WarehousesManager` (CRUD مدمج في صفحة حركات المخزون) · `inventoryApi.{get,create,update,delete}Warehouse` + `purchaseInvoiceApi.receive`.
+- **M4 ريسبونسيف:** كتلة `@media (max-width:767px)` شاملة على القشرة المشتركة `aseel-*` (titlebar يترك مساحة لهيدر زر القائمة العائم + يلتف، statusbar مخفي، الجداول تمرير أفقي، toolbar/أزرار مساحة لمس أكبر، المنتقيات بملء العرض، حقول 16px تمنع تكبير iOS) ⇒ يحسّن كل الشاشات دفعة واحدة · المكوّنات الجديدة بـ Tailwind responsive · الشريط الجانبي كان أصلاً يملك درج جوال.
+- **تحقق:** backend **167 tests** (159 + 8 في `logistics/tests/test_local_invoice_receive.py`) · tsc 0 · vite build OK · معاينة dev: صفحة الدخول ريسبونسيف 375px بلا أخطاء كونسول.
+- **إصلاحات ما بعد التشغيل (بلاغ المالك بالصورة):**
+  - **«Journal entry cannot be empty»:** استلام فاتورة كمية فقط (بلا أسعار) كان يفشل لأن قيد الاستلام صفري. الآن: إن كانت قيمة المستلَم صفراً يُتخطّى القيد المحاسبي ويبقى انعكاس المخزن + حالة الاستلام (الهدف الأساسي)؛ + احتياطي يشتق تكلفة الوحدة من `total_price` عند `unit_price=0`. journal_id يصبح null عند الاستلام الصفري. (+2 اختبار: استلام صفري بلا قيد، اشتقاق من الإجمالي.)
+  - **«البند N لا ينتمي لهذه الفاتورة»:** تعديل الفاتورة يحذف البنود ويعيد إنشاءها بمعرّفات جديدة (RTL edit gotcha)، فنسخة الفاتورة في لوحة المحاسبة تصير قديمة. الآن `ReceiveGoodsModal` يعيد جلب الفاتورة (`purchaseInvoiceApi.get`) عند الفتح لضمان معرّفات بنود حديثة.
+  - **استرداد مايغريشن MySQL:** أول `migrate` انقطع بعد إنشاء جدول `warehouses` دون تسجيل المايغريشن ⇒ «table already exists». الحل: إسقاط الجدول اليتيم (فارغ) ثم `migrate` نظيف. (ملاحظة دائمة: W036 — MySQL لا يدعم القيد الفريد المشروط على `warehouse.code`، تحذير غير مؤثر.)
+
+### [ORPHANS & PENDING — task15]
+- [ ] **المطلب (2) العيب التصميمي من الصورة — لم يُنفَّذ: الصورة لم تُرفق في المحادثة.** بانتظار المالك لمشاركتها.
+- [ ] فحص ما بعد النشر للشاشات الداخلية على الجوال (تتطلب باك-إند+تسجيل دخول): الشريط العلوي/الجداول/المودالات على عرض 375px؛ ومسار الاستلام الكامل (إنشاء فاتورة محلية → استلام → التحقق من رصيد المخزون والقيد).
+- **ملاحظة نشر:** `python manage.py migrate` (inventory/0009 + logistics/0043) — يبذر «المستودع الرئيسي» لكل شركة قائمة.
+
 ## [TASK11 — verification summary 2026-06-10]
 - **M1:** `bridge/tests/test_mapper_isolation.py` 8 اختبارات (عزل + soft-delete + فلتر boolean + عضوية).
 - **M3:** `accounting/tests/test_journal_tenant_scoping.py` 3 اختبارات.

@@ -845,7 +845,7 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
         model = PurchaseInvoiceItem
         fields = [
             'id', 'product', 'product_name', 'name',
-            'quantity', 'unit_price', 'total_price',
+            'quantity', 'received_quantity', 'unit_price', 'total_price',
             'notes', 'hs_code',
             'landed_unit_price_ils', 'landed_line_total_ils',
             'seq', 'catalog_number', 'name_snapshot', 'description_line', 'unit', 'warehouse',
@@ -853,7 +853,7 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
             'line_currency', 'line_exchange_rate', 'second_date', 'is_taxable', 'vat_percent',
             'discount_percent', 'discount_amount',
         ]
-        read_only_fields = ['id']
+        read_only_fields = ['id', 'received_quantity']
 
     def get_product_name(self, obj):
         if obj.product:
@@ -898,6 +898,7 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
     items_count = serializers.SerializerMethodField()
     journal_id_display = serializers.IntegerField(source='journal.id', read_only=True, default=None)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    receipt_status_display = serializers.CharField(source='get_receipt_status_display', read_only=True)
 
     class Meta:
         model = PurchaseInvoice
@@ -909,6 +910,7 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'currency', 'currency_code', 'exchange_rate',
             'subtotal', 'discount_amount', 'tax_rate', 'tax_amount',
             'grand_total', 'status', 'status_display',
+            'receipt_status', 'receipt_status_display',
             'is_posted', 'journal_id_display',
             'items_count',
             'created_at', 'updated_at',
@@ -926,6 +928,8 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     currency_code = serializers.CharField(source='currency.Code', read_only=True, default=None)
     journal_id_display = serializers.IntegerField(source='journal.id', read_only=True, default=None)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    receipt_status_display = serializers.CharField(source='get_receipt_status_display', read_only=True)
+    is_local = serializers.SerializerMethodField()
     cash_or_bank_account_name = serializers.CharField(
         source='cash_or_bank_account.name', read_only=True, default=None,
     )
@@ -963,12 +967,17 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             # the landed-cost live payload, but they are no longer model fields.
             # firestore_id: dropped in P-K-3 (migration 0042).
             'status', 'status_display', 'notes',
+            'receipt_status', 'receipt_status_display', 'is_local',
             'supplier_invoice_number', 'factory_name',
             'is_posted', 'journal', 'journal_id_display',
             'items', 'fees', 'cheques',
             'created_at', 'updated_at', 'created_by',
         ]
-        read_only_fields = ['id', 'is_posted', 'journal', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'is_posted', 'journal', 'created_at', 'updated_at', 'receipt_status']
+
+    def get_is_local(self, obj):
+        """فاتورة محلية = غير مستوردة (بلا صفقة/شحنة/تخليص) — قابلة للاستلام للمخزن."""
+        return not (obj.deal_id or obj.shipment_id or obj.clearance_id)
 
     def validate(self, attrs):
         payment_type = attrs.get('payment_type') or (

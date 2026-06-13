@@ -1599,6 +1599,42 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
     def perform_update(self, serializer):
         serializer.save()
 
+    @action(detail=True, methods=['post'], url_path='receive')
+    def receive(self, request, pk=None):
+        """استلام بضاعة فاتورة محلية إلى المخزن (انعكاس على المستودع + قيد).
+
+        Body: { "lines": [ { "item_id": int, "quantity": number, "warehouse_id": int }, ... ] }
+        حصري للفواتير غير المستوردة (بلا صفقة/شحنة/تخليص).
+        """
+        from core.tenant_utils import get_branch
+        from .services import receive_purchase_invoice
+
+        invoice = self.get_object()
+        tenant = self._get_tenant()
+        branch = get_branch(request, tenant) if tenant else None
+        lines = request.data.get('lines') or []
+        if not isinstance(lines, list):
+            return Response({'error': 'lines يجب أن تكون قائمة'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            result = receive_purchase_invoice(
+                invoice, lines=lines, branch=branch, user=request.user,
+            )
+        except DjangoValidationError as ve:
+            msg = ve.message if hasattr(ve, 'message') else (ve.messages[0] if getattr(ve, 'messages', None) else str(ve))
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        except ValidationError as ve:
+            return Response({'error': ve.detail if hasattr(ve, 'detail') else str(ve)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception('purchase invoice receive failed')
+            return Response({'error': 'حدث خطأ غير متوقع أثناء الاستلام.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response({
+            'receipt_status': result['receipt_status'],
+            'journal_id': result['journal'].id if result['journal'] else None,
+            'movements_created': len(result['movements']),
+        }, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=['post'], url_path='preview-clearance-import')
     def preview_clearance_import(self, request):
         """معاينة توزيع التكاليف قبل الاستيراد."""

@@ -6,10 +6,10 @@ from rest_framework import filters, serializers, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
-from .models import ProductCategory, Product, UnitOfMeasure, StockMovement
+from .models import ProductCategory, Product, UnitOfMeasure, StockMovement, Warehouse
 from .serializers import (
     CategorySerializer, ProductSerializer, UnitOfMeasureSerializer,
-    StockMovementSerializer,
+    StockMovementSerializer, WarehouseSerializer,
 )
 from .services import generate_next_sku, record_stock_movement
 from tenants.models import Tenant
@@ -161,6 +161,45 @@ class ProductViewSet(viewsets.ModelViewSet):
         product = self.get_object()
         qs = StockMovement.objects.filter(product=product).select_related('partner')
         return Response(StockMovementSerializer(qs[:50], many=True).data)
+
+
+class WarehouseViewSet(viewsets.ModelViewSet):
+    """مستودعات الشركة — معزولة بالشركة. الحذف يكتفي بالتعطيل (is_active=False)."""
+    queryset = Warehouse.objects.all().select_related('branch').order_by('-is_default', 'name')
+    serializer_class = WarehouseSerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return Warehouse.objects.none()
+        qs = super().get_queryset().filter(tenant=tenant)
+        if self.request.query_params.get('active_only') == 'true':
+            qs = qs.filter(is_active=True)
+        return qs
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        # أول مستودع للشركة يصبح الافتراضي تلقائياً
+        is_first = not Warehouse.objects.filter(tenant=tenant).exists()
+        is_default = bool(serializer.validated_data.get('is_default') or is_first)
+        if is_default:
+            Warehouse.objects.filter(tenant=tenant, is_default=True).update(is_default=False)
+        serializer.save(tenant=tenant, is_default=is_default)
+
+    def perform_update(self, serializer):
+        tenant = get_tenant(self.request)
+        if serializer.validated_data.get('is_default'):
+            Warehouse.objects.filter(tenant=tenant, is_default=True).exclude(
+                pk=serializer.instance.pk
+            ).update(is_default=False)
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        # تعطيل لا حذف نهائي — المخزون قد يشير للمستودع (PROTECT)
+        instance = self.get_object()
+        instance.is_active = False
+        instance.save(update_fields=['is_active'])
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class StockMovementViewSet(viewsets.ModelViewSet):

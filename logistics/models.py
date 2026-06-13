@@ -955,6 +955,22 @@ class PurchaseInvoice(models.Model):
     )
 
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', db_column='Status')
+
+    # حالة الاستلام للمخزن — بُعد مستقل عن الحالة المالية (status أعلاه)
+    RECEIPT_NOT = 'not_received'
+    RECEIPT_PARTIAL = 'partially_received'
+    RECEIPT_FULL = 'received'
+    RECEIPT_STATUS_CHOICES = [
+        (RECEIPT_NOT, 'غير مستلمة'),
+        (RECEIPT_PARTIAL, 'مستلمة جزئياً'),
+        (RECEIPT_FULL, 'مستلمة'),
+    ]
+    receipt_status = models.CharField(
+        max_length=20, choices=RECEIPT_STATUS_CHOICES, default=RECEIPT_NOT,
+        db_column='ReceiptStatus',
+        help_text='هل انعكست بنود الفاتورة على المخزن؟',
+    )
+
     notes = models.TextField(null=True, blank=True, db_column='Notes')
 
     supplier_invoice_number = models.CharField(max_length=100, null=True, blank=True, db_column='SupplierInvoiceNumber')
@@ -1026,6 +1042,10 @@ class PurchaseInvoiceItem(models.Model):
     )
     name = models.CharField(max_length=255, db_column='Name')
     quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')
+    received_quantity = models.DecimalField(
+        max_digits=18, decimal_places=4, default=0, db_column='ReceivedQuantity',
+        help_text='الكمية المستلمة فعلياً للمخزن من هذا البند',
+    )
     unit_price = models.DecimalField(max_digits=18, decimal_places=4, db_column='UnitPrice')
     total_price = models.DecimalField(max_digits=18, decimal_places=2, db_column='TotalPrice')
     notes = models.CharField(max_length=500, null=True, blank=True, db_column='Notes')

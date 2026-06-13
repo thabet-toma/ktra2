@@ -163,6 +163,12 @@ def create_company(name: str, creator_user) -> Tenant:
         Branch.objects.create(
             tenant=tenant, name="الفرع الرئيسي", code="MAIN", is_main=True, is_active=True)
 
+        # 4.6 Default warehouse — وجهة استلام البضاعة الافتراضية
+        from inventory.models import Warehouse
+        Warehouse.objects.create(
+            tenant=tenant, name="المستودع الرئيسي", code="MAIN",
+            is_default=True, is_active=True)
+
         # 5. Create UserCompanyMembership
         # If this is the user's only company, make it the default
         is_first = not UserCompanyMembership.objects.filter(user=creator_user).exists()

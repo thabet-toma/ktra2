@@ -1,5 +1,22 @@
 from rest_framework import serializers
-from .models import ProductCategory, Product, UnitOfMeasure, StockMovement
+from .models import ProductCategory, Product, UnitOfMeasure, StockMovement, Warehouse
+
+
+class WarehouseSerializer(serializers.ModelSerializer):
+    branch_name = serializers.CharField(source='branch.name', read_only=True, default=None)
+
+    class Meta:
+        model = Warehouse
+        fields = [
+            'id', 'tenant', 'branch', 'branch_name', 'name', 'code',
+            'location', 'is_default', 'is_active', 'created_at',
+        ]
+        read_only_fields = ['id', 'tenant', 'created_at']
+
+    def validate_name(self, value):
+        if not (value or '').strip():
+            raise serializers.ValidationError('اسم المستودع مطلوب.')
+        return value.strip()
 
 class CategorySerializer(serializers.ModelSerializer):
     children = serializers.SerializerMethodField()

@@ -4,13 +4,20 @@ export interface PurchaseInvoiceItemDto {
   product_name?: string | null;
   name: string;
   quantity: number;
+  received_quantity?: number;
   unit_price: number;
   total_price: number;
   notes?: string | null;
   hs_code?: string | null;
+  warehouse?: string | null;
   landed_unit_price_ils?: number | null;
   landed_line_total_ils?: number | null;
 }
+
+export type ReceiptStatus =
+  | "not_received"
+  | "partially_received"
+  | "received";
 
 export interface PurchaseInvoiceFeeDto {
   id?: number;
@@ -45,6 +52,8 @@ export interface PurchaseInvoiceListDto {
   grand_total: number;
   status: string;
   status_display: string;
+  receipt_status?: ReceiptStatus;
+  receipt_status_display?: string;
   is_posted: boolean;
   journal_id_display?: number | null;
   items_count: number;
@@ -78,6 +87,9 @@ export interface PurchaseInvoiceDto {
   conversion_metadata_json?: Record<string, unknown> | null;
   status: string;
   status_display?: string;
+  receipt_status?: ReceiptStatus;
+  receipt_status_display?: string;
+  is_local?: boolean;
   notes?: string | null;
   supplier_invoice_number?: string | null;
   factory_name?: string | null;
