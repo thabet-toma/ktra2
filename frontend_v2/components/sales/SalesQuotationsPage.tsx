@@ -506,7 +506,7 @@ export const SalesQuotationsPage: React.FC = () => {
                               if (prod) {
                                 handleLineUpdate(idx, {
                                   product_id: String(id),
-                                  product_name: formatProductPrimaryName(prod),
+                                  product_name: prod.name_ar || prod.name_en || prod.name || prod.sku || `#${prod.id}`,
                                   unit_price: prod.unit_price || "0"
                                 });
                               } else {
