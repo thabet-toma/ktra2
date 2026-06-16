@@ -3,7 +3,7 @@ import logging
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from .models import Account, ExchangeRate, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod, CostCenter
+from .models import Account, ExchangeRate, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod, CostCenter, VoidedJournal
 from decimal import Decimal
 from partners.models import Partner
 from tenants.models import Currency, TenantBook
@@ -447,7 +447,24 @@ def post_journal(
                 )
                 return existing
 
-        jh = JournalHeader.objects.create(
+        # ── Feature 2: إعادة استخدام رقم القيد المحجوز (recycle bin) ──
+        # إن كان لهذا المستند حجز في سلّة المحذوفات (أُلغِيَ ترحيله سابقاً ثم
+        # أُعيد الآن)، نُعيد إدراج القيد بنفس رقمه الأصلي بدل تخصيص رقم جديد.
+        # الإدراج القسري ذرّي داخل نفس المعاملة؛ أي تعارض (رقم مشغول — غير
+        # متوقع عملياً) يسقط بأمان إلى رقم تلقائي جديد مع تحذير.
+        reservation = None
+        if reference_type and reference_id is not None:
+            reservation = (
+                VoidedJournal.objects.select_for_update()
+                .filter(
+                    tenant_id=tenant_id,
+                    reference_type=reference_type,
+                    reference_id=reference_id,
+                )
+                .first()
+            )
+
+        header_kwargs = dict(
             tenant_id=tenant_id,
             branch_id=branch_id,
             transaction_date=transaction_date,
@@ -458,6 +475,28 @@ def post_journal(
             currency=currency,
             exchange_rate=exchange_rate,
         )
+
+        jh = None
+        if reservation is not None:
+            reserved_id = reservation.original_journal_id
+            if JournalHeader.objects.filter(pk=reserved_id).exists():
+                _logger.warning(
+                    "post_journal reuse fallback: reserved journal id=%s already "
+                    "occupied (type=%s ref_id=%s) — allocating new number.",
+                    reserved_id, reference_type, reference_id,
+                )
+            else:
+                jh = JournalHeader(id=reserved_id, **header_kwargs)
+                jh.save(force_insert=True)
+                _logger.info(
+                    "post_journal reused reserved number: id=%s type=%s ref_id=%s",
+                    reserved_id, reference_type, reference_id,
+                )
+            # الحجز استُهلِك (أُعيد استخدامه أو سقط للبديل) — يُحذف في الحالتين.
+            reservation.delete()
+
+        if jh is None:
+            jh = JournalHeader.objects.create(**header_kwargs)
 
         # N8-T6: التحقق من طبيعة الحساب (مدين فقط/دائن فقط)
         account_ids = {r["account"] for r in lines_data}
@@ -515,6 +554,7 @@ def unpost_document(
     stock_reference_types=(),
     user=None,
     document_label: str = "",
+    recycle: bool = False,
 ) -> dict:
     """المسار المركزي للتراجع عن ترحيل مستند (إلغاء الترحيل / cascade delete).
 
@@ -527,11 +567,17 @@ def unpost_document(
     تُمَسّ أي قيود يتيمة أو غير مرتبطة. بخلاف مسارات «القيد العكسي» القديمة،
     هذا حذف فعلي يُرجِع المستند لحالة مسودة قابلة للتعديل/الحذف.
 
+    recycle=True يحجز رقم القيد الأساسي (المطابق لأول نوع في
+    journal_reference_types) في سلّة المحذوفات (VoidedJournal) قبل الحذف، ليُعاد
+    استخدامه نصّاً عند إعادة الترحيل. القيود الفرعية (تكلفة المبيعات/الاستلام)
+    تُحذف دون حجز لأنها تُولَّد من جديد عند إعادة الترحيل.
+
     Returns: dict فيه عدد القيود وحركات المخزون المحذوفة.
     """
     from inventory.services import reverse_stock_movements
 
     journal_reference_types = list(journal_reference_types)
+    primary_ref_type = journal_reference_types[0] if journal_reference_types else None
     with transaction.atomic():
         headers = list(
             JournalHeader.objects.select_for_update().filter(
@@ -542,6 +588,23 @@ def unpost_document(
         )
         header_ids = [h.id for h in headers]
         lines_deleted = JournalLine.objects.filter(journal_id__in=header_ids).count() if header_ids else 0
+
+        # Feature 2: حجز رقم القيد الأساسي في سلّة المحذوفات قبل الحذف.
+        if recycle and primary_ref_type:
+            primary = next((h for h in headers if h.reference_type == primary_ref_type), None)
+            if primary is not None:
+                VoidedJournal.objects.update_or_create(
+                    tenant_id=tenant_id,
+                    reference_type=primary_ref_type,
+                    reference_id=reference_id,
+                    defaults={
+                        "original_journal_id": primary.id,
+                        "transaction_date": primary.transaction_date,
+                        "description": primary.description,
+                        "voided_by": user if (user and user.is_authenticated) else None,
+                    },
+                )
+
         # حذف الترويسة يُسقِط الأسطر تلقائياً (CASCADE)؛ نمرّ على كلٍّ على حدة
         # لأن JournalHeader.save() يحرس التعديل لا الحذف — والحذف مسموح هنا.
         for h in headers:

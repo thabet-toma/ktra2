@@ -18,6 +18,10 @@ import {
   RefreshCw,
   Trash2,
   X,
+  Send,
+  Undo2,
+  AlertCircle,
+  CheckCircle2,
 } from "lucide-react";
 import { AseelDatePicker } from "../../ui/AseelDatePicker";
 import {
@@ -52,6 +56,8 @@ import {
 } from "./sections";
 import { ItemsTableSection } from "@/components/forms/shared/ItemsTableSection";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
+import { PurchaseInvoiceAccountingPanel } from "./PurchaseInvoiceAccountingPanel";
+import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import {
   AseelDocumentShell,
   AseelGrid,
@@ -89,6 +95,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   );
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [saving, setSaving] = useState(false);
+  // M2: ترحيل/تراجع داخل المحرر — توحيداً مع شاشة المبيعات (شريط أدوات واحد).
+  const [posting, setPosting] = useState(false);
+  const [accMsg, setAccMsg] = useState<string | null>(null);
+  const [accErr, setAccErr] = useState<string | null>(null);
+  const [activeTabKey, setActiveTabKey] = useState<string>("basic");
   const [recalcBusy, setRecalcBusy] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   
@@ -466,6 +477,59 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       alert(msg);
     } finally {
       setSaving(false);
+    }
+  };
+
+  /** M2: إعادة تحميل الفاتورة من الخادم بعد ترحيل/تراجع لتحديث الحالة والقيد. */
+  const reloadInvoice = async () => {
+    if (!formData.id) return;
+    try {
+      const loaded = await purchaseInvoiceApi.get(Number(formData.id));
+      const mapped = mapPurchaseInvoiceDtoToInvoice(loaded);
+      setFormData(mapped);
+      setDealInfo(mapped.dealInfo || { createdBy: currentUser.id, createdAt: new Date().toISOString() });
+    } catch {
+      /* تجاهل — الحالة المعروضة ستُحدَّث عند التنقل */
+    }
+  };
+
+  // M2: ترحيل الفاتورة من شريط الأدوات (موحَّد مع شاشة المبيعات).
+  const handlePost = async () => {
+    if (!formData.id || posting) return;
+    setAccErr(null);
+    setAccMsg(null);
+    setPosting(true);
+    try {
+      const res = await purchaseInvoiceApi.postToAccounting(Number(formData.id));
+      setAccMsg(res.message || `تم الترحيل — قيد محاسبي #${res.journal_id}`);
+      await reloadInvoice();
+      if (onSave) onSave({ id: String(formData.id) });
+    } catch (e) {
+      setAccErr(e instanceof Error ? e.message : "تعذّر ترحيل الفاتورة");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  // M2: التراجع عن الترحيل — حذف القيود وإرجاع الفاتورة مسودة (Feature 1).
+  const handleUnpost = async () => {
+    if (!formData.id || posting) return;
+    if (!window.confirm(
+      "هذا المستند مرحَّل. سيؤدي التراجع عن الترحيل إلى حذف كل قيود اليومية " +
+      "وحركات المخزون الخاصة بهذه الفاتورة وإرجاعها مسودة قابلة للتعديل/الحذف. متابعة؟"
+    )) return;
+    setAccErr(null);
+    setAccMsg(null);
+    setPosting(true);
+    try {
+      await purchaseInvoiceApi.unpost(Number(formData.id));
+      setAccMsg("تم التراجع عن الترحيل وحذف القيود. الفاتورة الآن مسودة.");
+      await reloadInvoice();
+      if (onSave) onSave({ id: String(formData.id) });
+    } catch (e) {
+      setAccErr(e instanceof Error ? e.message : "تعذّر التراجع عن الترحيل");
+    } finally {
+      setPosting(false);
     }
   };
 
@@ -1157,12 +1221,36 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     </div>
   );
 
+  const isPosted = Boolean(formData.isPosted);
+  const canPost = Boolean(formData.id) && !isPosted && !formData.isHistorical;
   const toolbarActions: AseelToolbarAction[] = [
-    { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: <Save />, onClick: !saving ? () => handleSave() : undefined, disabled: saving },
+    { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => handleSave() : undefined, disabled: saving || isPosted },
     { key: "new", label: "جديدة", icon: <Plus />, onClick: () => nav.goNew(), separatorBefore: true },
+    {
+      key: "post",
+      label: posting ? "...ترحيل" : "ترحيل",
+      icon: posting ? <Loader2 className="animate-spin" /> : <Send />,
+      onClick: canPost && !posting ? () => void handlePost() : undefined,
+      disabled: !canPost || posting,
+      separatorBefore: true,
+    },
+    {
+      key: "unpost",
+      label: posting ? "...تراجع" : "تراجع عن الترحيل",
+      icon: posting ? <Loader2 className="animate-spin" /> : <Undo2 />,
+      onClick: isPosted && !posting ? () => void handleUnpost() : undefined,
+      disabled: !isPosted || posting,
+    },
     { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => window.print(), separatorBefore: true },
     { key: "cancel", label: "إلغاء", icon: <X />, onClick: onCancel, danger: true, separatorBefore: true },
   ];
+
+  const accBanner = (accErr || accMsg) ? (
+    <div className={`aseel-banner ${accErr ? "aseel-banner--err" : "aseel-banner--ok"}`}>
+      {accErr ? <AlertCircle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
+      <span>{accErr || accMsg}</span>
+    </div>
+  ) : null;
 
   return (
     <div
@@ -1320,6 +1408,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           </label>
         </>
       }
+      activeTab={activeTabKey}
+      onTabChange={setActiveTabKey}
       tabs={[
         { key: "basic", label: "بيانات الفاتورة", content: basicInfoTab },
         { key: "items", label: "البنود والمنتجات", content: itemsTab },
@@ -1329,6 +1419,33 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         { key: "attachments", label: "المرفقات", content: attachmentsTab },
         { key: "activity", label: "سجل النشاطات", content: activityTab },
         { key: "other", label: "بيانات أخرى", content: otherTab },
+        // M2: المحاسبة والقيد + الحركات المالية inline داخل المحرر (توحيداً مع المبيعات).
+        ...(formData.id && Number(formData.id) > 0 ? [
+          {
+            key: "accounting",
+            label: "المحاسبة والقيد",
+            content: (
+              <div className="aseel-legacy-tab">
+                <PurchaseInvoiceAccountingPanel
+                  invoiceId={Number(formData.id)}
+                  readOnly={readOnly}
+                  onPosted={() => { void reloadInvoice(); if (onSave) onSave({ id: String(formData.id) }); }}
+                />
+              </div>
+            ),
+          },
+          {
+            key: "financial_movements",
+            label: "الحركات المالية المرتبطة",
+            content: (
+              <DocumentPaymentsTab
+                referenceType="PURCHASE_INVOICE"
+                referenceId={Number(formData.id)}
+                searchQuery={formData.invoiceNumber}
+              />
+            ),
+          },
+        ] : []),
       ]}
       totals={
         <>
@@ -1369,6 +1486,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         </>
       }
     >
+      {accBanner}
       {/* task18 DEF-B1/B3: شجرة الأصناف المرساة بجانب جدول البنود — النقر على
           صنف ورقي يبدأ سطراً جديداً، مع إضافة فئة/صنف inline. */}
       <div style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>

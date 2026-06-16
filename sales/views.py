@@ -159,6 +159,7 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                     stock_reference_types=["SALE", "STOCK_ISSUE"],
                     user=request.user,
                     document_label=f"فاتورة مبيعات {invoice.invoice_number}",
+                    recycle=True,
                 )
                 invoice.status = SalesInvoice.STATUS_DRAFT
                 invoice.journal = None

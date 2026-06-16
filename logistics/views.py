@@ -1741,9 +1741,6 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         inv_num = self.request.data.get('invoice_number') or self._next_invoice_number(tenant)
         serializer.save(tenant=tenant, invoice_number=inv_num)
 
-    def perform_update(self, serializer):
-        serializer.save()
-
     @action(detail=True, methods=['post'], url_path='receive')
     def receive(self, request, pk=None):
         """استلام بضاعة فاتورة محلية إلى المخزن (انعكاس على المستودع + قيد).
@@ -2256,6 +2253,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                     stock_reference_types=['PURCHASE_INVOICE'],
                     user=request.user,
                     document_label=f"فاتورة شراء {invoice.invoice_number}",
+                    recycle=True,
                 )
                 invoice.is_posted = False
                 invoice.journal = None

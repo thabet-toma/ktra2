@@ -15,8 +15,6 @@ import { InvoiceList } from './invoices/InvoiceList';
 import { ClearanceImportModal, ShipmentImportContext } from './invoices/ClearanceImportModal';
 import { shipmentsService, advanceShipmentRouteAtLeast } from '@/services/shipmentsService';
 import { InvoicePrintView } from './invoices/InvoicePrintView';
-import { PurchaseInvoiceAccountingPanel } from './invoices/PurchaseInvoiceAccountingPanel';
-import { DocumentPaymentsTab } from '../shared/DocumentPaymentsTab';
 
 interface PurchaseInvoiceProps {
   currentUser?: User;
@@ -42,6 +40,7 @@ function sqlListToInvoice(row: PurchaseInvoiceListDto): Invoice {
     supplierId: String(row.partner),
     items: [],
     status: row.status as Invoice['status'],
+    isPosted: Boolean(row.is_posted),
     subtotal: row.subtotal,
     discountAmount: row.discount_amount,
     taxRate: row.tax_rate,
@@ -437,55 +436,21 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
   return (
     <div className="min-h-screen bg-[var(--color-surface-2)] pb-10">
 
-      {/* Header - يظهر فقط في وضع القائمة */}
-      {viewMode === 'list' && (
-        <div className="bg-[var(--color-surface)] border-b border-[var(--color-border)] mb-6">
-          <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-[var(--color-primary-light)] rounded-lg">
-                <FileText className="w-6 h-6 text-[var(--color-primary)]" />
-              </div>
-              <div>
-                <h1 className="text-[var(--font-size-xl)] font-bold text-[var(--color-text)]">فواتير المشتريات</h1>
-                <p className="text-[var(--font-size-sm)] text-[var(--color-text-muted)]">
-                  إدارة فواتير الشراء ({invoices.length})
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => setShowImportModal(true)}
-                disabled={importing}
-                className="flex items-center gap-2 bg-[var(--color-primary-light)] text-[var(--color-primary)] hover:bg-[var(--color-muted)] px-5 py-2.5 rounded-xl font-medium transition-all border border-[var(--color-primary)] disabled:opacity-50"
-              >
-                {importing ? <Loader2 className="w-5 h-5 animate-spin" /> : <ScrollText className="w-5 h-5" />}
-                <span>استيراد من تخليص جمركي</span>
-              </button>
-              <button
-                onClick={handleCreateNew}
-                className="flex items-center gap-2 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white px-5 py-2.5 rounded-xl font-medium transition-all shadow-sm hover:shadow-md"
-              >
-                <Plus className="w-5 h-5" />
-                <span>فاتورة جديدة</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* Content */}
-      <div className={viewMode === 'list' ? "max-w-7xl mx-auto px-4" : "w-full"}>
+      <div className="w-full">
         {viewMode === 'list' ? (
           <InvoiceList
             invoices={invoices}
             onEdit={handleEdit}
-            onView={handleView}     // 🟢 تمرير دالة العرض
-            onPrint={handlePrint}   // 🟢 تمرير دالة الطباعة
-            onDelete={handleDelete} // 🔴 تمرير دالة الحذف
+            onView={handleView}
+            onPrint={handlePrint}
+            onDelete={handleDelete}
             items={items}
             suppliers={suppliers}
             onConvertToDeal={handleConvertToDeal}
+            onCreateNew={handleCreateNew}
+            onImport={() => setShowImportModal(true)}
+            onRefresh={() => void loadInvoices()}
           />
         ) : (
           <>
@@ -502,27 +467,8 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
               }}
               allDbItems={items}
             />
-            {/* لوحة المحاسبة تظهر بعد حفظ الفاتورة مرة واحدة (لديها id) */}
-            {currentInvoice?.id && Number(currentInvoice.id) > 0 && (
-              <div className="max-w-7xl mx-auto px-4 mt-2 mb-8">
-                <PurchaseInvoiceAccountingPanel
-                  invoiceId={Number(currentInvoice.id)}
-                  readOnly={isReadOnly}
-                  onPosted={() => {
-                    void loadInvoices();
-                    // task16 C11: العودة للصفحة الرئيسية بعد إتمام الترحيل
-                    navigate("/dashboard");
-                  }}
-                />
-                <div className="mt-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                  <DocumentPaymentsTab 
-                    referenceType="PURCHASE_INVOICE"
-                    referenceId={Number(currentInvoice.id)}
-                    searchQuery={currentInvoice.invoiceNumber}
-                  />
-                </div>
-              </div>
-            )}
+            {/* M2: لوحة المحاسبة والحركات المالية أصبحت تبويبات داخل المحرر
+                (single editor + inline accounting) — توحيداً مع شاشة المبيعات. */}
           </>
         )}
       </div>

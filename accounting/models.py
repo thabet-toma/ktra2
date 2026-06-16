@@ -185,6 +185,48 @@ class JournalLine(models.Model):
         self.base_credit = (Decimal(str(self.credit or 0)) * rate).quantize(Decimal("0.01"))
         super().save(*args, **kwargs)
 
+
+class VoidedJournal(models.Model):
+    """سلّة المحذوفات لأرقام القيود — «recycle bin» يحجز رقم القيد المحذوف.
+
+    عند التراجع عن ترحيل مستند (إلغاء الترحيل) بوضع recycle، يُحذف القيد الحيّ
+    من `journal_headers` (فلا يمسّ أي تقرير) ويُسجَّل رقمه الأصلي هنا. الرقم يبقى
+    محجوزاً تلقائياً لأن AutoField لا يعيد استخدام رقم محذوف أبداً؛ هذا الجدول
+    يجعل الحجز صريحاً وقابلاً للاسترجاع: عند إعادة الترحيل يُعاد إدراج القيد
+    بنفس الرقم الأصلي ثم تُحذف هذه السطر. مخفيّ تماماً عن واجهة المستخدم وكل
+    تقارير الأستاذ/ميزان المراجعة (ليس قيداً حيّاً — لا أسطر له).
+    """
+    id = models.AutoField(primary_key=True, db_column='VoidedJournalID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    original_journal_id = models.IntegerField(
+        db_column='OriginalJournalID',
+        help_text='رقم القيد (JournalID) الأصلي المحجوز لإعادة الاستخدام عند إعادة الترحيل.',
+    )
+    reference_type = models.CharField(max_length=50, db_column='ReferenceType')
+    reference_id = models.IntegerField(db_column='ReferenceID')
+    transaction_date = models.DateField(null=True, blank=True, db_column='TransactionDate')
+    description = models.TextField(null=True, blank=True, db_column='Description')
+    voided_at = models.DateTimeField(auto_now_add=True, db_column='VoidedAt')
+    voided_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='VoidedByUserID', related_name='voided_journals',
+    )
+
+    class Meta:
+        db_table = 'voided_journals'
+        managed = True
+        constraints = [
+            # حجز واحد فعّال لكل مستند — إعادة الترحيل تستهلك السطر فلا يتراكم.
+            models.UniqueConstraint(
+                fields=['tenant', 'reference_type', 'reference_id'],
+                name='uniq_voided_journal_per_document',
+            ),
+        ]
+
+    def __str__(self):
+        return f"VoidedJournal #{self.original_journal_id} ({self.reference_type}:{self.reference_id})"
+
+
 class Cheque(models.Model):
     DIRECTION_CHOICES = [
         ('Incoming', 'Incoming'), # From Customer

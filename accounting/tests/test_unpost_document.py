@@ -14,7 +14,7 @@ import pytest
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 
-from accounting.models import Account, JournalHeader, JournalLine
+from accounting.models import Account, JournalHeader, JournalLine, VoidedJournal
 from accounting.services import create_fiscal_year, post_journal, unpost_document
 from inventory.models import Product, StockMovement
 from inventory.services import record_stock_movement
@@ -151,3 +151,117 @@ def test_posted_sales_invoice_blocks_delete_then_unpost_allows_it(env):
 
     # الآن الحذف مسموح
     assert c.delete(f"/api/sales/invoices/{inv.id}/").status_code == 204
+
+
+# ── Feature 2 — حجز رقم القيد وإعادة استخدامه عند إعادة الترحيل ──────────────
+
+def test_recycle_reserves_then_repost_reuses_same_number(env):
+    """post → unpost(recycle) → الرقم محجوز → re-post يُعيد نفس الرقم نصّاً."""
+    tenant, owner, ar, rev, customer, product = env
+    original = _post_simple_journal(tenant, ar, rev, "SALES_INVOICE", 3001)
+    original_id = original.id
+
+    unpost_document(
+        tenant_id=tenant.TenantID,
+        reference_id=3001,
+        journal_reference_types=["SALES_INVOICE", "SALES_DELIVERY_COGS"],
+        user=owner,
+        recycle=True,
+    )
+
+    # القيد الحيّ حُذِف، والرقم محجوز في سلّة المحذوفات
+    assert not JournalHeader.objects.filter(pk=original_id).exists()
+    res = VoidedJournal.objects.get(
+        tenant_id=tenant.TenantID, reference_type="SALES_INVOICE", reference_id=3001)
+    assert res.original_journal_id == original_id
+
+    # إعادة الترحيل تُعيد نفس الرقم وتستهلك الحجز
+    reposted = _post_simple_journal(tenant, ar, rev, "SALES_INVOICE", 3001)
+    assert reposted.id == original_id
+    assert not VoidedJournal.objects.filter(
+        tenant_id=tenant.TenantID, reference_type="SALES_INVOICE", reference_id=3001).exists()
+    assert JournalHeader.objects.filter(pk=original_id).count() == 1
+
+
+def test_recycle_reserves_only_primary_journal(env):
+    """مستند بقيدين (فاتورة + تكلفة مبيعات): يُحجز رقم القيد الأساسي فقط."""
+    tenant, owner, ar, rev, customer, product = env
+    primary = _post_simple_journal(tenant, ar, rev, "SALES_INVOICE", 3100)
+    cogs = _post_simple_journal(tenant, ar, rev, "SALES_DELIVERY_COGS", 3100)
+
+    unpost_document(
+        tenant_id=tenant.TenantID,
+        reference_id=3100,
+        journal_reference_types=["SALES_INVOICE", "SALES_DELIVERY_COGS"],
+        user=owner,
+        recycle=True,
+    )
+
+    reservations = VoidedJournal.objects.filter(tenant_id=tenant.TenantID, reference_id=3100)
+    assert reservations.count() == 1
+    res = reservations.get()
+    assert res.reference_type == "SALES_INVOICE"
+    assert res.original_journal_id == primary.id
+    # القيد الفرعي حُذِف دون حجز
+    assert not JournalHeader.objects.filter(pk=cogs.id).exists()
+
+
+def test_unpost_without_recycle_creates_no_reservation(env):
+    """السلوك الافتراضي (recycle=False) لا يحجز أي رقم."""
+    tenant, owner, ar, rev, customer, product = env
+    _post_simple_journal(tenant, ar, rev, "SALES_INVOICE", 3200)
+    unpost_document(
+        tenant_id=tenant.TenantID,
+        reference_id=3200,
+        journal_reference_types=["SALES_INVOICE"],
+        user=owner,
+    )
+    assert not VoidedJournal.objects.filter(
+        tenant_id=tenant.TenantID, reference_id=3200).exists()
+
+
+def test_repost_falls_back_to_new_number_when_reserved_id_occupied(env):
+    """إن كان الرقم المحجوز مشغولاً (حالة غير متوقعة): يسقط لرقم جديد + يستهلك الحجز."""
+    tenant, owner, ar, rev, customer, product = env
+    occupant = _post_simple_journal(tenant, ar, rev, "PURCHASE_INVOICE", 4000)
+    # حجز يدوي يشير إلى رقم مشغول فعلاً
+    VoidedJournal.objects.create(
+        tenant_id=tenant.TenantID, original_journal_id=occupant.id,
+        reference_type="SALES_INVOICE", reference_id=4001)
+
+    reposted = _post_simple_journal(tenant, ar, rev, "SALES_INVOICE", 4001)
+    assert reposted.id != occupant.id  # لم يَدُس على القيد المشغول
+    assert JournalHeader.objects.filter(pk=occupant.id).exists()  # المشغول سليم
+    assert not VoidedJournal.objects.filter(
+        tenant_id=tenant.TenantID, reference_id=4001).exists()  # الحجز استُهلِك
+
+
+def test_sales_invoice_repost_reuses_journal_number_via_api(env):
+    """E2E عبر نقاط النهاية: post → unpost → re-post يُعيد نفس رقم القيد."""
+    tenant, owner, ar, rev, customer, product = env
+    inv = SalesInvoice.objects.create(
+        tenant=tenant, invoice_number="U-INV-RE", customer=customer,
+        currency=Currency.objects.get(Code="ILS"), invoice_date="2026-06-11",
+        invoice_type=SalesInvoice.INVOICE_CREDIT, stock_on_post=False)
+    SalesInvoiceLine.objects.create(
+        tenant=tenant, invoice=inv, product=product,
+        quantity=Decimal("1"), unit_price=Decimal("100.00"))
+    c = _client(owner, tenant)
+
+    assert c.post(f"/api/sales/invoices/{inv.id}/post/", {}, format="json").status_code == 200
+    inv.refresh_from_db()
+    first_journal_id = inv.journal_id
+    assert first_journal_id is not None
+
+    assert c.post(f"/api/sales/invoices/{inv.id}/unpost/", {}, format="json").status_code == 200
+    inv.refresh_from_db()
+    assert inv.journal_id is None
+    assert VoidedJournal.objects.get(
+        tenant_id=tenant.TenantID, reference_type="SALES_INVOICE",
+        reference_id=inv.id).original_journal_id == first_journal_id
+
+    assert c.post(f"/api/sales/invoices/{inv.id}/post/", {}, format="json").status_code == 200
+    inv.refresh_from_db()
+    assert inv.journal_id == first_journal_id  # نفس الرقم بالضبط
+    assert not VoidedJournal.objects.filter(
+        tenant_id=tenant.TenantID, reference_id=inv.id).exists()

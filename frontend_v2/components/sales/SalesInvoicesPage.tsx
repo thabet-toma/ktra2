@@ -16,7 +16,6 @@ import {
   postSalesInvoice,
   createDeliveryOrder,
   deliverOrder,
-  duplicateSalesInvoice,
   deleteSalesInvoice,
   getSalesSettings,
   type SalesInvoiceRow,
@@ -29,7 +28,6 @@ import {
   Send,
   Truck,
   Pencil,
-  Copy,
   Trash2,
   Plus,
   Printer,
@@ -326,19 +324,6 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     }
   };
 
-  const handleDuplicate = async (id: number) => {
-    setErr(null);
-    setMsg(null);
-    try {
-      const d = await duplicateSalesInvoice(id);
-      setMsg(`نسخة مسودة ${d.invoice_number}`);
-      await load();
-      navigate(`/sales/invoices/${d.id}`);
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل النسخ");
-    }
-  };
-
   const handleDeleteDraft = async (id: number) => {
     if (!window.confirm("حذف هذه المسودة نهائياً؟")) return;
     setErr(null);
@@ -514,15 +499,6 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               </button>
               <button
                 type="button"
-                className="aseel-toolbtn"
-                style={{ fontSize: "10px", padding: "2px 6px" }}
-                onClick={(e) => { e.stopPropagation(); handleDuplicate(r.id); }}
-                title="نسخ"
-              >
-                <Copy className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
                 className="aseel-toolbtn aseel-toolbtn--danger"
                 style={{ fontSize: "10px", padding: "2px 6px" }}
                 onClick={(e) => { e.stopPropagation(); handleDeleteDraft(r.id); }}
@@ -558,15 +534,6 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
                 title="أمر إخراج"
               >
                 <Truck className="w-3 h-3" />
-              </button>
-              <button
-                type="button"
-                className="aseel-toolbtn"
-                style={{ fontSize: "10px", padding: "2px 6px" }}
-                onClick={(e) => { e.stopPropagation(); handleDuplicate(r.id); }}
-                title="نسخ"
-              >
-                <Copy className="w-3 h-3" />
               </button>
             </>
           )}
