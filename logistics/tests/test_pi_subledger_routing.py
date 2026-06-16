@@ -1,9 +1,9 @@
-"""Section B — قيد فاتورة الشراء يجب أن يمرّ دائماً عبر حساب المورد (ذمم).
+"""Section B / Feature 2 — قيد فاتورة الشراء يدين المخزون ويدائن ذمم المورد فقط.
 
-المطلب (المالك): حتى الشراء النقدي يُقيَّد أولاً على ذمم المورد (AP) ثم تُسوّى
-الدفعة النقدية بحركة ثانية (مدين ذمم المورد / دائن صندوق) في نفس القيد، كي
-يعكس كشف حساب المورد كل الحركات. القيد القديم للشراء النقدي كان يدين المخزون
-ويدائن الصندوق مباشرة ويتجاوز حساب المورد تماماً.
+المطلب (المالك — Feature 2): ترحيل فاتورة الشراء يقيّد Dr مخزون/ضريبة /
+Cr ذمم المورد بالكامل — ولا يُسوّي النقدية. الدفع للمورد (حتى النقدي) أصبح
+وصل دفع مستقل (SupplierPayment: Dr ذمم المورد / Cr صندوق) لا يولّده ترحيل
+الفاتورة. لذا قيد فاتورة نقدية يلمس ذمم المورد دائناً فقط — بلا سطر صندوق.
 """
 from decimal import Decimal
 
@@ -69,11 +69,11 @@ class PurchaseSubledgerRoutingTest(APITestCase):
         assert ap_lines, "الشراء النقدي يجب أن يلمس حساب ذمم المورد"
         ap_credit = sum(l.credit for l in ap_lines)
         ap_debit = sum(l.debit for l in ap_lines)
-        # ذمم المورد تُدان بكامل القيمة ثم تُسوَّى بالدفعة النقدية
+        # Feature 2: ذمم المورد تُدان بكامل القيمة ولا تُسوّى داخل قيد الفاتورة
         assert ap_credit == Decimal("1000.00")
-        assert ap_debit == Decimal("1000.00")
+        assert ap_debit == Decimal("0")
         assert all(l.partner_id == self.partner.id for l in ap_lines)
 
-        # الصندوق يُدان (دائن) بالمبلغ المدفوع
+        # Feature 2: لا سطر صندوق في قيد الفاتورة — الدفع وصل مستقل
         cash_credit = sum(l.credit for l in jl if l.account_id == self.cash.id)
-        assert cash_credit == Decimal("1000.00")
+        assert cash_credit == Decimal("0")

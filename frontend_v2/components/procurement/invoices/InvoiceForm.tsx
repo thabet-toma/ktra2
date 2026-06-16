@@ -30,12 +30,16 @@ import { SupplierModal } from "@/components/common/SupplierModal";
 import { mapPurchaseInvoiceDtoToInvoice } from "@/utils/mapPurchaseInvoiceDto";
 import { dealsService } from "@/services/dealsService";
 import { shipmentsService } from "@/services/shipmentsService";
+import { priceListService } from "@/services/priceListService";
 import {
   invoiceGrandTotalIls,
   invoiceVatBaseIls,
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
-import { ItemSearchModal } from "../price-offers/ItemSearchModal";
+import { ItemSearchModal, productToItem } from "../price-offers/ItemSearchModal";
+import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
+import { InvoiceCategoryTree } from "./InvoiceCategoryTree";
+import { getPartnerBalance, type PartnerBalanceResponse } from "@/services/salesApi";
 import {
   InvoiceBasicInfo,
   DealInfoSection,
@@ -93,6 +97,23 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
   const [showItemSearch, setShowItemSearch] = useState(false);
   const [activeItemSearchIndex, setActiveItemSearchIndex] = useState<number | null>(null);
+  // task18 DEF-B1/B3: إنشاء صنف جديد inline من خلية اسم الصنف (النص المكتوب يُمرَّر مسبقاً)
+  const [inlineCreate, setInlineCreate] = useState<{ rowIndex: number; name: string } | null>(null);
+  // task18 DEF-C1: رصيد المورد (قبل/بعد) عند اختيار مورد — يطابق شاشة المبيعات.
+  const [supplierBalance, setSupplierBalance] = useState<PartnerBalanceResponse | null>(null);
+  useEffect(() => {
+    const sid = formData.supplierId;
+    if (!sid) {
+      setSupplierBalance(null);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      getPartnerBalance({ partnerId: sid, proposedTotal: formData.grandTotal ?? 0 })
+        .then(setSupplierBalance)
+        .catch(() => setSupplierBalance(null));
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [formData.supplierId, formData.grandTotal]);
   /** بيانات الفاتورة والمورد — تُعرض من رأس الصفحة عند الضغط على «تفاصيل» */
   const [invoiceHeaderDetailsOpen, setInvoiceHeaderDetailsOpen] = useState(false);
   /** وصف الصفقة من SQL عند غيابه في الفاتورة المحمّلة */
@@ -454,6 +475,38 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   /* task13 M5: منطق تعبئة السطر مشترك بين المنتقي المدمج والفهرس الكامل */
   const applyItemAt = (index: number | null, item: Item, lastPrice?: number) => {
+    // task18 DEF-C3: إن كان الصنف موجوداً في سطر آخر — نبّه المستخدم ودعه يختار:
+    // موافق = دمج الكمية في السطر القائم · إلغاء = إضافته كسطر مستقل (سعر مختلف).
+    const current = formData.items || [];
+    const dupIndex = current.findIndex(
+      (r, i) => i !== index && String(r.itemId) === String(item.id) && r.itemId !== ""
+    );
+    if (dupIndex >= 0) {
+      const merge = window.confirm(
+        `الصنف «${item.name}» مضاف مسبقاً في الفاتورة.\n\n` +
+        `موافق = دمج الكمية في السطر الموجود\n` +
+        `إلغاء = إضافته كسطر جديد مستقل (سعر مختلف)`
+      );
+      if (merge) {
+        const updated = [...current];
+        const existing = { ...updated[dupIndex] };
+        existing.quantity = (Number(existing.quantity) || 0) + 1;
+        existing.totalPrice = roundSqlMoney2((Number(existing.quantity) || 0) * (Number(existing.unitPrice) || 0));
+        updated[dupIndex] = existing;
+        // أفرغ السطر الذي كان قيد التحرير (لتفادي تكراره) ما لم يكن سطر الإدخال الفارغ.
+        if (index !== null && index < updated.length && index !== dupIndex) {
+          updated[index] = {
+            id: updated[index].id,
+            itemId: "", name: "", categoryId: "", categoryName: "",
+            specifications: "", imageUrls: [], quantity: 1, unitPrice: 0, totalPrice: 0,
+          };
+        }
+        recalculateTotals({ items: updated });
+        return;
+      }
+      // إلغاء الدمج → نتابع بالمسار العادي فيُملأ السطر الجاري كصنف مستقل
+      // (سطر مكرّر بسعره الخاص — وهو المطلوب).
+    }
     const newItem: InvoiceItem = {
       id: crypto.randomUUID(),
       itemId: item.id,
@@ -870,16 +923,22 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       options={itemOptions}
       disabled={readOnly || formData.isHistorical}
       placeholder="اكتب اسم الصنف…"
-      onPick={(id) => {
+      onPick={async (id) => {
         const it = allDbItems.find((x) => String(x.id) === String(id));
-        if (it) applyItemAt(rowIndex, it);
+        if (it) {
+          let lastPrice = 0;
+          if (formData.supplierId) {
+            try {
+              lastPrice = await priceListService.getLastSupplierPrice(formData.supplierId, String(it.id));
+            } catch (err) { console.error("Failed to fetch last price", err); }
+          }
+          applyItemAt(rowIndex, it, lastPrice);
+        }
       }}
       onFreeText={(t) => {
-        const updated = [...(formData.items || [])];
-        if (rowIndex < updated.length) {
-          updated[rowIndex] = { ...updated[rowIndex], itemId: "", name: t };
-          recalculateTotals({ items: updated });
-        }
+        // task18 DEF-B1/B3: «إضافة كصنف جديد» يفتح إنشاء صنف سريع مُعبّأً بالنص
+        // ويُنشئه فعلياً (Product) بدل ترك سطر حر بلا itemId يُحذف عند الحفظ.
+        setInlineCreate({ rowIndex, name: t.trim() });
       }}
     />
   );
@@ -920,6 +979,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   const basicInfoTab = (
     <div className="aseel-legacy-tab">
+      {supplierBalance && (
+        <div
+          className="aseel-banner"
+          style={{ marginBottom: "8px", display: "flex", gap: "18px", flexWrap: "wrap", fontSize: "13px" }}
+        >
+          {/* task18 DEF-C1: رصيد المورد قبل/بعد هذه الفاتورة (من الـ subledger). */}
+          <span>رصيد المورد قبل الفاتورة: <strong>{Number(supplierBalance.open_balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+          <span>الرصيد المتوقع بعدها: <strong>{Number(supplierBalance.projected_balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+        </div>
+      )}
       <InvoiceBasicInfo
         data={formData}
         setData={setFormData}
@@ -1300,20 +1369,44 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         </>
       }
     >
-      <AseelGrid<InvoiceItem>
-        columns={itemColumns}
-        rows={formData.items || []}
-        getCell={itemGetCell}
-        getRowKey={(r) => r.id}
-        onChange={readOnly || formData.isHistorical ? undefined : itemOnChange}
-        onAddRow={readOnly || formData.isHistorical ? undefined : addRow}
-        emptyHint="لا توجد بنود — أضف صنفاً (+ فهرس الأصناف)"
-      />
-      {!readOnly && !formData.isHistorical && (
-        <button type="button" className="aseel-addrow" onClick={addRow}>
-          <Plus className="h-3 w-3" /> إضافة سطر
-        </button>
-      )}
+      {/* task18 DEF-B1/B3: شجرة الأصناف المرساة بجانب جدول البنود — النقر على
+          صنف ورقي يبدأ سطراً جديداً، مع إضافة فئة/صنف inline. */}
+      <div style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>
+        <InvoiceCategoryTree
+          items={allDbItems}
+          disabled={readOnly || formData.isHistorical}
+          onPickItem={async (it) => {
+            let lastPrice = 0;
+            if (formData.supplierId) {
+              try {
+                lastPrice = await priceListService.getLastSupplierPrice(formData.supplierId, String(it.id));
+              } catch (err) { console.error("Failed to fetch last price", err); }
+            }
+            applyItemAt(null, it, lastPrice);
+          }}
+          onItemCreated={(it) =>
+            setAllDbItems((prev) =>
+              prev.some((p) => String(p.id) === String(it.id)) ? prev : [it, ...prev]
+            )
+          }
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <AseelGrid<InvoiceItem>
+            columns={itemColumns}
+            rows={formData.items || []}
+            getCell={itemGetCell}
+            getRowKey={(r) => r.id}
+            onChange={readOnly || formData.isHistorical ? undefined : itemOnChange}
+            onAddRow={readOnly || formData.isHistorical ? undefined : addRow}
+            emptyHint="لا توجد بنود — أضف صنفاً من الشجرة أو اكتب اسمه"
+          />
+          {!readOnly && !formData.isHistorical && (
+            <button type="button" className="aseel-addrow" onClick={addRow}>
+              <Plus className="h-3 w-3" /> إضافة سطر
+            </button>
+          )}
+        </div>
+      </div>
     </AseelDocumentShell>
 
     {/* فهرس الموردين */}
@@ -1363,6 +1456,27 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         onSelectItem={handleItemSelect}
         items={allDbItems}
         supplierId={formData.supplierId}
+        onItemCreated={(it) =>
+          setAllDbItems((prev) =>
+            prev.some((p) => String(p.id) === String(it.id)) ? prev : [it, ...prev]
+          )
+        }
+      />
+    )}
+
+    {inlineCreate && (
+      <ItemQuickCreateModal
+        isOpen
+        initialName={inlineCreate.name}
+        onClose={() => setInlineCreate(null)}
+        onSaved={(newProduct) => {
+          const item = productToItem(newProduct);
+          setAllDbItems((prev) =>
+            prev.some((p) => String(p.id) === String(item.id)) ? prev : [item, ...prev]
+          );
+          applyItemAt(inlineCreate.rowIndex, item);
+          setInlineCreate(null);
+        }}
       />
     )}
 

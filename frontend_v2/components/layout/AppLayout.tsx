@@ -20,6 +20,7 @@ import {
   BranchSwitcher,
 } from './BranchSwitcher';
 import { AseelCalculatorButton } from '../aseel';
+import { GlobalActionBar } from './GlobalActionBar';
 import {
   User as UserIcon,
   Calendar,
@@ -127,6 +128,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </main>
         </div>
       </div>
+
+      {/* task18 DEF-A2: شريط الإجراءات العام الدائم (شريط الأدوات السفلي) */}
+      <GlobalActionBar user={user} onNavigate={onNavigate} />
 
       {/* M5-T1: شريط الحالة السفلي بنمط الأصيل */}
       <div className="aseel-statusbar flex-shrink-0">

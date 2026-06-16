@@ -453,6 +453,137 @@ tbody td {
 [data-skin="aseel"] .aseel-toolbtn--danger:hover:not(:disabled) { background: #f6dcdc; border-color: #c98686; color: var(--aseel-state); }
 [data-skin="aseel"] .aseel-toolbtn svg { width: 15px; height: 15px; }
 
+/* task18 DEF-A2: شريط الإجراءات العام السفلي — حد علوي بدل السفلي + لفّ آمن */
+[data-skin="aseel"] .aseel-actionbar {
+  border-top: 1px solid var(--aseel-border-soft);
+  border-bottom: none;
+  padding: 2px 6px;
+  row-gap: 2px;
+}
+
+/* task18 DEF-B1/B3: شجرة الأصناف المرساة بجانب الفاتورة */
+[data-skin="aseel"] .aseel-tree-panel {
+  flex: 0 0 240px;
+  max-width: 240px;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--aseel-border-soft);
+  border-radius: var(--aseel-radius);
+  background: var(--aseel-panel);
+  max-height: 480px;
+}
+[data-skin="aseel"] .aseel-tree-head,
+[data-skin="aseel"] .aseel-tree-search,
+[data-skin="aseel"] .aseel-tree-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--aseel-border-soft);
+}
+[data-skin="aseel"] .aseel-tree-search .aseel-input { height: 22px; }
+[data-skin="aseel"] .aseel-tree-actions { flex-wrap: wrap; }
+[data-skin="aseel"] .aseel-tree-body { overflow: auto; flex: 1; padding: 4px 2px; }
+[data-skin="aseel"] .aseel-tree-node,
+[data-skin="aseel"] .aseel-tree-leaf {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  text-align: start;
+  padding: 2px 4px;
+  font-size: var(--aseel-fs-sm);
+  color: var(--aseel-ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--aseel-radius);
+  cursor: pointer;
+}
+[data-skin="aseel"] .aseel-tree-node:hover,
+[data-skin="aseel"] .aseel-tree-leaf:hover:not(:disabled) { background: #dceaf6; }
+[data-skin="aseel"] .aseel-tree-leaf:disabled { opacity: .5; cursor: default; }
+[data-skin="aseel"] .aseel-tree-count { margin-inline-start: auto; font-size: 10px; color: var(--aseel-ink-soft, #888); }
+
+/* task18: شجرة احترافية — عقد قابلة للطيّ + أزرار إجراءات لكل فئة */
+[data-skin="aseel"] .aseel-tree-toolbar {
+  padding: 6px;
+  border-bottom: 1px solid var(--aseel-border-soft);
+}
+[data-skin="aseel"] .aseel-tree-cat {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: var(--aseel-radius);
+  font-size: var(--aseel-fs-sm);
+  font-weight: 600;
+  color: var(--aseel-ink);
+}
+[data-skin="aseel"] .aseel-tree-cat:hover { background: #eef4fa; }
+[data-skin="aseel"] .aseel-tree-twisty {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0; background: transparent; border: 0;
+  color: var(--aseel-ink); cursor: pointer; flex-shrink: 0;
+}
+[data-skin="aseel"] .aseel-tree-actions-inline {
+  display: inline-flex; gap: 1px; margin-inline-start: 2px;
+  opacity: 0; transition: opacity .1s;
+}
+[data-skin="aseel"] .aseel-tree-cat:hover .aseel-tree-actions-inline,
+[data-skin="aseel"] .group:hover .aseel-tree-actions-inline { opacity: 1; }
+[data-skin="aseel"] .aseel-tree-act {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; border-radius: var(--aseel-radius);
+  background: transparent; border: 1px solid transparent; color: var(--aseel-ink);
+  cursor: pointer;
+}
+[data-skin="aseel"] .aseel-tree-act:hover { background: #dceaf6; border-color: var(--aseel-accent-bd); }
+
+/* task18: قائمة زر الماوس الأيمن للشجرة */
+[data-skin="aseel"] .aseel-ctxmenu {
+  min-width: 160px;
+  background: var(--aseel-field, #fff);
+  border: 1px solid var(--aseel-border, #b9c4cf);
+  border-radius: var(--aseel-radius);
+  box-shadow: 0 6px 20px rgba(0,0,0,.18);
+  padding: 3px;
+}
+[data-skin="aseel"] .aseel-ctxmenu-item {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  padding: 5px 8px; border: 0; background: transparent; cursor: pointer;
+  font-size: var(--aseel-fs-sm); color: var(--aseel-ink); text-align: start;
+  border-radius: var(--aseel-radius);
+}
+[data-skin="aseel"] .aseel-ctxmenu-item:hover { background: #dceaf6; }
+[data-skin="aseel"] .aseel-tree-rail {
+  flex: 0 0 32px;
+  align-self: stretch;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  border: 1px solid var(--aseel-border-soft);
+  border-radius: var(--aseel-radius);
+  background: var(--aseel-panel);
+  color: var(--aseel-ink);
+  cursor: pointer;
+  transition: background .1s;
+}
+[data-skin="aseel"] .aseel-tree-rail:hover { background: #dceaf6; }
+[data-skin="aseel"] .aseel-tree-rail-label {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+@media print {
+  [data-skin="aseel"] .aseel-tree-panel,
+  [data-skin="aseel"] .aseel-tree-rail { display: none !important; }
+}
+
 /* ── Header field band ── */
 [data-skin="aseel"] .aseel-headband {
   padding: 3px 8px;
@@ -1137,6 +1268,7 @@ tbody td {
 @media print {
   [data-skin="aseel"] .aseel-sidebar,
   [data-skin="aseel"] .aseel-toolbar,
+  [data-skin="aseel"] .aseel-actionbar,
   [data-skin="aseel"] .aseel-statusbar-global,
   [data-skin="aseel"] .aseel-doc-statusbar,
   [data-skin="aseel"] .aseel-pagination {

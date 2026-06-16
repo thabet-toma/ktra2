@@ -26,12 +26,14 @@ from .serializers import (
     LocalShipmentSerializer, SupplierPaymentSerializer,
 )
 from accounting.models import Account, TaxRate
+from inventory.models import StockMovement
 from partners.models import Partner
 from partners.signals import ensure_partner_linked_account
 from tenants.models import Tenant, Currency
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
 from accounting.cashbox import resolve_default_cash_box_account
-from accounting.services import create_audit_log, validate_fiscal_period, post_journal, get_exchange_rate
+from accounting.services import create_audit_log, validate_fiscal_period, post_journal, get_exchange_rate, unpost_document
+from core.api_defaults import POSTED_DOC_WARNING
 from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
 from core.mixins import BaseTenantViewSet
@@ -99,6 +101,51 @@ class LogisticsDealViewSet(BaseTenantViewSet):
             serializer.save(deal=deal)
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        if instance is not None and instance.payments.filter(is_posted=True).exists():
+            raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.payments.filter(is_posted=True).exists():
+            return Response(
+                {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'], url_path='unpost')
+    def unpost(self, request, pk=None):
+        """تراجع عن ترحيل الصفقة: حذف قيود كل دفعاتها المرحّلة وإرجاعها مسودات."""
+        deal = self.get_object()
+        posted_payments = list(deal.payments.filter(is_posted=True))
+        if not posted_payments:
+            return Response(
+                {'error': 'لا توجد دفعات مرحّلة على هذه الصفقة.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            with transaction.atomic():
+                total = {'journals_deleted': 0, 'lines_deleted': 0, 'stock_movements_deleted': 0}
+                for pay in posted_payments:
+                    r = unpost_document(
+                        tenant_id=deal.tenant_id,
+                        reference_id=pay.id,
+                        journal_reference_types=['LOGISTICS_PAYMENT'],
+                        user=request.user,
+                        document_label=f"دفعة صفقة {deal.ref_number}",
+                    )
+                    for k in total:
+                        total[k] += r[k]
+                    pay.is_posted = False
+                    pay.journal = None
+                    pay.save(update_fields=['is_posted', 'journal'])
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'message': 'تم التراجع عن الترحيل وحذف القيود.', 'unpost_result': total})
 
     @action(detail=True, methods=['post'])
     def post_to_accounting(self, request, pk=None):
@@ -1091,6 +1138,56 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
             'journal_id': journal.id
         }, status=status.HTTP_200_OK)
 
+    def _shipment_is_posted(self, shipment):
+        """الشحنة «مرحّلة» إن وُجد قيد شحن أو حركة مخزون استلام تخصّها."""
+        return JournalHeader.objects.filter(
+            tenant_id=shipment.tenant_id,
+            reference_type='LOGISTICS_SHIPMENT',
+            reference_id=shipment.id,
+        ).exists() or StockMovement.objects.filter(
+            tenant_id=shipment.tenant_id,
+            reference_type='SHIPMENT',
+            reference_id=shipment.id,
+        ).exists()
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        if instance is not None and self._shipment_is_posted(instance):
+            raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if self._shipment_is_posted(instance):
+            return Response(
+                {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'], url_path='unpost')
+    def unpost(self, request, pk=None):
+        """تراجع عن الترحيل: حذف قيد الشحن وعكس حركات استلام مخزونها."""
+        shipment = self.get_object()
+        if not self._shipment_is_posted(shipment):
+            return Response(
+                {'error': 'الشحنة غير مُرحّلة.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            with transaction.atomic():
+                result = unpost_document(
+                    tenant_id=shipment.tenant_id,
+                    reference_id=shipment.id,
+                    journal_reference_types=['LOGISTICS_SHIPMENT'],
+                    stock_reference_types=['SHIPMENT'],
+                    user=request.user,
+                    document_label=f"شحنة {shipment.shipment_number}",
+                )
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'message': 'تم التراجع عن الترحيل وحذف القيد.', 'unpost_result': result})
+
 
 class LogisticsClearanceViewSet(BaseTenantViewSet):
     queryset = LogisticsClearance.objects.all().order_by("-id")
@@ -1110,6 +1207,54 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                 "lines",
             )
         )
+
+    def _clearance_is_posted(self, clearance):
+        return clearance.payments.filter(is_posted=True).exists() or bool(clearance.journal_id)
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        if instance is not None and self._clearance_is_posted(instance):
+            raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if self._clearance_is_posted(instance):
+            return Response(
+                {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'], url_path='unpost')
+    def unpost(self, request, pk=None):
+        """تراجع عن ترحيل التخليص: حذف قيود كل دفعاته المرحّلة وإرجاعها مسودات."""
+        clearance = self.get_object()
+        posted_payments = list(clearance.payments.filter(is_posted=True))
+        if not posted_payments:
+            return Response(
+                {'error': 'لا توجد دفعات تخليص مرحّلة.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            with transaction.atomic():
+                total = {'journals_deleted': 0, 'lines_deleted': 0, 'stock_movements_deleted': 0}
+                for pay in posted_payments:
+                    r = unpost_document(
+                        tenant_id=clearance.tenant_id,
+                        reference_id=pay.id,
+                        journal_reference_types=['CLEARANCE_PAYMENT', 'LOGISTICS_CLEARANCE_PAYMENT'],
+                        user=request.user,
+                        document_label=f"دفعة تخليص #{clearance.id}",
+                    )
+                    for k in total:
+                        total[k] += r[k]
+                    pay.is_posted = False
+                    pay.journal = None
+                    pay.save(update_fields=['is_posted', 'journal'])
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'message': 'تم التراجع عن الترحيل وحذف القيود.', 'unpost_result': total})
 
     @action(detail=True, methods=["get"])
     def payments(self, request, pk=None):
@@ -1829,21 +1974,12 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         partner = invoice.partner
 
         # ─── 1) الحساب الدائن دائماً = ذمم المورد (subledger) ───────────────────
-        # Section B: حتى الشراء النقدي يُقيَّد أولاً على ذمم المورد، ثم تُسوَّى
-        # الدفعة النقدية بحركة ثانية (مدين ذمم المورد / دائن صندوق) في نفس القيد
-        # — كي يعكس كشف حساب المورد والأعمار كل الحركات.
-        payment_type = getattr(invoice, 'payment_type', 'credit') or 'credit'
+        # Feature 2: ترحيل الفاتورة يدائن ذمم المورد بالكامل ولا يُسوّي النقدية —
+        # الدفع للمورد يُسجَّل كوصل دفع مستقل (SupplierPayment) بعد الترحيل.
         credit_account = partner.linked_account
         if not credit_account:
             return Response(
                 {'error': 'المورد بلا حساب محاسبي مربوط. اربط المورد بحساب ذمم (Trade Payables) أولاً.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        # حساب الصندوق/البنك للتسوية النقدية (مطلوب للنقدي، اختياري للدفعة الجزئية)
-        cash_account = invoice.cash_or_bank_account
-        if payment_type == 'cash' and not cash_account:
-            return Response(
-                {'error': 'فاتورة شراء نقدية تتطلب اختيار حساب صندوق/بنك.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1956,8 +2092,8 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         # (مع رسوم مرسملة مضمَّنة داخل grand إن وُجدت)
         inventory_debit = merchandise_net + capitalized_total
 
-        # If invoice has landed-cost items, align GL with WAC by using landed totals
         items_with_landed = list(invoice.items.all())
+        use_landed = False
         if items_with_landed and any(it.landed_line_total_ils for it in items_with_landed if it.landed_line_total_ils is not None):
             landed_sum = sum(
                 (Decimal(str(it.landed_line_total_ils or 0)) for it in items_with_landed),
@@ -1965,11 +2101,41 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             )
             if landed_sum > 0:
                 inventory_debit = landed_sum + capitalized_total
+                use_landed = True
 
         td = invoice.invoice_date or datetime.date.today()
 
         # ─── 5) بناء أسطر القيد ─────────────────────────────────────────────────
         lines_payload: list[dict] = []
+
+        subtotal = sum((Decimal(str(it.total_price or it.quantity * it.unit_price or 0)) for it in items_with_landed), Decimal('0'))
+        discount = Decimal(str(invoice.discount_amount or 0))
+
+        mapped_debit = Decimal('0')
+        mapped_lines = {}
+        for it in items_with_landed:
+            if not it.expense_account_id:
+                continue
+            if use_landed and it.landed_line_total_ils is not None:
+                amt = Decimal(str(it.landed_line_total_ils))
+            else:
+                raw_amt = Decimal(str(it.total_price or it.quantity * it.unit_price or 0))
+                # Distribute discount proportionally
+                if subtotal > 0 and discount > 0:
+                    amt = raw_amt - (raw_amt / subtotal * discount)
+                else:
+                    amt = raw_amt
+                    
+            if amt <= 0: continue
+            
+            mapped_debit += amt
+            if it.expense_account_id not in mapped_lines:
+                mapped_lines[it.expense_account_id] = {'amount': Decimal('0'), 'desc': []}
+            mapped_lines[it.expense_account_id]['amount'] += amt
+            if len(mapped_lines[it.expense_account_id]['desc']) < 3:
+                mapped_lines[it.expense_account_id]['desc'].append(it.name or '')
+        
+        inventory_debit -= mapped_debit
 
         if inventory_debit > 0:
             lines_payload.append({
@@ -1978,6 +2144,17 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 'credit': Decimal('0'),
                 'partner': partner.id,
                 'description': f"بضاعة/مخزون — {invoice.invoice_number}",
+            })
+            
+        for acc_id, data in mapped_lines.items():
+            names = "، ".join(data['desc'])
+            if len(data['desc']) == 3: names += "..."
+            lines_payload.append({
+                'account': acc_id,
+                'debit': data['amount'].quantize(Decimal('0.01')),
+                'credit': Decimal('0'),
+                'partner': partner.id,
+                'description': f"بند مشتريات: {names} — {invoice.invoice_number}"[:500],
             })
 
         if tax_amt > 0:
@@ -2011,34 +2188,10 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             'description': f"ذمم مورد — {invoice.invoice_number}"[:500],
         })
 
-        # ─── تسوية الدفعة النقدية عبر ذمم المورد (مدين ذمم / دائن صندوق) ────────
-        attached_cash = Decimal(str(getattr(invoice, 'attached_cash_amount', 0) or 0))
-        if payment_type == 'cash':
-            paid_cash = credit_total
-        else:
-            paid_cash = attached_cash if attached_cash > 0 else Decimal('0')
-            if paid_cash > credit_total:
-                paid_cash = credit_total
-        if paid_cash > 0:
-            if not cash_account:
-                return Response(
-                    {'error': 'دفعة نقدية على فاتورة الشراء تتطلب حساب صندوق/بنك.'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            lines_payload.append({
-                'account': credit_account.id,
-                'debit': paid_cash.quantize(Decimal('0.01')),
-                'credit': Decimal('0'),
-                'partner': partner.id,
-                'description': f"تسوية ذمم (نقدي) — {invoice.invoice_number}"[:500],
-            })
-            lines_payload.append({
-                'account': cash_account.id,
-                'debit': Decimal('0'),
-                'credit': paid_cash.quantize(Decimal('0.01')),
-                'partner': partner.id,
-                'description': f"دفع نقدي — {invoice.invoice_number}"[:500],
-            })
+        # ─── Feature 2 (شراء): ترحيل الفاتورة لا يُسوّي النقدية ─────────────────
+        # قيد الفاتورة يدين المخزون/الضريبة ويدائن ذمم المورد بالكامل فقط. الدفع
+        # النقدي للمورد — حتى للفاتورة النقدية — يصبح «وصل دفع» مستقل
+        # (SupplierPayment، Dr ذمم المورد / Cr صندوق) يُسجَّل من الفاتورة نفسها.
 
         # ─── 6) الترحيل المركزي ─────────────────────────────────────────────────
         try:
@@ -2070,46 +2223,50 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             'message': 'تم الترحيل بنجاح',
         }, status=status.HTTP_201_CREATED)
 
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        if instance is not None and instance.is_posted:
+            raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.is_posted:
+            return Response(
+                {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
+
     @action(detail=True, methods=['post'], url_path='unpost')
     def unpost(self, request, pk=None):
+        """تراجع عن الترحيل: حذف كل قيود الفاتورة وحركات استلامها وإرجاعها مسودة."""
         invoice = self.get_object()
-        if not invoice.is_posted or not invoice.journal:
+        if not invoice.is_posted and invoice.receipt_status == PurchaseInvoice.RECEIPT_NOT:
             return Response(
                 {'error': 'الفاتورة غير مرحّلة'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
             with transaction.atomic():
-                orig = invoice.journal
-                # Create reversal journal instead of deleting
-                rev = JournalHeader.objects.create(
-                    tenant=orig.tenant,
-                    transaction_date=datetime.date.today(),
-                    description=(f"عكس فاتورة شراء {invoice.invoice_number}: {orig.description or ''}")[:500],
-                    reference_type='PURCHASE_INVOICE_REVERSAL',
-                    reference_id=orig.id,
-                    is_posted=True,
-                    currency=orig.currency,
-                    exchange_rate=orig.exchange_rate,
+                result = unpost_document(
+                    tenant_id=invoice.tenant_id,
+                    reference_id=invoice.pk,
+                    journal_reference_types=['PURCHASE_INVOICE', 'PURCHASE_RECEIPT'],
+                    stock_reference_types=['PURCHASE_INVOICE'],
+                    user=request.user,
+                    document_label=f"فاتورة شراء {invoice.invoice_number}",
                 )
-                for line in orig.lines.all():
-                    JournalLine.objects.create(
-                        tenant=line.tenant,
-                        journal=rev,
-                        account=line.account,
-                        debit=line.credit,
-                        credit=line.debit,
-                        partner=line.partner,
-                        cost_center=line.cost_center,
-                        description=line.description,
-                    )
                 invoice.is_posted = False
                 invoice.journal = None
-                invoice.save(update_fields=['is_posted', 'journal'])
+                invoice.receipt_status = PurchaseInvoice.RECEIPT_NOT
+                invoice.save(update_fields=['is_posted', 'journal', 'receipt_status'])
+                # إعادة كميات الاستلام للصفر (عُكِست حركات المخزون أعلاه)
+                invoice.items.update(received_quantity=0)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({'message': 'تم إلغاء الترحيل بقيد عكسي', 'reversal_journal_id': rev.id})
+        return Response({'message': 'تم التراجع عن الترحيل وحذف القيود.', 'unpost_result': result})
 
 
 # ── P-H-3: SupplierPayment ──────────────────────────────────────────
@@ -2372,44 +2529,45 @@ class LocalShipmentViewSet(BaseTenantViewSet):
 
         return Response(LocalShipmentSerializer(shipment).data)
 
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        if instance is not None and getattr(instance, 'is_posted', False):
+            raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
+        serializer.save()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if getattr(instance, 'is_posted', False):
+            return Response(
+                {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
+
     @action(detail=True, methods=['post'], url_path='unpost')
     def unpost(self, request, pk=None):
+        """تراجع عن الترحيل: حذف قيد الشحن المحلي وإرجاعه مسودة."""
         shipment = self.get_object()
-        if not shipment.is_posted or not shipment.journal:
+        if not shipment.is_posted:
             return Response(
                 {'error': 'الشحنة غير مُرحّلة.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         try:
             with transaction.atomic():
-                j = shipment.journal
-                # Create reversal journal instead of deleting
-                rev = JournalHeader.objects.create(
-                    tenant=j.tenant,
-                    transaction_date=datetime.date.today(),
-                    description=(f"عكس شحن محلي {shipment.shipment_number}")[:500],
-                    reference_type='LOCAL_SHIPMENT_REVERSAL',
-                    reference_id=j.id,
-                    is_posted=True,
-                    currency=j.currency,
-                    exchange_rate=j.exchange_rate,
+                result = unpost_document(
+                    tenant_id=shipment.tenant_id,
+                    reference_id=shipment.pk,
+                    journal_reference_types=['LOCAL_SHIPMENT'],
+                    user=request.user,
+                    document_label=f"شحن محلي {shipment.shipment_number}",
                 )
-                for line in j.lines.all():
-                    JournalLine.objects.create(
-                        tenant=line.tenant,
-                        journal=rev,
-                        account=line.account,
-                        debit=line.credit,
-                        credit=line.debit,
-                        partner=line.partner,
-                        description=line.description,
-                    )
                 shipment.is_posted = False
                 shipment.journal = None
                 shipment.save(update_fields=['is_posted', 'journal'])
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({'message': 'تم إلغاء الترحيل بقيد عكسي', 'reversal_journal_id': rev.id})
+        return Response({'message': 'تم التراجع عن الترحيل وحذف القيد.', 'unpost_result': result})
 
     @action(detail=True, methods=['post'], url_path='import-to-invoice')
     def import_to_invoice(self, request, pk=None):

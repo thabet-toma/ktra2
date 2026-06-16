@@ -7,6 +7,7 @@ import { accountingApi } from "../../services/accountingApi";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { RefreshCw, Search, Plus } from "lucide-react";
 import { SupplierModal } from "../common/SupplierModal";
+import { useNavigate } from "react-router-dom";
 
 type Partner = {
   id: number;
@@ -29,6 +30,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
   initialPartnerId,
   onInitialPartnerConsumed,
 }) => {
+  const navigate = useNavigate();
   const [partners, setPartners] = useState<Partner[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -71,7 +73,18 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
   const columns: DenseColumn<Partner>[] = [
     { key: "id", header: "#", width: "55px", align: "center", render: (p) => <>{p.id}</> },
     { key: "name", header: "اسم المورد",
-      render: (p) => <b>{p.name}</b> },
+      render: (p) => (
+        <button
+          type="button"
+          className="text-xs font-semibold text-blue-700 hover:underline text-right"
+          onClick={(e) => {
+            e.stopPropagation();
+            navigate(`/partners/${p.id}`);
+          }}
+        >
+          {p.name}
+        </button>
+      ) },
     { key: "acct", header: "رقم الحساب", width: "110px",
       render: (p) => <>{p.linked_account_code || p.linked_account || "—"}</> },
     { key: "phone", header: "الهاتف", width: "130px", render: (p) => <>{p.phone || "—"}</> },
@@ -112,6 +125,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
         selectable
         selectedKey={selected}
         onSelect={(k) => setSelected(k as number | null)}
+        onRowDoubleClick={(r) => navigate(`/partners/${r.id}`)}
         emptyHint="لا يوجد موردون"
       />
 

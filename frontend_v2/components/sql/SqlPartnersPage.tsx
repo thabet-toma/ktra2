@@ -1,5 +1,7 @@
 /**
  * N7-T8 — SqlPartnersPage — AseelDenseTable للشركاء/الموردين
+/**
+ * N7-T8 — SqlPartnersPage — AseelDenseTable للشركاء/الموردين
  */
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import { apiGetList } from '../../services/restApi';
@@ -8,6 +10,7 @@ import { SqlDataPageShell } from './SqlDataPageShell';
 import { Eye, RefreshCw } from 'lucide-react';
 import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
+import { useNavigate } from 'react-router-dom';
 
 type PartnerRow = {
     id: number;
@@ -19,12 +22,11 @@ type PartnerRow = {
 };
 
 export function SqlPartnersPage() {
+    const navigate = useNavigate();
     const [rows, setRows] = useState<PartnerRow[]>([]);
     const [err, setErr] = useState<string | null>(null);
     const [q, setQ] = useState('');
     const [loading, setLoading] = useState(true);
-    const [selected, setSelected] = useState<PartnerRow | null>(null);
-    const [detailsOpen, setDetailsOpen] = useState(false);
     const [typeFilter, setTypeFilter] = useState<string>('all');
     const searchInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -50,8 +52,7 @@ export function SqlPartnersPage() {
     const partnerTypes = useMemo(() => Array.from(new Set(rows.map(x => x.partner_type).filter(Boolean) as string[])), [rows]);
 
     useAseelIndexKeymap(
-        { F6: () => searchInputRef.current?.focus(), Escape: () => { setQ(''); setTypeFilter('all'); } },
-        { enabled: !detailsOpen },
+        { F6: () => searchInputRef.current?.focus(), Escape: () => { setQ(''); setTypeFilter('all'); } }
     );
 
     const columns: DenseColumn<PartnerRow>[] = [
@@ -63,7 +64,7 @@ export function SqlPartnersPage() {
         {
             key: 'actions', header: '', width: '60px', align: 'center',
             render: r => (
-                <button className="aseel-toolbtn" style={{ padding: '2px 4px' }} onClick={e => { e.stopPropagation(); setSelected(r); setDetailsOpen(true); }} title="عرض التفاصيل">
+                <button className="aseel-toolbtn" style={{ padding: '2px 4px' }} onClick={e => { e.stopPropagation(); navigate(`/partners/${r.id}`); }} title="فتح ملف العميل/المورد">
                     <Eye style={{ width: 13, height: 13 }} />
                 </button>
             ),
@@ -105,26 +106,10 @@ export function SqlPartnersPage() {
                         getRowKey={r => r.id}
                         loading={loading}
                         emptyHint="لا يوجد بيانات"
-                        onRowDoubleClick={r => { setSelected(r); setDetailsOpen(true); }}
+                        onRowDoubleClick={r => navigate(`/partners/${r.id}`)}
                     />
                 </div>
             </SqlDataPageShell>
-
-            {detailsOpen && selected && (
-                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }} onClick={() => setDetailsOpen(false)}>
-                    <div dir="rtl" data-skin="aseel" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, width: '100%', maxWidth: 520, maxHeight: '90vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-                        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--aseel-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>تفاصيل المورد/الشريك</strong>
-                            <button className="aseel-toolbtn" onClick={() => setDetailsOpen(false)}>إغلاق</button>
-                        </div>
-                        <div style={{ padding: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 'var(--aseel-fs-sm)' }}>
-                            {[['ID', selected.id], ['الاسم', selected.name], ['النوع', selected.partner_type || '—'], ['الهاتف', selected.phone || '—'], ['البريد', selected.email || '—'], ['الحساب المرتبط', selected.linked_account?.code ? `${selected.linked_account.code} - ${selected.linked_account.name}` : '—']].map(([k, v]) => (
-                                <div key={k as string}><span style={{ color: 'var(--aseel-ink-soft)' }}>{k}:</span> <b>{v as string}</b></div>
-                            ))}
-                        </div>
-                    </div>
-                </div>
-            )}
         </>
     );
 }

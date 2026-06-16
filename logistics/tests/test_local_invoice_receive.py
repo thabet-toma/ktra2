@@ -89,7 +89,8 @@ class LocalInvoiceReceiveTest(APITestCase):
             "استلام الفاتورة الآجلة يجب أن يدائن ذمم المورد"
 
     def test_cash_receive_routes_through_supplier_ap(self):
-        # Section B: استلام فاتورة نقدية يمرّ عبر ذمم المورد ثم يُسوّى بالصندوق
+        # Feature 2: استلام فاتورة نقدية يدائن ذمم المورد بالكامل ولا يُسوّي الصندوق
+        # (الدفع للمورد يصبح وصل دفع مستقل بعد الاستلام).
         cash = Account.objects.create(
             tenant=self.tenant, code="1101-R", name="الصندوق الرئيسي",
             account_type="Asset", is_active=True)
@@ -109,11 +110,11 @@ class LocalInvoiceReceiveTest(APITestCase):
         from logistics.services import _resolve_ap_account
         ap = _resolve_ap_account(inv.partner)
         ap_lines = [l for l in jl if l.account_id == ap.id]
-        # ذمم المورد تُدان وتُدائن بنفس القيمة (يمرّ عبرها ثم يُسوّى)
+        # ذمم المورد تُدائن بكامل القيمة ولا تُسوّى داخل قيد الاستلام
         assert sum(l.credit for l in ap_lines) == Decimal("55.00")
-        assert sum(l.debit for l in ap_lines) == Decimal("55.00")
-        # الصندوق يُدائن بالمبلغ المدفوع
-        assert sum(l.credit for l in jl if l.account_id == cash.id) == Decimal("55.00")
+        assert sum(l.debit for l in ap_lines) == Decimal("0")
+        # لا سطر صندوق في قيد الاستلام
+        assert sum(l.credit for l in jl if l.account_id == cash.id) == Decimal("0")
 
     def test_zero_value_receive_reflects_stock_without_journal(self):
         # فاتورة كمية فقط (بلا أسعار) — الاستلام ينعكس على المخزن بلا قيد محاسبي

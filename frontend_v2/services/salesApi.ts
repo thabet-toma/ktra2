@@ -146,6 +146,11 @@ export async function postSalesInvoice(id: number): Promise<SalesInvoiceDetail> 
   return apiPostObject(`${BASE}/invoices/${id}/post/`, {}, { tenantId: tid() });
 }
 
+/** التراجع عن ترحيل الفاتورة: حذف قيودها وحركات مخزونها وإرجاعها مسودة (Feature 1). */
+export async function unpostSalesInvoice(id: number): Promise<SalesInvoiceDetail> {
+  return apiPostObject(`${BASE}/invoices/${id}/unpost/`, {}, { tenantId: tid() });
+}
+
 export async function deleteSalesInvoice(id: number): Promise<void> {
   return apiDelete(`${BASE}/invoices/${id}/`, { tenantId: tid() });
 }
@@ -191,6 +196,87 @@ export async function getCreditPreview(params: {
   q.set("proposed_total", String(params.proposed_total));
   if (params.excludeInvoice != null) q.set("exclude_invoice", String(params.excludeInvoice));
   return apiGetObject(`sales/invoices/credit-preview/?${q.toString()}`, { tenantId: tid() });
+}
+
+// -------------------------------------------------------------
+// task18 DEF-C2: آخر سعر بيع للوحدة (عام أو لعميل محدّد)
+// -------------------------------------------------------------
+export type LastSalePriceResponse = {
+  unit_price: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+};
+
+export async function getLastSalePrice(params: {
+  product: number;
+  customer?: number | "";
+}): Promise<LastSalePriceResponse> {
+  const q = new URLSearchParams();
+  q.set("product", String(params.product));
+  if (params.customer != null && params.customer !== "") q.set("customer", String(params.customer));
+  return apiGetObject(`sales/invoices/last-price/?${q.toString()}`, { tenantId: tid() });
+}
+
+// -------------------------------------------------------------
+// task18 DEF-C1: رصيد الشريك (قبل/بعد) — يعمل للعميل والمورد
+// -------------------------------------------------------------
+export type PartnerBalanceResponse = {
+  partner: number;
+  partner_type: string;
+  debit: string;
+  credit: string;
+  open_balance: string;
+  proposed_total: string;
+  projected_balance: string;
+};
+
+export async function getPartnerBalance(params: {
+  partnerId: number | string;
+  proposedTotal?: string | number;
+}): Promise<PartnerBalanceResponse> {
+  const q = new URLSearchParams();
+  if (params.proposedTotal != null) q.set("proposed_total", String(params.proposedTotal));
+  const qs = q.toString();
+  return apiGetObject(`partners/${params.partnerId}/balance/${qs ? `?${qs}` : ""}`, { tenantId: tid() });
+}
+
+// -------------------------------------------------------------
+// task18 DEF-C4: تقرير أرباح الفواتير
+// -------------------------------------------------------------
+export type InvoiceProfitRow = {
+  invoice: number;
+  invoice_number: string;
+  invoice_date: string | null;
+  customer: number | null;
+  customer_name: string;
+  revenue: string;
+  cost: string;
+  profit: string;
+  margin_pct: string;
+};
+
+export type InvoiceProfitsResponse = {
+  rows: InvoiceProfitRow[];
+  totals: {
+    count: number;
+    revenue: string;
+    cost: string;
+    profit: string;
+    margin_pct: string;
+  };
+};
+
+export async function getInvoiceProfits(params: {
+  dateFrom?: string;
+  dateTo?: string;
+  customer?: number;
+}): Promise<InvoiceProfitsResponse> {
+  const q = new URLSearchParams();
+  if (params.dateFrom) q.set("date_from", params.dateFrom);
+  if (params.dateTo) q.set("date_to", params.dateTo);
+  if (params.customer != null) q.set("customer", String(params.customer));
+  const qs = q.toString();
+  return apiGetObject(`sales/invoices/profits/${qs ? `?${qs}` : ""}`, { tenantId: tid() });
 }
 
 export type FifoAllocationRow = {

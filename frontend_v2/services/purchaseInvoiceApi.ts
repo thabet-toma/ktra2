@@ -142,6 +142,31 @@ export const purchaseInvoiceApi = {
     return res.json();
   },
 
+  /** وصل دفع للمورد (Feature 2): يُنشئ SupplierPayment ثم يرحّله (Dr ذمم المورد / Cr صندوق). */
+  addSupplierPayment: async (body: {
+    partner: number;
+    payment_date: string;
+    amount: string;
+    currency?: number | null;
+    cash_or_bank_account: number;
+    notes?: string;
+  }): Promise<{ id: number; journal: number | null }> => {
+    const SP = `${API_BASE}/logistics/supplier-payments`;
+    const createRes = await safeFetch(`${SP}/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(createRes, "addSupplierPayment");
+    const created = (await createRes.json()) as { id: number; journal: number | null };
+    const postRes = await safeFetch(`${SP}/${created.id}/post/`, {
+      method: "POST",
+      headers: headers(),
+    });
+    await handle(postRes, "postSupplierPayment");
+    return postRes.json();
+  },
+
   previewClearanceImport: async (body: {
     clearance_id: number;
     deal_ids: number[];

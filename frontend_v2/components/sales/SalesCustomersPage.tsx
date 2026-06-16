@@ -11,6 +11,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiDelete, apiGetList, apiPatchObject, apiPostObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { Plus, Pencil, Trash2, RefreshCw, Save, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import {
   AseelDocumentShell,
   AseelDenseTable,
@@ -76,6 +77,7 @@ const fmtMoney = (s: string | null | undefined) =>
     : "—";
 
 export const SalesCustomersPage: React.FC = () => {
+  const navigate = useNavigate();
   const [rows, setRows] = useState<PartnerApi[]>([]);
   const [currencies, setCurrencies] = useState<CurrRow[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterRow[]>([]);
@@ -244,7 +246,16 @@ export const SalesCustomersPage: React.FC = () => {
       header: "الاسم",
       render: (r) => (
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <span className="text-xs font-semibold">{r.name}</span>
+          <button
+            type="button"
+            className="text-xs font-semibold text-blue-700 hover:underline text-right"
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate(`/partners/${r.id}`);
+            }}
+          >
+            {r.name}
+          </button>
           {r.legal_name && <span className="text-[10px]" style={{ color: "var(--aseel-ink-soft)" }}>{r.legal_name}</span>}
         </div>
       ),

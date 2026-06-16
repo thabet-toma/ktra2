@@ -400,8 +400,8 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
         <button
           type="button"
           className="text-xs text-blue-700 hover:underline"
-          onClick={(e) => { e.stopPropagation(); navigate("/sales/customers"); }}
-          title="فتح العملاء"
+          onClick={(e) => { e.stopPropagation(); navigate(`/partners/${r.customer}`); }}
+          title="فتح ملف العميل"
         >
           {r.customer_name || `#${r.customer}`}
         </button>

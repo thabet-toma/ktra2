@@ -6,10 +6,14 @@ export type ItemQuickCreateModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onSaved: (newProduct: any) => void;
+  /** task18 DEF-B1/B3: تعبئة الاسم العربي مسبقاً (مثلاً النص المكتوب في الإكمال التلقائي). */
+  initialName?: string;
+  /** task18: إنشاء الصنف تحت فئة محددة (من الشجرة) — يُرسَل كـ category. */
+  categoryId?: string | number | null;
 };
 
-export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOpen, onClose, onSaved }) => {
-  const [nameAr, setNameAr] = useState("");
+export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOpen, onClose, onSaved, initialName, categoryId }) => {
+  const [nameAr, setNameAr] = useState(initialName || "");
   const [nameEn, setNameEn] = useState("");
   const [uom, setUom] = useState("عدد");
   const [saving, setSaving] = useState(false);
@@ -27,11 +31,12 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
     try {
       // The backend generates SKU if we don't pass it, since Product model has logic or we made it optional.
       // We pass the bare minimum.
-      const payload = {
+      const payload: Record<string, unknown> = {
         name_ar: nameAr,
         name_en: nameEn || null,
         uom_primary: uom,
       };
+      if (categoryId != null && categoryId !== "") payload.category = categoryId;
       const created = await inventoryApi.createProduct(payload);
       onSaved(created);
     } catch (e: any) {

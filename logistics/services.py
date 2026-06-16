@@ -274,10 +274,9 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
         journal = None
         if gross > 0:
             inventory_account = _resolve_inventory_account(invoice.tenant)
-            # Section B: القيد يمرّ دائماً عبر ذمم المورد (subledger) حتى النقدي —
-            # Dr مخزون/ضريبة / Cr ذمم المورد بكامل القيمة، ثم تُسوَّى الدفعة النقدية
-            # بحركة ثانية (Dr ذمم المورد / Cr صندوق) كي يعكس كشف حساب المورد كل
-            # الحركات. (كان النقدي يدائن الصندوق مباشرة ويتجاوز حساب المورد.)
+            # Feature 2: قيد الاستلام يدين المخزون/الضريبة ويدائن ذمم المورد بالكامل
+            # فقط — لا يُسوّي النقدية. الدفع للمورد يُسجَّل كوصل دفع مستقل
+            # (SupplierPayment، Dr ذمم المورد / Cr صندوق) بعد الاستلام.
             ap_account = _resolve_ap_account(invoice.partner)
             lines_payload = [
                 {'account': inventory_account.id, 'debit': inv_net, 'credit': Decimal('0'),
@@ -295,19 +294,6 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
                 'account': ap_account.id, 'debit': Decimal('0'), 'credit': gross,
                 'partner': invoice.partner_id,
             })
-
-            # تسوية الدفع النقدي عبر ذمم المورد
-            if invoice.payment_type == PurchaseInvoice.PAYMENT_TYPE_CASH:
-                if not invoice.cash_or_bank_account_id:
-                    raise ValidationError("فاتورة نقدية بلا حساب صندوق/بنك محدد.")
-                lines_payload.append({
-                    'account': ap_account.id, 'debit': gross, 'credit': Decimal('0'),
-                    'partner': invoice.partner_id,
-                })
-                lines_payload.append({
-                    'account': invoice.cash_or_bank_account_id, 'debit': Decimal('0'),
-                    'credit': gross, 'partner': invoice.partner_id,
-                })
 
             journal = post_journal(
                 tenant_id=invoice.tenant_id,

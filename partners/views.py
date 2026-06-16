@@ -2,6 +2,7 @@ import json
 
 from django.core.files.storage import default_storage
 from rest_framework import viewsets, status
+from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
@@ -21,6 +22,32 @@ class PartnerViewSet(viewsets.ModelViewSet):
 
     def _get_tenant(self):
         return get_tenant(self.request)
+
+    @action(detail=True, methods=["get"], url_path="balance")
+    def balance(self, request, pk=None):
+        """task18 DEF-C1: رصيد الشريك الحالي من القيود المرحَّلة + الرصيد المتوقع
+        بعد عملية مقترحة (?proposed_total=). للعميل: مدين−دائن؛ للمورد: دائن−مدين.
+        تُمكِّن شاشتي البيع/الشراء من عرض «الرصيد قبل/بعد» الفاتورة.
+        """
+        from decimal import Decimal
+        from accounting.services import partner_posted_balance
+        partner = self.get_object()
+        debit, credit = partner_posted_balance(partner.tenant_id, partner.id)
+        is_supplier = (partner.partner_type or "").lower() == "supplier"
+        open_balance = (credit - debit) if is_supplier else (debit - credit)
+        try:
+            proposed = Decimal(str(request.query_params.get("proposed_total", "0")))
+        except Exception:
+            proposed = Decimal("0")
+        return Response({
+            "partner": partner.id,
+            "partner_type": partner.partner_type,
+            "debit": str(debit),
+            "credit": str(credit),
+            "open_balance": str(open_balance),
+            "proposed_total": str(proposed),
+            "projected_balance": str(open_balance + proposed),
+        })
 
     def get_queryset(self):
         # task11 M7: القراءة كانت بلا فلترة tenant — موردو/زبائن كل الشركات

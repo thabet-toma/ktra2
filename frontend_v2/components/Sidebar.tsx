@@ -61,6 +61,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
       activeView === "sales-customer-payments" ||
       activeView === "sales-quotations" ||
       activeView === "credit-debit-notes" ||
+      activeView === "invoice-profits" ||
       activeView === "sales-settings"
     )
       setSalesExpanded(true);
@@ -83,6 +84,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "sales-customer-payments" as AppView, label: "دفعات العملاء", icon: <Banknote className="h-5 w-5" /> },
     { view: "supplier-payments" as AppView, label: "سندات الصرف للموردين", icon: <Banknote className="h-5 w-5" /> },
     { view: "sales-customers" as AppView, label: "العملاء", icon: <Users className="h-5 w-5" /> },
+    { view: "invoice-profits" as AppView, label: "أرباح الفواتير", icon: <FileText className="h-5 w-5" /> },
     { view: "sales-settings" as AppView, label: "إعدادات المبيعات", icon: <SettingsIcon className="h-5 w-5" /> },
   ];
 
@@ -92,6 +94,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "price-offers" as AppView, label: "عروض الأسعار", icon: <FileText className="h-5 w-5" /> },
     { view: "deals-management" as AppView, label: "إدارة الصفقات", icon: <Handshake className="h-5 w-5" /> },
     { view: "items-management" as AppView, label: "الأصناف", icon: <DashboardIcon className="h-5 w-5" /> },
+    { view: "items-categories" as AppView, label: "التصنيفات", icon: <Boxes className="h-5 w-5" /> },
     { view: "supplier-management" as AppView, label: "الموردين", icon: <UsersIcon className="h-5 w-5" /> },
     { view: "import-flow" as AppView, label: "رحلة الاستيراد", icon: <Package className="h-5 w-5" /> },
     { view: "shipments-management" as AppView, label: "الشحنات", icon: <Package className="h-5 w-5" /> },

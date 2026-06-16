@@ -16,6 +16,7 @@ import { ClearanceImportModal, ShipmentImportContext } from './invoices/Clearanc
 import { shipmentsService, advanceShipmentRouteAtLeast } from '@/services/shipmentsService';
 import { InvoicePrintView } from './invoices/InvoicePrintView';
 import { PurchaseInvoiceAccountingPanel } from './invoices/PurchaseInvoiceAccountingPanel';
+import { DocumentPaymentsTab } from '../shared/DocumentPaymentsTab';
 
 interface PurchaseInvoiceProps {
   currentUser?: User;
@@ -503,15 +504,23 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
             />
             {/* لوحة المحاسبة تظهر بعد حفظ الفاتورة مرة واحدة (لديها id) */}
             {currentInvoice?.id && Number(currentInvoice.id) > 0 && (
-              <div className="max-w-7xl mx-auto px-4 mt-2">
+              <div className="max-w-7xl mx-auto px-4 mt-2 mb-8">
                 <PurchaseInvoiceAccountingPanel
                   invoiceId={Number(currentInvoice.id)}
+                  readOnly={isReadOnly}
                   onPosted={() => {
                     void loadInvoices();
                     // task16 C11: العودة للصفحة الرئيسية بعد إتمام الترحيل
                     navigate("/dashboard");
                   }}
                 />
+                <div className="mt-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+                  <DocumentPaymentsTab 
+                    referenceType="PURCHASE_INVOICE"
+                    referenceId={Number(currentInvoice.id)}
+                    searchQuery={currentInvoice.invoiceNumber}
+                  />
+                </div>
               </div>
             )}
           </>

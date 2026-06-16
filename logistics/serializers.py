@@ -840,6 +840,8 @@ class LogisticsClearancePaymentSerializer(serializers.ModelSerializer):
 
 class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
+    expense_account_code = serializers.CharField(source='expense_account.code', read_only=True)
+    expense_account_name = serializers.CharField(source='expense_account.name', read_only=True)
 
     class Meta:
         model = PurchaseInvoiceItem
@@ -852,6 +854,7 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
             'extra_qty', 'batch_number', 'serial_number', 'manufacture_number', 'expiry_date',
             'line_currency', 'line_exchange_rate', 'second_date', 'is_taxable', 'vat_percent',
             'discount_percent', 'discount_amount',
+            'expense_account', 'expense_account_code', 'expense_account_name',
         ]
         read_only_fields = ['id', 'received_quantity']
 

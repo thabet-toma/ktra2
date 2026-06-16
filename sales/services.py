@@ -680,42 +680,13 @@ def post_sales_invoice(
             }
         )
 
-        # المبلغ النقدي المُحصَّل وقت الفاتورة + حسابه
-        if invoice.invoice_type == SalesInvoice.INVOICE_CASH:
-            cash_account = invoice.cash_or_bank_account
-            if not cash_account:
-                raise ValidationError("فواتير النقدي تتطلب حساب صندوق/بنك (cash_or_bank_account).")
-            # العميل يدفع نقداً صافي ما يتبقى بعد الشيكات وخصم المصدر
-            collected_cash = (grand - cheques_total - src_disc_amt).quantize(DEC)
-        else:
-            cash_account = invoice.attached_cash_account
-            collected_cash = attached_cash
-
-        # تسوية التحصيل النقدي عبر الذمم (مدين صندوق / دائن ذمم)
-        if collected_cash > 0:
-            if not cash_account:
-                raise ValidationError(
-                    "السند المرفق فيه مبلغ نقدي لكن لم يُحدَّد حساب الصندوق "
-                    "(attached_cash_account)."
-                )
-            journal_lines.append(
-                {
-                    "account": cash_account.id,
-                    "partner": invoice.customer_id,
-                    "debit": collected_cash,
-                    "credit": Decimal("0"),
-                    "description": f"تحصيل نقدي — {invoice.invoice_number}",
-                }
-            )
-            journal_lines.append(
-                {
-                    "account": ar.id,
-                    "partner": invoice.customer_id,
-                    "debit": Decimal("0"),
-                    "credit": collected_cash,
-                    "description": f"تسوية ذمم (نقدي) — {invoice.invoice_number}",
-                }
-            )
+        # ── Feature 2: قيد الفاتورة لا يُسوّي النقدية إطلاقاً ────────────────
+        # قيد الفاتورة (Entry A) يدين ذمم العميل بالكامل ويدائن الإيراد/الضريبة
+        # (+COGS/المخزن). تحصيل النقدية — حتى للبيع النقدي — يصبح سنداً مستقلاً
+        # «وصل دفع» (CustomerPayment، Entry B: مدين النقدية / دائن ذمم العميل)
+        # يُنشأ بفتح الفاتورة وإضافة وصل دفع إليها. لذا الترحيل هنا **لا يولّد**
+        # أي حركة نقدية ولا يستهلك cash_or_bank_account.
+        collected_cash = Decimal("0.00")
 
         # تسوية الشيكات عبر الذمم (مدين شيكات برسم التحصيل / دائن ذمم)
         if cheques_total > 0:
@@ -1319,6 +1290,125 @@ def credit_preview_for_sale(
         "proposed_total": str(prop),
         "projected_balance": str(projected),
         "would_exceed": would_exceed,
+    }
+
+
+def invoice_profits(
+    *,
+    tenant_id: int,
+    branch=None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    customer_id: int | None = None,
+) -> dict:
+    """task18 DEF-C4: تقرير أرباح الفواتير المرحَّلة.
+
+    الإيراد = صافي البنود قبل الضريبة (subtotal_excl_tax − خصم الفاتورة) — يطابق
+    الدائن في قيد الإيراد. التكلفة = مجموع `total_cost` لحركات مخزون البيع
+    (SALE/STOCK_ISSUE) المسجَّلة وقت الترحيل بمتوسط التكلفة آنذاك (تكلفة تاريخية
+    دقيقة لا تتأثر بانجراف WAC لاحقاً). الربح = الإيراد − التكلفة.
+    محصور بالشركة (والفرع غير الرئيسي إن مُرّر) وبفواتير البيع فقط (لا مراجيع).
+    """
+    qs = SalesInvoice.objects.filter(
+        tenant_id=tenant_id,
+        status=SalesInvoice.STATUS_POSTED,
+        invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+    )
+    if branch is not None and not getattr(branch, "is_main", False):
+        qs = qs.filter(branch=branch)
+    if date_from:
+        qs = qs.filter(invoice_date__gte=date_from)
+    if date_to:
+        qs = qs.filter(invoice_date__lte=date_to)
+    if customer_id:
+        qs = qs.filter(customer_id=customer_id)
+    qs = qs.select_related("customer").order_by("-invoice_date", "-id")
+
+    invoice_ids = list(qs.values_list("id", flat=True))
+    cogs_map: dict[int, Decimal] = defaultdict(lambda: Decimal("0"))
+    if invoice_ids:
+        mv = (
+            StockMovement.objects.filter(
+                tenant_id=tenant_id,
+                reference_type__in=("SALE", "STOCK_ISSUE"),
+                reference_id__in=invoice_ids,
+            )
+            .values("reference_id")
+            .annotate(c=Sum("total_cost"))
+        )
+        for r in mv:
+            cogs_map[r["reference_id"]] = Decimal(str(r["c"] or "0"))
+
+    rows: list[dict] = []
+    tot_rev = Decimal("0")
+    tot_cost = Decimal("0")
+    for inv in qs:
+        revenue = (inv.subtotal_excl_tax - inv.invoice_discount).quantize(DEC)
+        cost = cogs_map.get(inv.id, Decimal("0")).quantize(DEC)
+        profit = (revenue - cost).quantize(DEC)
+        margin = (profit / revenue * 100).quantize(DEC) if revenue > 0 else Decimal("0")
+        rows.append(
+            {
+                "invoice": inv.id,
+                "invoice_number": inv.invoice_number,
+                "invoice_date": inv.invoice_date.isoformat() if inv.invoice_date else None,
+                "customer": inv.customer_id,
+                "customer_name": getattr(inv.customer, "name", "") or "",
+                "revenue": str(revenue),
+                "cost": str(cost),
+                "profit": str(profit),
+                "margin_pct": str(margin),
+            }
+        )
+        tot_rev += revenue
+        tot_cost += cost
+
+    tot_profit = (tot_rev - tot_cost).quantize(DEC)
+    tot_margin = (tot_profit / tot_rev * 100).quantize(DEC) if tot_rev > 0 else Decimal("0")
+    return {
+        "rows": rows,
+        "totals": {
+            "count": len(rows),
+            "revenue": str(tot_rev.quantize(DEC)),
+            "cost": str(tot_cost.quantize(DEC)),
+            "profit": str(tot_profit),
+            "margin_pct": str(tot_margin),
+        },
+    }
+
+
+def last_sale_price(
+    *,
+    tenant_id: int,
+    product_id: int,
+    customer_id: int | None = None,
+) -> dict:
+    """task18 DEF-C2: آخر سعر بيع للوحدة لهذا الصنف (واختيارياً لهذا العميل).
+
+    يُرجع أحدث `unit_price` من سطور فواتير بيع مرحَّلة. إن مُرّر customer_id
+    فُضِّل آخر سعر لذلك العميل، وإلا فآخر سعر عام. يُمكّن الواجهة من اقتراح السعر.
+    """
+    qs = SalesInvoiceLine.objects.filter(
+        tenant_id=tenant_id,
+        product_id=product_id,
+        invoice__status=SalesInvoice.STATUS_POSTED,
+        invoice__invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+    )
+    line = None
+    if customer_id:
+        line = (
+            qs.filter(invoice__customer_id=customer_id)
+            .order_by("-invoice__invoice_date", "-invoice_id")
+            .first()
+        )
+    if line is None:
+        line = qs.order_by("-invoice__invoice_date", "-invoice_id").first()
+    if line is None:
+        return {"unit_price": None, "invoice_number": None, "invoice_date": None}
+    return {
+        "unit_price": str(line.unit_price),
+        "invoice_number": line.invoice.invoice_number,
+        "invoice_date": line.invoice.invoice_date.isoformat() if line.invoice.invoice_date else None,
     }
 
 

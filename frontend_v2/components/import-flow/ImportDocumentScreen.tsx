@@ -10,7 +10,7 @@ import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalS
 import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab } from "@/components/aseel";
 import { CompactTimeline } from "./CompactTimeline";
 import OfflineGuard from "@/components/offline/OfflineGuard";
-
+import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => {
   const n = Number(v);
@@ -1042,7 +1042,29 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     { key: "deals", label: "الصفقات", content: dealsContent },
     { key: "clearance", label: "التخليص", content: clearanceContent },
     { key: "local", label: "النقل المحلي", content: localContent },
-    { key: "payments", label: "الدفعات", content: paymentsContent },
+    { key: "payments", label: "الدفعات والمراحل", content: paymentsContent },
+    ...(s.id ? [{
+      key: "financial_movements",
+      label: "الحركات المالية المرتبطة",
+      content: (
+        <DocumentPaymentsTab 
+          referenceType="SHIPMENT" 
+          referenceId={s.id} 
+          searchQuery={s.shipment_number || ""}
+        />
+      ),
+    }] : []),
+    ...(clearance?.id ? [{
+      key: "clearance_financial_movements",
+      label: "حركات التخليص المالية",
+      content: (
+        <DocumentPaymentsTab 
+          referenceType="CLEARANCE" 
+          referenceId={clearance.id} 
+          searchQuery={clearance.declaration_number || ""}
+        />
+      ),
+    }] : []),
     { key: "accounts", label: "الحسابات", content: accountsContent },
     { key: "attachments", label: "المرفقات", content: attachmentsContent },
     { key: "notes", label: "ملاحظات", content: notesContent },

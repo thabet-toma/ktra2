@@ -149,6 +149,70 @@ def record_stock_movement(
     return movement
 
 
+def _recompute_product_stock(product: Product) -> None:
+    """أعد احتساب الرصيد ومتوسط التكلفة لصنف بإعادة تشغيل كل حركاته المتبقية.
+
+    تُستدعى بعد حذف حركات مستند ما (إلغاء الترحيل/الحذف) لتعيد ضبط
+    quantity_on_hand و avg_cost بدقة بغضّ النظر عن ترتيب الحركات — بدلاً من
+    تعديل تقريبي قد يفسد متوسط التكلفة (WAC). تُطبّق نفس معادلة
+    record_stock_movement بالترتيب الزمني (التاريخ ثم المعرّف).
+    """
+    with transaction.atomic():
+        prod = Product.objects.select_for_update().get(pk=product.pk)
+        movements = (
+            StockMovement.objects.filter(product=prod)
+            .order_by('movement_date', 'id')
+        )
+        qty = Decimal('0')
+        avg = Decimal('0')
+        for m in movements:
+            mqty = Decimal(str(m.quantity))
+            munit = Decimal(str(m.unit_cost or 0))
+            if m.movement_type in INBOUND_TYPES:
+                new_qty = qty + mqty
+                if new_qty > 0:
+                    avg = ((qty * avg) + (mqty * munit)) / new_qty
+                else:
+                    avg = munit
+                qty = new_qty
+            else:
+                qty = qty - mqty
+                # avg_cost لا يتغيّر بحركات الصرف (متطابق مع record_stock_movement)
+        prod.quantity_on_hand = qty.quantize(Decimal('0.0001'))
+        prod.avg_cost = avg.quantize(Decimal('0.0001'))
+        prod.save(update_fields=['quantity_on_hand', 'avg_cost'])
+
+
+def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:
+    """احذف حركات المخزون التي ولّدها مستند معيّن وأعد احتساب أرصدة أصنافه.
+
+    تُستخدم في «إلغاء الترحيل»/الحذف لإرجاع المخزون لما كان عليه قبل المستند.
+    النطاق محصور تماماً بـ (tenant, reference_id, reference_type ∈ reference_types)
+    فلا تُمَسّ حركات أي مستند آخر. تُرجع عدد الحركات المحذوفة.
+    """
+    if not reference_types:
+        return 0
+    movements = list(
+        StockMovement.objects.filter(
+            tenant_id=tenant_id,
+            reference_id=reference_id,
+            reference_type__in=list(reference_types),
+        ).select_related('product')
+    )
+    if not movements:
+        return 0
+    affected_products = {m.product_id: m.product for m in movements}
+    count = len(movements)
+    StockMovement.objects.filter(id__in=[m.id for m in movements]).delete()
+    for prod in affected_products.values():
+        _recompute_product_stock(prod)
+    logger.info(
+        "reverse_stock_movements: deleted %d movements ref=%s types=%s products=%d",
+        count, reference_id, list(reference_types), len(affected_products),
+    )
+    return count
+
+
 def receive_shipment_stock(shipment, movement_date=None):
     """
     Create IN movements for all deal items in a cleared shipment.

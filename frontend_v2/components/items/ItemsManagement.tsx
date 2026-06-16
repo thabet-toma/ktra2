@@ -6,8 +6,9 @@ import React, { useEffect, useState, useCallback } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
-import { Plus, RefreshCw, Edit2 } from "lucide-react";
+import { Plus, RefreshCw, Edit2, Package, Boxes } from "lucide-react";
 import { ItemFormAseel } from "./ItemFormAseel";
+import { CategoriesManagement } from "./CategoriesManagement";
 import { StalenessBadge } from "../offline";
 import db from "../../services/offline/db";
 
@@ -16,7 +17,13 @@ const fmt = (n: number | string) =>
 
 type View = "list" | "form";
 
-export const ItemsManagement: React.FC<{ user?: unknown }> = () => {
+export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products" | "categories" }> = ({ initialTab = "products" }) => {
+  const [activeTab, setActiveTab] = useState<"products" | "categories">(initialTab);
+  
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
+
   const [products, setProducts] = useState<SqlProduct[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -136,12 +143,50 @@ export const ItemsManagement: React.FC<{ user?: unknown }> = () => {
   }
 
   return (
-    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }} data-skin="aseel">
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
-          إدارة الأصناف
-        </strong>
-        <span className="aseel-status-item">الإجمالي: <b>{products.length}</b></span>
+    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", padding: "8px 12px" }} data-skin="aseel">
+      {/* Tabs Header */}
+      <div style={{ display: "flex", gap: "16px", borderBottom: "1px solid var(--aseel-border)", marginBottom: "8px" }}>
+        <button
+          onClick={() => setActiveTab("products")}
+          style={{
+            padding: "8px 16px",
+            borderBottom: activeTab === "products" ? "2px solid var(--aseel-primary)" : "2px solid transparent",
+            color: activeTab === "products" ? "var(--aseel-primary)" : "var(--aseel-ink)",
+            fontWeight: activeTab === "products" ? "bold" : "normal",
+            background: "none",
+            borderTop: "none", borderLeft: "none", borderRight: "none",
+            display: "flex", alignItems: "center", gap: "6px", cursor: "pointer"
+          }}
+        >
+          <Package className="h-4 w-4" /> الأصناف
+        </button>
+        <button
+          onClick={() => setActiveTab("categories")}
+          style={{
+            padding: "8px 16px",
+            borderBottom: activeTab === "categories" ? "2px solid var(--aseel-primary)" : "2px solid transparent",
+            color: activeTab === "categories" ? "var(--aseel-primary)" : "var(--aseel-ink)",
+            fontWeight: activeTab === "categories" ? "bold" : "normal",
+            background: "none",
+            borderTop: "none", borderLeft: "none", borderRight: "none",
+            display: "flex", alignItems: "center", gap: "6px", cursor: "pointer"
+          }}
+        >
+          <Boxes className="h-4 w-4" /> التصنيفات
+        </button>
+      </div>
+
+      {activeTab === "categories" ? (
+        <div style={{ flex: 1, overflow: "hidden" }}>
+          <CategoriesManagement />
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
+              إدارة الأصناف
+            </strong>
+            <span className="aseel-status-item">الإجمالي: <b>{products.length}</b></span>
         {/* Phase 2 wiring — freshness/cache indicator */}
         <StalenessBadge updatedAt={lastSync} />
         {fromCache && (
@@ -181,6 +226,8 @@ export const ItemsManagement: React.FC<{ user?: unknown }> = () => {
           onChange: (p) => setPage(p)
         } : undefined}
       />
+        </div>
+      )}
     </div>
   );
 };

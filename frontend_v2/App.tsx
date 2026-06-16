@@ -98,6 +98,7 @@ import { FiscalPeriodsPage } from "./components/accounting/FiscalPeriodsPage";
 import { ExchangeRatesPage } from "./components/accounting/ExchangeRatesPage";
 import { BalanceSheetPage } from "./components/accounting/BalanceSheetPage";
 import { IncomeStatementPage } from "./components/accounting/IncomeStatementPage";
+import { InvoiceProfitsPage } from "./components/accounting/InvoiceProfitsPage";
 import { VatStatementsPage } from "./components/accounting/VatStatementsPage";
 import { YearEndClosePage } from "./components/accounting/YearEndClosePage";
 import { SqlProductsPage } from "./components/sql/SqlProductsPage";
@@ -110,6 +111,7 @@ import { StockMovementsPage } from "./components/inventory/StockMovementsPage";
 import { StockLevelsPage } from "./components/inventory/StockLevelsPage";
 import { InventoryValuationPage } from "./components/inventory/InventoryValuationPage";
 import { PropertyRentalPage } from "./components/realestate/PropertyRentalPage";
+import { PartnerProfilePage } from "./components/partners/PartnerProfilePage";
 import { SalesInvoicesPage } from "./components/sales/SalesInvoicesPage";
 import { SalesCustomersPage } from "./components/sales/SalesCustomersPage";
 import SalesCustomerPaymentsPage from "./components/sales/SalesCustomerPaymentsPage";
@@ -145,6 +147,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "purchase-return": "/purchase-returns",
   "sales-customer-payments": "/sales/customer-payments",
   "supplier-payments": "/supplier-payments",
+  "invoice-profits": "/sales/profits",
   "sales-customers": "/sales/customers",
   "sales-settings": "/sales/settings",
   "purchase-invoices": "/purchase-invoices",
@@ -152,6 +155,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "price-offers": "/price-offers",
   "deals-management": "/deals",
   "items-management": "/items",
+  "items-categories": "/items/categories",
   "supplier-management": "/suppliers",
   "import-flow": "/import-flow",
   "shipments-management": "/shipments",
@@ -230,6 +234,16 @@ const App: React.FC = () => {
           navigate(`/purchase-invoices/${encodeURIComponent(targetId)}`, { replace: false });
         } else {
           navigate("/purchase-invoices", { replace: false });
+        }
+      } else if (view === "partner-profile") {
+        navigate(targetId ? `/partners/${encodeURIComponent(targetId)}` : "/partners", { replace: false });
+      } else if (view === "sales-invoices") {
+        // task18 DEF-A2: السماح بفتح فاتورة مبيعات جديدة/محدّدة عبر onNavigate
+        // (نفس عقد purchase-invoices). الـ targetId="new" → محرر فاتورة جديد.
+        if (targetId && targetId !== "list") {
+          navigate(`/sales/invoices/${encodeURIComponent(targetId)}`, { replace: false });
+        } else {
+          navigate("/sales/invoices", { replace: false });
         }
       } else {
         // task14 M1: بقية الشاشات كلها عبر الجدول — URL فريد لكل صفحة
@@ -439,6 +453,10 @@ const App: React.FC = () => {
     // المحرر يُفتح داخل SalesInvoicesPage حسب الـ id في المسار.
     if (path === "/sales/invoices" || path.startsWith("/sales/invoices/")) {
       setAppView("sales-invoices");
+      return;
+    }
+    if (path === "/partners" || path.startsWith("/partners/")) {
+      setAppView("partner-profile");
       return;
     }
     const journalMatch = path.match(/^\/accounting\/journals\/(.+)$/);
@@ -1277,6 +1295,15 @@ const App: React.FC = () => {
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
+      case "invoice-profits":
+        if (
+          currentUser!.role === "procurement" ||
+          currentUser!.role === "manager"
+        ) {
+          return <InvoiceProfitsPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
       case "purchase-invoices":
         if (
           currentUser!.role === "procurement" ||
@@ -1331,11 +1358,12 @@ const App: React.FC = () => {
       // -----------------------------------------
 
       case "items-management":
+      case "items-categories":
         if (
           currentUser!.role === "procurement" ||
           currentUser!.role === "manager"
         ) {
-          return <ItemsManagement user={currentUser!} />;
+          return <ItemsManagement user={currentUser!} initialTab={appView === "items-categories" ? "categories" : "products"} />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
@@ -1444,8 +1472,7 @@ const App: React.FC = () => {
               setAppView("accounting-general-ledger");
             }}
             onOpenSupplier={(partnerId) => {
-              setAccountingSupplierPartnerId(partnerId);
-              setAppView("supplier-management");
+              setViewAndSyncPath("partner-profile", String(partnerId));
             }}
           />
         );
@@ -1659,6 +1686,9 @@ const App: React.FC = () => {
 
       case "supplier-payments":
         return <SupplierPaymentsPage />;
+
+      case "partner-profile":
+        return <PartnerProfilePage />;
 
       default:
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;

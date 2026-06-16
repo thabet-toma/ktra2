@@ -13,3 +13,9 @@ ApiAuthAndUser = {
     "authentication_classes": [TokenAuthentication, SessionAuthentication],
     "permission_classes": [IsAuthenticated, TenantRolePermission],
 }
+
+# رسالة موحّدة تُعرض عند محاولة تعديل/حذف مستند مرحَّل قبل التراجع عن الترحيل.
+# تُستهلك في فواتير المبيعات/الشراء والصفقات والشحنات والتخليص والنقل.
+POSTED_DOC_WARNING = (
+    "هذا المستند مرحَّل. يجب التراجع عن الترحيل قبل تعديله أو حذفه."
+)

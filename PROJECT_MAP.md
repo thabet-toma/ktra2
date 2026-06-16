@@ -104,6 +104,39 @@ frontend_v2/
 
 **تحقق نهائي:** backend **169/169** · tsc 0 · vite build OK. لم يُتحقق في متصفح حي للشاشات الداخلية (تتطلب باك-إند+تسجيل دخول — نفس قيد المهام السابقة)؛ التحقق عبر الاختبارات + الأنواع + البناء.
 
+## [AUDIT — task17, 2026-06-14] (تراجع عن الترحيل + حذف متسلسل للقيود + فصل قيد البيع النقدي)
+
+طلب المالك: (1) للمستندات المرحَّلة الستة (فاتورة مبيعات/شراء، صفقة، شحنة، تخليص جمركي، نقل محلي) منع التعديل/الحذف المباشر مع تحذير + إجراء «تراجع عن الترحيل» يحذف **كل** قيود المستند (cascade) ويُرجعه مسودة، ذرّياً. (2) فصل قيد البيع النقدي إلى قيدين مستقلين: قيد الفاتورة (Dr ذمم / Cr إيراد + Dr تكلفة / Cr مخزن) ووصل دفع مستقل (Dr نقدية / Cr ذمم) لا يولّده ترحيل الفاتورة.
+
+### الأسباب الجذرية (مُتحقَّق منها بالكود)
+- **النظام كان يستخدم «قيوداً عكسية» لا الحذف:** `LOGISTICS_PAYMENT_UNPOST`/`CLEARANCE_PAYMENT_UNPOST`/`PURCHASE_INVOICE_REVERSAL`/`LOCAL_SHIPMENT_REVERSAL` تُنشئ قيداً معاكساً وتُبقي الأصل — لا حذف فعلي. المطلب الجديد: حذف القيود نفسها وإرجاع المستند لمسودة.
+- **قيد البيع النقدي كان مدمجاً (task16 Section B):** `post_sales_invoice` كان يدين الذمم بالكامل ثم يُسوّي النقدي (Dr صندوق / Cr ذمم) في **نفس** القيد. المطلب: نزع تسوية النقدي من قيد الفاتورة تماماً.
+
+### قرارات المالك (2026-06-14)
+- Feature 2: **فصل** القيد لقيدين. وصل الدفع = **إعادة استخدام `CustomerPayment`** (post_customer_payment يُنشئ Dr نقدية / Cr ذمم مستقلاً أصلاً). تنفيذ **كل شيء دفعة واحدة**.
+
+### [EXECUTION — task17]
+- **الطبقة المشتركة (Core/DRY):**
+  - `accounting.services.unpost_document(*, tenant_id, reference_id, journal_reference_types, stock_reference_types=(), user, document_label)` — المسار المركزي الوحيد للتراجع: يحذف كل `JournalHeader` لـ (tenant + reference_id + reference_type ∈ types) — أسطر القيد تُحذف cascade — ثم يعيد حركات المخزون، **ذرّياً** + audit log. النطاق محصور بدقة بقيود المستند وحده.
+  - `inventory.services.reverse_stock_movements(...)` + `_recompute_product_stock(product)` — تحذف حركات المستند وتعيد احتساب `quantity_on_hand`/`avg_cost` بإعادة تشغيل بقية الحركات زمنياً (WAC دقيق، لا تقريب يفسد المتوسط).
+  - `core.api_defaults.POSTED_DOC_WARNING` — رسالة موحّدة «هذا المستند مرحَّل…».
+- **توصيل المستندات الستة (backend):** كل viewset أُضيف له `perform_update`/`destroy` يحظران تعديل/حذف المرحَّل (يردّان 400 + `{detail, can_unpost:true}`) + إجراء `POST .../unpost/`:
+  - فاتورة مبيعات (`SALES_INVOICE`,`SALES_DELIVERY_COGS` + مخزون `SALE`,`STOCK_ISSUE`) → status=draft، journal=None، amount_paid=0، إعادة الشيكات Under_Collection→Draft.
+  - فاتورة شراء (`PURCHASE_INVOICE`,`PURCHASE_RECEIPT` + مخزون `PURCHASE_INVOICE`) → is_posted=False، receipt_status=not، received_quantity=0. (استُبدل المسار العكسي القديم بالحذف.)
+  - شحنة (`LOGISTICS_SHIPMENT` + مخزون `SHIPMENT`؛ «مرحّلة» = وجود قيد/حركة).
+  - نقل محلي (`LOCAL_SHIPMENT`؛ استُبدل العكسي بالحذف).
+  - صفقة/تخليص: القيود مفاتيحها على الدفعات (LOGISTICS_PAYMENT / CLEARANCE_PAYMENT) لا على المستند الأب — فالـ unpost يمرّ على الدفعات المرحَّلة ويحذف قيد كلٍّ ويعيدها مسودة.
+- **Feature 2 (فصل قيد البيع النقدي):** أُزيلت كتلة تسوية النقدي من `post_sales_invoice` بالكامل (نقدي الفاتورة النقدية + `attached_cash` على الآجل) — قيد الفاتورة الآن يدين الذمم بالكامل ويدائن الإيراد/الضريبة (+COGS) فقط؛ `amount_paid` لم يعد يشمل النقدي. التحصيل يُسجَّل كـ `CustomerPayment` مستقل (Dr نقدية / Cr ذمم). **قرار جراحي:** تسوية الشيكات بقيت داخل قيد الفاتورة (المطلب نصّ على النقدي فقط، وفصلها يكسر دورة حياة الشيك). **أثر جانبي موثّق:** مبلغ النقدي المرفق عبر `attach_payment_voucher`/`attach_voucher_and_post` لم يعد يُرحَّل عند الترحيل — استُبدل بوصل دفع مستقل.
+- **Feature 2 (شراء — امتداد بطلب المالك بعد مراجعة شاشة فاتورة الشراء):** نفس الفصل طُبِّق على **فاتورة الشراء** في كلا مساري الترحيل: `PurchaseInvoiceViewSet.post_to_accounting` و`receive_purchase_invoice` (task15). الترحيل يقيّد Dr مخزون/ضريبة / Cr ذمم المورد بالكامل فقط — أُزيلت تسوية الصندوق. الدفع للمورد أصبح **وصل دفع مستقل** عبر `SupplierPayment` (Dr ذمم المورد / Cr صندوق). الواجهة: `PurchaseInvoiceAccountingPanel` — أُزيلت أسطر التسوية النقدية من معاينة القيد، وأُضيف قسم «وصل دفع للمورد» (مبلغ + حساب صندوق → `purchaseInvoiceApi.addSupplierPayment` ينشئ ويرحّل SupplierPayment). اختبارا Section B للشراء (`test_pi_subledger_routing` + `test_local_invoice_receive::test_cash_receive…`) أُعيد ضبطهما (ap_debit=0، لا سطر صندوق).
+- **الواجهة:** `salesApi.unpostSalesInvoice` + إجراء «تراجع عن الترحيل» في شريط `SalesInvoiceEditor` (يظهر مفعّلاً عند الترحيل فقط) · زر «تراجع عن الترحيل» + تحذير في `PurchaseInvoiceAccountingPanel` (الحالة المرحَّلة) عبر `purchaseInvoiceApi.unpost` القائم.
+- **اختبارات (TDD):** `accounting/tests/test_unpost_document.py` (3): حذف محصور بالمستند فقط · عكس مخزون بإعادة التشغيل (WAC دقيق) · حظر حذف المرحَّلة ثم سماحه بعد التراجع عبر `/sales/invoices/{id}/unpost/`. وأُعيدت كتابة اختبارَي Section B (`sales/tests/test_subledger_routing.py`: قيد الفاتورة النقدية يدين الذمم فقط، لا سطر صندوق، amount_paid=0). **اختبار شراء Section B لم يُمَسّ (Feature 2 مبيعات فقط).**
+- **تحقق:** backend **174/174** خضراء · tsc 0 · vite build OK · `manage.py check` 0 · `makemigrations --check` لا انحراف (لا تغييرات نماذج). لم يُتحقق في متصفح حي للشاشات الداخلية (نفس قيد المهام السابقة).
+
+### [ORPHANS & PENDING — task17]
+- [ ] واجهة «تراجع عن الترحيل» للصفقة/الشحنة/التخليص/النقل المحلي: الـ endpoints جاهزة ومُختبرة backend؛ أزرار الواجهة على غرار المبيعات/الشراء عند لمس تلك الشاشات لاحقاً.
+- [ ] واجهة «وصل دفع» من داخل الفاتورة (Feature 2) تعتمد مسار `CustomerPayment` القائم (تبويب «سند مالي/payments»)؛ تدفّق إنشاء وصل دفع مخصّص داخل المحرر يُكمَّل عند جولة UI حية.
+- (موروث: قيود العكس القديمة `*_UNPOST`/`*_REVERSAL` لمسارات الدفعات الفردية بقيت كما هي — لم تُحذف؛ مسار المستند الجديد لا يعتمدها.)
+
 ## [AUDIT — task11, 2026-06-10] (Staff-Engineer full audit)
 
 ### 🔴 حرجة — Data loss / Data isolation
@@ -485,3 +518,33 @@ User pushed back on the «pending» list and asked for all of it. Closed every r
 - Full manual-merge editor UI for `SyncConflictModal` (currently parks as `failed` for inspection in the pending panel).
 - Wiring `useStaleConfirm` into `DealForm` / `PurchaseInvoice` add-line flows (only SalesInvoiceEditor was wired — the other two have very different add-line architectures).
 - Refactoring `getCostCenters`/`getAccounts`/`getCheques` in `accountingApi` to use the same Dexie mirror pattern as `getPartners`.
+
+## [AUDIT — task18, 2026-06-15] (Unified Invoice Workspace — convergence: purchase parity + missing screens + action bar)
+
+نطاق الجولة: عيوب «مساحة العمل الموحّدة» (DEF-A..D من بريف المالك). **الاكتشاف الجوهري:** شاشة المبيعات (`SalesInvoiceEditor`) تُنفّذ مسبقاً معظم المجموعتين A وB (إضافة عميل inline، شبكة دفعات، رصيد قبل/بعد عبر `getCreditPreview`، إكمال تلقائي للأصناف + إضافة inline، معاينة قيد مع ربح، توجيه deep-link لكل صفحة). فالعمل = **تقارب** (مساواة شاشة الشراء + سدّ الشاشات الناقصة + شريط الإجراءات) لا إعادة بناء. قرارات المالك: توسعة الشاشات القائمة · التحقق أولاً · (المنتقي عند الطلب أولاً، ثم **رجع المالك وطلب شجرة الأصناف المرساة** فعلاً — بُنيت، انظر DEF-B1 أدناه).
+
+### المنفّذ والمُتحقَّق
+- **DEF-A1 (مُتحقَّق — لا عمل):** لا تصادم مسارات؛ 53 شاشة في `VIEW_PATHS` كلها فريدة (أُصلح في task14 M1). تأكيد آلي عبر فحص التكرارات.
+- **DEF-A2 شريط الإجراءات العام:** `components/layout/GlobalActionBar.tsx` — شريط سفلي دائم (يحاكي شريط الأصيل) مُركَّب في `AppLayout`، مُقيَّد بالدور، يعيد استخدام `aseel-toolbtn` و`onNavigate`. أزرار: فاتورة مبيعات/شراء جديدة · سند قبض/صرف · قيد تحويل · بحث عن قيد · شجرة الحسابات · كشف الصندوق · الشيكات · صرف العملات · طباعة · تحديث — كلٌّ يوجّه لمساره. + إصلاح `setViewAndSyncPath` لفتح فاتورة مبيعات جديدة على `/sales/invoices/new` (كان يفتح القائمة فقط). + إصلاح كسر tsc قائم (`partner-profile` ناقص في `Breadcrumb`).
+- **DEF-B2 إضافة صنف inline تُحفظ (شراء):** `ItemQuickCreateModal` كان يُنشئ Product في inventory فعلاً، لكن السطر كان يُعبَّأ بـ name فارغ (Product يحمل name_ar لا name) ولا يظهر في `allDbItems`. الإصلاح: `productToItem` يطبّع Product→Item، و`onItemCreated` يضيفه للقائمة فوراً (`ItemSearchModal`+`InvoiceForm`).
+- **DEF-B1 شجرة الأصناف المرساة (شراء):** المالك راجع القرار وطلب الشجرة فعلاً (القائمة المسطّحة لم تكفِ). `components/procurement/invoices/InvoiceCategoryTree.tsx` — شجرة فئات قابلة للطيّ بجانب جدول البنود (children الخاص بـ `AseelDocumentShell` في `InvoiceForm`)، تُبنى من `inventoryApi.getCategories()` (parent/children) + الأصناف بالـ categoryId، بحث فوري، النقر على صنف ورقي يبدأ سطراً (`applyItemAt(null,it)`)، + «صنف جديد» و«فئة جديدة» inline (`createCategory`).
+- **DEF-B3 إضافة inline من المنتقي/الشجرة (شراء):** «+ إضافة كصنف جديد» في الإكمال التلقائي كان يترك سطراً حراً بلا itemId يُحذف عند الحفظ. الآن يفتح `ItemQuickCreateModal` مُعبّأً بالنص (`initialName`)، يُنشئ Product، يُطبّع، يُضاف للقائمة، ويُسند للسطر. وإضافة فئة من الشجرة عبر `inventoryApi.createCategory`.
+- **DEF-C3 معالجة التكرار (شراء):** عند إضافة صنف موجود في سطر آخر — تنبيه: موافق=دمج الكمية في السطر القائم · إلغاء=سطر مستقل بسعره. في `applyItemAt`.
+- **DEF-C1 رصيد الشريك قبل/بعد:** `accounting.services.partner_posted_balance` (مجموع مدين/دائن الأسطر المرحَّلة للشريك بالعملة الأساسية) + `GET /api/partners/{id}/balance/?proposed_total=` (عميل: مدين−دائن · مورد: دائن−مدين). شُلِّك في شاشة الشراء (`InvoiceForm` يعرض «رصيد المورد قبل/بعد»). المبيعات تملك المعادل أصلاً (`credit_preview_for_sale`). 3 اختبارات (`test_partner_balance.py`).
+- **DEF-C2 آخر سعر:** `last_sale_price(product, customer?)` + `GET /api/sales/invoices/last-price/`. شُلِّك في `SalesInvoiceEditor.onSelectProduct` (يقترح آخر سعر لهذا العميل/عام، قابل للتعديل). الشراء يملكه أصلاً (`ItemSearchModal` supplier_prices). 3 اختبارات (`test_last_price.py`).
+- **DEF-C4 تقرير أرباح الفواتير:** `invoice_profits(...)` + `GET /api/sales/invoices/profits/`. الربح = صافي البنود قبل الضريبة − التكلفة التاريخية (مجموع `StockMovement.total_cost` لحركات البيع وقت الترحيل). الواجهة `components/accounting/InvoiceProfitsPage.tsx` على `/sales/profits` + رابط في الشريط الجانبي + تصدير إكسل عبر `AseelReportTable`. 3 اختبارات (`test_invoice_profits.py`).
+- **DEF-D1 شجرة الحسابات (مُتحقَّق):** `AccountingCoaPage` يدعم الشجرة (أب/ابن، طيّ/فتح)، إضافة حساب/فئة (الحسابات هي الشجرة)، تعديل، حذف، نشط/مخفي (`is_active` + فلتر `activeOnly`). مكتمل — لا عمل.
+- **DEF-D2 سندات/إيصالات/تحويل من الشريط (مُتحقَّق):** مُلبّى عبر `GlobalActionBar` (سند قبض→دفعات العملاء · سند صرف→دفعات الموردين · قيد تحويل→قيد يومية جديد · الشيكات → صفحة الشيكات).
+- **DEF-D3 تعدد العملات (مُتحقَّق):** الأرصدة تُحسب بالعملة الأساسية (`base_debit/base_credit`)؛ رصيد المبيعات يحوّل عبر `exchange_rate`؛ لا خلط صامت.
+
+### المنفّذ مسبقاً (لا عمل في هذه الجولة)
+- DEF-B4 إضافة مورد inline (task16 C9: `InvoiceBasicInfo.onOpenAddSupplier→SupplierModal`). · DEF-B6 وصل دفع مدمج للمورد (`PurchaseInvoiceAccountingPanel` + `purchaseInvoiceApi.addSupplierPayment`، task17). · معظم B (مبيعات): إضافة عميل inline، شبكة دفعات، إكمال تلقائي، رصيد قبل/بعد، معاينة قيد+ربح — كلها من tasks 11–17.
+
+### [ROUTES — مضاف task18]
+- `/sales/profits` → `InvoiceProfitsPage` (view: `invoice-profits`).
+
+### [ORPHANS & PENDING — task18]
+- [ ] **DEF-B5 (جزئي):** نافذة إدخال السطر الكاملة (آخر سعر + تكلفة + ربح + **رصيد لكل مستودع**). المتوفر: «المتاح» وإجمالي السطر في الشبكة، الربح/التكلفة في معاينة القيد (مبيعات)، آخر سعر (الجهتان). الناقص: تفصيل الرصيد لكل مستودع في نافذة منبثقة للسطر — يتطلب استعلام مخزون على مستوى المستودع (نموذج `Warehouse` من task15) ولم يُبنَ في هذه الجولة.
+- [ ] **تحقق UI حيّ مُصادَق:** شريط الإجراءات وصفحة الأرباح ورصيد المورد وآخر سعر تُرسَم بعد تسجيل الدخول فقط؛ تأكيد النقر الحيّ متروك للمالك (إدخال كلمة المرور للمصادقة محظور على الوكيل). التحقق تمّ عبر pytest + tsc + vite build + رسم صفحة الدخول.
+
+**تحقق ختامي task18:** backend **183/183** خضراء (174 + 9 جديدة: أرباح الفواتير 3 · رصيد الشريك 3 · آخر سعر 3) · tsc 0 · vite build OK · `manage.py check` 0. التحقق الحيّ المُصادَق متروك للمالك (انظر ORPHANS).

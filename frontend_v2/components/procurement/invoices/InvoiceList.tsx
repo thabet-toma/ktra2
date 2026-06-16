@@ -692,8 +692,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
                             <button
                               type="button"
                               className="hover:underline text-blue-700"
-                              onClick={(e) => { e.stopPropagation(); navigate("/suppliers"); }}
-                              title="فتح الموردين"
+                              onClick={(e) => { e.stopPropagation(); navigate(`/partners/${invoice.supplierId}`); }}
+                              title="فتح ملف المورد"
                             >
                               {supplierDisplayName}
                             </button>

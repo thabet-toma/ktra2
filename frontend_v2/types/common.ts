@@ -24,6 +24,7 @@ export type AppView =
     | "sales-customers"
     | "old-invoices"
     | "items-management"
+    | "items-categories"
     | "supplier-management"
     | "price-offers"
     | "deals-management"
@@ -71,6 +72,8 @@ export type AppView =
     | "sales-return"
     | "purchase-return"
     | "supplier-payments"
+    | "invoice-profits"
+    | "partner-profile"
     | "import-flow";
 
 export interface Attachment {

@@ -507,6 +507,77 @@ def post_journal(
     return jh
 
 
+def unpost_document(
+    *,
+    tenant_id: int,
+    reference_id: int,
+    journal_reference_types,
+    stock_reference_types=(),
+    user=None,
+    document_label: str = "",
+) -> dict:
+    """المسار المركزي للتراجع عن ترحيل مستند (إلغاء الترحيل / cascade delete).
+
+    يحذف **كل** قيود اليومية التي ولّدها المستند (full cascade — أسطر القيد
+    تُحذف تلقائياً عبر on_delete=CASCADE) ويعيد حركات المخزون التابعة له، في
+    معاملة واحدة ذرّية (all-or-nothing) فلا تبقى حالة محاسبية ناقصة.
+
+    النطاق محصور بدقة بقيود هذا المستند وحده:
+    (tenant, reference_id, reference_type ∈ journal_reference_types) — فلا
+    تُمَسّ أي قيود يتيمة أو غير مرتبطة. بخلاف مسارات «القيد العكسي» القديمة،
+    هذا حذف فعلي يُرجِع المستند لحالة مسودة قابلة للتعديل/الحذف.
+
+    Returns: dict فيه عدد القيود وحركات المخزون المحذوفة.
+    """
+    from inventory.services import reverse_stock_movements
+
+    journal_reference_types = list(journal_reference_types)
+    with transaction.atomic():
+        headers = list(
+            JournalHeader.objects.select_for_update().filter(
+                tenant_id=tenant_id,
+                reference_id=reference_id,
+                reference_type__in=journal_reference_types,
+            )
+        )
+        header_ids = [h.id for h in headers]
+        lines_deleted = JournalLine.objects.filter(journal_id__in=header_ids).count() if header_ids else 0
+        # حذف الترويسة يُسقِط الأسطر تلقائياً (CASCADE)؛ نمرّ على كلٍّ على حدة
+        # لأن JournalHeader.save() يحرس التعديل لا الحذف — والحذف مسموح هنا.
+        for h in headers:
+            h.delete()
+
+        stock_deleted = 0
+        if stock_reference_types:
+            stock_deleted = reverse_stock_movements(
+                tenant_id=tenant_id,
+                reference_id=reference_id,
+                reference_types=stock_reference_types,
+            )
+
+    logger.info(
+        "unpost_document: %s ref=%s deleted journals=%d lines=%d stock_movements=%d",
+        document_label or journal_reference_types, reference_id,
+        len(header_ids), lines_deleted, stock_deleted,
+    )
+    create_audit_log(
+        tenant=_get_tenant_obj(tenant_id),
+        user=user,
+        action='DELETE',
+        model_name='JournalHeader',
+        object_id=reference_id,
+        change_details=(
+            f"Unpost {document_label or ''}: deleted {len(header_ids)} journal(s) "
+            f"({journal_reference_types}) + {stock_deleted} stock movement(s)"
+        )[:1000],
+    )
+    return {
+        "journals_deleted": len(header_ids),
+        "lines_deleted": lines_deleted,
+        "stock_movements_deleted": stock_deleted,
+    }
+
+
 def _get_tenant_obj(tenant_id: int):
     """Fetch Tenant model instance from ID, returning None on failure."""
     try:
@@ -827,4 +898,25 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             ),
         )
     return cheque
+
+
+# ─────────────────────────────────────────────────────────
+#  task18 DEF-C1: رصيد الشريك من دفتر الأستاذ الفرعي (subledger)
+# ─────────────────────────────────────────────────────────
+
+def partner_posted_balance(tenant_id: int, partner_id: int) -> tuple[Decimal, Decimal]:
+    """مجموع مدين/دائن أسطر القيود المرحَّلة لهذا الشريك (بالعملة الأساسية).
+
+    يُرجع (debit, credit). تفسير الرصيد متروك للمستدعي حسب نوع الشريك:
+    عميل (ذمم مدينة) ⇒ الرصيد = debit − credit؛ مورد (ذمم دائنة) ⇒ credit − debit.
+    """
+    from django.db.models import Sum
+    agg = JournalLine.objects.filter(
+        tenant_id=tenant_id,
+        partner_id=partner_id,
+        journal__is_posted=True,
+    ).aggregate(d=Sum("base_debit"), c=Sum("base_credit"))
+    debit = Decimal(str(agg["d"] or 0))
+    credit = Decimal(str(agg["c"] or 0))
+    return debit, credit
 

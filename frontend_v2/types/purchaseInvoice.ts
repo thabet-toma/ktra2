@@ -12,6 +12,9 @@ export interface PurchaseInvoiceItemDto {
   warehouse?: string | null;
   landed_unit_price_ils?: number | null;
   landed_line_total_ils?: number | null;
+  expense_account?: number | null;
+  expense_account_code?: string | null;
+  expense_account_name?: string | null;
 }
 
 export type ReceiptStatus =

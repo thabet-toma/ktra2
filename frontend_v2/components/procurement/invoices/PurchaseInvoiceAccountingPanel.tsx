@@ -18,12 +18,16 @@ import {
   Send,
   RefreshCw,
   PackageCheck,
+  Undo2,
+  Banknote,
+  Receipt,
 } from "lucide-react";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { accountingApi } from "@/services/accountingApi";
 import type {
   PurchaseInvoiceDto,
   PurchaseInvoiceFeeDto,
+  PurchaseInvoiceItemDto,
   ReceiptStatus,
 } from "@/types/purchaseInvoice";
 import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
@@ -45,6 +49,7 @@ interface AccountDto {
 interface Props {
   invoiceId: number;
   onPosted?: (journalId: number) => void;
+  readOnly?: boolean;
 }
 
 type PaymentType = "credit" | "cash";
@@ -60,11 +65,13 @@ const ACCOUNT_TYPE_LABELS: Record<string, string> = {
 export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   invoiceId,
   onPosted,
+  readOnly,
 }) => {
   const [loading, setLoading] = useState(true);
   const [invoice, setInvoice] = useState<PurchaseInvoiceDto | null>(null);
   const [accounts, setAccounts] = useState<AccountDto[]>([]);
   const [fees, setFees] = useState<PurchaseInvoiceFeeDto[]>([]);
+  const [items, setItems] = useState<PurchaseInvoiceItemDto[]>([]);
   const [paymentType, setPaymentType] = useState<PaymentType>("credit");
   const [cashAccountId, setCashAccountId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -72,6 +79,10 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showReceive, setShowReceive] = useState(false);
+  // وصل دفع للمورد (Feature 2)
+  const [payAmount, setPayAmount] = useState("");
+  const [payAccountId, setPayAccountId] = useState<number | null>(null);
+  const [paySaving, setPaySaving] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -84,6 +95,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
       setInvoice(inv);
       setAccounts(Array.isArray(accs) ? accs : []);
       setFees(Array.isArray(inv.fees) ? [...inv.fees] : []);
+      setItems(Array.isArray(inv.items) ? [...inv.items] : []);
       setPaymentType((inv.payment_type as PaymentType) || "credit");
       setCashAccountId(inv.cash_or_bank_account ?? null);
     } catch (e) {
@@ -152,6 +164,10 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
     setFees((f) => f.map((x, i) => (i === idx ? { ...x, ...patch } : x)));
   };
 
+  const updateItemAccount = (idx: number, accountId: number | null) => {
+    setItems((items) => items.map((x, i) => (i === idx ? { ...x, expense_account: accountId } : x)));
+  };
+
   // ─── حفظ الرسوم + نوع الدفع ────────────────────────────────────────────
   const saveAccountingFields = async () => {
     if (!invoice) return;
@@ -170,10 +186,12 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           capitalize_to_inventory: !!f.capitalize_to_inventory,
           is_taxable: !!f.is_taxable,
         })),
+        items: items,
       };
       const updated = await purchaseInvoiceApi.update(invoiceId, payload);
       setInvoice(updated);
       setFees(Array.isArray(updated.fees) ? [...updated.fees] : []);
+      setItems(Array.isArray(updated.items) ? [...updated.items] : []);
       setSuccess("تم حفظ الإعدادات المحاسبية.");
     } catch (e) {
       setError(e instanceof Error ? e.message : "تعذر الحفظ");
@@ -204,6 +222,61 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
     }
   };
 
+  // ─── التراجع عن الترحيل (حذف القيود) ─────────────────────────────────────
+  const unpost = async () => {
+    if (!invoice) return;
+    if (!window.confirm(
+      "هذا المستند مرحَّل. سيؤدي التراجع عن الترحيل إلى حذف كل قيود اليومية " +
+      "وحركات الاستلام الخاصة بهذه الفاتورة وإرجاعها مسودة. متابعة؟"
+    )) return;
+    setPosting(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await purchaseInvoiceApi.unpost(invoiceId);
+      setSuccess("تم التراجع عن الترحيل وحذف القيود. الفاتورة الآن مسودة.");
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر التراجع عن الترحيل");
+    } finally {
+      setPosting(false);
+    }
+  };
+
+  // ─── وصل دفع للمورد (Feature 2): سند صرف مستقل Dr ذمم المورد / Cr صندوق ───
+  const addSupplierPayment = async () => {
+    if (!invoice) return;
+    const amt = Number(payAmount);
+    if (!amt || amt <= 0) {
+      setError("أدخل مبلغ وصل الدفع.");
+      return;
+    }
+    if (!payAccountId) {
+      setError("اختر حساب الصندوق/البنك لوصل الدفع.");
+      return;
+    }
+    setPaySaving(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await purchaseInvoiceApi.addSupplierPayment({
+        partner: invoice.partner,
+        payment_date: new Date().toISOString().slice(0, 10),
+        amount: amt.toFixed(2),
+        currency: invoice.currency ?? null,
+        cash_or_bank_account: payAccountId,
+        notes: `وصل دفع فاتورة ${invoice.invoice_number || invoice.id}`,
+      });
+      setSuccess("✅ تم تسجيل وصل الدفع وترحيله (مدين ذمم المورد / دائن الصندوق).");
+      setPayAmount("");
+      await reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "تعذر تسجيل وصل الدفع");
+    } finally {
+      setPaySaving(false);
+    }
+  };
+
   // ─── معاينة القيد المحاسبي ─────────────────────────────────────────────
   const preview = useMemo(() => {
     if (!invoice) return null;
@@ -224,15 +297,34 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
       note?: string;
     }[] = [];
 
-    if (inventoryDebit > 0) {
+    // Default item behavior is still going to single inventory account unless mapped
+    const totalDiscount = Number(invoice.discount_amount) || 0;
+    let sumMapped = 0;
+
+    items.filter(it => it.expense_account).forEach(it => {
+        const acc = accounts.find(a => a.id === it.expense_account);
+        const label = acc ? `${acc.code || "?"} — ${acc.name || ""}` : `حساب #${it.expense_account}`;
+        let lineAmount = Number(it.total_price) || 0;
+        sumMapped += lineAmount;
+        lines.push({
+            account: label,
+            debit: lineAmount,
+            credit: 0,
+            note: it.name,
+        });
+    });
+
+    const remainingInventoryDebit = merchandiseNet + capitalizedFees - sumMapped;
+
+    if (remainingInventoryDebit > 0) {
       lines.push({
-        account: "مخزون (1104)",
-        debit: inventoryDebit,
+        account: "مخزون / مشتريات (1104)",
+        debit: remainingInventoryDebit,
         credit: 0,
         note:
           capitalizedFees > 0
             ? `صافي البضاعة + رسوم مرسملة (${capitalizedFees.toFixed(2)})`
-            : "صافي البضاعة",
+            : "صافي البضاعة غير المخصصة",
       });
     }
     if (tax > 0) {
@@ -260,17 +352,9 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
     const creditTotal = grand + feeTotal;
     const supplierLabel = `ذمم مورد (${invoice.partner_name || "—"})`;
     
-    // إثبات الفاتورة على حساب المورد
+    // إثبات الفاتورة على حساب المورد (Feature 2: لا تسوية نقدية في قيد الفاتورة —
+    // الدفع للمورد يُسجَّل كوصل دفع مستقل بعد الترحيل).
     lines.push({ account: supplierLabel, debit: 0, credit: creditTotal, note: "إثبات الفاتورة" });
-
-    // تسوية الدفعة النقدية إن وجدت
-    if (paymentType === "cash") {
-      const cashLabel = `صندوق/بنك (${
-        accounts.find((a) => a.id === cashAccountId)?.code || "—"
-      })`;
-      lines.push({ account: supplierLabel, debit: creditTotal, credit: 0, note: "تسوية ذمم (دفع نقدي)" });
-      lines.push({ account: cashLabel, debit: 0, credit: creditTotal, note: "دفع نقدي" });
-    }
 
     const totalDebit = lines.reduce((s, l) => s + l.debit, 0);
     const totalCredit = lines.reduce((s, l) => s + l.credit, 0);
@@ -290,7 +374,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   if (!invoice) return null;
 
   const isPosted = !!invoice.is_posted;
-  const disableEdit = isPosted;
+  const disableEdit = isPosted || !!readOnly;
 
   return (
     <div
@@ -350,7 +434,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                 RECEIPT_BADGE[invoice.receipt_status]?.label}
             </span>
           )}
-          {invoice.is_local && invoice.receipt_status !== "received" && (
+          {invoice.is_local && invoice.receipt_status !== "received" && !readOnly && (
             <button
               onClick={() => setShowReceive(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white rounded-full text-sm font-medium"
@@ -436,6 +520,56 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
               </select>
             </div>
           )}
+        </div>
+
+        {/* جدول الأصناف - توجيه حسابات الأسطر */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-sm font-semibold aseel-text-ink dark:aseel-text-soft">
+              توجيه حسابات بنود الفاتورة
+            </h4>
+          </div>
+          <div className="overflow-x-auto rounded-lg border aseel-border-soft dark:aseel-border-soft">
+            <table className="w-full text-sm">
+              <thead className="aseel-bg-panel dark:aseel-bg-panel aseel-text-soft dark:aseel-text-soft text-xs">
+                <tr>
+                  <th className="px-3 py-2 text-right font-medium">الصنف</th>
+                  <th className="px-3 py-2 text-right font-medium">المبلغ</th>
+                  <th className="px-3 py-2 text-right font-medium">حساب المصروف (تجاوز)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.length === 0 && (
+                  <tr>
+                    <td colSpan={3} className="px-3 py-6 text-center aseel-text-soft">
+                      لا توجد أصناف
+                    </td>
+                  </tr>
+                )}
+                {items.map((item, idx) => (
+                  <tr key={item.id ?? `it-${idx}`} className="border-t aseel-border-soft dark:aseel-border-soft">
+                    <td className="px-3 py-2">{item.name}</td>
+                    <td className="px-3 py-2">{Number(item.total_price).toFixed(2)}</td>
+                    <td className="px-3 py-2">
+                      <select
+                        value={item.expense_account || ""}
+                        onChange={(e) => updateItemAccount(idx, e.target.value ? Number(e.target.value) : null)}
+                        disabled={disableEdit}
+                        className="w-full h-9 px-2 border aseel-border-soft dark:aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-xs"
+                      >
+                        <option value="">— حساب المخزون الافتراضي —</option>
+                        {expenseAccountOptions.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.code} — {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {/* جدول الرسوم */}
@@ -615,7 +749,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         )}
 
         {/* أزرار الإجراءات */}
-        {!isPosted && (
+        {!isPosted && !readOnly && (
           <div className="flex items-center justify-end gap-3 pt-2 border-t aseel-border-soft dark:aseel-border-soft">
             <button
               onClick={saveAccountingFields}
@@ -641,6 +775,88 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
               )}
               ترحيل للمحاسبة
             </button>
+          </div>
+        )}
+
+        {/* مستند مرحَّل: تحذير + تراجع عن الترحيل */}
+        {isPosted && !readOnly && (
+          <div className="flex items-center justify-between gap-3 pt-2 border-t aseel-border-soft dark:aseel-border-soft">
+            <p className="text-sm aseel-text-soft">
+              هذا المستند مرحَّل. يجب التراجع عن الترحيل قبل تعديله أو حذفه.
+            </p>
+            <button
+              onClick={unpost}
+              disabled={posting}
+              className="flex items-center gap-2 px-5 py-2 rounded-lg font-medium border aseel-border-soft aseel-text-ink hover:aseel-bg-grid-head disabled:opacity-50 disabled:cursor-not-allowed"
+              title="حذف قيود الفاتورة وإرجاعها مسودة"
+            >
+              {posting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Undo2 className="w-4 h-4" />
+              )}
+              تراجع عن الترحيل
+            </button>
+          </div>
+        )}
+
+        {/* وصل دفع للمورد (Feature 2): سند صرف مستقل يُفرّغ ذمم المورد للصندوق */}
+        {isPosted && (
+          <div className="pt-3 mt-1 border-t aseel-border-soft dark:aseel-border-soft space-y-2">
+            <div className="flex items-center gap-2">
+              <Receipt className="w-4 h-4 aseel-text-soft" />
+              <h4 className="font-medium aseel-text-ink">وصل دفع للمورد</h4>
+              {invoice.remaining_balance != null && (
+                <span className="text-sm aseel-text-soft">
+                  المتبقي: {invoice.remaining_balance}
+                </span>
+              )}
+            </div>
+            <p className="text-xs aseel-text-soft">
+              قيد مستقل: مدين «ذمم المورد» / دائن «الصندوق/البنك» — لا يولّده ترحيل الفاتورة.
+            </p>
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="aseel-text-soft">المبلغ</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={payAmount}
+                  onChange={(e) => setPayAmount(e.target.value)}
+                  className="px-3 py-2 rounded-lg border aseel-border-soft aseel-bg-panel w-36"
+                  placeholder="0.00"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="aseel-text-soft">حساب الصندوق/البنك</span>
+                <select
+                  value={payAccountId ?? ""}
+                  onChange={(e) => setPayAccountId(e.target.value ? Number(e.target.value) : null)}
+                  className="px-3 py-2 rounded-lg border aseel-border-soft aseel-bg-panel min-w-[12rem]"
+                >
+                  <option value="">— اختر حساب —</option>
+                  {cashAccountOptions.map((a) => (
+                    <option key={a.id} value={a.id}>
+                      {a.code} — {a.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                onClick={addSupplierPayment}
+                disabled={paySaving}
+                className="flex items-center gap-2 px-5 py-2 rounded-lg font-medium aseel-bg-accent text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                title="تسجيل وصل دفع وترحيله"
+              >
+                {paySaving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Banknote className="w-4 h-4" />
+                )}
+                تسجيل وصل الدفع
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -8,7 +8,8 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
-from core.api_defaults import ApiAuthAndUser
+from accounting.services import unpost_document
+from core.api_defaults import ApiAuthAndUser, POSTED_DOC_WARNING
 from core.tenant_utils import get_branch, get_tenant
 from .models import (
     CreditDebitNote,
@@ -36,6 +37,8 @@ from .services import (
     credit_preview_for_sale,
     deliver_delivery_order,
     get_or_create_sales_settings,
+    invoice_profits,
+    last_sale_price,
     next_invoice_number,
     post_credit_debit_note,
     post_customer_payment,
@@ -122,16 +125,55 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 invoice._auto_post_error = str(e)
 
     def perform_update(self, serializer):
+        instance = serializer.instance
+        if instance is not None and instance.status != SalesInvoice.STATUS_DRAFT:
+            raise DRFValidationError(
+                {"detail": POSTED_DOC_WARNING, "can_unpost": True},
+            )
         serializer.save()
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         if instance.status != SalesInvoice.STATUS_DRAFT:
             return Response(
-                {"detail": "يمكن حذف المسودات فقط. الفواتير المرحّلة لا تُحذف من هنا."},
+                {"detail": POSTED_DOC_WARNING, "can_unpost": True},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=["post"], url_path="unpost")
+    def unpost_invoice(self, request, pk=None):
+        """تراجع عن الترحيل: حذف كل قيود الفاتورة وحركات مخزونها وإرجاعها مسودة."""
+        invoice = self.get_object()
+        if invoice.status != SalesInvoice.STATUS_POSTED:
+            return Response(
+                {"error": "الفاتورة غير مرحّلة."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            with transaction.atomic():
+                result = unpost_document(
+                    tenant_id=invoice.tenant_id,
+                    reference_id=invoice.id,
+                    journal_reference_types=["SALES_INVOICE", "SALES_DELIVERY_COGS"],
+                    stock_reference_types=["SALE", "STOCK_ISSUE"],
+                    user=request.user,
+                    document_label=f"فاتورة مبيعات {invoice.invoice_number}",
+                )
+                invoice.status = SalesInvoice.STATUS_DRAFT
+                invoice.journal = None
+                invoice.amount_paid = Decimal("0")
+                invoice.save(update_fields=["status", "journal", "amount_paid"])
+                # إعادة الشيكات المرفقة إلى مسودة (عكس ترقيتها عند الترحيل)
+                from accounting.models import Cheque
+                Cheque.objects.filter(
+                    sales_invoice=invoice, status="Under_Collection"
+                ).update(status="Draft")
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        invoice.refresh_from_db()
+        ser = SalesInvoiceSerializer(invoice, context={"request": request})
+        return Response({**ser.data, "unpost_result": result})
 
     @action(detail=True, methods=["post"], url_path="duplicate")
     def duplicate_invoice(self, request, pk=None):
@@ -281,6 +323,40 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             )
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(data)
+
+    @action(detail=False, methods=["get"], url_path="last-price")
+    def last_price(self, request):
+        """task18 DEF-C2: آخر سعر بيع لصنف (واختيارياً لعميل) من فواتير مرحَّلة."""
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"error": "لا يوجد شركة (tenant)."}, status=status.HTTP_400_BAD_REQUEST)
+        pid = request.query_params.get("product")
+        if not pid or not pid.isdigit():
+            return Response({"error": "باراميتر product مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
+        cid = request.query_params.get("customer")
+        data = last_sale_price(
+            tenant_id=tenant.TenantID,
+            product_id=int(pid),
+            customer_id=int(cid) if cid and cid.isdigit() else None,
+        )
+        return Response(data)
+
+    @action(detail=False, methods=["get"], url_path="profits")
+    def profits(self, request):
+        """task18 DEF-C4: تقرير أرباح الفواتير (إيراد/تكلفة/ربح لكل فاتورة + إجماليات)."""
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"error": "لا يوجد شركة (tenant)."}, status=status.HTTP_400_BAD_REQUEST)
+        cid = request.query_params.get("customer")
+        customer_id = int(cid) if cid and cid.isdigit() else None
+        data = invoice_profits(
+            tenant_id=tenant.TenantID,
+            branch=get_branch(request, tenant),
+            date_from=request.query_params.get("date_from") or None,
+            date_to=request.query_params.get("date_to") or None,
+            customer_id=customer_id,
+        )
         return Response(data)
 
     @action(detail=False, methods=["get"], url_path="next-number")

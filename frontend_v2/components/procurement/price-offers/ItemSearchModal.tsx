@@ -10,9 +10,26 @@ interface ItemSearchModalProps {
     onSelectItem: (item: Item, lastPrice?: number) => void;
     items: Item[];
     supplierId?: string;
+    /** task18 DEF-B2: يُستدعى بعد إنشاء صنف جديد (Product) ليُضيفه الأب إلى قائمة
+     *  الأصناف فوراً فيظهر في المنتقي/الإكمال التلقائي ويُعاد اختياره. */
+    onItemCreated?: (item: Item) => void;
 }
 
-export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClose, onSelectItem, items = [], supplierId }) => {
+/** task18 DEF-B2: تحويل Product المُنشأ (من inventory) إلى شكل Item الذي يتوقعه
+ *  سطر الفاتورة — كان السطر يُعبَّأ بـ name=undefined لأن Product يحمل name_ar. */
+export const productToItem = (p: any): Item => ({
+    id: String(p.id),
+    name: p.name_ar || p.name_en || p.sku || `صنف ${p.id ?? ""}`,
+    categoryId: p.category != null ? String(p.category) : "",
+    categoryName: p.category_name || "",
+    modelNumber: p.sku || undefined,
+    specifications: "",
+    imageUrls: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+});
+
+export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClose, onSelectItem, items = [], supplierId, onItemCreated }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [itemPrices, setItemPrices] = useState<Record<string, number>>({});
     const [loadingPrices, setLoadingPrices] = useState(false);
@@ -189,7 +206,11 @@ export const ItemSearchModal: React.FC<ItemSearchModalProps> = ({ isOpen, onClos
                     onClose={() => setShowAddItem(false)}
                     onSaved={(newProduct) => {
                         setShowAddItem(false);
-                        onSelectItem(newProduct, undefined);
+                        // task18 DEF-B2: طبّع Product→Item فيظهر اسمه في السطر،
+                        // وأبلغ الأب ليُضيفه لقائمة الأصناف (يظهر في المنتقي لاحقاً).
+                        const item = productToItem(newProduct);
+                        onItemCreated?.(item);
+                        onSelectItem(item, undefined);
                         onClose();
                     }}
                 />

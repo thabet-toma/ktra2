@@ -51,6 +51,7 @@ import { ItemSearchModal } from "../price-offers/ItemSearchModal";
 import { ImagePreviewModal } from "../price-offers/ImagePreviewModal";
 import { TermsAndShippingSection } from "@/components/forms/shared/TermsAndShippingSection";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
+import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import { dealsService } from "../../../services/dealsService";
 import { ActivityLog } from "./ActivityLog";
 import { InstallmentManager } from "./InstallmentManager";
@@ -956,6 +957,17 @@ export const DealForm: React.FC<DealFormProps> = ({
           { key: "attachments", label: "المرفقات", content: attachmentsTab },
           { key: "activity", label: "سجل النشاطات", content: activityTab },
           { key: "other", label: "بيانات أخرى", content: otherTab },
+          ...(formData.id ? [{
+            key: "financial_movements",
+            label: "الحركات المالية المرتبطة",
+            content: (
+              <DocumentPaymentsTab 
+                referenceType="DEAL" 
+                referenceId={formData.id} 
+                searchQuery={formData.dealNumber || ""}
+              />
+            ),
+          }] : []),
         ]}
         totals={
           <>

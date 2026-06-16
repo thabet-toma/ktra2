@@ -1078,6 +1078,12 @@ class PurchaseInvoiceItem(models.Model):
         max_digits=18, decimal_places=2, null=True, blank=True,
         db_column='LandedLineTotalILS',
     )
+    
+    expense_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='ExpenseAccountID', related_name='purchase_invoice_item_expenses',
+        help_text='حساب المصروف المخصص لهذا البند (إن وُجد) — يتخطى حساب المخزون الافتراضي',
+    )
 
     class Meta:
         db_table = 'purchase_invoice_items'
