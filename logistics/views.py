@@ -2102,6 +2102,20 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
 
         td = invoice.invoice_date or datetime.date.today()
 
+        # ─── GR/IR: الفاتورة المحلية → قيدان منفصلان عبر الحساب الوسيط ──────────
+        # بند البضاعة في قيد الفاتورة يدين «الوسيط» بدل المخزون مباشرةً؛ ويُنشأ
+        # قيد استلام مستقل (مدين المخزون / دائن الوسيط) + إدخال المخزون فعلياً.
+        # المستورد (صفقة/شحنة/تخليص) يبقى كما هو — مخزونه يأتي عبر الشحنة.
+        is_local = not (invoice.deal_id or invoice.shipment_id or invoice.clearance_id)
+        gr_ir_account = None
+        if is_local:
+            from .services import _resolve_gr_ir_account
+            try:
+                gr_ir_account = _resolve_gr_ir_account(tenant)
+            except Exception:
+                gr_ir_account = None
+        use_gr_ir = bool(is_local and gr_ir_account)
+
         # ─── 5) بناء أسطر القيد ─────────────────────────────────────────────────
         lines_payload: list[dict] = []
 
@@ -2134,13 +2148,19 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         
         inventory_debit -= mapped_debit
 
+        # المبلغ الذي سيمرّ عبر الوسيط ثم يُرحَّل لقيد الاستلام (للفاتورة المحلية).
+        goods_clearing_amt = inventory_debit if inventory_debit > 0 else Decimal('0')
+
         if inventory_debit > 0:
             lines_payload.append({
-                'account': inventory_account.id,
+                'account': (gr_ir_account.id if use_gr_ir else inventory_account.id),
                 'debit': inventory_debit.quantize(Decimal('0.01')),
                 'credit': Decimal('0'),
                 'partner': partner.id,
-                'description': f"بضاعة/مخزون — {invoice.invoice_number}",
+                'description': (
+                    f"وسيط استلام (بضاعة لم تُفوتَر) — {invoice.invoice_number}" if use_gr_ir
+                    else f"بضاعة/مخزون — {invoice.invoice_number}"
+                ),
             })
             
         for acc_id, data in mapped_lines.items():
@@ -2191,20 +2211,34 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         # (SupplierPayment، Dr ذمم المورد / Cr صندوق) يُسجَّل من الفاتورة نفسها.
 
         # ─── 6) الترحيل المركزي ─────────────────────────────────────────────────
+        # ذرّي: قيد الفاتورة + (للمحلية) قيد الاستلام عبر الوسيط + إدخال المخزون
+        # — كله معاً أو لا شيء، فلا تبقى حالة ناقصة.
+        receipt = None
         try:
-            journal = post_journal(
-                tenant_id=tenant.TenantID,
-                transaction_date=td,
-                reference_type="PURCHASE_INVOICE",
-                reference_id=invoice.pk,
-                description=f"فاتورة شراء {invoice.invoice_number} | {partner.name}"[:500],
-                lines_data=lines_payload,
-                currency=invoice.currency,
-                exchange_rate=invoice.exchange_rate,
-            )
-            invoice.is_posted = True
-            invoice.journal = journal
-            invoice.save(update_fields=['is_posted', 'journal'])
+            with transaction.atomic():
+                journal = post_journal(
+                    tenant_id=tenant.TenantID,
+                    transaction_date=td,
+                    reference_type="PURCHASE_INVOICE",
+                    reference_id=invoice.pk,
+                    description=f"فاتورة شراء {invoice.invoice_number} | {partner.name}"[:500],
+                    lines_data=lines_payload,
+                    currency=invoice.currency,
+                    exchange_rate=invoice.exchange_rate,
+                )
+                invoice.is_posted = True
+                invoice.journal = journal
+                invoice.save(update_fields=['is_posted', 'journal'])
+
+                # GR/IR: قيد الاستلام المنفصل + إدخال البضاعة للمستودع الافتراضي
+                # (الفاتورة المحلية غير المستلَمة بعد فقط — منعاً للازدواج).
+                if use_gr_ir and goods_clearing_amt > 0 and invoice.receipt_status == PurchaseInvoice.RECEIPT_NOT:
+                    receipt = self._post_grn_and_receive(
+                        invoice=invoice, tenant=tenant,
+                        inventory_account=inventory_account, gr_ir_account=gr_ir_account,
+                        goods_clearing_amt=goods_clearing_amt, transaction_date=td,
+                        request=request,
+                    )
         except (ValidationError, DjangoValidationError, IntegrityError) as e:
             msg = e.message if hasattr(e, 'message') else str(e)
             return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
@@ -2214,11 +2248,114 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
 
         return Response({
             'journal_id': journal.id,
+            'receipt_journal_id': receipt['journal_id'] if receipt else None,
+            'movements_created': receipt['movements'] if receipt else 0,
             'lines_count': len(lines_payload),
             'total_debit': str(sum((l['debit'] for l in lines_payload), Decimal('0'))),
             'total_credit': str(sum((l['credit'] for l in lines_payload), Decimal('0'))),
             'message': 'تم الترحيل بنجاح',
         }, status=status.HTTP_201_CREATED)
+
+    def _post_grn_and_receive(self, *, invoice, tenant, inventory_account, gr_ir_account,
+                              goods_clearing_amt, transaction_date, request):
+        """GR/IR: يُنشئ قيد الاستلام (مدين المخزون / دائن الوسيط) ويُدخِل البضاعة
+        فعلياً للمستودع الافتراضي. يُستدعى داخل معاملة الترحيل الذرّية.
+
+        تكلفة كل بند = حصته من goods_clearing_amt (توزيع تناسبي بقيمة السطر) حتى
+        يتطابق رصيد حساب المخزون مع قيمة المخزون الفعلية (WAC سليم).
+        """
+        from inventory.models import Warehouse
+        from inventory.services import record_stock_movement
+        from core.tenant_utils import get_branch
+
+        warehouse = (
+            Warehouse.objects.filter(tenant=tenant, is_active=True)
+            .order_by('-is_default', 'name')
+            .first()
+        )
+        if not warehouse:
+            raise DjangoValidationError(
+                "لا يوجد مستودع نشط لاستلام البضاعة. أنشئ مستودعاً (أو اجعله الافتراضي) أولاً."
+            )
+
+        # البنود القابلة للتخزين = ذات صنف، بلا حساب مصروف صريح، وكمية موجبة.
+        goods_lines = [
+            it for it in invoice.items.all()
+            if it.product_id and not it.expense_account_id
+            and Decimal(str(it.quantity or 0)) > 0
+        ]
+        base = sum(
+            (Decimal(str(it.total_price or it.quantity * it.unit_price or 0)) for it in goods_lines),
+            Decimal('0'),
+        )
+
+        branch = get_branch(request, tenant) if tenant else None
+        movements = 0
+        allocated = Decimal('0')
+        for idx, it in enumerate(goods_lines):
+            qty = Decimal(str(it.quantity or 0))
+            line_val = Decimal(str(it.total_price or it.quantity * it.unit_price or 0))
+            # آخر سطر يأخذ الباقي لتفادي فروق التقريب.
+            if idx == len(goods_lines) - 1:
+                cost_share = (goods_clearing_amt - allocated)
+            elif base > 0:
+                cost_share = (goods_clearing_amt * line_val / base).quantize(Decimal('0.01'))
+            else:
+                cost_share = Decimal('0')
+            allocated += cost_share
+            unit_cost = (cost_share / qty) if qty > 0 else Decimal('0')
+            record_stock_movement(
+                product=it.product,
+                movement_type='IN',
+                quantity=qty,
+                unit_cost=unit_cost,
+                reference_type='PURCHASE_INVOICE',
+                reference_id=invoice.id,
+                partner=invoice.partner,
+                movement_date=transaction_date,
+                notes=f"استلام بترحيل فاتورة {invoice.invoice_number} | {warehouse.name}",
+                tenant=tenant,
+                branch=branch,
+                warehouse=warehouse,
+            )
+            it.received_quantity = qty
+            it.warehouse = warehouse.name
+            it.save(update_fields=['received_quantity', 'warehouse'])
+            movements += 1
+
+        # قيد الاستلام: مدين المخزون / دائن الوسيط (يُصفّر الوسيط مع قيد الفاتورة).
+        receipt_journal = post_journal(
+            tenant_id=tenant.TenantID,
+            transaction_date=transaction_date,
+            reference_type="PURCHASE_GRN",
+            reference_id=invoice.pk,
+            description=f"استلام بضاعة فاتورة {invoice.invoice_number} | {invoice.partner.name}"[:500],
+            lines_data=[
+                {'account': inventory_account.id, 'debit': goods_clearing_amt.quantize(Decimal('0.01')),
+                 'credit': Decimal('0'), 'partner': invoice.partner_id,
+                 'description': f"مخزون مستلَم — {invoice.invoice_number}"[:500]},
+                {'account': gr_ir_account.id, 'debit': Decimal('0'),
+                 'credit': goods_clearing_amt.quantize(Decimal('0.01')), 'partner': invoice.partner_id,
+                 'description': f"تصفية وسيط الاستلام — {invoice.invoice_number}"[:500]},
+            ],
+            currency=invoice.currency,
+            exchange_rate=invoice.exchange_rate,
+        )
+
+        fully = all(
+            Decimal(str(it.received_quantity or 0)) >= Decimal(str(it.quantity or 0))
+            for it in invoice.items.all() if it.product_id
+        )
+        invoice.receipt_status = (
+            PurchaseInvoice.RECEIPT_FULL if fully else PurchaseInvoice.RECEIPT_PARTIAL
+        )
+        invoice.save(update_fields=['receipt_status'])
+
+        logger.info(
+            "purchase post+receive (GR/IR): invoice=%s receipt_journal=%s movements=%d clearing=%s",
+            invoice.id, receipt_journal.id, movements, goods_clearing_amt,
+        )
+        return {'journal_id': receipt_journal.id, 'movements': movements}
 
     def perform_update(self, serializer):
         instance = serializer.instance
@@ -2249,7 +2386,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 result = unpost_document(
                     tenant_id=invoice.tenant_id,
                     reference_id=invoice.pk,
-                    journal_reference_types=['PURCHASE_INVOICE', 'PURCHASE_RECEIPT'],
+                    journal_reference_types=['PURCHASE_INVOICE', 'PURCHASE_GRN', 'PURCHASE_RECEIPT'],
                     stock_reference_types=['PURCHASE_INVOICE'],
                     user=request.user,
                     document_label=f"فاتورة شراء {invoice.invoice_number}",

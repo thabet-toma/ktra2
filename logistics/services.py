@@ -156,6 +156,30 @@ def _resolve_vat_input_account(tenant) -> Account:
     return acc
 
 
+def _resolve_gr_ir_account(tenant) -> Account:
+    """الحساب الوسيط «بضاعة مُستلَمة لم تُفوتَر» (GR/IR Clearing، كود 2106).
+
+    يفصل حدث استلام البضاعة عن الالتزام للمورّد: قيد الاستلام يدائنه، وقيد
+    الفاتورة يدينه — فيُصفَّر عندما يُنشآن معاً. يُنشأ تلقائياً للمستأجرين الذين
+    لم تُبذَر شجرتهم بعد (لا يتطلب إعادة seed).
+    """
+    acc = Account.objects.filter(tenant=tenant, code="2106").first()
+    if acc:
+        return acc
+    parent = Account.objects.filter(tenant=tenant, code="21").first()
+    acc, _ = Account.objects.get_or_create(
+        tenant=tenant,
+        code="2106",
+        defaults={
+            "name": "بضاعة مُستلَمة لم تُفوتَر (GR/IR Clearing)",
+            "account_type": "Liability",
+            "parent": parent,
+            "is_active": True,
+        },
+    )
+    return acc
+
+
 def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement_date=None):
     """استلام بضاعة فاتورة شراء محلية إلى المخزن (انعكاس على المستودع + قيد).
 

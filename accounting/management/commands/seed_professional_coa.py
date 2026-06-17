@@ -47,6 +47,7 @@ class Command(BaseCommand):
             ('2103', 'مصاريف مستحقة (Accrued Expenses)', 'Liability', '21'),
             ('2104', 'ضريبة القيمة المضافة - مخرجات (VAT Output)', 'Liability', '21'),
             ('2105', 'رسوم جمركية مستحقة (Customs Duties Payable)', 'Liability', '21'),
+            ('2106', 'بضاعة مُستلَمة لم تُفوتَر (GR/IR Clearing)', 'Liability', '21'),
             ('22', 'الالتزامات غير المتداولة (Non-current Liabilities)', 'Liability', '2'),
             ('2201', 'قروض طويلة الأجل (Long-term Loans)', 'Liability', '22'),
 
