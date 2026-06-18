@@ -17,6 +17,20 @@ import { ThemeProvider } from './contexts/ThemeContext';
 
 import './styles/index.css';
 
+// عند تفعيل Service Worker جديد (بناء أحدث) أعِد تحميل الصفحة مرة واحدة كي يعمل
+// المستخدم دائماً على آخر كود — بلا مسح كاش يدوي. الحارس يمنع حلقة إعادة التحميل،
+// ولا يُعاد التحميل عند أول تثبيت (لا يوجد controller سابق).
+if ('serviceWorker' in navigator) {
+  let _swReloaded = false;
+  // أعِد التحميل فقط عند *تحديث* (كان هناك controller أصلاً)، لا عند أول تثبيت.
+  const _hadController = !!navigator.serviceWorker.controller;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (_swReloaded || !_hadController) return;
+    _swReloaded = true;
+    window.location.reload();
+  });
+}
+
 const rootElement = document.getElementById('root');
 if (!rootElement) {
   throw new Error("Could not find root element to mount to");

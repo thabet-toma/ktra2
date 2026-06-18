@@ -218,6 +218,33 @@ export async function getLastSalePrice(params: {
 }
 
 // -------------------------------------------------------------
+// FEAT-2: السعر المقترح لبند البيع عبر PriceResolver المشترك
+// (آخر سعر دفعه العميل ← سعر البيع الافتراضي ← فارغ) مع تطبيع العملة/الضريبة.
+// -------------------------------------------------------------
+export type ResolvedPriceResponse = {
+  unit_price: string | null;
+  strategy_used: string | null;
+  strategy_requested: string;
+  source: { document_type: string; document_number?: string } | null;
+};
+
+export async function resolveSalePrice(params: {
+  product: number;
+  customer?: number | "";
+  currency?: number | "";
+  exchange_rate?: number | string;
+  tax_inclusive?: boolean;
+}): Promise<ResolvedPriceResponse> {
+  const q = new URLSearchParams();
+  q.set("product", String(params.product));
+  if (params.customer != null && params.customer !== "") q.set("customer", String(params.customer));
+  if (params.currency != null && params.currency !== "") q.set("currency", String(params.currency));
+  if (params.exchange_rate != null) q.set("exchange_rate", String(params.exchange_rate));
+  if (params.tax_inclusive) q.set("tax_inclusive", "true");
+  return apiGetObject(`sales/invoices/resolve-price/?${q.toString()}`, { tenantId: tid() });
+}
+
+// -------------------------------------------------------------
 // task18 DEF-C1: رصيد الشريك (قبل/بعد) — يعمل للعميل والمورد
 // -------------------------------------------------------------
 export type PartnerBalanceResponse = {

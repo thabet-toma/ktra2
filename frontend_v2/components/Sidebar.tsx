@@ -90,6 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
   const procurementLinks = [
     { view: "purchase-invoices" as AppView, label: "فواتير الشراء", icon: <NoteIcon className="h-5 w-5" /> },
+    { view: "purchase-settings" as AppView, label: "إعدادات الشراء", icon: <SettingsIcon className="h-5 w-5" /> },
     { view: "old-invoices" as AppView, label: "أرشيف الفواتير", icon: <History className="h-5 w-5" /> },
     { view: "price-offers" as AppView, label: "عروض الأسعار", icon: <FileText className="h-5 w-5" /> },
     { view: "deals-management" as AppView, label: "إدارة الصفقات", icon: <Handshake className="h-5 w-5" /> },

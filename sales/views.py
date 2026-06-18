@@ -343,6 +343,35 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         )
         return Response(data)
 
+    @action(detail=False, methods=["get"], url_path="resolve-price")
+    def resolve_price(self, request):
+        """FEAT-2: السعر المقترح لبند بيع — آخر سعر دفعه هذا العميل لهذا الصنف.
+
+        يفوّض إلى core.pricing (المصدر المشترك مع الشراء): آخر بيع للعميل ثم
+        سعر البيع الافتراضي للصنف ثم فارغ — مع تطبيع العملة وأساس الضريبة.
+        """
+        from core.pricing import resolve_sales_price
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"error": "لا يوجد شركة (tenant)."}, status=status.HTTP_400_BAD_REQUEST)
+        pid = request.query_params.get("product")
+        if not pid or not pid.isdigit():
+            return Response({"error": "باراميتر product مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
+        cid = request.query_params.get("customer")
+        rate = request.query_params.get("exchange_rate")
+        cur = request.query_params.get("currency")
+        inc = request.query_params.get("tax_inclusive")
+        data = resolve_sales_price(
+            tenant_id=tenant.TenantID,
+            product_id=int(pid),
+            customer_id=int(cid) if cid and cid.isdigit() else None,
+            target_currency_id=int(cur) if cur and cur.isdigit() else None,
+            target_exchange_rate=Decimal(str(rate)) if rate else Decimal("1"),
+            target_tax_inclusive=str(inc).lower() in ("1", "true", "yes"),
+        )
+        return Response(data)
+
     @action(detail=False, methods=["get"], url_path="profits")
     def profits(self, request):
         """task18 DEF-C4: تقرير أرباح الفواتير (إيراد/تكلفة/ربح لكل فاتورة + إجماليات)."""

@@ -34,7 +34,6 @@ import { SupplierModal } from "@/components/common/SupplierModal";
 import { mapPurchaseInvoiceDtoToInvoice } from "@/utils/mapPurchaseInvoiceDto";
 import { dealsService } from "@/services/dealsService";
 import { shipmentsService } from "@/services/shipmentsService";
-import { priceListService } from "@/services/priceListService";
 import {
   invoiceGrandTotalIls,
   invoiceVatBaseIls,
@@ -104,6 +103,25 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   
   const [allDbItems, setAllDbItems] = useState<Item[]>(initialDbItems);
+  // الأصناف تصل من الأب بشكل غير متزامن (subscribeToItems). useState يلتقط الـ prop
+  // عند التركيب فقط، فإن فُتحت الفاتورة قبل اكتمال التحميل بقيت القائمة فارغة («لا
+  // يوجد تطابق») حتى إعادة فتحها. هذا التأثير يعتمد آخر قائمة وصلت مع الحفاظ على أي
+  // صنف أُنشئ inline، ويتفادى إعادة الرندر إن لم يتغيّر المحتوى فعلاً.
+  useEffect(() => {
+    setAllDbItems((prev) => {
+      const incoming = initialDbItems || [];
+      const incomingIds = new Set(incoming.map((i) => String(i.id)));
+      const localOnly = prev.filter((p) => !incomingIds.has(String(p.id)));
+      const merged = localOnly.length ? [...incoming, ...localOnly] : incoming;
+      if (
+        merged.length === prev.length &&
+        merged.every((m, i) => String(m.id) === String(prev[i]?.id))
+      ) {
+        return prev; // لا تغيير فعلي — تجنّب إعادة الرندر
+      }
+      return merged;
+    });
+  }, [initialDbItems]);
   const [showSupplierPicker, setShowSupplierPicker] = useState(false);
   const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
   const [showItemSearch, setShowItemSearch] = useState(false);
@@ -538,6 +556,21 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   /* task13 M5: منطق تعبئة السطر مشترك بين المنتقي المدمج والفهرس الكامل */
+  // FEAT-1: السعر المقترح لبند الشراء عبر PriceResolver المشترك في الخادم
+  // (آخر/أقل سعر شراء حسب إعدادات الشراء، ثم تكلفة الصنف، ثم فارغ). يحل محل
+  // مسار supplier_prices القديم (مصدر حقيقة موازٍ) — الآن من الفواتير المرحَّلة.
+  const resolveSuggestedPrice = async (productId: string | number): Promise<number> => {
+    const pid = Number(productId);
+    if (!pid) return 0;
+    try {
+      const r = await purchaseInvoiceApi.resolvePrice({ product: pid });
+      return r.unit_price != null ? Number(r.unit_price) || 0 : 0;
+    } catch (err) {
+      console.error("resolvePrice failed", err);
+      return 0;
+    }
+  };
+
   const applyItemAt = (index: number | null, item: Item, lastPrice?: number) => {
     // task18 DEF-C3: إن كان الصنف موجوداً في سطر آخر — نبّه المستخدم ودعه يختار:
     // موافق = دمج الكمية في السطر القائم · إلغاء = إضافته كسطر مستقل (سعر مختلف).
@@ -571,6 +604,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       // إلغاء الدمج → نتابع بالمسار العادي فيُملأ السطر الجاري كصنف مستقل
       // (سطر مكرّر بسعره الخاص — وهو المطلوب).
     }
+    // FEAT-1 edit-protection: السعر اليدوي يُحفظ فقط عند **إعادة اختيار نفس الصنف**
+    // على السطر. اختيار صنف *مختلف* يُعاد تسعيره دائماً بسعر الصنف الجديد — وإلا
+    // يرث الصنف الجديد سعر الصنف القديم.
+    const currentRow =
+      index !== null && index < (formData.items || []).length
+        ? (formData.items || [])[index]
+        : undefined;
+    const existingPrice = Number(currentRow?.unitPrice) || 0;
+    const sameProduct = currentRow != null && String(currentRow.itemId) === String(item.id);
+    const qty = 1;
+    const resolvedPrice = sameProduct && existingPrice > 0 ? existingPrice : (lastPrice || 0);
     const newItem: InvoiceItem = {
       id: crypto.randomUUID(),
       itemId: item.id,
@@ -580,9 +624,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       specifications: item.specifications || "",
       imageUrls: item.imageUrls,
       hsCodePrimary: item.hsCodePrimary,
-      quantity: 1,
-      unitPrice: roundSqlMoney4(lastPrice || 0),
-      totalPrice: roundSqlMoney2(lastPrice || 0),
+      quantity: qty,
+      unitPrice: roundSqlMoney4(resolvedPrice),
+      totalPrice: roundSqlMoney2(qty * resolvedPrice),
     };
 
     let updatedItems = [...(formData.items || [])];
@@ -990,12 +1034,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onPick={async (id) => {
         const it = allDbItems.find((x) => String(x.id) === String(id));
         if (it) {
-          let lastPrice = 0;
-          if (formData.supplierId) {
-            try {
-              lastPrice = await priceListService.getLastSupplierPrice(formData.supplierId, String(it.id));
-            } catch (err) { console.error("Failed to fetch last price", err); }
-          }
+          const lastPrice = await resolveSuggestedPrice(it.id);
           applyItemAt(rowIndex, it, lastPrice);
         }
       }}
@@ -1494,12 +1533,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           items={allDbItems}
           disabled={readOnly || formData.isHistorical}
           onPickItem={async (it) => {
-            let lastPrice = 0;
-            if (formData.supplierId) {
-              try {
-                lastPrice = await priceListService.getLastSupplierPrice(formData.supplierId, String(it.id));
-              } catch (err) { console.error("Failed to fetch last price", err); }
-            }
+            const lastPrice = await resolveSuggestedPrice(it.id);
             applyItemAt(null, it, lastPrice);
           }}
           onItemCreated={(it) =>

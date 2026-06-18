@@ -14,6 +14,17 @@ from accounting.models import Account, Cheque
 DEC = Decimal("0.01")
 
 
+def get_or_create_purchase_settings(tenant):
+    """FEAT-1: يُعيد (أو يُنشئ) إعدادات الشراء للشركة بقيم افتراضية."""
+    from logistics.models import PurchaseSettings
+
+    tenant_id = getattr(tenant, "TenantID", tenant)
+    obj = PurchaseSettings.objects.filter(tenant_id=tenant_id).first()
+    if obj is None:
+        obj = PurchaseSettings.objects.create(tenant_id=tenant_id)
+    return obj
+
+
 def _resolve_ap_account(partner) -> Account:
     """P-H-3: يحلّ حساب الذمم الدائنة للمورد بسلسلة أولويات.
 

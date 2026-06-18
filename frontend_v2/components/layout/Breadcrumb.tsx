@@ -17,6 +17,8 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'sales-customer-payments': 'دفعات العملاء',
   'sales-customers': 'العملاء',
   'sales-settings': 'إعدادات المبيعات',
+  'purchase-settings': 'إعدادات الشراء',
+  'product-profile': 'بطاقة الصنف',
   'purchase-invoices': 'فواتير الشراء',
   'old-invoices': 'أرشيف الفواتير',
   'price-offers': 'عروض الأسعار',

@@ -24,6 +24,7 @@ from .serializers import (
     LogisticsClearancePaymentSerializer,
     PurchaseInvoiceSerializer, PurchaseInvoiceListSerializer,
     LocalShipmentSerializer, SupplierPaymentSerializer,
+    PurchaseSettingsSerializer,
 )
 from accounting.models import Account, TaxRate
 from inventory.models import StockMovement
@@ -1741,6 +1742,38 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         inv_num = self.request.data.get('invoice_number') or self._next_invoice_number(tenant)
         serializer.save(tenant=tenant, invoice_number=inv_num)
 
+    @action(detail=False, methods=['get'], url_path='resolve-price')
+    def resolve_price(self, request):
+        """FEAT-1: سعر الوحدة المقترح لصنف حسب استراتيجية إعدادات الشراء.
+
+        يفوّض إلى core.pricing (المصدر المشترك مع المبيعات). الاستراتيجية تؤخذ من
+        إعدادات الشراء افتراضياً ويمكن تجاوزها بـ ?strategy=.
+        """
+        from decimal import Decimal
+
+        from core.pricing import resolve_purchase_price
+        from logistics.services import get_or_create_purchase_settings
+
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'لا يوجد شركة (tenant).'}, status=status.HTTP_400_BAD_REQUEST)
+        pid = request.query_params.get('product')
+        if not pid or not str(pid).isdigit():
+            return Response({'error': 'باراميتر product مطلوب.'}, status=status.HTTP_400_BAD_REQUEST)
+        strategy = request.query_params.get('strategy') or get_or_create_purchase_settings(
+            tenant
+        ).purchase_default_price_strategy
+        rate = request.query_params.get('exchange_rate')
+        cur = request.query_params.get('currency')
+        data = resolve_purchase_price(
+            tenant_id=tenant.TenantID,
+            product_id=int(pid),
+            strategy=strategy,
+            target_currency_id=int(cur) if cur and str(cur).isdigit() else None,
+            target_exchange_rate=Decimal(str(rate)) if rate else Decimal('1'),
+        )
+        return Response(data)
+
     @action(detail=True, methods=['post'], url_path='receive')
     def receive(self, request, pk=None):
         """استلام بضاعة فاتورة محلية إلى المخزن (انعكاس على المستودع + قيد).
@@ -3008,3 +3041,33 @@ def _build_landed_cost_summary(shipment, *, detailed=False):
         'deals': deals_data,
         'clearance': clearance_data,
     }
+
+
+class PurchaseSettingsViewSet(BaseTenantViewSet):
+    """FEAT-1: نقطة واحدة (GET/PUT/PATCH) لإعدادات الشراء للشركة.
+
+    مرآة SalesSettingsViewSet — استراتيجية التسعير التلقائي لبنود فاتورة الشراء.
+    """
+
+    serializer_class = PurchaseSettingsSerializer
+
+    def get_queryset(self):
+        from logistics.models import PurchaseSettings
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return PurchaseSettings.objects.none()
+        return PurchaseSettings.objects.filter(tenant=tenant)
+
+    @action(detail=False, methods=['get', 'put', 'patch'], url_path='current')
+    def current(self, request):
+        from logistics.services import get_or_create_purchase_settings
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'لا يوجد شركة (tenant).'}, status=status.HTTP_400_BAD_REQUEST)
+        ps = get_or_create_purchase_settings(tenant)
+        if request.method == 'GET':
+            return Response(PurchaseSettingsSerializer(ps).data)
+        ser = PurchaseSettingsSerializer(ps, data=request.data, partial=True)
+        ser.is_valid(raise_exception=True)
+        ser.save()
+        return Response(ser.data)

@@ -441,3 +441,126 @@ def _resolve_line_account(product, account_type='revenue', *, tenant_id=None):
         f"لم يُعثر على حساب {account_type} للصنف «{product.sku or product.name}». "
         "حدد حساباً للصنف أو للتصنيف أو في إعدادات المبيعات."
     )
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# FEAT-3 — Product profile (KPIs + linked invoices + stock ledger)
+# ──────────────────────────────────────────────────────────────────────────
+def product_profile(*, tenant_id: int, product_id: int) -> dict:
+    """Header KPIs for the product profile. Totals come from posted documents;
+    on-hand / valuation come from the canonical Product fields (A4)."""
+    from django.db.models import Sum
+
+    from logistics.models import PurchaseInvoiceItem
+    from sales.models import SalesInvoice, SalesInvoiceLine
+
+    p = Product.objects.select_related('category').get(id=product_id, tenant_id=tenant_id)
+
+    purchased = PurchaseInvoiceItem.objects.filter(
+        invoice__tenant_id=tenant_id, invoice__is_posted=True, product_id=product_id,
+    ).aggregate(q=Sum('quantity'), v=Sum('total_price'))
+    sold = SalesInvoiceLine.objects.filter(
+        tenant_id=tenant_id, product_id=product_id,
+        invoice__status=SalesInvoice.STATUS_POSTED,
+        invoice__invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+    ).aggregate(q=Sum('quantity'), v=Sum('line_total_excl_tax'))
+
+    on_hand = Decimal(str(p.quantity_on_hand or 0))
+    avg_cost = Decimal(str(p.avg_cost or 0))
+    return {
+        'id': p.id,
+        'sku': p.sku,
+        'name': p.name_ar or p.name_en or p.sku,
+        'category': p.category.name if p.category_id else None,
+        'quantity_on_hand': str(on_hand),
+        'avg_cost': str(avg_cost),
+        'inventory_valuation': str((on_hand * avg_cost).quantize(Decimal('0.01'))),
+        'purchased_qty': str(purchased['q'] or 0),
+        'purchased_value': str(purchased['v'] or 0),
+        'sold_qty': str(sold['q'] or 0),
+        'sold_value': str(sold['v'] or 0),
+    }
+
+
+_STOCK_IN_TYPES = {'IN', 'ADJUST_IN', 'RETURN_IN'}
+
+
+def product_stock_ledger(*, tenant_id: int, product_id: int, limit: int = 50, offset: int = 0) -> dict:
+    """Chronological stock ledger for a product, with a running balance per row.
+
+    The running balance reuses the movement's stored `quantity_after` — the
+    canonical per-product on-hand after that movement — so it reconciles exactly
+    to current stock (A4) without a parallel computation. Paginated.
+    """
+    base = (
+        StockMovement.objects.filter(tenant_id=tenant_id, product_id=product_id)
+        .select_related('warehouse')
+        .order_by('movement_date', 'id')
+    )
+    total = base.count()
+    rows = []
+    for m in base[offset:offset + limit]:
+        qty = Decimal(str(m.quantity or 0))
+        is_in = m.movement_type in _STOCK_IN_TYPES
+        rows.append({
+            'id': m.id,
+            'date': m.movement_date.isoformat() if m.movement_date else None,
+            'movement_type': m.movement_type,
+            'movement_type_label': m.get_movement_type_display(),
+            'reference_type': m.reference_type,
+            'reference_id': m.reference_id,
+            'warehouse': m.warehouse.name if m.warehouse_id else None,
+            'qty_in': str(qty) if is_in else '0',
+            'qty_out': str(qty) if not is_in else '0',
+            'running_balance': str(m.quantity_after),
+        })
+    return {'results': rows, 'count': total, 'limit': limit, 'offset': offset}
+
+
+def product_linked_invoices(*, tenant_id: int, product_id: int) -> list[dict]:
+    """All purchase + sales invoices that contain this product (clickable)."""
+    from logistics.models import PurchaseInvoiceItem
+    from sales.models import SalesInvoiceLine
+
+    out: list[dict] = []
+    pis = (
+        PurchaseInvoiceItem.objects.filter(
+            invoice__tenant_id=tenant_id, product_id=product_id,
+        )
+        .select_related('invoice', 'invoice__partner')
+        .order_by('-invoice__invoice_date', '-invoice_id')
+    )
+    seen_p = set()
+    for it in pis:
+        if it.invoice_id in seen_p:
+            continue
+        seen_p.add(it.invoice_id)
+        inv = it.invoice
+        out.append({
+            'document_type': 'PURCHASE_INVOICE',
+            'document_id': inv.id,
+            'document_number': inv.invoice_number,
+            'date': inv.invoice_date.isoformat() if inv.invoice_date else None,
+            'party': inv.partner.name if inv.partner_id else None,
+            'is_posted': bool(inv.is_posted),
+        })
+    sls = (
+        SalesInvoiceLine.objects.filter(tenant_id=tenant_id, product_id=product_id)
+        .select_related('invoice', 'invoice__customer')
+        .order_by('-invoice__invoice_date', '-invoice_id')
+    )
+    seen_s = set()
+    for ln in sls:
+        if ln.invoice_id in seen_s:
+            continue
+        seen_s.add(ln.invoice_id)
+        inv = ln.invoice
+        out.append({
+            'document_type': 'SALES_INVOICE',
+            'document_id': inv.id,
+            'document_number': inv.invoice_number,
+            'date': inv.invoice_date.isoformat() if inv.invoice_date else None,
+            'party': inv.customer.name if inv.customer_id else None,
+            'is_posted': inv.status == 'posted',
+        })
+    return out

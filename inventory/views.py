@@ -162,6 +162,35 @@ class ProductViewSet(viewsets.ModelViewSet):
         qs = StockMovement.objects.filter(product=product).select_related('partner')
         return Response(StockMovementSerializer(qs[:50], many=True).data)
 
+    # ── FEAT-3: Product profile ──────────────────────────────────
+    @action(detail=True, methods=['get'], url_path='profile')
+    def profile(self, request, pk=None):
+        from inventory.services import product_profile
+        product = self.get_object()
+        return Response(product_profile(tenant_id=product.tenant_id, product_id=product.id))
+
+    @action(detail=True, methods=['get'], url_path='stock-ledger')
+    def stock_ledger(self, request, pk=None):
+        from inventory.services import product_stock_ledger
+        product = self.get_object()
+        try:
+            limit = min(int(request.query_params.get('limit', 50)), 200)
+        except (TypeError, ValueError):
+            limit = 50
+        try:
+            offset = max(int(request.query_params.get('offset', 0)), 0)
+        except (TypeError, ValueError):
+            offset = 0
+        return Response(product_stock_ledger(
+            tenant_id=product.tenant_id, product_id=product.id, limit=limit, offset=offset))
+
+    @action(detail=True, methods=['get'], url_path='invoices')
+    def invoices(self, request, pk=None):
+        from inventory.services import product_linked_invoices
+        product = self.get_object()
+        return Response(product_linked_invoices(
+            tenant_id=product.tenant_id, product_id=product.id))
+
 
 class WarehouseViewSet(viewsets.ModelViewSet):
     """مستودعات الشركة — معزولة بالشركة. الحذف يكتفي بالتعطيل (is_active=False)."""

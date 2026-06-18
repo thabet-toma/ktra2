@@ -3,6 +3,7 @@
  * يستخدم SQL products من inventoryApi (لا Firestore).
  */
 import React, { useEffect, useState, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
@@ -18,6 +19,7 @@ const fmt = (n: number | string) =>
 type View = "list" | "form";
 
 export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products" | "categories" }> = ({ initialTab = "products" }) => {
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<"products" | "categories">(initialTab);
   
   useEffect(() => {
@@ -101,7 +103,16 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           {p.sku}
         </b>
     ) },
-    { key: "name_ar", header: "اسم الصنف", render: (p) => <>{p.name_ar || p.name_en || "—"}</> },
+    { key: "name_ar", header: "اسم الصنف", render: (p) => (
+      // FEAT-3: اسم الصنف يفتح بطاقة الصنف (الفواتير المرتبطة + دفتر الحركة).
+      <button
+        type="button"
+        className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
+        onClick={(e) => { e.stopPropagation(); navigate(`/products/${p.id}`); }}
+      >
+        {p.name_ar || p.name_en || "—"}
+      </button>
+    ) },
     { key: "cat", header: "التصنيف", width: "140px", render: (p) => <>{p.category_name || "—"}</> },
     { key: "qty", header: "الكمية", width: "80px", align: "center", numeric: true,
       render: (p) => {

@@ -234,4 +234,50 @@ export const purchaseInvoiceApi = {
     await handle(res, "recalculateLandedCost");
     return res.json();
   },
+
+  /**
+   * FEAT-1: السعر المقترح لصنف عند إضافته لبند فاتورة شراء. يفوّض للـ PriceResolver
+   * المشترك في الخادم (آخر/أقل سعر شراء حسب إعدادات الشراء، ثم تكلفة الصنف، ثم فارغ).
+   */
+  resolvePrice: async (params: {
+    product: number;
+    currency?: number | null;
+    exchange_rate?: number | string | null;
+    strategy?: string;
+  }): Promise<{
+    unit_price: string | null;
+    strategy_used: string | null;
+    strategy_requested: string;
+    source: { document_type: string; document_number?: string } | null;
+  }> => {
+    const q = new URLSearchParams();
+    q.set("product", String(params.product));
+    if (params.currency != null) q.set("currency", String(params.currency));
+    if (params.exchange_rate != null) q.set("exchange_rate", String(params.exchange_rate));
+    if (params.strategy) q.set("strategy", params.strategy);
+    const res = await safeFetch(`${BASE}/resolve-price/?${q}`, { headers: headers() });
+    await handle(res, "resolvePrice");
+    return res.json();
+  },
+
+  /** FEAT-1: إعدادات الشراء (استراتيجية التسعير التلقائي). */
+  getSettings: async (): Promise<{ purchase_default_price_strategy: string }> => {
+    const res = await safeFetch(`${API_BASE}/logistics/purchase-settings/current/`, {
+      headers: headers(),
+    });
+    await handle(res, "getPurchaseSettings");
+    return res.json();
+  },
+
+  updateSettings: async (body: {
+    purchase_default_price_strategy: string;
+  }): Promise<{ purchase_default_price_strategy: string }> => {
+    const res = await safeFetch(`${API_BASE}/logistics/purchase-settings/current/`, {
+      method: "PATCH",
+      headers: headers(),
+      body: JSON.stringify(body),
+    });
+    await handle(res, "updatePurchaseSettings");
+    return res.json();
+  },
 };

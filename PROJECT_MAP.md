@@ -65,6 +65,101 @@ frontend_v2/
 └── constants/                 # App constants
 ```
 
+## [AUDIT — task20, 2026-06-18] (التسعير الذكي + بطاقات الكيانات — FEAT-1..4)
+
+نطاق: تسعير تلقائي لبنود الشراء (FEAT-1) والبيع حسب العميل (FEAT-2) + بطاقة صنف
+احترافية (FEAT-3) + بطاقتا عميل/مورد (FEAT-4). المبدأ المعماري: مصدر حقيقة واحد
+(الفواتير المرحَّلة/الأستاذ) — لا مخزن أسعار موازٍ.
+
+### الطبقة المشتركة (Core / DRY)
+- **`core/pricing.py` — PriceResolver (strategy pattern):** دالّتان عامتان
+  `resolve_purchase_price` (LAST_PURCHASE/LOWEST_PURCHASE) و`resolve_sales_price`
+  (LAST_SALE_TO_CUSTOMER) + facade `PriceResolver.resolve`. يقرأ **فقط** المستندات
+  المرحَّلة (`PurchaseInvoiceItem` على فاتورة `is_posted`، `SalesInvoiceLine` على
+  فاتورة `posted/sale`). تطبيع العملة عبر سعر صرف المستند (للأساس ثم للعملة الهدف)،
+  وتطبيع أساس الضريبة (inclusive↔exclusive) عبر نسبة ضريبة السطر. سلسلة سقوط: تاريخ
+  الشراء → `Product.avg_cost`؛ تاريخ بيع العميل → سعر بيع الصنف (`ProductPriceTier`
+  المطابق للعملة) → فارغ. تسجيل (logging) لكل مسار. **يبطل** مسار
+  `priceListService.getLastSupplierPrice` القديم (مجموعة `supplier_prices` الموازية).
+- **`frontend_v2/components/shared/LedgerTable.tsx`:** مكوّن واحد لقوائم الحركات ذات
+  «الرصيد الجاري» — أعمدة كبارامتر (وارد/صادر للصنف · Dr/Cr للشريك) + `DocRefCell`
+  (مرجع مستند قابل للنقر عبر `utils/entityLinks.invoicePathForReference` — مُحلِّل
+  المراجع المشترك). يستهلكه ProductProfilePage + PartnerProfilePage.
+
+### FEAT-1 — تسعير الشراء + إعدادات الشراء
+- موديل `logistics.PurchaseSettings` (`purchase_default_price_strategy`) + migration
+  `logistics/0045_purchasesettings` + `get_or_create_purchase_settings`.
+- نقاط نهاية: `GET logistics/purchase-invoices/resolve-price/?product=&strategy=&exchange_rate=`
+  · `GET|PUT|PATCH logistics/purchase-settings/current/`.
+- واجهة: `PurchaseSettingsPage` (view `purchase-settings`, مسار `/purchase-settings`,
+  في شريط المشتريات الجانبي) · `InvoiceForm` يستدعي `purchaseInvoiceApi.resolvePrice`
+  عند اختيار صنف (يحل محل `getLastSupplierPrice`) مع **حماية تعديل** (لا يَدُس سعراً
+  أُدخل يدوياً — يُملأ فقط إن كان صفراً).
+
+### FEAT-2 — تسعير البيع حسب العميل
+- نقطة نهاية: `GET sales/invoices/resolve-price/?product=&customer=&exchange_rate=&tax_inclusive=`
+  (`last-price` القديمة باقية). `salesApi.resolveSalePrice`.
+- واجهة: `SalesInvoiceEditor` — `onSelectProduct` يستدعي الـ resolver؛ تغيير العميل
+  بعد وجود بنود يُعيد تسعير الأسطر **غير المَلموسة فقط** (effect على `customerId`).
+  حقل `DraftLine.priceTouched` (يُضبط عند تحرير السعر يدوياً وعلى الأسطر المحمَّلة/
+  المستعادة) يحمي السعر اليدوي.
+
+### FEAT-3 — بطاقة الصنف
+- `inventory/services.py`: `product_profile` (KPIs) · `product_stock_ledger` (رصيد
+  جارٍ = `StockMovement.quantity_after` المخزّن ⇒ يطابق المخزون الحالي، مُرقَّم) ·
+  `product_linked_invoices`. أكشِنات على `ProductViewSet`: `profile/`, `stock-ledger/`,
+  `invoices/`.
+- واجهة: `components/items/ProductProfilePage` (view `product-profile`, مسار
+  `/products/:id`) — اسم الصنف في `ItemsManagement` يفتحها.
+
+### FEAT-4 — بطاقتا العميل/المورد
+- `accounting/services.py`: `partner_account_statement` (Dr/Cr + رصيد جارٍ، مُرقَّم،
+  يطابق `partner_posted_balance`). أكشِنات على `PartnerViewSet`: `profile/`
+  (الرصيد + جهة Dr/Cr + إجماليات + آخر معاملة), `statement/`, `invoices/`.
+- واجهة: `PartnerProfilePage` — مُلئت تبويبات «ملخص الرصيد/كشف الحساب/الفواتير»
+  عبر LedgerTable (بدل placeholders «قريباً»؛ أُزيل تبويب GL على مستوى الحساب لصالح
+  كشف الحساب المحصور بالشريك).
+
+### تحقق
+- اختبارات جديدة (TDD، +28): `logistics/tests/test_purchase_price_resolver.py` (8) ·
+  `sales/tests/test_sales_price_resolver.py` (6) · `inventory/tests/test_product_profile.py` (7) ·
+  `accounting/tests/test_partner_statement.py` (7).
+- **backend 211/211 أخضر** · tsc 0 · vite build OK · `makemigrations --check` لا انحراف ·
+  `manage.py check` 0. لم يُتحقق في متصفح حي للشاشات الداخلية (تتطلب باك-إند + جلسة —
+  نفس قيد المهام السابقة)؛ التحقق عبر الاختبارات + الأنواع + البناء.
+- **ملاحظة نشر:** `python manage.py migrate` (logistics/0045 — جدول `purchase_module_settings`).
+
+### إصلاح كاش الـ PWA والتحديثات (بعد بلاغ «البطاقة فارغة/عالقة»)
+- **السبب الجذري:** `sw.ts` كان (1) يعترض نداءات `/api/` **عابرة الأصل** (الواجهة :3000،
+  الـ API :8000) بـ networkFirst/مهلة 3ث + سقوط للكاش ⇒ يُقدَّم رد قديم/فارغ أو 503
+  بدل الخادم؛ (2) `cacheFirst` على JS باسم كاش ثابت `ktra-static-v1` ⇒ كود قديم محبوس؛
+  (3) `registerType:'prompt'` بلا إعادة تحميل تلقائية ⇒ التحديث لا يصل بلا مسح يدوي.
+- **الإصلاح:** حارس **same-origin** (نداءات الأصل الآخر تتجاوز الـ SW تماماً) · اسم كاش
+  ثابت مشتق من بصمة البناء `ktra-static-${hash(__WB_MANIFEST)}` ⇒ activate يمسح كاش
+  أي نسخة سابقة · التنقّل (navigate) network-first ليصل index.html الأحدث · مهلة الـ API
+  8ث · `index.tsx` يستمع لـ `controllerchange` فيعيد التحميل مرة واحدة عند تفعيل SW جديد
+  (حارس `_hadController` يمنع ذلك عند أول تثبيت وحلقات التحميل). **تحقق:** vite build OK ·
+  tsc 0. **إجراء لمرة واحدة للخروج من SW القديم العالق:** إعادة بناء + إعادة تحميل
+  (أو DevTools→Application→Unregister إن لزم)؛ بعدها التحديثات تُطبَّق تلقائياً.
+
+### إصلاح جذري: البطاقة فارغة لأن `id`=undefined (لا علاقة للكاش/الخادم)
+- **السبب الجذري المؤكَّد:** `App` مركّب في `index.tsx` على مسار splat `<Route path="/*">`
+  بلا أي `<Route path=":id">` داخلي (يعرض الصفحات عبر `switch(appView)`). لذا
+  `useParams().id` داخل `ProductProfilePage`/`PartnerProfilePage` يرجع **undefined**،
+  وشرط `if (!id) return;` في كل الـ effects يمنع إرسال أي طلب ⇒ الاسم يبقى «جاري
+  التحميل...» والتبويبات فارغة، وسجل الخادم لا يُظهر أي نداء `/profile|/invoices|/statement`.
+  (تم الفحص: خادم :8000 يردّ 401 على النقاط = موجودة وسليمة؛ المشكلة كانت أن الواجهة
+  لا ترسل الطلب أصلاً.)
+- **الإصلاح:** استخراج المعرّف من `useLocation().pathname` عبر regex
+  (`/products/([^/]+)` و`/partners/([^/]+)`) بدل `useParams`. هذا أصلح بطاقة الصنف
+  **وبطاقة الشريك** (التي لم تكن تعمل ببيانات حقيقية أصلاً لنفس السبب). vite build OK · tsc 0.
+
+### [ORPHANS & PENDING — task20]
+- `priceListService.ts` لم يعد مستهلَكاً من `InvoiceForm` (بقي معرّفاً — لم يُحذف
+  لاحتمال استهلاك آخر؛ مرشّح للإزالة لاحقاً).
+- تطبيع UoM: النظام بلا معامِلات تحويل وحدات — السعر بوحدة الصنف الأساسية (A5).
+- بطاقة الصنف: لا صورة في الرأس بعد (KPIs نصية)؛ تُضاف عند جولة UI حية.
+
 ## [AUDIT — task16, 2026-06-13] (Surgical sweep — Section B accounting first, then UX/nav)
 
 ### B. القيد المزدوج يمرّ دائماً عبر الـ subledger (مُنفَّذ + مُختبَر)

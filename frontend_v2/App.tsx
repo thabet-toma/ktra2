@@ -112,10 +112,12 @@ import { StockLevelsPage } from "./components/inventory/StockLevelsPage";
 import { InventoryValuationPage } from "./components/inventory/InventoryValuationPage";
 import { PropertyRentalPage } from "./components/realestate/PropertyRentalPage";
 import { PartnerProfilePage } from "./components/partners/PartnerProfilePage";
+import { ProductProfilePage } from "./components/items/ProductProfilePage";
 import { SalesInvoicesPage } from "./components/sales/SalesInvoicesPage";
 import { SalesCustomersPage } from "./components/sales/SalesCustomersPage";
 import SalesCustomerPaymentsPage from "./components/sales/SalesCustomerPaymentsPage";
 import SalesSettingsPage from "./components/sales/SalesSettingsPage";
+import PurchaseSettingsPage from "./components/procurement/PurchaseSettingsPage";
 import LocalShippingPage from "./components/logistics/LocalShippingPage";
 import { GroupConstantsPage } from './components/settings/GroupConstantsPage';
 import { useLocation, useNavigate } from "react-router-dom";
@@ -150,6 +152,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "invoice-profits": "/sales/profits",
   "sales-customers": "/sales/customers",
   "sales-settings": "/sales/settings",
+  "purchase-settings": "/purchase-settings",
   "purchase-invoices": "/purchase-invoices",
   "old-invoices": "/old-invoices",
   "price-offers": "/price-offers",
@@ -237,6 +240,8 @@ const App: React.FC = () => {
         }
       } else if (view === "partner-profile") {
         navigate(targetId ? `/partners/${encodeURIComponent(targetId)}` : "/partners", { replace: false });
+      } else if (view === "product-profile") {
+        navigate(targetId ? `/products/${encodeURIComponent(targetId)}` : "/products", { replace: false });
       } else if (view === "sales-invoices") {
         // task18 DEF-A2: السماح بفتح فاتورة مبيعات جديدة/محدّدة عبر onNavigate
         // (نفس عقد purchase-invoices). الـ targetId="new" → محرر فاتورة جديد.
@@ -457,6 +462,10 @@ const App: React.FC = () => {
     }
     if (path === "/partners" || path.startsWith("/partners/")) {
       setAppView("partner-profile");
+      return;
+    }
+    if (path.startsWith("/products/")) {
+      setAppView("product-profile");
       return;
     }
     const journalMatch = path.match(/^\/accounting\/journals\/(.+)$/);
@@ -1286,6 +1295,15 @@ const App: React.FC = () => {
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
+      case "purchase-settings":
+        if (
+          currentUser!.role === "procurement" ||
+          currentUser!.role === "manager"
+        ) {
+          return <PurchaseSettingsPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
       case "sales-customers":
         if (
           currentUser!.role === "procurement" ||
@@ -1689,6 +1707,9 @@ const App: React.FC = () => {
 
       case "partner-profile":
         return <PartnerProfilePage />;
+
+      case "product-profile":
+        return <ProductProfilePage />;
 
       default:
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;

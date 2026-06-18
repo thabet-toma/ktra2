@@ -1172,5 +1172,43 @@ class PurchaseInvoiceFee(models.Model):
         return f"{self.description}: {self.amount}"
 
 
+class PurchaseSettings(models.Model):
+    """FEAT-1: إعدادات مركزية لفواتير الشراء لكل شركة (Tenant).
+
+    تُعرّف استراتيجية التسعير التلقائي لبنود فاتورة الشراء — قيمة افتراضية
+    قابلة للتعديل (مرآة SalesSettings للجانب الشرائي).
+    """
+
+    STRATEGY_LAST_PURCHASE = "LAST_PURCHASE"
+    STRATEGY_LOWEST_PURCHASE = "LOWEST_PURCHASE"
+    STRATEGY_CHOICES = [
+        (STRATEGY_LAST_PURCHASE, "آخر سعر شراء (أحدث فاتورة مرحَّلة)"),
+        (STRATEGY_LOWEST_PURCHASE, "أقل سعر شراء (الأدنى تاريخياً)"),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column="PurchaseSettingsID")
+    tenant = models.OneToOneField(
+        Tenant,
+        on_delete=models.CASCADE,
+        db_column="TenantID",
+        related_name="purchase_settings",
+    )
+    purchase_default_price_strategy = models.CharField(
+        max_length=20,
+        choices=STRATEGY_CHOICES,
+        default=STRATEGY_LAST_PURCHASE,
+        db_column="PurchaseDefaultPriceStrategy",
+        help_text="استراتيجية تعبئة سعر الوحدة تلقائياً عند اختيار صنف في بند الشراء",
+    )
+    updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
+
+    class Meta:
+        db_table = "purchase_module_settings"
+        managed = True
+
+    def __str__(self):
+        return f"PurchaseSettings(tenant={self.tenant_id})"
+
+
 # Automatically connect signals for the logistics app
 import logistics.signals

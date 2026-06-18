@@ -44,6 +44,8 @@ export type AppView =
     | "accounting-landed-cost"
     | "sales-customer-payments"
     | "sales-settings"
+    | "purchase-settings"
+    | "product-profile"
     | "local-shipping"
     | "sql-products"
     | "sql-partners"

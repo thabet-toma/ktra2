@@ -5,7 +5,7 @@ import {
   createSalesInvoice,
   duplicateSalesInvoice,
   getCreditPreview,
-  getLastSalePrice,
+  resolveSalePrice,
   postCustomerPayment,
   getNextInvoiceNumber,
   getSalesInvoice,
@@ -101,6 +101,9 @@ type DraftLine = {
   unit_price: string;
   line_discount: string;
   tax_rate: number | "" | null;
+  /** FEAT-2 edit-protection: مضبوط عندما يحرّر المستخدم سعر السطر يدوياً.
+   *  السعر المقترح لا يُدَس على سطر مَلموس عند تغيير العميل. */
+  priceTouched?: boolean;
 };
 
 const newLineKey = () => `ln-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -673,6 +676,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         unit_price: String(ln.unit_price),
         line_discount: String(ln.line_discount ?? 0),
         tax_rate: ln.tax_rate != null ? ln.tax_rate : null,
+        // FEAT-2: أسعار فاتورة محمَّلة مُثبّتة — لا يُعاد تسعيرها عند تغيير العميل.
+        priceTouched: true,
       }))
     );
     dirtyRef.current = false;
@@ -940,6 +945,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             line_discount: s(ln.line_discount, "0"),
             tax_rate:
               ln.tax_rate === "" || ln.tax_rate == null ? null : (ln.tax_rate as number),
+            // FEAT-2: أسعار مستعادة من المسودة مُثبّتة — لا يُعاد تسعيرها تلقائياً.
+            priceTouched: true,
           }))
         );
       }
@@ -1242,16 +1249,73 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       product: productId,
       unit_price: price,
     });
-    // task18 DEF-C2: اقترح آخر سعر بيع (لهذا العميل إن وُجد، وإلا عام) ويبقى
-    // قابلاً للتعديل. لا نحجب الإدخال — نحدّث السطر بمجرد وصول السعر إن توفّر.
+    // FEAT-2: اقترح سعر الوحدة عبر PriceResolver المشترك — آخر سعر دفعه هذا
+    // العميل لهذا الصنف، ثم سعر البيع الافتراضي، ثم فارغ. القيمة تبقى قابلة
+    // للتعديل، ولا تُدَس على سطر حرّره المستخدم يدوياً (edit-protection).
     if (networkOnline) {
-      getLastSalePrice({ product: productId, customer: customerId })
+      resolveSalePrice({
+        product: productId,
+        customer: customerId,
+        currency: currencyId,
+        exchange_rate: exchangeRate,
+        tax_inclusive: pricesIncludeTax,
+      })
         .then((res) => {
-          if (res?.unit_price != null) updateLine(key, { unit_price: String(res.unit_price) });
+          if (res?.unit_price == null) return;
+          setLines((prev) =>
+            prev.map((r) =>
+              r.key === key && !r.priceTouched
+                ? { ...r, unit_price: String(res.unit_price) }
+                : r,
+            ),
+          );
         })
         .catch(() => { /* لا سجل سابق — نُبقي السعر الافتراضي */ });
     }
   };
+
+  // FEAT-2: عند تغيير العميل بعد وجود بنود، أعِد تسعير الأسطر غير المَلموسة فقط
+  // (أسعار محمَّلة/مُحرَّرة يدوياً = priceTouched، فلا تُمَسّ). أول تحميل/عميل
+  // افتراضي بلا بنود = لا عملية.
+  const prevCustomerRef = React.useRef<number | "" | null>(null);
+  useEffect(() => {
+    if (prevCustomerRef.current === null) {
+      prevCustomerRef.current = customerId;
+      return;
+    }
+    if (prevCustomerRef.current === customerId) return;
+    prevCustomerRef.current = customerId;
+    if (customerId === "" || !networkOnline) return;
+    let cancelled = false;
+    // اقرأ اللقطة الحالية للأسطر دون إعادة رندر (إرجاع نفس المرجع).
+    setLines((snapshot) => {
+      snapshot
+        .filter((l) => l.product !== "" && !l.priceTouched)
+        .forEach((l) => {
+          resolveSalePrice({
+            product: Number(l.product),
+            customer: customerId,
+            currency: currencyId,
+            exchange_rate: exchangeRate,
+            tax_inclusive: pricesIncludeTax,
+          })
+            .then((res) => {
+              if (cancelled || res?.unit_price == null) return;
+              setLines((cur) =>
+                cur.map((r) =>
+                  r.key === l.key && !r.priceTouched
+                    ? { ...r, unit_price: String(res.unit_price) }
+                    : r,
+                ),
+              );
+            })
+            .catch(() => { /* لا سجل سابق للعميل الجديد — نُبقي السعر */ });
+        });
+      return snapshot;
+    });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId]);
 
   const handleBarcodeEnter = (raw: string) => {
     const t = raw.trim();
@@ -1456,7 +1520,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     const row = lines[rowIndex];
     if (!row) return;
     if (key === "quantity") updateLine(row.key, { quantity: value });
-    else if (key === "unit_price") updateLine(row.key, { unit_price: value });
+    // FEAT-2: تحرير السعر يدوياً يضع علامة «مَلموس» فلا يُعاد تسعيره تلقائياً.
+    else if (key === "unit_price") updateLine(row.key, { unit_price: value, priceTouched: true });
     else if (key === "line_discount") updateLine(row.key, { line_discount: value });
   };
 

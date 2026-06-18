@@ -49,6 +49,104 @@ class PartnerViewSet(viewsets.ModelViewSet):
             "projected_balance": str(open_balance + proposed),
         })
 
+    # ── FEAT-4: Party (customer/supplier) profile ────────────────
+    @action(detail=True, methods=["get"], url_path="profile")
+    def profile(self, request, pk=None):
+        """رأس بطاقة الشريك: الرصيد Dr/Cr + إجمالي المبيعات/المشتريات + المتبقي
+        + تاريخ آخر معاملة. تُطابق الأرصدة المصدر القانوني (القيود المرحَّلة)."""
+        from decimal import Decimal
+        from django.db.models import Sum, Max
+        from accounting.services import partner_posted_balance
+        from sales.models import SalesInvoice
+        from logistics.models import PurchaseInvoice
+
+        partner = self.get_object()
+        is_supplier = (partner.partner_type or "").lower() == "supplier"
+        debit, credit = partner_posted_balance(partner.tenant_id, partner.id)
+        balance = (credit - debit) if is_supplier else (debit - credit)
+
+        sales_agg = SalesInvoice.objects.filter(
+            tenant_id=partner.tenant_id, customer_id=partner.id,
+            status=SalesInvoice.STATUS_POSTED,
+        ).aggregate(total=Sum("grand_total"), last=Max("invoice_date"))
+        purch_agg = PurchaseInvoice.objects.filter(
+            tenant_id=partner.tenant_id, partner_id=partner.id, is_posted=True,
+        ).aggregate(total=Sum("grand_total"), last=Max("invoice_date"))
+
+        last_dates = [d for d in (sales_agg["last"], purch_agg["last"]) if d]
+        last_txn = max(last_dates).isoformat() if last_dates else None
+
+        # عميل: رصيد موجب = مدين له علينا (Dr/ذمم مدينة). مورد: رصيد موجب =
+        # دائن نحن مدينون له (Cr/ذمم دائنة). الإشارة السالبة تعكس الجهة.
+        natural = "Cr" if is_supplier else "Dr"
+        opposite = "Dr" if is_supplier else "Cr"
+        balance_side = natural if balance >= 0 else opposite
+
+        return Response({
+            "id": partner.id,
+            "name": partner.name,
+            "partner_type": partner.partner_type,
+            "phone": partner.phone,
+            "email": partner.email,
+            "debit": str(debit),
+            "credit": str(credit),
+            "balance": str(balance),
+            "balance_side": balance_side,
+            "outstanding_balance": str(abs(balance)),
+            "total_sales": str(sales_agg["total"] or Decimal("0")),
+            "total_purchases": str(purch_agg["total"] or Decimal("0")),
+            "last_transaction_date": last_txn,
+        })
+
+    @action(detail=True, methods=["get"], url_path="statement")
+    def statement(self, request, pk=None):
+        """كشف حساب الشريك (الأستاذ) — Debit/Credit + رصيد جارٍ، مُرقَّم."""
+        from accounting.services import partner_account_statement
+        partner = self.get_object()
+        is_supplier = (partner.partner_type or "").lower() == "supplier"
+        try:
+            limit = min(int(request.query_params.get("limit", 50)), 200)
+        except (TypeError, ValueError):
+            limit = 50
+        try:
+            offset = max(int(request.query_params.get("offset", 0)), 0)
+        except (TypeError, ValueError):
+            offset = 0
+        return Response(partner_account_statement(
+            tenant_id=partner.tenant_id, partner_id=partner.id,
+            is_supplier=is_supplier, limit=limit, offset=offset))
+
+    @action(detail=True, methods=["get"], url_path="invoices")
+    def invoices(self, request, pk=None):
+        """فواتير الشريك (بيع للعميل + شراء للمورد) — كلٌّ قابل للنقر."""
+        from sales.models import SalesInvoice
+        from logistics.models import PurchaseInvoice
+        partner = self.get_object()
+        out = []
+        for inv in SalesInvoice.objects.filter(
+            tenant_id=partner.tenant_id, customer_id=partner.id,
+        ).order_by("-invoice_date", "-id")[:200]:
+            out.append({
+                "document_type": "SALES_INVOICE",
+                "document_id": inv.id,
+                "document_number": inv.invoice_number,
+                "date": inv.invoice_date.isoformat() if inv.invoice_date else None,
+                "grand_total": str(inv.grand_total),
+                "is_posted": inv.status == SalesInvoice.STATUS_POSTED,
+            })
+        for inv in PurchaseInvoice.objects.filter(
+            tenant_id=partner.tenant_id, partner_id=partner.id,
+        ).order_by("-invoice_date", "-id")[:200]:
+            out.append({
+                "document_type": "PURCHASE_INVOICE",
+                "document_id": inv.id,
+                "document_number": inv.invoice_number,
+                "date": inv.invoice_date.isoformat() if inv.invoice_date else None,
+                "grand_total": str(inv.grand_total),
+                "is_posted": bool(inv.is_posted),
+            })
+        return Response(out)
+
     def get_queryset(self):
         # task11 M7: القراءة كانت بلا فلترة tenant — موردو/زبائن كل الشركات
         # كانوا يظهرون لأي شركة. .none() عند غياب الشركة حتى لا يتسرب شيء.

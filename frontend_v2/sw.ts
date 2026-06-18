@@ -1,23 +1,32 @@
 /// <reference lib="webworker" />
 /* eslint-disable no-restricted-globals */
 
-const CACHE_VERSION = 1;
-const STATIC_CACHE = `ktra-static-v${CACHE_VERSION}`;
-const MASTER_DATA_CACHE = 'ktra-master-data';
-const API_CACHE = 'ktra-api';
-
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: Array<{url: string; revision: string | null}> };
 
-const manifestEntries = self.__WB_MANIFEST;
+const manifestEntries = self.__WB_MANIFEST || [];
+
+// نسخة الكاش مشتقّة من بصمة الأصول المبنية — تتغيّر مع كل بناء جديد، فيُمسح كاش
+// الكود القديم تلقائياً عند التفعيل ولا يبقى JS قديم محبوساً في cacheFirst.
+function _hash(str: string): string {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h) ^ str.charCodeAt(i);
+  return (h >>> 0).toString(36);
+}
+const BUILD_VERSION = _hash(manifestEntries.map((e) => e.revision || e.url).join('|') || 'dev');
+const STATIC_CACHE = `ktra-static-${BUILD_VERSION}`;
+const MASTER_DATA_CACHE = 'ktra-master-data';
+const API_CACHE = 'ktra-api';
+const CURRENT_CACHES = new Set([STATIC_CACHE, MASTER_DATA_CACHE, API_CACHE]);
 
 self.addEventListener('install', (event) => {
-  if (manifestEntries) {
+  if (manifestEntries.length) {
     event.waitUntil(
       caches.open(STATIC_CACHE).then((cache) =>
         cache.addAll(manifestEntries.map((e) => e.url))
       )
     );
   }
+  // فعّل النسخة الجديدة فوراً بدل انتظار إغلاق كل التبويبات.
   self.skipWaiting();
 });
 
@@ -25,9 +34,8 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(
-        keys
-          .filter((k) => k !== STATIC_CACHE && k !== MASTER_DATA_CACHE && k !== API_CACHE)
-          .map((k) => caches.delete(k))
+        // امسح أي كاش لا ينتمي للنسخة الحالية (يشمل كاش الكود القديم بنسخته السابقة).
+        keys.filter((k) => !CURRENT_CACHES.has(k)).map((k) => caches.delete(k))
       )
     )
   );
@@ -37,7 +45,18 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET') return;
+  // لا تتدخّل في طلبات أصل آخر (مثل API على :8000 أو CDN) — اترك المتصفح يديرها
+  // مباشرة كي لا يُقدَّم رد قديم من الكاش بدل الخادم.
+  if (url.origin !== self.location.origin) return;
 
+  // التنقّل (طلب صفحة) → الشبكة أولاً ليصل index.html الأحدث بمراجع الـ chunks
+  // الجديدة؛ السقوط للكاش عند انقطاع الشبكة فقط (دعم أوفلاين).
+  if (event.request.mode === 'navigate') {
+    event.respondWith(networkFirst(event.request, STATIC_CACHE, 8));
+    return;
+  }
+
+  // أصول مُجزّأة (hashed) — اسمها يتغيّر مع كل بناء، فالـ cacheFirst آمن ولا يُجمِّد كوداً قديماً.
   if (url.pathname.match(/\.(js|css|woff2)$/)) {
     event.respondWith(cacheFirst(event.request, STATIC_CACHE));
     return;
@@ -49,11 +68,11 @@ self.addEventListener('fetch', (event) => {
   }
 
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(networkFirst(event.request, API_CACHE, 3));
+    event.respondWith(networkFirst(event.request, API_CACHE, 8));
     return;
   }
 
-  event.respondWith(networkFirst(event.request, STATIC_CACHE, 3));
+  event.respondWith(networkFirst(event.request, STATIC_CACHE, 8));
 });
 
 async function cacheFirst(request: Request, cacheName: string): Promise<Response> {

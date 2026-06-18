@@ -307,6 +307,7 @@ from .models import (
     PurchaseInvoice,
     PurchaseInvoiceItem,
     PurchaseInvoiceFee,
+    PurchaseSettings,
     LocalShipment
 )
 from partners.serializers import PartnerSerializer
@@ -1220,6 +1221,15 @@ class LocalShipmentSerializer(serializers.ModelSerializer):
 
 
 # ── P-H-3: SupplierPayment ──────────────────────────────────────────
+
+class PurchaseSettingsSerializer(serializers.ModelSerializer):
+    """FEAT-1: إعدادات الشراء (استراتيجية التسعير التلقائي)."""
+
+    class Meta:
+        model = PurchaseSettings
+        fields = ['id', 'purchase_default_price_strategy', 'updated_at']
+        read_only_fields = ['id', 'updated_at']
+
 
 class SupplierPaymentSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source='partner.name', read_only=True)

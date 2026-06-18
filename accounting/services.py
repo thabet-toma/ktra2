@@ -967,6 +967,65 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
 #  task18 DEF-C1: رصيد الشريك من دفتر الأستاذ الفرعي (subledger)
 # ─────────────────────────────────────────────────────────
 
+def partner_account_statement(
+    *, tenant_id: int, partner_id: int, is_supplier: bool,
+    limit: int = 50, offset: int = 0,
+) -> dict:
+    """FEAT-4: كشف حساب الشريك من أسطر القيود المرحَّلة — مع رصيد جارٍ لكل سطر.
+
+    الرصيد الجاري يُحسب خادمياً بالترتيب الزمني ويُطابق `partner_posted_balance`
+    (لا مصدر حقيقة موازٍ — A4). للعميل: مدين−دائن؛ للمورد: دائن−مدين. مُرقَّم.
+    """
+    base = (
+        JournalLine.objects.filter(
+            tenant_id=tenant_id, partner_id=partner_id, journal__is_posted=True,
+        )
+        .order_by("journal__transaction_date", "journal_id", "id")
+    )
+    # خفيف: عمودان عشريان فقط لحساب الرصيد الجاري بالترتيب (بحدود أسطر الشريك).
+    ordered = list(base.values_list("id", "base_debit", "base_credit"))
+    total = len(ordered)
+    running = Decimal("0")
+    running_by_id: dict[int, Decimal] = {}
+    for lid, d, c in ordered:
+        d = Decimal(str(d or 0))
+        c = Decimal(str(c or 0))
+        running += (c - d) if is_supplier else (d - c)
+        running_by_id[lid] = running
+    closing = running
+
+    page_ids = [lid for lid, _d, _c in ordered[offset:offset + limit]]
+    page = (
+        JournalLine.objects.filter(id__in=page_ids)
+        .select_related("journal")
+    )
+    by_id = {jl.id: jl for jl in page}
+    rows = []
+    for lid in page_ids:
+        jl = by_id.get(lid)
+        if jl is None:
+            continue
+        j = jl.journal
+        rows.append({
+            "id": jl.id,
+            "journal_id": j.id,
+            "date": j.transaction_date.isoformat() if j.transaction_date else None,
+            "reference_type": j.reference_type,
+            "reference_id": j.reference_id,
+            "description": jl.description or j.description or "",
+            "debit": str(jl.base_debit),
+            "credit": str(jl.base_credit),
+            "running_balance": str(running_by_id[lid]),
+        })
+    return {
+        "results": rows,
+        "count": total,
+        "limit": limit,
+        "offset": offset,
+        "closing_balance": str(closing),
+    }
+
+
 def partner_posted_balance(tenant_id: int, partner_id: int) -> tuple[Decimal, Decimal]:
     """مجموع مدين/دائن أسطر القيود المرحَّلة لهذا الشريك (بالعملة الأساسية).
 
