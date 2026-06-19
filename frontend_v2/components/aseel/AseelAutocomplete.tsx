@@ -10,7 +10,7 @@
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus } from 'lucide-react';
+import { Plus, Info } from 'lucide-react';
 
 export interface AseelAutocompleteOption {
   id: string | number;
@@ -25,6 +25,8 @@ export interface AseelAutocompleteProps {
   value: string;
   options: AseelAutocompleteOption[];
   onPick: (id: string | number) => void;
+  /** DEF-008: عند توفره تظهر أيقونة (i) لكل خيار → تفتح بطاقة الصنف دون اختياره. */
+  onInfo?: (id: string | number) => void;
   /** عند توفره: خيار «+ إضافة …» يثبت النص المكتوب كصنف حر/جديد */
   onFreeText?: (text: string) => void;
   placeholder?: string;
@@ -57,6 +59,7 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
   value,
   options,
   onPick,
+  onInfo,
   onFreeText,
   placeholder = 'اكتب للبحث…',
   disabled,
@@ -162,18 +165,33 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
           style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
         >
           {matches.map((opt, i) => (
-            <button
+            <div
               key={opt.id}
-              type="button"
+              className={`aseel-autocomplete-row${i === sel ? ' aseel-autocomplete-row--sel' : ''}`}
               role="option"
               aria-selected={i === sel}
-              className={`aseel-autocomplete-row${i === sel ? ' aseel-autocomplete-row--sel' : ''}`}
               onMouseEnter={() => setSel(i)}
-              onMouseDown={(e) => { e.preventDefault(); commit(i); }}
             >
-              <span className="aseel-autocomplete-label">{opt.label}</span>
-              {opt.sub && <span className="aseel-autocomplete-sub">{opt.sub}</span>}
-            </button>
+              <button
+                type="button"
+                className="aseel-autocomplete-main"
+                onMouseDown={(e) => { e.preventDefault(); commit(i); }}
+              >
+                <span className="aseel-autocomplete-label">{opt.label}</span>
+                {opt.sub && <span className="aseel-autocomplete-sub">{opt.sub}</span>}
+              </button>
+              {onInfo && (
+                <button
+                  type="button"
+                  className="aseel-autocomplete-info"
+                  title="بطاقة الصنف"
+                  aria-label="بطاقة الصنف"
+                  onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onInfo(opt.id); close(); }}
+                >
+                  <Info className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           ))}
           {matches.length === 0 && !canCreate && (
             <div className="aseel-autocomplete-empty">لا تطابق</div>

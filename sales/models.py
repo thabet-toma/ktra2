@@ -971,3 +971,61 @@ class VatStatement(models.Model):
     def __str__(self):
         return f"{self.statement_number} ({self.period_from} → {self.period_to})"
 
+
+
+class CustomerProductQuote(models.Model):
+    """DEF-004 — عرض السعر اليدوي لكل (عميل، منتج).
+
+    سعر يدوي يحفظه المستخدم لمنتج لم يشترِه العميل بعد. مصدر تسعير احتياطي بحت
+    (sales-only) — لا يولّد أي قيد محاسبي ولا يمسّ الأستاذ. آخر سعر فاتورة فعلية
+    للعميل يفوز عليه دائماً (DEF-005)؛ يُستعمل فقط حين لا يوجد تاريخ بيع للعميل.
+    """
+
+    id = models.AutoField(primary_key=True, db_column="CustomerProductQuoteID")
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        db_column="TenantID",
+        to_field="TenantID",
+    )
+    customer = models.ForeignKey(
+        Partner,
+        on_delete=models.CASCADE,
+        db_column="CustomerID",
+        related_name="product_quotes",
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        db_column="ProductID",
+        related_name="customer_quotes",
+    )
+    unit_price = models.DecimalField(
+        max_digits=18, decimal_places=4, db_column="UnitPrice",
+        help_text="سعر العرض اليدوي للوحدة (بعملة الشركة الأساسية)",
+    )
+    currency = models.ForeignKey(
+        Currency,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column="CurrencyID",
+        related_name="customer_product_quotes",
+    )
+    updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
+
+    class Meta:
+        db_table = "sales_module_customer_product_quotes"
+        managed = True
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "customer", "product"],
+                name="uniq_customer_product_quote",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "customer"]),
+        ]
+
+    def __str__(self):
+        return f"Quote c={self.customer_id} p={self.product_id} = {self.unit_price}"

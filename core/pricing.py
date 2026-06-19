@@ -288,7 +288,42 @@ def resolve_sales_price(
         )
         return result
 
-    # Fallback: product default selling price (sale tier #1). Only when the
+    # DEF-005 fallback #1: the customer's manual quote ("عرض السعر") — used only
+    # when the customer has NO posted sale of this product (last-sale always wins
+    # above). Sales-only, no ledger impact. Stored in base currency.
+    if customer_id:
+        from sales.models import CustomerProductQuote
+
+        quote = (
+            CustomerProductQuote.objects.filter(
+                tenant_id=tenant_id, customer_id=customer_id, product_id=product_id,
+            )
+            .only("id", "unit_price")
+            .first()
+        )
+        if quote is not None and _dec(quote.unit_price) > 0:
+            price = _convert_currency(
+                _dec(quote.unit_price), source_rate=Decimal("1"), target_rate=target_rate
+            )
+            # quote is recorded tax-exclusive (a plain entered price); only adjust
+            # if the target line is tax-inclusive.
+            price = _convert_tax_basis(
+                price, source_inclusive=False, target_inclusive=bool(target_tax_inclusive),
+                tax_percent=_ZERO,
+            )
+            result = _resolved(
+                price,
+                strategy_requested=PriceStrategy.LAST_SALE_TO_CUSTOMER,
+                strategy_used=PriceStrategy.DEFAULT,
+                source={"document_type": "CUSTOMER_QUOTE", "document_id": quote.id},
+            )
+            logger.info(
+                "price_resolve sales tenant=%s product=%s customer=%s fallback=quote -> %s",
+                tenant_id, product_id, customer_id, result["unit_price"],
+            )
+            return result
+
+    # Fallback #2: product default selling price (sale tier #1). Only when the
     # tier currency reconciles to the target (no rate available to convert).
     product = Product.objects.filter(id=product_id, tenant_id=tenant_id).only("id", "online_price").first()
     if product:

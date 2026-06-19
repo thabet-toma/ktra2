@@ -4,6 +4,7 @@ import { apiGetObject } from '../../services/restApi';
 import { resolveTenantId } from '../../utils/tenantContext';
 import { AseelDocumentShell, AseelTab } from '../aseel';
 import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTable';
+import { CustomerPriceListTab } from './CustomerPriceListTab';
 
 interface PartnerApi {
   id: number;
@@ -248,6 +249,14 @@ export const PartnerProfilePage: React.FC = () => {
         </div>
       ),
     },
+    // DEF-004: عرض السعر — مبيعات فقط (للعملاء، لا للموردين).
+    ...(!isSupplier && id
+      ? [{
+          key: 'price_list',
+          label: 'عرض السعر',
+          content: <CustomerPriceListTab customerId={id} />,
+        } as AseelTab]
+      : []),
   ];
 
   return (

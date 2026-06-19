@@ -21,6 +21,7 @@ import { useStaleConfirm } from "../offline/StaleDataConfirm";
 import { DocumentPaymentsTab } from "../shared/DocumentPaymentsTab";
 import { AseelDatePicker } from "../ui/AseelDatePicker";
 import { InvoiceCategoryTree } from "../procurement/invoices/InvoiceCategoryTree";
+import { ProductCardModal } from "../shared/ProductCardModal";
 import { Item } from "../../types";
 import db from "../../services/offline/db";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
@@ -42,6 +43,7 @@ import {
   CreditCard,
   ArrowRight,
   Undo2,
+  Info,
 } from "lucide-react";
 import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
 import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
@@ -104,6 +106,8 @@ type DraftLine = {
   /** FEAT-2 edit-protection: مضبوط عندما يحرّر المستخدم سعر السطر يدوياً.
    *  السعر المقترح لا يُدَس على سطر مَلموس عند تغيير العميل. */
   priceTouched?: boolean;
+  /** DEF-005: مصدر السعر المقترح للشارة — آخر فاتورة للعميل أو عرض السعر اليدوي. */
+  priceSource?: "last_invoice" | "quote" | null;
 };
 
 const newLineKey = () => `ln-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -235,6 +239,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [taxPercentDraft, setTaxPercentDraft] = useState<Record<string, string>>({});
   const [taxSavingKey, setTaxSavingKey] = useState<string | null>(null);
   const [productPickerLineKey, setProductPickerLineKey] = useState<string | null>(null);
+  // DEF-007/008: بطاقة الصنف (مودال مشترك) — تُفتح من الشجرة/القائمة/سطر الفاتورة.
+  const [cardProductId, setCardProductId] = useState<number | null>(null);
+  // «موافق» (إضافة للفاتورة) يظهر فقط عند فتح البطاقة من الشجرة، لا من أيقونة (i).
+  const [cardCanAdd, setCardCanAdd] = useState(false);
   const [invoiceStatus, setInvoiceStatus] = useState<string>("draft");
   const [postedJournalId, setPostedJournalId] = useState<number | null>(null);
   // task18: المدفوع/الإجمالي المحفوظان — لحساب المتبقي عند تسجيل سند قبض على فاتورة مرحّلة.
@@ -271,15 +279,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   // M3: selling below available stock is ALLOWED — but we surface a
   // non-blocking warning so the user is aware the stock will go negative.
   const overSellWarnings = useMemo(() => {
-    if (!stockOnPost) return [] as { sku: string; qty: number; available: number }[];
-    const out: { sku: string; qty: number; available: number }[] = [];
+    if (!stockOnPost) return [] as { name: string; qty: number; available: number }[];
+    const out: { name: string; qty: number; available: number }[] = [];
     for (const l of lines) {
       if (l.product === "") continue;
       const pr = productsById.get(Number(l.product));
       if (!pr) continue;
       const q = Number(l.quantity) || 0;
       const avail = Number(pr.quantity_on_hand) || 0;
-      if (q > avail + 1e-6) out.push({ sku: pr.sku, qty: q, available: avail });
+      if (q > avail + 1e-6) out.push({ name: pr.name_ar || pr.name_en || pr.sku, qty: q, available: avail });
     }
     return out;
     // lines/quantities are strings in state; recompute whenever they change
@@ -1154,6 +1162,27 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     markDirty();
   };
 
+  /** يُدرج صنفاً في أول سطر فارغ (أو سطر جديد) ثم يجلب سعره — مدخل موحّد
+   *  للشجرة وزر «موافق» في بطاقة الصنف. */
+  const insertProductIntoInvoice = (productId: number) => {
+    if (!productId || readOnly || isPosted) return;
+    let targetKey = "";
+    setLines((prev) => {
+      const emptyIdx = prev.findIndex((l) => l.product === "" && !l.description);
+      if (emptyIdx >= 0) {
+        targetKey = prev[emptyIdx].key;
+        const next = [...prev];
+        next[emptyIdx] = { ...next[emptyIdx], product: -1 };
+        return next;
+      }
+      const newLine = makeEmptyLine();
+      newLine.product = -1;
+      targetKey = newLine.key;
+      return [...prev, newLine];
+    });
+    setTimeout(() => onSelectProduct(targetKey, productId), 0);
+  };
+
   const removeRow = (key: string) => {
     if (readOnly) return;
     setLines((prev) => (prev.length <= 1 ? prev : prev.filter((r) => r.key !== key)));
@@ -1220,6 +1249,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     }
   };
 
+  // DEF-005: ترجمة نوع مصدر السعر من الـ resolver إلى شارة السطر.
+  const priceSourceFromResolve = (docType?: string): DraftLine["priceSource"] => {
+    if (docType === "SALES_INVOICE") return "last_invoice";
+    if (docType === "CUSTOMER_QUOTE") return "quote";
+    return null;
+  };
+
   const onSelectProduct = async (key: string, productId: number) => {
     const pr = productsById.get(productId);
     const price =
@@ -1248,10 +1284,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     updateLine(key, {
       product: productId,
       unit_price: price,
+      priceSource: null,
     });
-    // FEAT-2: اقترح سعر الوحدة عبر PriceResolver المشترك — آخر سعر دفعه هذا
-    // العميل لهذا الصنف، ثم سعر البيع الافتراضي، ثم فارغ. القيمة تبقى قابلة
-    // للتعديل، ولا تُدَس على سطر حرّره المستخدم يدوياً (edit-protection).
+    // FEAT-2 / DEF-005: اقترح سعر الوحدة عبر PriceResolver المشترك — آخر سعر
+    // دفعه هذا العميل لهذا الصنف (يفوز دائماً)، ثم عرض السعر اليدوي، ثم سعر البيع
+    // الافتراضي، ثم فارغ. القيمة تبقى قابلة للتعديل، ولا تُدَس على سطر حرّره
+    // المستخدم يدوياً (edit-protection). الشارة تعكس مصدر السعر.
     if (networkOnline) {
       resolveSalePrice({
         product: productId,
@@ -1262,10 +1300,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       })
         .then((res) => {
           if (res?.unit_price == null) return;
+          const src = priceSourceFromResolve(res.source?.document_type);
+          // DEF-003: عرض السعر المقترح بمنزلتين (يبقى قابلاً للتحرير).
+          const shown = Number(res.unit_price);
+          const priceStr = Number.isNaN(shown) ? String(res.unit_price) : shown.toFixed(2);
           setLines((prev) =>
             prev.map((r) =>
               r.key === key && !r.priceTouched
-                ? { ...r, unit_price: String(res.unit_price) }
+                ? { ...r, unit_price: priceStr, priceSource: src }
                 : r,
             ),
           );
@@ -1301,10 +1343,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           })
             .then((res) => {
               if (cancelled || res?.unit_price == null) return;
+              const src = priceSourceFromResolve(res.source?.document_type);
+              const shown = Number(res.unit_price);
+              const priceStr = Number.isNaN(shown) ? String(res.unit_price) : shown.toFixed(2);
               setLines((cur) =>
                 cur.map((r) =>
                   r.key === l.key && !r.priceTouched
-                    ? { ...r, unit_price: String(res.unit_price) }
+                    ? { ...r, unit_price: priceStr, priceSource: src }
                     : r,
                 ),
               );
@@ -1521,7 +1566,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     if (!row) return;
     if (key === "quantity") updateLine(row.key, { quantity: value });
     // FEAT-2: تحرير السعر يدوياً يضع علامة «مَلموس» فلا يُعاد تسعيره تلقائياً.
-    else if (key === "unit_price") updateLine(row.key, { unit_price: value, priceTouched: true });
+    else if (key === "unit_price") updateLine(row.key, { unit_price: value, priceTouched: true, priceSource: null });
     else if (key === "line_discount") updateLine(row.key, { line_discount: value });
   };
 
@@ -1537,7 +1582,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     [products],
   );
 
-  const renderProductCell = (row: DraftLine) => (
+  const renderProductCell = (row: DraftLine) => {
+    const selectedId = row.product && Number(row.product) > 0 ? Number(row.product) : null;
+    return (
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
       <AseelAutocomplete
         value={(() => {
@@ -1548,7 +1595,24 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         disabled={readOnly}
         placeholder="اكتب اسم الصنف…"
         onPick={(id) => void onSelectProduct(row.key, Number(id))}
+        onInfo={(id) => { setCardCanAdd(false); setCardProductId(Number(id)); }}
       />
+      {/* DEF-008: أيقونة (i) بجانب المنتج المختار على السطر → بطاقة الصنف */}
+      {selectedId != null && (
+        <button
+          type="button"
+          className="aseel-ellipsis"
+          onClick={() => { setCardCanAdd(false); setCardProductId(selectedId); }}
+          title="بطاقة الصنف"
+        ><Info className="w-3.5 h-3.5" /></button>
+      )}
+      {/* DEF-005: شارة مصدر السعر المقترح */}
+      {row.priceSource === "last_invoice" && (
+        <span className="aseel-price-badge aseel-price-badge--last" title="السعر من آخر فاتورة لهذا العميل">من آخر فاتورة</span>
+      )}
+      {row.priceSource === "quote" && (
+        <span className="aseel-price-badge aseel-price-badge--quote" title="السعر من عرض السعر اليدوي للعميل">من عرض السعر</span>
+      )}
       <button
         type="button"
         className="aseel-ellipsis"
@@ -1557,7 +1621,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         title="فهرس الأصناف الكامل (+)"
       >…</button>
     </div>
-  );
+    );
+  };
 
   const renderTaxCell = (row: DraftLine) => {
     const isEdit = taxEditKey === row.key;
@@ -1797,7 +1862,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         <span>
           تنبيه: الكمية تتجاوز المتوفر وسيصبح المخزون بالسالب —{" "}
           {overSellWarnings
-            .map((w) => `«${w.sku}» (المطلوب ${w.qty} / المتوفر ${w.available})`)
+            .map((w) => `«${w.name}» (المطلوب ${w.qty} / المتوفر ${w.available})`)
             .join("، ")}
           . البيع مسموح ويمكنك المتابعة.
         </span>
@@ -2200,6 +2265,27 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         }
         nav={nav}
         actions={toolbarActions}
+        aside={
+          <InvoiceCategoryTree
+            items={products.map((p) => ({
+              ...p,
+              id: String(p.id),
+              name: p.name_ar || p.name_en || p.sku || "",
+              categoryId: (p as any).category
+            } as unknown as Item))}
+            disabled={readOnly || isPosted}
+            onShowCard={(it) => {
+              const p = products.find((x) => String(x.id) === String(it.id));
+              const productId = p ? p.id : Number(it.id);
+              if (productId) { setCardCanAdd(true); setCardProductId(productId); }
+            }}
+            onPickItem={(it) => {
+              const p = products.find((x) => String(x.id) === String(it.id));
+              const productId = p ? p.id : Number(it.id);
+              insertProductIntoInvoice(productId);
+            }}
+          />
+        }
         header={
           <>
             <div className="flex flex-col gap-2 w-full">
@@ -2590,42 +2676,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         {banner}
         {stockWarningBanner}
         {restoreBanner}
-        <div style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>
-          <InvoiceCategoryTree
-            items={products.map((p) => ({ 
-              ...p, 
-              id: String(p.id),
-              name: p.name_ar || p.name_en || p.sku || "",
-              categoryId: (p as any).category
-            } as unknown as Item))}
-            disabled={readOnly || isPosted}
-            onPickItem={(it) => {
-              const p = products.find((x) => String(x.id) === String(it.id));
-              const productId = p ? p.id : Number(it.id);
-              if (productId) {
-                let targetKey = "";
-                setLines((prev) => {
-                  const emptyIdx = prev.findIndex((l) => l.product === "" && !l.description);
-                  if (emptyIdx >= 0) {
-                    targetKey = prev[emptyIdx].key;
-                    // Reserve this line temporarily so next rapid click won't use it
-                    const next = [...prev];
-                    next[emptyIdx] = { ...next[emptyIdx], product: -1 }; 
-                    return next;
-                  } else {
-                    const newLine = makeEmptyLine();
-                    newLine.product = -1; // Reserve it
-                    targetKey = newLine.key;
-                    return [...prev, newLine];
-                  }
-                });
-                
-                // Fetch price and actually apply the product
-                setTimeout(() => onSelectProduct(targetKey, productId), 0);
-              }
-            }}
-          />
-          <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "8px" }}>
+        {/* الشجرة انتقلت إلى الشريط الجانبي (aside) ليرتفع لأعلى المستند. */}
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "8px" }}>
             <AseelGrid<DraftLine>
               columns={gridColumns}
               rows={lines}
@@ -2635,6 +2687,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               onAddRow={readOnly ? undefined : addRow}
               emptyHint="لا توجد بنود — أضف صنفاً (+ فهرس الأصناف)"
             />
+            {/* DEF-006: السطر الجديد يُضاف فقط عبر هذا الزر الصريح (لا من نقر خارجي/شجرة). */}
+            {!readOnly && (
+              <button type="button" className="aseel-addrow" onClick={addRow}>
+                <Plus className="h-3 w-3" /> إضافة سطر
+              </button>
+            )}
 
             {/* INLINE FOOTER: Payments, Notes, and GL Preview instead of Tabs */}
             <div style={{ display: "flex", gap: "16px", background: "var(--aseel-panel)", padding: "8px", border: "1px solid var(--aseel-border)" }}>
@@ -2751,7 +2809,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               <div className="aseel-note aseel-note--warn">لا توجد نسبة ضريبة مبيعات مسجلة في الإعدادات.</div>
             )}
           </div>
-        </div>
       </AseelDocumentShell>
 
       {/* فهرس الحسابات (العميل) */}
@@ -2812,6 +2869,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         }}
         onClose={() => setProductPickerLineKey(null)}
       />
+
+      {/* DEF-007/008: بطاقة الصنف المشتركة */}
+      {cardProductId != null && (
+        <ProductCardModal
+          productId={cardProductId}
+          productName={(() => { const p = products.find((x) => x.id === cardProductId); return p ? (p.name_ar || p.name_en || p.sku) : undefined; })()}
+          onConfirm={cardCanAdd && !readOnly && !isPosted ? () => insertProductIntoInvoice(cardProductId) : undefined}
+          onClose={() => setCardProductId(null)} />
+      )}
 
       {/* Attached payment voucher modal removed - now a bottom tab */}
       {/* P3-2-b: stale-data confirmation portal for offline product picks */}

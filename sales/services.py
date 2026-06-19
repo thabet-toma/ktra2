@@ -1412,6 +1412,104 @@ def last_sale_price(
     }
 
 
+def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
+    """DEF-004: عرض السعر لكل العميل عبر كامل الكتالوج.
+
+    لكل منتج فعّال:
+      - إن اشتراه العميل سابقاً (فاتورة بيع مرحَّلة) → سعر آخر فاتورة (للقراءة فقط).
+      - وإلا → عرض السعر اليدوي المحفوظ (قابل للتحرير)، أو فارغ إن لم يُحفظ.
+    لا أثر محاسبي — مصدر تسعير احتياطي فقط.
+    """
+    from .models import CustomerProductQuote
+
+    # آخر سطر بيع مرحَّل لهذا العميل لكل منتج (دفعة واحدة).
+    last_by_product: dict[int, SalesInvoiceLine] = {}
+    lines = (
+        SalesInvoiceLine.objects.filter(
+            tenant_id=tenant_id,
+            invoice__customer_id=customer_id,
+            invoice__status=SalesInvoice.STATUS_POSTED,
+            invoice__invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+        )
+        .select_related("invoice")
+        .order_by("product_id", "-invoice__invoice_date", "-invoice_id", "-id")
+    )
+    for ln in lines:
+        if ln.product_id not in last_by_product:
+            last_by_product[ln.product_id] = ln
+
+    quotes = {
+        q.product_id: q
+        for q in CustomerProductQuote.objects.filter(tenant_id=tenant_id, customer_id=customer_id)
+    }
+
+    rows: list[dict] = []
+    products = Product.objects.filter(tenant_id=tenant_id).order_by("name_ar", "sku")
+    for p in products:
+        ln = last_by_product.get(p.id)
+        q = quotes.get(p.id)
+        name = p.name_ar or p.name_en or p.sku or f"#{p.id}"
+        if ln is not None:
+            rows.append({
+                "product_id": p.id,
+                "sku": p.sku,
+                "name": name,
+                "price": str(ln.unit_price),
+                "source": "last_invoice",
+                "source_label": "آخر فاتورة",
+                "editable": False,
+                "invoice_number": ln.invoice.invoice_number,
+            })
+        else:
+            rows.append({
+                "product_id": p.id,
+                "sku": p.sku,
+                "name": name,
+                "price": str(q.unit_price) if q is not None else None,
+                "source": "quote",
+                "source_label": "عرض السعر / يدوي",
+                "editable": True,
+                "invoice_number": None,
+            })
+    return rows
+
+
+@transaction.atomic
+def save_customer_quotes(*, tenant_id: int, customer_id: int, entries: list[dict]) -> int:
+    """DEF-004: حفظ/تحديث/حذف عروض الأسعار اليدوية لعميل.
+
+    كل عنصر: {"product": id, "unit_price": value}. قيمة فارغة/صفر/سالبة ⇒ حذف
+    العرض. يُرجع عدد العروض المحفوظة (غير المحذوفة).
+    """
+    from .models import CustomerProductQuote
+
+    saved = 0
+    for e in entries or []:
+        pid = e.get("product")
+        if pid in (None, ""):
+            continue
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            continue
+        raw = e.get("unit_price")
+        try:
+            price = Decimal(str(raw)) if raw not in (None, "") else None
+        except (TypeError, ValueError):
+            price = None
+        if price is None or price <= 0:
+            CustomerProductQuote.objects.filter(
+                tenant_id=tenant_id, customer_id=customer_id, product_id=pid
+            ).delete()
+            continue
+        CustomerProductQuote.objects.update_or_create(
+            tenant_id=tenant_id, customer_id=customer_id, product_id=pid,
+            defaults={"unit_price": price},
+        )
+        saved += 1
+    return saved
+
+
 def suggest_fifo_allocations(
     *,
     tenant_id: int,

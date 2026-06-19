@@ -22,7 +22,9 @@ import {
   Undo2,
   AlertCircle,
   CheckCircle2,
+  Info,
 } from "lucide-react";
+import { ProductCardModal } from "../../shared/ProductCardModal";
 import { AseelDatePicker } from "../../ui/AseelDatePicker";
 import {
   suppliersService,
@@ -123,6 +125,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     });
   }, [initialDbItems]);
   const [showSupplierPicker, setShowSupplierPicker] = useState(false);
+  // DEF-007/008: بطاقة الصنف المشتركة (نقر مفرد على الشجرة / أيقونة (i)).
+  const [cardProductId, setCardProductId] = useState<number | null>(null);
+  // «موافق» (إضافة للفاتورة) يظهر فقط عند فتح البطاقة من الشجرة، لا من أيقونة (i).
+  const [cardCanAdd, setCardCanAdd] = useState(false);
   const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
   const [showItemSearch, setShowItemSearch] = useState(false);
   const [activeItemSearchIndex, setActiveItemSearchIndex] = useState<number | null>(null);
@@ -1025,26 +1031,41 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     [allDbItems],
   );
 
-  const renderItemNameCell = (row: InvoiceItem, rowIndex: number) => (
-    <AseelAutocomplete
-      value={row.name || ""}
-      options={itemOptions}
-      disabled={readOnly || formData.isHistorical}
-      placeholder="اكتب اسم الصنف…"
-      onPick={async (id) => {
-        const it = allDbItems.find((x) => String(x.id) === String(id));
-        if (it) {
-          const lastPrice = await resolveSuggestedPrice(it.id);
-          applyItemAt(rowIndex, it, lastPrice);
-        }
-      }}
-      onFreeText={(t) => {
-        // task18 DEF-B1/B3: «إضافة كصنف جديد» يفتح إنشاء صنف سريع مُعبّأً بالنص
-        // ويُنشئه فعلياً (Product) بدل ترك سطر حر بلا itemId يُحذف عند الحفظ.
-        setInlineCreate({ rowIndex, name: t.trim() });
-      }}
-    />
-  );
+  const renderItemNameCell = (row: InvoiceItem, rowIndex: number) => {
+    const selectedId = row.itemId ? Number(row.itemId) : null;
+    return (
+    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+      <AseelAutocomplete
+        value={row.name || ""}
+        options={itemOptions}
+        disabled={readOnly || formData.isHistorical}
+        placeholder="اكتب اسم الصنف…"
+        onPick={async (id) => {
+          const it = allDbItems.find((x) => String(x.id) === String(id));
+          if (it) {
+            const lastPrice = await resolveSuggestedPrice(it.id);
+            applyItemAt(rowIndex, it, lastPrice);
+          }
+        }}
+        onInfo={(id) => { const pid = Number(id); if (pid) { setCardCanAdd(false); setCardProductId(pid); } }}
+        onFreeText={(t) => {
+          // task18 DEF-B1/B3: «إضافة كصنف جديد» يفتح إنشاء صنف سريع مُعبّأً بالنص
+          // ويُنشئه فعلياً (Product) بدل ترك سطر حر بلا itemId يُحذف عند الحفظ.
+          setInlineCreate({ rowIndex, name: t.trim() });
+        }}
+      />
+      {/* DEF-008: أيقونة (i) بجانب المنتج المختار → بطاقة الصنف */}
+      {selectedId != null && (
+        <button
+          type="button"
+          className="aseel-ellipsis"
+          onClick={() => { setCardCanAdd(false); setCardProductId(selectedId); }}
+          title="بطاقة الصنف"
+        ><Info className="w-3.5 h-3.5" /></button>
+      )}
+    </div>
+    );
+  };
 
   const renderDeleteCell = (row: InvoiceItem) =>
     readOnly || formData.isHistorical ? null : (
@@ -1304,6 +1325,22 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       }
       nav={nav}
       actions={toolbarActions}
+      aside={
+        <InvoiceCategoryTree
+          items={allDbItems}
+          disabled={readOnly || formData.isHistorical}
+          onShowCard={(it) => { const pid = Number(it.id); if (pid) { setCardCanAdd(true); setCardProductId(pid); } }}
+          onPickItem={async (it) => {
+            const lastPrice = await resolveSuggestedPrice(it.id);
+            applyItemAt(null, it, lastPrice);
+          }}
+          onItemCreated={(it) =>
+            setAllDbItems((prev) =>
+              prev.some((p) => String(p.id) === String(it.id)) ? prev : [it, ...prev]
+            )
+          }
+        />
+      }
       header={
         <>
           {fld(
@@ -1526,23 +1563,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       }
     >
       {accBanner}
-      {/* task18 DEF-B1/B3: شجرة الأصناف المرساة بجانب جدول البنود — النقر على
-          صنف ورقي يبدأ سطراً جديداً، مع إضافة فئة/صنف inline. */}
-      <div style={{ display: "flex", gap: "8px", alignItems: "flex-start" }}>
-        <InvoiceCategoryTree
-          items={allDbItems}
-          disabled={readOnly || formData.isHistorical}
-          onPickItem={async (it) => {
-            const lastPrice = await resolveSuggestedPrice(it.id);
-            applyItemAt(null, it, lastPrice);
-          }}
-          onItemCreated={(it) =>
-            setAllDbItems((prev) =>
-              prev.some((p) => String(p.id) === String(it.id)) ? prev : [it, ...prev]
-            )
-          }
-        />
-        <div style={{ flex: 1, minWidth: 0 }}>
+      {/* الشجرة انتقلت إلى الشريط الجانبي (aside) ليرتفع لأعلى المستند. */}
+      <div style={{ flex: 1, minWidth: 0 }}>
           <AseelGrid<InvoiceItem>
             columns={itemColumns}
             rows={formData.items || []}
@@ -1558,7 +1580,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             </button>
           )}
         </div>
-      </div>
     </AseelDocumentShell>
 
     {/* فهرس الموردين */}
@@ -1640,6 +1661,22 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         </button>
       </div>
     )}
+
+    {/* DEF-007/008: بطاقة الصنف المشتركة — «موافق» يُدرج الصنف في فاتورة الشراء. */}
+    {cardProductId != null && (() => {
+      const it = allDbItems.find((x) => String(x.id) === String(cardProductId));
+      return (
+        <ProductCardModal
+          productId={cardProductId}
+          productName={it ? it.name : undefined}
+          onConfirm={(!cardCanAdd || readOnly || formData.isHistorical || !it) ? undefined : async () => {
+            const lastPrice = await resolveSuggestedPrice(it.id);
+            applyItemAt(null, it, lastPrice);
+          }}
+          onClose={() => setCardProductId(null)}
+        />
+      );
+    })()}
     </div>
   );
 };

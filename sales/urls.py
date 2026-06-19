@@ -4,6 +4,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     CreditDebitNoteViewSet,
     CustomerPaymentViewSet,
+    CustomerPriceListViewSet,
     DeliveryOrderViewSet,
     SalesInvoiceViewSet,
     SalesQuotationViewSet,
@@ -18,6 +19,7 @@ router.register(r"delivery-orders", DeliveryOrderViewSet, basename="sales-delive
 router.register(r"payments", CustomerPaymentViewSet, basename="customer-payments")
 router.register(r"settings", SalesSettingsViewSet, basename="sales-settings")
 router.register(r"credit-debit-notes", CreditDebitNoteViewSet, basename="credit-debit-notes")
+router.register(r"customer-price-list", CustomerPriceListViewSet, basename="customer-price-list")
 
 report_list = SalesReportViewSet.as_view({"get": "aging"})
 

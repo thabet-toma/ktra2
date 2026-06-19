@@ -1,5 +1,11 @@
 # PROJECT_MAP — K.T.R.A
 
+## [AI_TOOLING]
+- **Ruflo** (Multi-Agent Orchestrator): `.clone/ruflo/` — استخدمه دائماً للمهام المعقدة
+  - تشغيل: `npx ruflo init` أو `node .clone/ruflo/bin/ruflo.js`
+  - الدليل: `CLAUDE.md` (في جذر المشروع)
+  - المصدر: https://github.com/ruvnet/ruflo
+
 ## [TECH_STACK]
 - **Frontend:** React 19.2, TypeScript 5.8, Vite 6.2, Tailwind CSS 4.3, react-router-dom 7, date-fns 4
 - **Backend:** Django 6.0.1 (latest stable 6.0.6, 2026-06-03; LTS 5.2.15), DRF 3.16, MySQL (prod), SQLite (test)
@@ -64,6 +70,77 @@ frontend_v2/
 ├── styles/                    # CSS (Tailwind entry)
 └── constants/                 # App constants
 ```
+
+## [AUDIT — task21, 2026-06-19] (تحسينات UX لفاتورة البيع/الشراء + تسعير عرض السعر — DEF-001..009)
+
+تغييرات جراحية على شاشتي فاتورة المبيعات/الشراء وشجرة المنتجات وبطاقة الصنف
+وبطاقة العميل. لا انحدار محاسبي (UI/UX + اقتراح سعر فقط). **تحقّق حيّ في المتصفح
+بجلسة مصادَقة فعلية** (أول مهمة تتحقق حيّاً من الشاشات الداخلية).
+
+### الطبقة المشتركة (DRY)
+- **`frontend_v2/components/shared/ProductCardModal.tsx`** — بطاقة الصنف كمودال
+  واحد يُعاد استخدامه في **ثلاثة مداخل** (DEF-007/008): نقر مفرد على الشجرة ·
+  أيقونة (i) في القائمة المنسدلة · أيقونة (i) على سطر الفاتورة. يقرأ نفس نقطة
+  `inventory/products/{id}/profile/`. أسعار بمنزلتين (DEF-003).
+- **`core/pricing.py resolve_sales_price`** — أُضيف سقوط «عرض السعر اليدوي»
+  (CustomerProductQuote) بين «آخر بيع للعميل» و«سعر الصنف الافتراضي». الأولوية
+  (DEF-005): آخر فاتورة للعميل **تفوز دائماً** ← عرض السعر اليدوي ← tier ← فارغ.
+  مصدر السعر يُرجَع في `source.document_type` (`SALES_INVOICE`/`CUSTOMER_QUOTE`).
+
+### DEF-001..003 (تموضع/تسمية/تنسيق)
+- DEF-001: `.aseel-tree-panel` صارت `sticky top:8px` بارتفاع `calc(100vh-160px)`
+  و`min-height:320px` ⇒ رأس الشجرة + 20+ صفاً ظاهرة دون تمرير على 1366×768.
+- DEF-002: «شجرة الأصناف» → **«شجرة المنتجات»** (3 مواضع). الهرمية صريحة: الصنف/
+  الفئة = عقدة فرعية، المنتج = عقدة ورقية. **لا إعادة تسمية للباك-إند** (A1).
+- DEF-003: بطاقة الصنف تعرض كل الأسعار بمنزلتين؛ السعر المقترح للسطر يُعرض عبر
+  `toFixed(2)` (يبقى قابلاً للتحرير). الدقّة المخزّنة (4 منازل) لم تُمَسّ (A2).
+
+### DEF-004 — عرض السعر لكل العميل (مبيعات فقط)
+- موديل **`sales.CustomerProductQuote`** (جدول `sales_module_customer_product_quotes`،
+  migration `0018`): فريد `(tenant, customer, product)` + `unit_price`. لا أثر
+  محاسبي (A3).
+- خدمات `sales/services.py`: `customer_price_list` (كامل الكتالوج + مصدر/قابلية
+  تحرير لكل صف: مُشترى→سعر آخر فاتورة للقراءة فقط، غير مُشترى→حقل قابل للتحرير) ·
+  `save_customer_quotes` (upsert؛ قيمة فارغة تحذف العرض).
+- نقطة نهاية `CustomerPriceListViewSet`: `GET sales/customer-price-list/?customer=` ·
+  `POST sales/customer-price-list/save/`.
+- واجهة: تبويب **«عرض السعر»** في `PartnerProfilePage` (للعملاء فقط) عبر
+  `CustomerPriceListTab.tsx` + `salesApi.getCustomerPriceList/saveCustomerQuotes`.
+
+### DEF-005..008 (سلوك السطر/الشجرة/القائمة)
+- DEF-005: شارة مصدر السعر على السطر («من آخر فاتورة» / «من عرض السعر») —
+  `DraftLine.priceSource` يُضبط من نتيجة الـ resolver، يُمسح عند التحرير اليدوي.
+- DEF-006: السطر يُضاف فقط بزر **«إضافة سطر»** الصريح (أُضيف لشاشة المبيعات أيضاً)؛
+  النقر خارج الجدول/على الشجرة (مفرد) لا يُنشئ صفوفاً (مُتحقَّق حيّاً).
+- DEF-007: في `InvoiceCategoryTree` تمييز نقر مفرد/مزدوج عبر مؤقّت 220ms — مفرد=
+  بطاقة (`onShowCard`)، مزدوج=إدراج (`onPickItem` كما كان). متطابق بيع/شراء (مكوّن
+  مشترك).
+- DEF-008: `AseelAutocomplete` صار يعرض أيقونة (i) لكل خيار (`onInfo`) تفتح البطاقة
+  دون اختيار/إضافة؛ وأيقونة (i) بجانب المنتج المختار على السطر (بيع وشراء).
+
+### DEF-009 — مهلة الخمول
+- ثابت وحيد `frontend_v2/constants/session.ts IDLE_TIMEOUT_MS = 30دقيقة` +
+  `components/IdleTimeoutGuard.tsx` (مركّب في `App.tsx`): بعد 30د خمول يمسح التوكن
+  ويعرض مودال «تم إنهاء الجلسة» → العودة لتسجيل الدخول. أي نشاط يعيد ضبط المؤقّت.
+
+### تحقق
+- backend: TDD جديد `sales/tests/test_customer_quote_pricing.py` (+6: مصفوفة
+  الأولوية quote-only/purchased-beats-quote/neither + نقطة القائمة list/save/delete).
+  حزم البيع+التسعير+البطاقات **57 أخضر** · `makemigrations --check` لا انحراف ·
+  `manage.py check` 0.
+- frontend: tsc 0 · vite build OK.
+- **حيّ في المتصفح (1366×768، جلسة فعلية):** «شجرة المنتجات» (لا «أصناف») · الشجرة
+  أعلى البنود (20+ صفاً) · نقر مفرد=بطاقة · مزدوج=إدراج بلا تكرار · نقر خارجي=صفر
+  صفوف · (i) القائمة ×8 تفتح البطاقة دون اختيار · (i) السطر ×2 تفتح البطاقة ·
+  تبويب «عرض السعر» يظهر للعميل. (قائمة «عرض السعر» الحيّة فارغة لأن خادم الـ API
+  المتصل به الواجهة لم يُنشر عليه الـ endpoint/migration الجديدان بعد — مُغطّى
+  backend بالاختبارات. نشر: `python manage.py migrate sales`.)
+
+### [ORPHANS & PENDING — task21]
+- DEF-009 لم يُختبر حيّاً (يتطلب انتظار 30د)؛ الكود مركّب والبناء نظيف.
+- صف فارغ تالٍ بعد الإدراج = سلوك قائم سابقاً في محرر المبيعات (ليس صفاً «شارداً»).
+- بطاقة الصنف لا تعرض «آخر 7/28 يوم» ولا صورة (نقطة `profile` لا تُرجعهما) — تُضاف
+  عند توسعة الـ endpoint لاحقاً.
 
 ## [AUDIT — task20, 2026-06-18] (التسعير الذكي + بطاقات الكيانات — FEAT-1..4)
 

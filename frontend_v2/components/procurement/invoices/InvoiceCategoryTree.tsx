@@ -22,17 +22,21 @@ import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
 import { productToItem } from "../price-offers/ItemSearchModal";
 
 /**
- * task18 DEF-B1/B3: شجرة أصناف احترافية مرساة بجانب الفاتورة (نمط الأصيل).
- * مصطلحات المالك: «صنف» = الفئة/المجموعة (عقدة الشجرة) · «منتج» = العنصر الورقي.
- * - مطويّة افتراضياً، تنفتح بالنقر.
+ * task18 DEF-B1/B3: شجرة منتجات احترافية مرساة بجانب الفاتورة (نمط الأصيل).
+ * المصطلحات (DEF-002): «صنف/فئة» = العقدة الفرعية (branch) · «منتج» = العقدة
+ * الورقية (leaf). المنتجات تُجمَّع تحت أصنافها.
  * - زر الماوس الأيمن على أي عقدة → قائمة: «إضافة صنف» (فرعي) · «إضافة منتج» · «تعديل».
- * - النقر على منتج يبدأ سطراً في الفاتورة. + بحث فوري.
+ * - DEF-007: النقر المفرد على منتج يفتح بطاقته · النقر المزدوج يُدرجه في الفاتورة.
+ * + بحث فوري.
  */
 type Cat = { id: string; name: string; parent: number | null };
 
 interface Props {
   items: Item[];
+  /** DEF-007: إدراج المنتج في الفاتورة (نقر مزدوج). */
   onPickItem: (item: Item) => void;
+  /** DEF-007: فتح بطاقة المنتج (نقر مفرد). */
+  onShowCard?: (item: Item) => void;
   onItemCreated?: (item: Item) => void;
   disabled?: boolean;
 }
@@ -45,7 +49,13 @@ const ctxItemStyle: React.CSSProperties = {
   fontSize: 13, color: "#333426", textAlign: "start", borderRadius: 5,
 };
 
-export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onItemCreated, disabled }) => {
+export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShowCard, onItemCreated, disabled }) => {
+  // نقرة مفردة على الصنف → تفتح بطاقة الصنف (وفيها «موافق» للإضافة). لا إدراج
+  // بالنقر المزدوج. (الإدراج المباشر يبقى فقط عند إنشاء صنف جديد من الشجرة.)
+  const handleLeafClick = (it: Item) => {
+    if (disabled) return;
+    onShowCard?.(it);
+  };
   const [cats, setCats] = useState<Cat[]>([]);
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -166,8 +176,8 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onItem
         type="button"
         disabled={disabled}
         className="aseel-tree-leaf"
-        onClick={() => !disabled && onPickItem(it)}
-        title={it.name}
+        onClick={() => handleLeafClick(it)}
+        title={`${it.name} — انقر لعرض بطاقة الصنف`}
       >
         <Package className="w-3 h-3 shrink-0" />
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
@@ -253,11 +263,11 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onItem
       <button
         type="button"
         className="aseel-tree-rail"
-        title="إظهار شجرة الأصناف"
+        title="إظهار شجرة المنتجات"
         onClick={() => setPanelCollapsed(false)}
       >
         <PanelRightOpen className="w-4 h-4" />
-        <span className="aseel-tree-rail-label">شجرة الأصناف</span>
+        <span className="aseel-tree-rail-label">شجرة المنتجات</span>
       </button>
     );
   }
@@ -266,7 +276,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onItem
     <div className="aseel-tree-panel w-[280px] shrink-0">
       <div className="aseel-tree-toolbar">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-semibold" style={{ color: "var(--aseel-ink)" }}>شجرة الأصناف</span>
+          <span className="text-xs font-semibold" style={{ color: "var(--aseel-ink)" }}>شجرة المنتجات</span>
           <button type="button" className="aseel-toolbtn" title="طيّ اللوحة" onClick={() => setPanelCollapsed(true)}>
             <PanelRightClose className="w-4 h-4" />
           </button>

@@ -45,6 +45,10 @@ export interface AseelDocumentShellProps {
   actions?: AseelToolbarAction[];
   /** Header field band (labelled inputs). */
   header: React.ReactNode;
+  /** Optional full-height right rail spanning the header band + grid (e.g. الشجرة).
+   *  When provided, the header + grid are wrapped in a column beside this rail so
+   *  it rises to the very top of the document instead of starting below the header. */
+  aside?: React.ReactNode;
   /** Lines / grid area. */
   children: React.ReactNode;
   /** Bottom tab strip (notes / accounts / other). */
@@ -100,6 +104,7 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
   nav,
   actions = [],
   header,
+  aside,
   children,
   tabs = [],
   totals,
@@ -183,23 +188,40 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
         </div>
       </div>
 
-      {/* Header field band */}
-      <div className="aseel-headband">{header}</div>
-
-      {/* Lines / grid — task13 M3: تدفق طبيعي بلا سكرول داخلي (سكرولر
-          الصفحة الوحيد في main.app-content) */}
-      <div className="aseel-gridwrap">
-        {tabsInMain ? (
-          <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
-            {tabStrip}
-            <div className="aseel-tabpanel" role="tabpanel" style={{ flex: '1 0 auto' }}>
-              {tab?.content}
+      {/* Header field band + lines/grid — task13 M3: تدفق طبيعي بلا سكرول داخلي
+          (سكرولر الصفحة الوحيد في main.app-content). عند تمرير `aside` تُغلَّف هذه
+          المنطقة في عمود بجانب الشريط الجانبي ليرتفع لأعلى المستند. */}
+      {(() => {
+        const band = <div className="aseel-headband">{header}</div>;
+        const grid = (
+          <div className="aseel-gridwrap">
+            {tabsInMain ? (
+              <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100%' }}>
+                {tabStrip}
+                <div className="aseel-tabpanel" role="tabpanel" style={{ flex: '1 0 auto' }}>
+                  {tab?.content}
+                </div>
+              </div>
+            ) : (
+              children
+            )}
+          </div>
+        );
+        return aside ? (
+          <div className="aseel-doc-mainrow">
+            {aside}
+            <div className="aseel-doc-maincol">
+              {band}
+              {grid}
             </div>
           </div>
         ) : (
-          children
-        )}
-      </div>
+          <>
+            {band}
+            {grid}
+          </>
+        );
+      })()}
 
       {/* Bottom: tabs + totals dock (الـ tabs هنا فقط عندما يوجد محتوى رئيسي) */}
       {((tabs.length > 0 && !tabsInMain) || totals) && (

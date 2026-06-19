@@ -35,6 +35,8 @@ from .services import (
     attach_payment_voucher,
     convert_quotation_to_invoice,
     credit_preview_for_sale,
+    customer_price_list,
+    save_customer_quotes,
     deliver_delivery_order,
     get_or_create_sales_settings,
     invoice_profits,
@@ -535,6 +537,42 @@ class SalesSettingsViewSet(viewsets.ViewSet):
         ser.is_valid(raise_exception=True)
         ser.save()
         return Response(ser.data)
+
+
+class CustomerPriceListViewSet(viewsets.ViewSet):
+    """DEF-004: عرض السعر لكل العميل عبر كامل الكتالوج (مبيعات فقط).
+
+    GET  sales/customer-price-list/?customer={id} → كل المنتجات + مصدر السعر.
+    PUT  sales/customer-price-list/  {customer, entries:[{product,unit_price}]} → حفظ
+    العروض اليدوية. لا أثر محاسبي.
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    def list(self, request):
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"error": "لا يوجد شركة (tenant)."}, status=status.HTTP_400_BAD_REQUEST)
+        cid = request.query_params.get("customer")
+        if not cid or not str(cid).isdigit():
+            return Response({"error": "باراميتر customer مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
+        rows = customer_price_list(tenant_id=tenant.TenantID, customer_id=int(cid))
+        return Response(rows)
+
+    @action(detail=False, methods=["put", "post"], url_path="save")
+    def save(self, request):
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"error": "لا يوجد شركة (tenant)."}, status=status.HTTP_400_BAD_REQUEST)
+        cid = request.data.get("customer")
+        if cid in (None, "") or not str(cid).isdigit():
+            return Response({"error": "حقل customer مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
+        entries = request.data.get("entries") or []
+        saved = save_customer_quotes(
+            tenant_id=tenant.TenantID, customer_id=int(cid), entries=entries
+        )
+        return Response({"saved": saved})
 
 
 class SalesReportViewSet(viewsets.ViewSet):

@@ -31,6 +31,7 @@ import OfflineCoachmark from "./components/offline/OfflineCoachmark";
 import StatusMessage from "./components/offline/StatusMessage";
 import { processMutationQueue, registerConflictListener, type ConflictPayload, type ConflictResolution } from "./services/offline/cachedApi";
 import StorageQuotaGuard from "./components/offline/StorageQuotaGuard";
+import { IdleTimeoutGuard } from "./components/IdleTimeoutGuard";
 import SyncConflictModal from "./components/offline/SyncConflictModal";
 import { useBroadcastSync } from "./hooks/useBroadcastSync";
 import { cleanOldCache } from "./services/offline/cacheCleaner";
@@ -1829,6 +1830,8 @@ const App: React.FC = () => {
       <UpdatePrompt />
       <OfflineCoachmark />
       <StorageQuotaGuard />
+      {/* DEF-009: مهلة الخمول — تُنهي الجلسة بعد عدم نشاط طويل */}
+      <IdleTimeoutGuard onLogout={logout} />
       {statusMsg && <StatusMessage message={statusMsg.message} type={statusMsg.type} />}
       {syncConflict && (
         <SyncConflictModal

@@ -461,7 +461,9 @@ tbody td {
   row-gap: 2px;
 }
 
-/* task18 DEF-B1/B3: شجرة الأصناف المرساة بجانب الفاتورة */
+/* task18 DEF-B1/B3 + DEF-001: شجرة المنتجات المرساة بجانب الفاتورة.
+   DEF-001: ترتفع لتحاذي رأس جدول البنود وتستعمل ارتفاع الشاشة المتاح حتى تظهر
+   أول ~8 صفوف دون تمرير على دقّة 1366×768 (يبقى الـ body قابلاً للتمرير عند الطول). */
 [data-skin="aseel"] .aseel-tree-panel {
   flex: 0 0 240px;
   max-width: 240px;
@@ -470,7 +472,11 @@ tbody td {
   border: 1px solid var(--aseel-border-soft);
   border-radius: var(--aseel-radius);
   background: var(--aseel-panel);
-  max-height: 480px;
+  align-self: flex-start;
+  position: sticky;
+  top: 8px;
+  max-height: calc(100vh - 160px);
+  min-height: 320px;
 }
 [data-skin="aseel"] .aseel-tree-head,
 [data-skin="aseel"] .aseel-tree-search,
@@ -633,6 +639,20 @@ tbody td {
   border-top: 1px solid var(--aseel-border);
   border-bottom: 1px solid var(--aseel-border);
 }
+/* DEF: الشجرة كشريط جانبي يمتدّ من رأس المستند (يحاذي بطاقة العميل) لأقصى أعلى. */
+[data-skin="aseel"] .aseel-doc-mainrow {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  flex: 1 0 auto;
+  min-height: 0;
+}
+[data-skin="aseel"] .aseel-doc-maincol {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
 [data-skin="aseel"] .aseel-grid { width: 100%; border-collapse: collapse; font-size: var(--aseel-fs); }
 [data-skin="aseel"] .aseel-grid thead th {
   position: sticky;
@@ -767,6 +787,27 @@ tbody td {
 .aseel-autocomplete-sub { color: #6b6952; font-size: 11px; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
 .aseel-autocomplete-empty { padding: 8px; color: #6b6952; text-align: center; }
 .aseel-autocomplete-row--create { color: #2f5f8f; font-weight: 700; justify-content: flex-start; border-bottom: none; }
+/* DEF-008: زرّ المحتوى الأساسي داخل صف القائمة + أيقونة (i) لفتح بطاقة الصنف */
+.aseel-autocomplete-main {
+  display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0;
+  background: transparent; border: none; padding: 0; text-align: start;
+  cursor: pointer; font: inherit; color: inherit;
+}
+.aseel-autocomplete-info {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; width: 22px; height: 22px; padding: 0;
+  background: transparent; border: 1px solid transparent; border-radius: 3px;
+  color: #2f5f8f; cursor: pointer;
+}
+.aseel-autocomplete-info:hover { background: #e3ecf6; border-color: #9bb4d0; }
+
+/* DEF-005: شارة مصدر السعر المقترح على سطر الفاتورة */
+[data-skin="aseel"] .aseel-price-badge {
+  flex: 0 0 auto; font-size: 10px; line-height: 1; white-space: nowrap;
+  padding: 2px 5px; border-radius: 8px; font-weight: 700;
+}
+[data-skin="aseel"] .aseel-price-badge--last { background: #dbeafe; color: #1e40af; }
+[data-skin="aseel"] .aseel-price-badge--quote { background: #fef3c7; color: #92400e; }
 
 /* ── Status bar ── */
 [data-skin="aseel"] .aseel-statusbar {

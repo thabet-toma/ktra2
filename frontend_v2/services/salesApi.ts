@@ -245,6 +245,36 @@ export async function resolveSalePrice(params: {
 }
 
 // -------------------------------------------------------------
+// DEF-004: عرض السعر لكل العميل (قائمة الكتالوج + حفظ العروض اليدوية)
+// -------------------------------------------------------------
+export type CustomerPriceRow = {
+  product_id: number;
+  sku: string | null;
+  name: string;
+  price: string | null;
+  source: "last_invoice" | "quote";
+  source_label: string;
+  editable: boolean;
+  invoice_number: string | null;
+};
+
+export async function getCustomerPriceList(customerId: number | string): Promise<CustomerPriceRow[]> {
+  const q = new URLSearchParams({ customer: String(customerId) });
+  return apiGetList(`sales/customer-price-list/?${q.toString()}`, { tenantId: tid() });
+}
+
+export async function saveCustomerQuotes(
+  customerId: number | string,
+  entries: { product: number; unit_price: string }[],
+): Promise<{ saved: number }> {
+  return apiPostObject(
+    `sales/customer-price-list/save/`,
+    { customer: Number(customerId), entries },
+    { tenantId: tid() },
+  );
+}
+
+// -------------------------------------------------------------
 // task18 DEF-C1: رصيد الشريك (قبل/بعد) — يعمل للعميل والمورد
 // -------------------------------------------------------------
 export type PartnerBalanceResponse = {
