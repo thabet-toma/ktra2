@@ -57,6 +57,8 @@ export type AppView =
     | "accounting-exchange-rates"
     | "stock-levels"
     | "stock-movements"
+    | "warehouse-transfer"
+    | "stocktake"
     | "property-rental"
     | "aseel-kit"
     | "aseel-sales"

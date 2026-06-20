@@ -191,6 +191,8 @@ class StockMovement(models.Model):
         ('SALE', 'بيع'),
         ('STOCK_ISSUE', 'إذن صرف'),
         ('PURCHASE_INVOICE', 'فاتورة شراء'),
+        ('WAREHOUSE_TRANSFER', 'تحويل مستودعي'),
+        ('STOCKTAKE', 'جرد'),
     ]
 
     id = models.AutoField(primary_key=True, db_column='MovementID')
@@ -262,3 +264,97 @@ class ProductPriceTier(models.Model):
     def __str__(self):
         return f"{self.product} — {self.tier_type} #{self.tier_number}: {self.price}"
 
+
+
+# ════════════════════════════════════════════════════════════════════
+# Phase 7 (T-I1/T-I2): مستندات المخزون — تحويل بين المستودعات + جرد
+# ════════════════════════════════════════════════════════════════════
+
+
+class WarehouseTransfer(models.Model):
+    """T-I1: مستند تحويل بضاعة بين مستودعين.
+
+    الترحيل = حركتا مخزون (صرف من المصدر + استلام في الوجهة) بالتكلفة المتوسطة،
+    فلا يتغيّر إجمالي المخزون أو متوسط التكلفة على مستوى الشركة — تنتقل البضاعة
+    بين المستودعين فقط. لا قيد محاسبي (لا أثر على قيمة المخزون).
+    """
+    id = models.AutoField(primary_key=True, db_column='TransferID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', related_name='warehouse_transfers')
+    transfer_number = models.CharField(max_length=30, blank=True, default='', db_column='TransferNumber')
+    transfer_date = models.DateField(db_column='TransferDate')
+    source_warehouse = models.ForeignKey(
+        'Warehouse', on_delete=models.PROTECT, db_column='SourceWarehouseID',
+        related_name='transfers_out')
+    dest_warehouse = models.ForeignKey(
+        'Warehouse', on_delete=models.PROTECT, db_column='DestWarehouseID',
+        related_name='transfers_in')
+    notes = models.CharField(max_length=500, blank=True, default='', db_column='Notes')
+    is_posted = models.BooleanField(default=False, db_column='IsPosted')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'warehouse_transfers'
+        managed = True
+        ordering = ['-transfer_date', '-id']
+
+    def __str__(self):
+        return f"تحويل {self.transfer_number or self.id}: {self.source_warehouse} → {self.dest_warehouse}"
+
+
+class WarehouseTransferLine(models.Model):
+    id = models.AutoField(primary_key=True, db_column='TransferLineID')
+    transfer = models.ForeignKey(WarehouseTransfer, on_delete=models.CASCADE, db_column='TransferID', related_name='lines')
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, db_column='ProductID')
+    quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')
+
+    class Meta:
+        db_table = 'warehouse_transfer_lines'
+        managed = True
+
+    def __str__(self):
+        return f"{self.product} × {self.quantity}"
+
+
+class Stocktake(models.Model):
+    """T-I2: مستند جرد فعلي. الترحيل يسوّي رصيد كل صنف ليطابق الكمية المعدودة
+    (حركات ADJUST_IN/ADJUST_OUT) ويُنشئ قيد فرق الجرد (المخزون مقابل تكلفة
+    البضاعة المباعة — المعالجة المعتادة لفرو قات الجرد)."""
+    id = models.AutoField(primary_key=True, db_column='StocktakeID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', related_name='stocktakes')
+    stocktake_number = models.CharField(max_length=30, blank=True, default='', db_column='StocktakeNumber')
+    stocktake_date = models.DateField(db_column='StocktakeDate')
+    warehouse = models.ForeignKey(
+        'Warehouse', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='WarehouseID', related_name='stocktakes',
+        help_text='المستودع المجرود (وسم على الحركات) — الرصيد على مستوى الشركة')
+    notes = models.CharField(max_length=500, blank=True, default='', db_column='Notes')
+    is_posted = models.BooleanField(default=False, db_column='IsPosted')
+    journal = models.ForeignKey(
+        'accounting.JournalHeader', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='JournalID', related_name='stocktakes')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'stocktakes'
+        managed = True
+        ordering = ['-stocktake_date', '-id']
+
+    def __str__(self):
+        return f"جرد {self.stocktake_number or self.id}"
+
+
+class StocktakeLine(models.Model):
+    id = models.AutoField(primary_key=True, db_column='StocktakeLineID')
+    stocktake = models.ForeignKey(Stocktake, on_delete=models.CASCADE, db_column='StocktakeID', related_name='lines')
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, db_column='ProductID')
+    counted_quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='CountedQuantity')
+    # لقطة رصيد النظام لحظة الترحيل (للتدقيق) + الفرق المُرحَّل.
+    system_quantity = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='SystemQuantity')
+    variance = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='Variance')
+
+    class Meta:
+        db_table = 'stocktake_lines'
+        managed = True
+
+    def __str__(self):
+        return f"{self.product}: عُدّ {self.counted_quantity}"

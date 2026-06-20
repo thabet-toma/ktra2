@@ -36,22 +36,49 @@ const fmt2 = (v: string | number | null | undefined): string => {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
+/** DEF-005 / T-R2: مصدر السعر المقترح للشارة داخل البطاقة. */
+export type ProductCardPriceSource = "last_invoice" | "quote" | "default" | null;
+
 interface Props {
   productId: number;
   onClose: () => void;
-  /** عند تمريرها يظهر زر «موافق» الذي يُدرج الصنف في الفاتورة (بيع/شراء). */
-  onConfirm?: () => void;
+  /** عند تمريرها يظهر زر «موافق» الذي يُدرج الصنف في الفاتورة (بيع/شراء).
+   *  T-R2: في وضع الإضافة يُمرَّر الكمية والسعر المُدخلان. */
+  onConfirm?: (opts?: { quantity: number; unitPrice: number }) => void;
   /** نصّ زر التأكيد (افتراضي: «موافق»). */
   confirmLabel?: string;
   /** اسم الصنف الاحتياطي ليظهر فوراً حتى لو تعذّر تحميل بيانات البطاقة. */
   productName?: string;
+  /** T-R2: وضع الإضافة للفاتورة — يُظهر حقل الكمية والسعر مع شارة المصدر. */
+  addMode?: boolean;
+  /** السعر المقترح (من آخر فاتورة/عرض سعر) — مبدئي قابل للتعديل. */
+  suggestedPrice?: number | string | null;
+  /** مصدر السعر المقترح للشارة. */
+  priceSource?: ProductCardPriceSource;
 }
 
-export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfirm, confirmLabel = "موافق", productName }) => {
+const PRICE_SOURCE_LABEL: Record<NonNullable<ProductCardPriceSource>, string> = {
+  last_invoice: "من آخر فاتورة",
+  quote: "من عرض السعر",
+  default: "السعر الافتراضي",
+};
+
+export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfirm, confirmLabel = "موافق", productName, addMode = false, suggestedPrice, priceSource = null }) => {
   const navigate = useNavigate();
   const [profile, setProfile] = useState<ProductProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // T-R2: الكمية والسعر المُدخلان في وضع الإضافة.
+  const [qty, setQty] = useState("1");
+  const [price, setPrice] = useState<string>(
+    suggestedPrice == null || suggestedPrice === "" ? "" : String(suggestedPrice)
+  );
+  useEffect(() => {
+    if (suggestedPrice != null && suggestedPrice !== "") setPrice(String(suggestedPrice));
+  }, [suggestedPrice]);
+
+  /** يجمع قيم الإضافة لتمريرها لـ onConfirm. */
+  const confirmPayload = () => ({ quantity: Number(qty) || 1, unitPrice: Number(price) || 0 });
 
   useEffect(() => {
     let cancelled = false;
@@ -69,11 +96,11 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      else if (e.key === "Enter" && onConfirm) { e.preventDefault(); onConfirm(); }
+      else if (e.key === "Enter" && onConfirm) { e.preventDefault(); onConfirm(addMode ? confirmPayload() : undefined); onClose(); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, onConfirm]);
+  }, [onClose, onConfirm, addMode, qty, price]);
 
   const title = profile?.name || productName || null;
 
@@ -119,6 +146,42 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
               <Kpi label="إجمالي المباعة (قيمة)" value={fmt2(profile.sold_value)} />
             </div>
           ) : null}
+
+          {/* T-R2: حقل الكمية والسعر مع شارة المصدر — يظهر فقط في وضع الإضافة. */}
+          {addMode && onConfirm && (
+            <div className="mt-3 pt-3 border-t border-[var(--aseel-border)] grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1 text-xs text-[var(--aseel-ink-soft)]">
+                الكمية المراد إضافتها
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  className="aseel-input"
+                  value={qty}
+                  autoFocus
+                  onChange={(e) => setQty(e.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-xs text-[var(--aseel-ink-soft)]">
+                <span className="flex items-center justify-between gap-2">
+                  السعر
+                  {priceSource && (
+                    <span className="aseel-price-badge" title="مصدر السعر المقترح">
+                      {PRICE_SOURCE_LABEL[priceSource]}
+                    </span>
+                  )}
+                </span>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  className="aseel-input"
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                />
+              </label>
+            </div>
+          )}
         </div>
         <div className="aseel-picker-foot" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
           <button
@@ -134,7 +197,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
             {onConfirm && (
               <button
                 type="button"
-                onClick={() => { onConfirm(); onClose(); }}
+                onClick={() => { onConfirm(addMode ? confirmPayload() : undefined); onClose(); }}
                 title="إضافة الصنف إلى الفاتورة"
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors"
               >

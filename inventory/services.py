@@ -564,3 +564,188 @@ def product_linked_invoices(*, tenant_id: int, product_id: int) -> list[dict]:
             'is_posted': inv.status == 'posted',
         })
     return out
+
+
+# ════════════════════════════════════════════════════════════════════
+# Phase 7 (T-I1/T-I2): ترحيل مستندات المخزون — تحويل + جرد
+# ════════════════════════════════════════════════════════════════════
+
+def _next_doc_number(tenant_id, model, field, prefix):
+    """رقم تسلسلي بسيط لكل شركة: PREFIX-0001 (مرآة منطق توليد SKU)."""
+    last = (
+        model.objects.filter(tenant_id=tenant_id)
+        .exclude(**{f'{field}': ''})
+        .order_by('-id')
+        .values_list(field, flat=True)
+        .first()
+    )
+    n = 0
+    if last:
+        try:
+            n = int(str(last).split('-')[-1])
+        except (ValueError, IndexError):
+            n = model.objects.filter(tenant_id=tenant_id).count()
+    return f"{prefix}-{n + 1:04d}"
+
+
+def post_warehouse_transfer(transfer, user=None):
+    """T-I1: يرحّل تحويلاً بين مستودعين — صرف من المصدر + استلام في الوجهة بالتكلفة
+    المتوسطة. صافي الأثر على إجمالي المخزون/المتوسط = صفر (نقل موقعي). لا قيد محاسبي."""
+    from .models import WarehouseTransfer
+    if transfer.is_posted:
+        raise ValidationError("التحويل مُرحَّل مسبقاً.")
+    if transfer.source_warehouse_id == transfer.dest_warehouse_id:
+        raise ValidationError("مستودع المصدر والوجهة متطابقان.")
+    lines = list(transfer.lines.select_related('product').all())
+    if not lines:
+        raise ValidationError("أضف بنداً واحداً على الأقل.")
+
+    with transaction.atomic():
+        if not transfer.transfer_number:
+            transfer.transfer_number = _next_doc_number(
+                transfer.tenant_id, WarehouseTransfer, 'transfer_number', 'TRF')
+        for ln in lines:
+            prod = ln.product
+            # نلتقط التكلفة المتوسطة الحالية لاستخدامها في الاستلام (نقل بالتكلفة).
+            avg = Decimal(str(prod.avg_cost))
+            record_stock_movement(
+                product=prod, movement_type='OUT', quantity=ln.quantity,
+                reference_type='WAREHOUSE_TRANSFER', reference_id=transfer.id,
+                movement_date=transfer.transfer_date, tenant=transfer.tenant,
+                warehouse=transfer.source_warehouse,
+                notes=f"تحويل إلى {transfer.dest_warehouse.name}",
+            )
+            record_stock_movement(
+                product=prod, movement_type='IN', quantity=ln.quantity, unit_cost=avg,
+                reference_type='WAREHOUSE_TRANSFER', reference_id=transfer.id,
+                movement_date=transfer.transfer_date, tenant=transfer.tenant,
+                warehouse=transfer.dest_warehouse,
+                notes=f"تحويل من {transfer.source_warehouse.name}",
+            )
+        transfer.is_posted = True
+        transfer.save(update_fields=['is_posted', 'transfer_number'])
+    logger.info("Warehouse transfer #%s posted (%d lines)", transfer.id, len(lines))
+    return transfer
+
+
+def unpost_warehouse_transfer(transfer, user=None):
+    """يعكس التحويل: استلام في المصدر + صرف من الوجهة بالتكلفة المتوسطة الحالية."""
+    if not transfer.is_posted:
+        raise ValidationError("التحويل ليس مُرحَّلاً.")
+    lines = list(transfer.lines.select_related('product').all())
+    with transaction.atomic():
+        for ln in lines:
+            prod = ln.product
+            avg = Decimal(str(prod.avg_cost))
+            record_stock_movement(
+                product=prod, movement_type='OUT', quantity=ln.quantity,
+                reference_type='WAREHOUSE_TRANSFER', reference_id=transfer.id,
+                movement_date=transfer.transfer_date, tenant=transfer.tenant,
+                warehouse=transfer.dest_warehouse, notes="عكس تحويل",
+            )
+            record_stock_movement(
+                product=prod, movement_type='IN', quantity=ln.quantity, unit_cost=avg,
+                reference_type='WAREHOUSE_TRANSFER', reference_id=transfer.id,
+                movement_date=transfer.transfer_date, tenant=transfer.tenant,
+                warehouse=transfer.source_warehouse, notes="عكس تحويل",
+            )
+        transfer.is_posted = False
+        transfer.save(update_fields=['is_posted'])
+    return transfer
+
+
+def post_stocktake(stocktake, user=None):
+    """T-I2: يرحّل جرداً — يسوّي رصيد كل صنف ليطابق الكمية المعدودة عبر حركات
+    ADJUST_IN/ADJUST_OUT، ويُنشئ قيد فرق الجرد (المخزون مقابل تكلفة البضاعة المباعة).
+      فائض (عُدّ > النظام): مدين المخزون / دائن ت.ب.م.
+      عجز  (عُدّ < النظام): مدين ت.ب.م / دائن المخزون.
+    """
+    from .models import Stocktake
+    from accounting.services import post_journal
+    if stocktake.is_posted:
+        raise ValidationError("الجرد مُرحَّل مسبقاً.")
+    lines = list(stocktake.lines.select_related('product').all())
+    if not lines:
+        raise ValidationError("أضف بنداً واحداً على الأقل.")
+
+    # تجميع أطراف القيد حسب الحساب (مخزون/ت.ب.م) عبر كل البنود.
+    debit_by_acct = {}   # account_id -> Decimal
+    credit_by_acct = {}
+    acct_obj = {}
+
+    def _add(d, acct, amt):
+        d[acct.id] = d.get(acct.id, Decimal('0')) + amt
+        acct_obj[acct.id] = acct
+
+    with transaction.atomic():
+        if not stocktake.stocktake_number:
+            stocktake.stocktake_number = _next_doc_number(
+                stocktake.tenant_id, Stocktake, 'stocktake_number', 'JRD')
+        for ln in lines:
+            prod = ln.product
+            system_qty = Decimal(str(prod.quantity_on_hand))
+            counted = Decimal(str(ln.counted_quantity))
+            variance = (counted - system_qty).quantize(Decimal('0.0001'))
+            ln.system_quantity = system_qty
+            ln.variance = variance
+            ln.save(update_fields=['system_quantity', 'variance'])
+            if variance == 0:
+                continue
+            avg = Decimal(str(prod.avg_cost))
+            value = (abs(variance) * avg).quantize(Decimal('0.01'))
+            inv_acct = _resolve_line_account(prod, 'inventory', tenant_id=stocktake.tenant_id)
+            cogs_acct = _resolve_line_account(prod, 'cogs', tenant_id=stocktake.tenant_id)
+            if variance > 0:
+                # فائض: زيادة مخزون
+                record_stock_movement(
+                    product=prod, movement_type='ADJUST_IN', quantity=variance, unit_cost=avg,
+                    reference_type='STOCKTAKE', reference_id=stocktake.id,
+                    movement_date=stocktake.stocktake_date, tenant=stocktake.tenant,
+                    warehouse=stocktake.warehouse, notes="فائض جرد",
+                )
+                if value > 0:
+                    _add(debit_by_acct, inv_acct, value)
+                    _add(credit_by_acct, cogs_acct, value)
+            else:
+                # عجز: نقص مخزون
+                record_stock_movement(
+                    product=prod, movement_type='ADJUST_OUT', quantity=abs(variance),
+                    reference_type='STOCKTAKE', reference_id=stocktake.id,
+                    movement_date=stocktake.stocktake_date, tenant=stocktake.tenant,
+                    warehouse=stocktake.warehouse, notes="عجز جرد",
+                )
+                if value > 0:
+                    _add(debit_by_acct, cogs_acct, value)
+                    _add(credit_by_acct, inv_acct, value)
+
+        # بناء أطراف القيد (صافي مدين/دائن لكل حساب) وترحيله إن وُجد فرق قيمي.
+        lines_data = []
+        net = {}
+        for aid, amt in debit_by_acct.items():
+            net[aid] = net.get(aid, Decimal('0')) + amt
+        for aid, amt in credit_by_acct.items():
+            net[aid] = net.get(aid, Decimal('0')) - amt
+        for aid, amt in net.items():
+            if amt == 0:
+                continue
+            if amt > 0:
+                lines_data.append({'account': aid, 'debit': amt, 'credit': Decimal('0'), 'description': 'فرق جرد'})
+            else:
+                lines_data.append({'account': aid, 'debit': Decimal('0'), 'credit': -amt, 'description': 'فرق جرد'})
+
+        journal = None
+        if lines_data:
+            journal = post_journal(
+                tenant_id=stocktake.tenant_id,
+                transaction_date=stocktake.stocktake_date,
+                reference_type='STOCKTAKE',
+                reference_id=stocktake.id,
+                description=f"فرق جرد {stocktake.stocktake_number}",
+                lines_data=lines_data,
+                user=user,
+            )
+        stocktake.is_posted = True
+        stocktake.journal = journal
+        stocktake.save(update_fields=['is_posted', 'journal', 'stocktake_number'])
+    logger.info("Stocktake #%s posted (journal=%s)", stocktake.id, journal.id if journal else None)
+    return stocktake

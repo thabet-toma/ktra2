@@ -7,7 +7,11 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Loader2, Save, Info } from "lucide-react";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
+import { apiGetList } from "../../services/restApi";
+import { resolveTenantId } from "../../utils/tenantContext";
 import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
+
+type AccountOpt = { id: number; code?: string | null; name?: string | null; account_type?: string | null; is_active?: boolean };
 
 const STRATEGIES: { value: string; label: string; hint: string }[] = [
   {
@@ -24,6 +28,9 @@ const STRATEGIES: { value: string; label: string; hint: string }[] = [
 
 const PurchaseSettingsPage: React.FC = () => {
   const [strategy, setStrategy] = useState<string>("LAST_PURCHASE");
+  // T-A4: الصندوق الافتراضي لفواتير الشراء.
+  const [cashAccount, setCashAccount] = useState<number | null>(null);
+  const [accounts, setAccounts] = useState<AccountOpt[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [banner, setBanner] = useState<{ ok: boolean; msg: string } | null>(null);
@@ -31,14 +38,26 @@ const PurchaseSettingsPage: React.FC = () => {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const s = await purchaseInvoiceApi.getSettings();
+      const [s, accs] = await Promise.all([
+        purchaseInvoiceApi.getSettings(),
+        apiGetList<AccountOpt>("accounting/accounts/", { tenantId: resolveTenantId() }),
+      ]);
       setStrategy(s.purchase_default_price_strategy || "LAST_PURCHASE");
+      setCashAccount(s.default_cash_account ?? null);
+      setAccounts(accs || []);
     } catch (e) {
       setBanner({ ok: false, msg: e instanceof Error ? e.message : String(e) });
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const cashAccounts = (accounts || [])
+    .filter((a) => a.is_active !== false)
+    .filter((a) => {
+      const t = (a.account_type || "").toLowerCase();
+      return t === "asset" || t === "cash" || t === "bank";
+    });
 
   useEffect(() => {
     load();
@@ -50,6 +69,7 @@ const PurchaseSettingsPage: React.FC = () => {
     try {
       await purchaseInvoiceApi.updateSettings({
         purchase_default_price_strategy: strategy,
+        default_cash_account: cashAccount,
       });
       setBanner({ ok: true, msg: "حُفظت إعدادات الشراء بنجاح." });
     } catch (e) {
@@ -57,7 +77,7 @@ const PurchaseSettingsPage: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [strategy]);
+  }, [strategy, cashAccount]);
 
   const actions: AseelToolbarAction[] = [
     {
@@ -127,6 +147,28 @@ const PurchaseSettingsPage: React.FC = () => {
               ))}
             </div>
           )}
+
+          {/* T-A4: الصندوق الافتراضي لفواتير الشراء النقدية (مرآة إعدادات المبيعات). */}
+          <div className="mt-6 pt-4 border-t border-[var(--aseel-border)]">
+            <h3 className="font-bold mb-1 text-[var(--aseel-ink)]">حساب الصندوق الافتراضي (للنقدي)</h3>
+            <p className="text-sm text-[var(--aseel-ink-soft)] mb-2 flex items-start gap-1">
+              <Info className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>يُستخدم تلقائياً للدفعات النقدية في فواتير الشراء بدل اختيار صندوق لكل فاتورة.</span>
+            </p>
+            <select
+              className="aseel-input w-full max-w-md"
+              disabled={loading}
+              value={cashAccount ?? ""}
+              onChange={(e) => setCashAccount(e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">— لا شيء —</option>
+              {cashAccounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {(a.code || "") + " — " + (a.name || "")}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
       </AseelDocumentShell>
     </div>

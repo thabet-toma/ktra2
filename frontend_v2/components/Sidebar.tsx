@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { User, AppView } from "../types";
 import { LogoIcon } from "./icons/LogoIcon";
-import { DashboardIcon } from "./icons/DashboardIcon";
 import { TasksIcon } from "./icons/TasksIcon";
 import { UsersIcon } from "./icons/UsersIcon";
 import { ReportsIcon } from "./icons/ReportsIcon";
@@ -13,10 +12,12 @@ import { GalleryIcon } from "./icons/GalleryIcon";
 import {
   ChevronDown, ChevronUp, Package, FileText, History,
   Handshake, Users, Menu, X, ChevronRight, ChevronLeft, Info,
-  Calculator, BookMarked, Scale, BookOpen, Banknote, Sparkles,
+  Calculator, BookMarked, Scale, BookOpen, Banknote,
   CalendarDays, CalendarX, ArrowLeftRight, Boxes, BarChart3, Building2,
-  ShoppingCart, Receipt, Ship, Truck, Wrench, TrendingUp, ClipboardList,
+  ShoppingCart, Receipt, Ship, Truck, TrendingUp, ClipboardList,
+  ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home,
 } from 'lucide-react';
+import { openInNewTab } from "../utils/openInNewTab";
 
 
 interface SidebarProps {
@@ -28,8 +29,14 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  // Phase 5 (Section 9): مجموعات تنقّل رئيسية كبيرة، كلٌّ بأيقونته الخاصة.
   const [salesExpanded, setSalesExpanded] = useState(false);
-  const [procurementExpanded, setProcurementExpanded] = useState(false);
+  const [customersExpanded, setCustomersExpanded] = useState(false);
+  const [purchasesExpanded, setPurchasesExpanded] = useState(false);
+  const [inventoryExpanded, setInventoryExpanded] = useState(false);
+  const [importExpanded, setImportExpanded] = useState(false);
+  const [financeExpanded, setFinanceExpanded] = useState(false);
+  const [reportsExpanded, setReportsExpanded] = useState(false);
   const [accountingExpanded, setAccountingExpanded] = useState(false);
   const [userManagementExpanded, setUserManagementExpanded] = useState(false);
 
@@ -50,23 +57,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "property-rental", label: "تأجير العقارات والعدادات", icon: <Building2 className="h-4 w-4" /> },
   ];
 
-  useEffect(() => {
-    if (activeView.startsWith("accounting-") || activeView === "property-rental") setAccountingExpanded(true);
-  }, [activeView]);
-
-  useEffect(() => {
-    if (
-      activeView === "sales-invoices" ||
-      activeView === "sales-customers" ||
-      activeView === "sales-customer-payments" ||
-      activeView === "sales-quotations" ||
-      activeView === "credit-debit-notes" ||
-      activeView === "invoice-profits" ||
-      activeView === "sales-settings"
-    )
-      setSalesExpanded(true);
-  }, [activeView]);
-
   const userManagementLinks = [
     { view: "users" as AppView, label: "قائمة المستخدمين", icon: <UsersIcon className="h-5 w-5" />, roles: ['manager'] },
     { view: "attendance" as AppView, label: "الحضور والغياب", icon: <AttendanceIcon className="h-5 w-5" />, roles: ['manager', 'employee', 'procurement'] },
@@ -75,40 +65,81 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "points-history" as AppView, label: "سجل نقاطي", icon: <PointsIcon className="h-5 w-5" />, roles: ['employee', 'procurement', 'manager'] },
   ];
 
-  const salesLinks = [
-    { view: "sales-invoices" as AppView, label: "فواتير المبيعات", icon: <FileText className="h-5 w-5" /> },
-    { view: "sales-quotations" as AppView, label: "العروض والطلبيات", icon: <FileText className="h-5 w-5" /> },
-    { view: "credit-debit-notes" as AppView, label: "الإشعارات المدينة/الدائنة", icon: <FileText className="h-5 w-5" /> },
-    { view: "sales-return" as AppView, label: "مرجع البيع", icon: <FileText className="h-5 w-5" /> },
-    { view: "purchase-return" as AppView, label: "مرجع الشراء", icon: <FileText className="h-5 w-5" /> },
-    { view: "sales-customer-payments" as AppView, label: "دفعات العملاء", icon: <Banknote className="h-5 w-5" /> },
-    { view: "supplier-payments" as AppView, label: "سندات الصرف للموردين", icon: <Banknote className="h-5 w-5" /> },
-    { view: "sales-customers" as AppView, label: "العملاء", icon: <Users className="h-5 w-5" /> },
-    { view: "invoice-profits" as AppView, label: "أرباح الفواتير", icon: <FileText className="h-5 w-5" /> },
-    { view: "sales-settings" as AppView, label: "إعدادات المبيعات", icon: <SettingsIcon className="h-5 w-5" /> },
+  type NavLink = { view: AppView; label: string; icon: React.ReactNode; path?: string; newTab?: boolean; roles?: string[] };
+
+  // 2) المبيعات — إعدادات المبيعات آخراً (Section 9).
+  const salesLinks: NavLink[] = [
+    { view: "sales-invoices", label: "فواتير المبيعات", icon: <FileText className="h-4 w-4" /> },
+    { view: "sales-quotations", label: "العروض", icon: <FileText className="h-4 w-4" /> },
+    { view: "credit-debit-notes", label: "الإشعارات المدينة/الدائنة", icon: <FileText className="h-4 w-4" /> },
+    { view: "sales-return", label: "مرجع البيع", icon: <FileText className="h-4 w-4" /> },
+    { view: "invoice-profits", label: "أرباح الفواتير", icon: <TrendingUp className="h-4 w-4" /> },
+    { view: "sales-settings", label: "إعدادات المبيعات", icon: <SettingsIcon className="h-4 w-4" /> },
   ];
 
-  const procurementLinks = [
-    { view: "purchase-invoices" as AppView, label: "فواتير الشراء", icon: <NoteIcon className="h-5 w-5" /> },
-    { view: "purchase-settings" as AppView, label: "إعدادات الشراء", icon: <SettingsIcon className="h-5 w-5" /> },
-    { view: "old-invoices" as AppView, label: "أرشيف الفواتير", icon: <History className="h-5 w-5" /> },
-    { view: "price-offers" as AppView, label: "عروض الأسعار", icon: <FileText className="h-5 w-5" /> },
-    { view: "deals-management" as AppView, label: "إدارة الصفقات", icon: <Handshake className="h-5 w-5" /> },
-    { view: "items-management" as AppView, label: "الأصناف", icon: <DashboardIcon className="h-5 w-5" /> },
-    { view: "items-categories" as AppView, label: "التصنيفات", icon: <Boxes className="h-5 w-5" /> },
-    { view: "supplier-management" as AppView, label: "الموردين", icon: <UsersIcon className="h-5 w-5" /> },
-    { view: "import-flow" as AppView, label: "رحلة الاستيراد", icon: <Package className="h-5 w-5" /> },
-    { view: "shipments-management" as AppView, label: "الشحنات", icon: <Package className="h-5 w-5" /> },
-    { view: "customs-clearance" as AppView, label: "التخليص الجمركي", icon: <FileText className="h-5 w-5" /> },
-    { view: "local-shipping" as AppView, label: "الشحن المحلي", icon: <Truck className="h-5 w-5" /> },
-    { view: "stock-levels" as AppView, label: "أرصدة المخزون", icon: <BarChart3 className="h-5 w-5" /> },
-    { view: "stock-movements" as AppView, label: "حركات المخزون", icon: <Boxes className="h-5 w-5" /> },
-    { view: "aseel-kit" as AppView, label: "🔧 Aseel Kit (M0)", icon: <Wrench className="h-5 w-5" />, roles: ['manager', 'procurement'] as string[] },
+  // 3) العملاء
+  const customersLinks: NavLink[] = [
+    { view: "sales-customers", label: "العملاء", icon: <Users className="h-4 w-4" /> },
+    { view: "sales-customer-payments", label: "دفعات العملاء", icon: <Banknote className="h-4 w-4" /> },
   ];
 
-  const financeLinks = [
-    { view: "cash-boxes" as AppView, label: "صناديق الكاش", icon: <FileText className="h-5 w-5" /> },
+  // 4) المشتريات
+  const purchasesLinks: NavLink[] = [
+    { view: "purchase-invoices", label: "فواتير الشراء", icon: <NoteIcon className="h-4 w-4" /> },
+    { view: "price-offers", label: "عروض الأسعار", icon: <FileText className="h-4 w-4" /> },
+    { view: "purchase-return", label: "مرجع الشراء", icon: <FileText className="h-4 w-4" /> },
+    { view: "supplier-payments", label: "سندات الصرف للموردين", icon: <Banknote className="h-4 w-4" /> },
+    { view: "purchase-settings", label: "إعدادات الشراء", icon: <SettingsIcon className="h-4 w-4" /> },
+    { view: "supplier-management", label: "الموردين", icon: <UsersIcon className="h-4 w-4" /> },
   ];
+
+  // 5b) المخزون → مجموعة فرعية «الاستيراد» (زر الاستيراد المستقل أُزيل ويعيش هنا).
+  const importLinks: NavLink[] = [
+    { view: "deals-management", label: "الصفقات", icon: <Handshake className="h-4 w-4" /> },
+    { view: "shipments-management", label: "الشحنات", icon: <Ship className="h-4 w-4" /> },
+    { view: "old-invoices", label: "أرشيف الفواتير", icon: <History className="h-4 w-4" /> },
+    { view: "local-shipping", label: "النقل المحلي", icon: <Truck className="h-4 w-4" /> },
+    { view: "customs-clearance", label: "التخليص الجمركي", icon: <FileText className="h-4 w-4" /> },
+    { view: "import-flow", label: "رحلة الاستيراد", icon: <Package className="h-4 w-4" /> },
+  ];
+
+  // 5) المخزون — الأصناف (شجرة، T-N3) + أرصدة + حركات. (إعدادات المخزون غير مبنية — مُدرجة بخارطة الطريق.)
+  const inventoryLinks: NavLink[] = [
+    { view: "stock-levels", label: "أرصدة المخزون", icon: <BarChart3 className="h-4 w-4" /> },
+    { view: "items-management", label: "الأصناف", icon: <Boxes className="h-4 w-4" /> },
+    { view: "stock-movements", label: "حركات المخزون", icon: <ArrowLeftRight className="h-4 w-4" /> },
+    { view: "warehouse-transfer", label: "تحويل بين المستودعات", icon: <Truck className="h-4 w-4" /> },
+    { view: "stocktake", label: "الجرد", icon: <ClipboardList className="h-4 w-4" /> },
+  ];
+
+  // 6) المالية — (البنوك غير مبنية كشاشة مستقلة — مُدرجة بخارطة الطريق).
+  const financeLinks: NavLink[] = [
+    { view: "cash-boxes", label: "صناديق الكاش", icon: <Banknote className="h-4 w-4" /> },
+    { view: "accounting-cheques", label: "الشيكات", icon: <Receipt className="h-4 w-4" /> },
+  ];
+
+  // 7) التقارير — كل تقرير يفتح في تبويبه الخاص (G2).
+  const reportsLinks: NavLink[] = [
+    { view: "reports", label: "التقارير العامة", icon: <ReportsIcon className="h-4 w-4" />, path: "/reports", newTab: true },
+    { view: "stock-movements", label: "تقرير حركة صنف", icon: <ArrowLeftRight className="h-4 w-4" />, path: "/stock-movements", newTab: true },
+    { view: "accounting-trial-balance", label: "ميزان المراجعة", icon: <Scale className="h-4 w-4" />, path: "/accounting/trial-balance", newTab: true },
+    { view: "accounting-income-statement", label: "قائمة الدخل", icon: <TrendingUp className="h-4 w-4" />, path: "/accounting/income-statement", newTab: true },
+    { view: "accounting-balance-sheet", label: "الميزانية العمومية", icon: <BarChart3 className="h-4 w-4" />, path: "/accounting/balance-sheet", newTab: true },
+    { view: "accounting-vat-report", label: "تقرير ض.ق.م", icon: <Receipt className="h-4 w-4" />, path: "/accounting/vat-report", newTab: true },
+  ];
+
+  // فتح المجموعة التي تحتوي الشاشة النشطة تلقائياً.
+  useEffect(() => {
+    const inAny = (links: NavLink[]) => links.some((l) => l.view === activeView);
+    if (inAny(salesLinks)) setSalesExpanded(true);
+    if (inAny(customersLinks)) setCustomersExpanded(true);
+    if (inAny(purchasesLinks)) setPurchasesExpanded(true);
+    if (inAny(inventoryLinks)) setInventoryExpanded(true);
+    if (inAny(importLinks)) { setInventoryExpanded(true); setImportExpanded(true); }
+    if (inAny(financeLinks)) setFinanceExpanded(true);
+    if (activeView.startsWith("accounting-") || activeView === "property-rental") setAccountingExpanded(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeView]);
 
 
   const isViewActive = (view: string) => activeView === view;
@@ -120,6 +151,51 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
   const SidebarContent = (isMobile: boolean = false) => {
     const showText = !isCollapsed || isMobile;
+
+    // عارض مجموعة تنقّل رئيسية قابلة للطيّ (Section 9): تبويب كبير بأيقونته الخاصة
+    // + أبناء. روابط newTab تفتح في تبويب جديد (G2). توحيد DRY لكل المجموعات.
+    const renderGroup = (
+      label: string,
+      icon: React.ReactNode,
+      expanded: boolean,
+      toggle: () => void,
+      links: NavLink[],
+      children?: React.ReactNode,
+    ) => (
+      <div className="space-y-1">
+        <button
+          onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); toggle(); }}
+          className={`flex items-center justify-between w-full p-3 rounded-lg transition-all ${expanded ? "bg-[var(--color-surface-3)] text-[var(--color-primary)]" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+          title={label}
+        >
+          <div className="flex items-center">
+            <span className="flex-shrink-0">{icon}</span>
+            {showText && <span className="mr-3 font-semibold">{label}</span>}
+          </div>
+          {showText && (expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
+        </button>
+        {expanded && showText && (
+          <div className="mr-4 pr-4 border-r-2 border-[var(--color-border)] space-y-1 mt-1">
+            {links.filter((l) => !l.roles || l.roles.includes(user.role)).map((link) => (
+              <button
+                key={link.view + (link.path || "")}
+                onClick={() => {
+                  if (link.newTab && link.path) openInNewTab(link.path);
+                  else { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }
+                }}
+                className={`flex items-center gap-2 w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) && !link.newTab ? "text-[var(--color-primary)] font-bold bg-[var(--color-surface-3)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
+                title={link.newTab ? `${link.label} (تبويب جديد)` : link.label}
+              >
+                <span className="flex-shrink-0">{link.icon}</span>
+                <span className="flex-1 text-right">{link.label}</span>
+                {link.newTab && <ExternalLink className="h-3 w-3 opacity-60 flex-shrink-0" />}
+              </button>
+            ))}
+            {children}
+          </div>
+        )}
+      </div>
+    );
 
     return (
       <div className="flex flex-col h-full bg-[var(--color-surface-2)] border-l border-[var(--color-border)] transition-all duration-300 relative" data-skin="aseel">
@@ -143,176 +219,93 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
         >
           <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; }`}</style>
 
-          {/* الرئيسية */}
+          {/* 1) الرئيسية */}
           {hasAccess('manager') && (
             <button
               onClick={() => { setView("dashboard"); if (isMobile) setIsMobileMenuOpen(false); }}
-              className={`flex items-center w-full p-2 text-sm rounded transition-all ${isViewActive("dashboard") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+              className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("dashboard") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
               title="الرئيسية"
             >
-              <DashboardIcon className="h-4 w-4 flex-shrink-0" />
-              {showText && <span className="mr-2 text-right flex-1">الرئيسية</span>}
+              <Home className="h-5 w-5 flex-shrink-0" />
+              {showText && <span className="mr-3 text-right flex-1 font-semibold">الرئيسية</span>}
             </button>
           )}
 
-          <button
-            onClick={() => { setView(user.role === 'manager' ? "task-management" : "tasks"); if (isMobile) setIsMobileMenuOpen(false); }}
-            className={`flex items-center w-full p-2 text-sm rounded transition-all ${isViewActive("task-management") || isViewActive("tasks") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
-            title="المهام"
-          >
-            <TasksIcon className="h-4 w-4 flex-shrink-0" />
-            {showText && <span className="mr-2 text-right flex-1">{user.role === 'manager' ? "إدارة المهام" : "مهامي"}</span>}
-          </button>
+          {/* 2) المبيعات */}
+          {(user.role === 'manager' || user.role === 'procurement') &&
+            renderGroup("المبيعات", <ShoppingCart className="h-5 w-5 flex-shrink-0" />, salesExpanded, () => setSalesExpanded(!salesExpanded), salesLinks)}
 
-          <button
-            onClick={() => { setView("smart-assistant"); if (isMobile) setIsMobileMenuOpen(false); }}
-            className={`flex items-center w-full p-2 text-sm rounded transition-all ${isViewActive("smart-assistant") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
-            title="المساعد الذكي"
-          >
-            <Sparkles className="h-4 w-4 flex-shrink-0" />
-            {showText && <span className="mr-2 text-right flex-1">المساعد الذكي</span>}
-          </button>
+          {/* 3) العملاء */}
+          {(user.role === 'manager' || user.role === 'procurement') &&
+            renderGroup("العملاء", <Users className="h-5 w-5 flex-shrink-0" />, customersExpanded, () => setCustomersExpanded(!customersExpanded), customersLinks)}
 
-          {/* المبيعات (منفصل عن المشتريات) */}
-          {(user.role === 'manager' || user.role === 'procurement') && (
-            <div className="space-y-1">
-              <button
-                onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); setSalesExpanded(!salesExpanded); }}
-                className={`flex items-center justify-between w-full p-3 rounded-lg ${salesExpanded ? "bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
-                title="المبيعات"
-              >
-                <div className="flex items-center">
-                  <ShoppingCart className="h-6 w-6 flex-shrink-0" />
-                  {showText && <span className="mr-3">المبيعات</span>}
-                </div>
-                {showText && (salesExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
-              </button>
-              {salesExpanded && showText && (
-                <div className="mr-4 pr-4 border-r-2 border-emerald-100 dark:border-emerald-900/40 space-y-1 mt-1">
-                  {salesLinks.map((link) => (
-                    <button
-                      key={link.view}
-                      onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
-                      className={`flex items-center w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-emerald-700 font-bold bg-emerald-50 dark:bg-emerald-900/25" : "text-gray-500 hover:text-emerald-600"}`}
-                    >
-                      <span className="ml-2">{link.icon}</span>
-                      {link.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {/* 4) المشتريات */}
+          {(user.role === 'manager' || user.role === 'procurement') &&
+            renderGroup("المشتريات", <ShoppingBag className="h-5 w-5 flex-shrink-0" />, purchasesExpanded, () => setPurchasesExpanded(!purchasesExpanded), purchasesLinks)}
 
-          {/* المشتريات والتوريد */}
-          {(user.role === 'manager' || user.role === 'procurement') && (
-            <div className="space-y-1">
-              <button
-                onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); setProcurementExpanded(!procurementExpanded); }}
-                className={`flex items-center justify-between w-full p-3 rounded-lg ${procurementExpanded ? "bg-blue-50 dark:bg-blue-900/20 text-blue-600" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
-                title="المشتريات والتوريد"
-              >
-                <div className="flex items-center">
-                  <Package className="h-6 w-6 flex-shrink-0" />
-                  {showText && <span className="mr-3">المشتريات والتوريد</span>}
-                </div>
-                {showText && (procurementExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
-              </button>
-              {procurementExpanded && showText && (
-                <div className="mr-4 pr-4 border-r-2 border-gray-100 dark:border-gray-700 space-y-1 mt-1">
-                  {procurementLinks.filter(l => !l.roles || l.roles.includes(user.role)).map(link => (
-                    <button
-                      key={link.view}
-                      onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
-                      className={`flex items-center w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-blue-600 font-bold bg-blue-50 dark:bg-blue-900/20" : "text-gray-500 hover:text-blue-600"}`}
-                    >
-                      <span className="ml-2">{link.icon}</span>
-                      {link.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {/* 5) المخزون — يضم مجموعة «الاستيراد» الفرعية (زر الاستيراد المستقل أُزيل) */}
+          {(user.role === 'manager' || user.role === 'procurement') &&
+            renderGroup("المخزون", <Warehouse className="h-5 w-5 flex-shrink-0" />, inventoryExpanded, () => setInventoryExpanded(!inventoryExpanded), inventoryLinks,
+              <div className="space-y-1">
+                <button
+                  onClick={() => setImportExpanded(!importExpanded)}
+                  className={`flex items-center justify-between w-full p-2 text-sm rounded transition-all ${importExpanded ? "bg-[var(--color-surface-3)] text-[var(--color-primary)]" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+                  title="الاستيراد"
+                >
+                  <div className="flex items-center gap-2">
+                    <Download className="h-4 w-4 flex-shrink-0" />
+                    <span className="font-semibold">الاستيراد</span>
+                  </div>
+                  {importExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                </button>
+                {importExpanded && (
+                  <div className="mr-3 pr-2 border-r border-[var(--color-border)] space-y-1">
+                    {importLinks.map((link) => (
+                      <button
+                        key={link.view}
+                        onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
+                        className={`flex items-center gap-2 w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-[var(--color-primary)] font-bold bg-[var(--color-surface-3)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
+                      >
+                        <span className="flex-shrink-0">{link.icon}</span>
+                        <span className="flex-1 text-right">{link.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
-          {/* المحاسبة — قيود SQL (Django) — للمدير فقط */}
-          {hasAccess('manager') && (
-            <div className="space-y-1">
-              <button
-                onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); setAccountingExpanded(!accountingExpanded); }}
-                className={`flex items-center justify-between w-full p-3 rounded-lg ${accountingExpanded ? "bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20 text-[var(--color-primary)] dark:text-[var(--color-primary)]" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
-                title="المحاسبة"
-              >
-                <div className="flex items-center">
-                  <Calculator className="h-6 w-6 flex-shrink-0" />
-                  {showText && <span className="mr-3">المحاسبة</span>}
-                </div>
-                {showText && (accountingExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
-              </button>
-              {accountingExpanded && showText && (
-                <div className="mr-4 pr-4 border-r-2 border-gray-100 dark:border-gray-700 space-y-1 mt-1">
-                  {accountingLinks.map((link) => (
-                    <button
-                      key={link.view}
-                      onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
-                      className={`flex items-center w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) || (link.view === "accounting-journals" && activeView === "accounting-journal-entry") ? "text-[var(--color-primary)] font-bold bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20" : "text-gray-500 hover:text-[var(--color-primary-hover)]"}`}
-                    >
-                      <span className="ml-2">{link.icon}</span>
-                      {link.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {/* 6) المالية */}
+          {hasAccess('manager') &&
+            renderGroup("المالية", <Landmark className="h-5 w-5 flex-shrink-0" />, financeExpanded, () => setFinanceExpanded(!financeExpanded), financeLinks)}
 
-          {/* المالية - للمدير فقط */}
-          {hasAccess('manager') && (
-            <div className="space-y-1">
-              <button
-                onClick={() => { setView("cash-boxes"); if (isMobile) setIsMobileMenuOpen(false); }}
-                className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("cash-boxes") ? "bg-blue-600 text-white shadow-md" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
-                title="المالية"
-              >
-                <div className="flex items-center">
-                  <FileText className="h-6 w-6 flex-shrink-0" />
-                  {showText && <span className="mr-3 text-right flex-1">المالية</span>}
-                </div>
-              </button>
-            </div>
-          )}
+          {/* المحاسبة — محفوظة للوصول الكامل للعمليات المحاسبية (خارج تبسيط Section 9، لا تُكسر ميزة) */}
+          {hasAccess('manager') &&
+            renderGroup("المحاسبة", <Calculator className="h-5 w-5 flex-shrink-0" />, accountingExpanded, () => setAccountingExpanded(!accountingExpanded), accountingLinks)}
 
-          {/* التقارير - للمدير فقط */}
-          {hasAccess('manager') && (
-            <button
-              onClick={() => { setView("reports"); if (isMobile) setIsMobileMenuOpen(false); }}
-              className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("reports") ? "bg-blue-600 text-white shadow-md" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
-              title="التقارير"
-            >
-              <ReportsIcon className="h-6 w-6 flex-shrink-0" />
-              {showText && <span className="mr-3 text-right flex-1">التقارير</span>}
-            </button>
-          )}
+          {/* 7) التقارير — كل تقرير يفتح في تبويبه الخاص (G2) */}
+          {hasAccess('manager') &&
+            renderGroup("التقارير", <ReportsIcon className="h-5 w-5 flex-shrink-0" />, reportsExpanded, () => setReportsExpanded(!reportsExpanded), reportsLinks)}
 
           <button
             onClick={() => { setView("gallery"); if (isMobile) setIsMobileMenuOpen(false); }}
-            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("gallery") ? "bg-blue-600 text-white shadow-md" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
+            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("gallery") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
             title="صالة الصور"
           >
-            <GalleryIcon className="h-6 w-6 flex-shrink-0" />
+            <GalleryIcon className="h-5 w-5 flex-shrink-0" />
             {showText && <span className="mr-3 text-right flex-1">صالة الصور</span>}
           </button>
 
           <button
             onClick={() => { setView("settings"); if (isMobile) setIsMobileMenuOpen(false); }}
-            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("settings") ? "bg-blue-600 text-white shadow-md" : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"}`}
+            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("settings") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
             title="الإعدادات"
           >
-            <SettingsIcon className="h-6 w-6 flex-shrink-0" />
+            <SettingsIcon className="h-5 w-5 flex-shrink-0" />
             {showText && <span className="mr-3 text-right flex-1">الإعدادات</span>}
           </button>
 
-          {/* task16 E19: إدارة الموظفين في أسفل الشريط الجانبي */}
+          {/* task16 E19: إدارة الموظفين */}
           <div className="space-y-0.5">
             <button
               onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); setUserManagementExpanded(!userManagementExpanded); }}
@@ -331,7 +324,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                   <button
                     key={link.view}
                     onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
-                    className={`flex items-center w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-blue-600 font-bold bg-blue-50 dark:bg-blue-900/20" : "text-gray-500 hover:text-blue-600"}`}
+                    className={`flex items-center w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-[var(--color-primary)] font-bold bg-[var(--color-surface-3)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
                   >
                     <span className="ml-2">{link.icon}</span>
                     {link.label}
@@ -343,12 +336,24 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
           <button
             onClick={() => { window.history.pushState({}, '', '/about-us'); window.dispatchEvent(new PopStateEvent('popstate')); if (isMobile) setIsMobileMenuOpen(false); }}
-            className="flex items-center w-full p-3 rounded-lg text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50"
+            className="flex items-center w-full p-3 rounded-lg text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
             title="من نحن"
           >
-            <Info className="h-6 w-6 flex-shrink-0" />
+            <Info className="h-5 w-5 flex-shrink-0" />
             {showText && <span className="mr-3 text-right flex-1">من نحن</span>}
           </button>
+
+          {/* 8) إدارة المهام — في الأسفل تماماً (Section 9) */}
+          <div className="mt-2 pt-2 border-t border-[var(--color-border)]">
+            <button
+              onClick={() => { setView(user.role === 'manager' ? "task-management" : "tasks"); if (isMobile) setIsMobileMenuOpen(false); }}
+              className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("task-management") || isViewActive("tasks") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+              title="إدارة المهام"
+            >
+              <TasksIcon className="h-5 w-5 flex-shrink-0" />
+              {showText && <span className="mr-3 text-right flex-1 font-semibold">{user.role === 'manager' ? "إدارة المهام" : "مهامي"}</span>}
+            </button>
+          </div>
         </nav>
 
         {/* User Profile */}

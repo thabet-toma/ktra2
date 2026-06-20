@@ -10,6 +10,7 @@ import { Loader2, Save, Info } from "lucide-react";
 import {
   getSalesSettings,
   updateSalesSettings,
+  restoreSalesSettingsDefaults,
   type SalesSettings,
 } from "../../services/salesApi";
 import { apiGetList } from "../../services/restApi";
@@ -157,6 +158,7 @@ export const SalesSettingsPage: React.FC = () => {
         prices_include_tax: rest.prices_include_tax,
         auto_post_invoices: rest.auto_post_invoices,
         show_journal_preview: rest.show_journal_preview,
+        warn_on_duplicate_item: rest.warn_on_duplicate_item,
         default_shipping_origin: rest.default_shipping_origin,
         default_shipping_destination: rest.default_shipping_destination,
       };
@@ -169,6 +171,31 @@ export const SalesSettingsPage: React.FC = () => {
     } finally {
       setSaving(false);
     }
+  };
+
+  // T-S3: استعادة خريطة القيد الافتراضية (الحسابات الافتراضية لكل نوع فاتورة).
+  const handleRestoreDefaults = async () => {
+    if (!window.confirm(
+      "استعادة خريطة القيد الافتراضية؟ سيُعاد ضبط الحسابات الافتراضية (صندوق/ذمم/إيراد/مخزون/تكلفة) من شجرة الحسابات."
+    )) return;
+    setSaving(true); setMsg(null); setErr(null);
+    try {
+      const updated = await restoreSalesSettingsDefaults();
+      setSettings(updated);
+      setMsg("تمت استعادة خريطة القيد الافتراضية");
+      window.setTimeout(() => setMsg(null), 2500);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // اسم الحساب من القائمة المحمَّلة (لعرض خريطة القيد).
+  const acctName = (id: number | null): string => {
+    if (id == null) return "— غير محدد —";
+    const a = accounts.find((x) => x.id === id);
+    return a ? `${a.code} ${a.name}` : `#${id}`;
   };
 
   if (loading && !settings) {
@@ -539,6 +566,71 @@ export const SalesSettingsPage: React.FC = () => {
             <option value="no">إخفاء معاينة القيد</option>
           </select>
         </FieldLabel>
+      </Section>
+
+      {/* T-S2: إعدادات عامة (سلوك) — مودلة على إعدادات التطبيق المكتبي (صورة 7). */}
+      <Section
+        title="إعدادات عامة (السلوك)"
+        description="سلوكيات عامة لمحرّر الفاتورة. تُربط بسلوك حقيقي في الشاشة."
+      >
+        <FieldLabel label="عند تكرار المادة في الفاتورة">
+          <select
+            className={input}
+            value={settings.warn_on_duplicate_item ? "yes" : "no"}
+            onChange={(e) => setField("warn_on_duplicate_item", e.target.value === "yes")}
+          >
+            <option value="yes">إظهار رسالة تنبيه وتأكيد (مُوصى)</option>
+            <option value="no">إضافة سطر جديد مباشرة بلا تنبيه</option>
+          </select>
+        </FieldLabel>
+      </Section>
+
+      {/* T-S3: خريطة القيد المحاسبي لكل نوع فاتورة (صورة 6) + استعادة الافتراضي. */}
+      <Section
+        title="خريطة القيد المحاسبي (الحسابات الافتراضية لكل نوع)"
+        description="الحسابات التي يُرحَّل إليها كل نوع فاتورة. تُعدَّل من حقول الحسابات أعلاه."
+      >
+        <div className="md:col-span-2 overflow-x-auto">
+          <table className="w-full text-sm aseel-grid" data-variant="list">
+            <thead>
+              <tr>
+                <th className="text-right p-2">نوع الفاتورة / الحركة</th>
+                <th className="text-right p-2">مدين</th>
+                <th className="text-right p-2">دائن</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="p-2">بيع نقدي</td>
+                <td className="p-2">{acctName(settings.default_cash_account)}</td>
+                <td className="p-2">{acctName(settings.default_revenue_account_product)} <span className="aseel-text-soft">+ ض.ق.م مخرجات</span></td>
+              </tr>
+              <tr>
+                <td className="p-2">بيع آجل (ذمم)</td>
+                <td className="p-2">ذمم العميل <span className="aseel-text-soft">(حساب العميل المرتبط، أو الافتراضي: {acctName(settings.default_ar_account)})</span></td>
+                <td className="p-2">{acctName(settings.default_revenue_account_product)} <span className="aseel-text-soft">+ ض.ق.م مخرجات</span></td>
+              </tr>
+              <tr>
+                <td className="p-2">بيع خدمات</td>
+                <td className="p-2">الصندوق / ذمم العميل</td>
+                <td className="p-2">{acctName(settings.default_revenue_account_service)}</td>
+              </tr>
+              <tr>
+                <td className="p-2">تكلفة المبيعات (عند خصم المخزون)</td>
+                <td className="p-2">{acctName(settings.default_cogs_account)}</td>
+                <td className="p-2">{acctName(settings.default_inventory_account)}</td>
+              </tr>
+            </tbody>
+          </table>
+          <button
+            type="button"
+            onClick={handleRestoreDefaults}
+            disabled={saving}
+            className="mt-3 text-sm px-3 py-1.5 rounded-lg border aseel-border-soft hover:aseel-bg-panel disabled:opacity-40"
+          >
+            استعادة خريطة القيد الافتراضية
+          </button>
+        </div>
       </Section>
 
       <Section

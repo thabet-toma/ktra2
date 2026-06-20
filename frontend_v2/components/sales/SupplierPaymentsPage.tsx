@@ -10,9 +10,10 @@
  */
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { apiGetList, apiPostObject } from "../../services/restApi";
+import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { accountingApi } from "../../services/accountingApi";
+import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import {
   AseelDocumentShell,
   AseelDenseTable,
@@ -29,8 +30,8 @@ type Currency = { CurrencyID: number; Code: string };
 
 interface SupplierPaymentRow {
   id: number;
-  supplier: number;
-  supplier_name?: string;
+  partner: number;
+  partner_name?: string;
   payment_date: string;
   amount: string;
   cash_or_bank_account: number;
@@ -102,7 +103,9 @@ export const SupplierPaymentsPage: React.FC = () => {
     const tenantId = resolveTenantId();
     try {
       const [pays, parts, accs, currs] = await Promise.allSettled([
-        apiGetList<SupplierPaymentRow>("purchase/payments/", { tenantId }),
+        // T-V1: المسار الصحيح المُسجَّل (api/logistics/supplier-payments/) —
+        // كان يستدعي purchase/payments/ غير الموجود فيفشل بـ 404 عند الفتح.
+        apiGetList<SupplierPaymentRow>("logistics/supplier-payments/", { tenantId }),
         accountingApi.getPartners() as Promise<Partner[]>,
         accountingApi.getAccounts() as Promise<Account[]>,
         accountingApi.getCurrencies() as Promise<Currency[]>,
@@ -112,8 +115,7 @@ export const SupplierPaymentsPage: React.FC = () => {
       if (accs.status === "fulfilled") setAccounts(accs.value || []);
       if (currs.status === "fulfilled") setCurrencies(currs.value || []);
       if (pays.status === "rejected") {
-        // backend N8-T12 not implemented
-        setErr("backend N8-T12 غير جاهز — يَعمل listing تجريبياً");
+        setErr(pays.reason instanceof Error ? pays.reason.message : "فشل تحميل سندات الصرف");
       }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
@@ -146,43 +148,27 @@ export const SupplierPaymentsPage: React.FC = () => {
     setSubmitting(true);
     setErr(null);
     setMsg(null);
-    const tenantId = resolveTenantId();
     try {
-      const payload = {
-        supplier: supplierId,
+      // T-V1: ينشئ SupplierPayment ويرحّله عبر المسار الصحيح
+      // (logistics/supplier-payments/ + /post/). نموذج SupplierPayment مبسّط
+      // (مبلغ واحد)، فتفصيل الشيكات/خصم المصدر في الواجهة لا يُحفظ بعد — يُسجّل
+      // المبلغ الإجمالي المصروف. (تفصيل الشيكات: خارطة طريق.)
+      await purchaseInvoiceApi.addSupplierPayment({
+        partner: Number(supplierId),
         payment_date: paymentDate,
         amount: String(computedTotal.toFixed(2)),
-        cash_amount: String(cashNum.toFixed(2)),
-        cheques_total: String(totalCheques.toFixed(2)),
-        withholding_pct: withholdingPct,
-        withholding_amount: withholdingAmt,
-        net_payable: String(netAfterWh.toFixed(2)),
-        cash_or_bank_account: cashAccountId,
-        currency: currencyId || null,
-        exchange_rate: exchangeRate,
-        notes: notes || null,
-        cheques: cheques.filter((c) => c.cheque_number || c.amount).map((c) => ({
-          cheque_number: c.cheque_number,
-          payee_name: c.payee_name || null,
-          due_date: c.due_date || null,
-          amount: c.amount,
-          bank_name: c.bank_name || null,
-          branch: c.branch || null,
-        })),
-      };
-      await apiPostObject("purchase/payments/", payload, { tenantId });
-      setMsg("✓ تم إنشاء سند الصرف");
+        currency: currencyId ? Number(currencyId) : null,
+        cash_or_bank_account: Number(cashAccountId),
+        notes: notes || undefined,
+      });
+      setMsg("✓ تم إنشاء سند الصرف وترحيله");
       setShowForm(false);
       // reset
       setSupplierId(""); setCashAmount(""); setCheques([]); setNotes("");
       setWithholdingPct("0"); setWithholdingAmt("0");
       await load();
     } catch (e: unknown) {
-      setErr(
-        e instanceof Error
-          ? `${e.message} (يَتطلب N8-T12 backend)`
-          : "فشل الحفظ — يَتطلب N8-T12 backend"
-      );
+      setErr(e instanceof Error ? e.message : "فشل حفظ سند الصرف");
     } finally {
       setSubmitting(false);
     }
@@ -191,7 +177,7 @@ export const SupplierPaymentsPage: React.FC = () => {
   const filtered = payments.filter((p) => {
     if (!search) return true;
     const s = search.toLowerCase();
-    return (p.supplier_name || "").toLowerCase().includes(s) || String(p.id).includes(s);
+    return (p.partner_name || "").toLowerCase().includes(s) || String(p.id).includes(s);
   });
 
   const partnerName = (id: number) => partners.find((p) => p.id === id)?.name || `#${id}`;
@@ -203,7 +189,7 @@ export const SupplierPaymentsPage: React.FC = () => {
   const columns: DenseColumn<SupplierPaymentRow>[] = [
     { key: "id", header: "#", width: "60px", align: "center", render: (r) => <span className="font-mono text-xs">#{r.id}</span> },
     { key: "payment_date", header: "التاريخ", width: "110px", align: "center", render: (r) => <span className="text-xs">{r.payment_date}</span> },
-    { key: "supplier", header: "المورد", render: (r) => <span className="text-xs">{r.supplier_name || partnerName(r.supplier)}</span> },
+    { key: "supplier", header: "المورد", render: (r) => <span className="text-xs">{r.partner_name || partnerName(r.partner)}</span> },
     { key: "amount", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmt(r.amount)}</span> },
     { key: "cash_account", header: "الصندوق", render: (r) => <span className="text-xs">{accountName(r.cash_or_bank_account)}</span> },
     {
@@ -261,8 +247,8 @@ export const SupplierPaymentsPage: React.FC = () => {
 
           <div className="aseel-banner" style={{ marginBottom: "8px", background: "var(--aseel-surface-2, #f4ede0)", fontSize: "11px", padding: "8px 12px" }}>
             <AlertTriangle className="w-3 h-3 inline" style={{ marginInlineEnd: "4px", color: "var(--aseel-warn, #b06800)" }} />
-            صفحة سندات الصرف للموردين — تَعتمد على backend N8-T12.
-            UI مكتملة (نقد + شيكات + خصم المصدر)، تَخزين فعلي يَنتظر backend.
+            يُسجَّل المبلغ الإجمالي المصروف ويُرحَّل (Dr ذمم المورد / Cr الصندوق).
+            تفصيل الشيكات وخصم المصدر لا يُحفظان بعد (نموذج مبسّط) — قيد التطوير.
           </div>
 
           <AseelDenseTable<SupplierPaymentRow>

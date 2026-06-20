@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { DollarSign, Percent, Tag } from 'lucide-react';
+import { formatMoney, formatNumber } from '@/utils/formatNumber';
 
 interface FinancialProps {
     data: any;
@@ -58,7 +59,7 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                     <span>الملخص المالي</span>
                 </h3>
                 <div className="text-lg font-bold text-green-600 whitespace-nowrap">
-                    ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    ${formatMoney(grandTotal)}
                 </div>
             </div>
 
@@ -67,7 +68,7 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                 {/* سعر المنتجات */}
                 <div className="flex justify-between items-center py-1">
                     <span className="text-gray-700 dark:text-gray-300 whitespace-nowrap">سعر المنتجات</span>
-                    <span className="font-medium">${subtotal.toLocaleString()}</span>
+                    <span className="font-medium">${formatMoney(subtotal)}</span>
                 </div>
 
                 {/* الخصم - مع إمكانية التعديل */}
@@ -116,11 +117,11 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                         ) : discountAmount > 0 ? (
                             <div className="flex flex-col items-end">
                                 <span className="font-medium text-red-600">
-                                    -${discountAmount.toLocaleString()}
+                                    -${formatMoney(discountAmount)}
                                 </span>
                                 {discountPercentage > 0 && (
                                     <span className="text-xs text-gray-500">
-                                        ({discountPercentage.toFixed(1)}%)
+                                        ({formatNumber(discountPercentage, { maxDecimals: 1 })}%)
                                     </span>
                                 )}
                             </div>
@@ -175,15 +176,15 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                         ) : taxAmount > 0 ? (
                             <div className="flex flex-col items-end">
                                 <span className="font-medium">
-                                    ${taxAmount.toFixed(2)}
+                                    ${formatMoney(taxAmount)}
                                 </span>
                                 <span className="text-xs text-gray-500">
-                                    ({taxRate}%)
+                                    ({formatNumber(taxRate, { maxDecimals: 4 })}%)
                                 </span>
                             </div>
                         ) : (
                             <span className="font-medium">
-                                {taxRate}%
+                                {formatNumber(taxRate, { maxDecimals: 4 })}%
                             </span>
                         )}
                     </div>
@@ -196,7 +197,7 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                             الشحن {data.shippingIncluded && <span className="text-xs text-green-600">(متضمن)</span>}
                         </span>
                         <span className="font-medium">
-                            {data.shippingIncluded ? "متضمن" : `$${shippingCost.toLocaleString()}`}
+                            {data.shippingIncluded ? "متضمن" : `$${formatMoney(shippingCost)}`}
                         </span>
                     </div>
                 )}
@@ -208,7 +209,7 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                 <div className="flex justify-between items-center py-1">
                     <span className="font-bold text-gray-900 dark:text-white text-base whitespace-nowrap">الإجمالي</span>
                     <span className="text-lg font-bold text-green-600 whitespace-nowrap">
-                        ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${formatMoney(grandTotal)}
                     </span>
                 </div>
 
@@ -218,14 +219,14 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                 {/* المدفوع */}
                 <div className="flex justify-between items-center py-1">
                     <span className="text-gray-700 dark:text-gray-300 whitespace-nowrap">المدفوع</span>
-                    <span className="font-bold text-green-600 text-sm">${paidAmount.toLocaleString()}</span>
+                    <span className="font-bold text-green-600 text-sm">${formatMoney(paidAmount)}</span>
                 </div>
 
                 {/* المتبقي */}
                 <div className="flex justify-between items-center py-1">
                     <span className="text-gray-700 dark:text-gray-300 whitespace-nowrap">المتبقي</span>
                     <span className="font-bold text-orange-600 text-sm">
-                        ${remainingAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ${formatMoney(remainingAmount)}
                     </span>
                 </div>
             </div>
@@ -253,13 +254,13 @@ export const FinancialSummarySection: React.FC<FinancialProps> = ({ data, onUpda
                         {discountAmount > 0 && (
                             <div className="flex justify-between">
                                 <span>قيمة الخصم:</span>
-                                <span className="font-medium">${discountAmount.toFixed(2)}</span>
+                                <span className="font-medium">${formatMoney(discountAmount)}</span>
                             </div>
                         )}
                         {taxRate > 0 && (
                             <div className="flex justify-between">
                                 <span>نسبة الضريبة:</span>
-                                <span className="font-medium">{taxRate}%</span>
+                                <span className="font-medium">{formatNumber(taxRate, { maxDecimals: 4 })}%</span>
                             </div>
                         )}
                     </div>

@@ -71,6 +71,210 @@ frontend_v2/
 └── constants/                 # App constants
 ```
 
+## [AUDIT — task22 Phase 1, 2026-06-20] (المرافق العامة — G1 مُنسّق الأرقام + G2 تبويب جديد)
+
+خطة جراحية متعددة المراحل (10 مراحل، تنفيذ مرحلة-بمرحلة بمراجعة المالك). المرجع
+الأصلي مكتوب لـ RooFlow لكن المشروع لا يستخدم `memory-bank/` — مصدر الحقيقة هو هذا
+الملف + ذاكرة `.claude`. **المرحلة 1 (المرافق العامة):**
+
+- **[G1] مُنسّق أرقام موحّد** — `frontend_v2/utils/formatNumber.ts`:
+  - `formatNumber(value, { maxDecimals?, group?, fallback? })` يحذف الأصفار العشرية
+    غير الدالّة: `30490.00→"30490"` · `187.50→"187.5"` · `187.55→"187.55"`.
+  - اختصاران: `formatMoney` (منازل 2 + فاصل آلاف) · `formatQuantity` (منازل 4).
+  - تحقّق منطقي: 12/12 حالة (لا يوجد JS unit-runner في `frontend_v2` — تحقّق عبر Node).
+- **[G2] فتح تبويب جديد** — `frontend_v2/utils/openInNewTab.ts`: مصدر واحد لـ
+  `window.open(_blank, noopener)` للفواتير/كشوف الحساب/الطباعة.
+- **[G3/G4]** موجودان أصلاً في `styles/index.css` (رموز كثافة `--spacing-*` مدمجة +
+  أحجام خط صغيرة + Tailwind v4 responsive) — يُطبَّقان لكل شاشة في المرحلتين 2/5، لا
+  أساس جديد مطلوب.
+- **بدء التعميم:** `components/forms/shared/FinancialSummarySection.tsx` يمرّ الآن كل
+  عرض عبر `formatMoney`/`formatNumber` (كان `toFixed(2)`/`toLocaleString(min:2)` ينتج
+  `$30490.00`). بقية الـ23 ملفاً تُحوَّل ضمن مراحلها (تلمس فواتير/كشوف/تقارير لاحقاً).
+- tsc نظيف (exit 0). لا انحدار وظيفي (عرض فقط).
+
+### الباقي للتعميم (G1 rollout — يُنفَّذ ضمن المراحل اللاحقة)
+SalesInvoiceEditor · PurchaseInvoiceAccountingPanel · DealForm · Sales/PurchaseReturnEditor ·
+SalesCustomerPaymentsPage · CreditDebitNotesPage · SupplierPaymentsPage · AccountingJournalEntryPage ·
+ClearanceImportModal · InvoicePrintView · InstallmentManager · ItemsTableSection · PriceOfferListUpdated ·
+NISItemsTable · NISInvoiceTaxStrip · LocalPaymentsSection · ConversionDetailsSection · DealPrintView ·
+dealsService · ProductCard (≈22 ملف يستخدم toFixed(2)/toLocaleString).
+
+## [AUDIT — task22 Phase 8, 2026-06-20] (محرّك الإعدادات — T-S1..T-S4)
+
+- **T-S1 (تدقيق الإعدادات الموجودة):** `SalesSettings` (محور غني: عميل/عملة افتراضيان +
+  **خريطة حسابات افتراضية كاملة** صندوق/ذمم/إيراد منتج+خدمة/مخزون/ت.ب.م/ض.ق.م + أعلام
+  سلوك: نوع الدفع، خصم المخزون، الرصيد السالب، شمول الضريبة، الترحيل التلقائي، معاينة
+  القيد) عبر `sales/settings/current/`. `PurchaseSettings` (استراتيجية تسعير +
+  default_cash_account من المرحلة 4). `useTenantSettings` + `SalesSettingsPage`/
+  `PurchaseSettingsPage`/`SettingsPage`/`GroupConstantsPage`.
+- **T-S2 (إعدادات عامة):** أُضيف `SalesSettings.warn_on_duplicate_item` (افتراضي true)
+  عبر الـ stack (model + serializer + هجرة `0019` + نوع TS + حفظ الصفحة) — **يقود فعلياً
+  T-R3** (تنبيه التكرار في المحرّر، كان يقرأ الإعداد منذ المرحلة 3). قسم «إعدادات عامة
+  (السلوك)» جديد في صفحة إعدادات المبيعات.
+- **T-S3 (خريطة القيد + استعادة الافتراضي):** لوحة «خريطة القيد المحاسبي» في الصفحة تعرض
+  مدين/دائن لكل نوع (بيع نقدي: الصندوق/الإيراد · آجل: ذمم العميل/الإيراد · خدمات · ت.ب.م/
+  المخزون — مطابقة صورة 6) من الحسابات المُهيّأة. زر **«استعادة خريطة القيد الافتراضية»**
+  → `POST sales/settings/restore-defaults/` يحلّ الحسابات من COA (كود ثم نوع ثم اسم).
+  الترحيل يمرّ عبر الـ subledger أصلاً (حساب العميل المرتبط/الصندوق/الإيراد).
+- **T-S4 (خارطة الطريق — إعدادات/شاشات غير مبنية):**
+  - أعلام عرض مكتبية (صورة 7/8) لم تُبنَ لتفادي مفاتيح ميتة بلا سلوك: «إظهار آخر سعر
+    بيع / ربح الصنف / رصيد العميل قبل-وبعد»، «اقتراح الصنف بـ اسم/كود/باركود»، «عدد
+    المنازل العشرية للسعر/الكمية» (G1 يطبّق منزلتين حالياً). تُبنى كحقول `SalesSettings`
+    + ربط فعلي لاحقاً.
+  - «إعدادات المخزون» و«البنوك» (من المرحلة 5) — شاشتان مستقلتان غير مبنيتين.
+  - خريطة قيد الشراء (شراء نقدي/آجل، مرتجع شراء) — `PurchaseSettings` يحوي
+    default_cash_account فقط؛ خريطة كاملة لاحقاً.
+- **التحقق:** **3 اختبارات جديدة** (`test_settings_engine`: افتراضي التنبيه true + PATCH +
+  restore-defaults يحلّ الأنواع الصحيحة) · **sales 45/45** · `manage.py check` 0 · tsc نظيف.
+- **هجرة جديدة 0019 (sales) تُطبَّق عند النشر** (مع 0046 لوجستيات + 0010 inventory).
+
+## [AUDIT — task22 Phase 7, 2026-06-20] (مستندات المخزون — T-I1 تحويل + T-I2 جرد)
+
+مرحلة backend-ثقيلة: 4 نماذج جديدة + هجرة `0010` + خدمات ترحيل مُختبَرة + DRF + شاشتان.
+
+- **النماذج (inventory/models.py):** `WarehouseTransfer`+`WarehouseTransferLine` ·
+  `Stocktake`(+journal FK)+`StocktakeLine`(counted/system/variance). أُضيف نوعا مرجع
+  `WAREHOUSE_TRANSFER`/`STOCKTAKE` إلى `StockMovement.REFERENCE_TYPES`. هجرة
+  `0010_alter_stockmovement_reference_type_stocktake_and_more`.
+- **الترحيل (inventory/services.py):**
+  - `post_warehouse_transfer`: لكل بند `OUT` من المصدر + `IN` للوجهة **بالتكلفة
+    المتوسطة الملتقطة** → صافي صفري على `quantity_on_hand`/`avg_cost` للشركة (نقل
+    موقعي)، حركتان موسومتان بالمستودعين. **لا قيد محاسبي.** + `unpost_*` يعكس.
+  - `post_stocktake`: لكل بند variance = counted − quantity_on_hand → `ADJUST_IN`
+    (فائض) أو `ADJUST_OUT` (عجز)؛ يُجمِّع قيد فرق واحد عبر `post_journal`
+    (فائض: مدين المخزون/دائن ت.ب.م · عجز: العكس) بقيمة variance×avg_cost. حسابا
+    المخزون/ت.ب.م عبر `_resolve_line_account` (لا حساب تسوية مخصّص مطلوب). لا فرق ⇒ لا قيد.
+- **الواجهة:** `WarehouseTransferViewSet`/`StocktakeViewSet` (+ actions `/post/`,
+  `/unpost/`) على `inventory/warehouse-transfers/` و`inventory/stocktakes/`. سيريلايزرز
+  بأسطر متداخلة قابلة للكتابة (ترفض تعديل المُرحَّل).
+- **الأمامي:** `WarehouseTransferPage` + `StocktakePage` (قائمة + نموذج «حفظ وترحيل») ·
+  `inventoryApi` (get/create/post لكلٍّ) · AppView+VIEW_PATHS+Breadcrumb · روابط في
+  مجموعة «المخزون» بالشريط الجانبي.
+- **التحقق:** **9/9 اختبارات جديدة** (`test_inventory_documents`: صافي صفري التحويل +
+  وسم الحركات + رفض نفس المستودع + رفض الترحيل المزدوج + عكس · الجرد فائض/عجز/قيد/لا-فرق) ·
+  **inventory 29/29** · `manage.py check` 0 · tsc نظيف · `resolve()` للمسارين · التطبيق
+  يُحمَّل بلا أخطاء console. (الشاشات خلف الدخول — لم تُختبر بصرياً.)
+- **هجرة جديدة 0010 تُطبَّق عند النشر** (مع 0046 لوجستيات من المرحلة 4).
+
+## [AUDIT — task22 Phase 6, 2026-06-20] (مدفوعات + شبكات + سندات — T-P1/P2/G1/V1)
+
+- **T-V1 (خلل سندات الصرف للموردين):** `SupplierPaymentsPage` كان يستدعي
+  `purchase/payments/` — **لا مسار باسم `api/purchase/`** فيفشل بـ 404 عند الفتح.
+  المسار الصحيح المُسجَّل: `logistics/supplier-payments/` → `SupplierPaymentViewSet`.
+  أُصلح: القائمة + الإنشاء (عبر `purchaseInvoiceApi.addSupplierPayment` الذي ينشئ+يرحّل)،
+  وأُعيدت تسمية حقول الصف `supplier→partner`/`supplier_name→partner_name` لمطابقة
+  `SupplierPaymentSerializer`، وحُذفت لافتات «backend N8-T12 غير جاهز» المضلِّلة.
+  **إثبات:** `resolve('/api/logistics/supplier-payments/')→SupplierPaymentViewSet`،
+  `'/api/purchase/payments/'→404`. (تفصيل الشيكات/خصم المصدر لا يحفظه النموذج المبسّط —
+  خارطة طريق.)
+- **T-P1 (FIFO + فاتورة محددة):** `SalesCustomerPaymentsPage` — أُبقي «اقتراح FIFO»،
+  وأُضيف منتقي فاتورة مفتوحة محددة (`partnerAging`) + زر «أضف الفاتورة» يُنشئ سطر توزيع
+  بمبلغ افتراضي = min(متبقي الدفعة، متبقي الفاتورة). توزيعات قابلة للتحرير كما هي.
+- **T-P2 (سند قبض سريع من كشف الحساب):** زر «سند قبض جديد» في `PartnerProfilePage`
+  (للعملاء) يفتح `/sales/customer-payments?pay_partner={id}`؛ الصفحة تقرأ الباراميتر
+  وتفتح المودال مع العميل مُعبّأً مسبقاً (`initialPartnerId`).
+- **T-G1 (أعمدة قابلة للتحجيم Excel-like):** `AseelDenseTable` أُضيف له مقبض سحب على
+  الحافة الطرفية لكل عمود (`resizable` افتراضي مُفعّل) — يعمل لشبكة العملاء وكل
+  المستهلِكين (DRY). يحسب الدلتا حسب اتجاه RTL/LTR.
+- **التحقق:** tsc نظيف (exit 0) · إثبات توجيه T-V1 عبر `resolve()`. **التحقق البصري
+  للشاشات يحتاج جلسة مصادَقة** (خلف الدخول) — لم يُجرَ.
+
+## [AUDIT — task22 Phase 5, 2026-06-20] (إعادة هيكلة التنقّل — Section 9 + T-N1..T-N3)
+
+- **الشريط الجانبي (`Sidebar.tsx`) أُعيد بناؤه data-driven** بمجموعات Section 9 الكبيرة،
+  كلٌّ بأيقونته (عارض `renderGroup` موحّد DRY، أصناف ثابتة بـ design-tokens — تفادي
+  مصيدة Tailwind للأصناف الديناميكية). الترتيب:
+  1. الرئيسية (Home) 2. المبيعات (ShoppingCart): فواتير/عروض/إشعارات/مرجع بيع/أرباح/
+  إعدادات-آخراً 3. العملاء (Users): العملاء/دفعات 4. المشتريات (ShoppingBag): فواتير/
+  عروض أسعار/مرجع شراء/سندات صرف/إعدادات/موردين 5. المخزون (Warehouse): أرصدة/الأصناف/
+  حركات + **مجموعة فرعية «الاستيراد»** (الصفقات/الشحنات/أرشيف/نقل محلي/تخليص/رحلة) —
+  **زر الاستيراد المستقل أُزيل** 6. المالية (Landmark): صناديق/شيكات 7. التقارير
+  (تفتح كلٌّ في **تبويب جديد** G2 عبر `openInNewTab`) 8. **إدارة المهام في الأسفل تماماً**.
+  المحاسبة محفوظة كمجموعة (وصول كامل للعمليات، لا تُكسر ميزة).
+- **T-N1:** المساعد الذكي نُقل من الشريط الجانبي إلى رأس `AppLayout` بجوار `BranchSwitcher`
+  («كل الفروع»).
+- **T-N2:** زر «التصنيفات» (`items-categories`) أُزيل من التنقّل (المسار/التبويب باقٍ).
+- **T-N3:** شاشة الأصناف (`ItemsManagement`) أصبح لها **عرض شجرة تصنيفات** (يعيد استخدام
+  `InvoiceCategoryTree`) كافتراضي + مبدّل شجرة/جدول. نقرة=بطاقة، اختيار=تعديل.
+- **شاشات غير مبنية (خارطة طريق، T-S4):** «إعدادات المخزون» و«البنوك» لا تملكان شاشة
+  مستقلة — لم تُضَف أزرار مكسورة؛ تُبنى في مرحلة لاحقة. `aseel-kit` (أداة تطوير) أُسقط
+  من التنقّل (المسار باقٍ).
+- **تحذير تصميمي:** المجموعات موحّدة اللون (design-tokens) مع أيقونات مميِّزة بدل ألوان
+  لكل مجموعة (تفادي عجز Tailwind JIT عن توليد أصناف ديناميكية).
+- **التحقق:** tsc نظيف (exit 0) · إزالة الاستيرادات اليتيمة (Sparkles/Wrench/DashboardIcon) ·
+  Vite يبني، التطبيق يُحمَّل بلا أخطاء console. **التحقق البصري لترتيب التبويبات يحتاج
+  جلسة مصادَقة** (الشريط خلف الدخول) — لم يُجرَ.
+
+## [AUDIT — task22 Phase 4, 2026-06-20] (روابط الحسابات + النقد — T-A1..T-A4)
+
+- **T-A1 (المتبقي على حساب العميل):** **موجود أصلاً** (task18) — صفّا «رصيد العميل»
+  و«الرصيد بعد الفاتورة» في رصيف الإجماليات + سطر «الرصيد السابق/بعد الفاتورة» في
+  بطاقة العميل بالرأس. لا تغيير.
+- **T-A2 (بطاقة العميل قابلة للنقر):** زر «بطاقة العميل» بجوار حقل العميل في
+  `SalesInvoiceEditor` يفتح `/partners/{id}` في **تبويب جديد** (G2 — يحفظ الفاتورة الجارية).
+- **T-A3 (المورد قابل للنقر عالمياً):** عمود المورد في `InvoiceList` (قائمة فواتير
+  الشراء) صار رابطاً لكشف حساب المورد `/partners/{supplierId}` في تبويب جديد
+  (`stopPropagation` كي لا يفتح الصف). (بطاقة العميل/المورد وكشف الحساب كلها
+  `PartnerProfilePage` على `/partners/:id` — تبويب statement.)
+- **T-A4 (الصندوق الافتراضي):**
+  - **مبيعات:** أُزيل منتقي «حساب الصندوق» للدفعة المرفقة (موضعان) واستُبدل بعرض
+    للقراءة فقط للصندوق الافتراضي + effect يملؤه من `default_cash_account`. (صندوق
+    الفاتورة النقدية نفسه كان يتبع الإعدادات أصلاً، بلا منتقي.)
+  - **شراء:** أُضيف الحقل عبر الـ stack: `PurchaseSettings.default_cash_account` FK
+    (logistics/models.py) + هجرة `0046_purchasesettings_default_cash_account` +
+    حقل في `PurchaseSettingsSerializer` + نوعا `purchaseInvoiceApi.get/updateSettings`
+    + منتقي صندوق في `PurchaseSettingsPage` (يحمّل `accounting/accounts/`).
+- **التحقق:** tsc نظيف (exit 0) · `manage.py check` 0 مشاكل · هجرة 0046 تُطبَّق على
+  DB نظيفة (pytest) · `test_purchase_price_resolver` 8/8 · **الحزمة الكاملة 217/217** (لا انحدار).
+
+## [AUDIT — task22 Phase 3, 2026-06-20] (سلوك بنود الفاتورة — T-R1..T-R4)
+
+- **T-R1 (خلل السطور الوهمية، مبيعات):** `SalesInvoiceEditor.updateLine` كان يُلحق سطراً
+  جديداً عندما يكون آخر سطر «ممتلئاً» بشرط `product!=="" || quantity!=="0"`. بما أن
+  `makeEmptyLine` يبدأ بالكمية `"1"`، كان كل سطر فارغ يُحسب ممتلئاً فتتكاثر السطور.
+  **الإصلاح:** الإلحاق فقط عندما يكتسب آخر سطر **صنفاً** حقيقياً (`product!=="" && !==-1`).
+  محاكاة Node: قديم=5 سطور بعد إضافة+3 تعديلات كمية، جديد=2 (ممتلئ + فارغ واحد).
+  (الشراء لا يعاني الخلل — `applyItemAt` يُلحق سطراً ذيلياً واحداً متحكَّماً به فقط.)
+- **T-R2 (بطاقة الصنف ← حوار كمية+سعر):** `shared/ProductCardModal` أُضيف له **وضع إضافة**
+  (`addMode`) يعرض حقل **الكمية** وحقل **السعر** مع **شارة مصدر** (`من آخر فاتورة` /
+  `من عرض السعر` / `السعر الافتراضي`)، و«موافق» يمرّر `{quantity, unitPrice}`. وُصِّل في
+  الشاشتين: المبيعات تُقدّر السعر عبر `resolveSalePrice` عند فتح البطاقة وتُثبّت السعر
+  المُدخل (`priceTouched`)؛ الشراء عبر `resolveSuggestedPrice` ويمرّر الكمية إلى
+  `applyItemAt(…, qtyOverride)`.
+- **T-R3 (تنبيه التكرار):** المبيعات: تنبيه/تأكيد جديد في `insertProductIntoInvoice`
+  يتبع إعداد `warn_on_duplicate_item` (افتراضي مُفعّل — جاهز لربط إعداد المرحلة 8).
+  الشراء: **موجود أصلاً** (`applyItemAt` يعرض دمج/سطر مستقل).
+- **T-R4 (حارس العمل غير المحفوظ):** المبيعات: `guardedReset` على «إضافة/إلغاء» —
+  تأكيد ثنائي (متابعة؟ ثم حفظ-قبل-المغادرة؟). الشراء: `guardedGoNew` يحرس «جديدة»
+  عندما تكون الفاتورة بلا id وتحتوي بنوداً (حالة فقدان العمل الحقيقية؛ لا تتبّع dirty
+  كامل في الشراء — حُرست الحالة الجوهرية فقط). اختصار Ctrl+Ins تُرك بلا حارس (تفادي
+  use-before-define؛ زر «جديدة» المرئي محروس).
+- **تعميم G1:** `ProductCardModal.fmt2` ما يزال toLocaleString(min2) داخل KPIs البطاقة —
+  مُدرج لاحقاً (عرض إحصائي، ليس مبالغ فاتورة).
+- **التحقق:** tsc نظيف (exit 0) · محاكاة T-R1 Node. **التحقق البصري للحوار/الحارس يحتاج
+  جلسة مصادَقة** (محرّر الفاتورة خلف الدخول) — لم يُجرَ.
+
+## [AUDIT — task22 Phase 2, 2026-06-20] (تخطيط الفاتورة — رأس أفقي مدمج T-L1..T-L5)
+
+**السبب الجذري (T-L1):** القشرة `AseelDocumentShell` تلفّ الرأس في `.aseel-headband`
+لكن هذا الصنف لم يكن يضبط `display`، فحقول `fld()` (label.aseel-field) تتراصّ
+**عمودياً** وتبتلع نصف الصفحة — تماماً كصورة 11 لفاتورة الشراء. (قاعدة الموبايل
+كانت تتجاوز `grid-template-columns` لم يُضبط على الديسكتوب أصلاً — تخطيط مرتجَع.)
+
+- **الإصلاح (DRY، عالمي):** `styles/index.css` — `.aseel-headband` صار
+  `display:flex; flex-wrap:wrap; gap:3px 14px`، و`> .aseel-field` يأخذ
+  `flex:1 1 220px; min-width:190px; max-width:340px`. يُصلح رأس فاتورة الشراء
+  وكل شاشات المستندات (deals، عروض الأسعار، المرتجعات…) دفعة واحدة. رأس المبيعات
+  محفوظ لأن طفله الأول `w-full` فيبقى صفّاً مستقلاً. قاعدة الموبايل (<640px) حُدِّثت
+  لـ `flex-direction:column`.
+- **T-L1/T-L2/T-L5:** الرأس الآن أفقي مضغوط على الشاشتين؛ المورد/الاسم متجاوران.
+  T-L3 (الشريط) وT-L4 (رصيف الإجماليات الثابت) مؤمَّنان أصلاً ببنية القشرة.
+- **تعميم G1 (المرحلة 2):** `SalesInvoiceEditor.fmt` و`InvoiceForm.fmt` أُعيد تعريفهما
+  إلى `formatMoney` (يحذف الأصفار الزائدة من كل الإجماليات) + سطرا رصيد المورد.
+- **التحقق:** tsc نظيف (exit 0) · خادم Vite يبني/يخدم بلا أخطاء CSS، التطبيق يُحمَّل
+  (صفحة الدخول) بلا أخطاء runtime. **التحقق البصري للرأس الأفقي يحتاج جلسة مصادَقة
+  (محرّر الفاتورة خلف تسجيل دخول)** — لم يُجرَ لأن إدخال بيانات الدخول ليس من صلاحياتي.
+
 ## [AUDIT — task21, 2026-06-19] (تحسينات UX لفاتورة البيع/الشراء + تسعير عرض السعر — DEF-001..009)
 
 تغييرات جراحية على شاشتي فاتورة المبيعات/الشراء وشجرة المنتجات وبطاقة الصنف
@@ -748,7 +952,7 @@ User pushed back on the «pending» list and asked for all of it. Closed every r
 
 ### المنفّذ والمُتحقَّق
 - **DEF-A1 (مُتحقَّق — لا عمل):** لا تصادم مسارات؛ 53 شاشة في `VIEW_PATHS` كلها فريدة (أُصلح في task14 M1). تأكيد آلي عبر فحص التكرارات.
-- **DEF-A2 شريط الإجراءات العام:** `components/layout/GlobalActionBar.tsx` — شريط سفلي دائم (يحاكي شريط الأصيل) مُركَّب في `AppLayout`، مُقيَّد بالدور، يعيد استخدام `aseel-toolbtn` و`onNavigate`. أزرار: فاتورة مبيعات/شراء جديدة · سند قبض/صرف · قيد تحويل · بحث عن قيد · شجرة الحسابات · كشف الصندوق · الشيكات · صرف العملات · طباعة · تحديث — كلٌّ يوجّه لمساره. + إصلاح `setViewAndSyncPath` لفتح فاتورة مبيعات جديدة على `/sales/invoices/new` (كان يفتح القائمة فقط). + إصلاح كسر tsc قائم (`partner-profile` ناقص في `Breadcrumb`).
+- **DEF-A2 شريط الإجراءات العام:** `components/layout/GlobalActionBar.tsx` — قائمة منسدلة وأيقونات سريعة في الشريط العلوي (تم نقله من شريط سفلي لاستغلال المساحة) مُركَّب في `AppLayout`، مُقيَّد بالدور. أزرار: فاتورة مبيعات/شراء جديدة · سند قبض/صرف · قيد تحويل · بحث عن قيد · شجرة الحسابات · كشف الصندوق · الشيكات · صرف العملات · طباعة · تحديث — كلٌّ يوجّه لمساره. + إصلاح `setViewAndSyncPath` لفتح فاتورة مبيعات جديدة على `/sales/invoices/new` (كان يفتح القائمة فقط). + إصلاح كسر tsc قائم (`partner-profile` ناقص في `Breadcrumb`).
 - **DEF-B2 إضافة صنف inline تُحفظ (شراء):** `ItemQuickCreateModal` كان يُنشئ Product في inventory فعلاً، لكن السطر كان يُعبَّأ بـ name فارغ (Product يحمل name_ar لا name) ولا يظهر في `allDbItems`. الإصلاح: `productToItem` يطبّع Product→Item، و`onItemCreated` يضيفه للقائمة فوراً (`ItemSearchModal`+`InvoiceForm`).
 - **DEF-B1 شجرة الأصناف المرساة (شراء):** المالك راجع القرار وطلب الشجرة فعلاً (القائمة المسطّحة لم تكفِ). `components/procurement/invoices/InvoiceCategoryTree.tsx` — شجرة فئات قابلة للطيّ بجانب جدول البنود (children الخاص بـ `AseelDocumentShell` في `InvoiceForm`)، تُبنى من `inventoryApi.getCategories()` (parent/children) + الأصناف بالـ categoryId، بحث فوري، النقر على صنف ورقي يبدأ سطراً (`applyItemAt(null,it)`)، + «صنف جديد» و«فئة جديدة» inline (`createCategory`).
 - **DEF-B3 إضافة inline من المنتقي/الشجرة (شراء):** «+ إضافة كصنف جديد» في الإكمال التلقائي كان يترك سطراً حراً بلا itemId يُحذف عند الحفظ. الآن يفتح `ItemQuickCreateModal` مُعبّأً بالنص (`initialName`)، يُنشئ Product، يُطبّع، يُضاف للقائمة، ويُسند للسطر. وإضافة فئة من الشجرة عبر `inventoryApi.createCategory`.
@@ -771,3 +975,11 @@ User pushed back on the «pending» list and asked for all of it. Closed every r
 - [ ] **تحقق UI حيّ مُصادَق:** شريط الإجراءات وصفحة الأرباح ورصيد المورد وآخر سعر تُرسَم بعد تسجيل الدخول فقط؛ تأكيد النقر الحيّ متروك للمالك (إدخال كلمة المرور للمصادقة محظور على الوكيل). التحقق تمّ عبر pytest + tsc + vite build + رسم صفحة الدخول.
 
 **تحقق ختامي task18:** backend **183/183** خضراء (174 + 9 جديدة: أرباح الفواتير 3 · رصيد الشريك 3 · آخر سعر 3) · tsc 0 · vite build OK · `manage.py check` 0. التحقق الحيّ المُصادَق متروك للمالك (انظر ORPHANS).
+
+## [AUDIT — task23, 2026-06-20] (Global Back Button - زر الرجوع العام)
+
+- **زر رجوع عام:** تمت إضافة زر "رجوع" (ArrowRight) بجوار مسار التنقل (Breadcrumb) في `components/layout/Breadcrumb.tsx` ليظهر في كل شاشات النظام.
+- **التوجيه (Routing):** الزر يستخدم `useNavigate` من `react-router-dom` وينفذ `navigate(-1)` للعودة إلى الصفحة السابقة في الـ History. 
+- **التجريد:** الإضافة تمت في المكون المركزي مما يلغي الحاجة لتكرار الكود في كل صفحة.
+- **الاختبار:** تمت كتابة اختبار Playwright (`e2e/back-button.spec.ts`) بناءً على منهجية TDD، لكن الاختبار يتطلب تجاوز صفحة تسجيل الدخول لرؤية الواجهة الداخلية (سيتم إضافة دعم المصادقة للاختبارات لاحقاً).
+- **التحقق:** `npm run build` يعمل بنجاح (tsc 0, vite build OK). لا توجد أكواد Deprecated بناءً على هذا التعديل.

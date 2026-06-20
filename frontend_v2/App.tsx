@@ -110,6 +110,8 @@ import { SmartAssistantPage } from "./components/SmartAssistantPage";
 import { CustomsClearanceManagement } from "./components/procurement/clearance/CustomsClearanceManagement";
 import { StockMovementsPage } from "./components/inventory/StockMovementsPage";
 import { StockLevelsPage } from "./components/inventory/StockLevelsPage";
+import { WarehouseTransferPage } from "./components/inventory/WarehouseTransferPage";
+import { StocktakePage } from "./components/inventory/StocktakePage";
 import { InventoryValuationPage } from "./components/inventory/InventoryValuationPage";
 import { PropertyRentalPage } from "./components/realestate/PropertyRentalPage";
 import { PartnerProfilePage } from "./components/partners/PartnerProfilePage";
@@ -167,6 +169,8 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "local-shipping": "/local-shipping",
   "stock-levels": "/stock-levels",
   "stock-movements": "/stock-movements",
+  "warehouse-transfer": "/warehouse-transfer",
+  "stocktake": "/stocktake",
   "accounting-coa": "/accounting/coa",
   "accounting-journals": "/accounting/journals",
   "accounting-cheques": "/accounting/cheques",
@@ -1648,6 +1652,12 @@ const App: React.FC = () => {
 
       case "stock-movements":
         return <StockMovementsPage />;
+
+      case "warehouse-transfer":
+        return <WarehouseTransferPage />;
+
+      case "stocktake":
+        return <StocktakePage />;
 
       case "inventory-valuation":
         return <InventoryValuationPage />;

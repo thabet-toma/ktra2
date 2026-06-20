@@ -73,17 +73,22 @@ export default function PendingMutationsPanel() {
     chipDot = "bg-yellow-500";
   }
 
+  // إخفاء الزر الأخضر "متصل" بناء على طلب المستخدم
+  const isAllClear = online && pendingCount === 0 && failedCount === 0 && syncingCount === 0;
+
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700 ${chipBg}`}
-        aria-label={`حالة المزامنة: ${chipText}`}
-      >
-        <span className={`w-2 h-2 rounded-full ${chipDot}`} />
-        <span>{chipText}</span>
-      </button>
+      {!isAllClear && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700 ${chipBg}`}
+          aria-label={`حالة المزامنة: ${chipText}`}
+        >
+          <span className={`w-2 h-2 rounded-full ${chipDot}`} />
+          <span>{chipText}</span>
+        </button>
+      )}
 
       <AseelSidePanel open={open} onClose={() => setOpen(false)} title="العمليات المعلقة" width={420}>
         {mutations.length === 0 ? (

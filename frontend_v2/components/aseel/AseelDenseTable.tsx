@@ -12,7 +12,7 @@
  *   - pagination?: { page, pageSize, total, onChange }
  * Reference: docs/aseel_reference/accounting.txt 48–69.
  */
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { AseelSpinner, AseelEmptyState } from './AseelStates';
 
 export type DenseColumn<T> = {
@@ -57,6 +57,8 @@ export type AseelDenseTableProps<T> = {
   exportable?: boolean;
   /** Filename for CSV export (without .csv). */
   exportFilename?: string;
+  /** T-G1: drag-to-resize column widths (Excel-like). Default true. */
+  resizable?: boolean;
 };
 
 export function AseelDenseTable<T extends Record<string, any>>({
@@ -79,9 +81,35 @@ export function AseelDenseTable<T extends Record<string, any>>({
   rowColorKey,
   exportable = false,
   exportFilename = 'export',
+  resizable = true,
 }: AseelDenseTableProps<T>) {
   const totalCols = columns.length + (selectable ? 1 : 0);
   const [hoveredKey, setHoveredKey] = useState<string | number | null>(null);
+  // T-G1: عرض الأعمدة بعد السحب (px) — يتجاوز width الافتراضي للعمود.
+  const [colWidths, setColWidths] = useState<Record<string, number>>({});
+
+  const startResize = (e: React.MouseEvent, colKey: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const th = (e.currentTarget as HTMLElement).closest('th') as HTMLElement | null;
+    if (!th) return;
+    const startX = e.clientX;
+    const startW = th.getBoundingClientRect().width;
+    // RTL: السحب لليسار يزيد العرض — نعكس الإشارة حسب اتجاه الجدول.
+    const rtl = getComputedStyle(th).direction === 'rtl';
+    const onMove = (ev: MouseEvent) => {
+      const delta = (ev.clientX - startX) * (rtl ? -1 : 1);
+      setColWidths((prev) => ({ ...prev, [colKey]: Math.max(40, Math.round(startW + delta)) }));
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.style.userSelect = '';
+    };
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  };
 
   const handleSort = (col: DenseColumn<T>) => {
     if (!col.sortable || !onSort) return;
@@ -137,13 +165,35 @@ export function AseelDenseTable<T extends Record<string, any>>({
             {columns.map((col) => (
               <th
                 key={col.key}
-                style={{ width: col.width, textAlign: getAlign(col) as any }}
+                style={{
+                  width: colWidths[col.key] != null ? `${colWidths[col.key]}px` : col.width,
+                  textAlign: getAlign(col) as any,
+                  position: resizable ? 'relative' : undefined,
+                }}
                 className={col.sortable && onSort ? 'aseel-sortable' : ''}
                 onClick={() => handleSort(col)}
               >
                 {col.header}
                 {sortKey === col.key && (
                   <span className="aseel-sort-indicator">{sortDir === 'asc' ? '▲' : '▼'}</span>
+                )}
+                {resizable && (
+                  // T-G1: مقبض سحب لتغيير عرض العمود (Excel-like) عند الحافة الطرفية.
+                  <span
+                    onMouseDown={(e) => startResize(e, col.key)}
+                    onClick={(e) => e.stopPropagation()}
+                    title="اسحب لتغيير عرض العمود"
+                    style={{
+                      position: 'absolute',
+                      insetInlineEnd: 0,
+                      top: 0,
+                      height: '100%',
+                      width: '6px',
+                      cursor: 'col-resize',
+                      userSelect: 'none',
+                      zIndex: 1,
+                    }}
+                  />
                 )}
               </th>
             ))}

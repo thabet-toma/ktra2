@@ -1200,6 +1200,16 @@ class PurchaseSettings(models.Model):
         db_column="PurchaseDefaultPriceStrategy",
         help_text="استراتيجية تعبئة سعر الوحدة تلقائياً عند اختيار صنف في بند الشراء",
     )
+    # T-A4: الصندوق الافتراضي للدفعات النقدية في فواتير الشراء (مرآة SalesSettings).
+    default_cash_account = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column="DefaultCashAccountID",
+        related_name="purchase_settings_cash",
+        help_text="حساب الصندوق الافتراضي للدفعات النقدية في فواتير الشراء",
+    )
     updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
 
     class Meta:

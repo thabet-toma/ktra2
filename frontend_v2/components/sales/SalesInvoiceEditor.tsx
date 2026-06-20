@@ -25,6 +25,8 @@ import { ProductCardModal } from "../shared/ProductCardModal";
 import { Item } from "../../types";
 import db from "../../services/offline/db";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
+import { formatMoney } from "../../utils/formatNumber";
+import { openInNewTab } from "../../utils/openInNewTab";
 import { apiPostObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import {
@@ -149,6 +151,8 @@ type Props = {
     prices_include_tax: boolean;
     auto_post_invoices: boolean;
     show_journal_preview: boolean;
+    /** T-R3: تنبيه عند تكرار الصنف على سطر جديد (الافتراضي مُفعّل). */
+    warn_on_duplicate_item?: boolean;
   } | null;
 };
 
@@ -243,6 +247,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [cardProductId, setCardProductId] = useState<number | null>(null);
   // «موافق» (إضافة للفاتورة) يظهر فقط عند فتح البطاقة من الشجرة، لا من أيقونة (i).
   const [cardCanAdd, setCardCanAdd] = useState(false);
+  // T-R2: السعر المقترح ومصدره — يُحسبان عند فتح البطاقة من الشجرة لعرضهما داخلها.
+  const [cardSuggestedPrice, setCardSuggestedPrice] = useState<number | null>(null);
+  const [cardPriceSource, setCardPriceSource] = useState<DraftLine["priceSource"]>(null);
   const [invoiceStatus, setInvoiceStatus] = useState<string>("draft");
   const [postedJournalId, setPostedJournalId] = useState<number | null>(null);
   // task18: المدفوع/الإجمالي المحفوظان — لحساب المتبقي عند تسجيل سند قبض على فاتورة مرحّلة.
@@ -419,6 +426,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     if (!cashboxAccounts.length) return;
     setCashAccountId(cashboxAccounts[0].id);
   }, [invType, cashboxAccounts, cashAccountId, salesSettings?.default_cash_account]);
+
+  // T-A4: صندوق الدفعة النقدية المرفقة يتبع «الصندوق الافتراضي» من إعدادات المبيعات
+  // تلقائياً — لا اختيار صندوق لكل فاتورة (أُزيل المنتقي من الشاشة).
+  useEffect(() => {
+    if (attachedCashAccountId !== "") return;
+    if (salesSettings?.default_cash_account) setAttachedCashAccountId(salesSettings.default_cash_account);
+    else if (cashboxAccounts.length) setAttachedCashAccountId(cashboxAccounts[0].id);
+  }, [attachedCashAccountId, salesSettings?.default_cash_account, cashboxAccounts]);
 
   /** معاينة القيد المحاسبي المباشرة — تطابق منطق post_sales_invoice في الخادم. */
   type PreviewLine = {
@@ -1156,6 +1171,29 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     dirtyRef.current = false;
   };
 
+  // T-R4: حارس التغييرات غير المحفوظة — يُستدعى من «إضافة/جديدة» و«إلغاء». بدل
+  // التجاهل الصامت للعمل، يسأل المستخدم ويُتيح الحفظ قبل المغادرة (سلوك احترافي).
+  const guardedReset = () => {
+    const hasContent = lines.some((l) => l.product !== "" && l.product !== -1);
+    if (!isPosted && dirtyRef.current && hasContent) {
+      const proceed = window.confirm(
+        "لديك تغييرات غير محفوظة في هذه الفاتورة.\n«موافق» للمتابعة بفاتورة جديدة · «إلغاء» للعودة."
+      );
+      if (!proceed) return;
+      const save = window.confirm(
+        "هل تريد حفظ هذه الفاتورة قبل البدء بفاتورة جديدة؟\n«موافق» = حفظ ثم جديدة · «إلغاء» = تجاهل التغييرات."
+      );
+      if (save) {
+        void (async () => {
+          await handleSaveDraft();
+          resetForm();
+        })();
+        return;
+      }
+    }
+    resetForm();
+  };
+
   const addRow = () => {
     if (readOnly) return;
     setLines((prev) => [...prev, makeEmptyLine()]);
@@ -1164,8 +1202,19 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   /** يُدرج صنفاً في أول سطر فارغ (أو سطر جديد) ثم يجلب سعره — مدخل موحّد
    *  للشجرة وزر «موافق» في بطاقة الصنف. */
-  const insertProductIntoInvoice = (productId: number) => {
+  const insertProductIntoInvoice = (
+    productId: number,
+    opts?: { quantity?: number; unitPrice?: number; source?: DraftLine["priceSource"] }
+  ) => {
     if (!productId || readOnly || isPosted) return;
+    // T-R3: تنبيه عند تكرار الصنف على سطر جديد (يتبع إعداد warn_on_duplicate_item،
+    // الافتراضي مُفعّل — يطابق إعداد «عند تكرار المادة: إظهار رسالة تنبيه»).
+    const isDuplicate = lines.some(
+      (l) => l.product !== "" && l.product !== -1 && Number(l.product) === Number(productId)
+    );
+    if (isDuplicate && (salesSettings?.warn_on_duplicate_item ?? true)) {
+      if (!window.confirm("هذا الصنف موجود مسبقاً في الفاتورة.\nهل تريد إضافة سطر جديد بنفس الصنف؟")) return;
+    }
     let targetKey = "";
     setLines((prev) => {
       const emptyIdx = prev.findIndex((l) => l.product === "" && !l.description);
@@ -1180,7 +1229,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       targetKey = newLine.key;
       return [...prev, newLine];
     });
-    setTimeout(() => onSelectProduct(targetKey, productId), 0);
+    setTimeout(() => onSelectProduct(targetKey, productId, opts), 0);
   };
 
   const removeRow = (key: string) => {
@@ -1194,7 +1243,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setLines((prev) => {
       const next = prev.map((r) => (r.key === key ? { ...r, ...patch } : r));
       const lastLine = next[next.length - 1];
-      if (lastLine && (lastLine.product !== "" || (lastLine.quantity !== "" && lastLine.quantity !== "0"))) {
+      // T-R1: أبقِ سطراً فارغاً واحداً فقط في الذيل. أضِف سطراً جديداً عندما يكتسب
+      // آخر سطر صنفاً حقيقياً فقط — لا بناءً على الكمية. (الخلل السابق: makeEmptyLine
+      // يبدأ بالكمية "1" فكان كل سطر فارغ يُحسب «ممتلئاً» وتتكاثر السطور الوهمية.)
+      const lastHasProduct = lastLine && lastLine.product !== "" && lastLine.product !== -1;
+      if (lastHasProduct) {
         return [...next, makeEmptyLine()];
       }
       return next;
@@ -1256,10 +1309,18 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     return null;
   };
 
-  const onSelectProduct = async (key: string, productId: number) => {
+  const onSelectProduct = async (
+    key: string,
+    productId: number,
+    opts?: { quantity?: number; unitPrice?: number; source?: DraftLine["priceSource"] }
+  ) => {
     const pr = productsById.get(productId);
+    // T-R2: عند تمرير سعر من بطاقة الصنف نستخدمه ونثبّته (priceTouched) فلا يدهسه
+    // الـ resolver؛ وإلا نبدأ بسعر البيع الافتراضي ثم نقترح عبر الـ resolver.
     const price =
-      pr?.online_price != null && pr.online_price !== ""
+      opts?.unitPrice != null
+        ? String(opts.unitPrice)
+        : pr?.online_price != null && pr.online_price !== ""
         ? String(pr.online_price)
         : "0";
     // P3-2-b: when offline, warn the user if the product row is from the
@@ -1284,13 +1345,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     updateLine(key, {
       product: productId,
       unit_price: price,
-      priceSource: null,
+      priceSource: opts?.source ?? null,
+      // سعر مُدخَل من البطاقة = مُثبّت (لا يُعاد تسعيره تلقائياً).
+      ...(opts?.unitPrice != null ? { quantity: String(opts.quantity ?? 1), priceTouched: true } : {}),
     });
     // FEAT-2 / DEF-005: اقترح سعر الوحدة عبر PriceResolver المشترك — آخر سعر
     // دفعه هذا العميل لهذا الصنف (يفوز دائماً)، ثم عرض السعر اليدوي، ثم سعر البيع
     // الافتراضي، ثم فارغ. القيمة تبقى قابلة للتعديل، ولا تُدَس على سطر حرّره
     // المستخدم يدوياً (edit-protection). الشارة تعكس مصدر السعر.
-    if (networkOnline) {
+    if (networkOnline && opts?.unitPrice == null) {
       resolveSalePrice({
         product: productId,
         customer: customerId,
@@ -1381,8 +1444,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     }
   };
 
-  const fmt = (n: number) =>
-    n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // G1: عرض موحّد بلا أصفار عشرية زائدة (مع فاصل آلاف للمبالغ).
+  const fmt = (n: number) => formatMoney(n);
 
   /* ───────────── تنقّل السجلات (M1-T2) — نفس API: getSalesInvoice ───────────── */
   /** تحميل فاتورة بالمعرّف عبر نفس مسار getSalesInvoice الموجود (بلا API جديد). */
@@ -1764,7 +1827,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     ...(onClose
       ? [{ key: "back", label: "الفواتير", icon: <ArrowRight />, onClick: onClose } as AseelToolbarAction]
       : []),
-    { key: "new", label: "إضافة", icon: <Plus />, onClick: resetForm },
+    { key: "new", label: "إضافة", icon: <Plus />, onClick: guardedReset },
     {
       key: "save",
       label: saving ? "...تخزين" : "تخزين",
@@ -1807,7 +1870,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       key: "cancel",
       label: "إلغاء",
       icon: <X />,
-      onClick: !isPosted ? resetForm : undefined,
+      onClick: !isPosted ? guardedReset : undefined,
       disabled: isPosted,
       danger: true,
     },
@@ -2024,22 +2087,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         </label>
         <label className="aseel-field">
           <span className="aseel-field-label">حساب الصندوق</span>
-          <select
+          {/* T-A4: الصندوق الافتراضي من الإعدادات (للعرض فقط) — لا اختيار لكل فاتورة. */}
+          <input
             className="aseel-input"
-            disabled={readOnly || isPosted}
-            value={attachedCashAccountId}
-            onChange={(e) => {
-              setAttachedCashAccountId(e.target.value ? Number(e.target.value) : "");
-              markDirty();
-            }}
-          >
-            <option value="">— اختر —</option>
-            {cashboxAccounts.map((a) => (
-              <option key={a.id} value={a.id}>
-                {(a.code || "") + " — " + (a.name || "")}
-              </option>
-            ))}
-          </select>
+            readOnly
+            title="الصندوق الافتراضي مضبوط في إعدادات المبيعات"
+            value={(() => {
+              const a = attachedCashAccountId !== "" ? accountsById.get(Number(attachedCashAccountId)) : undefined;
+              return a ? `${a.code || ""} — ${a.name || ""}` : "الصندوق الافتراضي (من الإعدادات)";
+            })()}
+          />
         </label>
       </div>
 
@@ -2277,7 +2334,23 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             onShowCard={(it) => {
               const p = products.find((x) => String(x.id) === String(it.id));
               const productId = p ? p.id : Number(it.id);
-              if (productId) { setCardCanAdd(true); setCardProductId(productId); }
+              if (!productId) return;
+              setCardCanAdd(true);
+              // T-R2: ابدأ بسعر البيع الافتراضي، ثم اقترح آخر فاتورة/عرض سعر للعميل.
+              const online = p?.online_price;
+              const hasDefault = online != null && online !== "";
+              setCardSuggestedPrice(hasDefault ? Number(online) : null);
+              setCardPriceSource(hasDefault ? "default" : null);
+              setCardProductId(productId);
+              if (networkOnline) {
+                resolveSalePrice({ product: productId, customer: customerId, currency: currencyId, exchange_rate: exchangeRate, tax_inclusive: pricesIncludeTax })
+                  .then((res) => {
+                    if (res?.unit_price == null) return;
+                    setCardSuggestedPrice(Number(res.unit_price));
+                    setCardPriceSource(priceSourceFromResolve(res.source?.document_type) ?? "default");
+                  })
+                  .catch(() => { /* لا اقتراح — تبقى البطاقة بالسعر الافتراضي */ });
+              }
             }}
             onPickItem={(it) => {
               const p = products.find((x) => String(x.id) === String(it.id));
@@ -2287,140 +2360,144 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           />
         }
         header={
-          <>
-            <div className="flex flex-col gap-2 w-full">
-              {/* Row 1: Primary Info (Customer & Invoice Metadata) — كثيف بنمط الأصيل */}
-              <div className="flex gap-2">
-
-                {/* Customer Card */}
-                <div className="flex-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 flex flex-col gap-2">
-                  <div className="flex justify-between items-start">
-                    <h3 className="font-semibold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-                      العميل
-                    </h3>
-                    <div className="flex gap-2">
-                      <select
-                        className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-sm rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 outline-none"
-                        disabled={readOnly}
-                        value={invType}
-                        onChange={(e) => { setInvType(e.target.value as "cash" | "credit"); markDirty(); }}
-                      >
-                        <option value="credit">دفع آجل (ذمم)</option>
-                        <option value="cash">دفع نقدي</option>
-                      </select>
-                    </div>
+          <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-1.5 flex flex-col gap-1 w-full shadow-sm">
+            <div className="flex flex-col xl:flex-row gap-2 items-start">
+              
+              {/* Customer Section */}
+              <div className="flex-1 flex flex-col gap-1 xl:border-l border-gray-100 dark:border-gray-700 pl-2 w-full">
+                <div className="flex items-center gap-1">
+                  <span className="font-bold text-gray-800 dark:text-gray-100 min-w-[35px] text-xs">العميل</span>
+                  <select
+                    className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-xs rounded px-1 py-0.5 focus:ring-1 focus:ring-emerald-500 outline-none"
+                    disabled={readOnly}
+                    value={invType}
+                    onChange={(e) => { setInvType(e.target.value as "cash" | "credit"); markDirty(); }}
+                  >
+                    <option value="credit">ذمم</option>
+                    <option value="cash">نقدي</option>
+                  </select>
+                  <div className="flex-1 relative min-w-[120px]">
+                    <input 
+                      className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-1.5 py-0.5 text-xs focus:ring-1 focus:ring-emerald-500 outline-none cursor-pointer"
+                      readOnly 
+                      disabled={readOnly} 
+                      value={selectedCustomer ? `#${selectedCustomer.id} - ${selectedCustomer.name}` : ""} 
+                      placeholder="اختر عميلاً..." 
+                      onClick={() => !readOnly && setCustomerPickerOpen(true)}
+                    />
                   </div>
+                  {selectedCustomer && (
+                    <button
+                      type="button"
+                      className="shrink-0 text-emerald-600 hover:text-emerald-700 text-[10px] underline px-1"
+                      title="فتح بطاقة العميل في تبويب جديد"
+                      onClick={() => openInNewTab(`/partners/${selectedCustomer.id}`)}
+                    >
+                      بطاقة
+                    </button>
+                  )}
+                </div>
 
-                  <div className="flex gap-2">
-                    <div className="flex-1 relative">
-                      <input 
-                        className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg pl-8 pr-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 outline-none cursor-pointer"
-                        readOnly 
-                        disabled={readOnly} 
-                        value={selectedCustomer ? `#${selectedCustomer.id} - ${selectedCustomer.name}` : ""} 
-                        placeholder="اختر عميلاً من الفهرس..." 
-                        onClick={() => !readOnly && setCustomerPickerOpen(true)}
-                      />
-                    </div>
-                  </div>
+                {selectedCustomer && creditHint && (() => {
+                  const bal = Number(creditHint.open_balance);
+                  const isDebtor = bal > 0.005;
+                  const isCreditor = bal < -0.005;
+                  const statusLabel = isDebtor ? "عليه" : isCreditor ? "له" : "متوازن";
+                  const color = isDebtor ? "text-red-600 dark:text-red-400" : isCreditor ? "text-emerald-600 dark:text-emerald-400" : "text-gray-500";
+                  const ledgerAcct = selectedCustomer?.linked_account ?? null;
+                  const canDrill = Boolean(onOpenGeneralLedger && ledgerAcct);
 
-                  {selectedCustomer && creditHint && (() => {
-                    const bal = Number(creditHint.open_balance);
-                    const isDebtor = bal > 0.005;
-                    const isCreditor = bal < -0.005;
-                    const statusLabel = isDebtor ? "عليه" : isCreditor ? "له" : "متوازن";
-                    const color = isDebtor ? "text-red-600 dark:text-red-400" : isCreditor ? "text-emerald-600 dark:text-emerald-400" : "text-gray-500";
-                    const ledgerAcct = selectedCustomer?.linked_account ?? null;
-                    const canDrill = Boolean(onOpenGeneralLedger && ledgerAcct);
+                  const balAfterRaw = bal + totals.grandTotal - (Number(attachedCashAmount) || 0) - attachedCheques.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+                  const isDebtorAfter = balAfterRaw > 0.005;
+                  const isCreditorAfter = balAfterRaw < -0.005;
+                  const statusLabelAfter = isDebtorAfter ? "عليه" : isCreditorAfter ? "له" : "متوازن";
+                  const colorAfter = isDebtorAfter ? "text-red-600 dark:text-red-400" : isCreditorAfter ? "text-emerald-600 dark:text-emerald-400" : "text-gray-500";
 
-                    const balAfterRaw = bal + totals.grandTotal - (Number(attachedCashAmount) || 0) - attachedCheques.reduce((s, c) => s + (Number(c.amount) || 0), 0);
-                    const isDebtorAfter = balAfterRaw > 0.005;
-                    const isCreditorAfter = balAfterRaw < -0.005;
-                    const statusLabelAfter = isDebtorAfter ? "عليه" : isCreditorAfter ? "له" : "متوازن";
-                    const colorAfter = isDebtorAfter ? "text-red-600 dark:text-red-400" : isCreditorAfter ? "text-emerald-600 dark:text-emerald-400" : "text-gray-500";
-
-                    return (
-                      // task18: سطر رصيد مضغوط (استغلال مساحة بنمط الأصيل) بدل بطاقتين ضخمتين.
-                      <div className="flex items-center flex-wrap gap-x-3 gap-y-1 mt-1 px-2 py-1 rounded border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 text-sm">
-                        <span className="text-xs text-gray-500">الرصيد السابق:</span>
+                  return (
+                    <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[11px]">
+                      <div className="flex items-center gap-1">
+                        <span className="text-gray-500">سابق:</span>
                         {canDrill ? (
-                          <button
-                            type="button"
-                            className={`font-bold hover:underline ${color}`}
-                            title="فتح الأستاذ العام لحساب العميل"
-                            onClick={() => onOpenGeneralLedger!(ledgerAcct as number)}
-                          >
-                            {fmt(Math.abs(bal))} <span className="text-xs font-normal text-gray-500">{statusLabel}</span>
+                          <button type="button" className={`font-bold hover:underline ${color}`} onClick={() => onOpenGeneralLedger!(ledgerAcct as number)}>
+                            {fmt(Math.abs(bal))} <span className="font-normal opacity-80">{statusLabel}</span>
                           </button>
                         ) : (
                           <span className={`font-bold ${color}`}>
-                            {fmt(Math.abs(bal))} <span className="text-xs font-normal text-gray-500">{statusLabel}</span>
+                            {fmt(Math.abs(bal))} <span className="font-normal opacity-80">{statusLabel}</span>
                           </span>
                         )}
-                        <span className="text-gray-300 dark:text-gray-600">|</span>
-                        <span className="text-xs text-gray-500">بعد الفاتورة:</span>
+                      </div>
+                      <span className="text-gray-300 dark:text-gray-600 hidden sm:inline">|</span>
+                      <div className="flex items-center gap-1">
+                        <span className="text-gray-500">متوقع:</span>
                         <span className={`font-bold ${colorAfter}`}>
-                          {fmt(Math.abs(balAfterRaw))} <span className="text-xs font-normal text-gray-500">{statusLabelAfter}</span>
+                          {fmt(Math.abs(balAfterRaw))} <span className="font-normal opacity-80">{statusLabelAfter}</span>
                         </span>
                       </div>
-                    );
-                  })()}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Barcode Search */}
+              <div className="w-full xl:w-[250px] shrink-0 flex flex-col gap-0.5 xl:border-l border-gray-100 dark:border-gray-700 pl-2 justify-center">
+                 <div className="flex justify-between items-end">
+                   <label className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400">بحث سريع / باركود (F6)</label>
+                 </div>
+                 <div className="relative">
+                   <div className="absolute inset-y-0 right-0 flex items-center pr-1.5 pointer-events-none">
+                     <Search className="w-3 h-3 text-emerald-500" />
+                   </div>
+                   <input
+                    className="w-full bg-emerald-50/50 dark:bg-emerald-900/10 border border-emerald-300 dark:border-emerald-800/60 rounded px-2 py-0.5 pr-6 text-xs font-bold focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none placeholder:text-gray-400 placeholder:font-normal"
+                    data-aseel-field="barcode"
+                    disabled={readOnly}
+                    value={productFilter}
+                    onChange={(e) => setProductFilter(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleBarcodeEnter(productFilter);
+                      }
+                    }}
+                    placeholder="الاسم/SKU/الباركود ⏎"
+                  />
+                 </div>
+              </div>
+
+              {/* Invoice Metadata */}
+              <div className="w-full xl:w-[280px] shrink-0 flex flex-col gap-1">
+                <div className="flex justify-between items-center text-xs pb-0.5 border-b border-gray-100 dark:border-gray-700">
+                  <span className="font-bold text-gray-800 dark:text-gray-100">الفاتورة</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">{invoiceNumber || "جديدة"}</span>
                 </div>
-
-                {/* Invoice Metadata */}
-                <div className="w-[260px] shrink-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg p-2.5 flex flex-col gap-1.5">
-                  <h3 className="font-semibold text-gray-800 dark:text-gray-100 border-b border-gray-100 dark:border-gray-700 pb-1.5">
-                    الفاتورة <span className="text-emerald-600">{invoiceNumber || "— جديدة —"}</span>
-                  </h3>
-
-                  <div className="flex flex-col gap-1.5">
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-500">التاريخ</span>
-                      <input type="date" className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-2 py-1 outline-none focus:border-emerald-500" disabled={readOnly} value={invDate} onChange={(e) => { setInvDate(e.target.value); markDirty(); }} />
-                    </div>
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-500">الاستحقاق</span>
-                      <input type="date" className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-2 py-1 outline-none focus:border-emerald-500" disabled={readOnly} value={dueDate} onChange={(e) => { setDueDate(e.target.value); markDirty(); }} />
-                    </div>
-                    <div className="flex justify-between items-center text-sm">
-                      <span className="text-gray-500">العملة</span>
-                      <select className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-2 py-1 outline-none focus:border-emerald-500 w-[130px]" disabled={readOnly} value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}>
-                        <option value="">—</option>
-                        {currencies.map((c) => (<option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>))}
-                      </select>
-                    </div>
-                    <div className="flex justify-between items-center text-sm mt-1 pt-2 border-t border-gray-100 dark:border-gray-700">
-                      <label className="flex items-center gap-2 text-gray-600 dark:text-gray-300 cursor-pointer">
-                        <input type="checkbox" className="rounded text-emerald-600 focus:ring-emerald-500" disabled={readOnly} checked={pricesIncludeTax} onChange={(e) => { setPricesIncludeTax(e.target.checked); markDirty(); }} /> 
-                        الأسعار تشمل الضريبة
-                      </label>
-                    </div>
+                <div className="flex gap-1">
+                  <div className="flex items-center gap-1 flex-1">
+                    <span className="text-gray-500 text-[10px] min-w-[30px]">تاريخ</span>
+                    <input type="date" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-emerald-500 text-[11px]" disabled={readOnly} value={invDate} onChange={(e) => { setInvDate(e.target.value); markDirty(); }} />
+                  </div>
+                  <div className="flex items-center gap-1 flex-1">
+                    <span className="text-gray-500 text-[10px] min-w-[35px]">استحقاق</span>
+                    <input type="date" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-emerald-500 text-[11px]" disabled={readOnly} value={dueDate} onChange={(e) => { setDueDate(e.target.value); markDirty(); }} />
                   </div>
                 </div>
-
+                <div className="flex justify-between items-center">
+                  <div className="flex items-center gap-1">
+                    <span className="text-gray-500 text-[10px] min-w-[30px]">عملة</span>
+                    <select className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 text-[11px] outline-none focus:ring-1 focus:ring-emerald-500" disabled={readOnly} value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}>
+                      <option value="">—</option>
+                      {currencies.map((c) => (<option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>))}
+                    </select>
+                  </div>
+                  <label className="flex items-center gap-1 text-[11px] font-bold cursor-pointer text-gray-700 dark:text-gray-300">
+                    <input type="checkbox" className="rounded text-emerald-600 focus:ring-emerald-500 w-3 h-3" disabled={readOnly} checked={pricesIncludeTax} onChange={(e) => { setPricesIncludeTax(e.target.checked); markDirty(); }} /> 
+                    شامل الضريبة
+                  </label>
+                </div>
               </div>
+
             </div>
-            
-            <div style={{ marginTop: "2px" }}>
-              {fld(
-                "بحث / باركود",
-                <input
-                  className="aseel-input"
-                  data-aseel-field="barcode"
-                  disabled={readOnly}
-                  value={productFilter}
-                  onChange={(e) => setProductFilter(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleBarcodeEnter(productFilter);
-                    }
-                  }}
-                  placeholder="اسم/SKU/Barcode ثم Enter — أو F6"
-                />
-              )}
-            </div>
-          </>
+          </div>
         }
         activeTab={activeTabKey}
         onTabChange={setActiveTabKey}
@@ -2716,22 +2793,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                   </label>
                   <label className="aseel-field" style={{ flex: 1 }}>
                     <span className="aseel-field-label">حساب الصندوق</span>
-                    <select
+                    {/* T-A4: الصندوق الافتراضي من الإعدادات (للعرض فقط) — لا اختيار لكل فاتورة. */}
+                    <input
                       className="aseel-input"
-                      disabled={readOnly || isPosted}
-                      value={attachedCashAccountId}
-                      onChange={(e) => {
-                        setAttachedCashAccountId(e.target.value ? Number(e.target.value) : "");
-                        markDirty();
-                      }}
-                    >
-                      <option value="">— اختر —</option>
-                      {cashboxAccounts.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {(a.code || "") + " — " + (a.name || "")}
-                        </option>
-                      ))}
-                    </select>
+                      readOnly
+                      title="الصندوق الافتراضي مضبوط في إعدادات المبيعات"
+                      value={(() => {
+                        const a = attachedCashAccountId !== "" ? accountsById.get(Number(attachedCashAccountId)) : undefined;
+                        return a ? `${a.code || ""} — ${a.name || ""}` : "الصندوق الافتراضي (من الإعدادات)";
+                      })()}
+                    />
                   </label>
                 </div>
                 <label className="aseel-field">
@@ -2875,7 +2946,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         <ProductCardModal
           productId={cardProductId}
           productName={(() => { const p = products.find((x) => x.id === cardProductId); return p ? (p.name_ar || p.name_en || p.sku) : undefined; })()}
-          onConfirm={cardCanAdd && !readOnly && !isPosted ? () => insertProductIntoInvoice(cardProductId) : undefined}
+          addMode={cardCanAdd && !readOnly && !isPosted}
+          suggestedPrice={cardSuggestedPrice}
+          priceSource={cardPriceSource}
+          onConfirm={cardCanAdd && !readOnly && !isPosted ? (opts) => insertProductIntoInvoice(cardProductId, opts) : undefined}
           onClose={() => setCardProductId(null)} />
       )}
 

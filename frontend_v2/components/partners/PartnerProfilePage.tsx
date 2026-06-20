@@ -263,7 +263,18 @@ export const PartnerProfilePage: React.FC = () => {
     <div data-skin="aseel" className="min-h-[calc(100vh-5rem)]">
       <AseelDocumentShell
         title={partner ? `كشف حساب: ${partner.name}` : 'جاري التحميل...'}
-        actions={[{ key: 'back', label: 'عودة', onClick: () => navigate(-1) }]}
+        actions={[
+          { key: 'back', label: 'عودة', onClick: () => navigate(-1) },
+          // T-P2: سند قبض سريع من كشف الحساب — العميل مُعبّأ مسبقاً.
+          ...(!isSupplier && id
+            ? [{
+                key: 'new-receipt',
+                label: 'سند قبض جديد',
+                onClick: () => navigate(`/sales/customer-payments?pay_partner=${id}`),
+                separatorBefore: true,
+              }]
+            : []),
+        ]}
         tabs={tabs}
         status={
           error ? <span className="text-[var(--aseel-danger)]">{error}</span> :

@@ -60,7 +60,17 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
+  // T-P2: عميل مُسبق التعبئة عند الوصول من كشف الحساب (?pay_partner=ID).
+  const [prefillPartnerId, setPrefillPartnerId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    const pid = new URLSearchParams(window.location.search).get("pay_partner");
+    if (pid && Number(pid)) {
+      setPrefillPartnerId(Number(pid));
+      setShowForm(true);
+    }
+  }, []);
 
   // M4-T3: Aseel Navigation for customer payments
   const [selectedPayment, setSelectedPayment] = useState<CustomerPaymentRow | null>(null);
@@ -388,9 +398,11 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
           accounts={accounts}
           currencies={currencies}
           aging={aging}
-          onClose={() => setShowForm(false)}
+          initialPartnerId={prefillPartnerId}
+          onClose={() => { setShowForm(false); setPrefillPartnerId(null); }}
           onSaved={async () => {
             setShowForm(false);
+            setPrefillPartnerId(null);
             await loadAll();
           }}
         />
@@ -430,9 +442,11 @@ const NewPaymentModal: React.FC<{
   aging: AgingInvoice[];
   onClose: () => void;
   onSaved: () => void;
-}> = ({ partners, accounts, currencies, aging, onClose, onSaved }) => {
+  /** T-P2: عميل مُسبق التعبئة عند الفتح من كشف الحساب. */
+  initialPartnerId?: number | null;
+}> = ({ partners, accounts, currencies, aging, onClose, onSaved, initialPartnerId }) => {
   const today = new Date().toISOString().split("T")[0];
-  const [partnerId, setPartnerId] = useState<number | "">("");
+  const [partnerId, setPartnerId] = useState<number | "">(initialPartnerId ?? "");
   const [date, setDate] = useState(today);
   const [amount, setAmount] = useState(""); // total payment amount
   const [cashAmount, setCashAmount] = useState(""); // N4-T4: نقد جزء
@@ -449,6 +463,8 @@ const NewPaymentModal: React.FC<{
   const [allocations, setAllocations] = useState<
     Array<{ invoice: number; invoice_number?: string; amount: string }>
   >([]);
+  // T-P1: الفاتورة المحددة لتسوية الدفعة عليها (بديل لتوزيع FIFO).
+  const [pickInvoiceId, setPickInvoiceId] = useState<number | "">("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -532,6 +548,27 @@ const NewPaymentModal: React.FC<{
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "فشل اقتراح التوزيع");
     }
+  };
+
+  // T-P1: تسوية الدفعة على فاتورة محددة يختارها المستخدم (بدل FIFO). تُضاف كسطر
+  // توزيع بمبلغ افتراضي = الأقل بين المتبقي من الدفعة ومتبقي الفاتورة.
+  const addInvoiceAllocation = () => {
+    const inv = partnerAging.find((a) => a.invoice_id === Number(pickInvoiceId));
+    if (!inv) return;
+    if (allocations.some((a) => a.invoice === inv.invoice_id)) {
+      setError("الفاتورة مضافة مسبقاً في التوزيع");
+      return;
+    }
+    const alreadyAlloc = allocations.reduce((s, a) => s + Number(a.amount || 0), 0);
+    const remainingPayment = Math.max(0, amtNum - alreadyAlloc);
+    const invRemaining = Number(inv.remaining) || 0;
+    const amt = remainingPayment > 0 ? Math.min(remainingPayment, invRemaining) : invRemaining;
+    setAllocations((as) => [
+      ...as,
+      { invoice: inv.invoice_id, invoice_number: inv.invoice_number, amount: String(amt.toFixed(2)) },
+    ]);
+    setPickInvoiceId("");
+    setError(null);
   };
 
   const updateAlloc = (idx: number, amt: string) => {
@@ -757,6 +794,32 @@ const NewPaymentModal: React.FC<{
                         اقتراح FIFO
                       </button>
                     </div>
+
+                    {/* T-P1: تسوية على فاتورة محددة (بديل لـ FIFO). */}
+                    {partnerId && partnerAging.length > 0 && (
+                      <div className="flex items-center gap-2 mb-2">
+                        <select
+                          className="flex-1 border rounded px-2 py-1.5 text-xs dark:aseel-bg-panel dark:aseel-border-soft"
+                          value={pickInvoiceId}
+                          onChange={(e) => setPickInvoiceId(e.target.value ? Number(e.target.value) : "")}
+                        >
+                          <option value="">— اختر فاتورة محددة لتسويتها —</option>
+                          {partnerAging.map((a) => (
+                            <option key={a.invoice_id} value={a.invoice_id}>
+                              {a.invoice_number || `#${a.invoice_id}`} — متبقٍ {fmt(a.remaining)}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={addInvoiceAllocation}
+                          disabled={!pickInvoiceId}
+                          className="text-xs px-3 py-1.5 border aseel-border-soft rounded-lg disabled:opacity-40 hover:aseel-bg-panel"
+                        >
+                          أضف الفاتورة
+                        </button>
+                      </div>
+                    )}
 
                     {partnerAging.length > 0 && allocations.length === 0 && (
                       <div className="mb-2 p-2 rounded aseel-bg-panel dark:aseel-bg-panel/20 text-xs aseel-text-ink">

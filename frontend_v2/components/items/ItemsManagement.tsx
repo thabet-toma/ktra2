@@ -7,9 +7,11 @@ import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
-import { Plus, RefreshCw, Edit2, Package, Boxes } from "lucide-react";
+import { Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2 } from "lucide-react";
 import { ItemFormAseel } from "./ItemFormAseel";
 import { CategoriesManagement } from "./CategoriesManagement";
+import { InvoiceCategoryTree } from "../procurement/invoices/InvoiceCategoryTree";
+import type { Item } from "../../types";
 import { StalenessBadge } from "../offline";
 import db from "../../services/offline/db";
 
@@ -30,6 +32,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<View>("list");
+  // T-N3: عرض الأصناف كشجرة تصنيفات (مثل شجرة المنتجات في الفواتير) أو كجدول.
+  const [displayMode, setDisplayMode] = useState<"tree" | "table">("tree");
   const [editId, setEditId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -215,6 +219,15 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           placeholder="بحث SKU / الاسم…"
           value={search} onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { setPage(1); load(1, search); } }} />
+        {/* T-N3: مبدّل عرض الشجرة/الجدول */}
+        <button
+          className="aseel-toolbtn"
+          onClick={() => setDisplayMode(displayMode === "tree" ? "table" : "tree")}
+          title={displayMode === "tree" ? "عرض كجدول" : "عرض كشجرة تصنيفات"}
+        >
+          {displayMode === "tree" ? <Table2 className="h-4 w-4" /> : <ListTree className="h-4 w-4" />}
+          {displayMode === "tree" ? " جدول" : " شجرة"}
+        </button>
         <button className="aseel-toolbtn" onClick={() => { setPage(1); load(1, search); }} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
@@ -225,18 +238,36 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
 
       {err && <div className="aseel-banner aseel-banner--err">{err}</div>}
 
-      <AseelDenseTable<SqlProduct>
-        columns={columns}
-        rows={products} // search is server-side now
-        getRowKey={(p) => p.id}
-        loading={loading}
-        emptyHint="لا توجد أصناف"
-        onRowDoubleClick={(p) => { setEditId(p.id); setView("form"); }}
-        pagination={total > pageSize ? {
-          page, pageSize, total,
-          onChange: (p) => setPage(p)
-        } : undefined}
-      />
+      {displayMode === "tree" ? (
+        // T-N3: شجرة التصنيفات/الأصناف (نفس مكوّن شجرة المنتجات في الفواتير).
+        // نقرة مفردة على صنف → بطاقته؛ نقرة مزدوجة/اختيار → تعديله.
+        <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+          <InvoiceCategoryTree
+            items={products.map((p) => ({
+              ...(p as unknown as Item),
+              id: String(p.id),
+              name: p.name_ar || p.name_en || p.sku || "",
+              categoryId: (p as unknown as { category?: number | string }).category ?? "",
+            })) as Item[]}
+            onShowCard={(it) => navigate(`/products/${it.id}`)}
+            onPickItem={(it) => { setEditId(Number(it.id)); setView("form"); }}
+            onItemCreated={() => load(page, search)}
+          />
+        </div>
+      ) : (
+        <AseelDenseTable<SqlProduct>
+          columns={columns}
+          rows={products} // search is server-side now
+          getRowKey={(p) => p.id}
+          loading={loading}
+          emptyHint="لا توجد أصناف"
+          onRowDoubleClick={(p) => { setEditId(p.id); setView("form"); }}
+          pagination={total > pageSize ? {
+            page, pageSize, total,
+            onChange: (p) => setPage(p)
+          } : undefined}
+        />
+      )}
         </div>
       )}
     </div>

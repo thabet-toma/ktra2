@@ -1,6 +1,7 @@
 import React from 'react';
 import { AppView } from '../../types';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, ArrowRight } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 export const VIEW_LABELS: Record<AppView, string> = {
   dashboard: 'الرئيسية',
@@ -53,6 +54,8 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'partner-profile': 'ملف الشريك',
   'stock-levels': 'أرصدة المخزون',
   'stock-movements': 'حركات المخزون',
+  'warehouse-transfer': 'تحويل بين المستودعات',
+  'stocktake': 'الجرد',
   'property-rental': 'تأجير العقارات',
   'sql-products': 'المنتجات (SQL)',
   'sql-partners': 'الشركاء (SQL)',
@@ -79,6 +82,7 @@ interface BreadcrumbItem {
 }
 
 export const Breadcrumb: React.FC<{ activeView: AppView }> = ({ activeView }) => {
+  const navigate = useNavigate();
   const crumbs: BreadcrumbItem[] = [];
   const label = VIEW_LABELS[activeView] ?? activeView;
 
@@ -90,17 +94,33 @@ export const Breadcrumb: React.FC<{ activeView: AppView }> = ({ activeView }) =>
   }
 
   return (
-    <nav aria-label="breadcrumb" className="flex items-center gap-1 text-[var(--font-size-sm)]">
-      {crumbs.map((crumb, i) => (
-        <React.Fragment key={i}>
-          {i > 0 && <ChevronLeft className="h-3 w-3 text-[var(--color-text-muted)]" />}
-          <span className={i === crumbs.length - 1
-            ? 'font-semibold text-[var(--color-text)]'
-            : 'text-[var(--color-text-muted)]'}>
-            {crumb.label}
-          </span>
-        </React.Fragment>
-      ))}
-    </nav>
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={() => {
+          console.log('[Routing] Back button clicked: Navigating back');
+          navigate(-1);
+        }}
+        className="px-3 py-1.5 rounded-lg bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold transition-all flex items-center gap-1.5 border border-gray-200 dark:border-gray-700 shadow-sm"
+        title="رجوع للصفحة السابقة"
+        aria-label="رجوع"
+      >
+        <ArrowRight className="h-4 w-4" />
+        <span className="text-sm">رجوع</span>
+      </button>
+
+      <nav aria-label="breadcrumb" className="flex items-center gap-1 text-[var(--font-size-sm)] border-s border-gray-300 dark:border-gray-600 ps-2">
+        {crumbs.map((crumb, i) => (
+          <React.Fragment key={i}>
+            {i > 0 && <ChevronLeft className="h-3 w-3 text-[var(--color-text-muted)]" />}
+            <span className={i === crumbs.length - 1
+              ? 'font-semibold text-[var(--color-text)]'
+              : 'text-[var(--color-text-muted)]'}>
+              {crumb.label}
+            </span>
+          </React.Fragment>
+        ))}
+      </nav>
+    </div>
   );
 };

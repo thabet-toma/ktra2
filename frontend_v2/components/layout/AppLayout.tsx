@@ -25,7 +25,10 @@ import {
   User as UserIcon,
   Calendar,
   Zap,
+  Sparkles,
+  LogOut,
 } from 'lucide-react';
+import { useAuth } from '../../contexts/AuthContext';
 import {
   getQuickShortcuts,
   labelForShortcut,
@@ -48,6 +51,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   children,
   onOpenGroupConstants,
 }) => {
+  const { logout } = useAuth();
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
   // task16 D14: اختصارات الوصول السريع (قابلة للتهيئة من الإعدادات)
   const [shortcuts, setShortcuts] = useState<AppView[]>(() => getQuickShortcuts());
@@ -82,13 +86,53 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         <div className="aseel-company flex items-center gap-3">
           <CompanySwitcher />
           <BranchSwitcher />
+          
+          {/* T-N1: المساعد الذكي */}
+          <button
+            type="button"
+            onClick={() => onNavigate('smart-assistant')}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium transition-colors ${
+              activeView === 'smart-assistant'
+                ? 'bg-[var(--color-primary)] text-white'
+                : 'text-[var(--color-primary)] hover:bg-[var(--color-surface-2)]'
+            }`}
+            title="المساعد الذكي"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span className="hidden sm:inline">المساعد الذكي</span>
+          </button>
+          
+          {/* شريط الإجراءات السريعة */}
+          <GlobalActionBar user={user} onNavigate={onNavigate} />
         </div>
-        <div className="flex items-center gap-2 ms-auto">
+        <div className="flex items-center gap-3 ms-auto">
+          {/* العناصر المنقولة من الشريط السفلي */}
+          <div className="hidden xl:flex items-center gap-2 text-xs text-[var(--color-text-muted)] border-e border-gray-200 dark:border-gray-700 pe-3 me-1">
+            <UserIcon className="w-3.5 h-3.5" />
+            <span className="font-semibold text-[var(--color-text)]">{user.name}</span>
+            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span>الدور: {user.role === 'manager' ? 'مدير' : user.role === 'procurement' ? 'مشتريات' : 'موظف'}</span>
+            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <Calendar className="w-3.5 h-3.5" />
+            <span>{new Date().toLocaleDateString('ar-EG')}</span>
+            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span>السنة المالية {new Date().getFullYear()}</span>
+          </div>
+
           <GlobalSearch userRole={user.role} onNavigate={onNavigate} />
           {/* task16 E15: حاسبة بأيقونة — تفتح عند الطلب فقط */}
           <AseelCalculatorButton />
           <DensitySwitch value={density} onChange={setDensity} />
           <ThemeToggle />
+          <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-1"></div>
+          <button
+            onClick={() => logout()}
+            className="p-1.5 rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors flex items-center justify-center"
+            title="تسجيل الخروج"
+            aria-label="تسجيل الخروج"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
@@ -102,10 +146,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               <Breadcrumb activeView={activeView} />
             </div>
             {/* task16 D14: اختصارات الوصول السريع القابلة للتهيئة */}
-            {shortcuts.length > 0 && (
-              <div className="aseel-toolgrp ms-auto flex items-center gap-1" title="اختصارات سريعة (تُهيّأ من الإعدادات)">
+            {shortcuts.filter(v => v !== 'dashboard' && v !== activeView).length > 0 && (
+              <div className="aseel-toolgrp flex items-center gap-1 ms-4" title="اختصارات سريعة (تُهيّأ من الإعدادات)">
                 <Zap className="w-3.5 h-3.5 text-[var(--color-primary)]" />
-                {shortcuts.map((v) => (
+                {shortcuts.filter(v => v !== 'dashboard' && v !== activeView).map((v) => (
                   <button
                     key={v}
                     type="button"
@@ -122,45 +166,12 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
               </div>
             )}
           </div>
-
           <main className="app-content overflow-auto flex-1">
             {children}
           </main>
         </div>
       </div>
 
-      {/* task18 DEF-A2: شريط الإجراءات العام الدائم (شريط الأدوات السفلي) */}
-      <GlobalActionBar user={user} onNavigate={onNavigate} />
-
-      {/* M5-T1: شريط الحالة السفلي بنمط الأصيل */}
-      <div className="aseel-statusbar flex-shrink-0">
-        <div className="aseel-status-item">
-          <UserIcon className="w-3 h-3" />
-          <span>{user.name}</span>
-        </div>
-        <div className="aseel-status-item">
-          <span className="text-gray-400">|</span>
-        </div>
-        <div className="aseel-status-item">
-          <span>الدور: {user.role === 'manager' ? 'مدير' : user.role === 'procurement' ? 'مشتريات' : 'موظف'}</span>
-        </div>
-        <div className="aseel-status-item">
-          <span className="text-gray-400">|</span>
-        </div>
-        <div className="aseel-status-item">
-          <Calendar className="w-3 h-3" />
-          <span>{new Date().toLocaleDateString('ar-EG')}</span>
-        </div>
-        <div className="aseel-status-item">
-          <span className="text-gray-400">|</span>
-        </div>
-        <div className="aseel-status-item">
-          <span>السنة المالية {new Date().getFullYear()}</span>
-        </div>
-        <div className="ms-auto aseel-status-item">
-          <span className="text-green-600">● متصل</span>
-        </div>
-      </div>
     </div>
   );
 };

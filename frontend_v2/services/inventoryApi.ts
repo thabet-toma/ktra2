@@ -189,4 +189,40 @@ export const inventoryApi = {
     });
     await handle(res, "deleteProduct");
   },
+
+  // ── Phase 7 (T-I1): تحويل بين المستودعات ──────────────────────────
+  getWarehouseTransfers: () =>
+    fetch(`${INV}/warehouse-transfers/`, { headers: headers() }).then(asList),
+  createWarehouseTransfer: async (body: Record<string, unknown>) => {
+    const res = await fetch(`${INV}/warehouse-transfers/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createWarehouseTransfer");
+    return res.json();
+  },
+  postWarehouseTransfer: async (id: number) => {
+    const res = await fetch(`${INV}/warehouse-transfers/${id}/post/`, {
+      method: "POST", headers: headers(),
+    });
+    await handle(res, "postWarehouseTransfer");
+    return res.json();
+  },
+
+  // ── Phase 7 (T-I2): جرد ───────────────────────────────────────────
+  getStocktakes: () =>
+    fetch(`${INV}/stocktakes/`, { headers: headers() }).then(asList),
+  createStocktake: async (body: Record<string, unknown>) => {
+    const res = await fetch(`${INV}/stocktakes/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createStocktake");
+    return res.json();
+  },
+  postStocktake: async (id: number) => {
+    const res = await fetch(`${INV}/stocktakes/${id}/post/`, {
+      method: "POST", headers: headers(),
+    });
+    await handle(res, "postStocktake");
+    return res.json();
+  },
 };

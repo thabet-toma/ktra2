@@ -595,6 +595,22 @@ tbody td {
   padding: 3px 8px;
   background: var(--aseel-panel);
   border-bottom: 1px solid var(--aseel-border-soft);
+  /* T-L1/T-L5: رأس أفقي مدمج — حقول fld تتدفّق جنباً إلى جنب وتلتفّ على عدة
+     صفوف بدل التراص العمودي الذي كان يبتلع نصف الصفحة (فاتورة الشراء، صورة 11).
+     عناصر بعرض كامل (w-full، كبطاقتي رأس المبيعات) تبقى صفّاً مستقلاً. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px 14px;
+}
+[data-skin="aseel"] .aseel-headband > .aseel-field {
+  flex: 1 1 220px;
+  min-width: 190px;
+  max-width: 340px;
+}
+[data-skin="aseel"] .aseel-headband > .aseel-field > :not(.aseel-field-label) {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 [data-skin="aseel"] .aseel-field { display: flex; align-items: center; gap: 4px; }
 [data-skin="aseel"] .aseel-field-label {
@@ -1224,12 +1240,14 @@ tbody td {
 /* ── N9-T4: Mobile RTL — headband single col <640px, toolbar 2 rows ── */
 @media (max-width: 640px) {
   [data-skin="aseel"] .aseel-headband {
-    grid-template-columns: 1fr !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
     gap: 2px !important;
     padding: 4px !important;
   }
-  [data-skin="aseel"] .aseel-headband .aseel-field-row {
-    grid-template-columns: 1fr !important;
+  [data-skin="aseel"] .aseel-headband > .aseel-field {
+    flex: 1 1 auto !important;
+    max-width: none !important;
   }
   [data-skin="aseel"] .aseel-toolbar {
     flex-wrap: wrap !important;

@@ -260,8 +260,8 @@ export const purchaseInvoiceApi = {
     return res.json();
   },
 
-  /** FEAT-1: إعدادات الشراء (استراتيجية التسعير التلقائي). */
-  getSettings: async (): Promise<{ purchase_default_price_strategy: string }> => {
+  /** FEAT-1: إعدادات الشراء (استراتيجية التسعير + T-A4: الصندوق الافتراضي). */
+  getSettings: async (): Promise<{ purchase_default_price_strategy: string; default_cash_account: number | null }> => {
     const res = await safeFetch(`${API_BASE}/logistics/purchase-settings/current/`, {
       headers: headers(),
     });
@@ -270,8 +270,9 @@ export const purchaseInvoiceApi = {
   },
 
   updateSettings: async (body: {
-    purchase_default_price_strategy: string;
-  }): Promise<{ purchase_default_price_strategy: string }> => {
+    purchase_default_price_strategy?: string;
+    default_cash_account?: number | null;
+  }): Promise<{ purchase_default_price_strategy: string; default_cash_account: number | null }> => {
     const res = await safeFetch(`${API_BASE}/logistics/purchase-settings/current/`, {
       method: "PATCH",
       headers: headers(),

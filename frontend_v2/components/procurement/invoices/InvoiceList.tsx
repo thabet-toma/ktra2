@@ -7,6 +7,7 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Invoice, Item, Supplier } from "@/types";
+import { openInNewTab } from "@/utils/openInNewTab";
 import {
   Plus,
   RefreshCw,
@@ -145,7 +146,20 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
     {
       key: "supplier",
       header: "المورد",
-      render: (r) => <span className="text-xs">{supplierName(r)}</span>,
+      // T-A3: اسم المورد رابط لكشف حساب المورد (بطاقة الشريك) — يفتح في تبويب جديد (G2).
+      render: (r) =>
+        r.supplierId ? (
+          <button
+            type="button"
+            className="text-xs text-[var(--aseel-accent)] underline hover:no-underline cursor-pointer bg-transparent border-0 p-0 font-inherit text-right"
+            title="فتح كشف حساب المورد في تبويب جديد"
+            onClick={(e) => { e.stopPropagation(); openInNewTab(`/partners/${r.supplierId}`); }}
+          >
+            {supplierName(r)}
+          </button>
+        ) : (
+          <span className="text-xs">{supplierName(r)}</span>
+        ),
     },
     {
       key: "status",

@@ -1227,7 +1227,7 @@ class PurchaseSettingsSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PurchaseSettings
-        fields = ['id', 'purchase_default_price_strategy', 'updated_at']
+        fields = ['id', 'purchase_default_price_strategy', 'default_cash_account', 'updated_at']
         read_only_fields = ['id', 'updated_at']
 
 

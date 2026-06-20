@@ -6,12 +6,19 @@ from rest_framework import filters, serializers, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
-from .models import ProductCategory, Product, UnitOfMeasure, StockMovement, Warehouse
+from .models import (
+    ProductCategory, Product, UnitOfMeasure, StockMovement, Warehouse,
+    WarehouseTransfer, Stocktake,
+)
 from .serializers import (
     CategorySerializer, ProductSerializer, UnitOfMeasureSerializer,
     StockMovementSerializer, WarehouseSerializer,
+    WarehouseTransferSerializer, StocktakeSerializer,
 )
-from .services import generate_next_sku, record_stock_movement
+from .services import (
+    generate_next_sku, record_stock_movement,
+    post_warehouse_transfer, unpost_warehouse_transfer, post_stocktake,
+)
 from tenants.models import Tenant
 from core.tenant_utils import get_tenant
 
@@ -344,4 +351,67 @@ class StockMovementViewSet(viewsets.ModelViewSet):
             'total_inventory_value': total_value,
             'total_products_in_stock': len(result),
         })
+
+
+# ── Phase 7 (T-I1/T-I2): مستندات المخزون ──────────────────────────────
+
+class WarehouseTransferViewSet(viewsets.ModelViewSet):
+    """T-I1: تحويل بضاعة بين مستودعين — معزول بالشركة. الترحيل عبر action /post/."""
+    queryset = WarehouseTransfer.objects.all().prefetch_related('lines__product').order_by('-transfer_date', '-id')
+    serializer_class = WarehouseTransferSerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return WarehouseTransfer.objects.none()
+        return super().get_queryset().filter(tenant=tenant)
+
+    def perform_create(self, serializer):
+        serializer.save(tenant=get_tenant(self.request))
+
+    @action(detail=True, methods=['post'], url_path='post')
+    def post_doc(self, request, pk=None):
+        transfer = self.get_object()
+        try:
+            post_warehouse_transfer(transfer, user=request.user)
+        except serializers.ValidationError:
+            raise
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(transfer).data)
+
+    @action(detail=True, methods=['post'], url_path='unpost')
+    def unpost_doc(self, request, pk=None):
+        transfer = self.get_object()
+        try:
+            unpost_warehouse_transfer(transfer, user=request.user)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(transfer).data)
+
+
+class StocktakeViewSet(viewsets.ModelViewSet):
+    """T-I2: جرد فعلي — معزول بالشركة. الترحيل عبر action /post/ (يسوّي المخزون + قيد الفرق)."""
+    queryset = Stocktake.objects.all().prefetch_related('lines__product').order_by('-stocktake_date', '-id')
+    serializer_class = StocktakeSerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return Stocktake.objects.none()
+        return super().get_queryset().filter(tenant=tenant)
+
+    def perform_create(self, serializer):
+        serializer.save(tenant=get_tenant(self.request))
+
+    @action(detail=True, methods=['post'], url_path='post')
+    def post_doc(self, request, pk=None):
+        stocktake = self.get_object()
+        try:
+            post_stocktake(stocktake, user=request.user)
+        except serializers.ValidationError:
+            raise
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self.get_serializer(stocktake).data)
 

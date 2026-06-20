@@ -439,6 +439,8 @@ export type SalesSettings = {
   prices_include_tax: boolean;
   auto_post_invoices: boolean;
   show_journal_preview: boolean;
+  /** T-S2: تنبيه عند تكرار الصنف (يقود T-R3). */
+  warn_on_duplicate_item: boolean;
   default_shipping_origin: string;
   default_shipping_destination: string;
   updated_at?: string;
@@ -446,6 +448,13 @@ export type SalesSettings = {
 
 export async function getSalesSettings(): Promise<SalesSettings> {
   return apiGetObject(`${BASE}/settings/current/`, { tenantId: tid() });
+}
+
+/** T-S3: استعادة خريطة القيد الافتراضية (الحسابات الافتراضية لكل نوع فاتورة). */
+export async function restoreSalesSettingsDefaults(): Promise<SalesSettings> {
+  const settings = await apiPostObject(`${BASE}/settings/restore-defaults/`, {}, { tenantId: tid() });
+  try { eventBus.publish("settings", tid()); } catch (e) { console.error(e); }
+  return settings as SalesSettings;
 }
 
 export async function updateSalesSettings(

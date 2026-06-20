@@ -1,5 +1,8 @@
 from rest_framework import serializers
-from .models import ProductCategory, Product, UnitOfMeasure, StockMovement, Warehouse
+from .models import (
+    ProductCategory, Product, UnitOfMeasure, StockMovement, Warehouse,
+    WarehouseTransfer, WarehouseTransferLine, Stocktake, StocktakeLine,
+)
 
 
 class WarehouseSerializer(serializers.ModelSerializer):
@@ -118,4 +121,109 @@ class StockMovementSerializer(serializers.ModelSerializer):
     def get_product_name(self, obj):
         p = obj.product
         return p.name_ar or p.name_en or p.sku
+
+
+# ── Phase 7 (T-I1/T-I2): مستندات المخزون ──────────────────────────────
+
+class WarehouseTransferLineSerializer(serializers.ModelSerializer):
+    product_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WarehouseTransferLine
+        fields = ['id', 'product', 'product_name', 'quantity']
+        read_only_fields = ['id']
+
+    def get_product_name(self, obj):
+        p = obj.product
+        return p.name_ar or p.name_en or p.sku
+
+
+class WarehouseTransferSerializer(serializers.ModelSerializer):
+    lines = WarehouseTransferLineSerializer(many=True)
+    source_warehouse_name = serializers.CharField(source='source_warehouse.name', read_only=True)
+    dest_warehouse_name = serializers.CharField(source='dest_warehouse.name', read_only=True)
+
+    class Meta:
+        model = WarehouseTransfer
+        fields = [
+            'id', 'transfer_number', 'transfer_date',
+            'source_warehouse', 'source_warehouse_name',
+            'dest_warehouse', 'dest_warehouse_name',
+            'notes', 'is_posted', 'created_at', 'lines',
+        ]
+        read_only_fields = ['id', 'transfer_number', 'is_posted', 'created_at']
+
+    def validate(self, attrs):
+        src = attrs.get('source_warehouse') or getattr(self.instance, 'source_warehouse', None)
+        dst = attrs.get('dest_warehouse') or getattr(self.instance, 'dest_warehouse', None)
+        if src and dst and src == dst:
+            raise serializers.ValidationError('مستودع المصدر والوجهة متطابقان.')
+        return attrs
+
+    def create(self, validated_data):
+        lines = validated_data.pop('lines', [])
+        transfer = WarehouseTransfer.objects.create(**validated_data)
+        for ln in lines:
+            WarehouseTransferLine.objects.create(transfer=transfer, **ln)
+        return transfer
+
+    def update(self, instance, validated_data):
+        if instance.is_posted:
+            raise serializers.ValidationError('لا يمكن تعديل تحويل مُرحَّل.')
+        lines = validated_data.pop('lines', None)
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        if lines is not None:
+            instance.lines.all().delete()
+            for ln in lines:
+                WarehouseTransferLine.objects.create(transfer=instance, **ln)
+        return instance
+
+
+class StocktakeLineSerializer(serializers.ModelSerializer):
+    product_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = StocktakeLine
+        fields = ['id', 'product', 'product_name', 'counted_quantity', 'system_quantity', 'variance']
+        read_only_fields = ['id', 'system_quantity', 'variance']
+
+    def get_product_name(self, obj):
+        p = obj.product
+        return p.name_ar or p.name_en or p.sku
+
+
+class StocktakeSerializer(serializers.ModelSerializer):
+    lines = StocktakeLineSerializer(many=True)
+    warehouse_name = serializers.CharField(source='warehouse.name', read_only=True, default=None)
+
+    class Meta:
+        model = Stocktake
+        fields = [
+            'id', 'stocktake_number', 'stocktake_date',
+            'warehouse', 'warehouse_name', 'notes',
+            'is_posted', 'journal', 'created_at', 'lines',
+        ]
+        read_only_fields = ['id', 'stocktake_number', 'is_posted', 'journal', 'created_at']
+
+    def create(self, validated_data):
+        lines = validated_data.pop('lines', [])
+        stocktake = Stocktake.objects.create(**validated_data)
+        for ln in lines:
+            StocktakeLine.objects.create(stocktake=stocktake, **ln)
+        return stocktake
+
+    def update(self, instance, validated_data):
+        if instance.is_posted:
+            raise serializers.ValidationError('لا يمكن تعديل جرد مُرحَّل.')
+        lines = validated_data.pop('lines', None)
+        for k, v in validated_data.items():
+            setattr(instance, k, v)
+        instance.save()
+        if lines is not None:
+            instance.lines.all().delete()
+            for ln in lines:
+                StocktakeLine.objects.create(stocktake=instance, **ln)
+        return instance
 

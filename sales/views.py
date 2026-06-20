@@ -538,6 +538,48 @@ class SalesSettingsViewSet(viewsets.ViewSet):
         ser.save()
         return Response(ser.data)
 
+    @action(detail=False, methods=["post"], url_path="restore-defaults")
+    def restore_defaults(self, request):
+        """T-S3: استعادة خريطة القيد الافتراضية — يُعيد الحسابات الافتراضية لكل نوع
+        فاتورة إلى أفضل تطابق من شجرة الحسابات (حسب الكود ثم النوع ثم الاسم)."""
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"error": "لا يوجد شركة (tenant)."}, status=status.HTTP_400_BAD_REQUEST)
+        ss = get_or_create_sales_settings(tenant)
+        from accounting.models import Account
+
+        def resolve(code_prefixes=None, acc_type=None, name_kw=None):
+            qs = Account.objects.filter(tenant=tenant, is_active=True)
+            for cp in (code_prefixes or []):
+                hit = qs.filter(code__startswith=cp).order_by("code").first()
+                if hit:
+                    return hit
+            if acc_type:
+                typed = qs.filter(account_type=acc_type)
+                if name_kw:
+                    hit = typed.filter(name__icontains=name_kw).first()
+                    if hit:
+                        return hit
+                hit = typed.order_by("code").first()
+                if hit:
+                    return hit
+            return None
+
+        ss.default_cash_account = resolve(["1101", "1102", "1103"], "Asset", "صندوق")
+        ss.default_ar_account = resolve(["1201", "1106"], "Asset", "ذمم")
+        ss.default_revenue_account_product = resolve(["4101", "41"], "Revenue", "مبيعات")
+        ss.default_revenue_account_service = (
+            resolve(["4102"], "Revenue", "خدمات") or ss.default_revenue_account_product
+        )
+        ss.default_inventory_account = resolve(["1104", "1105"], "Asset", "مخزون")
+        ss.default_cogs_account = resolve(["5101", "51"], "Expense", "تكلفة")
+        ss.save(update_fields=[
+            "default_cash_account", "default_ar_account",
+            "default_revenue_account_product", "default_revenue_account_service",
+            "default_inventory_account", "default_cogs_account", "updated_at",
+        ])
+        return Response(SalesSettingsSerializer(ss).data)
+
 
 class CustomerPriceListViewSet(viewsets.ViewSet):
     """DEF-004: عرض السعر لكل العميل عبر كامل الكتالوج (مبيعات فقط).

@@ -179,6 +179,12 @@ class SalesSettings(models.Model):
         db_column="ShowJournalPreview",
         help_text="إظهار معاينة القيد المحاسبي قبل الترحيل",
     )
+    # T-S2: تنبيه عند تكرار الصنف على سطر جديد (يقود سلوك T-R3 في محرّر الفاتورة).
+    warn_on_duplicate_item = models.BooleanField(
+        default=True,
+        db_column="WarnOnDuplicateItem",
+        help_text="عند تكرار المادة في الفاتورة: إظهار رسالة تنبيه وتأكيد",
+    )
 
     default_shipping_origin = models.CharField(
         max_length=200, blank=True, default="", db_column="DefaultShippingOrigin"

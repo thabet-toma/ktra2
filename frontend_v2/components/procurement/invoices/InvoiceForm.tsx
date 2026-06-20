@@ -41,6 +41,7 @@ import {
   invoiceVatBaseIls,
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
+import { formatMoney } from "@/utils/formatNumber";
 import { ItemSearchModal, productToItem } from "../price-offers/ItemSearchModal";
 import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
 import { InvoiceCategoryTree } from "./InvoiceCategoryTree";
@@ -129,6 +130,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [cardProductId, setCardProductId] = useState<number | null>(null);
   // «موافق» (إضافة للفاتورة) يظهر فقط عند فتح البطاقة من الشجرة، لا من أيقونة (i).
   const [cardCanAdd, setCardCanAdd] = useState(false);
+  // T-R2: السعر المقترح (آخر فاتورة شراء) ومصدره — لعرضهما داخل البطاقة.
+  const [cardSuggestedPrice, setCardSuggestedPrice] = useState<number | null>(null);
   const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
   const [showItemSearch, setShowItemSearch] = useState(false);
   const [activeItemSearchIndex, setActiveItemSearchIndex] = useState<number | null>(null);
@@ -577,7 +580,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
   };
 
-  const applyItemAt = (index: number | null, item: Item, lastPrice?: number) => {
+  const applyItemAt = (index: number | null, item: Item, lastPrice?: number, qtyOverride?: number) => {
     // task18 DEF-C3: إن كان الصنف موجوداً في سطر آخر — نبّه المستخدم ودعه يختار:
     // موافق = دمج الكمية في السطر القائم · إلغاء = إضافته كسطر مستقل (سعر مختلف).
     const current = formData.items || [];
@@ -619,7 +622,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         : undefined;
     const existingPrice = Number(currentRow?.unitPrice) || 0;
     const sameProduct = currentRow != null && String(currentRow.itemId) === String(item.id);
-    const qty = 1;
+    // T-R2: الكمية المُدخلة من بطاقة الصنف (إن وُجدت) وإلا 1.
+    const qty = qtyOverride && qtyOverride > 0 ? qtyOverride : 1;
     const resolvedPrice = sameProduct && existingPrice > 0 ? existingPrice : (lastPrice || 0);
     const newItem: InvoiceItem = {
       id: crypto.randomUUID(),
@@ -913,7 +917,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     ilsMerchandiseBase,
   ]);
 
-  const fmt = (v: number) => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // G1: عرض موحّد بلا أصفار عشرية زائدة (مع فاصل آلاف للمبالغ).
+  const fmt = (v: number) => formatMoney(v);
 
   const fld = (label: string, node: React.ReactNode) => (
     <label className="aseel-field">
@@ -1109,8 +1114,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           style={{ marginBottom: "8px", display: "flex", gap: "18px", flexWrap: "wrap", fontSize: "13px" }}
         >
           {/* task18 DEF-C1: رصيد المورد قبل/بعد هذه الفاتورة (من الـ subledger). */}
-          <span>رصيد المورد قبل الفاتورة: <strong>{Number(supplierBalance.open_balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
-          <span>الرصيد المتوقع بعدها: <strong>{Number(supplierBalance.projected_balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></span>
+          <span>رصيد المورد قبل الفاتورة: <strong>{formatMoney(supplierBalance.open_balance)}</strong></span>
+          <span>الرصيد المتوقع بعدها: <strong>{formatMoney(supplierBalance.projected_balance)}</strong></span>
         </div>
       )}
       <InvoiceBasicInfo
@@ -1283,9 +1288,21 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   const isPosted = Boolean(formData.isPosted);
   const canPost = Boolean(formData.id) && !isPosted && !formData.isHistorical;
+
+  // T-R4: حارس التغييرات غير المحفوظة عند «جديدة». فاتورة الشراء لا تحفظ تلقائياً،
+  // فبدء فاتورة جديدة فوق فاتورة جديدة (بلا id) تحتوي بنوداً = فقدان عمل. نحرس هذه
+  // الحالة فقط (المسودة المحفوظة لها id فلا تُفقد).
+  const guardedGoNew = () => {
+    const hasContent = (formData.items || []).some((i) => i.itemId !== "" && i.itemId != null);
+    if (!formData.id && hasContent) {
+      if (!window.confirm("لديك فاتورة شراء غير محفوظة تحتوي بنوداً.\nهل تريد المتابعة بفاتورة جديدة وتجاهلها؟")) return;
+    }
+    nav.goNew();
+  };
+
   const toolbarActions: AseelToolbarAction[] = [
     { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => handleSave() : undefined, disabled: saving || isPosted },
-    { key: "new", label: "جديدة", icon: <Plus />, onClick: () => nav.goNew(), separatorBefore: true },
+    { key: "new", label: "جديدة", icon: <Plus />, onClick: guardedGoNew, separatorBefore: true },
     {
       key: "post",
       label: posting ? "...ترحيل" : "ترحيل",
@@ -1329,7 +1346,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         <InvoiceCategoryTree
           items={allDbItems}
           disabled={readOnly || formData.isHistorical}
-          onShowCard={(it) => { const pid = Number(it.id); if (pid) { setCardCanAdd(true); setCardProductId(pid); } }}
+          onShowCard={(it) => {
+            const pid = Number(it.id);
+            if (!pid) return;
+            setCardCanAdd(true);
+            setCardSuggestedPrice(null);
+            setCardProductId(pid);
+            // T-R2: اقترح آخر سعر شراء لعرضه داخل البطاقة.
+            resolveSuggestedPrice(pid).then((p) => setCardSuggestedPrice(p > 0 ? p : null)).catch(() => {});
+          }}
           onPickItem={async (it) => {
             const lastPrice = await resolveSuggestedPrice(it.id);
             applyItemAt(null, it, lastPrice);
@@ -1669,9 +1694,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         <ProductCardModal
           productId={cardProductId}
           productName={it ? it.name : undefined}
-          onConfirm={(!cardCanAdd || readOnly || formData.isHistorical || !it) ? undefined : async () => {
-            const lastPrice = await resolveSuggestedPrice(it.id);
-            applyItemAt(null, it, lastPrice);
+          addMode={!(!cardCanAdd || readOnly || formData.isHistorical || !it)}
+          suggestedPrice={cardSuggestedPrice}
+          priceSource={cardSuggestedPrice != null ? "last_invoice" : "default"}
+          onConfirm={(!cardCanAdd || readOnly || formData.isHistorical || !it) ? undefined : (opts) => {
+            const price = opts?.unitPrice ?? cardSuggestedPrice ?? 0;
+            applyItemAt(null, it, price, opts?.quantity);
           }}
           onClose={() => setCardProductId(null)}
         />

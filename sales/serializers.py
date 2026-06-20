@@ -477,6 +477,7 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "prices_include_tax",
             "auto_post_invoices",
             "show_journal_preview",
+            "warn_on_duplicate_item",
             "default_shipping_origin",
             "default_shipping_destination",
             "updated_at",

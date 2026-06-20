@@ -1,0 +1,158 @@
+"""Phase 7 (T-I1/T-I2): مستندات المخزون — تحويل بين المستودعات + جرد.
+
+يثبت أن الترحيل يصحّح المخزون ويُنشئ القيود/الحركات الصحيحة:
+- التحويل: صافي أثر صفري على إجمالي الشركة، حركتان موسومتان بالمستودعين.
+- الجرد: تسوية الرصيد ليطابق العدّ + قيد فرق (مخزون ↔ ت.ب.م).
+"""
+from decimal import Decimal
+
+from django.core.exceptions import ValidationError
+from django.test import TestCase
+
+from accounting.models import Account, FiscalPeriod, JournalLine
+from inventory.models import (
+    Product, ProductCategory, Warehouse, StockMovement,
+    WarehouseTransfer, WarehouseTransferLine, Stocktake, StocktakeLine,
+)
+from inventory.services import (
+    post_warehouse_transfer, unpost_warehouse_transfer, post_stocktake,
+)
+from tenants.models import Tenant
+
+
+class WarehouseTransferTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.tenant = Tenant.objects.create(TenantID=701, CompanyName="TRF Co")
+        cls.wh_a = Warehouse.objects.create(tenant=cls.tenant, name="مستودع A", code="A")
+        cls.wh_b = Warehouse.objects.create(tenant=cls.tenant, name="مستودع B", code="B")
+        cls.product = Product.objects.create(
+            tenant=cls.tenant, sku="TRF-1", name_ar="صنف تحويل",
+            quantity_on_hand=Decimal("100"), avg_cost=Decimal("10"),
+        )
+
+    def _make_transfer(self, qty="30"):
+        t = WarehouseTransfer.objects.create(
+            tenant=self.tenant, transfer_date="2026-07-01",
+            source_warehouse=self.wh_a, dest_warehouse=self.wh_b,
+        )
+        WarehouseTransferLine.objects.create(transfer=t, product=self.product, quantity=Decimal(qty))
+        return t
+
+    def test_transfer_is_net_zero_on_company_totals(self):
+        t = self._make_transfer("30")
+        post_warehouse_transfer(t)
+        self.product.refresh_from_db()
+        # نقل موقعي: الإجمالي والمتوسط لا يتغيّران.
+        self.assertEqual(self.product.quantity_on_hand, Decimal("100.0000"))
+        self.assertEqual(self.product.avg_cost, Decimal("10.0000"))
+
+    def test_transfer_creates_two_tagged_movements(self):
+        t = self._make_transfer("30")
+        post_warehouse_transfer(t)
+        movs = StockMovement.objects.filter(reference_type="WAREHOUSE_TRANSFER", reference_id=t.id)
+        self.assertEqual(movs.count(), 2)
+        out = movs.get(movement_type="OUT")
+        inn = movs.get(movement_type="IN")
+        self.assertEqual(out.warehouse_id, self.wh_a.id)
+        self.assertEqual(inn.warehouse_id, self.wh_b.id)
+        self.assertEqual(out.quantity, Decimal("30.0000"))
+        self.assertEqual(inn.quantity, Decimal("30.0000"))
+        t.refresh_from_db()
+        self.assertTrue(t.is_posted)
+        self.assertTrue(t.transfer_number)
+
+    def test_same_warehouse_rejected(self):
+        t = WarehouseTransfer.objects.create(
+            tenant=self.tenant, transfer_date="2026-07-01",
+            source_warehouse=self.wh_a, dest_warehouse=self.wh_a,
+        )
+        WarehouseTransferLine.objects.create(transfer=t, product=self.product, quantity=Decimal("5"))
+        with self.assertRaises(ValidationError):
+            post_warehouse_transfer(t)
+
+    def test_double_post_rejected(self):
+        t = self._make_transfer("10")
+        post_warehouse_transfer(t)
+        with self.assertRaises(ValidationError):
+            post_warehouse_transfer(t)
+
+    def test_unpost_restores_and_clears_flag(self):
+        t = self._make_transfer("30")
+        post_warehouse_transfer(t)
+        unpost_warehouse_transfer(t)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.quantity_on_hand, Decimal("100.0000"))
+        t.refresh_from_db()
+        self.assertFalse(t.is_posted)
+        # 2 حركات ترحيل + 2 حركات عكس = 4
+        self.assertEqual(
+            StockMovement.objects.filter(reference_type="WAREHOUSE_TRANSFER", reference_id=t.id).count(), 4)
+
+
+class StocktakeTest(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.tenant = Tenant.objects.create(TenantID=702, CompanyName="JRD Co")
+        cls.inv_acct = Account.objects.create(
+            tenant=cls.tenant, code="1104", name="المخزون", account_type="Asset", is_active=True)
+        cls.cogs_acct = Account.objects.create(
+            tenant=cls.tenant, code="5101", name="ت.ب.م", account_type="Expense", is_active=True)
+        cls.cat = ProductCategory.objects.create(
+            tenant=cls.tenant, name="فئة جرد",
+            inventory_account=cls.inv_acct, cogs_account=cls.cogs_acct)
+        cls.product = Product.objects.create(
+            tenant=cls.tenant, sku="JRD-1", name_ar="صنف جرد", category=cls.cat,
+            quantity_on_hand=Decimal("100"), avg_cost=Decimal("10"))
+        FiscalPeriod.objects.create(
+            tenant=cls.tenant, name="2026",
+            start_date="2026-01-01", end_date="2026-12-31", is_closed=False)
+
+    def _make_stocktake(self, counted):
+        s = Stocktake.objects.create(tenant=self.tenant, stocktake_date="2026-07-01")
+        StocktakeLine.objects.create(stocktake=s, product=self.product, counted_quantity=Decimal(counted))
+        return s
+
+    def test_surplus_increases_stock_and_posts_journal(self):
+        s = self._make_stocktake("120")  # فائض +20 × 10 = 200
+        post_stocktake(s)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.quantity_on_hand, Decimal("120.0000"))
+        s.refresh_from_db()
+        self.assertTrue(s.is_posted)
+        self.assertIsNotNone(s.journal)
+        # Dr مخزون 200 / Cr ت.ب.م 200
+        inv_line = JournalLine.objects.get(journal=s.journal, account=self.inv_acct)
+        cogs_line = JournalLine.objects.get(journal=s.journal, account=self.cogs_acct)
+        self.assertEqual(inv_line.debit, Decimal("200.00"))
+        self.assertEqual(cogs_line.credit, Decimal("200.00"))
+        line = s.lines.first()
+        self.assertEqual(line.system_quantity, Decimal("100.0000"))
+        self.assertEqual(line.variance, Decimal("20.0000"))
+
+    def test_shortage_decreases_stock_and_posts_journal(self):
+        s = self._make_stocktake("90")  # عجز -10 × 10 = 100
+        post_stocktake(s)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.quantity_on_hand, Decimal("90.0000"))
+        s.refresh_from_db()
+        inv_line = JournalLine.objects.get(journal=s.journal, account=self.inv_acct)
+        cogs_line = JournalLine.objects.get(journal=s.journal, account=self.cogs_acct)
+        self.assertEqual(cogs_line.debit, Decimal("100.00"))
+        self.assertEqual(inv_line.credit, Decimal("100.00"))
+
+    def test_no_variance_posts_no_journal(self):
+        s = self._make_stocktake("100")  # لا فرق
+        post_stocktake(s)
+        s.refresh_from_db()
+        self.assertTrue(s.is_posted)
+        self.assertIsNone(s.journal)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.quantity_on_hand, Decimal("100.0000"))
+
+    def test_movement_tagged_stocktake(self):
+        s = self._make_stocktake("120")
+        post_stocktake(s)
+        mov = StockMovement.objects.get(reference_type="STOCKTAKE", reference_id=s.id)
+        self.assertEqual(mov.movement_type, "ADJUST_IN")
+        self.assertEqual(mov.quantity, Decimal("20.0000"))
