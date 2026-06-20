@@ -1,5 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
-import { X, Delete, Check } from "lucide-react";
+import { X, Delete, History as HistoryIcon, Trash2 } from "lucide-react";
+
+/** T-C1: ذاكرة العمليات السابقة — تُحفظ محلياً وتبقى بين الجلسات. */
+const HISTORY_KEY = "aseel_calc_history";
+type CalcEntry = { expr: string; result: string };
 
 interface AseelCalculatorPopoverProps {
   initialValue: string | number;
@@ -24,6 +28,38 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
     return isNaN(v) || v === 0 ? "" : String(v);
   });
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // T-C1: ذاكرة العمليات السابقة (محفوظة محلياً).
+  const [history, setHistory] = useState<CalcEntry[]>(() => {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      return raw ? (JSON.parse(raw) as CalcEntry[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [showHistory, setShowHistory] = useState(false);
+
+  const pushHistory = (expr: string, result: number) => {
+    setHistory((prev) => {
+      const next = [{ expr, result: String(result) }, ...prev].slice(0, 25);
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      } catch {
+        /* localStorage غير متاح (وضع خاص) — تجاهل */
+      }
+      return next;
+    });
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    try {
+      localStorage.removeItem(HISTORY_KEY);
+    } catch {
+      /* تجاهل */
+    }
+  };
 
   // Focus the container on mount to catch keyboard events
   useEffect(() => {
@@ -53,6 +89,10 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
       const result = eval(expression);
       if (typeof result === "number" && !isNaN(result) && isFinite(result)) {
         const rounded = Number(result.toFixed(4));
+        // T-C1: سجّل العملية في الذاكرة قبل عرض/تأكيد الناتج.
+        if (expression.trim() && expression.trim() !== String(rounded)) {
+          pushHistory(expression.trim(), rounded);
+        }
         if (standalone) {
           // حاسبة مستقلة: اعرض الناتج وأبقِ النافذة لمواصلة الحساب
           setExpression(String(rounded));
@@ -96,14 +136,54 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
       dir="ltr"
     >
       <div className="flex justify-between items-center mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
-        <span className="text-xs font-semibold text-gray-500 dark:text-gray-400">حاسبة الأصيل</span>
-        <button
-          onClick={onClose}
-          className="text-gray-400 hover:text-gray-600 dark:hover:text-white p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
-        >
-          <X className="w-4 h-4" />
-        </button>
+        <span className="text-xs font-bold bg-gradient-to-l from-emerald-500 to-blue-500 bg-clip-text text-transparent">حاسبة الأصيل</span>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowHistory((s) => !s)}
+            title="ذاكرة العمليات السابقة"
+            className={`p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 ${showHistory ? "text-emerald-600" : "text-gray-400 hover:text-gray-600 dark:hover:text-white"}`}
+          >
+            <HistoryIcon className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-white p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       </div>
+
+      {/* T-C1: لوحة ذاكرة العمليات السابقة — نقرة على عملية تستعيد ناتجها. */}
+      {showHistory && (
+        <div className="mb-2 border border-gray-100 dark:border-gray-700 rounded-xl overflow-hidden">
+          <div className="flex justify-between items-center px-2 py-1 bg-gray-50 dark:bg-gray-900/40">
+            <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">العمليات السابقة</span>
+            {history.length > 0 && (
+              <button onClick={clearHistory} title="مسح الذاكرة" className="text-gray-400 hover:text-red-500 p-0.5 rounded">
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+          <div className="max-h-32 overflow-y-auto">
+            {history.length === 0 ? (
+              <div className="px-2 py-3 text-center text-[11px] text-gray-400">لا عمليات محفوظة</div>
+            ) : (
+              history.map((h, i) => (
+                <button
+                  key={i}
+                  onClick={() => { setExpression(h.result); setShowHistory(false); }}
+                  title="استعادة الناتج"
+                  className="w-full flex justify-between items-baseline gap-2 px-2 py-1 text-right hover:bg-emerald-50 dark:hover:bg-emerald-950/20 border-b border-gray-50 dark:border-gray-800 last:border-0"
+                >
+                  <span className="font-mono text-[11px] text-gray-400 truncate">{h.expr}</span>
+                  <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">= {h.result}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Screen */}
       <div className="bg-gray-50 dark:bg-gray-900 border border-gray-150 dark:border-gray-700 rounded-xl p-2.5 mb-3 text-right font-mono text-lg font-bold text-gray-800 dark:text-white truncate min-h-[44px]">
