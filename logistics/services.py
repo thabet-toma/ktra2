@@ -363,6 +363,16 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
             update_fields += ['is_posted', 'journal']
         invoice.save(update_fields=update_fields)
 
+        # نموذج «تكلفة المنتجات»: اجعل avg_cost المتوسط المرجّح للمشتريات المرحّلة
+        # (مصدر الحقيقة الجديد) كي يقرأ ترحيل COGS عند البيع القيمة الصحيحة.
+        if invoice.is_posted:
+            from inventory.services import set_avg_cost_from_purchases
+            seen = set()
+            for it in product_items:
+                if it.product_id and it.product_id not in seen:
+                    seen.add(it.product_id)
+                    set_avg_cost_from_purchases(it.product)
+
     logger.info(
         "Purchase invoice #%s received: %d movement(s), receipt_status=%s, journal=%s",
         invoice.id, len(movements), invoice.receipt_status,

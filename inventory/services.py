@@ -582,6 +582,7 @@ def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:
     items = (
         PurchaseInvoiceItem.objects.filter(
             invoice__tenant_id=tenant_id, product_id=product_id,
+            invoice__is_posted=True,
         )
         .select_related('invoice', 'invoice__partner')
         .order_by('invoice__invoice_date', 'invoice_id')
@@ -647,6 +648,102 @@ def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:
         'total_purchased_qty': str(total_qty.quantize(Decimal('0.0001'))),
         'average_cost': str(average_cost),
     }
+
+
+def set_avg_cost_from_purchases(product) -> Decimal:
+    """يضبط `avg_cost` للصنف من فواتير الشراء المرحّلة بنموذج «تكلفة المنتجات»
+    (متوسط مرجّح بالكمية). يُستدعى بعد استلام/ترحيل فاتورة شراء محلية كي يصبح
+    avg_cost مصدر الحقيقة للنموذج الجديد بدل WAC المتحرك المنحرف — فيقرأ ترحيل
+    COGS عند البيع القيمة الصحيحة تلقائياً. لا فواتير ⇒ يُترك avg_cost كما هو."""
+    bd = product_cost_breakdown(tenant_id=product.tenant_id, product_id=product.id)
+    if bd['invoice_count'] == 0:
+        return Decimal(str(product.avg_cost or 0))
+    avg = Decimal(bd['average_cost'])
+    with transaction.atomic():
+        prod = Product.objects.select_for_update().get(pk=product.pk)
+        prod.avg_cost = avg
+        prod.save(update_fields=['avg_cost'])
+    logger.info("set_avg_cost_from_purchases product=%s avg=%s", product.pk, avg)
+    return avg
+
+
+def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = False, user=None) -> dict:
+    """يصحّح تكلفة البضاعة المباعة وقائمة الدخل لصنف وفق نموذج «تكلفة المنتجات»
+    (متوسط مرجّح بالكمية، periodic — يتحقق: COGS + مخزون آخر المدة = إجمالي المشتريات).
+
+    يعيد تقييم حركات البيع (movement_type=OUT, reference_type=SALE) بالمتوسط الجديد
+    (فيصبح تقرير أرباح الفواتير صحيحاً لأنه يقرأ total_cost للحركة)، ويُرحّل **قيد
+    تسوية واحداً** بفرق التكلفة (مدين ت.ب.م / دائن المخزون عند الزيادة، والعكس عند
+    النقص) فتصبح قائمة الدخل صحيحة. يعالج حالة البيع قبل وصول الشراء (COGS=0).
+
+    apply=False ⇒ معاينة فقط (لا تعديل). idempotent: تشغيل ثانٍ لا فرق فيه ⇒ لا قيد.
+    """
+    from accounting.services import post_journal
+    import datetime
+
+    bd = product_cost_breakdown(tenant_id=tenant_id, product_id=product_id)
+    avg = Decimal(bd['average_cost'])
+    out_moves = list(StockMovement.objects.filter(
+        tenant_id=tenant_id, product_id=product_id,
+        movement_type='OUT', reference_type='SALE',
+    ))
+    old_cogs = sum((Decimal(str(m.total_cost or 0)) for m in out_moves), Decimal('0')).quantize(Decimal('0.01'))
+    new_cogs = sum((Decimal(str(m.quantity or 0)) * avg for m in out_moves), Decimal('0')).quantize(Decimal('0.01'))
+    diff = (new_cogs - old_cogs).quantize(Decimal('0.01'))
+
+    result = {
+        'product_id': product_id, 'average_cost': str(avg),
+        'sold_moves': len(out_moves), 'old_cogs': str(old_cogs),
+        'new_cogs': str(new_cogs), 'diff': str(diff),
+        'applied': False, 'journal_id': None,
+    }
+    if not apply or bd['invoice_count'] == 0:
+        return result
+
+    p = Product.objects.get(id=product_id, tenant_id=tenant_id)
+    with transaction.atomic():
+        for m in out_moves:
+            q = Decimal(str(m.quantity or 0))
+            m.unit_cost = avg
+            m.total_cost = (q * avg).quantize(Decimal('0.01'))
+            m.avg_cost_after = avg
+            m.save(update_fields=['unit_cost', 'total_cost', 'avg_cost_after'])
+        p.avg_cost = avg
+        p.save(update_fields=['avg_cost'])
+        journal = None
+        if diff != 0:
+            cogs_acct = _resolve_line_account(p, 'cogs', tenant_id=tenant_id)
+            inv_acct = _resolve_line_account(p, 'inventory', tenant_id=tenant_id)
+            if diff > 0:
+                lines_data = [
+                    {'account': cogs_acct.id, 'debit': diff, 'credit': Decimal('0'), 'description': 'تسوية ت.ب.م'},
+                    {'account': inv_acct.id, 'debit': Decimal('0'), 'credit': diff, 'description': 'تسوية مخزون'},
+                ]
+            else:
+                amt = -diff
+                lines_data = [
+                    {'account': inv_acct.id, 'debit': amt, 'credit': Decimal('0'), 'description': 'تسوية مخزون'},
+                    {'account': cogs_acct.id, 'debit': Decimal('0'), 'credit': amt, 'description': 'تسوية ت.ب.م'},
+                ]
+            # تاريخ التسوية = آخر تاريخ بيع (ضمن فترة البيانات/الفترة المحاسبية المفتوحة).
+            sale_dates = [m.movement_date for m in out_moves if m.movement_date]
+            txn_date = max(sale_dates) if sale_dates else datetime.date.today()
+            journal = post_journal(
+                tenant_id=tenant_id,
+                transaction_date=txn_date,
+                reference_type='COGS_RECONCILE',
+                reference_id=product_id,
+                description=f"تسوية تكلفة المبيعات — {p.sku}",
+                lines_data=lines_data,
+                user=user if user and not getattr(user, 'is_anonymous', False) else None,
+            )
+        result['applied'] = True
+        result['journal_id'] = journal.id if journal else None
+    logger.info(
+        "reconcile_product_cogs product=%s avg=%s diff=%s journal=%s",
+        product_id, avg, diff, result['journal_id'],
+    )
+    return result
 
 
 # ════════════════════════════════════════════════════════════════════

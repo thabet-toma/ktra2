@@ -2431,6 +2431,13 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 invoice.save(update_fields=['is_posted', 'journal', 'receipt_status'])
                 # إعادة كميات الاستلام للصفر (عُكِست حركات المخزون أعلاه)
                 invoice.items.update(received_quantity=0)
+                # أعد ضبط avg_cost على المتوسط المرجّح للمشتريات المتبقية المرحّلة.
+                from inventory.services import set_avg_cost_from_purchases
+                seen = set()
+                for it in invoice.items.select_related('product'):
+                    if it.product_id and it.product_id not in seen:
+                        seen.add(it.product_id)
+                        set_avg_cost_from_purchases(it.product)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
