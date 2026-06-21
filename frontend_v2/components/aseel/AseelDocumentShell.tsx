@@ -149,11 +149,11 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
     <div className="aseel-doc" data-skin="aseel">
       {/* Title bar */}
       <div className="aseel-titlebar">
-        <div className="aseel-company">{company}</div>
         <div className="aseel-title-grp">
           <span className="aseel-title-chip">{title}</span>
           {state && <span className="aseel-title-state">{state}</span>}
         </div>
+        <div className="aseel-company">{company}</div>
       </div>
 
       {/* Command toolbar */}

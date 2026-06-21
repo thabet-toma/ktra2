@@ -54,6 +54,8 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'partner-profile': 'ملف الشريك',
   'stock-levels': 'أرصدة المخزون',
   'stock-movements': 'حركات المخزون',
+  'product-cost': 'تكلفة المنتجات',
+  'warehouses': 'المستودعات',
   'warehouse-transfer': 'تحويل بين المستودعات',
   'stocktake': 'الجرد',
   'property-rental': 'تأجير العقارات',

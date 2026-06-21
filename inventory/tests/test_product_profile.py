@@ -9,6 +9,7 @@ from rest_framework.test import APITestCase
 
 from inventory.models import Product
 from inventory.services import (
+    product_cost_breakdown,
     product_linked_invoices,
     product_profile,
     product_stock_ledger,
@@ -93,6 +94,53 @@ def test_linked_invoices_have_clickable_refs(env):
     assert links[0]["document_number"] == "P-1"
 
 
+def test_cost_breakdown_weighted_avg_ignores_sold_qty(env):
+    """واجهة تكلفة المنتجات: سعر وحدة لكل فاتورة، ثم متوسط مرجّح بكمية الشراء —
+    المقام إجمالي المشترى (لا الكمية الحالية)، فبيع جزء لا يضخّم التكلفة."""
+    tenant, ils, sup, product = env
+    # فاتورة 1: 10 وحدات بإجمالي 1000 → سعر وحدة 100
+    inv1 = PurchaseInvoice.objects.create(
+        tenant=tenant, invoice_number="P-1", partner=sup, currency=ils,
+        invoice_date="2026-06-01", is_posted=True)
+    PurchaseInvoiceItem.objects.create(
+        invoice=inv1, product=product, name="صنف",
+        quantity=Decimal("10"), unit_price=Decimal("100"), total_price=Decimal("1000"))
+    # فاتورة 2: 30 وحدة بإجمالي 2800 → سعر وحدة 93.3333
+    inv2 = PurchaseInvoice.objects.create(
+        tenant=tenant, invoice_number="P-2", partner=sup, currency=ils,
+        invoice_date="2026-06-05", is_posted=True)
+    PurchaseInvoiceItem.objects.create(
+        invoice=inv2, product=product, name="صنف",
+        quantity=Decimal("30"), unit_price=Decimal("93.3333"), total_price=Decimal("2800"))
+
+    res = product_cost_breakdown(tenant_id=tenant.TenantID, product_id=product.id)
+    assert res["invoice_count"] == 2
+    assert res["invoices"][0]["unit_cost"] == "100.0000"
+    assert res["invoices"][0]["invoice_cost"] == "1000.00"
+    assert res["invoices"][1]["unit_cost"] == "93.3333"
+    assert Decimal(res["total_purchased_qty"]) == Decimal("40")
+    # متوسط مرجّح = (1000 + 2800) / 40 = 95 — لا 3800/13 ولا متوسط بسيط 96.67
+    assert Decimal(res["average_cost"]) == Decimal("95.0000")
+
+
+def test_cost_breakdown_landed_cost_priority(env):
+    """تكلفة الفاتورة تأخذ landed cost حين توفّره (السعر النازل الحقيقي)."""
+    tenant, ils, sup, product = env
+    inv = PurchaseInvoice.objects.create(
+        tenant=tenant, invoice_number="P-L", partner=sup, currency=ils,
+        invoice_date="2026-06-01", is_posted=True)
+    PurchaseInvoiceItem.objects.create(
+        invoice=inv, product=product, name="صنف",
+        quantity=Decimal("10"), unit_price=Decimal("100"), total_price=Decimal("1000"),
+        landed_unit_price_ils=Decimal("120"))
+
+    res = product_cost_breakdown(tenant_id=tenant.TenantID, product_id=product.id)
+    # 120 × 10 = 1200 (landed) بدل 1000 (total_price)
+    assert res["invoices"][0]["invoice_cost"] == "1200.00"
+    assert res["invoices"][0]["unit_cost"] == "120.0000"
+    assert Decimal(res["average_cost"]) == Decimal("120.0000")
+
+
 class ProductProfileEndpointTest(APITestCase):
     @classmethod
     def setUpTestData(cls):
@@ -118,3 +166,8 @@ class ProductProfileEndpointTest(APITestCase):
         assert r.status_code == 200, r.content
         assert r.json()["count"] == 1
         assert Decimal(r.json()["results"][0]["running_balance"]) == Decimal("4")
+
+        r = self.client.get(f"/api/inventory/products/{self.product.id}/cost-breakdown/", **self._auth())
+        assert r.status_code == 200, r.content
+        body = r.json()
+        assert "invoices" in body and "average_cost" in body

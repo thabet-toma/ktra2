@@ -109,10 +109,12 @@ import { SqlShipmentsPage } from "./components/sql/SqlShipmentsPage";
 import { SmartAssistantPage } from "./components/SmartAssistantPage";
 import { CustomsClearanceManagement } from "./components/procurement/clearance/CustomsClearanceManagement";
 import { StockMovementsPage } from "./components/inventory/StockMovementsPage";
+import { WarehousesManager } from "./components/inventory/WarehousesManager";
 import { StockLevelsPage } from "./components/inventory/StockLevelsPage";
 import { WarehouseTransferPage } from "./components/inventory/WarehouseTransferPage";
 import { StocktakePage } from "./components/inventory/StocktakePage";
 import { InventoryValuationPage } from "./components/inventory/InventoryValuationPage";
+import { ProductCostPage } from "./components/inventory/ProductCostPage";
 import { PropertyRentalPage } from "./components/realestate/PropertyRentalPage";
 import { PartnerProfilePage } from "./components/partners/PartnerProfilePage";
 import { ProductProfilePage } from "./components/items/ProductProfilePage";
@@ -169,8 +171,10 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "local-shipping": "/local-shipping",
   "stock-levels": "/stock-levels",
   "stock-movements": "/stock-movements",
+  "warehouses": "/warehouses",
   "warehouse-transfer": "/warehouse-transfer",
   "stocktake": "/stocktake",
+  "product-cost": "/product-cost",
   "accounting-coa": "/accounting/coa",
   "accounting-journals": "/accounting/journals",
   "accounting-cheques": "/accounting/cheques",
@@ -1653,11 +1657,17 @@ const App: React.FC = () => {
       case "stock-movements":
         return <StockMovementsPage />;
 
+      case "warehouses":
+        return <WarehousesManager />;
+
       case "warehouse-transfer":
         return <WarehouseTransferPage />;
 
       case "stocktake":
         return <StocktakePage />;
+
+      case "product-cost":
+        return <ProductCostPage />;
 
       case "inventory-valuation":
         return <InventoryValuationPage />;

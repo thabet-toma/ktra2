@@ -3,6 +3,27 @@ import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const INV = `${API_BASE}/inventory`;
 
+export interface ProductCostInvoiceRow {
+  invoice_id: number;
+  invoice_number: string;
+  date: string | null;
+  party: string | null;
+  is_posted: boolean;
+  quantity: string;
+  invoice_cost: string;
+  unit_cost: string;
+}
+
+export interface ProductCostBreakdown {
+  product_id: number;
+  sku: string;
+  name: string;
+  invoices: ProductCostInvoiceRow[];
+  invoice_count: number;
+  total_purchased_qty: string;
+  average_cost: string;
+}
+
 const headers = (): HeadersInit => {
   const token = localStorage.getItem("token");
   // task11 R2: الشركة النشطة + الفرع النشط مع كل طلب مخزون
@@ -131,6 +152,15 @@ export const inventoryApi = {
     });
     await handle(res, "getProductStockMovements");
     return res.json();
+  },
+
+  // ─── تكلفة المنتجات: تكلفة كل فاتورة + متوسط مرجّح بالكمية ───
+  getProductCostBreakdown: async (productId: number) => {
+    const res = await fetch(`${INV}/products/${productId}/cost-breakdown/`, {
+      headers: headers(),
+    });
+    await handle(res, "getProductCostBreakdown");
+    return res.json() as Promise<ProductCostBreakdown>;
   },
 
   // ─── Stock Movements ───

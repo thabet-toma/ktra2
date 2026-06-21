@@ -4,7 +4,6 @@ import { inventoryApi } from "../../services/inventoryApi";
 import type { StockMovementDto, SqlProduct } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { Plus, RefreshCw, X, Save, Loader2, Warehouse as WhIcon } from "lucide-react";
-import { WarehousesManager } from "./WarehousesManager";
 import { invoicePathForReference, productPath } from "../../utils/entityLinks";
 
 const TYPES: Record<string, string> = {
@@ -40,7 +39,6 @@ export const StockMovementsPage: React.FC = () => {
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const [showWarehouses, setShowWarehouses] = useState(false);
   const [form, setForm] = useState<FormState>(blankForm());
 
   // فلاتر
@@ -178,15 +176,10 @@ export const StockMovementsPage: React.FC = () => {
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
         <div style={{ flex: 1 }} />
-        <button className="aseel-toolbtn" onClick={() => setShowWarehouses((s) => !s)} title="إدارة المستودعات">
-          <WhIcon className="h-4 w-4" /> المستودعات
-        </button>
         <button className="aseel-toolbtn" onClick={() => { setShowForm(true); setErr(null); }} title="إضافة حركة (Ctrl+Ins)">
           <Plus className="h-4 w-4" /> إضافة حركة
         </button>
       </div>
-
-      {showWarehouses && <WarehousesManager />}
 
       {err && <div className="aseel-banner aseel-banner--err">{err}</div>}
 

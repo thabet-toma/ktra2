@@ -71,6 +71,34 @@ frontend_v2/
 └── constants/                 # App constants
 ```
 
+## [AUDIT — task23, 2026-06-21] (واجهة «تكلفة المنتجات» + تنبيه أثر السعر + إصلاح متوسط التكلفة)
+
+**السبب الجذري (مؤكَّد):** متوسط التكلفة المعروض في بطاقة الصنف كان = إجمالي قيمة
+الشراء ÷ الكمية الحالية المتبقية (مثال حقيقي 3800÷13=292.31)، متجاهلاً المباع. مصدره
+**انحراف WAC المتحرك مع المخزون السالب** (`allow_negative_stock_default=True`): بيع 27
+قبل وصول الشراء سجّل COGS=0 وكمية ‑27، ثم شراء 40 جعل المعادلة `((‑27×0)+(40×95))÷13`
+= 3800÷13. المطلوب من المالك: نموذج جديد يُعرض في واجهة مستقلة (لا النموذج الحالي).
+
+- **النموذج الجديد (تكلفة المنتجات):** سعر وحدة كل فاتورة = تكلفة الفاتورة ÷ كميتها،
+  ثم تكلفة المنتج = **متوسط أسعار وحدات الفواتير مرجّحاً بكمية كل فاتورة** =
+  Σ(تكلفة الفواتير) ÷ Σ(كميات الشراء). المقام إجمالي المشترى (لا الحالية) ⇒ لا يتأثر
+  بالبيع. تكلفة الفاتورة تأخذ landed cost حين توفّره.
+  - `inventory/services.py::product_cost_breakdown` + endpoint
+    `GET inventory/products/{id}/cost-breakdown/`.
+- **الواجهة:** `frontend_v2/components/inventory/ProductCostPage.tsx` (view `product-cost`،
+  مسار `/product-cost?product=ID`) — بحث/اختيار منتج، جدول فواتير الشراء (تكلفة/سعر وحدة)،
+  تذييل بالمتوسط المرجّح. روابط دخول: الشريط الجانبي (مجموعة المخزون) + زر «تكلفة المنتجات»
+  في بطاقة الصنف (تبويب جديد، المنتج محدد افتراضياً).
+- **تنبيه أثر السعر (فوري):** في `InvoiceForm` عند كتابة سعر/كمية بند شراء، تنبيه
+  «سيغيّر المتوسط من X إلى Y» + زر يفتح `/product-cost?product=ID`. يحسب المتوقّع من
+  `cost-breakdown` (cache لكل منتج).
+- **تصحيح البيانات القديمة:** أمر `recompute_product_cost [--apply] [--tenant N]` يعيد
+  ضبط `Product.avg_cost` بالنموذج الجديد (يصحّح 292.31⇐95). dry-run افتراضياً.
+- **التحقق:** **inventory 31/31** (+3 جديدة: متوسط مرجّح يتجاهل المباع، أولوية landed،
+  endpoint) · tsc نظيف · بناء الإنتاج ناجح. (الشاشة خلف الدخول — لا تحقّق بصري.)
+- **بقي (خارطة طريق):** ربط النموذج الجديد بترحيل COGS الحيّ (record_stock_movement ما
+  يزال WAC المتحرك)؛ سياسة المخزون السالب (المالك اختار: اسمح + صحّح COGS لاحقاً).
+
 ## [AUDIT — task22 Phase 1, 2026-06-20] (المرافق العامة — G1 مُنسّق الأرقام + G2 تبويب جديد)
 
 خطة جراحية متعددة المراحل (10 مراحل، تنفيذ مرحلة-بمرحلة بمراجعة المالك). المرجع
@@ -1005,3 +1033,31 @@ User pushed back on the «pending» list and asked for all of it. Closed every r
 - **التجريد:** الإضافة تمت في المكون المركزي مما يلغي الحاجة لتكرار الكود في كل صفحة.
 - **الاختبار:** تمت كتابة اختبار Playwright (`e2e/back-button.spec.ts`) بناءً على منهجية TDD، لكن الاختبار يتطلب تجاوز صفحة تسجيل الدخول لرؤية الواجهة الداخلية (سيتم إضافة دعم المصادقة للاختبارات لاحقاً).
 - **التحقق:** `npm run build` يعمل بنجاح (tsc 0, vite build OK). لا توجد أكواد Deprecated بناءً على هذا التعديل.
+
+## [AUDIT — task24, 2026-06-21] (تأكيد تسجيل الخروج)
+
+- **جراحة الواجهة:** إضافة حوار تأكيد `window.confirm("هل تريد تأكيد تسجيل الخروج؟")` في زر تسجيل الخروج العام (في `AppLayout.tsx`) وفي واجهة المتجر (في `StorePage.tsx`).
+- **التجريد:** تم التعديل بشكل موضعي (Surgical) بدون التأثير على منطق الـ `AuthContext` الأساسي، للحفاظ على استقرار النظام وإمكانية مناداة `logout()` برمجياً عند الخمول بلا تأكيد.
+- **التحقق:** التعديل تم بسلاسة وبدون أي مساس بميزات أخرى. لا يوجد أي كود Deprecated.
+
+## [AUDIT — task25, 2026-06-21] (توحيد عرض محرّر مبيعات المبيعات)
+
+- **جراحة الواجهة:** تعديل `SalesInvoicesPage.tsx` لإلغاء العرض بوضع ملء الشاشة (`fixed inset-0 z-[60]`) لمحرر الفاتورة، وجعله يعرض داخل الصفحة بشكل طبيعي (Inline) أسوةً بفواتير المشتريات.
+- **النتيجة:** أصبحت القائمة الجانبية (Sidebar) والترويسة العلوية (Header) مرئية دائماً عند فتح فاتورة مبيعات جديدة أو تعديل فاتورة سابقة.
+- **التحقق:** `npm run build` اجتاز الفحص (tsc 0). لا يوجد كود Deprecated.
+
+## [AUDIT — task28, 2026-06-21] (الصندوق الافتراضي في دفعات العملاء)
+
+- **جراحة الواجهة:** تعديل `SalesCustomerPaymentsPage.tsx` لسحب الصندوق الافتراضي (Default Cash Account) المعرّف في إعدادات المشتريات (والذي يعمل كصندوق افتراضي للنقدي) وتمريره إلى نافذة الدفعة الجديدة `NewPaymentModal`.
+- **التجريد:** تم استدعاء `purchaseInvoiceApi.getSettings()` داخل دورة جلب البيانات الأولية `loadAll` بدون إضافة تعقيد أو تكرار واستخدامه كقيمة أولية (Prefill).
+- **التحقق:** تمت إضافة اختبار `default-cash-account.spec.ts` (TDD) وتم اجتياز الفحص البرمجي (tsc 0).
+- **Task 30:** Replicated duplicate item warning and quantity merge logic in Sales Invoices ('SalesInvoiceEditor.tsx') to match the behavior in Purchase Invoices, per user request.
+- **Task 31:** Added unsaved changes guard (dirty state tracking) to Purchase Invoices ('InvoiceForm.tsx') to warn the user before canceling or creating a new invoice, matching the behavior in Sales Invoices.
+- **Task 32:** Added a below-cost warning to the unit price cell in SalesInvoiceEditor to alert users when the selling price is lower than the product's average cost.
+- **Task 32:** Added below-cost warning to Sales Invoices ('SalesInvoiceEditor.tsx') so when a user types a unit price lower than the average cost, the input highlights in red and shows a warning.
+- **Task 33:** Added confirmation prompt to the Restore Draft button in Sales Invoices ('SalesInvoiceEditor.tsx') if the current session has unsaved modifications, preventing accidental loss of data.
+- **Task 34:** Removed InvoiceCategoryTree (product category sidebar) from both Sales Invoices ('SalesInvoiceEditor.tsx') and Purchase Invoices ('InvoiceForm.tsx') to streamline the layout and rely on other available product addition methods.
+- **Task 35:** Implemented auto-scrolling to the bottom of the invoice lines grid when new lines are added. Modified AseelGrid.tsx to use a flex column with internal overflow and scrollIntoView logic, ensuring large invoices remain fully visible and usable without stretching the main page.
+- **Task 35 Fix:** Refined AseelGrid auto-scroll behavior to use setTimeout and scrollTop = scrollHeight to reliably force the grid scrollbar to the bottom immediately after a new row is added.
+- **Task 36:** Promoted WarehousesManager to a standalone top-level interface. Added 'warehouses' view to App.tsx, inserted a navigation link under the Inventory section in Sidebar.tsx, and updated breadcrumbs, resolving the lack of a clear warehouses interface.
+- **Task 37:** Added 'Load All Items' (����� �� �������) button to the Stocktake form to auto-populate the grid with all available products, streamlining the inventory counting process.

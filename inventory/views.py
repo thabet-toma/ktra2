@@ -198,6 +198,13 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response(product_linked_invoices(
             tenant_id=product.tenant_id, product_id=product.id))
 
+    @action(detail=True, methods=['get'], url_path='cost-breakdown')
+    def cost_breakdown(self, request, pk=None):
+        from inventory.services import product_cost_breakdown
+        product = self.get_object()
+        return Response(product_cost_breakdown(
+            tenant_id=product.tenant_id, product_id=product.id))
+
 
 class WarehouseViewSet(viewsets.ModelViewSet):
     """مستودعات الشركة — معزولة بالشركة. الحذف يكتفي بالتعطيل (is_active=False)."""

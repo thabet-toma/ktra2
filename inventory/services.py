@@ -566,6 +566,89 @@ def product_linked_invoices(*, tenant_id: int, product_id: int) -> list[dict]:
     return out
 
 
+def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:
+    """واجهة «تكلفة المنتجات»: تكلفة كل فاتورة شراء لهذا الصنف على حدة، ومتوسط سعر
+    الوحدة لكل فاتورة (إجمالي الفاتورة ÷ كميتها)، ثم تكلفة المنتج = **متوسط أسعار
+    وحدات الفواتير مرجّحاً بكمية كل فاتورة** — أي Σ(سعر وحدة الفاتورة × كميتها) ÷
+    Σ(كميات الشراء). المقام هو إجمالي الكمية المشتراة (لا الكمية الحالية المتبقية)،
+    فلا يتأثر بما بِيع.
+
+    تكلفة بند الفاتورة تُؤخذ بأفضلية landed cost (السعر النازل الحقيقي للمستورد):
+      landed_line_total_ils ← landed_unit_price_ils × qty ← total_price.
+    البنود متعددة لنفس الصنف داخل فاتورة واحدة تُجمَّع في صفّ فاتورة واحد.
+    """
+    from logistics.models import PurchaseInvoiceItem
+
+    items = (
+        PurchaseInvoiceItem.objects.filter(
+            invoice__tenant_id=tenant_id, product_id=product_id,
+        )
+        .select_related('invoice', 'invoice__partner')
+        .order_by('invoice__invoice_date', 'invoice_id')
+    )
+
+    by_invoice: dict[int, dict] = {}
+    order: list[int] = []
+    for it in items:
+        inv = it.invoice
+        if inv.id not in by_invoice:
+            order.append(inv.id)
+            by_invoice[inv.id] = {
+                'invoice_id': inv.id,
+                'invoice_number': inv.invoice_number,
+                'date': inv.invoice_date.isoformat() if inv.invoice_date else None,
+                'party': inv.partner.name if inv.partner_id else None,
+                'is_posted': bool(inv.is_posted),
+                '_qty': Decimal('0'),
+                '_cost': Decimal('0'),
+            }
+        qty = Decimal(str(it.quantity or 0))
+        if it.landed_line_total_ils is not None and Decimal(str(it.landed_line_total_ils)) > 0:
+            cost = Decimal(str(it.landed_line_total_ils))
+        elif it.landed_unit_price_ils is not None and Decimal(str(it.landed_unit_price_ils)) > 0:
+            cost = Decimal(str(it.landed_unit_price_ils)) * qty
+        else:
+            cost = Decimal(str(it.total_price or 0))
+        by_invoice[inv.id]['_qty'] += qty
+        by_invoice[inv.id]['_cost'] += cost
+
+    rows: list[dict] = []
+    weighted_sum = Decimal('0')   # Σ(سعر وحدة الفاتورة × كميتها)
+    total_qty = Decimal('0')      # Σ(كميات الشراء)
+    for inv_id in order:
+        v = by_invoice[inv_id]
+        qty = v.pop('_qty')
+        cost = v.pop('_cost')
+        unit = (cost / qty) if qty > 0 else Decimal('0')
+        weighted_sum += unit * qty
+        total_qty += qty
+        v['quantity'] = str(qty.quantize(Decimal('0.0001')))
+        v['invoice_cost'] = str(cost.quantize(Decimal('0.01')))
+        v['unit_cost'] = str(unit.quantize(Decimal('0.0001')))
+        rows.append(v)
+
+    # تكلفة المنتج = متوسط أسعار وحدات الفواتير مرجّحاً بكمية كل فاتورة.
+    if total_qty > 0:
+        average_cost = (weighted_sum / total_qty).quantize(Decimal('0.0001'))
+    else:
+        average_cost = Decimal('0')
+
+    p = Product.objects.get(id=product_id, tenant_id=tenant_id)
+    logger.info(
+        "product_cost_breakdown product=%s invoices=%d qty=%s weighted_avg=%s",
+        product_id, len(rows), total_qty, average_cost,
+    )
+    return {
+        'product_id': p.id,
+        'sku': p.sku,
+        'name': p.name_ar or p.name_en or p.sku,
+        'invoices': rows,
+        'invoice_count': len(rows),
+        'total_purchased_qty': str(total_qty.quantize(Decimal('0.0001'))),
+        'average_cost': str(average_cost),
+    }
+
+
 # ════════════════════════════════════════════════════════════════════
 # Phase 7 (T-I1/T-I2): ترحيل مستندات المخزون — تحويل + جرد
 # ════════════════════════════════════════════════════════════════════

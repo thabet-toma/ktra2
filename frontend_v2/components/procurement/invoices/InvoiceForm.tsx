@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   Invoice,
   InvoiceItem,
@@ -42,9 +42,11 @@ import {
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { formatMoney } from "@/utils/formatNumber";
+import { inventoryApi } from "@/services/inventoryApi";
+import { openInNewTab } from "@/utils/openInNewTab";
 import { ItemSearchModal, productToItem } from "../price-offers/ItemSearchModal";
 import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
-import { InvoiceCategoryTree } from "./InvoiceCategoryTree";
+
 import { getPartnerBalance, type PartnerBalanceResponse } from "@/services/salesApi";
 import {
   InvoiceBasicInfo,
@@ -139,6 +141,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [inlineCreate, setInlineCreate] = useState<{ rowIndex: number; name: string } | null>(null);
   // task18 DEF-C1: رصيد المورد (قبل/بعد) عند اختيار مورد — يطابق شاشة المبيعات.
   const [supplierBalance, setSupplierBalance] = useState<PartnerBalanceResponse | null>(null);
+
+  // حارس التغييرات غير المحفوظة (Dirty state tracking)
+  const dirtyRef = useRef(false);
+  const markDirty = () => {
+    dirtyRef.current = true;
+  };
   useEffect(() => {
     const sid = formData.supplierId;
     if (!sid) {
@@ -207,6 +215,33 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     },
   });
 
+  const guardedCancel = () => {
+    if (!formData.id && !(formData.items || []).some(i => i.itemId) && !formData.supplierId) {
+      // Empty draft, no need to warn
+      onCancel();
+      return;
+    }
+    if (dirtyRef.current) {
+      if (!window.confirm("لديك تغييرات غير محفوظة. هل أنت متأكد من الخروج دون حفظ؟")) {
+        return;
+      }
+    }
+    onCancel();
+  };
+
+  const guardedNew = () => {
+    if (!formData.id && !(formData.items || []).some(i => i.itemId) && !formData.supplierId) {
+      nav?.goNew?.();
+      return;
+    }
+    if (dirtyRef.current) {
+      if (!window.confirm("لديك تغييرات غير محفوظة. هل أنت متأكد من فتح فاتورة جديدة وتجاهل التغييرات؟")) {
+        return;
+      }
+    }
+    nav?.goNew?.();
+  };
+
   // M4-T1: Aseel keyboard shortcuts — real handlers.
   useAseelKeymap({
     F2: () => window.print(),
@@ -217,7 +252,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     F12: () => handleSave(),
     Escape: () => {
       if (showSupplierPicker) { setShowSupplierPicker(false); return; }
-      onCancel();
+      guardedCancel();
     },
     plus: () => {
       const ae = document.activeElement;
@@ -230,7 +265,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     CtrlEnd: () => nav?.last?.(),
     CtrlPageUp: () => nav?.prev?.(),
     CtrlPageDown: () => nav?.next?.(),
-    CtrlIns: () => nav.goNew(),
+    CtrlIns: () => guardedNew(),
   }, { enabled: !showSupplierPicker });
 
   // Load invoices list for navigation
@@ -353,6 +388,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       setInstallmentPlanEnabled(initialInvoice.installmentPlanEnabled || false);
       setDealActivities(initialInvoice.dealInfo.activityLog || []);
     }
+    dirtyRef.current = false;
   }, [initialInvoice]);
 
   // Sync state to formData
@@ -495,6 +531,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
       if (onSave) onSave({ id: savedSqlId });
       alert("تم حفظ الفاتورة بنجاح");
+      dirtyRef.current = false;
     } catch (error) {
       // console suppressed
       const msg =
@@ -664,6 +701,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
 
     recalculateTotals({ items: updatedItems });
+    markDirty();
   };
 
   const handleItemSelect = (item: Item, lastPrice?: number) => {
@@ -683,11 +721,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
 
     recalculateTotals({ items: newItems });
+    markDirty();
   };
 
   const handleRemoveItem = (index: number) => {
     const updatedItems = (formData.items || []).filter((_, i) => i !== index);
     recalculateTotals({ items: updatedItems });
+    markDirty();
   };
 
   const handleUpdateFinancial = (field: string, value: any) => {
@@ -728,13 +768,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           grandTotal: roundSqlMoney2(grandTotal),
         };
       });
+      markDirty();
       return;
     }
     recalculateTotals({ [field]: value });
+    markDirty();
   };
 
   const handleDealInfoUpdate = (field: string, value: any) => {
     setDealInfo((prev) => ({ ...prev, [field]: value }));
+    markDirty();
   };
 
   const handleAddInstallment = () => {
@@ -747,6 +790,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       notes: "",
     };
     setInstallments([...installments, newInstallment]);
+    markDirty();
   };
 
   const handleRemoveInstallment = (index: number) => {
@@ -755,12 +799,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       (installment, idx) => ({ ...installment, installmentNumber: idx + 1 })
     );
     setInstallments(renumberedInstallments);
+    markDirty();
   };
 
   const handleUpdateInstallment = (index: number, field: string, value: any) => {
     const updatedInstallments = [...installments];
     updatedInstallments[index] = { ...updatedInstallments[index], [field]: value };
     setInstallments(updatedInstallments);
+    markDirty();
   };
 
   const handleToggleInstallmentPlan = (enabled: boolean) => {
@@ -770,6 +816,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     } else {
       handleAddInstallment();
     }
+    markDirty();
   };
 
   const handleRecalculateLanded = async () => {
@@ -931,6 +978,43 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     ? suppliers.find((s) => s.id === formData.supplierId)
     : undefined;
 
+  /* ───────────── تنبيه أثر السعر على متوسط تكلفة المنتج ───────────── */
+  // عند إدخال سعر سيغيّر متوسط تكلفة المنتج (المرجّح بالكمية)، نعرض تنبيهاً فورياً
+  // مع رابط لواجهة «تكلفة المنتجات» والمنتج محدد افتراضياً.
+  interface CostWarning { productId: number; name: string; from: number; to: number }
+  const [costWarnings, setCostWarnings] = useState<Record<string, CostWarning>>({});
+  // تخزين مؤقّت لتكلفة كل منتج (متوسط مرجّح + إجمالي الكمية المشتراة) لتفادي طلب لكل ضغطة.
+  const costCacheRef = useRef<Record<number, { avg: number; qty: number }>>({});
+
+  const evaluateCostImpact = async (rowId: string, item: InvoiceItem) => {
+    const pid = Number(item.itemId);
+    const price = Number(item.unitPrice) || 0;
+    const lineQty = Number(item.quantity) || 0;
+    if (!pid || price <= 0 || lineQty <= 0) {
+      setCostWarnings((w) => { if (!w[rowId]) return w; const n = { ...w }; delete n[rowId]; return n; });
+      return;
+    }
+    let base = costCacheRef.current[pid];
+    if (!base) {
+      try {
+        const b = await inventoryApi.getProductCostBreakdown(pid);
+        base = { avg: Number(b.average_cost) || 0, qty: Number(b.total_purchased_qty) || 0 };
+        costCacheRef.current[pid] = base;
+      } catch {
+        return; // تعذّر التحميل — لا تُظهر تنبيهاً مضلّلاً
+      }
+    }
+    // متوسط مرجّح متوقّع لو أُضيف هذا السطر: Σ(تكلفة) + سعر×كمية ÷ Σ(كمية) + كمية.
+    const newQty = base.qty + lineQty;
+    const newAvg = newQty > 0 ? (base.avg * base.qty + price * lineQty) / newQty : price;
+    // لا تكلفة سابقة (منتج جديد) → لا متوسط ليتغيّر؛ تغيّر ضئيل (<0.01) يُتجاهل.
+    if (base.avg > 0 && Math.abs(newAvg - base.avg) >= 0.01) {
+      setCostWarnings((w) => ({ ...w, [rowId]: { productId: pid, name: item.name, from: base.avg, to: newAvg } }));
+    } else {
+      setCostWarnings((w) => { if (!w[rowId]) return w; const n = { ...w }; delete n[rowId]; return n; });
+    }
+  };
+
   /* ───────────── أعمدة جدول البنود (AseelGrid) ───────────── */
   const itemColumns: AseelGridColumn<InvoiceItem>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
@@ -969,6 +1053,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
     items[rowIndex] = item;
 
+    // تنبيه أثر السعر على متوسط تكلفة المنتج (فوري أثناء كتابة السعر/الكمية).
+    if (key === "unitPrice" || key === "quantity") {
+      void evaluateCostImpact(item.id, item);
+    }
+
     // Auto-expanding line item grid logic when last row is edited
     const lastRow = items[items.length - 1];
     if (rowIndex === items.length - 1 && lastRow.itemId) {
@@ -1003,11 +1092,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       totalPrice: 0,
     };
     recalculateTotals({ items: [...(formData.items || []), newItem] });
+    markDirty();
   };
 
   const removeRow = (key: string) => {
     const updated = (formData.items || []).filter((i) => i.id !== key);
     recalculateTotals({ items: updated });
+    markDirty();
   };
 
   const renderItemIdCell = (row: InvoiceItem, rowIndex: number) => (
@@ -1102,7 +1193,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   const attachmentsTab = (
     <div className="aseel-legacy-tab">
-      <AttachmentsSection data={formData} setData={setFormData} />
+      <AttachmentsSection data={formData} setData={(val) => { setFormData(val); markDirty(); }} />
     </div>
   );
 
@@ -1120,7 +1211,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       )}
       <InvoiceBasicInfo
         data={formData}
-        setData={setFormData}
+        setData={(val) => { setFormData(val); markDirty(); }}
         suppliers={suppliers}
         readOnly={readOnly || formData.isHistorical}
         items={formData.items}
@@ -1233,10 +1324,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         shippingCost={formData.shippingCost || 0}
         shippingIncluded={formData.shippingIncluded || false}
         localPayments={formData.localPayments || {}}
-        onToggleInstallmentPlan={handleToggleInstallmentPlan}
-        onAddInstallment={handleAddInstallment}
-        onRemoveInstallment={handleRemoveInstallment}
-        onUpdateInstallment={handleUpdateInstallment}
+        onToggleInstallmentPlan={(e) => { handleToggleInstallmentPlan(e); markDirty(); }}
+        onAddInstallment={() => { handleAddInstallment(); markDirty(); }}
+        onRemoveInstallment={(i) => { handleRemoveInstallment(i); markDirty(); }}
+        onUpdateInstallment={(i, f, v) => { handleUpdateInstallment(i, f, v); markDirty(); }}
         readOnly={formData.isHistorical || false}
         currency={formData.currency}
         grandTotalFromForm={formData.currency === "ILS" ? formData.grandTotal : undefined}
@@ -1251,7 +1342,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       <DealInfoSection
         dealInfo={dealInfo}
         formData={formData}
-        onUpdateDealInfo={handleDealInfoUpdate}
+        onUpdateDealInfo={(f, v) => { handleDealInfoUpdate(f, v); markDirty(); }}
       />
     </div>
   );
@@ -1273,7 +1364,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           type="checkbox"
           disabled={readOnly || formData.isHistorical}
           checked={formData.shippingIncluded || false}
-          onChange={(e) => handleUpdateFinancial("shippingIncluded", e.target.checked)}
+          onChange={(e) => { handleUpdateFinancial("shippingIncluded", e.target.checked); markDirty(); }}
         />
         <span className="aseel-field-label" style={{ flex: "unset" }}>
           الأسعار تشمل الشحن
@@ -1289,20 +1380,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const isPosted = Boolean(formData.isPosted);
   const canPost = Boolean(formData.id) && !isPosted && !formData.isHistorical;
 
-  // T-R4: حارس التغييرات غير المحفوظة عند «جديدة». فاتورة الشراء لا تحفظ تلقائياً،
-  // فبدء فاتورة جديدة فوق فاتورة جديدة (بلا id) تحتوي بنوداً = فقدان عمل. نحرس هذه
-  // الحالة فقط (المسودة المحفوظة لها id فلا تُفقد).
-  const guardedGoNew = () => {
-    const hasContent = (formData.items || []).some((i) => i.itemId !== "" && i.itemId != null);
-    if (!formData.id && hasContent) {
-      if (!window.confirm("لديك فاتورة شراء غير محفوظة تحتوي بنوداً.\nهل تريد المتابعة بفاتورة جديدة وتجاهلها؟")) return;
-    }
-    nav.goNew();
-  };
-
   const toolbarActions: AseelToolbarAction[] = [
-    { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => handleSave() : undefined, disabled: saving || isPosted },
-    { key: "new", label: "جديدة", icon: <Plus />, onClick: guardedGoNew, separatorBefore: true },
+    { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => { handleSave(); dirtyRef.current = false; } : undefined, disabled: saving || isPosted },
+    { key: "new", label: "جديدة", icon: <Plus />, onClick: guardedNew, separatorBefore: true },
     {
       key: "post",
       label: posting ? "...ترحيل" : "ترحيل",
@@ -1319,7 +1399,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       disabled: !isPosted || posting,
     },
     { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => window.print(), separatorBefore: true },
-    { key: "cancel", label: "إلغاء", icon: <X />, onClick: onCancel, danger: true, separatorBefore: true },
+    { key: "cancel", label: "إلغاء", icon: <X />, onClick: guardedCancel, danger: true, separatorBefore: true },
   ];
 
   const accBanner = (accErr || accMsg) ? (
@@ -1342,30 +1422,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       }
       nav={nav}
       actions={toolbarActions}
-      aside={
-        <InvoiceCategoryTree
-          items={allDbItems}
-          disabled={readOnly || formData.isHistorical}
-          onShowCard={(it) => {
-            const pid = Number(it.id);
-            if (!pid) return;
-            setCardCanAdd(true);
-            setCardSuggestedPrice(null);
-            setCardProductId(pid);
-            // T-R2: اقترح آخر سعر شراء لعرضه داخل البطاقة.
-            resolveSuggestedPrice(pid).then((p) => setCardSuggestedPrice(p > 0 ? p : null)).catch(() => {});
-          }}
-          onPickItem={async (it) => {
-            const lastPrice = await resolveSuggestedPrice(it.id);
-            applyItemAt(null, it, lastPrice);
-          }}
-          onItemCreated={(it) =>
-            setAllDbItems((prev) =>
-              prev.some((p) => String(p.id) === String(it.id)) ? prev : [it, ...prev]
-            )
-          }
-        />
-      }
+
       header={
         <>
           {fld(
@@ -1589,7 +1646,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     >
       {accBanner}
       {/* الشجرة انتقلت إلى الشريط الجانبي (aside) ليرتفع لأعلى المستند. */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
           <AseelGrid<InvoiceItem>
             columns={itemColumns}
             rows={formData.items || []}
@@ -1604,6 +1661,33 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               <Plus className="h-3 w-3" /> إضافة سطر
             </button>
           )}
+          {(Object.entries(costWarnings) as [string, CostWarning][]).map(([rowId, w]) => (
+            <div
+              key={rowId}
+              role="alert"
+              style={{
+                display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap",
+                margin: "4px 0", padding: "6px 10px", borderRadius: 4,
+                background: "var(--aseel-warn-bg, #fff7e6)",
+                border: "1px solid var(--aseel-warn, #e0a800)",
+                color: "var(--aseel-ink)", fontSize: "var(--aseel-fs-sm)",
+              }}
+            >
+              <AlertCircle style={{ width: 14, height: 14, color: "var(--aseel-warn, #e0a800)" }} />
+              <span>
+                هذا السعر سيغيّر متوسط تكلفة «<b>{w.name}</b>» من <b>{formatMoney(w.from)}</b> إلى{" "}
+                <b>{formatMoney(w.to)}</b>.
+              </span>
+              <button
+                type="button"
+                className="aseel-toolbtn"
+                style={{ fontWeight: 600 }}
+                onClick={() => openInNewTab(`/product-cost?product=${w.productId}`)}
+              >
+                تكلفة المنتجات
+              </button>
+            </div>
+          ))}
         </div>
     </AseelDocumentShell>
 
@@ -1631,6 +1715,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onSelect={(r) => {
         setFormData((prev) => ({ ...prev, supplierId: r.id, factoryName: r.tradeName }));
         setShowSupplierPicker(false);
+        markDirty();
       }}
       onClose={() => setShowSupplierPicker(false)}
     />
@@ -1643,6 +1728,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           setShowAddSupplierModal(false);
           setFormData((prev) => ({ ...prev, supplierId: newSupplier.id, factoryName: newSupplier.tradeName || newSupplier.alias || "" }));
           setShowSupplierPicker(false);
+          markDirty();
         }}
       />
     )}

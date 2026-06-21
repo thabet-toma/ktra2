@@ -85,8 +85,23 @@ export function AseelDenseTable<T extends Record<string, any>>({
 }: AseelDenseTableProps<T>) {
   const totalCols = columns.length + (selectable ? 1 : 0);
   const [hoveredKey, setHoveredKey] = useState<string | number | null>(null);
-  // T-G1: عرض الأعمدة بعد السحب (px) — يتجاوز width الافتراضي للعمود.
-  const [colWidths, setColWidths] = useState<Record<string, number>>({});
+
+  // 1. حساب مفتاح فريد للجدول dựa على المسار والأعمدة للحفظ التلقائي
+  const storageKey = React.useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return `aseel_table_widths_${window.location.pathname}_${columns.map(c => c.key).join(',')}`;
+  }, [columns]);
+
+  // 2. التهيئة من localStorage (T-G1 + Persistence)
+  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
+    if (!storageKey) return {};
+    try {
+      const saved = localStorage.getItem(storageKey);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
 
   const startResize = (e: React.MouseEvent, colKey: string) => {
     e.preventDefault();
@@ -105,6 +120,13 @@ export function AseelDenseTable<T extends Record<string, any>>({
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
       document.body.style.userSelect = '';
+      // 3. الحفظ عند التغيير (نهاية السحب)
+      setColWidths(prev => {
+        if (storageKey) {
+           localStorage.setItem(storageKey, JSON.stringify(prev));
+        }
+        return prev;
+      });
     };
     document.body.style.userSelect = 'none';
     document.addEventListener('mousemove', onMove);

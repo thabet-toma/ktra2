@@ -126,7 +126,11 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           <ThemeToggle />
           <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-1"></div>
           <button
-            onClick={() => logout()}
+            onClick={() => {
+              if (window.confirm('هل تريد تأكيد تسجيل الخروج؟')) {
+                logout();
+              }
+            }}
             className="p-1.5 rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors flex items-center justify-center"
             title="تسجيل الخروج"
             aria-label="تسجيل الخروج"

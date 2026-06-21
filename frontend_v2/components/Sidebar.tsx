@@ -108,6 +108,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "stock-levels", label: "أرصدة المخزون", icon: <BarChart3 className="h-4 w-4" /> },
     { view: "items-management", label: "الأصناف", icon: <Boxes className="h-4 w-4" /> },
     { view: "stock-movements", label: "حركات المخزون", icon: <ArrowLeftRight className="h-4 w-4" /> },
+    { view: "product-cost", label: "تكلفة المنتجات", icon: <BarChart3 className="h-4 w-4" /> },
+    { view: "warehouses", label: "المستودعات", icon: <Warehouse className="h-4 w-4" /> },
     { view: "warehouse-transfer", label: "تحويل بين المستودعات", icon: <Truck className="h-4 w-4" /> },
     { view: "stocktake", label: "الجرد", icon: <ClipboardList className="h-4 w-4" /> },
   ];

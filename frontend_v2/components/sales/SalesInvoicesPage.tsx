@@ -597,91 +597,80 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   // task11 M6: جدول الفواتير في منطقة gridwrap الرئيسية المرنة — كان محشوراً
   // في tab سفلي بارتفاع أقصى 220px تاركاً فراغاً أبيض ضخماً وسط الشاشة.
   return (
-    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
-      <AseelDocumentShell
-        title="فواتير المبيعات"
-        state={loading ? "جاري التحميل…" : `${filteredRows.length} من ${rows.length}`}
-        actions={toolbarActions}
-        header={filterBar}
-        status={
-          <>
-            <span className="aseel-status-item">العدد <b>{filteredRows.length}</b></span>
-            <span className="aseel-status-item">الإجمالي <b className="aseel-num">{fmtNum(totalSum)}</b></span>
-            <span className="aseel-status-item">المدفوع <b className="aseel-num">{fmtNum(paidSum)}</b></span>
-            <span
-              className="aseel-status-item"
-              style={{ color: balanceSum > 0 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ok, #2d7d46)" }}
-            >
-              المتبقي <b className="aseel-num">{fmtNum(balanceSum)}</b>
-            </span>
-          </>
-        }
-      >
-        <div style={{ padding: "8px" }}>
-          {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
-          {msg && <div className="aseel-banner" style={{ marginBottom: "8px", color: "var(--aseel-ok, #2d7d46)" }}>{msg}</div>}
-          <AseelDenseTable<ExtRow>
-            columns={columns}
-            rows={filteredRows}
-            getRowKey={(r) => r.id}
-            loading={loading}
-            emptyHint="لا توجد فواتير — اضغط Ctrl+Ins للإضافة"
-            selectable
-            selectedKey={selectedKey}
-            onSelect={(k) => setSelectedKey(k as number | null)}
-            onRowDoubleClick={(r) => {
-              if (r.status === "draft") openEdit(r.id);
-            }}
-          />
-        </div>
-      </AseelDocumentShell>
-
-      {/* Editor overlay — fullscreen modal */}
-      {editorOpen && (
+    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)", display: "flex", flexDirection: "column" }}>
+      {!editorOpen ? (
+        <AseelDocumentShell
+          title="فواتير المبيعات"
+          state={loading ? "جاري التحميل…" : `${filteredRows.length} من ${rows.length}`}
+          actions={toolbarActions}
+          header={filterBar}
+          status={
+            <>
+              <span className="aseel-status-item">العدد <b>{filteredRows.length}</b></span>
+              <span className="aseel-status-item">الإجمالي <b className="aseel-num">{fmtNum(totalSum)}</b></span>
+              <span className="aseel-status-item">المدفوع <b className="aseel-num">{fmtNum(paidSum)}</b></span>
+              <span
+                className="aseel-status-item"
+                style={{ color: balanceSum > 0 ? "#fbbf24" : "#34d399" }}
+              >
+                المتبقي <b className="aseel-num" style={{ backgroundColor: balanceSum > 0 ? "rgba(251,191,36,0.15)" : "rgba(52,211,153,0.15)" }}>{fmtNum(balanceSum)}</b>
+              </span>
+            </>
+          }
+        >
+          <div style={{ padding: "8px" }}>
+            {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+            {msg && <div className="aseel-banner" style={{ marginBottom: "8px", color: "var(--aseel-ok, #2d7d46)" }}>{msg}</div>}
+            <AseelDenseTable<ExtRow>
+              columns={columns}
+              rows={filteredRows}
+              getRowKey={(r) => r.id}
+              loading={loading}
+              emptyHint="لا توجد فواتير — اضغط Ctrl+Ins للإضافة"
+              selectable
+              selectedKey={selectedKey}
+              onSelect={(k) => setSelectedKey(k as number | null)}
+              onRowDoubleClick={(r) => {
+                if (r.status === "draft") openEdit(r.id);
+              }}
+            />
+          </div>
+        </AseelDocumentShell>
+      ) : (
         <div
-          className="fixed inset-0 z-[60] bg-black/40"
-          style={{ display: "flex", alignItems: "stretch", justifyContent: "stretch" }}
-          onMouseDown={(e) => {
-            if (e.target === e.currentTarget) closeEditor();
+          style={{
+            background: "var(--aseel-bg, #fffbf5)",
+            flex: 1,
+            position: "relative",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
-          <div
-            style={{
-              background: "var(--aseel-bg, #fffbf5)",
-              width: "100%",
-              height: "100vh",
-              overflow: "hidden",
-              position: "relative",
-              display: "flex",
-              flexDirection: "column",
-            }}
-            onMouseDown={(e) => e.stopPropagation()}
-          >
+          <div style={{ padding: "8px", borderBottom: "1px solid var(--aseel-border)", display: "flex", justifyContent: "flex-end" }}>
             <button
               type="button"
               className="aseel-toolbtn aseel-toolbtn--danger"
               onClick={closeEditor}
-              style={{ position: "absolute", top: "8px", left: "8px", zIndex: 5 }}
             >
               ✕ إغلاق
             </button>
-            <SalesInvoiceEditor
-              products={products}
-              partners={partners}
-              currencies={currencies}
-              accounts={accounts}
-              taxRates={taxRates}
-              draftToEditId={draftToEditId}
-              onDraftEditConsumed={() => setDraftToEditId(null)}
-              onClose={closeEditor}
-              onInvoiceSaved={() => {
-                closeEditor();
-              }}
-              invoiceList={rows}
-              onOpenGeneralLedger={onOpenGeneralLedger}
-              salesSettings={salesSettings}
-            />
           </div>
+          <SalesInvoiceEditor
+            products={products}
+            partners={partners}
+            currencies={currencies}
+            accounts={accounts}
+            taxRates={taxRates}
+            draftToEditId={draftToEditId}
+            onDraftEditConsumed={() => setDraftToEditId(null)}
+            onClose={closeEditor}
+            onInvoiceSaved={() => {
+              closeEditor();
+            }}
+            invoiceList={rows}
+            onOpenGeneralLedger={onOpenGeneralLedger}
+            salesSettings={salesSettings}
+          />
         </div>
       )}
     </div>

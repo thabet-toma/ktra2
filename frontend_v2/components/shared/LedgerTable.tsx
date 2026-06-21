@@ -27,6 +27,7 @@ export interface LedgerTableProps<Row = Record<string, unknown>> {
   offset?: number;
   onPage?: (newOffset: number) => void;
   emptyText?: string;
+  summaryRow?: React.ReactNode;
 }
 
 /** خلية مرجع مستند قابلة للنقر — مصدر حقيقة واحد لكل البطاقات. */
@@ -60,14 +61,15 @@ export function LedgerTable<Row = Record<string, unknown>>({
   offset = 0,
   onPage,
   emptyText = "لا توجد حركات.",
+  summaryRow,
 }: LedgerTableProps<Row>) {
   const canPaginate = onPage != null && limit != null && count != null;
   const hasPrev = canPaginate && offset > 0;
   const hasNext = canPaginate && offset + (limit ?? 0) < (count ?? 0);
 
   return (
-    <div className="overflow-x-auto">
-      <table className="aseel-dense-table w-full text-sm" dir="rtl">
+    <div className="aseel-dense-table overflow-x-auto" dir="rtl">
+      <table className="w-full text-sm">
         <thead>
           <tr>
             {columns.map((c) => (
@@ -114,6 +116,11 @@ export function LedgerTable<Row = Record<string, unknown>>({
             ))
           )}
         </tbody>
+        {summaryRow && (
+          <tfoot>
+            {summaryRow}
+          </tfoot>
+        )}
       </table>
 
       {canPaginate && (count ?? 0) > (limit ?? 0) && (

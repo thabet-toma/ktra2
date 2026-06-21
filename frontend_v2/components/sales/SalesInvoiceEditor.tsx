@@ -20,7 +20,7 @@ import { useOnlineStatus } from "../../hooks/useOnlineStatus";
 import { useStaleConfirm } from "../offline/StaleDataConfirm";
 import { DocumentPaymentsTab } from "../shared/DocumentPaymentsTab";
 import { AseelDatePicker } from "../ui/AseelDatePicker";
-import { InvoiceCategoryTree } from "../procurement/invoices/InvoiceCategoryTree";
+
 import { ProductCardModal } from "../shared/ProductCardModal";
 import { Item } from "../../types";
 import db from "../../services/offline/db";
@@ -1207,14 +1207,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     opts?: { quantity?: number; unitPrice?: number; source?: DraftLine["priceSource"] }
   ) => {
     if (!productId || readOnly || isPosted) return;
-    // T-R3: تنبيه عند تكرار الصنف على سطر جديد (يتبع إعداد warn_on_duplicate_item،
-    // الافتراضي مُفعّل — يطابق إعداد «عند تكرار المادة: إظهار رسالة تنبيه»).
-    const isDuplicate = lines.some(
-      (l) => l.product !== "" && l.product !== -1 && Number(l.product) === Number(productId)
-    );
-    if (isDuplicate && (salesSettings?.warn_on_duplicate_item ?? true)) {
-      if (!window.confirm("هذا الصنف موجود مسبقاً في الفاتورة.\nهل تريد إضافة سطر جديد بنفس الصنف؟")) return;
-    }
+    // T-R3/M5: Duplicate checking logic has been moved to onSelectProduct 
+    // to unify behavior across both tree picker and inline combobox.
     let targetKey = "";
     setLines((prev) => {
       const emptyIdx = prev.findIndex((l) => l.product === "" && !l.description);
@@ -1315,6 +1309,43 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     opts?: { quantity?: number; unitPrice?: number; source?: DraftLine["priceSource"] }
   ) => {
     const pr = productsById.get(productId);
+
+    // T-R3 / M5: تنبيه عند تكرار الصنف (نفس سلوك فاتورة الشراء)
+    const isDuplicate = lines.some(
+      (l) => l.key !== key && l.product !== "" && l.product !== -1 && Number(l.product) === Number(productId)
+    );
+    if (isDuplicate && (salesSettings?.warn_on_duplicate_item ?? true)) {
+      const merge = window.confirm(
+        `الصنف «${pr?.name_ar || productId}» مضاف مسبقاً في الفاتورة.\n\n` +
+        `موافق = دمج الكمية في السطر الموجود\n` +
+        `إلغاء = إضافته كسطر جديد مستقل (سعر مختلف)`
+      );
+      if (merge) {
+        // ابحث عن السطر الأصلي الذي يحوي هذا الصنف واجمع الكميات
+        setLines((prev) => {
+          const next = [...prev];
+          const dupIndex = next.findIndex(
+            (l) => l.key !== key && l.product !== "" && l.product !== -1 && Number(l.product) === Number(productId)
+          );
+          if (dupIndex >= 0) {
+            const addedQty = opts?.quantity ?? 1;
+            next[dupIndex] = {
+              ...next[dupIndex],
+              quantity: String((Number(next[dupIndex].quantity) || 0) + addedQty),
+            };
+          }
+          // أفرغ السطر الحالي (الذي اختار فيه المستخدم الصنف المكرر)
+          const currentIdx = next.findIndex((l) => l.key === key);
+          if (currentIdx >= 0) {
+            next[currentIdx] = { ...next[currentIdx], product: "", quantity: "0", unit_price: "0", priceTouched: false };
+          }
+          return next;
+        });
+        markDirty();
+        return;
+      }
+    }
+
     // T-R2: عند تمرير سعر من بطاقة الصنف نستخدمه ونثبّته (priceTouched) فلا يدهسه
     // الـ resolver؛ وإلا نبدأ بسعر البيع الافتراضي ثم نقترح عبر الـ resolver.
     const price =
@@ -1687,6 +1718,36 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     );
   };
 
+  const renderUnitPriceCell = (row: DraftLine) => {
+    const p = row.product ? productsById.get(Number(row.product)) : undefined;
+    const cost = p ? Number(p.avg_cost || 0) : 0;
+    const price = Number(row.unit_price || 0);
+    const belowCost = cost > 0 && price > 0 && price < cost;
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "2px", alignItems: "center" }}>
+        <input
+          className={`aseel-input ${belowCost ? "border-red-500 focus:ring-red-500" : ""}`}
+          type="number"
+          min={0}
+          step={0.01}
+          value={row.unit_price}
+          disabled={readOnly || isPosted}
+          style={{ textAlign: "center", ...(belowCost ? { color: "#ef4444", borderColor: "#ef4444" } : {}) }}
+          onChange={(e) => {
+            updateLine(row.key, { unit_price: e.target.value, priceTouched: true, priceSource: null });
+          }}
+        />
+        {belowCost && (
+          <span style={{ color: "#ef4444", fontSize: "0.65rem", whiteSpace: "nowrap", fontWeight: "bold" }}>
+            أقل من التكلفة ({fmt(cost)})
+          </span>
+        )}
+      </div>
+    );
+  };
+
+
   const renderTaxCell = (row: DraftLine) => {
     const isEdit = taxEditKey === row.key;
     return (
@@ -1770,6 +1831,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   // حقن الأعمدة المخصّصة (تستخدم render)
   gridColumns[1].render = renderProductCell;
+  gridColumns[4].render = renderUnitPriceCell;
   gridColumns[6].render = renderTaxCell;
   gridColumns[8].render = renderDeleteCell;
 
@@ -1945,6 +2007,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         type="button"
         className="mr-3 underline font-semibold hover:no-underline"
         onClick={() => {
+          if (dirtyRef.current) {
+            const confirmed = window.confirm("لديك تعديلات غير محفوظة حالياً. هل أنت متأكد من استعادة المسودة وفقدان هذه التعديلات؟");
+            if (!confirmed) return;
+          }
           hydrateFromLocalDraft(recoverableDraft.data);
           setRecoverableDraft(null);
         }}
@@ -2322,43 +2388,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         }
         nav={nav}
         actions={toolbarActions}
-        aside={
-          <InvoiceCategoryTree
-            items={products.map((p) => ({
-              ...p,
-              id: String(p.id),
-              name: p.name_ar || p.name_en || p.sku || "",
-              categoryId: (p as any).category
-            } as unknown as Item))}
-            disabled={readOnly || isPosted}
-            onShowCard={(it) => {
-              const p = products.find((x) => String(x.id) === String(it.id));
-              const productId = p ? p.id : Number(it.id);
-              if (!productId) return;
-              setCardCanAdd(true);
-              // T-R2: ابدأ بسعر البيع الافتراضي، ثم اقترح آخر فاتورة/عرض سعر للعميل.
-              const online = p?.online_price;
-              const hasDefault = online != null && online !== "";
-              setCardSuggestedPrice(hasDefault ? Number(online) : null);
-              setCardPriceSource(hasDefault ? "default" : null);
-              setCardProductId(productId);
-              if (networkOnline) {
-                resolveSalePrice({ product: productId, customer: customerId, currency: currencyId, exchange_rate: exchangeRate, tax_inclusive: pricesIncludeTax })
-                  .then((res) => {
-                    if (res?.unit_price == null) return;
-                    setCardSuggestedPrice(Number(res.unit_price));
-                    setCardPriceSource(priceSourceFromResolve(res.source?.document_type) ?? "default");
-                  })
-                  .catch(() => { /* لا اقتراح — تبقى البطاقة بالسعر الافتراضي */ });
-              }
-            }}
-            onPickItem={(it) => {
-              const p = products.find((x) => String(x.id) === String(it.id));
-              const productId = p ? p.id : Number(it.id);
-              insertProductIntoInvoice(productId);
-            }}
-          />
-        }
+
         header={
           <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-1.5 flex flex-col gap-1 w-full shadow-sm">
             <div className="flex flex-col xl:flex-row gap-2 items-start">

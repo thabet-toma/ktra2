@@ -142,9 +142,9 @@ export const PartnerProfilePage: React.FC = () => {
       ),
     },
     { key: 'description', header: 'البيان', render: (r) => r.description || '—' },
-    { key: 'debit', header: 'مدين (Dr)', align: 'center', render: (r) => r.debit },
-    { key: 'credit', header: 'دائن (Cr)', align: 'center', render: (r) => r.credit },
-    { key: 'running_balance', header: 'الرصيد', align: 'center', render: (r) => <b>{r.running_balance}</b> },
+    { key: 'debit', header: 'مدين (Dr)', align: 'right', render: (r) => <span className="aseel-num">{r?.debit ?? ''}</span> },
+    { key: 'credit', header: 'دائن (Cr)', align: 'right', render: (r) => <span className="aseel-num">{r?.credit ?? ''}</span> },
+    { key: 'running_balance', header: 'الرصيد', align: 'right', render: (r) => <b className="aseel-num">{r?.running_balance ?? ''}</b> },
   ];
 
   const invColumns: LedgerColumn<InvoiceRow>[] = [
@@ -230,6 +230,26 @@ export const PartnerProfilePage: React.FC = () => {
             offset={stmtOffset}
             onPage={setStmtOffset}
             emptyText="لا توجد حركات على حساب هذا الشريك."
+            summaryRow={
+              (stmt?.rows && stmt.rows.length > 0) ? (
+                <tr className="bg-[#e6e4d5] font-bold border-t-2 border-[var(--aseel-border)]">
+                  <td colSpan={3} className="px-2 py-2 text-right">الإجمالي (هذه الصفحة):</td>
+                  <td className="px-2 py-2 text-right aseel-num">
+                    {stmt.rows.reduce((sum, r) => {
+                      const val = parseFloat(String(r?.debit || "0").replace(/,/g, ''));
+                      return sum + (isNaN(val) ? 0 : val);
+                    }, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-2 py-2 text-right aseel-num">
+                    {stmt.rows.reduce((sum, r) => {
+                      const val = parseFloat(String(r?.credit || "0").replace(/,/g, ''));
+                      return sum + (isNaN(val) ? 0 : val);
+                    }, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-2 py-2"></td>
+                </tr>
+              ) : undefined
+            }
           />
         </div>
       ),

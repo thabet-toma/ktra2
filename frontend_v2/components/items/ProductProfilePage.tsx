@@ -9,6 +9,7 @@ import { apiGetObject } from '../../services/restApi';
 import { resolveTenantId } from '../../utils/tenantContext';
 import { AseelDocumentShell, AseelTab } from '../aseel';
 import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTable';
+import { openInNewTab } from '../../utils/openInNewTab';
 
 interface ProductProfile {
   id: number;
@@ -220,7 +221,10 @@ export const ProductProfilePage: React.FC = () => {
     <div data-skin="aseel" className="min-h-[calc(100vh-5rem)]">
       <AseelDocumentShell
         title={title}
-        actions={[{ key: 'back', label: 'عودة', onClick: () => navigate(-1) }]}
+        actions={[
+          { key: 'cost', label: 'تكلفة المنتجات', onClick: () => openInNewTab(`/product-cost?product=${id}`) },
+          { key: 'back', label: 'عودة', onClick: () => navigate(-1) },
+        ]}
         tabs={tabs}
         status={
           error ? <span className="text-[var(--aseel-danger)]">تعذّر تحميل البطاقة: {error}</span> :

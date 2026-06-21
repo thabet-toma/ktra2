@@ -75,6 +75,7 @@ export const StorePage: React.FC = () => {
     };
 
     const handleLogout = async () => {
+        if (!window.confirm('هل تريد تأكيد تسجيل الخروج؟')) return;
         await logoutUser();
         setCurrentUser(null);
         navigate('/');

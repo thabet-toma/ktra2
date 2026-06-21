@@ -400,7 +400,7 @@ tbody td {
   background: var(--aseel-panel);
   border-bottom: 1px solid var(--aseel-border-soft);
 }
-[data-skin="aseel"] .aseel-title-grp { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+[data-skin="aseel"] .aseel-title-grp { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 [data-skin="aseel"] .aseel-title-chip {
   background: var(--aseel-accent-bg);
   border: 1px solid var(--aseel-accent-bd);
@@ -411,7 +411,7 @@ tbody td {
   padding: 3px 14px;
 }
 [data-skin="aseel"] .aseel-title-state { color: var(--aseel-state); font-weight: 700; font-size: var(--aseel-fs); }
-[data-skin="aseel"] .aseel-company { color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); text-align: start; }
+[data-skin="aseel"] .aseel-company { color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); text-align: end; }
 
 /* ── Command toolbar ── */
 /* task13 M3: شريط الأوامر يلتصق بأعلى سكرولر الصفحة — أزرار الحفظ/الطباعة
@@ -830,16 +830,30 @@ tbody td {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  padding: 1px 8px;
-  background: #dedbc8;
-  border-top: 1px solid var(--aseel-border);
-  color: var(--aseel-ink-soft);
-  font-size: var(--aseel-fs-sm);
+  justify-content: flex-end;
+  gap: 20px;
+  padding: 8px 16px;
+  background: #1f2937; /* Dark elegant gray */
+  border-top: 2px solid var(--aseel-accent);
+  color: #e5e7eb;
+  font-size: 14px;
+  font-weight: 600;
   flex-shrink: 0;
+  box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
 }
-[data-skin="aseel"] .aseel-status-item { display: inline-flex; align-items: center; gap: 5px; }
-[data-skin="aseel"] .aseel-status-item b { color: var(--aseel-ink); font-weight: 700; }
+[data-skin="aseel"] .aseel-status-item { 
+  display: inline-flex; 
+  align-items: center; 
+  gap: 6px; 
+}
+[data-skin="aseel"] .aseel-status-item b { 
+  color: #fff; /* White numbers for high contrast */
+  font-weight: 800; 
+  font-size: 15px;
+  background: rgba(255,255,255,0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
 
 /* ── Index picker modal ── */
 [data-skin="aseel"] .aseel-picker-mask {
@@ -1355,4 +1369,4 @@ tbody td {
     font-size: 10pt;
     color: #666;
   }
-}
+} 

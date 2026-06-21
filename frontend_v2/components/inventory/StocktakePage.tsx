@@ -7,7 +7,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
-import { Plus, Send, Trash2, RefreshCw, X } from "lucide-react";
+import { Plus, Send, Trash2, RefreshCw, X, List } from "lucide-react";
 
 type Wh = { id: number; name: string };
 type Prod = { id: number; sku: string; name_ar?: string; name_en?: string; quantity_on_hand?: string };
@@ -62,6 +62,15 @@ export const StocktakePage: React.FC = () => {
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   const addLine = () => setLines((ls) => [...ls, { product: "", counted_quantity: "0" }]);
   const removeLine = (i: number) => setLines((ls) => (ls.length <= 1 ? ls : ls.filter((_, idx) => idx !== i)));
+
+  const loadAllProducts = () => {
+    if (products.length === 0) return;
+    const newLines = products.map((p) => ({
+      product: p.id,
+      counted_quantity: p.quantity_on_hand || "0",
+    }));
+    setLines(newLines);
+  };
 
   const resetForm = () => {
     setDate(today); setWarehouse(""); setNotes("");
@@ -156,6 +165,7 @@ export const StocktakePage: React.FC = () => {
               </table>
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="aseel-toolbtn" onClick={addLine}><Plus className="h-4 w-4" /> سطر</button>
+                <button className="aseel-toolbtn" onClick={loadAllProducts} title="إدراج كافة الأصناف المسجلة"><List className="h-4 w-4" /> إدراج كل الأصناف</button>
                 <button className="aseel-toolbtn" onClick={saveAndPost} disabled={saving} style={{ marginInlineStart: "auto" }}>
                   {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} حفظ وترحيل
                 </button>

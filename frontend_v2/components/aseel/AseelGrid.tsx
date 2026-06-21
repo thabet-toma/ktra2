@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 
 export interface AseelGridColumn<T> {
   key: string;
@@ -36,6 +36,19 @@ export function AseelGrid<T>({
   variant = 'items',
   emptyHint = 'لا توجد بنود — ابدأ الإدخال',
 }: AseelGridProps<T>) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const prevRowsLength = useRef(rows.length);
+
+  useEffect(() => {
+    if (rows.length > prevRowsLength.current) {
+      setTimeout(() => {
+        if (containerRef.current) {
+          containerRef.current.scrollTop = containerRef.current.scrollHeight;
+        }
+      }, 10);
+    }
+    prevRowsLength.current = rows.length;
+  }, [rows.length]);
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>, rowIndex: number) => {
       const td = (e.target as HTMLElement).closest('td');
@@ -68,7 +81,7 @@ export function AseelGrid<T>({
   );
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative flex-1 overflow-y-auto min-h-0" style={{ zIndex: 0 }}>
       <table className="aseel-grid" data-variant={variant}>
         <thead>
           <tr>

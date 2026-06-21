@@ -25,8 +25,10 @@ import {
   deleteCustomerPayment,
   suggestFifoAllocations,
   getAgingReport,
+  getSalesSettings,
   type CustomerPaymentRow,
 } from "../../services/salesApi";
+import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { accountingApi } from "../../services/accountingApi";
 import {
   AseelDocumentShell,
@@ -63,6 +65,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
   // T-P2: عميل مُسبق التعبئة عند الوصول من كشف الحساب (?pay_partner=ID).
   const [prefillPartnerId, setPrefillPartnerId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  const [defaultCashAccountId, setDefaultCashAccountId] = useState<number | "">("");
 
   useEffect(() => {
     const pid = new URLSearchParams(window.location.search).get("pay_partner");
@@ -126,18 +129,25 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     setLoading(true);
     setErr(null);
     try {
-      const [pays, parts, accs, currs, ag] = await Promise.all([
+      const [pays, parts, accs, currs, ag, pSettings, sSettings] = await Promise.all([
         listCustomerPayments(),
         accountingApi.getPartners() as Promise<Partner[]>,
         accountingApi.getAccounts() as Promise<Account[]>,
         accountingApi.getCurrencies() as Promise<Currency[]>,
         getAgingReport(),
+        purchaseInvoiceApi.getSettings().catch(() => null),
+        getSalesSettings().catch(() => null),
       ]);
       setPayments(pays || []);
       setPartners(parts || []);
       setAccounts(accs || []);
       setCurrencies(currs || []);
       setAging(ag || []);
+      // T-A4: Set default cash account (prefer sales settings, fallback to purchase settings)
+      const defCash = sSettings?.default_cash_account || pSettings?.default_cash_account;
+      if (defCash) {
+        setDefaultCashAccountId(defCash);
+      }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
     } finally {
@@ -399,6 +409,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
           currencies={currencies}
           aging={aging}
           initialPartnerId={prefillPartnerId}
+          defaultCashAccountId={defaultCashAccountId}
           onClose={() => { setShowForm(false); setPrefillPartnerId(null); }}
           onSaved={async () => {
             setShowForm(false);
@@ -424,6 +435,7 @@ interface ChequeLine {
   amount: string;
   bank_name: string;
   branch: string;
+  account_number: string;
 }
 
 const newChequeLine = (): ChequeLine => ({
@@ -433,6 +445,7 @@ const newChequeLine = (): ChequeLine => ({
   amount: "",
   bank_name: "",
   branch: "",
+  account_number: "",
 });
 
 const NewPaymentModal: React.FC<{
@@ -444,7 +457,8 @@ const NewPaymentModal: React.FC<{
   onSaved: () => void;
   /** T-P2: عميل مُسبق التعبئة عند الفتح من كشف الحساب. */
   initialPartnerId?: number | null;
-}> = ({ partners, accounts, currencies, aging, onClose, onSaved, initialPartnerId }) => {
+  defaultCashAccountId?: number | "";
+}> = ({ partners, accounts, currencies, aging, onClose, onSaved, initialPartnerId, defaultCashAccountId }) => {
   const today = new Date().toISOString().split("T")[0];
   const [partnerId, setPartnerId] = useState<number | "">(initialPartnerId ?? "");
   const [date, setDate] = useState(today);
@@ -452,7 +466,7 @@ const NewPaymentModal: React.FC<{
   const [cashAmount, setCashAmount] = useState(""); // N4-T4: نقد جزء
   const [currencyId, setCurrencyId] = useState<number | "">("");
   const [exchangeRate, setExchangeRate] = useState("1");
-  const [cashAccountId, setCashAccountId] = useState<number | "">("");
+  const [cashAccountId, setCashAccountId] = useState<number | "">(defaultCashAccountId ?? "");
   const [notes, setNotes] = useState("");
   // N4-T4: withholding (خصم المصدر) — يُحسَب من amount
   const [withholdingPct, setWithholdingPct] = useState("0");
@@ -467,6 +481,13 @@ const NewPaymentModal: React.FC<{
   const [pickInvoiceId, setPickInvoiceId] = useState<number | "">("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // تحديث الصندوق الافتراضي في حال تم تحميله بعد فتح النافذة (مثال: فتح من رابط)
+  useEffect(() => {
+    if (defaultCashAccountId && cashAccountId === "") {
+      setCashAccountId(defaultCashAccountId);
+    }
+  }, [defaultCashAccountId, cashAccountId]);
 
   // مجموع الشيكات = sum cheques.amount
   const totalCheques = cheques.reduce((s, c) => s + (Number(c.amount) || 0), 0);
@@ -497,17 +518,22 @@ const NewPaymentModal: React.FC<{
   const cashboxAccounts = useMemo(
     () =>
       accounts.filter((a) => {
-        const t = a.account_type || "";
-        if (t !== "Asset") return false;
-        const code = String(a.code || "");
-        const name = (a.name || "").toLowerCase();
-        return (
-          code.startsWith("110") ||
-          name.includes("صندوق") ||
-          name.includes("بنك") ||
-          name.includes("cash") ||
-          name.includes("bank")
-        );
+        // T-A4: Ensure consistent filtering with PurchaseSettings / SalesSettings
+        if (a.account_type === undefined) return false;
+        const t = (a.account_type || "").toLowerCase();
+        if (t === "cash" || t === "bank") return true;
+        if (t === "asset") {
+          const code = String(a.code || "");
+          const name = (a.name || "").toLowerCase();
+          return (
+            code.startsWith("110") ||
+            name.includes("صندوق") ||
+            name.includes("بنك") ||
+            name.includes("cash") ||
+            name.includes("bank")
+          );
+        }
+        return false;
       }),
     [accounts],
   );
@@ -930,7 +956,7 @@ const NewPaymentModal: React.FC<{
                         <button
                           type="button"
                           onClick={() => setCheques((cs) => [...cs, newChequeLine()])}
-                          className="flex items-center gap-1 text-xs px-2 py-1 aseel-bg-panel text-white rounded"
+                          className="flex items-center gap-1 text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded"
                         >
                           <Plus className="w-3 h-3" /> شيك
                         </button>
@@ -946,6 +972,7 @@ const NewPaymentModal: React.FC<{
                           <tr>
                             <th className="text-right p-1.5">#</th>
                             <th className="text-right p-1.5">رقم</th>
+                            <th className="text-right p-1.5">رقم الحساب</th>
                             <th className="text-right p-1.5">صاحب الشيك</th>
                             <th className="text-right p-1.5">الاستحقاق</th>
                             <th className="text-right p-1.5">المبلغ</th>
@@ -959,6 +986,7 @@ const NewPaymentModal: React.FC<{
                             <tr key={i} className="border-t aseel-border-soft dark:aseel-border-soft">
                               <td className="p-1 text-center">{i + 1}</td>
                               <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.cheque_number} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, cheque_number: e.target.value } : x))} /></td>
+                              <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.account_number} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, account_number: e.target.value } : x))} /></td>
                               <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.payee_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, payee_name: e.target.value } : x))} /></td>
                               <td className="p-1"><input type="date" className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.due_date} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, due_date: e.target.value } : x))} /></td>
                               <td className="p-1"><input type="number" step="0.01" className="w-full border rounded px-1 py-0.5 text-xs font-mono dark:aseel-bg-panel" value={c.amount} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, amount: e.target.value } : x))} /></td>
