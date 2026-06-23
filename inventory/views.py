@@ -2,6 +2,7 @@ import datetime
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
+from django.db.models import F
 from rest_framework import filters, serializers, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.pagination import PageNumberPagination
@@ -68,7 +69,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     pagination_class = OptionalPageNumberPagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['sku', 'barcode', 'name_ar', 'name_en', 'category__name']
-    ordering_fields = ['id', 'sku', 'name_ar', 'quantity_on_hand', 'avg_cost', 'created_at']
+    ordering_fields = ['id', 'sku', 'name_ar', 'quantity_on_hand', 'avg_cost', 'min_stock_level', 'created_at']
     ordering = ['-id']
 
     def _get_tenant(self):
@@ -91,6 +92,22 @@ class ProductViewSet(viewsets.ModelViewSet):
         created_to = params.get('created_to')
         if created_to:
             qs = qs.filter(created_at__date__lte=created_to)
+        # جدول الأصناف: فلتر حالة المخزون — مطابق لمنطق ProductSerializer.get_stock_status
+        # (نفذ: ≤0 · منخفض: >0 و حد أدنى>0 و ≤الحد الأدنى · متوفر: الباقي).
+        stock_status = params.get('stock_status')
+        if stock_status == 'out_of_stock':
+            qs = qs.filter(quantity_on_hand__lte=0)
+        elif stock_status == 'low_stock':
+            qs = qs.filter(
+                quantity_on_hand__gt=0,
+                min_stock_level__gt=0,
+                quantity_on_hand__lte=F('min_stock_level'),
+            )
+        elif stock_status == 'in_stock':
+            qs = qs.filter(quantity_on_hand__gt=0).exclude(
+                min_stock_level__gt=0,
+                quantity_on_hand__lte=F('min_stock_level'),
+            )
         return qs
 
     def _handle_attachments(self, product, data, tenant):

@@ -120,3 +120,41 @@ class ProductApiTest(APITestCase):
         self._post({"name_ar": "سري لشركة أ"})
         self._auth(user=self.owner_b, tenant=self.t_b)
         assert self._get().json() == []
+
+    # ── جدول الأصناف: فلتر حالة المخزون + ترتيب حسب الكمية/الحد الأدنى ──
+    def _seed_stock_mix(self):
+        # qty/min_stock_level للقراءة فقط في الـ serializer — نُنشئها مباشرة.
+        from decimal import Decimal
+        Product.objects.create(tenant=self.t_a, sku="ST-OUT", name_ar="نفذ",
+                               quantity_on_hand=Decimal("0"), min_stock_level=9)
+        Product.objects.create(tenant=self.t_a, sku="ST-LOW", name_ar="منخفض",
+                               quantity_on_hand=Decimal("3"), min_stock_level=5)
+        Product.objects.create(tenant=self.t_a, sku="ST-OK", name_ar="متوفر",
+                               quantity_on_hand=Decimal("20"), min_stock_level=1)
+
+    def test_stock_status_filter_out_of_stock(self):
+        self._auth()
+        self._seed_stock_mix()
+        rows = self._get("?stock_status=out_of_stock").json()
+        assert {r["sku"] for r in rows} == {"ST-OUT"}
+
+    def test_stock_status_filter_low_stock(self):
+        self._auth()
+        self._seed_stock_mix()
+        rows = self._get("?stock_status=low_stock").json()
+        assert {r["sku"] for r in rows} == {"ST-LOW"}
+
+    def test_stock_status_filter_in_stock(self):
+        self._auth()
+        self._seed_stock_mix()
+        rows = self._get("?stock_status=in_stock").json()
+        assert {r["sku"] for r in rows} == {"ST-OK"}
+
+    def test_ordering_by_quantity_and_min_stock_level(self):
+        self._auth()
+        self._seed_stock_mix()
+        asc = [r["sku"] for r in self._get("?ordering=quantity_on_hand").json()]
+        assert asc == ["ST-OUT", "ST-LOW", "ST-OK"]
+        # min_stock_level قابل للترتيب الآن (كان غائباً عن ordering_fields)
+        by_min = [r["sku"] for r in self._get("?ordering=min_stock_level").json()]
+        assert by_min == ["ST-OK", "ST-LOW", "ST-OUT"]

@@ -19,6 +19,7 @@ import {
 } from "./types";
 import { findProducts } from "./services/geminiService";
 import { LoginPage } from "./components/LoginPage";
+import { LandingPage } from "./components/LandingPage";
 import { SignupPage } from "./components/SignupPage";
 import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
@@ -128,7 +129,7 @@ import { GroupConstantsPage } from './components/settings/GroupConstantsPage';
 import { useLocation, useNavigate } from "react-router-dom";
 
 type SourcingView = "search" | "loading" | "results";
-type AuthView = "login" | "signup";
+type AuthView = "landing" | "login" | "signup";
 
 /**
  * task14 M1 (DEF-B1): جدول مسار↔شاشة واحد — مصدر الحقيقة للاتجاهين.
@@ -210,7 +211,7 @@ const App: React.FC = () => {
 
   const { currentUser, loading: authLoading, logout, updateUser } = useAuth();
 
-  const [authView, setAuthView] = useState<AuthView>("login");
+  const [authView, setAuthView] = useState<AuthView>("landing");
   const [users, setUsers] = useState<User[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
 
@@ -1786,10 +1787,22 @@ const App: React.FC = () => {
         </div>
       );
     }
+    if (authView === "login") {
+      return (
+        <div className={theme}>
+          <LoginPage
+            onNavigateToSignup={() => setAuthView("signup")}
+            onGoToStore={() => setAppView('store')}
+          />
+        </div>
+      );
+    }
+    // صفحة هبوط تعريفية بالمنصة للزوّار غير الأعضاء (الافتراضية قبل تسجيل الدخول).
     return (
       <div className={theme}>
-        <LoginPage
-          onNavigateToSignup={() => setAuthView("signup")}
+        <LandingPage
+          onLogin={() => setAuthView("login")}
+          onSignup={() => setAuthView("signup")}
           onGoToStore={() => setAppView('store')}
         />
       </div>

@@ -7,7 +7,7 @@ import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
-import { Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2 } from "lucide-react";
+import { Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2, Printer } from "lucide-react";
 import { ItemFormAseel } from "./ItemFormAseel";
 import { CategoriesManagement } from "./CategoriesManagement";
 import { InvoiceCategoryTree } from "../procurement/invoices/InvoiceCategoryTree";
@@ -15,11 +15,33 @@ import type { Item } from "../../types";
 import { StalenessBadge } from "../offline";
 import db from "../../services/offline/db";
 import { openInNewTab } from "@/utils/openInNewTab";
+import { clientLogger } from "../../services/logger";
 
 const fmt = (n: number | string) =>
   Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 type View = "list" | "form";
+type StockStatus = "" | "out_of_stock" | "low_stock" | "in_stock";
+
+// مفتاح عمود الجدول → حقل الترتيب الخادمي (OrderingFilter).
+const ORDER_FIELD: Record<string, string> = {
+  sku: "sku",
+  name_ar: "name_ar",
+  qty: "quantity_on_hand",
+  avg_cost: "avg_cost",
+  min: "min_stock_level",
+};
+
+const STATUS_LABEL: Record<Exclude<StockStatus, "">, string> = {
+  out_of_stock: "نفذ",
+  low_stock: "منخفض",
+  in_stock: "متوفر",
+};
+
+const exportItemStyle: React.CSSProperties = {
+  display: "block", width: "100%", textAlign: "start", padding: "8px 12px",
+  background: "none", border: "none", cursor: "pointer", color: "var(--aseel-ink)",
+};
 
 export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products" | "categories" }> = ({ initialTab = "products" }) => {
   const navigate = useNavigate();
@@ -39,17 +61,34 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  // جدول الأصناف: فلتر حالة المخزون + ترتيب حسب العمود (خادمي) + قائمة التصدير.
+  const [statusFilter, setStatusFilter] = useState<StockStatus>("");
+  const [sortKey, setSortKey] = useState<string>("");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const pageSize = 50;
+
+  const orderingParam = sortKey
+    ? `${sortDir === "desc" ? "-" : ""}${ORDER_FIELD[sortKey] ?? sortKey}`
+    : "";
   // Phase 2 wiring: track when the list was last refreshed from the server,
   // and whether the current render is being served from the offline cache.
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [fromCache, setFromCache] = useState(false);
 
-  const load = useCallback(async (currentPage = 1, currentSearch = search) => {
+  const load = useCallback(async (opts: {
+    page?: number; search?: string; status?: StockStatus; ordering?: string;
+  } = {}) => {
+    const { page: currentPage = 1, search: currentSearch = "", status = "", ordering = "" } = opts;
     setLoading(true);
     setErr(null);
     try {
-      const data = await inventoryApi.getProducts({ page: currentPage, page_size: pageSize, search: currentSearch });
+      const params: Record<string, string | number> = { page: currentPage, page_size: pageSize };
+      if (currentSearch) params.search = currentSearch;
+      if (status) params.stock_status = status;
+      if (ordering) params.ordering = ordering;
+      const data = await inventoryApi.getProducts(params);
       const rows = Array.isArray(data) ? data : (data.results ?? []);
       setProducts(rows as SqlProduct[]);
       setTotal(data.count ?? rows.length);
@@ -90,25 +129,115 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
     }
   }, [pageSize]);
 
-  useEffect(() => { load(page, search); }, [load, page]);
+  // مصدر تحميل واحد: يتفاعل مع البحث (debounced) + فلتر الحالة + الترتيب + الصفحة.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      load({ page, search, status: statusFilter, ordering: orderingParam });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [load, page, search, statusFilter, orderingParam]);
 
-  const filtered = products.filter((p) => {
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return (
-      p.sku.toLowerCase().includes(s) ||
-      (p.name_ar || "").toLowerCase().includes(s) ||
-      (p.name_en || "").toLowerCase().includes(s)
-    );
-  });
+  // إعادة تحميل يدوي (زر التحديث / بعد الحفظ) يحافظ على الفلاتر الحالية.
+  const reload = useCallback(() => {
+    load({ page, search, status: statusFilter, ordering: orderingParam });
+  }, [load, page, search, statusFilter, orderingParam]);
+
+  // تصدير PDF للطباعة بخيارات: الكل / ما نفذ / المنخفضة — يجلب كل الصفحات المطابقة
+  // (لا الصفحة الحالية فقط) ثم يفتح نافذة طباعة بنفس نمط تقرير أرصدة المخزون (DRY).
+  const exportProducts = useCallback(async (status: StockStatus) => {
+    setExportMenuOpen(false);
+    setExporting(true);
+    try {
+      const all: SqlProduct[] = [];
+      let pg = 1;
+      for (;;) {
+        const params: Record<string, string | number> = { page: pg, page_size: 200 };
+        if (status) params.stock_status = status;
+        const data = await inventoryApi.getProducts(params);
+        const rows = (Array.isArray(data) ? data : (data.results ?? [])) as SqlProduct[];
+        all.push(...rows);
+        const count = (Array.isArray(data) ? rows.length : (data.count ?? all.length)) as number;
+        if (rows.length === 0 || all.length >= count) break;
+        pg++;
+      }
+      if (all.length === 0) { setErr("لا توجد أصناف للتصدير بهذا الخيار."); return; }
+
+      const printWindow = window.open("", "_blank");
+      if (!printWindow) { setErr("الرجاء السماح بالنوافذ المنبثقة (Pop-ups) للطباعة"); return; }
+
+      const today = new Date().toISOString().slice(0, 10);
+      const subset = status ? `الأصناف: ${STATUS_LABEL[status]}` : "كل الأصناف";
+      const esc = (v: unknown) => String(v ?? "—")
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      const rowsHtml = all.map((p) => {
+        const name = esc(p.name_ar || p.name_en || p.sku);
+        const qty = Number(p.quantity_on_hand);
+        const avgCost = Number(p.avg_cost).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const cls = p.stock_status === "out_of_stock" ? "danger" : p.stock_status === "low_stock" ? "warn" : "";
+        return `
+          <tr>
+            <td class="num" style="direction: ltr">${esc(p.sku)}</td>
+            <td>${name}</td>
+            <td>${esc(p.category_name || "—")}</td>
+            <td class="num ${cls}" style="direction: ltr">${qty}</td>
+            <td class="num" style="direction: ltr">${avgCost}</td>
+            <td class="num" style="direction: ltr">${p.min_stock_level ?? "—"}</td>
+            <td class="${cls}">${STATUS_LABEL[p.stock_status]}</td>
+          </tr>`;
+      }).join("");
+
+      const html = `
+        <html dir="rtl" lang="ar">
+          <head>
+            <title>تقرير الأصناف - ${today}</title>
+            <style>
+              body { font-family: system-ui, -apple-system, sans-serif; padding: 20px; color: #111827; }
+              h2 { text-align: center; color: #1857a4; margin-bottom: 5px; }
+              .subtitle { text-align: center; color: #6b7280; margin-bottom: 20px; font-size: 14px; }
+              table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+              th, td { border: 1px solid #e5e7eb; padding: 10px 12px; text-align: right; }
+              th { background-color: #f9fafb; color: #374151; font-weight: 600; }
+              tr:nth-child(even) { background-color: #fcfcfd; }
+              .num { text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+              .danger { color: #dc2626; font-weight: bold; }
+              .warn { color: #b8800a; font-weight: bold; }
+              @media print { body { padding: 0; } @page { margin: 1.5cm; } }
+            </style>
+          </head>
+          <body>
+            <h2>تقرير الأصناف</h2>
+            <div class="subtitle">${subset} · العدد: ${all.length} · التاريخ: ${today}</div>
+            <table>
+              <thead>
+                <tr>
+                  <th>رقم الصنف</th><th>اسم الصنف</th><th>التصنيف</th>
+                  <th>الكمية</th><th>متوسط التكلفة</th><th>الحد الأدنى</th><th>الحالة</th>
+                </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+            <script>window.onload = () => { window.print(); };</script>
+          </body>
+        </html>`;
+
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+      clientLogger.info("items.export_pdf", { status: status || "all", count: all.length });
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "تعذّر التصدير");
+    } finally {
+      setExporting(false);
+    }
+  }, []);
 
   const columns: DenseColumn<SqlProduct>[] = [
-    { key: "sku", header: "رقم الصنف", width: "110px", render: (p) => (
+    { key: "sku", header: "رقم الصنف", width: "110px", sortable: true, render: (p) => (
         <b title={p.sku} style={{ display: "inline-block", maxWidth: "90px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "bottom" }}>
           {p.sku}
         </b>
     ) },
-    { key: "name_ar", header: "اسم الصنف", render: (p) => (
+    { key: "name_ar", header: "اسم الصنف", sortable: true, render: (p) => (
       // FEAT-3: اسم الصنف يفتح بطاقة الصنف (الفواتير المرتبطة + دفتر الحركة).
       <button
         type="button"
@@ -120,16 +249,16 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       </button>
     ) },
     { key: "cat", header: "التصنيف", width: "140px", render: (p) => <>{p.category_name || "—"}</> },
-    { key: "qty", header: "الكمية", width: "80px", align: "center", numeric: true,
+    { key: "qty", header: "الكمية", width: "80px", align: "center", numeric: true, sortable: true,
       render: (p) => {
         const qty = Number(p.quantity_on_hand);
         const low = qty <= 0;
         return <span style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{fmt(qty)}</span>;
       }
     },
-    { key: "avg_cost", header: "متوسط التكلفة", width: "110px", align: "center", numeric: true,
+    { key: "avg_cost", header: "متوسط التكلفة", width: "110px", align: "center", numeric: true, sortable: true,
       render: (p) => <>{fmt(p.avg_cost)}</> },
-    { key: "min", header: "الحد الأدنى", width: "90px", align: "center",
+    { key: "min", header: "الحد الأدنى", width: "90px", align: "center", sortable: true,
       render: (p) => <>{p.min_stock_level ?? "—"}</> },
     { key: "status", header: "الحالة", width: "80px", align: "center",
       render: (p) => {
@@ -153,7 +282,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       <ItemFormAseel
         productId={editId}
         products={products}
-        onSaved={() => { load(); setView("list"); setEditId(null); }}
+        onSaved={() => { reload(); setView("list"); setEditId(null); }}
         onCancel={() => { setView("list"); setEditId(null); }}
       />
     );
@@ -219,8 +348,36 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         <div style={{ flex: 1 }} />
         <input className="aseel-input" style={{ width: 200 }}
           placeholder="بحث SKU / الاسم…"
-          value={search} onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { setPage(1); load(1, search); } }} />
+          value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+        {/* فلتر حالة المخزون: الكل / نفذ / منخفض / متوفر (خادمي) */}
+        <select className="aseel-input" style={{ width: 130 }}
+          value={statusFilter}
+          onChange={(e) => { setStatusFilter(e.target.value as StockStatus); setPage(1); }}
+          title="فلترة حسب حالة المخزون">
+          <option value="">كل الحالات</option>
+          <option value="out_of_stock">نفذ</option>
+          <option value="low_stock">كمية منخفضة</option>
+          <option value="in_stock">متوفر</option>
+        </select>
+        {/* تصدير بخيارات: الكل / ما نفذ / المنخفضة */}
+        <div style={{ position: "relative" }}>
+          <button className="aseel-toolbtn" disabled={exporting}
+            onClick={() => setExportMenuOpen((o) => !o)} title="تصدير PDF للطباعة">
+            <Printer className="h-4 w-4" /> {exporting ? "جارٍ التحضير…" : "تصدير PDF"}
+          </button>
+          {exportMenuOpen && (
+            <div role="menu"
+              style={{
+                position: "absolute", insetInlineStart: 0, top: "calc(100% + 4px)", zIndex: 10,
+                background: "var(--aseel-surface, #fff)", border: "1px solid var(--aseel-border)",
+                borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,.12)", minWidth: 170,
+              }}>
+              <button className="aseel-menu-item" style={exportItemStyle} onClick={() => exportProducts("")}>تصدير الكل</button>
+              <button className="aseel-menu-item" style={exportItemStyle} onClick={() => exportProducts("out_of_stock")}>الأصناف التي نفذت</button>
+              <button className="aseel-menu-item" style={exportItemStyle} onClick={() => exportProducts("low_stock")}>الكمية المنخفضة</button>
+            </div>
+          )}
+        </div>
         {/* T-N3: مبدّل عرض الشجرة/الجدول */}
         <button
           className="aseel-toolbtn"
@@ -230,7 +387,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           {displayMode === "tree" ? <Table2 className="h-4 w-4" /> : <ListTree className="h-4 w-4" />}
           {displayMode === "tree" ? " جدول" : " شجرة"}
         </button>
-        <button className="aseel-toolbtn" onClick={() => { setPage(1); load(1, search); }} title="تحديث">
+        <button className="aseel-toolbtn" onClick={() => reload()} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
         <button className="aseel-toolbtn" onClick={() => { setEditId(null); setView("form"); }} title="إضافة صنف (Ctrl+Ins)">
@@ -253,7 +410,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
             })) as Item[]}
             onShowCard={(it) => openInNewTab(`/products/${it.id}`)}
             onPickItem={(it) => { setEditId(Number(it.id)); setView("form"); }}
-            onItemCreated={() => load(page, search)}
+            onItemCreated={() => reload()}
           />
         </div>
       ) : (
@@ -264,6 +421,9 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           loading={loading}
           emptyHint="لا توجد أصناف"
           onRowDoubleClick={(p) => { setEditId(p.id); setView("form"); }}
+          sortKey={sortKey}
+          sortDir={sortDir}
+          onSort={(key, dir) => { setSortKey(key); setSortDir(dir); setPage(1); }}
           pagination={total > pageSize ? {
             page, pageSize, total,
             onChange: (p) => setPage(p)
