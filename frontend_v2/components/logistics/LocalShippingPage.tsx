@@ -23,6 +23,7 @@ import {
 } from "@/services/localShippingApi";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { useAseelIndexKeymap } from "../aseel/useAseelIndexKeymap";
+import { openInNewTab } from "@/utils/openInNewTab";
 
 const STATUS_LABEL: Record<LocalShipmentStatus, string> = {
   pending:    "قيد الانتظار",
@@ -237,7 +238,7 @@ export const LocalShippingPage: React.FC = () => {
               <button
                 className="aseel-toolbtn"
                 style={{ padding: "2px 4px" }}
-                onClick={() => navigate(`/import-flow/${r.shipment}?tab=local`)}
+                onClick={() => openInNewTab(`/import-flow/${r.shipment}?tab=local`)}
                 title="تعديل"
               >
                 <Pencil style={{ width: 13, height: 13 }} />
@@ -266,7 +267,7 @@ export const LocalShippingPage: React.FC = () => {
             <button
               className="aseel-toolbtn"
               style={{ padding: "2px 4px" }}
-              onClick={() => navigate(`/import-flow/${r.shipment}?tab=local`)}
+              onClick={() => openInNewTab(`/import-flow/${r.shipment}?tab=local`)}
               title="نقل إلى فاتورة مشتريات"
             >
               <LinkIcon style={{ width: 13, height: 13 }} />
@@ -289,7 +290,7 @@ export const LocalShippingPage: React.FC = () => {
 
   useAseelIndexKeymap(
     {
-      CtrlIns: () => navigate("/import-flow/new?tab=local"),
+      CtrlIns: () => openInNewTab("/import-flow/new?tab=local"),
       F6: () => searchInputRef.current?.focus(),
       F5: () => void load(),
       Escape: () => { setSearch(""); setStatusFilter("all"); },
@@ -337,7 +338,7 @@ export const LocalShippingPage: React.FC = () => {
         </button>
         <button
           className="aseel-toolbtn"
-          onClick={() => navigate("/import-flow/new?tab=local")}
+          onClick={() => openInNewTab("/import-flow/new?tab=local")}
           title="شحنة محلية جديدة (Ctrl+Ins)"
         >
           <Plus style={{ width: 14, height: 14 }} /> شحنة محلية جديدة
@@ -363,7 +364,7 @@ export const LocalShippingPage: React.FC = () => {
         getRowKey={(r) => r.id}
         loading={loading}
         emptyHint="لا توجد شحنات محلية بعد — اضغط «شحنة محلية جديدة»"
-        onRowClick={(row) => navigate(`/import-flow/${row.shipment}?tab=local`)}
+        onRowClick={(row) => openInNewTab(`/import-flow/${row.shipment}?tab=local`)}
         footer={
           filteredRows.length > 0 ? (
             <span style={{ fontFamily: "monospace", fontSize: "var(--aseel-fs-sm)" }}>

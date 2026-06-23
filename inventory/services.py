@@ -213,6 +213,103 @@ def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:
     return count
 
 
+# أنواع حركات تُورِّد المخزون (يُبنى عليها لاحقاً) مقابل التي تستهلكه.
+_SUPPLY_MOVEMENTS = ("IN", "ADJUST_IN", "RETURN_IN")
+_CONSUME_MOVEMENTS = ("OUT", "ADJUST_OUT", "RETURN_OUT")
+
+# تسميات عربية لأنواع مراجع الحركات (لرسالة الاعتمادية عند منع التراجع).
+_REFERENCE_LABELS = {
+    "SALE": "فاتورة بيع",
+    "STOCK_ISSUE": "إذن صرف",
+    "PURCHASE_INVOICE": "فاتورة شراء",
+    "SHIPMENT": "شحنة",
+    "DEAL": "صفقة",
+    "CLEARANCE": "تخليص جمركي",
+    "WAREHOUSE_TRANSFER": "تحويل مستودعي",
+    "STOCKTAKE": "جرد",
+    "MANUAL": "حركة يدوية",
+}
+
+
+def _dependent_label(reference_type, reference_id, tenant_id) -> str:
+    """تسمية مقروءة للمستند المعتمِد — رقم الفاتورة للبيع/الصرف وإلا «النوع #المعرّف»."""
+    noun = _REFERENCE_LABELS.get(reference_type, reference_type)
+    number = None
+    try:
+        if reference_type in ("SALE", "STOCK_ISSUE"):
+            from sales.models import SalesInvoice
+            inv = (
+                SalesInvoice.objects.filter(tenant_id=tenant_id, id=reference_id)
+                .only("invoice_number")
+                .first()
+            )
+            if inv:
+                number = inv.invoice_number
+    except Exception:  # noqa: BLE001 — التسمية تجميلية، لا تُفشل الحارس
+        number = None
+    return f"{noun} {number}" if number else f"{noun} #{reference_id}"
+
+
+def find_stock_dependents(*, tenant_id, reference_id, reference_types) -> list[dict]:
+    """ابحث عن المستندات اللاحقة المعتمِدة على المخزون/التكلفة الذي وفّره مستند.
+
+    عند التراجع عن ترحيل مستند **مُورِّد للمخزون** (شراء/استلام/تسوية إضافة)، فإن
+    أي حركة **صرف/بيع لاحقة** على نفس الأصناف تكون قد استهلكت رصيده وبُنيت تكلفتها
+    (COGS) على متوسط التكلفة المتضمِّن هذا المستند. حذف المستند يُيتّم تلك الحركات
+    وقيودها (تكلفة المبيعات…). تُرجع قائمة المستندات المعتمِدة (نوع/رقم/أصناف)
+    لمنع الحذف. قائمة فارغة ⇒ لا اعتمادية (يجوز التراجع).
+
+    مستند **مستهلِك** (بيع/صرف) لا تابعين له — التراجع عنه يحرّر مخزوناً فقط.
+    """
+    if not reference_types:
+        return []
+    own = list(
+        StockMovement.objects.filter(
+            tenant_id=tenant_id,
+            reference_id=reference_id,
+            reference_type__in=list(reference_types),
+        ).only("id", "product_id", "movement_type")
+    )
+    if not own:
+        return []
+    supply_products = {m.product_id for m in own if m.movement_type in _SUPPLY_MOVEMENTS}
+    if not supply_products:
+        return []
+    anchor_id = min(m.id for m in own)
+    dependents = (
+        StockMovement.objects.filter(
+            tenant_id=tenant_id,
+            product_id__in=supply_products,
+            movement_type__in=_CONSUME_MOVEMENTS,
+            id__gt=anchor_id,
+        )
+        .exclude(reference_type__in=list(reference_types), reference_id=reference_id)
+        .select_related("product")
+        .order_by("id")
+    )
+    grouped: dict[tuple, dict] = {}
+    for m in dependents:
+        key = (m.reference_type, m.reference_id)
+        entry = grouped.setdefault(key, {
+            "reference_type": m.reference_type,
+            "reference_id": m.reference_id,
+            "label": _dependent_label(m.reference_type, m.reference_id, tenant_id),
+            "products": set(),
+        })
+        p = m.product
+        entry["products"].add(p.name_ar or p.name_en or p.sku or f"#{m.product_id}")
+    result = []
+    for entry in grouped.values():
+        entry["products"] = sorted(entry["products"])
+        result.append(entry)
+    if result:
+        logger.info(
+            "find_stock_dependents: ref=%s types=%s -> %d dependent document(s)",
+            reference_id, list(reference_types), len(result),
+        )
+    return result
+
+
 def receive_shipment_stock(shipment, movement_date=None):
     """
     Create IN movements for all deal items in a cleared shipment.

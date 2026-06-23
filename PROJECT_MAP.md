@@ -71,6 +71,57 @@ frontend_v2/
 └── constants/                 # App constants
 ```
 
+## [AUDIT — task25, 2026-06-23] (حارس اعتمادية التراجع عن الترحيل — منع إيتام القيود المبنية)
+
+**المطلوب:** عند التراجع عن ترحيل مستند مُورِّد للمخزون (فاتورة شراء/شحنة/استلام)،
+إن كانت مبيعات أو حركات صرف لاحقة قد استهلكت مخزونه وبَنَت تكلفتها (COGS) على
+متوسط التكلفة المتضمِّن هذا المستند — **يُمنع التراجع** (لئلا تبقى قيود تكلفة
+المبيعات يتيمة) مع **رسالة بقائمة المستندات المتأثّرة**.
+
+- **الكشف (Core، DRY):** `inventory/services.py::find_stock_dependents(tenant_id,
+  reference_id, reference_types)` — يحدّد أصناف المستند ذات الأثر المُورِّد (IN/
+  ADJUST_IN/RETURN_IN)؛ مستند مستهلِك بحت (بيع/صرف) ⇒ لا تابعين. ثم يجمع حركات
+  الصرف اللاحقة (OUT/ADJUST_OUT/RETURN_OUT، `id__gt` لأول حركة للمستند) على نفس
+  الأصناف من مراجع أخرى، مجمّعةً حسب (reference_type, reference_id) مع تسمية
+  مقروءة (`_dependent_label` يحلّ رقم فاتورة البيع للـ SALE/STOCK_ISSUE).
+  - WAC-صحيح: كل المشتريات تذوب في متوسط واحد، فأي صرف لاحق يعتمد على هذا الرصيد.
+- **الحارس (مركزي):** `accounting/services.py::unpost_document` — في بداية المعاملة
+  الذرّية، إن وُجد `stock_reference_types` واكتُشف تابعون ⇒ `ValidationError` (إجهاض
+  كامل، لا حذف) برسالة «… المتأثّرة: فاتورة بيع SI-… (الأصناف: …)؛ …». لا bypass
+  (بطلب المالك). مستندات الاستهلاك (فاتورة بيع) تتراجع بحرّية كما كانت.
+- **الرسالة النظيفة:** مُعالِجا التراجع للموردّين (فاتورة الشراء + الشحنة في
+  `logistics/views.py`) يعرضان `e.messages` بدل `str(e)` (يتفادى تغليف `['…']`).
+- **التحقق:** **accounting+logistics 97/97** + اختبارا TDD جديدان
+  (`test_unpost_document`): منع تراجع شراء استهلكه بيع لاحق + سلامة الإجهاض،
+  والسماح بالتراجع عن المستهلِك. inventory/sales-stock 35/35 (لا انحدار) ·
+  `manage.py check` 0.
+
+## [AUDIT — task24, 2026-06-23] (السعر المقترح داخل خيارات منتقي الأصناف — بلا نقر)
+
+**المطلوب:** في منتقي الأصناف لفاتورتي المبيعات والمشتريات يظهر السعر المقترح
+(آخر بيع/شراء أو عرض سعر أو الافتراضي) **داخل كل خيار مباشرة** مع تسمية مصدره،
+دون الحاجة لنقر الصنف.
+
+- **الطبقة المشتركة (DRY):** `frontend_v2/components/aseel/AseelAutocomplete.tsx` —
+  حقلان اختياريان على الخيار `price`/`priceLabel` يُرسمان كرقاقة سعر خضراء في
+  الصف (CSS `.aseel-autocomplete-price[-src]` في `styles/index.css`). موضع واحد
+  يخدم الشاشتين.
+- **المبيعات:** `SalesInvoiceEditor` يجلب `getCustomerPriceList(customer)` دفعة
+  واحدة عند تغيّر العميل → خريطة `customerPriceMap` تغذّي `productOptions`:
+  «آخر بيع»/«عرض سعر» للعميل، وإلا سعر البيع الافتراضي (`online_price`) بوسم
+  «افتراضي»، وإلا نص رمادي **«السعر غير معرف»** (بطلب المالك — لا فراغ). (يُعاد
+  الاستخدام من DEF-004، لا endpoint جديد.)
+- **المشتريات:** endpoint جديد **bulk** يتفادى نداء resolve-price لكل صف:
+  `core.pricing::purchase_price_list(tenant_id, strategy)` (آخر/أقل شراء حسب
+  إعدادات الشراء ← متوسط التكلفة) + action `GET logistics/purchase-invoices/price-list/`
+  + عميل `purchaseInvoiceApi.priceList()`. `InvoiceForm` يجلبها مرة → `purchasePriceMap`
+  يغذّي `itemOptions` («آخر شراء»/«أقل شراء»/«متوسط التكلفة»، وإلا «السعر غير معرف»).
+  - **معاينة أحادية العملة:** الرقاقة تعرض سعر سطر المصدر كما سُجِّل؛ تحويل العملة
+    لكل سطر يبقى في `resolve_purchase_price` عند الاختيار الفعلي.
+- **التحقق:** **logistics 11/11** (+3: bulk last/lowest، تجاهل المسودّات، endpoint) ·
+  sales pricing 12/12 (لا انحدار) · `manage.py check` 0 · tsc نظيف · بناء الإنتاج ناجح.
+  (الشاشتان خلف الدخول — لا تحقّق بصري.)
+
 ## [AUDIT — task23, 2026-06-21] (واجهة «تكلفة المنتجات» + تنبيه أثر السعر + إصلاح متوسط التكلفة)
 
 **السبب الجذري (مؤكَّد):** متوسط التكلفة المعروض في بطاقة الصنف كان = إجمالي قيمة
@@ -726,7 +777,7 @@ dealsService · ProductCard (≈22 ملف يستخدم toFixed(2)/toLocaleString
 - **M1:** `MANUAL_WF_STAGES` + توسيع `VALID_TRANSITIONS` (حر بين الثلاث اليدوية، sw_wait_intl_ship→sw_wait_arrival يبقى) · حارس Cancelled في `_sync_legacy_status_fields` · إشارة `release_deal_on_purchase_invoice` (PI مرتبطة بصفقة → sw_released + مزامنة الكاش) · DealForm: حالة completed «مكتملة — مفرج عنها».
 - **M2:** add_deal/remove_deal يستدعيان `redistribute_shipment_deal_allocations` + `tenant=shipment.tenant` في جلب الصفقة · زر «⟳ إعادة توزيع الحصص» في تبويب الصفقات (ImportDocumentScreen).
 - **M3:** زر التحويل → `/purchase-invoices?import_shipment=N` → المودال يفتح مسبق الاختيار (prop `initialShipmentId`) · `converted_from_shipment` يُكتب في `import_invoices_from_clearance` · فلتر `?shipment=` في PurchaseInvoiceViewSet · تبويب النقل المحلي: زر «إلى الفاتورة» (import-to-invoice) عند وجود فاتورة محوّلة + تلميح ترتيب «إلى الفاتورة قبل الترحيل» + عرض «في الفاتورة X» بعد النقل.
-- **M4:** TenantViewSet: update/partial_update مدير فقط، destroy محظور (400) · `GET|POST /tenants/companies/{id}/members/` + `members/change-role/` + `members/remove/` مع حماية آخر مدير · `CompanyManagementModal` (إعادة تسمية + جدول أعضاء + إضافة بدور) من زر «إدارة الشركة» في CompanySwitcher · تسمية دور «مستعرض» أُضيفت.
+- **M4:** TenantViewSet: update/partial_update مدير فقط، destroy محظور (400) · `GET|POST /tenants/companies/{id}/members/` + `members/change-role/` + `members/remove/` مع حماية آخر مدير · `CompanyManagementModal` (إعادة تسمية + جدول أعضاء + إضافة بدور عبر قائمة منسدلة Dropdown تسحب جميع مستخدمي النظام من `/hr/users/` بدلاً من كتابة الإيميل يدوياً) من زر «إدارة الشركة» في CompanySwitcher · تسمية دور «مستعرض» أُضيفت.
 - **M5:** `perform_create` للصفقات يولّد/يصحّح `D-####` (يشمل soft-deleted) و`ref_number` صار اختيارياً بالـ serializer · حقل المورد يعرض الاسم (وID في tooltip) · رقم الصفقة الجديد «D-000N (جديدة)» بدل «— جديدة —» · شارة المزامنة «متصل» عند الخمول.
 - **تحقق:** backend **140 tests** (118 سابقة + 22 جديدة: test_deal_workflow_machine 11 + test_company_admin 11) · tsc 0 · vite build OK · eslint 0 errors. لم يُتحقق في متصفح حي (يتطلب باك-إند بيانات) — فحص ما بعد النشر: محدد المراحل على صفقة جديدة، إلغاء صفقة، ربط صفقتين بشحنة (الحصص)، زر التحويل من شاشة الاستيراد، «إدارة الشركة» للمدير ولموظف.
 

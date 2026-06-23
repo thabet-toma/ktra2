@@ -15,6 +15,7 @@ import { InvoiceList } from './invoices/InvoiceList';
 import { ClearanceImportModal, ShipmentImportContext } from './invoices/ClearanceImportModal';
 import { shipmentsService, advanceShipmentRouteAtLeast } from '@/services/shipmentsService';
 import { InvoicePrintView } from './invoices/InvoicePrintView';
+import { openInNewTab } from '@/utils/openInNewTab';
 
 interface PurchaseInvoiceProps {
   currentUser?: User;
@@ -235,16 +236,16 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
 
   // --- Handlers ---
   const handleCreateNew = () => {
-    navigate("/purchase-invoices/new");
+    openInNewTab("/purchase-invoices/new");
   };
 
   /** قائمة الفواتير لا تتضمن البنود — نجلب التفاصيل من الـ API عند الفتح */
   const handleEdit = (invoice: Invoice) => {
-    navigate(`/purchase-invoices/${invoice.id}`);
+    openInNewTab(`/purchase-invoices/${invoice.id}`);
   };
 
   const handleView = (invoice: Invoice) => {
-    navigate(`/purchase-invoices/${invoice.id}?mode=view`);
+    openInNewTab(`/purchase-invoices/${invoice.id}?mode=view`);
   };
 
   const handlePrint = async (invoice: Invoice) => {

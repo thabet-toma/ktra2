@@ -5,6 +5,7 @@ import type { StockMovementDto, SqlProduct } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { Plus, RefreshCw, X, Save, Loader2, Warehouse as WhIcon } from "lucide-react";
 import { invoicePathForReference, productPath } from "../../utils/entityLinks";
+import { openInNewTab } from "@/utils/openInNewTab";
 
 const TYPES: Record<string, string> = {
   IN: "استلام", OUT: "صرف",
@@ -108,7 +109,7 @@ export const StockMovementsPage: React.FC = () => {
           <button
             type="button"
             className="text-blue-700 hover:underline text-right"
-            onClick={() => navigate(productPath())}
+            onClick={() => openInNewTab(productPath())}
             title="فتح الأصناف"
           >
             {m.product_name}
@@ -138,7 +139,7 @@ export const StockMovementsPage: React.FC = () => {
           <button
             type="button"
             className="text-blue-700 hover:underline"
-            onClick={() => navigate(href)}
+            onClick={() => openInNewTab(href)}
             title="فتح الفاتورة المرتبطة"
           >
             {label}{m.reference_id ? ` #${m.reference_id}` : ""}

@@ -12,6 +12,7 @@ import { LoadingSpinner } from '../../LoadingSpinner';
 import { ShipmentDetailView } from './ShipmentDetailView';
 import { AseelDenseTable, type DenseColumn } from '../../aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from '../../aseel/useAseelIndexKeymap';
+import { openInNewTab } from '@/utils/openInNewTab';
 
 interface ShipmentManagementProps {
     currentUser: User;
@@ -102,11 +103,11 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     }), [shipments]);
 
     const handleCreateNew = () => {
-        navigate('/import-flow/new');
+        openInNewTab('/import-flow/new');
     };
 
     const handleEdit = (shipment: Shipment) => {
-        navigate(`/import-flow/${encodeURIComponent(String(shipment.id))}`);
+        openInNewTab(`/import-flow/${encodeURIComponent(String(shipment.id))}`);
     };
 
     const handleDelete = async (shipmentId: string) => {
@@ -205,7 +206,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                     <button
                         className="aseel-toolbtn"
                         style={{ padding: '2px 4px' }}
-                        onClick={(e) => { e.stopPropagation(); handleEdit(s); }}
+                        onClick={(e) => { e.stopPropagation(); openInNewTab(`/import-flow/${s.id}`); }}
                         title="تعديل"
                     >
                         <Edit style={{ width: 13, height: 13 }} />
@@ -224,13 +225,12 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     ];
 
     // N0-T7 — keymap على قائمة الشحنات
-    useAseelIndexKeymap(
-        {
-            CtrlIns: handleCreateNew,
-            F6: () => searchInputRef.current?.focus(),
-            Escape: () => { setSearch(''); setTypeFilter('all'); setStatusFilter('all'); },
-        },
-        { enabled: !viewingShipment },
+    useAseelIndexKeymap({
+        CtrlIns: handleCreateNew,
+        F6: () => searchInputRef.current?.focus(),
+        Escape: () => { setSearch(''); setTypeFilter('all'); setStatusFilter('all'); },
+    },
+    { enabled: !viewingShipment },
     );
 
     if (loading) return <LoadingSpinner />;

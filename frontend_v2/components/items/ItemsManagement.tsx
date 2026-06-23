@@ -14,6 +14,7 @@ import { InvoiceCategoryTree } from "../procurement/invoices/InvoiceCategoryTree
 import type { Item } from "../../types";
 import { StalenessBadge } from "../offline";
 import db from "../../services/offline/db";
+import { openInNewTab } from "@/utils/openInNewTab";
 
 const fmt = (n: number | string) =>
   Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -112,7 +113,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       <button
         type="button"
         className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
-        onClick={(e) => { e.stopPropagation(); navigate(`/products/${p.id}`); }}
+        title="عرض بطاقة الصنف"
+        onClick={(e) => { e.stopPropagation(); openInNewTab(`/products/${p.id}`); }}
       >
         {p.name_ar || p.name_en || "—"}
       </button>
@@ -249,7 +251,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
               name: p.name_ar || p.name_en || p.sku || "",
               categoryId: (p as unknown as { category?: number | string }).category ?? "",
             })) as Item[]}
-            onShowCard={(it) => navigate(`/products/${it.id}`)}
+            onShowCard={(it) => openInNewTab(`/products/${it.id}`)}
             onPickItem={(it) => { setEditId(Number(it.id)); setView("form"); }}
             onItemCreated={() => load(page, search)}
           />

@@ -18,6 +18,10 @@ export interface AseelAutocompleteOption {
   label: string;
   /** سطر ثانوي اختياري (موديل / SKU / رصيد) — هدف مطابقة ثانٍ */
   sub?: string;
+  /** task24: السعر المقترح معروض مباشرة في الخيار (نص منسّق) — بلا نقر. */
+  price?: string;
+  /** task24: تسمية مصدر السعر (آخر بيع/شراء، عرض سعر، افتراضي…). */
+  priceLabel?: string;
 }
 
 export interface AseelAutocompleteProps {
@@ -179,6 +183,18 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
               >
                 <span className="aseel-autocomplete-label">{opt.label}</span>
                 {opt.sub && <span className="aseel-autocomplete-sub">{opt.sub}</span>}
+                {opt.price ? (
+                  <span className="aseel-autocomplete-price" title={opt.priceLabel}>
+                    {opt.price}
+                    {opt.priceLabel && (
+                      <em className="aseel-autocomplete-price-src">{opt.priceLabel}</em>
+                    )}
+                  </span>
+                ) : opt.priceLabel ? (
+                  <span className="aseel-autocomplete-price aseel-autocomplete-price--none">
+                    {opt.priceLabel}
+                  </span>
+                ) : null}
               </button>
               {onInfo && (
                 <button

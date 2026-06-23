@@ -212,6 +212,67 @@ def resolve_purchase_price(
     return _blank(strategy, reason="no_history")
 
 
+def purchase_price_list(*, tenant_id: int, strategy: str | None = None) -> dict[int, dict]:
+    """task24: سعر الشراء المقترح لكل المنتجات دفعة واحدة (لعرضه داخل خيارات
+    منتقي الأصناف في فاتورة الشراء بلا نقر).
+
+    يُرجع {product_id: {"unit_price", "source_type", "source_label"}}. السعر هو
+    سعر سطر المصدر كما سُجِّل (معاينة أحادية العملة) — تحويل العملة لكل سطر يبقى
+    في `resolve_purchase_price` وحده. السلسلة: تاريخ الشراء المرحَّل (حسب
+    الاستراتيجية) ← متوسط تكلفة المنتج ← لا شيء.
+    """
+    from inventory.models import Product
+    from logistics.models import PurchaseInvoiceItem
+
+    strategy = strategy if strategy in PriceStrategy.PURCHASE_CHOICES else PriceStrategy.LAST_PURCHASE
+    qs = (
+        PurchaseInvoiceItem.objects.filter(
+            invoice__tenant_id=tenant_id,
+            invoice__is_posted=True,
+            unit_price__gt=0,
+        )
+        .select_related("invoice")
+        .order_by("product_id", "-invoice__invoice_date", "-invoice_id", "-id")
+    )
+    result: dict[int, dict] = {}
+    if strategy == PriceStrategy.LOWEST_PURCHASE:
+        for item in qs:
+            unit = _dec(item.unit_price)
+            cur = result.get(item.product_id)
+            if cur is None or unit < _dec(cur["unit_price"]):
+                result[item.product_id] = {
+                    "unit_price": str(unit.quantize(_UNIT_Q)),
+                    "source_type": "PURCHASE_INVOICE",
+                    "source_label": "أقل شراء",
+                }
+    else:  # LAST_PURCHASE — أحدث فاتورة شراء مرحَّلة لكل منتج (أول صف في الترتيب)
+        for item in qs:
+            if item.product_id in result:
+                continue
+            result[item.product_id] = {
+                "unit_price": str(_dec(item.unit_price).quantize(_UNIT_Q)),
+                "source_type": "PURCHASE_INVOICE",
+                "source_label": "آخر شراء",
+            }
+
+    # احتياطي: متوسط تكلفة المنتج لمن لا تاريخ شراء له.
+    for p in Product.objects.filter(tenant_id=tenant_id).only("id", "avg_cost"):
+        if p.id in result:
+            continue
+        cost = _dec(p.avg_cost)
+        if cost > 0:
+            result[p.id] = {
+                "unit_price": str(cost.quantize(_UNIT_Q)),
+                "source_type": "PRODUCT_AVG_COST",
+                "source_label": "متوسط التكلفة",
+            }
+    logger.info(
+        "price_list purchase tenant=%s strategy=%s -> %s products",
+        tenant_id, strategy, len(result),
+    )
+    return result
+
+
 def _src_purchase_rate(item) -> Decimal:
     """Source exchange rate for a purchase line: per-line override, else invoice."""
     rate = _dec(getattr(item, "line_exchange_rate", None), _ZERO)

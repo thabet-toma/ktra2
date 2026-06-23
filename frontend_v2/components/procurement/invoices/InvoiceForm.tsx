@@ -1117,14 +1117,43 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     </button>
   );
 
+  /* task24: خريطة سعر الشراء المقترح (آخر/أقل شراء أو متوسط التكلفة) لكامل
+     الكتالوج — تُجلب دفعة واحدة لعرض السعر داخل خيارات المنتقي بلا نقر. */
+  const [purchasePriceMap, setPurchasePriceMap] = useState<
+    Map<number, { price: string; label: string }>
+  >(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    purchaseInvoiceApi
+      .priceList()
+      .then((rows) => {
+        if (cancelled) return;
+        const m = new Map<number, { price: string; label: string }>();
+        for (const r of rows) {
+          if (r.unit_price != null && Number(r.unit_price) > 0) {
+            m.set(r.product_id, { price: r.unit_price, label: r.source_label });
+          }
+        }
+        setPurchasePriceMap(m);
+      })
+      .catch(() => { /* بلا تاريخ شراء — تُعرض الخيارات بلا سعر */ });
+    return () => { cancelled = true; };
+  }, []);
+
   /* task13 M5: منتقي مدمج في خلية اسم الصنف (يحل محل المودال كمسار أساسي) */
   const itemOptions = useMemo(
-    () => allDbItems.map((it) => ({
-      id: it.id,
-      label: it.name,
-      sub: it.modelNumber || it.categoryName || "",
-    })),
-    [allDbItems],
+    () => allDbItems.map((it) => {
+      const pp = purchasePriceMap.get(Number(it.id));
+      return {
+        id: it.id,
+        label: it.name,
+        sub: it.modelNumber || it.categoryName || "",
+        price: pp ? formatMoney(Number(pp.price)) : undefined,
+        // لا آخر/أقل شراء ولا متوسط تكلفة → نص «السعر غير معرف» بدل الفراغ.
+        priceLabel: pp ? pp.label : "السعر غير معرف",
+      };
+    }),
+    [allDbItems, purchasePriceMap],
   );
 
   const renderItemNameCell = (row: InvoiceItem, rowIndex: number) => {

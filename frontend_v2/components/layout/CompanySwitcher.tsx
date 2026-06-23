@@ -138,8 +138,8 @@ export const CompanySwitcher: React.FC = () => {
         <CompanyManagementModal
           isOpen={showManageModal}
           onClose={() => setShowManageModal(false)}
-          tenant={currentCompany}
-          myRole={companies.find((m) => m.tenant.TenantID === currentCompany.TenantID)?.role || "staff"}
+          memberships={companies}
+          initialTenantId={currentCompany.TenantID}
           onChanged={refreshCompanies}
         />
       )}

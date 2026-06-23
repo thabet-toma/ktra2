@@ -10,10 +10,18 @@
  */
 export function openInNewTab(url: string): boolean {
   if (!url) return false;
-  const win = window.open(url, "_blank", "noopener,noreferrer");
-  if (win) {
-    win.opener = null;
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
     return true;
+  } catch (e) {
+    console.error("Failed to open tab via anchor", e);
+    return false;
   }
-  return false;
 }
+

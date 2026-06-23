@@ -8,7 +8,7 @@ from .auth_api import (
     resend_view,
     change_password_view,
 )
-from .user_api import user_detail
+from .user_api import user_detail, list_users
 
 router = DefaultRouter()
 router.register(r'tasks', TaskViewSet)
@@ -21,6 +21,7 @@ urlpatterns = [
     path('auth/signup/', signup_view),
     path('auth/resend-verification/', resend_view),
     path('auth/change-password/', change_password_view),
-    path('users/<int:pk>/', user_detail),
+    path('users/', list_users),
+    path('users/<str:pk>/', user_detail),
     path('', include(router.urls)),
 ]

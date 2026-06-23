@@ -574,11 +574,34 @@ def unpost_document(
 
     Returns: dict فيه عدد القيود وحركات المخزون المحذوفة.
     """
-    from inventory.services import reverse_stock_movements
+    from inventory.services import find_stock_dependents, reverse_stock_movements
 
     journal_reference_types = list(journal_reference_types)
     primary_ref_type = journal_reference_types[0] if journal_reference_types else None
     with transaction.atomic():
+        # حارس الاعتمادية: امنع التراجع إن بُنيت عليه مستندات لاحقة (بيع/صرف
+        # استهلكت مخزونه وتكلفته)، فحذفه يُيتّم قيود تكلفة المبيعات المبنية عليه.
+        # رسالة بقائمة المستندات المتأثّرة كي يتراجع عنها المستخدم أولاً.
+        if stock_reference_types:
+            dependents = find_stock_dependents(
+                tenant_id=tenant_id,
+                reference_id=reference_id,
+                reference_types=stock_reference_types,
+            )
+            if dependents:
+                listing = "؛ ".join(
+                    f"{d['label']} (الأصناف: {'، '.join(d['products'])})"
+                    for d in dependents
+                )
+                logger.warning(
+                    "unpost_document blocked: %s ref=%s has %d dependent document(s)",
+                    document_label or journal_reference_types, reference_id, len(dependents),
+                )
+                raise ValidationError(
+                    f"تعذّر التراجع عن ترحيل {document_label or 'هذا المستند'}: "
+                    f"توجد مستندات لاحقة بُنيت عليه (استهلكت مخزونه/تكلفته). "
+                    f"تراجع عن ترحيلها أولاً ثم أعد المحاولة — المتأثّرة: {listing}"
+                )
         headers = list(
             JournalHeader.objects.select_for_update().filter(
                 tenant_id=tenant_id,

@@ -289,7 +289,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       key: "new",
       label: "فاتورة جديدة",
       icon: <Plus />,
-      onClick: onCreateNew ?? (() => navigate("/purchase-invoices/new")),
+      onClick: onCreateNew ?? (() => openInNewTab("/purchase-invoices/new")),
     },
     ...(onImport
       ? [{ key: "import", label: "استيراد من تخليص جمركي", icon: <ScrollText />, onClick: onImport, separatorBefore: true } as AseelToolbarAction]

@@ -28,3 +28,25 @@ def user_detail(request, pk):
         return JsonResponse({"detail": "Not found"}, status=404)
     # دائماً نفس منطق login: دمج auth_django + المرآة (الدوار، الموافقة، إلخ)
     return JsonResponse(_user_payload(user))
+
+@csrf_exempt
+def list_users(request):
+    if request.method != "GET":
+        return JsonResponse({"detail": "Method not allowed"}, status=405)
+    auth = request.headers.get("Authorization", "").replace("Token ", "").strip()
+    token = Token.objects.filter(key=auth).select_related("user").first()
+    if not token:
+        return JsonResponse({"detail": "Unauthorized"}, status=401)
+    
+    users = User.objects.filter(is_active=True).values("id", "username", "email", "first_name", "last_name")
+    
+    result = []
+    for u in users:
+        full_name = f"{u['first_name']} {u['last_name']}".strip()
+        result.append({
+            "id": u["id"],
+            "username": u["username"],
+            "email": u["email"],
+            "full_name": full_name or u["username"]
+        })
+    return JsonResponse(result, safe=False)

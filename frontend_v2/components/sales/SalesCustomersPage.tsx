@@ -20,6 +20,7 @@ import {
   type AseelToolbarAction,
   type AseelTab,
 } from "../aseel";
+import { openInNewTab } from "@/utils/openInNewTab";
 
 type PartnerApi = {
   id: number;
@@ -251,7 +252,7 @@ export const SalesCustomersPage: React.FC = () => {
             className="text-xs font-semibold text-blue-700 hover:underline text-right"
             onClick={(e) => {
               e.stopPropagation();
-              navigate(`/partners/${r.id}`);
+              openInNewTab(`/partners/${r.id}`);
             }}
           >
             {r.name}

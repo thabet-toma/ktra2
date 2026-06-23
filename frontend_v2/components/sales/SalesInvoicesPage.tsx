@@ -35,6 +35,7 @@ import {
 import { SalesInvoiceEditor, type PartnerRow, type ProductRow } from "./SalesInvoiceEditor";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { eventBus } from "../../utils/eventBus";
+import { openInNewTab } from "../../utils/openInNewTab";
 import {
   AseelDocumentShell,
   AseelDenseTable,
@@ -243,11 +244,11 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   // (/sales/invoices/:id) لهما مساران مستقلان — الـ URL هو مصدر الحقيقة لفتح
   // المحرر. فتح/إغلاق المحرر يتم عبر التنقّل، وتأثير المزامنة أدناه يضبط الحالة.
   const openNew = () => {
-    navigate("/sales/invoices/new");
+    openInNewTab("/sales/invoices/new");
   };
 
   const openEdit = (id: number) => {
-    navigate(`/sales/invoices/${id}`);
+    openInNewTab(`/sales/invoices/${id}`);
   };
 
   const closeEditor = () => {

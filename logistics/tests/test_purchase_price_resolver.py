@@ -10,7 +10,7 @@ import pytest
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
-from core.pricing import PriceStrategy, resolve_purchase_price
+from core.pricing import PriceStrategy, purchase_price_list, resolve_purchase_price
 from inventory.models import Product
 from logistics.models import (
     PurchaseInvoice,
@@ -134,6 +134,33 @@ def test_get_or_create_purchase_settings_default(env):
     assert get_or_create_purchase_settings(tenant).pk == ps.pk
 
 
+def test_price_list_bulk_last_and_lowest(env):
+    # task24: bulk price-list for the dropdown — one product with history, one
+    # with only avg_cost, both returned in a single map.
+    tenant, ils, _usd, sup, product = env
+    _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=100)
+    _posted_pi(tenant, sup, ils, product, number="P-2", date="2026-06-15", price=130)
+    other = Product.objects.create(
+        tenant=tenant, sku="PPR-2", name_ar="صنف٢", quantity_on_hand=0, avg_cost=Decimal("42"))
+
+    last = purchase_price_list(tenant_id=tenant.TenantID, strategy=PriceStrategy.LAST_PURCHASE)
+    assert Decimal(last[product.id]["unit_price"]) == Decimal("130.0000")
+    assert last[product.id]["source_type"] == "PURCHASE_INVOICE"
+    assert Decimal(last[other.id]["unit_price"]) == Decimal("42.0000")
+    assert last[other.id]["source_type"] == "PRODUCT_AVG_COST"
+
+    low = purchase_price_list(tenant_id=tenant.TenantID, strategy=PriceStrategy.LOWEST_PURCHASE)
+    assert Decimal(low[product.id]["unit_price"]) == Decimal("100.0000")
+
+
+def test_price_list_ignores_drafts(env):
+    tenant, ils, _usd, sup, product = env
+    _posted_pi(tenant, sup, ils, product, number="D-1", date="2026-06-20", price=5, posted=False)
+    _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=100)
+    out = purchase_price_list(tenant_id=tenant.TenantID, strategy=PriceStrategy.LOWEST_PURCHASE)
+    assert Decimal(out[product.id]["unit_price"]) == Decimal("100.0000")
+
+
 class PurchasePriceEndpointTest(APITestCase):
     @classmethod
     def setUpTestData(cls):
@@ -174,3 +201,12 @@ class PurchasePriceEndpointTest(APITestCase):
             f"/api/logistics/purchase-invoices/resolve-price/?product={self.product.id}",
             **self._auth())
         assert Decimal(res.json()["unit_price"]) == Decimal("80.0000")
+
+    def test_price_list_endpoint_returns_bulk_map(self):
+        # task24: bulk endpoint feeds the dropdown — default LAST_PURCHASE → 130.
+        res = self.client.get(
+            "/api/logistics/purchase-invoices/price-list/", **self._auth())
+        assert res.status_code == 200, res.content
+        row = next(r for r in res.json() if r["product_id"] == self.product.id)
+        assert Decimal(row["unit_price"]) == Decimal("130.0000")
+        assert row["source_label"] == "آخر شراء"

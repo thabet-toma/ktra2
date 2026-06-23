@@ -12,6 +12,7 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.test import APIClient
 
 from accounting.models import Account, JournalHeader, JournalLine, VoidedJournal
@@ -79,6 +80,62 @@ def test_unpost_deletes_only_scoped_journals(env):
     # القيود الأخرى لم تُمَسّ (نفس reference_id لكن نوع مختلف، وقيد آخر بنفس النوع)
     assert JournalHeader.objects.filter(pk=keep.id).exists()
     assert JournalHeader.objects.filter(pk=other.id).exists()
+
+
+def test_unpost_blocked_when_later_sale_consumed_stock(env):
+    """التراجع عن مستند مُورِّد للمخزون يُمنع إن استهلكت مبيعات لاحقة رصيده/تكلفته،
+    ولا يُحذف شيء (إجهاض ذرّي) — والرسالة تذكر المستند المتأثّر."""
+    tenant, owner, ar, rev, customer, product = env
+    _post_simple_journal(tenant, ar, rev, "PURCHASE_INVOICE", 905)
+    record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("10"),
+        unit_cost=Decimal("5"), reference_type="PURCHASE_INVOICE", reference_id=905,
+        movement_date="2026-06-01", tenant=tenant)
+    # بيع لاحق يستهلك المخزون (حركة OUT مرجعها فاتورة بيع #770)
+    record_stock_movement(
+        product=product, movement_type="OUT", quantity=Decimal("4"),
+        unit_cost=Decimal("5"), reference_type="SALE", reference_id=770,
+        movement_date="2026-06-05", tenant=tenant)
+
+    with pytest.raises(DjangoValidationError) as exc:
+        unpost_document(
+            tenant_id=tenant.TenantID,
+            reference_id=905,
+            journal_reference_types=["PURCHASE_INVOICE"],
+            stock_reference_types=["PURCHASE_INVOICE"],
+            user=owner,
+        )
+    assert "770" in str(exc.value)  # المستند المعتمِد مذكور في الرسالة
+    # لم يُحذف شيء: قيد الشراء وحركته باقيان
+    assert JournalHeader.objects.filter(reference_type="PURCHASE_INVOICE", reference_id=905).exists()
+    assert StockMovement.objects.filter(reference_type="PURCHASE_INVOICE", reference_id=905).exists()
+
+
+def test_unpost_consumer_document_allowed(env):
+    """التراجع عن مستند مستهلِك (فاتورة بيع) مسموح — لا تابعين له — فيُحذف قيده
+    وحركته دون المساس بمخزون الشراء الذي صرف منه."""
+    tenant, owner, ar, rev, customer, product = env
+    record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("10"),
+        unit_cost=Decimal("5"), reference_type="PURCHASE_INVOICE", reference_id=906,
+        movement_date="2026-06-01", tenant=tenant)
+    _post_simple_journal(tenant, ar, rev, "SALES_INVOICE", 780)
+    record_stock_movement(
+        product=product, movement_type="OUT", quantity=Decimal("3"),
+        unit_cost=Decimal("5"), reference_type="SALE", reference_id=780,
+        movement_date="2026-06-06", tenant=tenant)
+
+    unpost_document(
+        tenant_id=tenant.TenantID,
+        reference_id=780,
+        journal_reference_types=["SALES_INVOICE", "SALES_DELIVERY_COGS"],
+        stock_reference_types=["SALE", "STOCK_ISSUE"],
+        user=owner,
+    )
+    assert not JournalHeader.objects.filter(reference_type="SALES_INVOICE", reference_id=780).exists()
+    assert not StockMovement.objects.filter(reference_type="SALE", reference_id=780).exists()
+    # حركة الشراء التي صُرف منها لم تُمَسّ
+    assert StockMovement.objects.filter(reference_type="PURCHASE_INVOICE", reference_id=906).exists()
 
 
 def test_unpost_reverses_stock_via_replay(env):

@@ -260,6 +260,21 @@ export const purchaseInvoiceApi = {
     return res.json();
   },
 
+  /**
+   * task24: سعر الشراء المقترح لكل المنتجات دفعة واحدة — لعرضه داخل خيارات منتقي
+   * الأصناف بلا نقر (يتجنّب نداء resolve-price لكل صف).
+   */
+  priceList: async (): Promise<Array<{
+    product_id: number;
+    unit_price: string | null;
+    source_type: string;
+    source_label: string;
+  }>> => {
+    const res = await safeFetch(`${BASE}/price-list/`, { headers: headers() });
+    await handle(res, "purchasePriceList");
+    return res.json();
+  },
+
   /** FEAT-1: إعدادات الشراء (استراتيجية التسعير + T-A4: الصندوق الافتراضي). */
   getSettings: async (): Promise<{ purchase_default_price_strategy: string; default_cash_account: number | null }> => {
     const res = await safeFetch(`${API_BASE}/logistics/purchase-settings/current/`, {

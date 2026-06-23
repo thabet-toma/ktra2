@@ -5,6 +5,7 @@ import {
   createSalesInvoice,
   duplicateSalesInvoice,
   getCreditPreview,
+  getCustomerPriceList,
   resolveSalePrice,
   postCustomerPayment,
   getNextInvoiceNumber,
@@ -1664,16 +1665,58 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     else if (key === "line_discount") updateLine(row.key, { line_discount: value });
   };
 
+  /* task24: خريطة سعر العميل (آخر بيع/عرض سعر) لكامل الكتالوج — تُجلب دفعة واحدة
+     عند تغيّر العميل لعرض السعر داخل خيارات المنتقي بلا نقر. */
+  const [customerPriceMap, setCustomerPriceMap] = useState<
+    Map<number, { price: string; source: "last_invoice" | "quote" }>
+  >(new Map());
+  useEffect(() => {
+    if (customerId === "" || !networkOnline) { setCustomerPriceMap(new Map()); return; }
+    let cancelled = false;
+    getCustomerPriceList(customerId)
+      .then((rows) => {
+        if (cancelled) return;
+        const m = new Map<number, { price: string; source: "last_invoice" | "quote" }>();
+        for (const r of rows) {
+          if (r.price != null && Number(r.price) > 0) {
+            m.set(r.product_id, { price: r.price, source: r.source });
+          }
+        }
+        setCustomerPriceMap(m);
+      })
+      .catch(() => { if (!cancelled) setCustomerPriceMap(new Map()); });
+    return () => { cancelled = true; };
+  }, [customerId, networkOnline]);
+
   /* task13 M5: منتقي مدمج — الكتابة في الخلية تفلتر الأصناف فورياً وتعبئ
      السطر (المودال الكامل يبقى متاحاً من زر «…» واختصار +). لا خيار «صنف حر»
      هنا لأن سطر فاتورة المبيعات يتطلب صنفاً معرّفاً في المخزون. */
   const productOptions = useMemo(
-    () => products.map((p) => ({
-      id: p.id,
-      label: formatProductPrimaryName(p),
-      sub: `${p.sku || ""} · رصيد ${Number(p.quantity_on_hand) || 0}`,
-    })),
-    [products],
+    () => products.map((p) => {
+      // task24: السعر المقترح يظهر داخل الخيار مباشرة (بلا نقر): آخر بيع/عرض سعر
+      // لهذا العميل من خريطة العميل، وإلا سعر البيع الافتراضي للصنف.
+      const cp = customerPriceMap.get(p.id);
+      let price: string | undefined;
+      let priceLabel: string | undefined;
+      if (cp) {
+        price = formatMoney(Number(cp.price));
+        priceLabel = cp.source === "quote" ? "عرض سعر" : "آخر بيع";
+      } else if (p.online_price != null && p.online_price !== "" && Number(p.online_price) > 0) {
+        price = formatMoney(Number(p.online_price));
+        priceLabel = "افتراضي";
+      } else {
+        // لا آخر بيع لهذا العميل ولا عرض سعر ولا سعر بيع افتراضي.
+        priceLabel = "السعر غير معرف";
+      }
+      return {
+        id: p.id,
+        label: formatProductPrimaryName(p),
+        sub: `${p.sku || ""} · رصيد ${Number(p.quantity_on_hand) || 0}`,
+        price,
+        priceLabel,
+      };
+    }),
+    [products, customerPriceMap],
   );
 
   const renderProductCell = (row: DraftLine) => {

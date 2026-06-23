@@ -10,6 +10,8 @@ import {
   activityService,
 } from "../services/firestoreService";
 import { Filter, UserCheck, Briefcase, Activity } from 'lucide-react'; // استيراد أيقونات الفلاتر
+import { useCompany } from "../contexts/CompanyContext";
+import { apiGetObject } from "../services/restApi";
 
 // إضافة نوع لحالة التوظيف للاستخدام المحلي
 type EmploymentStatus = "probation" | "permanent" | "intern";
@@ -98,6 +100,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   onUpdateUser,
   onDeleteUser,
 }) => {
+  const { currentCompany } = useCompany();
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -111,6 +114,27 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [activityFilter, setActivityFilter] = useState<string>('all');
 
+  const [companyMemberEmails, setCompanyMemberEmails] = useState<Set<string>>(new Set());
+  const [membersLoaded, setMembersLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!currentCompany) {
+      setCompanyMemberEmails(new Set());
+      setMembersLoaded(true);
+      return;
+    }
+    setMembersLoaded(false);
+    apiGetObject<any[]>(`tenants/companies/${currentCompany.TenantID}/members/`)
+      .then((members) => {
+        const emails = new Set(members.map((m) => m.email?.toLowerCase()).filter(Boolean));
+        setCompanyMemberEmails(emails);
+        setMembersLoaded(true);
+      })
+      .catch((e) => {
+        console.error("Failed to fetch company members for user management", e);
+        setMembersLoaded(true);
+      });
+  }, [currentCompany]);
 
   // دالة لتحميل جميع بيانات النشاط للموظفين (لم تتغير)
   const loadAllActivityStatuses = async (): Promise<void> => {
@@ -170,7 +194,17 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   // دالة الفلترة الرئيسية
   const filteredUsers = useMemo(() => {
+    if (!membersLoaded) return []; // تجنب عرض كل المستخدمين أثناء جلب أعضاء الشركة
     return users.filter(user => {
+      // فلتر الشركة: حصر المستخدمين بأعضاء الشركة الحالية
+      if (currentCompany && user.email) {
+        if (!companyMemberEmails.has(user.email.toLowerCase())) {
+          return false;
+        }
+      } else if (currentCompany && !user.email && companyMemberEmails.size > 0) {
+        return false;
+      }
+
       // فلتر الدور
       if (roleFilter !== 'all' && user.role !== roleFilter) {
         return false;

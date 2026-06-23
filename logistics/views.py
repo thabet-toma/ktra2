@@ -1186,7 +1186,8 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                     document_label=f"شحنة {shipment.shipment_number}",
                 )
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            err = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
+            return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'message': 'تم التراجع عن الترحيل وحذف القيد.', 'unpost_result': result})
 
 
@@ -1773,6 +1774,33 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             target_exchange_rate=Decimal(str(rate)) if rate else Decimal('1'),
         )
         return Response(data)
+
+    @action(detail=False, methods=['get'], url_path='price-list')
+    def price_list(self, request):
+        """task24: سعر الشراء المقترح لكل المنتجات دفعة واحدة — يُعرض داخل خيارات
+        منتقي الأصناف في الفاتورة بلا نقر. يفوّض لـ core.pricing (المصدر المشترك).
+        الاستراتيجية من إعدادات الشراء افتراضياً ويمكن تجاوزها بـ ?strategy=.
+        """
+        from core.pricing import purchase_price_list
+        from logistics.services import get_or_create_purchase_settings
+
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'لا يوجد شركة (tenant).'}, status=status.HTTP_400_BAD_REQUEST)
+        strategy = request.query_params.get('strategy') or get_or_create_purchase_settings(
+            tenant
+        ).purchase_default_price_strategy
+        prices = purchase_price_list(tenant_id=tenant.TenantID, strategy=strategy)
+        rows = [
+            {
+                "product_id": pid,
+                "unit_price": d["unit_price"],
+                "source_type": d["source_type"],
+                "source_label": d["source_label"],
+            }
+            for pid, d in prices.items()
+        ]
+        return Response(rows)
 
     @action(detail=True, methods=['post'], url_path='receive')
     def receive(self, request, pk=None):
@@ -2439,7 +2467,9 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                         seen.add(it.product_id)
                         set_avg_cost_from_purchases(it.product)
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            # ValidationError (حارس الاعتمادية مثلاً) يحمل رسالة نظيفة في .messages.
+            err = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
+            return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response({'message': 'تم التراجع عن الترحيل وحذف القيود.', 'unpost_result': result})
 
