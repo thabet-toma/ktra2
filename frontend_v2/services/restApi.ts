@@ -27,35 +27,60 @@ const NETWORK_HINT =
 
 const FETCH_TIMEOUT_MS = 120_000;
 
-async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
-  const signalFromCaller = init?.signal;
+// إعادة المحاولة التلقائية لفشل الاتصال العابر (HTTP/3/QUIC أو لحظة توقّف gunicorn).
+// تُطبَّق فقط على طلبات القراءة الآمنة (GET/HEAD) لتفادي تكرار عمليات الكتابة.
+const MAX_FETCH_ATTEMPTS = 3;
+const RETRY_DELAYS_MS = [400, 1200]; // تأخير قبل المحاولة الثانية ثم الثالثة
+
+function isSafeToRetry(init?: RequestInit): boolean {
+  const method = (init?.method || "GET").toUpperCase();
+  // لا نعيد المحاولة إذا مرّر المتصل signal خاص به (قد يكون للإلغاء)
+  return (method === "GET" || method === "HEAD") && !init?.signal;
+}
+
+function buildSignal(init?: RequestInit): AbortSignal | undefined {
+  if (init?.signal) return init.signal;
   const timeoutFn = (AbortSignal as unknown as { timeout?: (ms: number) => AbortSignal })
     .timeout;
-  const mergedInit: RequestInit = {
-    ...init,
-    signal:
-      signalFromCaller ??
-      (typeof timeoutFn === "function" ? timeoutFn(FETCH_TIMEOUT_MS) : undefined),
-  };
-  try {
-    return await fetch(url, mergedInit);
-  } catch (e) {
-    const name = e instanceof Error ? e.name : "";
-    const domName = e instanceof DOMException ? e.name : "";
-    if (
-      name === "TimeoutError" ||
-      domName === "TimeoutError" ||
-      domName === "AbortError"
-    ) {
-      throw new Error(
-        "انتهت مهلة انتظار الخادم (دقيقتان). تحقق من تشغيل Django والشبكة، ثم أعد المحاولة."
-      );
+  return typeof timeoutFn === "function" ? timeoutFn(FETCH_TIMEOUT_MS) : undefined;
+}
+
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  const canRetry = isSafeToRetry(init);
+  const maxAttempts = canRetry ? MAX_FETCH_ATTEMPTS : 1;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const mergedInit: RequestInit = { ...init, signal: buildSignal(init) };
+    try {
+      return await fetch(url, mergedInit);
+    } catch (e) {
+      const name = e instanceof Error ? e.name : "";
+      const domName = e instanceof DOMException ? e.name : "";
+      const isTimeout =
+        name === "TimeoutError" ||
+        domName === "TimeoutError" ||
+        domName === "AbortError";
+      const isNetwork = name === "TypeError" || String(e).includes("fetch");
+
+      // فشل شبكة عابر على طلب آمن + ما زال في محاولات → انتظر ثم أعد
+      if (canRetry && isNetwork && !isTimeout && attempt < maxAttempts - 1) {
+        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt] ?? 1200));
+        continue;
+      }
+
+      if (isTimeout) {
+        throw new Error(
+          "انتهت مهلة انتظار الخادم (دقيقتان). تحقق من تشغيل Django والشبكة، ثم أعد المحاولة."
+        );
+      }
+      if (isNetwork) {
+        throw new Error(NETWORK_HINT);
+      }
+      throw e;
     }
-    if (name === "TypeError" || String(e).includes("fetch")) {
-      throw new Error(NETWORK_HINT);
-    }
-    throw e;
   }
+  // لا يُفترض الوصول هنا (الحلقة إمّا تُرجع استجابة أو ترمي خطأً)
+  throw new Error(NETWORK_HINT);
 }
 
 function getHeaders(extra?: Record<string, string>, withJsonContentType: boolean = true) {
