@@ -79,7 +79,9 @@ class ReadIsolationTest(APITestCase):
         rows = self._list("/api/accounting/accounts/")
         codes = {r["code"] for r in rows}
         assert {"1", "2", "3", "4", "5", "1101", "2101", "4101"} <= codes
-        # كل الصفوف المعادة تخص الشركة الجديدة فقط — لا تسرب من القديمة
-        assert len(rows) == Account.objects.filter(tenant=self.t_b).count()
+        # قسم «تكاليف الاستيراد» (53*) مخفي ما لم تُفعَّل وحدة الاستيراد للشركة.
+        assert not any(c and c.startswith("53") for c in codes)
+        # كل الصفوف المعادة تخص الشركة الجديدة فقط (بلا قسم الاستيراد) — لا تسرب من القديمة
+        assert len(rows) == Account.objects.filter(tenant=self.t_b).exclude(code__startswith="53").count()
         names = {r["name"] for r in rows}
         assert "مورد قديم" not in names

@@ -29,6 +29,8 @@ export interface StockMovementDto {
   reference_type: string;
   reference_type_display: string;
   reference_id?: number | null;
+  /** مصدر البضاعة: international (استيراد) / local (شراء) / other */
+  origin?: 'international' | 'local' | 'other';
   partner?: number | null;
   partner_name?: string | null;
   movement_date: string;

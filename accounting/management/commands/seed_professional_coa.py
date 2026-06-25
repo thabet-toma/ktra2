@@ -61,6 +61,7 @@ class Command(BaseCommand):
             ('4101', 'مبيعات المنتجات (Product Sales)', 'Revenue', '41'),
             ('4102', 'مبيعات الخدمات (Service Sales)', 'Revenue', '41'),
             ('42', 'إيرادات أخرى (Other Revenue)', 'Revenue', '4'),
+            ('4201', 'فروق صرف محقّقة (Realized FX Gain/Loss)', 'Revenue', '42'),
 
             # Expenses (5)
             ('51', 'تكلفة المبيعات (Cost of Goods Sold)', 'Expense', '5'),

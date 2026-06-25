@@ -72,7 +72,8 @@ class TenantBookSerializer(serializers.ModelSerializer):
 class TenantSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tenant
-        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt"]
+        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt", "import_enabled"]
+        read_only_fields = ["import_enabled"]
 
 
 class UserCompanyMembershipSerializer(serializers.ModelSerializer):
@@ -80,5 +81,5 @@ class UserCompanyMembershipSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = UserCompanyMembership
-        fields = ["id", "tenant", "role", "is_default", "created_at"]
+        fields = ["id", "tenant", "role", "is_default", "created_at", "can_access_import"]
 

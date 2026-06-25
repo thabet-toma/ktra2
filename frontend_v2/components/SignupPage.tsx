@@ -11,11 +11,16 @@ import {
 
 interface SignupPageProps {
   onNavigateToLogin: () => void;
+  /** نوع الحساب: 'trader' تاجر/شركة (نموذج مبسّط بلا سيرة ذاتية)، 'employee' موظف/فريق كترا. */
+  accountType?: 'trader' | 'employee';
 }
 
-export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => {
+export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin, accountType }) => {
+  const acctType: 'trader' | 'employee' = accountType === 'trader' ? 'trader' : 'employee';
+  const isTrader = acctType === 'trader';
   const [formData, setFormData] = useState({
     fullName: '',
+    companyName: '',
     email: '',
     phone: '',
     city: '',
@@ -101,15 +106,14 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
       return;
     }
 
-    if (!resumeFile) {
+    // السيرة الذاتية مطلوبة للموظفين فقط؛ التاجر/الشركة لا يرفعها.
+    if (!isTrader && !resumeFile) {
       setError("يرجى رفع السيرة الذاتية.");
       return;
     }
 
     setIsLoading(true);
     try {
-      const base64Data = await convertFileToBase64(resumeFile);
-
       const fullAddress = `${formData.city} - ${formData.village} - ${formData.street}`;
 
       await signupUser({
@@ -118,13 +122,16 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
         phone: formData.phone,
         address: fullAddress,
         password: formData.password,
-        experienceDescription: formData.experienceDescription,
-        educationLevel: formData.educationLevel,
-        resumeData: {
-          name: resumeFile.name,
-          type: resumeFile.type,
-          url: base64Data
-        }
+        accountType: acctType,
+        ...(isTrader
+          ? { companyName: formData.companyName }
+          : {
+              experienceDescription: formData.experienceDescription,
+              educationLevel: formData.educationLevel,
+              resumeData: resumeFile
+                ? { name: resumeFile.name, type: resumeFile.type, url: await convertFileToBase64(resumeFile) }
+                : undefined,
+            }),
       });
 
       setSuccessMessage("✨ تم إنشاء الحساب بنجاح! يرجى تفعيل بريدك الإلكتروني وانتظار موافقة الإدارة.");
@@ -196,10 +203,12 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
           </div>
 
           <h1 className="mt-2 text-4xl font-bold bg-gradient-to-r from-blue-600 via-[var(--color-primary)] to-blue-600 bg-clip-text text-transparent">
-            انضم إلى فريق K.T.R.A
+            {isTrader ? 'سجّل شركتك في K.T.R.A' : 'انضم إلى فريق K.T.R.A'}
           </h1>
           <p className="mt-3 text-lg text-gray-600 dark:text-gray-400 max-w-2xl text-center">
-            انضم إلى عائلة شركة كترا للتجارة العالمية وأبدأ رحلتك المهنية مع أكثر من 20 عاماً من الخبرة في الاستيراد والتجارة الدولية
+            {isTrader
+              ? 'أنشئ حساب شركتك أو متجرك وابدأ إدارة الاستيراد والفواتير والمخزون والمحاسبة في منصة واحدة.'
+              : 'انضم إلى عائلة شركة كترا للتجارة العالمية وأبدأ رحلتك المهنية مع أكثر من 20 عاماً من الخبرة في الاستيراد والتجارة الدولية'}
           </p>
 
           {/* شارات الشركة */}
@@ -297,6 +306,24 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
                   </div>
                 </div>
 
+                {isTrader && (
+                  <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+                      <Building2 className="w-4 h-4" />
+                      اسم الشركة / المتجر
+                    </label>
+                    <input
+                      required
+                      type="text"
+                      name="companyName"
+                      value={formData.companyName}
+                      onChange={handleChange}
+                      className="w-full px-4 py-3.5 text-gray-900 dark:text-gray-200 bg-gray-50/50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm placeholder-gray-400 dark:placeholder-gray-500 transition duration-300"
+                      placeholder="شركة / متجر ..."
+                    />
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
                     <Phone className="w-4 h-4" />
@@ -357,7 +384,8 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
                 </div>
               </div>
 
-              {/* المعلومات المهنية */}
+              {/* المعلومات المهنية — للموظفين فقط (التاجر/الشركة لا يرفع سيرة ذاتية) */}
+              {!isTrader && (
               <div className="space-y-6 pt-6 border-t border-gray-200 dark:border-gray-700">
                 <div className="flex items-center gap-3 mb-4">
                   <div className="p-2 bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/30 rounded-lg">
@@ -428,6 +456,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
                   />
                 </div>
               </div>
+              )}
 
               {/* كلمة المرور */}
               <div className="space-y-6 pt-6 border-t border-gray-200 dark:border-gray-700">
@@ -547,7 +576,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onNavigateToLogin }) => 
                     </div>
                   ) : (
                     <div className="flex items-center justify-center gap-3">
-                      <span>انضم إلى فريق K.T.R.A</span>
+                      <span>{isTrader ? 'إنشاء حساب الشركة' : 'انضم إلى فريق K.T.R.A'}</span>
                       <Users className="w-5 h-5 group-hover:scale-110 transition-transform" />
                     </div>
                   )}

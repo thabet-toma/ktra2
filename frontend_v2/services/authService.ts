@@ -16,9 +16,12 @@ export const signupUser = async (data: {
     password: string;
     phone: string;
     address: string;
-    experienceDescription: string;
-    educationLevel: string;
-    resumeData: { name: string; type: string; url: string };
+    /** 'trader' = تاجر/شركة، 'employee' = موظف/فريق كترا */
+    accountType?: 'trader' | 'employee';
+    companyName?: string;
+    experienceDescription?: string;
+    educationLevel?: string;
+    resumeData?: { name: string; type: string; url: string };
 }) => {
     const response = await fetch(`${API_URL}/hr/auth/signup/`, {
         method: 'POST',

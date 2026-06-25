@@ -294,6 +294,12 @@ class StockMovementViewSet(viewsets.ModelViewSet):
         rt = params.get('reference_type')
         if rt:
             qs = qs.filter(reference_type=rt)
+        # تقسيم المخزن: مصدر البضاعة محلي (فاتورة شراء) أو دولي (مسار الاستيراد).
+        origin = params.get('origin')
+        if origin == 'international':
+            qs = qs.filter(reference_type__in=StockMovement.IMPORT_REFERENCE_TYPES)
+        elif origin == 'local':
+            qs = qs.filter(reference_type__in=StockMovement.LOCAL_REFERENCE_TYPES)
         df = params.get('date_from')
         if df:
             qs = qs.filter(movement_date__gte=df)

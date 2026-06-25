@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Loader2, Save, Trash2, UserPlus, X } from "lucide-react";
 import { apiGetObject, apiPatchObject, apiPostObject } from "../../services/restApi";
 import type { Tenant, CompanyMembership } from "../../contexts/CompanyContext";
+import { useAuth } from "../../contexts/AuthContext";
+import { useConfirm } from "../../contexts/ConfirmContext";
 
 /** task12 M4 — إدارة الشركة: إعادة التسمية + الأعضاء والأدوار.
  * كانت الشركة بلا أي واجهة تعديل/أعضاء (CompanySwitcher = إنشاء وتبديل فقط). */
@@ -14,6 +16,7 @@ type MemberRow = {
   full_name: string;
   role: string;
   is_default: boolean;
+  can_access_import: boolean;
 };
 
 export const ROLE_LABELS: Record<string, string> = {
@@ -39,6 +42,11 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
   const myRole = activeMembership?.role || "staff";
 
   const isManager = myRole === "manager";
+  const { currentUser } = useAuth();
+  const confirm = useConfirm();
+  const isSuperAdmin = !!currentUser?.isSuperAdmin;
+  const importEnabled = !!tenant?.import_enabled;
+  const showImportCol = isManager && importEnabled;
   const [name, setName] = useState(tenant?.CompanyName || "");
   const [savingName, setSavingName] = useState(false);
   const [members, setMembers] = useState<MemberRow[]>([]);
@@ -141,9 +149,30 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
       }
     });
 
+  const handleToggleCompanyImport = (next: boolean) =>
+    run(async () => {
+      await apiPostObject(`${base}/set-import-enabled/`, { import_enabled: next });
+      await onChanged();
+      await loadMembers();
+    }, next ? "تم تفعيل وحدة الاستيراد لهذه الشركة." : "تم تعطيل وحدة الاستيراد لهذه الشركة.");
+
+  const handleToggleMemberImport = (m: MemberRow, next: boolean) =>
+    run(async () => {
+      setBusyId(m.membership_id);
+      try {
+        await apiPostObject(`${base}/members/set-import-access/`, {
+          membership_id: m.membership_id,
+          can_access_import: next,
+        });
+        await loadMembers();
+      } finally {
+        setBusyId(null);
+      }
+    });
+
   const handleRemove = (m: MemberRow) =>
     run(async () => {
-      if (!window.confirm(`إزالة ${m.username} من «${tenant.CompanyName}»؟`)) return;
+      if (!(await confirm({ title: "إزالة عضو", message: `إزالة ${m.username} من «${tenant.CompanyName}»؟`, confirmText: "إزالة" }))) return;
       setBusyId(m.membership_id);
       try {
         await apiPostObject(`${base}/members/remove/`, { membership_id: m.membership_id });
@@ -206,6 +235,23 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
           </div>
           {!isManager && <p className="text-[11px] opacity-60 mt-1">تعديل الاسم متاح لمدير الشركة فقط.</p>}
         </div>
+
+        {/* وحدة الاستيراد — سوبر أدمن المنصة فقط */}
+        {isSuperAdmin && (
+          <div className="mb-6 p-3 rounded-lg border border-[var(--aseel-border,#ddd)] bg-[var(--aseel-panel,#fafafa)]">
+            <label className="flex items-center gap-2 text-sm font-bold cursor-pointer" style={{ color: "var(--aseel-ink)" }}>
+              <input
+                type="checkbox"
+                checked={importEnabled}
+                onChange={(e) => void handleToggleCompanyImport(e.target.checked)}
+              />
+              تفعيل وحدة الاستيراد لهذه الشركة (سوبر أدمن)
+            </label>
+            <p className="text-[11px] opacity-60 mt-1">
+              عند التعطيل، لا يرى أعضاء الشركة قائمة الاستيراد ولا قسم «تكاليف الاستيراد» في شجرة الحسابات. مدير الشركة يمنح الصلاحية لكل موظف بعد التفعيل.
+            </p>
+          </div>
+        )}
 
         {/* الأعضاء */}
         <div>
@@ -270,6 +316,7 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
                   <th className="px-3 py-2 font-bold">المستخدم</th>
                   <th className="px-3 py-2 font-bold">البريد</th>
                   <th className="px-3 py-2 font-bold w-44">الدور</th>
+                  {showImportCol && <th className="px-3 py-2 font-bold w-20 text-center">استيراد</th>}
                   {isManager && <th className="px-3 py-2 w-12" />}
                 </tr>
               </thead>
@@ -298,6 +345,21 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
                         <span>{ROLE_LABELS[m.role] || m.role}</span>
                       )}
                     </td>
+                    {showImportCol && (
+                      <td className="px-3 py-2 text-center">
+                        {m.role === "manager" ? (
+                          <span className="text-[11px] opacity-60" title="المدير يملك صلاحية الاستيراد ضمناً">ضمناً</span>
+                        ) : (
+                          <input
+                            type="checkbox"
+                            checked={!!m.can_access_import}
+                            disabled={busyId === m.membership_id}
+                            onChange={(e) => void handleToggleMemberImport(m, e.target.checked)}
+                            aria-label={`صلاحية استيراد ${m.username}`}
+                          />
+                        )}
+                      </td>
+                    )}
                     {isManager && (
                       <td className="px-3 py-2 text-center">
                         <button
@@ -314,7 +376,7 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
                   </tr>
                 ))}
                 {members.length === 0 && (
-                  <tr><td colSpan={isManager ? 4 : 3} className="px-3 py-6 text-center opacity-60">لا يوجد أعضاء</td></tr>
+                  <tr><td colSpan={3 + (isManager ? 1 : 0) + (showImportCol ? 1 : 0)} className="px-3 py-6 text-center opacity-60">لا يوجد أعضاء</td></tr>
                 )}
               </tbody>
             </table>

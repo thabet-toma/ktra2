@@ -3,12 +3,13 @@ import { LogoIcon } from './icons/LogoIcon';
 import { PublicNavbar } from './layout/PublicNavbar';
 import {
   Ship, FileText, Warehouse, Calculator, Users, BarChart3,
-  Globe, Shield, ArrowLeft, CheckCircle2, Building2, Boxes,
+  Globe, Shield, ArrowLeft, CheckCircle2, Building2, Boxes, Store, UserCog,
 } from 'lucide-react';
 
 interface LandingPageProps {
   onLogin: () => void;
-  onSignup: () => void;
+  /** نوع التسجيل: 'trader' تاجر/شركة، 'employee' موظف/فريق كترا. */
+  onSignup: (type: 'trader' | 'employee') => void;
   onGoToStore: () => void;
 }
 
@@ -29,6 +30,9 @@ const HIGHLIGHTS = [
 ];
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onSignup }) => {
+  const scrollToPaths = () => {
+    document.getElementById('signup-paths')?.scrollIntoView({ behavior: 'smooth' });
+  };
   return (
     <div dir="rtl" className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-[var(--color-primary)] dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 font-sans relative overflow-hidden">
       <PublicNavbar />
@@ -80,11 +84,57 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onSignup }) =
               <ArrowLeft className="w-5 h-5 group-hover:-translate-x-1 transition-transform" />
             </button>
             <button
-              onClick={onSignup}
+              onClick={scrollToPaths}
               className="w-full sm:w-auto bg-white dark:bg-gray-700 border-2 border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 font-bold py-4 px-8 rounded-xl text-lg hover:bg-gray-50 dark:hover:bg-gray-600 hover:border-gray-300 hover:shadow-lg transition-all duration-300"
             >
               إنشاء حساب جديد
             </button>
+          </div>
+        </section>
+
+        {/* ── مساران للتسجيل: التجار/الشركات و الموظفون/فريق كترا ── */}
+        <section id="signup-paths" className="mt-24 scroll-mt-28">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-100">اختر نوع حسابك</h2>
+            <p className="mt-3 text-gray-600 dark:text-gray-400">واجهتان مختلفتان حسب دورك في المنصة.</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
+            {/* التجار وأصحاب الشركات */}
+            <div className="group p-8 bg-white/90 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-100/70 dark:border-gray-700/60 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
+              <div className="w-14 h-14 rounded-xl bg-gradient-to-tr from-blue-600 to-[var(--color-primary)] flex items-center justify-center mb-5 shadow-md">
+                <Store className="w-7 h-7 text-white" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-2">للتجار وأصحاب الشركات</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-6 flex-1">
+                سجّل شركتك أو متجرك وأدر الاستيراد والتخليص، الفواتير، المخزون والمحاسبة في منصة واحدة.
+              </p>
+              <button
+                onClick={() => onSignup('trader')}
+                className="w-full group/btn bg-gradient-to-r from-blue-600 to-[var(--color-primary)] text-white font-bold py-3.5 px-6 rounded-xl hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2"
+              >
+                <span>للتجار والشركات من هنا</span>
+                <ArrowLeft className="w-5 h-5 group-hover/btn:-translate-x-1 transition-transform" />
+              </button>
+            </div>
+
+            {/* الموظفون ومنظمو فريق كترا */}
+            <div className="group p-8 bg-white/90 dark:bg-gray-800/80 backdrop-blur-sm rounded-2xl shadow-lg border border-gray-100/70 dark:border-gray-700/60 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col">
+              <div className="w-14 h-14 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center mb-5 shadow-md">
+                <UserCog className="w-7 h-7 text-white" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-2">للموظفين ومنظّمي فريق كترا</h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 leading-relaxed mb-6 flex-1">
+                انضم إلى فريق كترا — قدّم سيرتك الذاتية وبياناتك المهنية وابدأ رحلتك المهنية معنا.
+              </p>
+              <button
+                onClick={() => onSignup('employee')}
+                className="w-full group/btn bg-gradient-to-r from-emerald-600 to-teal-500 text-white font-bold py-3.5 px-6 rounded-xl hover:shadow-xl transition-all duration-300 flex items-center justify-center gap-2"
+              >
+                <span>للموظفين والمنظّمين من هنا</span>
+                <ArrowLeft className="w-5 h-5 group-hover/btn:-translate-x-1 transition-transform" />
+              </button>
+            </div>
           </div>
         </section>
 
@@ -140,7 +190,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onSignup }) =
                 <button onClick={onLogin} className="w-full sm:w-auto bg-white text-blue-700 font-bold py-3.5 px-8 rounded-xl hover:bg-blue-50 transition-all duration-300">
                   تسجيل الدخول
                 </button>
-                <button onClick={onSignup} className="w-full sm:w-auto bg-blue-500/30 border border-white/40 text-white font-bold py-3.5 px-8 rounded-xl hover:bg-blue-500/50 transition-all duration-300">
+                <button onClick={scrollToPaths} className="w-full sm:w-auto bg-blue-500/30 border border-white/40 text-white font-bold py-3.5 px-8 rounded-xl hover:bg-blue-500/50 transition-all duration-300">
                   إنشاء حساب جديد
                 </button>
               </div>

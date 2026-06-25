@@ -408,6 +408,51 @@ class CashBoxLedgerAccount(models.Model):
         return f"{self.name} ({self.external_id})"
 
 
+class CashBoxFxLot(models.Model):
+    """طبقة FIFO لصندوق بعملة أجنبية (مثل صندوق الدولار).
+
+    كل إيداع/تحويل ينشئ طبقة بسعر صرفها وقت التمويل. عند الدفع بالعملة الأجنبية
+    تُستهلَك الطبقات بترتيب FIFO (الأقدم أولاً)، والتكلفة بالعملة الأساسية تُحسب
+    بسعر كل طبقة. رصيد حساب الصندوق في الشجرة = القيمة الدفترية بالشيقل
+    (مجموع remaining_fc × rate).
+    """
+
+    SOURCE_CAPITAL = 'capital'
+    SOURCE_TRANSFER = 'transfer_ils'
+    SOURCE_CHOICES = [
+        (SOURCE_CAPITAL, 'إيداع من رأس المال'),
+        (SOURCE_TRANSFER, 'تحويل من صندوق الشيقل'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='CashBoxFxLotID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    cash_box = models.ForeignKey(
+        CashBoxLedgerAccount, on_delete=models.CASCADE,
+        db_column='CashBoxLedgerID', related_name='fx_lots',
+        help_text='صندوق العملة الأجنبية صاحب الطبقة')
+    lot_date = models.DateField(db_column='LotDate')
+    original_fc = models.DecimalField(max_digits=18, decimal_places=4, db_column='OriginalFC',
+        help_text='المبلغ الأصلي بالعملة الأجنبية')
+    remaining_fc = models.DecimalField(max_digits=18, decimal_places=4, db_column='RemainingFC',
+        help_text='المتبقي بالعملة الأجنبية (يُستهلَك FIFO)')
+    rate = models.DecimalField(max_digits=18, decimal_places=6, db_column='Rate',
+        help_text='سعر صرف الطبقة: شيقل لكل وحدة عملة أجنبية')
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, db_column='Source')
+    journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='JournalID', related_name='fx_lots',
+        help_text='قيد التمويل')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'cash_box_fx_lots'
+        managed = True
+        ordering = ['lot_date', 'id']  # ترتيب FIFO
+
+    def __str__(self):
+        return f"Lot {self.id}: {self.remaining_fc}/{self.original_fc} @ {self.rate}"
+
+
 class FiscalPeriod(models.Model):
     STATUS_CHOICES = [
         ('Open', 'Open'),

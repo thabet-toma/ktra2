@@ -8,6 +8,7 @@ import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Invoice, Item, Supplier } from "@/types";
 import { openInNewTab } from "@/utils/openInNewTab";
+import { useConfirm } from "../../../contexts/ConfirmContext";
 import {
   Plus,
   RefreshCw,
@@ -67,6 +68,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   onRefresh,
 }) => {
   const navigate = useNavigate();
+  const confirm = useConfirm();
 
   // فلاتر
   const [search, setSearch] = useState("");
@@ -239,9 +241,9 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
               type="button"
               className="aseel-toolbtn aseel-toolbtn--danger"
               style={{ fontSize: "10px", padding: "2px 6px" }}
-              onClick={(e) => {
+              onClick={async (e) => {
                 e.stopPropagation();
-                if (window.confirm(`حذف الفاتورة (${r.invoiceNumber}) نهائياً؟ لا يمكن التراجع.`)) {
+                if (await confirm({ title: "حذف الفاتورة", message: `حذف الفاتورة (${r.invoiceNumber}) نهائياً؟ لا يمكن التراجع.` })) {
                   onDelete(String(r.id));
                 }
               }}

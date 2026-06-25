@@ -347,10 +347,24 @@ class LogisticsDealViewSet(BaseTenantViewSet):
                     rate = Decimal('1')
                     local_amount = foreign_amount
 
-                lines_data = [
-                    {"account": deal_locked.partner.linked_account_id, "debit": local_amount, "credit": Decimal("0"), "partner": deal_locked.partner_id, "description": f"دفعة {payment_locked.title} | صفقة: {deal_locked.ref_number}"},
-                    {"account": bank_account.id, "debit": Decimal("0"), "credit": local_amount, "partner": deal_locked.partner_id, "description": f"دفعة {payment_locked.title} | صفقة: {deal_locked.ref_number}"},
-                ]
+                _desc = f"دفعة {payment_locked.title} | صفقة: {deal_locked.ref_number}"
+                # صندوق الدولار FIFO: إن كان الصندوق المصدر بعملة أجنبية وله طبقات،
+                # تُسحب التكلفة بالشيقل FIFO ويُحتسب فرق الصرف المحقّق مقابل سعر الدفع.
+                from accounting.fx_fifo import fifo_link_for_box, build_fx_payment_lines
+                fifo_link = fifo_link_for_box(bank_account, deal_locked.tenant) if is_foreign else None
+                if fifo_link:
+                    lines_data = build_fx_payment_lines(
+                        fifo_link=fifo_link, foreign_amount=foreign_amount, local_amount=local_amount,
+                        debit_account_id=deal_locked.partner.linked_account_id,
+                        box_account_id=bank_account.id, partner_id=deal_locked.partner_id,
+                        description=_desc, tenant=deal_locked.tenant)
+                    journal_currency, journal_rate = base_currency, Decimal('1')
+                else:
+                    lines_data = [
+                        {"account": deal_locked.partner.linked_account_id, "debit": local_amount, "credit": Decimal("0"), "partner": deal_locked.partner_id, "description": _desc},
+                        {"account": bank_account.id, "debit": Decimal("0"), "credit": local_amount, "partner": deal_locked.partner_id, "description": _desc},
+                    ]
+                    journal_currency, journal_rate = deal_currency, rate
 
                 journal = post_journal(
                     tenant_id=deal_locked.tenant_id,
@@ -359,8 +373,8 @@ class LogisticsDealViewSet(BaseTenantViewSet):
                     reference_id=payment_locked.id,
                     description=f"دفعة {payment_locked.title} | صفقة: {deal_locked.ref_number} | المورد: {deal_locked.partner.name}",
                     lines_data=lines_data,
-                    currency=deal_currency,
-                    exchange_rate=rate,
+                    currency=journal_currency,
+                    exchange_rate=journal_rate,
                 )
 
                 # تحديث الدفعة
@@ -961,10 +975,22 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                     journal_currency = base_currency or usd_currency
 
                 ag = ship_locked.shipping_agent
-                lines_data = [
-                    {"account": ag.linked_account_id, "debit": local_amount, "credit": Decimal("0"), "partner": ag.id, "description": f"دفعة {payment_locked.title} | شحنة: {ship_locked.shipment_number}"},
-                    {"account": bank_account.id, "debit": Decimal("0"), "credit": local_amount, "partner": ag.id, "description": f"دفعة {payment_locked.title} | شحنة: {ship_locked.shipment_number}"},
-                ]
+                _adesc = f"دفعة {payment_locked.title} | شحنة: {ship_locked.shipment_number}"
+                # صندوق الدولار FIFO لدفعات وكيل الشحن (مثل دفعات الصفقة).
+                from accounting.fx_fifo import fifo_link_for_box, build_fx_payment_lines
+                fifo_link = fifo_link_for_box(bank_account, ship_locked.tenant) if is_foreign_usd else None
+                if fifo_link:
+                    lines_data = build_fx_payment_lines(
+                        fifo_link=fifo_link, foreign_amount=foreign_amount, local_amount=local_amount,
+                        debit_account_id=ag.linked_account_id, box_account_id=bank_account.id,
+                        partner_id=ag.id, description=_adesc, tenant=ship_locked.tenant)
+                    journal_currency, journal_rate = (base_currency or usd_currency), Decimal('1')
+                else:
+                    lines_data = [
+                        {"account": ag.linked_account_id, "debit": local_amount, "credit": Decimal("0"), "partner": ag.id, "description": _adesc},
+                        {"account": bank_account.id, "debit": Decimal("0"), "credit": local_amount, "partner": ag.id, "description": _adesc},
+                    ]
+                    journal_currency, journal_rate = journal_currency, rate
 
                 journal = post_journal(
                     tenant_id=ship_locked.tenant_id,
@@ -977,7 +1003,7 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                     ),
                     lines_data=lines_data,
                     currency=journal_currency,
-                    exchange_rate=rate,
+                    exchange_rate=journal_rate,
                 )
 
                 payment_locked.is_posted = True
@@ -1472,22 +1498,36 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                 if errors:
                     raise DjangoValidationError(errors)
 
-                lines_data = [
-                    {
-                        "account": payee.linked_account_id,
-                        "partner": payee.pk,
-                        "debit": amount,
-                        "credit": Decimal("0"),
-                        "description": line_desc,
-                    },
-                    {
-                        "account": cash_link.account_id,
-                        "partner": payee.pk,
-                        "debit": Decimal("0"),
-                        "credit": amount,
-                        "description": f"صرف من الصندوق {cash_link.name}",
-                    },
-                ]
+                # صندوق الدولار FIFO: عند الدفع من صندوق بعملة أجنبية له طبقات،
+                # يُحوَّل القيد للشيقل (amount × سعر الدفع) وتُسحب التكلفة FIFO + فرق صرف محقّق.
+                from accounting.fx_fifo import fifo_link_for_box, build_fx_payment_lines
+                is_foreign_pay = bool(pay_currency and base_cur and pay_currency.pk != base_cur.pk)
+                fifo_link = fifo_link_for_box(cash_link.account, clearance.tenant) if is_foreign_pay else None
+                if fifo_link:
+                    local_amount = (amount * pay_rate).quantize(Decimal("0.01"))
+                    lines_data = build_fx_payment_lines(
+                        fifo_link=fifo_link, foreign_amount=amount, local_amount=local_amount,
+                        debit_account_id=payee.linked_account_id, box_account_id=cash_link.account_id,
+                        partner_id=payee.pk, description=line_desc, tenant=clearance.tenant)
+                    jcurrency, jrate = base_cur, Decimal("1")
+                else:
+                    lines_data = [
+                        {
+                            "account": payee.linked_account_id,
+                            "partner": payee.pk,
+                            "debit": amount,
+                            "credit": Decimal("0"),
+                            "description": line_desc,
+                        },
+                        {
+                            "account": cash_link.account_id,
+                            "partner": payee.pk,
+                            "debit": Decimal("0"),
+                            "credit": amount,
+                            "description": f"صرف من الصندوق {cash_link.name}",
+                        },
+                    ]
+                    jcurrency, jrate = pay_currency, pay_rate
 
                 jh = post_journal(
                     tenant_id=clearance.tenant_id,
@@ -1496,8 +1536,8 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                     reference_id=pay.id,
                     description=jdesc,
                     lines_data=lines_data,
-                    currency=pay_currency,
-                    exchange_rate=pay_rate,
+                    currency=jcurrency,
+                    exchange_rate=jrate,
                     user=request.user if hasattr(request, 'user') else None,
                 )
 
@@ -1716,6 +1756,13 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 Q(invoice_name__icontains=search) |
                 Q(partner__name__icontains=search)
             )
+        # فصل المحلية/الدولية: فلتر صريح + إخفاء الدولية عمّن لا يملك صلاحية الاستيراد.
+        it = params.get('invoice_type')
+        if it in (PurchaseInvoice.INVOICE_TYPE_LOCAL, PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL):
+            qs = qs.filter(invoice_type=it)
+        from core.import_access import user_can_access_import
+        if tenant and not user_can_access_import(self.request.user, tenant):
+            qs = qs.filter(invoice_type=PurchaseInvoice.INVOICE_TYPE_LOCAL)
         return qs
 
     def _get_tenant(self):
@@ -1741,7 +1788,22 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
     def perform_create(self, serializer):
         tenant = self._get_tenant()
         inv_num = self.request.data.get('invoice_number') or self._next_invoice_number(tenant)
-        serializer.save(tenant=tenant, invoice_number=inv_num)
+        # نوع الفاتورة: صريح إن مُرّر، وإلا يُشتق من ارتباط مسار الاستيراد.
+        vd = serializer.validated_data
+        req_type = (self.request.data.get('invoice_type') or '').strip()
+        if req_type in (PurchaseInvoice.INVOICE_TYPE_LOCAL, PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL):
+            invoice_type = req_type
+        elif vd.get('deal') or vd.get('shipment') or vd.get('clearance'):
+            invoice_type = PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL
+        else:
+            invoice_type = PurchaseInvoice.INVOICE_TYPE_LOCAL
+        # الفاتورة الدولية (الاستيراد) محجوبة عمّن لا يملك الصلاحية.
+        if invoice_type == PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL:
+            from core.import_access import user_can_access_import
+            from rest_framework.exceptions import PermissionDenied
+            if not user_can_access_import(self.request.user, tenant):
+                raise PermissionDenied("صلاحية الفاتورة الدولية (الاستيراد) غير متاحة لحسابك.")
+        serializer.save(tenant=tenant, invoice_number=inv_num, invoice_type=invoice_type)
 
     @action(detail=False, methods=['get'], url_path='resolve-price')
     def resolve_price(self, request):

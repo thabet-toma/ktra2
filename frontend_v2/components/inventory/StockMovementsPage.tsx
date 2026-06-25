@@ -47,6 +47,8 @@ export const StockMovementsPage: React.FC = () => {
   const [filterType, setFilterType] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
+  // تقسيم المخزن: محلي (فاتورة شراء) / دولي (مسار الاستيراد)
+  const [filterOrigin, setFilterOrigin] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -55,6 +57,7 @@ export const StockMovementsPage: React.FC = () => {
       const params: Record<string, string> = {};
       if (filterProduct) params.product = filterProduct;
       if (filterType) params.movement_type = filterType;
+      if (filterOrigin) params.origin = filterOrigin;
       if (filterDateFrom) params.date_from = filterDateFrom;
       if (filterDateTo) params.date_to = filterDateTo;
       const [mvs, prods] = await Promise.all([
@@ -68,7 +71,7 @@ export const StockMovementsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [filterProduct, filterType, filterDateFrom, filterDateTo]);
+  }, [filterProduct, filterType, filterOrigin, filterDateFrom, filterDateTo]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -146,6 +149,14 @@ export const StockMovementsPage: React.FC = () => {
           </button>
         );
       } },
+    { key: "origin", header: "المصدر", width: "90px", align: "center",
+      render: (m) => {
+        if (m.origin === "international")
+          return <span style={{ color: "#1d4ed8", fontWeight: 600 }}>دولي</span>;
+        if (m.origin === "local")
+          return <span style={{ color: "#166534", fontWeight: 600 }}>محلي</span>;
+        return <>—</>;
+      } },
     { key: "notes", header: "ملاحظات",
       render: (m) => <>{m.notes || "—"}</> },
   ];
@@ -168,6 +179,12 @@ export const StockMovementsPage: React.FC = () => {
           value={filterType} onChange={(e) => setFilterType(e.target.value)}>
           <option value="">كل الأنواع</option>
           {Object.entries(TYPES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+        </select>
+        <select className="aseel-input" style={{ width: 120 }}
+          value={filterOrigin} onChange={(e) => setFilterOrigin(e.target.value)} title="مصدر البضاعة">
+          <option value="">كل المصادر</option>
+          <option value="local">محلي (شراء)</option>
+          <option value="international">دولي (استيراد)</option>
         </select>
         <input className="aseel-input" style={{ width: 120 }} type="date"
           value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} title="من تاريخ" />

@@ -69,9 +69,14 @@ class AccountViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         tenant = get_tenant(self.request)
-        if tenant:
-            return Account.objects.filter(tenant=tenant)
-        return Account.objects.none()
+        if not tenant:
+            return Account.objects.none()
+        qs = Account.objects.filter(tenant=tenant)
+        # إخفاء قسم «تكاليف الاستيراد» (الشجرة 53*) عمّن لا يملك صلاحية الاستيراد.
+        from core.import_access import user_can_access_import
+        if not user_can_access_import(self.request.user, tenant):
+            qs = qs.exclude(code__startswith="53")
+        return qs
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
@@ -925,6 +930,67 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
             CashBoxLedgerAccountSerializer(link).data,
             status=status.HTTP_201_CREATED,
         )
+
+    # ── صندوق العملة الأجنبية: تمويل FIFO + الرصيد (صندوق الدولار) ──
+    @staticmethod
+    def _fx_date(raw):
+        try:
+            return datetime.date.fromisoformat(str(raw)[:10])
+        except (TypeError, ValueError):
+            return datetime.date.today()
+
+    @action(detail=True, methods=["get"], url_path="fx-lots")
+    def fx_lots(self, request, pk=None):
+        """طبقات FIFO + الرصيد بالعملة الأجنبية وقيمته بالشيقل."""
+        from .fx_fifo import box_fc_balance, box_ils_value
+        box = self.get_object()
+        lots = box.fx_lots.all().order_by("lot_date", "id")
+        return Response({
+            "currency_code": box.currency_code,
+            "fc_balance": str(box_fc_balance(box)),
+            "ils_value": str(box_ils_value(box)),
+            "lots": [{
+                "id": l.id, "lot_date": l.lot_date,
+                "original_fc": str(l.original_fc), "remaining_fc": str(l.remaining_fc),
+                "rate": str(l.rate), "source": l.source, "journal": l.journal_id,
+            } for l in lots],
+        })
+
+    @action(detail=True, methods=["post"], url_path="fund-capital")
+    def fund_capital(self, request, pk=None):
+        """إيداع عملة أجنبية من رأس المال — ينشئ طبقة FIFO + قيد."""
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from .fx_fifo import fund_box_from_capital
+        box = self.get_object()
+        try:
+            lot = fund_box_from_capital(
+                box, request.data.get("amount"), request.data.get("rate"),
+                date=self._fx_date(request.data.get("date")), user=request.user)
+        except DjangoValidationError as e:
+            return Response({"error": "; ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"lot_id": lot.id, "remaining_fc": str(lot.remaining_fc), "rate": str(lot.rate)},
+            status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="transfer-from-ils")
+    def transfer_from_ils(self, request, pk=None):
+        """تحويل من صندوق الشيقل لصندوق العملة الأجنبية بسعر صرف — ينشئ طبقة FIFO + قيد."""
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from .fx_fifo import transfer_ils_to_fx
+        box = self.get_object()
+        ils_box = CashBoxLedgerAccount.objects.filter(
+            tenant=box.tenant, id=request.data.get("ils_box_id")).first()
+        if not ils_box:
+            return Response({"error": "صندوق الشيقل المصدر غير موجود."}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            lot = transfer_ils_to_fx(
+                box, ils_box, request.data.get("amount"), request.data.get("rate"),
+                date=self._fx_date(request.data.get("date")), user=request.user)
+        except DjangoValidationError as e:
+            return Response({"error": "; ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {"lot_id": lot.id, "remaining_fc": str(lot.remaining_fc), "rate": str(lot.rate)},
+            status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["post"], url_path="deposit-journal")
     def deposit_journal(self, request):

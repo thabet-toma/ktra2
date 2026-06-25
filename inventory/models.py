@@ -223,6 +223,10 @@ class StockMovement(models.Model):
     avg_cost_before = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='AvgCostBefore')
     avg_cost_after = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='AvgCostAfter')
 
+    # تقسيم المخزن: مصدر البضاعة محلي (فاتورة شراء عادية) أو دولي (مسار الاستيراد).
+    IMPORT_REFERENCE_TYPES = ('SHIPMENT', 'DEAL', 'CLEARANCE')
+    LOCAL_REFERENCE_TYPES = ('PURCHASE_INVOICE',)
+
     class Meta:
         db_table = 'stock_movements'
         managed = True
@@ -230,6 +234,15 @@ class StockMovement(models.Model):
 
     def __str__(self):
         return f"{self.get_movement_type_display()} | {self.product} | {self.quantity}"
+
+    @property
+    def origin(self) -> str:
+        """مصدر الحركة: international (استيراد) / local (شراء محلي) / other."""
+        if self.reference_type in self.IMPORT_REFERENCE_TYPES:
+            return 'international'
+        if self.reference_type in self.LOCAL_REFERENCE_TYPES:
+            return 'local'
+        return 'other'
 
 
 class ProductPriceTier(models.Model):

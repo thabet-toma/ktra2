@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Invoice, Item, Supplier } from '../types';
+import { useConfirm } from '../contexts/ConfirmContext';
 import { invoicesService, itemsService, suppliersService } from '../services/firestoreService';
 import { Plus, Archive, Package } from 'lucide-react';
 import { collection, query, where, orderBy, getDocs, limit, onSnapshot, db } from "../services/sqlApiClient";
@@ -13,6 +14,7 @@ import { InvoiceDetailsModal } from './procurement/old-invoices/InvoiceDetailsMo
 import { SupplierModal } from './common/SupplierModal';
 
 export const OldPurchaseInvoice: React.FC = () => {
+    const confirm = useConfirm();
     // --- Data States ---
     const [invoices, setInvoices] = useState<Invoice[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -118,17 +120,17 @@ export const OldPurchaseInvoice: React.FC = () => {
         }
     };
 
-    const handleDeleteInvoice = (invoice: Invoice) => {
-        if (!window.confirm(`هل أنت متأكد من الحذف النهائي للفاتورة ${invoice.invoiceNumber}؟\n\nهذا الإجراء لا يمكن التراجع عنه!`)) {
+    const handleDeleteInvoice = async (invoice: Invoice) => {
+        if (!(await confirm({ title: "حذف نهائي", message: `هل أنت متأكد من الحذف النهائي للفاتورة ${invoice.invoiceNumber}؟\n\nهذا الإجراء لا يمكن التراجع عنه!` }))) {
             return;
         }
 
         // تأكيد إضافي للمبالغ الكبيرة
         if ((invoice.grandTotal || 0) > 1000) {
-            const confirmAgain = window.confirm(
-                `تنبيه! الفاتورة تحتوي على مبلغ كبير: $${invoice.grandTotal?.toLocaleString()}\n` +
-                `هل أنت متأكد تماماً من الحذف النهائي؟`
-            );
+            const confirmAgain = await confirm({
+                title: "تأكيد مبلغ كبير",
+                message: `تنبيه! الفاتورة تحتوي على مبلغ كبير: $${invoice.grandTotal?.toLocaleString()}\nهل أنت متأكد تماماً من الحذف النهائي؟`,
+            });
             if (!confirmAgain) return;
         }
 

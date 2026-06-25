@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import { useSearchParams } from "react-router-dom";
 import { Save, Plus, FileText } from "lucide-react";
 import { apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "@/services/restApi";
@@ -108,6 +109,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   // ── All hooks MUST be declared before any early return (React rules-of-hooks). ──
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab") || "deals";
+  const confirm = useConfirm();
   const [shipment, setShipment] = useState<ShipmentApiRow | null>(null);
   const [shipmentForm, setShipmentForm] = useState<ShipmentApiRow | null>(null);
   const [clearance, setClearance] = useState<ClearanceRow | null>(null);
@@ -489,7 +491,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   }, [localForm, editingLocalId, shipment, reloadLocal]);
 
   const handleDeleteLocal = useCallback(async (id: number) => {
-    if (!window.confirm("هل تريد حذف سجل النقل المحلي؟")) return;
+    if (!(await confirm({ title: "حذف النقل المحلي", message: "هل تريد حذف سجل النقل المحلي؟" }))) return;
     setSaving(true); setError(null);
     try {
       await deleteLocalShipment(id);

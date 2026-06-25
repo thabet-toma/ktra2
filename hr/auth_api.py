@@ -76,6 +76,29 @@ def _apply_sole_active_owner_role(user, payload: Dict[str, Any]) -> Dict[str, An
     return payload
 
 
+def _import_flags(user) -> Dict[str, Any]:
+    """أعلام صلاحية الاستيراد للواجهة (إخفاء قائمة الاستيراد). الإنفاذ الموثوق
+    يبقى على الخادم لكل شركة نشطة؛ canAccessImport يُحسب من العضوية الافتراضية."""
+    try:
+        from core.import_access import is_super_admin, user_can_access_import
+        from tenants.models import UserCompanyMembership
+
+        # canAccessImport هنا قيمة أوّلية من الشركة الافتراضية فقط؛ الواجهة تعيد
+        # حسابها للشركة النشطة (CompanyContext). تفعيل الشركة شرطٌ للجميع.
+        m = (
+            UserCompanyMembership.objects.filter(user=user, is_default=True).select_related("tenant").first()
+            or UserCompanyMembership.objects.filter(user=user).select_related("tenant").first()
+        )
+        tenant = m.tenant if m else None
+        return {
+            "isSuperAdmin": is_super_admin(user),
+            "canAccessImport": user_can_access_import(user, tenant),
+        }
+    except Exception:  # noqa: BLE001 — لا نعطّل المصادقة بسبب حساب الأعلام
+        logger.exception("import flags computation failed for user=%s", getattr(user, "pk", None))
+        return {"isSuperAdmin": False, "canAccessImport": False}
+
+
 def _user_payload(user) -> Dict[str, Any]:
     base = _base_payload(user)
     doc = FirestoreMirrorDoc.objects.filter(path=f"users/{user.pk}").first()
@@ -85,8 +108,10 @@ def _user_payload(user) -> Dict[str, Any]:
         # الدور من مرآة users/<id> (مثل أول مستخدم = manager) يبقى ولا يُستبدل بافتراضي base
         if doc.data.get("role"):
             merged["role"] = doc.data["role"]
-        return _apply_sole_active_owner_role(user, merged)
-    return _apply_sole_active_owner_role(user, base)
+        result = _apply_sole_active_owner_role(user, merged)
+    else:
+        result = _apply_sole_active_owner_role(user, base)
+    return {**result, **_import_flags(user)}
 
 
 def _sync_user_mirror(user, extra: Optional[Dict[str, Any]] = None):
@@ -175,9 +200,15 @@ def signup_view(request):
         last_name=last[:100],
         is_active=is_first_user,
     )
+    # نوع الحساب: t=تاجر/شركة، e=موظف/فريق كترا — يحدّد واجهة الترحيب والتسجيل.
+    account_type = str(body.get("accountType") or "employee").strip().lower()
+    if account_type not in ("trader", "employee"):
+        account_type = "employee"
     extra = {
         "role": "manager" if is_first_user else "employee",
         "isEmailVerified": True,
+        "accountType": account_type,
+        "companyName": body.get("companyName") or "",
         "phone": body.get("phone") or "",
         "address": body.get("address") or "",
         "experienceDescription": body.get("experienceDescription") or "",

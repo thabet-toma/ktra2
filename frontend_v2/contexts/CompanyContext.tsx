@@ -9,6 +9,7 @@ export type Tenant = {
   SubscriptionPlan: string;
   Status: string;
   CreatedAt: string;
+  import_enabled?: boolean;
 };
 
 export type CompanyMembership = {
@@ -17,12 +18,15 @@ export type CompanyMembership = {
   role: string;
   is_default: boolean;
   created_at: string;
+  can_access_import?: boolean;
 };
 
 interface CompanyContextType {
   companies: CompanyMembership[];
   currentCompany: Tenant | null;
   loading: boolean;
+  /** صلاحية وحدة الاستيراد للشركة النشطة — يشترط تفعيل الشركة للجميع (حتى السوبر أدمن). */
+  canAccessImport: boolean;
   switchCompany: (companyId: number) => Promise<void>;
   createCompany: (name: string) => Promise<Tenant>;
   refreshCompanies: () => Promise<void>;
@@ -101,11 +105,22 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return newCompany;
   };
 
+  // صلاحية الاستيراد للشركة النشطة (تتفاعل مع تبديل الشركة) — تفعيل الشركة شرطٌ للجميع.
+  const activeMembership = currentCompany
+    ? companies.find((m) => m.tenant.TenantID === currentCompany.TenantID)
+    : undefined;
+  const canAccessImport =
+    !!currentCompany?.import_enabled &&
+    (!!currentUser?.isSuperAdmin ||
+      activeMembership?.role === "manager" ||
+      !!activeMembership?.can_access_import);
+
   return (
     <CompanyContext.Provider
       value={{
         companies,
         currentCompany,
+        canAccessImport,
         // Reflects the actual fetch state only. Deriving loading from
         // `companies.length === 0` would hang the switcher forever for a user
         // with no memberships (e.g. a superuser created after the backfill).

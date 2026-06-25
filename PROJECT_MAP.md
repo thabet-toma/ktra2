@@ -1174,3 +1174,62 @@ User pushed back on the «pending» list and asked for all of it. Closed every r
 - **Task 35 Fix:** Refined AseelGrid auto-scroll behavior to use setTimeout and scrollTop = scrollHeight to reliably force the grid scrollbar to the bottom immediately after a new row is added.
 - **Task 36:** Promoted WarehousesManager to a standalone top-level interface. Added 'warehouses' view to App.tsx, inserted a navigation link under the Inventory section in Sidebar.tsx, and updated breadcrumbs, resolving the lack of a clear warehouses interface.
 - **Task 37:** Added 'Load All Items' (����� �� �������) button to the Stocktake form to auto-populate the grid with all available products, streamlining the inventory counting process.
+
+## [AUDIT — task28 الاستيراد، المرحلة 1، 2026-06-24] (صلاحية وحدة الاستيراد + إخفاء تكاليف الاستيراد من COA)
+
+أول مرحلة من «جراحة الاستيراد» متعددة المراحل (القرارات: فصل الفاتورة الدولية، صندوق الدولار FIFO مع فرق صرف محقّق، تقسيم المخزن محلي/دولي، صفحة هبوط بنوعين، تأكيد الحذف — مراحل لاحقة).
+
+- **النموذج (من مستويين):** `Tenant.import_enabled` (سوبر أدمن المنصة يقرّر أي شركة) + `UserCompanyMembership.can_access_import` (مدير الشركة يمنح لكل موظف، فعّال فقط ضمن شركة مفعّلة). Migration `tenants/0010_import_access`.
+- **السوبر أدمن:** `core/import_access.py` — `is_super_admin` (is_superuser أو البريد في `SUPER_ADMIN_EMAILS`، الافتراضي `thapet64@gmail.com`) + `user_can_access_import(user, tenant)` (سوبر أدمن دائماً؛ وإلا الشركة مفعّلة وَ(مدير أو ممنوح)).
+- **إخفاء COA:** `AccountViewSet.get_queryset` يستثني الشجرة `53*` (تكاليف الاستيراد: شحن دولي/تخليص/رسوم… 5301–5307) لمن لا يملك الصلاحية.
+- **نقاط النهاية:** `POST tenants/companies/{id}/set-import-enabled/` (سوبر أدمن، يصل لأي شركة بمعرّفها) · `POST tenants/companies/{id}/members/set-import-access/` (مدير، يشترط تفعيل الشركة). `TenantSerializer` يضيف `import_enabled`؛ member payload + `UserCompanyMembershipSerializer` يضيفان `can_access_import`.
+- **الأعلام للواجهة:** `hr/auth_api._user_payload` يضيف `isSuperAdmin` + `canAccessImport` (محسوبان من العضوية الافتراضية؛ الإنفاذ الموثوق يبقى على الخادم لكل شركة نشطة).
+- **الواجهة:** `types/user.ts` (+ الحقلان) · `Sidebar.tsx` مجموعة «الاستيراد» الفرعية تظهر فقط مع `canAccessImport` · `CompanyManagementModal.tsx`: مفتاح تفعيل الاستيراد للشركة (سوبر أدمن) + عمود checkbox «استيراد» لكل عضو (مدير، بعد التفعيل؛ المدير «ضمناً»). `CompanyContext` Tenant/Membership types موسّعة.
+- **التحقق:** `tenants/tests/test_import_access.py` (14 اختبار TDD: الـhelper + مصفوفة COA + نقاط التفعيل) + تحديث `test_read_isolation` (الشركة الجديدة تخفي 53* افتراضياً). الحزمة الكاملة: 262 passed · `tsc` 0.
+- **ملاحظة (نطاق لاحق):** مفتاح السوبر أدمن يعيش حالياً داخل CompanyManagementModal (المنحصر بشركات المستخدم المدير). لوحة سوبر أدمن مستقلة لكل الشركات = مرحلة لاحقة إن لزم.
+
+## [AUDIT — task28 الاستيراد، المرحلة 2 (الخلفية)، 2026-06-24] (فصل الفاتورة الدولية + تقسيم المخزن)
+
+أساس الخادم لفصل الفاتورة الدولية عن المحلية وتمييز مصدر المخزون. الواجهة (شاشتان + أقسام المخزن) = الخطوة التالية.
+
+- **`PurchaseInvoice.invoice_type`** (`local`/`international`، افتراضي local) — migration `logistics/0047_purchaseinvoice_invoice_type` يَبني الحقل ويعيد ملء الموجود: دولية حيث `deal`/`shipment`/`clearance`/`converted_from_shipment` مضبوط (نفس منطق `is_local` القديم).
+- **الفصل في الـAPI:** `PurchaseInvoiceViewSet.get_queryset` يدعم `?invoice_type=local|international` ويُخفي الدولية عمّن لا يملك صلاحية الاستيراد (مطابق لإخفاء COA بالمرحلة 1). `perform_create` يشتق النوع (صريح ← روابط الاستيراد ← محلي) ويرفض إنشاء الدولية (403) لغير المخوّل. المُسلسِلان (list+detail) يكشفان `invoice_type`.
+- **تقسيم المخزن:** `StockMovement.origin` (property: international إن كان reference_type ∈ SHIPMENT/DEAL/CLEARANCE، local إن PURCHASE_INVOICE، وإلا other) + ثوابت `IMPORT_REFERENCE_TYPES`/`LOCAL_REFERENCE_TYPES`. المُسلسِل يكشف `origin`، و`StockMovementViewSet` يدعم `?origin=local|international`.
+- **التحقق:** `logistics/tests/test_invoice_type_split.py` (9 اختبارات: النوع الافتراضي/الحجب/السماح/الإخفاء بالقائمة/الفلتر + origin property/filter). الحزمة الكاملة **265 passed**.
+## [AUDIT — task28 الاستيراد، المرحلة 3 (ذيل) + تأكيد الحذف، 2026-06-25]
+
+### ذيل المرحلة 3 — FIFO لدفعات التخليص ووكيل الشحن
+- استُخرج helper مشترك في `accounting/fx_fifo.py`: `fifo_link_for_box(box_account, tenant)` + `build_fx_payment_lines(...)` (يستهلك FIFO ويبني أسطر الشيقل + فرق صرف محقّق).
+- طُبِّق في الثلاثة (DRY): دفعة الصفقة (`post_payment_to_accounting`)، دفعة وكيل الشحن (`post_agent_payment_to_accounting`)، ودفعة التخليص (`pay_from_cashbox` — يحوّل القيد للشيقل amount×سعر الدفع عند استخدام صندوق FIFO). صندوق بلا طبقات ⇒ السلوك القديم (توافق رجعي).
+- اختبارات: `logistics/tests/test_deal_payment_fifo.py` صار 5 (صفقة ربح/خسارة/legacy + وكيل ربح + تخليص ربح). الحزمة الكاملة 276 passed.
+
+### تأكيد الحذف الموحّد
+- `components/common/ConfirmDialog.tsx` (حوار RTL، نمط خطر أحمر، Esc/Enter) + `contexts/ConfirmContext.tsx` (`ConfirmProvider` + `useConfirm()` وعديّ: `if (!(await confirm({message}))) return;`). مُركّب في `index.tsx` حول `<App/>`.
+- حُوِّل 12 موقع حذف من `window.confirm` إلى `useConfirm`: CompanyManagementModal، ShipmentManagement، DealManagement، SalesCustomersPage، SalesQuotationsPage، SalesInvoicesPage، CategoriesManagement، CategoryPicker (CategoryManageModal)، LocalShippingPage، InvoiceList، ImportDocumentScreen، OldPurchaseInvoice. `tsc` 0؛ التطبيق يُقلع بلا أخطاء.
+- **متبقٍ:** مواقع `window.confirm` غير المتعلّقة بالحذف (تسجيل خروج/ترحيل/تغييرات غير محفوظة) تبقى كما هي — يمكن توحيدها لاحقاً بنفس `useConfirm`.
+
+## [AUDIT — task28 الاستيراد، المرحلة 4، 2026-06-25] (صفحة الهبوط بنوعين + تسجيل تاجر/موظف)
+
+صفحة هبوط بمسارين للتسجيل وواجهتَي ترحيب مختلفتين.
+
+- **`LandingPage.tsx`:** قسم «اختر نوع حسابك» ببطاقتين — «للتجار وأصحاب الشركات» (`onSignup('trader')`) و«للموظفين ومنظّمي فريق كترا» (`onSignup('employee')`)؛ أزرار الهيرو/الختام تمرّر لقسم `#signup-paths`. تغيّر توقيع `onSignup` إلى `(type) => void`.
+- **`SignupPage.tsx`:** prop `accountType`. التاجر: نموذج مبسّط (اسم الشركة/المتجر، بلا سيرة ذاتية/مؤهل/خبرة) + عنوان «سجّل شركتك» + زر «إنشاء حساب الشركة». الموظف: النموذج الكامل الحالي بلا تغيير.
+- **`App.tsx`:** حالة `signupType` تُمرَّر للـSignupPage؛ تسجيل الدخول→تسجيل يفترض «trader».
+- **الخادم:** `signup_view` يقرأ `accountType` (trader/employee) و`companyName` ويخزّنهما في مرآة المستخدم؛ `authService.signupUser` وُسِّع (الحقول المهنية اختيارية + accountType/companyName).
+- **التحقق (متصفّح حيّ):** صفحة الهبوط ترسم القسمين والبطاقتين؛ مسار التاجر يُظهر حقل الشركة بلا سيرة ذاتية، مسار الموظف يُظهر السيرة/المؤهل بلا حقل شركة؛ بلا أخطاء console. `tsc` 0.
+
+## [AUDIT — task28 الاستيراد، المرحلة 3 (محرّك FIFO)، 2026-06-24] (صندوق الدولار FIFO)
+
+محرّك FIFO لصناديق العملة الأجنبية: تمويل بطبقات بسعر صرفها، واستهلاك الأقدم أولاً بتكلفة الشيقل بسعر الطبقة (مثال المالك: 1000$@3 ثم 500$@4، دفع 1200$ → 3800 شيقل).
+
+- **النموذج `CashBoxFxLot`** (طبقة FIFO): `cash_box`(FK CashBoxLedgerAccount)/`lot_date`/`original_fc`/`remaining_fc`/`rate`(شيقل لكل وحدة)/`source`(capital|transfer_ils)/`journal`. ترتيب `lot_date,id`. Migration `accounting/0025_cashboxfxlot`.
+- **الخدمة `accounting/fx_fifo.py`:** `fund_box_from_capital` (مدين الصندوق شيقل/دائن رأس المال) · `transfer_ils_to_fx` (مدين الأجنبي/دائن الشيقل) · `consume_fifo`→(تكلفة شيقل، تفصيل الطبقات) ينقص الأقدم أولاً ويرفع عند نقص الرصيد · `box_fc_balance`/`box_ils_value` (القيمة الدفترية = Σ remaining×rate = رصيد حساب الصندوق). كل قيد عبر `post_journal` المركزي.
+- **نقاط النهاية** (على `cash-box-accounts/{id}/`): `fund-capital`، `transfer-from-ils` (body amount/rate/date[/ils_box_id])، `fx-lots` (الطبقات + الرصيد).
+- **ربط دفعات الصفقات (مُنفَّذ):** `LogisticsDealViewSet.post_payment_to_accounting` صار واعياً للـFIFO: إن كان الصندوق المصدر بعملة أجنبية وله طبقات، يُسحب `consume_fifo` (تكلفة الشيقل)، والقيد = مدين ذمم المورد (مبلغ×سعر الدفع) / دائن الصندوق (تكلفة FIFO) / **فرق الصرف المحقّق** للفرق (ربح=دائن، خسارة=مدين) على حساب `get_realized_fx_account` (كود 4201، يُنشأ عند الحاجة + مضاف لـ`tenants.services.COA_DATA` وseed). صندوق بلا طبقات ⇒ السلوك القديم بلا تغيير (توافق رجعي).
+- **التحقق:** `accounting/tests/test_fx_fifo.py` (6) + `logistics/tests/test_deal_payment_fifo.py` (3: ربح/خسارة فرق صرف/توافق رجعي لصندوق بلا طبقات).
+- **واجهة التمويل (مُنفَّذة):** `FundFxBoxModal.tsx` (إيداع من رأس المال / تحويل من صندوق الشيقل بسعر صرف + عرض الطبقات والرصيد) + زر «تمويل» (أيقونة Layers) على بطاقات صناديق العملة الأجنبية في `CashBoxList.tsx`؛ خدمة `accountingApi`: `fundFxBoxFromCapital`/`transferIlsToFxBox`/`getFxBoxLots`. `tsc` 0.
+- **المتبقي (مرحلة لاحقة):** نفس معالجة FIFO لدفعات التخليص/وكيل الشحن بالدولار (`pay_from_cashbox`/`post_agent_payment`).
+
+## [AUDIT — task28 الاستيراد، المرحلة 2 (الواجهة)، 2026-06-24] (فصل شاشتي الفاتورة + أقسام المخزن)
+
+- **الواجهة (مُنفَّذة):** `PurchaseInvoice.tsx` صار يقبل `invoiceType` (افتراضي local) + `listPath`؛ شاشة الشراء الحالية تعرض المحلية فقط ويختفي زر «استيراد من تخليص جمركي» منها. شاشة **«الفواتير الدولية»** الجديدة (view `international-invoices`، مسار `/international-invoices`، تحت مجموعة الاستيراد) تعيد استخدام نفس المكوّن بـ `invoiceType="international"` وتعرض زر الاستيراد/التحويل؛ محرّر الفاتورة يبقى مشتركاً على `/purchase-invoices/:id` (يُفتح بتبويب جديد). `canAccessImport` صار تفاعلياً للشركة النشطة عبر `CompanyContext` (يشترط تفعيل الشركة للجميع). شاشة حركات المخزون أُضيف لها فلتر «المصدر» (محلي/دولي عبر `?origin=`) + عمود شارة. `tsc` 0.

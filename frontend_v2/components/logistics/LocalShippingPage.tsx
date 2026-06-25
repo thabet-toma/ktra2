@@ -3,6 +3,7 @@
  * المرجع: task5.md:797 + الإرساليات.txt:91-109
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import {
   Plus,
   Pencil,
@@ -47,6 +48,7 @@ const fmt = (s: string | number) =>
 
 export const LocalShippingPage: React.FC = () => {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [rows, setRows] = useState<LocalShipmentRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -127,7 +129,7 @@ export const LocalShippingPage: React.FC = () => {
 
   const handleDelete = async (r: LocalShipmentRow) => {
     if (r.is_posted) { alert("ألغِ الترحيل أولاً."); return; }
-    if (!window.confirm(`حذف الشحنة ${r.shipment_number}؟`)) return;
+    if (!(await confirm({ title: "حذف الشحنة", message: `حذف الشحنة ${r.shipment_number}؟` }))) return;
     setErr(null);
     try {
       await deleteLocalShipment(r.id);

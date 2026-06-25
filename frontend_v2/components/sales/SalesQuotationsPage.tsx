@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import {
   FileText,
   Plus,
@@ -53,6 +54,7 @@ type LineState = {
 };
 
 export const SalesQuotationsPage: React.FC = () => {
+  const confirm = useConfirm();
   const [quotations, setQuotations] = useState<SalesQuotationRow[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -278,7 +280,7 @@ export const SalesQuotationsPage: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm("هل أنت متأكد من حذف هذا العرض؟")) return;
+    if (!(await confirm({ title: "حذف عرض السعر", message: "هل أنت متأكد من حذف هذا العرض؟" }))) return;
     try {
       await deleteQuotation(id);
       await loadAll();

@@ -1,4 +1,6 @@
 """N0-T4 — Views for TenantSettings + TenantBook + Currency (Group Constants F11)."""
+import logging
+
 from django.db import transaction
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import status, viewsets
@@ -11,6 +13,8 @@ from core.api_defaults import ApiAuthAndUser
 from core.tenant_utils import get_tenant
 from .models import Branch, Currency, TenantBook, TenantSettings, Tenant, UserCompanyMembership
 from .serializers import BranchSerializer, TenantBookSerializer, TenantSettingsSerializer, TenantSerializer, UserCompanyMembershipSerializer
+
+logger = logging.getLogger(__name__)
 
 
 class CurrencyViewSet(viewsets.ReadOnlyModelViewSet):
@@ -274,6 +278,7 @@ class TenantViewSet(viewsets.ModelViewSet):
             "full_name": (f"{m.user.first_name} {m.user.last_name}").strip(),
             "role": m.role,
             "is_default": m.is_default,
+            "can_access_import": m.can_access_import,
             "created_at": m.created_at,
         }
 
@@ -353,6 +358,49 @@ class TenantViewSet(viewsets.ModelViewSet):
         self._assert_not_last_manager(tenant, m)
         m.delete()
         return Response({"ok": True})
+
+    # ── صلاحية وحدة الاستيراد (نموذج من مستويين) ──
+    @staticmethod
+    def _coerce_bool(val) -> bool:
+        if isinstance(val, str):
+            return val.strip().lower() in ("1", "true", "yes", "on")
+        return bool(val)
+
+    @action(detail=True, methods=["post"], url_path="set-import-enabled")
+    def set_import_enabled(self, request, pk=None):
+        """تفعيل/تعطيل وحدة الاستيراد لشركة — سوبر أدمن المنصة فقط.
+
+        body: {"import_enabled": true|false}
+        """
+        from core.import_access import is_super_admin
+        if not is_super_admin(request.user):
+            raise PermissionDenied("فقط مدير المنصة (سوبر أدمن) يتحكم بتفعيل الاستيراد للشركات.")
+        # السوبر أدمن يصل لأي شركة بمعرّفها (لا يقيّده فلتر العضوية في get_queryset).
+        tenant = Tenant.objects.filter(pk=pk).first()
+        if not tenant:
+            raise DRFValidationError({"detail": "الشركة غير موجودة."})
+        tenant.import_enabled = self._coerce_bool(request.data.get("import_enabled"))
+        tenant.save(update_fields=["import_enabled"])
+        logger.info("import-access: tenant=%s import_enabled=%s by_user=%s",
+                    tenant.pk, tenant.import_enabled, request.user.pk)
+        return Response({"TenantID": tenant.pk, "import_enabled": tenant.import_enabled})
+
+    @action(detail=True, methods=["post"], url_path="members/set-import-access")
+    def set_member_import_access(self, request, pk=None):
+        """منح/سحب صلاحية الاستيراد لعضو — مدير الشركة فقط، ويشترط تفعيل الاستيراد للشركة.
+
+        body: {"membership_id": n, "can_access_import": true|false}
+        """
+        tenant = self.get_object()
+        self._require_company_manager(request, tenant)
+        if not tenant.import_enabled:
+            raise DRFValidationError({"detail": "وحدة الاستيراد غير مفعّلة لهذه الشركة. تواصل مع إدارة المنصة."})
+        m = self._get_member_or_400(tenant, request)
+        m.can_access_import = self._coerce_bool(request.data.get("can_access_import"))
+        m.save(update_fields=["can_access_import"])
+        logger.info("import-access: membership=%s can_access_import=%s by_user=%s",
+                    m.id, m.can_access_import, request.user.pk)
+        return Response(self._member_payload(m))
 
     @action(detail=False, methods=["get"], url_path="my-companies")
     def my_companies(self, request):

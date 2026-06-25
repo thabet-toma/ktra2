@@ -20,6 +20,7 @@ export type AppView =
     | "points-management"
     | "attendance"
     | "purchase-invoices"
+    | "international-invoices"
     | "sales-invoices"
     | "sales-customers"
     | "old-invoices"

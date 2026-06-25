@@ -21,6 +21,7 @@ import {
   type AseelTab,
 } from "../aseel";
 import { openInNewTab } from "@/utils/openInNewTab";
+import { useConfirm } from "../../contexts/ConfirmContext";
 
 type PartnerApi = {
   id: number;
@@ -79,6 +80,7 @@ const fmtMoney = (s: string | null | undefined) =>
 
 export const SalesCustomersPage: React.FC = () => {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [rows, setRows] = useState<PartnerApi[]>([]);
   const [currencies, setCurrencies] = useState<CurrRow[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterRow[]>([]);
@@ -230,7 +232,7 @@ export const SalesCustomersPage: React.FC = () => {
   };
 
   const handleDelete = async (p: PartnerApi) => {
-    if (!window.confirm(`حذف العميل «${p.name}»؟`)) return;
+    if (!(await confirm({ title: "حذف العميل", message: `حذف العميل «${p.name}»؟` }))) return;
     setErr(null); setMsg(null);
     try {
       await apiDelete(`partners/${p.id}/`, { tenantId });

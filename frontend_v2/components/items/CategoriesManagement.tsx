@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import { inventoryApi } from "../../services/inventoryApi";
 import { Plus, Edit2, Trash2, X, Check, RefreshCw } from "lucide-react";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
@@ -10,6 +11,7 @@ type Category = {
 };
 
 export const CategoriesManagement: React.FC = () => {
+  const confirm = useConfirm();
   const [list, setList] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -74,7 +76,7 @@ export const CategoriesManagement: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm("هل أنت متأكد من حذف هذا التصنيف؟")) return;
+    if (!(await confirm({ title: "حذف التصنيف", message: "هل أنت متأكد من حذف هذا التصنيف؟" }))) return;
     setLoading(true);
     setErr(null);
     try {

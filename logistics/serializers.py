@@ -908,6 +908,7 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
         model = PurchaseInvoice
         fields = [
             'id', 'invoice_number', 'invoice_name', 'invoice_date',
+            'invoice_type',
             'partner', 'partner_name',
             'deal', 'deal_ref',
             'shipment', 'clearance',
@@ -959,6 +960,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         model = PurchaseInvoice
         fields = [
             'id', 'invoice_number', 'invoice_name', 'invoice_date',
+            'invoice_type',
             'partner', 'partner_name',
             'deal', 'deal_ref',
             'shipment',

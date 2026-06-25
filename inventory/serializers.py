@@ -99,6 +99,7 @@ class StockMovementSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source='partner.name', read_only=True, default=None)
     movement_type_display = serializers.CharField(source='get_movement_type_display', read_only=True)
     reference_type_display = serializers.CharField(source='get_reference_type_display', read_only=True)
+    origin = serializers.CharField(read_only=True)
 
     class Meta:
         model = StockMovement
@@ -106,7 +107,7 @@ class StockMovementSerializer(serializers.ModelSerializer):
             'id', 'product', 'product_name', 'product_sku',
             'movement_type', 'movement_type_display',
             'quantity', 'unit_cost', 'total_cost',
-            'reference_type', 'reference_type_display', 'reference_id',
+            'reference_type', 'reference_type_display', 'reference_id', 'origin',
             'partner', 'partner_name',
             'movement_date', 'notes', 'created_at',
             'quantity_before', 'quantity_after',

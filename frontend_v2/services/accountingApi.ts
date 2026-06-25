@@ -295,6 +295,43 @@ export const accountingApi = {
     return res.json() as Promise<{ journal_id: number }>;
   },
 
+  // ── صندوق العملة الأجنبية FIFO (صندوق الدولار) ──
+  fundFxBoxFromCapital: async (
+    id: number,
+    body: { amount: string | number; rate: string | number; date?: string },
+  ) => {
+    const res = await fetch(`${ACC}/cash-box-accounts/${id}/fund-capital/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "fundFxBoxFromCapital");
+    return res.json();
+  },
+
+  transferIlsToFxBox: async (
+    id: number,
+    body: { ils_box_id: number; amount: string | number; rate: string | number; date?: string },
+  ) => {
+    const res = await fetch(`${ACC}/cash-box-accounts/${id}/transfer-from-ils/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "transferIlsToFxBox");
+    return res.json();
+  },
+
+  getFxBoxLots: async (id: number) => {
+    const res = await fetch(`${ACC}/cash-box-accounts/${id}/fx-lots/`, { headers: headers() });
+    await handle(res, "getFxBoxLots");
+    return res.json() as Promise<{
+      currency_code: string;
+      fc_balance: string;
+      ils_value: string;
+      lots: Array<{
+        id: number; lot_date: string; original_fc: string;
+        remaining_fc: string; rate: string; source: string; journal: number | null;
+      }>;
+    }>;
+  },
+
   postPurchaseReceipt: async (body: Record<string, unknown>) => {
     const res = await fetch(`${ACC}/purchase-receipts/`, {
       method: "POST",

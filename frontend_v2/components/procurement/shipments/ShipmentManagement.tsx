@@ -13,6 +13,7 @@ import { ShipmentDetailView } from './ShipmentDetailView';
 import { AseelDenseTable, type DenseColumn } from '../../aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from '../../aseel/useAseelIndexKeymap';
 import { openInNewTab } from '@/utils/openInNewTab';
+import { useConfirm } from '../../../contexts/ConfirmContext';
 
 interface ShipmentManagementProps {
     currentUser: User;
@@ -56,6 +57,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
 }) => {
     const navigate = useNavigate();
 
+    const confirm = useConfirm();
     const [shipments, setShipments] = useState<Shipment[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
     const [loading, setLoading] = useState(true);
@@ -111,7 +113,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     };
 
     const handleDelete = async (shipmentId: string) => {
-        if (!window.confirm('هل أنت متأكد من حذف هذه الشحنة؟')) return;
+        if (!(await confirm({ title: 'حذف الشحنة', message: 'هل أنت متأكد من حذف هذه الشحنة؟' }))) return;
         try {
             await shipmentsService.deleteShipment(shipmentId);
         } catch (error) {

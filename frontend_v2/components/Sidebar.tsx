@@ -18,6 +18,7 @@ import {
   ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home,
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
+import { useCompany } from "../contexts/CompanyContext";
 
 
 interface SidebarProps {
@@ -27,6 +28,8 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) => {
+  // صلاحية الاستيراد للشركة النشطة (تتفاعل مع تبديل الشركة) — لا تعتمد على علم ثابت من تسجيل الدخول.
+  const { canAccessImport } = useCompany();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   // Phase 5 (Section 9): مجموعات تنقّل رئيسية كبيرة، كلٌّ بأيقونته الخاصة.
@@ -95,6 +98,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
   // 5b) المخزون → مجموعة فرعية «الاستيراد» (زر الاستيراد المستقل أُزيل ويعيش هنا).
   const importLinks: NavLink[] = [
+    { view: "international-invoices", label: "الفواتير الدولية", icon: <FileText className="h-4 w-4" /> },
     { view: "deals-management", label: "الصفقات", icon: <Handshake className="h-4 w-4" /> },
     { view: "shipments-management", label: "الشحنات", icon: <Ship className="h-4 w-4" /> },
     { view: "old-invoices", label: "أرشيف الفواتير", icon: <History className="h-4 w-4" /> },
@@ -248,6 +252,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           {/* 5) المخزون — يضم مجموعة «الاستيراد» الفرعية (زر الاستيراد المستقل أُزيل) */}
           {(user.role === 'manager' || user.role === 'procurement') &&
             renderGroup("المخزون", <Warehouse className="h-5 w-5 flex-shrink-0" />, inventoryExpanded, () => setInventoryExpanded(!inventoryExpanded), inventoryLinks,
+              // مجموعة «الاستيراد» الفرعية تظهر فقط عند تفعيل الاستيراد للشركة النشطة + صلاحية المستخدم.
+              canAccessImport ? (
               <div className="space-y-1">
                 <button
                   onClick={() => setImportExpanded(!importExpanded)}
@@ -275,6 +281,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                   </div>
                 )}
               </div>
+              ) : undefined
             )}
 
           {/* 6) المالية */}

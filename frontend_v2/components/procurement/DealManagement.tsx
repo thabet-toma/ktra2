@@ -14,6 +14,7 @@ import { LoadingSpinner } from '../LoadingSpinner';
 import { PriceOfferSelectionModal } from './price-offers/PriceOfferSelectionModal';
 import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
+import { useConfirm } from '../../contexts/ConfirmContext';
 
 interface DealManagementProps {
     currentUser: User;
@@ -84,6 +85,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         return { mode: 'deal' as const, id: seg };
     }, [location.pathname]);
 
+    const confirm = useConfirm();
     const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
     const [deals, setDeals] = useState<Deal[]>([]);
     const [priceOffers, setPriceOffers] = useState<PriceOffer[]>([]);
@@ -280,7 +282,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     };
 
     const handleDelete = async (dealId: string) => {
-        if (!window.confirm('حذف الصفقة؟')) return;
+        if (!(await confirm({ title: 'حذف الصفقة', message: 'حذف الصفقة؟' }))) return;
         try {
             await dealsService.deleteDeal(dealId);
         } catch (error) {

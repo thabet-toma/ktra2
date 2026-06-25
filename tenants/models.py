@@ -33,6 +33,10 @@ class Tenant(models.Model):
     Status = models.CharField(max_length=50, choices=STATUS_CHOICES, default='Trial')
     CreatedAt = models.DateTimeField(auto_now_add=True)
     DomainName = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    # وحدة الاستيراد (الصفقات/الشحن/التخليص/الفاتورة الدولية) — يضبطها السوبر أدمن
+    # فقط لكل شركة. الشركة غير المفعّلة لا يرى أعضاؤها قائمة الاستيراد ولا قسم
+    # «تكاليف الاستيراد» في شجرة الحسابات.
+    import_enabled = models.BooleanField(default=False, db_column='ImportEnabled')
 
     class Meta:
         db_table = 'tenants'
@@ -221,6 +225,9 @@ class UserCompanyMembership(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, related_name='memberships', db_column='TenantID')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='staff', db_column='Role')
     is_default = models.BooleanField(default=False, db_column='IsDefault')
+    # منح هذا العضو صلاحية وحدة الاستيراد — يضبطه مدير الشركة، وفعّال فقط ضمن
+    # شركة مفعّل لديها الاستيراد. المدير يملكها ضمناً.
+    can_access_import = models.BooleanField(default=False, db_column='CanAccessImport')
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
 
     class Meta:

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Plus, Wallet, ArrowRightLeft, Pencil } from 'lucide-react';
+import { Plus, Wallet, ArrowRightLeft, Pencil, Layers } from 'lucide-react';
 import { CashBox } from '../../types';
 import { cashBoxesService } from '../../services/firestoreService';
 import { accountingApi, type CashBoxLedgerLink } from '../../services/accountingApi';
 import { CreateCashBoxModal } from './modals/CreateCashBoxModal';
 import { EditCashBoxModal } from './modals/EditCashBoxModal';
+import { FundFxBoxModal } from './modals/FundFxBoxModal';
 
 interface CashBoxListProps {
     onSelectCashBox: (cashBox: CashBox) => void;
@@ -16,6 +17,9 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
     const [editBox, setEditBox] = useState<CashBox | null>(null);
     const [loading, setLoading] = useState(true);
     const [ledgerByExt, setLedgerByExt] = useState<Record<string, CashBoxLedgerLink>>({});
+    // صندوق العملة الأجنبية (الدولار) المراد تمويله بطبقات FIFO
+    const [fundBox, setFundBox] = useState<CashBoxLedgerLink | null>(null);
+    const ilsBoxes = (Object.values(ledgerByExt) as CashBoxLedgerLink[]).filter((l) => l.currency_code === 'ILS');
 
     const refreshLedgers = useCallback(async () => {
         try {
@@ -78,17 +82,33 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                                 <Wallet className="w-6 h-6 text-blue-600 dark:text-blue-400" />
                             </div>
                             <div className="flex flex-col items-end gap-1">
-                                <button
-                                    type="button"
-                                    title="تعديل الصندوق"
-                                    className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setEditBox(box);
-                                    }}
-                                >
-                                    <Pencil className="w-4 h-4" />
-                                </button>
+                                <div className="flex items-center gap-1">
+                                    {/* تمويل FIFO — لصناديق العملة الأجنبية المربوطة بالشجرة (مثل صندوق الدولار) */}
+                                    {ledgerByExt[box.id] && ledgerByExt[box.id].currency_code !== 'ILS' && (
+                                        <button
+                                            type="button"
+                                            title="تمويل (FIFO): إيداع/تحويل"
+                                            className="p-2 rounded-lg text-green-700 hover:bg-green-50 dark:hover:bg-gray-700"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setFundBox(ledgerByExt[box.id]);
+                                            }}
+                                        >
+                                            <Layers className="w-4 h-4" />
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        title="تعديل الصندوق"
+                                        className="p-2 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 dark:text-gray-300"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setEditBox(box);
+                                        }}
+                                    >
+                                        <Pencil className="w-4 h-4" />
+                                    </button>
+                                </div>
                                 <span
                                     className={`px-2 py-1 text-xs font-semibold rounded-full ${
                                         box.currency === "USD"
@@ -163,6 +183,13 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                     void refreshLedgers();
                 }}
                 onLedgersMaybeChanged={() => void refreshLedgers()}
+            />
+            <FundFxBoxModal
+                isOpen={fundBox !== null}
+                ledger={fundBox}
+                ilsBoxes={ilsBoxes}
+                onClose={() => setFundBox(null)}
+                onFunded={() => void refreshLedgers()}
             />
         </div>
     );

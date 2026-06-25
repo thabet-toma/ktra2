@@ -19,6 +19,10 @@ import { openInNewTab } from '@/utils/openInNewTab';
 
 interface PurchaseInvoiceProps {
   currentUser?: User;
+  /** نوع الفاتورة المعروضة في القائمة: محلية (افتراضي) أو دولية (الاستيراد). */
+  invoiceType?: 'local' | 'international';
+  /** مسار القائمة لهذا النوع (محرر الفاتورة يبقى مشتركاً على /purchase-invoices/:id). */
+  listPath?: string;
 }
 
 const DEFAULT_USER: User = {
@@ -121,8 +125,13 @@ function invoiceToSqlPayload(inv: Partial<Invoice>): Partial<PurchaseInvoiceDto>
 }
 
 
-export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: propUser }) => {
+export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
+  currentUser: propUser,
+  invoiceType = 'local',
+  listPath = '/purchase-invoices',
+}) => {
   const currentUser = propUser || DEFAULT_USER;
+  const isInternational = invoiceType === 'international';
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -146,7 +155,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
 
   const loadInvoices = useCallback(async () => {
     try {
-      const rows = await purchaseInvoiceApi.list();
+      const rows = await purchaseInvoiceApi.list({ invoice_type: invoiceType });
       const mapped = rows.map(sqlListToInvoice);
       setInvoices(mapped);
     } catch (e) {
@@ -154,12 +163,12 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [invoiceType]);
 
   /** مزامنة قائمة/نموذج الفاتورة مع المسار: /purchase-invoices و /purchase-invoices/:id */
   const applyLocationToView = useCallback(async () => {
     const path = location.pathname.replace(/\/$/, "") || "/";
-    const listOnly = matchPath({ path: "/purchase-invoices", end: true }, path);
+    const listOnly = matchPath({ path: listPath, end: true }, path);
     const detail = matchPath({ path: "/purchase-invoices/:invoiceId", end: true }, path);
 
     if (listOnly) {
@@ -182,7 +191,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
       const numId = Number(pathId);
       if (!Number.isFinite(numId) || numId <= 0) {
         setInvoiceRouteLoading(false);
-        navigate("/purchase-invoices", { replace: true });
+        navigate(listPath, { replace: true });
         return;
       }
       const sp = new URLSearchParams(location.search);
@@ -201,12 +210,12 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
         setViewMode("form");
       } catch (e) {
         // console suppressed
-        navigate("/purchase-invoices", { replace: true });
+        navigate(listPath, { replace: true });
       } finally {
         setInvoiceRouteLoading(false);
       }
     }
-  }, [location.pathname, location.search, navigate, currentInvoice?.id]);
+  }, [location.pathname, location.search, navigate, currentInvoice?.id, listPath]);
 
   useEffect(() => {
     void loadInvoices();
@@ -450,7 +459,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({ currentUser: p
             suppliers={suppliers}
             onConvertToDeal={handleConvertToDeal}
             onCreateNew={handleCreateNew}
-            onImport={() => setShowImportModal(true)}
+            onImport={isInternational ? () => setShowImportModal(true) : undefined}
             onRefresh={() => void loadInvoices()}
           />
         ) : (

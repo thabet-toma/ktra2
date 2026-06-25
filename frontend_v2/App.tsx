@@ -160,6 +160,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "sales-settings": "/sales/settings",
   "purchase-settings": "/purchase-settings",
   "purchase-invoices": "/purchase-invoices",
+  "international-invoices": "/international-invoices",
   "old-invoices": "/old-invoices",
   "price-offers": "/price-offers",
   "deals-management": "/deals",
@@ -212,6 +213,8 @@ const App: React.FC = () => {
   const { currentUser, loading: authLoading, logout, updateUser } = useAuth();
 
   const [authView, setAuthView] = useState<AuthView>("landing");
+  // نوع التسجيل المختار من صفحة الهبوط: تاجر/شركة أو موظف/فريق كترا.
+  const [signupType, setSignupType] = useState<'trader' | 'employee'>('trader');
   const [users, setUsers] = useState<User[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
 
@@ -1341,6 +1344,21 @@ const App: React.FC = () => {
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
+      case "international-invoices":
+        if (
+          currentUser!.role === "procurement" ||
+          currentUser!.role === "manager"
+        ) {
+          return (
+            <PurchaseInvoice
+              currentUser={currentUser!}
+              invoiceType="international"
+              listPath="/international-invoices"
+            />
+          );
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
       // ---------- New Case Added Here ----------
       case "old-invoices":
         if (
@@ -1783,7 +1801,7 @@ const App: React.FC = () => {
     if (authView === "signup") {
       return (
         <div className={theme}>
-          <SignupPage onNavigateToLogin={() => setAuthView("login")} />
+          <SignupPage onNavigateToLogin={() => setAuthView("login")} accountType={signupType} />
         </div>
       );
     }
@@ -1791,7 +1809,7 @@ const App: React.FC = () => {
       return (
         <div className={theme}>
           <LoginPage
-            onNavigateToSignup={() => setAuthView("signup")}
+            onNavigateToSignup={() => { setSignupType('trader'); setAuthView("signup"); }}
             onGoToStore={() => setAppView('store')}
           />
         </div>
@@ -1802,7 +1820,7 @@ const App: React.FC = () => {
       <div className={theme}>
         <LandingPage
           onLogin={() => setAuthView("login")}
-          onSignup={() => setAuthView("signup")}
+          onSignup={(type) => { setSignupType(type); setAuthView("signup"); }}
           onGoToStore={() => setAppView('store')}
         />
       </div>

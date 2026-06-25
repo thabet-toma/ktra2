@@ -62,6 +62,10 @@ export interface User {
     totalPoints?: number;
     currentDailyPoints?: DailyPoints;
     checkInButtonEnabled?: boolean;
+    /** سوبر أدمن المنصة — يتحكم بتفعيل الاستيراد لكل شركة */
+    isSuperAdmin?: boolean;
+    /** صلاحية وحدة الاستيراد (إخفاء القائمة وقسم تكاليف الاستيراد) — الإنفاذ الموثوق على الخادم */
+    canAccessImport?: boolean;
 }
 
 export interface AttendanceSession {

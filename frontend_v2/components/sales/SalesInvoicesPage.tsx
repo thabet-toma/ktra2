@@ -10,6 +10,7 @@
  * F6 = focus search
  */
 import React, { useCallback, useEffect, useState } from "react";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   listSalesInvoices,
@@ -82,6 +83,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
 }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const confirm = useConfirm();
   const [rows, setRows] = useState<ExtRow[]>([]);
   const [partners, setPartners] = useState<PartnerRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -326,7 +328,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   };
 
   const handleDeleteDraft = async (id: number) => {
-    if (!window.confirm("حذف هذه المسودة نهائياً؟")) return;
+    if (!(await confirm({ title: "حذف المسودة", message: "حذف هذه المسودة نهائياً؟" }))) return;
     setErr(null);
     setMsg(null);
     try {

@@ -903,6 +903,20 @@ class PurchaseInvoice(models.Model):
     invoice_name = models.CharField(max_length=255, null=True, blank=True, db_column='InvoiceName')
     invoice_date = models.DateField(null=True, blank=True, db_column='InvoiceDate')
 
+    # فصل الفاتورة الدولية (الاستيراد) عن المحلية. المحلية = فاتورة شراء عادية؛
+    # الدولية = ضمن مسار الاستيراد (صفقة/شحنة/تخليص). الفصل يحكم الشاشة المعروضة
+    # وصلاحية الوصول (الدولية تتطلب صلاحية الاستيراد).
+    INVOICE_TYPE_LOCAL = 'local'
+    INVOICE_TYPE_INTERNATIONAL = 'international'
+    INVOICE_TYPE_CHOICES = [
+        (INVOICE_TYPE_LOCAL, 'محلية'),
+        (INVOICE_TYPE_INTERNATIONAL, 'دولية (استيراد)'),
+    ]
+    invoice_type = models.CharField(
+        max_length=20, choices=INVOICE_TYPE_CHOICES, default=INVOICE_TYPE_LOCAL,
+        db_column='InvoiceType',
+    )
+
     partner = models.ForeignKey(
         Partner, on_delete=models.PROTECT, db_column='PartnerID',
         related_name='purchase_invoices',
