@@ -241,11 +241,23 @@ export const inventoryApi = {
   // ── Phase 7 (T-I2): جرد ───────────────────────────────────────────
   getStocktakes: () =>
     fetch(`${INV}/stocktakes/`, { headers: headers() }).then(asList),
+  getStocktake: async (id: number) => {
+    const res = await fetch(`${INV}/stocktakes/${id}/`, { headers: headers() });
+    await handle(res, "getStocktake");
+    return res.json();
+  },
   createStocktake: async (body: Record<string, unknown>) => {
     const res = await fetch(`${INV}/stocktakes/`, {
       method: "POST", headers: headers(), body: JSON.stringify(body),
     });
     await handle(res, "createStocktake");
+    return res.json();
+  },
+  updateStocktake: async (id: number, body: Record<string, unknown>) => {
+    const res = await fetch(`${INV}/stocktakes/${id}/`, {
+      method: "PATCH", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "updateStocktake");
     return res.json();
   },
   postStocktake: async (id: number) => {

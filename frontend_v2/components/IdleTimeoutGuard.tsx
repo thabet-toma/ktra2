@@ -3,10 +3,13 @@
  * بعد {@link IDLE_TIMEOUT_MS} من غياب أي نشاط (نقر/مفتاح/تمرير/لمس/تنقّل) يُبطل
  * الجلسة (يمسح التوكن) ويعرض مودال «تم إنهاء الجلسة» يعيد المستخدم إلى تسجيل
  * الدخول. أي نشاط قبل انتهاء المهلة يُعيد ضبط المؤقّت.
+ *
+ * قبل الانتهاء بـ {@link IDLE_WARNING_MS} يظهر تنبيه بعدّاد تنازلي يتيح للمستخدم
+ * الضغط «متابعة الجلسة» لتمديدها دون فقد عمله (مهم لعمليات الجرد الطويلة).
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { IDLE_TIMEOUT_MS } from "../constants/session";
+import { IDLE_TIMEOUT_MS, IDLE_WARNING_MS } from "../constants/session";
 import { logoutUser } from "../services/authService";
 
 interface Props {
@@ -16,22 +19,48 @@ interface Props {
 
 export const IdleTimeoutGuard: React.FC<Props> = ({ onLogout }) => {
   const [expired, setExpired] = useState(false);
-  const timerRef = useRef<number | null>(null);
+  // ثوانٍ متبقية حتى الانتهاء أثناء التنبيه؛ null = لا تنبيه معروض.
+  const [warnSeconds, setWarnSeconds] = useState<number | null>(null);
+  const warnTimerRef = useRef<number | null>(null);
+  const expireTimerRef = useRef<number | null>(null);
+  const countdownRef = useRef<number | null>(null);
   const expiredRef = useRef(false);
+
+  const clearTimers = () => {
+    if (warnTimerRef.current != null) window.clearTimeout(warnTimerRef.current);
+    if (expireTimerRef.current != null) window.clearTimeout(expireTimerRef.current);
+    if (countdownRef.current != null) window.clearInterval(countdownRef.current);
+    warnTimerRef.current = expireTimerRef.current = countdownRef.current = null;
+  };
 
   const handleExpire = useCallback(() => {
     if (expiredRef.current) return;
     expiredRef.current = true;
+    clearTimers();
     // إبطال الجلسة فوراً (مسح التوكن) — أي نداء API بعدها غير مُصرَّح به.
     void logoutUser();
     setExpired(true);
   }, []);
 
+  // بدء التنبيه بعدّاد تنازلي يُحدَّث كل ثانية حتى الانتهاء.
+  const startWarning = useCallback(() => {
+    if (expiredRef.current) return;
+    const deadline = Date.now() + IDLE_WARNING_MS;
+    setWarnSeconds(Math.ceil(IDLE_WARNING_MS / 1000));
+    if (countdownRef.current != null) window.clearInterval(countdownRef.current);
+    countdownRef.current = window.setInterval(() => {
+      const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      setWarnSeconds(left);
+    }, 1000);
+  }, []);
+
   const reset = useCallback(() => {
     if (expiredRef.current) return;
-    if (timerRef.current != null) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(handleExpire, IDLE_TIMEOUT_MS);
-  }, [handleExpire]);
+    clearTimers();
+    setWarnSeconds(null);
+    warnTimerRef.current = window.setTimeout(startWarning, IDLE_TIMEOUT_MS - IDLE_WARNING_MS);
+    expireTimerRef.current = window.setTimeout(handleExpire, IDLE_TIMEOUT_MS);
+  }, [handleExpire, startWarning]);
 
   useEffect(() => {
     // throttle: لا نعيد ضبط المؤقّت أكثر من مرة كل ثانية لتفادي ضغط الأحداث.
@@ -49,9 +78,58 @@ export const IdleTimeoutGuard: React.FC<Props> = ({ onLogout }) => {
     reset();
     return () => {
       events.forEach((e) => window.removeEventListener(e, onActivity, { capture: true } as any));
-      if (timerRef.current != null) window.clearTimeout(timerRef.current);
+      clearTimers();
     };
   }, [reset]);
+
+  // تنبيه ما قبل الانتهاء — يظهر فقط عند الخمول قبل الانتهاء، وأي نشاط يخفيه.
+  if (!expired && warnSeconds != null) {
+    const mm = String(Math.floor(warnSeconds / 60)).padStart(2, "0");
+    const ss = String(warnSeconds % 60).padStart(2, "0");
+    return createPortal(
+      <div
+        data-skin="aseel"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label="تنبيه انتهاء الجلسة"
+        style={{
+          position: "fixed", inset: 0, zIndex: 100000,
+          background: "rgba(0,0,0,0.45)", display: "flex",
+          alignItems: "center", justifyContent: "center", padding: 16,
+        }}
+      >
+        <div
+          dir="rtl"
+          style={{
+            width: "100%", maxWidth: 400, background: "#fff", borderRadius: 8,
+            boxShadow: "0 10px 40px rgba(0,0,0,.3)", padding: 24, textAlign: "center",
+            fontFamily: "inherit",
+          }}
+        >
+          <div style={{ fontSize: 18, fontWeight: 700, color: "#b45309", marginBottom: 8 }}>
+            ستنتهي الجلسة قريباً
+          </div>
+          <p style={{ fontSize: 14, color: "#444", margin: "0 0 6px" }}>
+            بسبب عدم النشاط، ستُنهى الجلسة خلال
+          </p>
+          <div style={{ fontSize: 30, fontWeight: 800, color: "#b91c1c", margin: "0 0 16px", direction: "ltr", letterSpacing: 1 }}>
+            {mm}:{ss}
+          </div>
+          <button
+            type="button"
+            onClick={reset}
+            style={{
+              width: "100%", padding: "10px 16px", background: "#2563eb", color: "#fff",
+              border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer", fontSize: 14,
+            }}
+          >
+            متابعة الجلسة
+          </button>
+        </div>
+      </div>,
+      document.body,
+    );
+  }
 
   if (!expired) return null;
 
