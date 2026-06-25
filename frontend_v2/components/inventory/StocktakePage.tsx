@@ -103,6 +103,27 @@ export const StocktakePage: React.FC = () => {
     })),
     [sortedProducts],
   );
+  // خيارات «القفز لصنف»: الكود أولاً في التسمية كي تطابق الكتابة فوراً (startsWith)
+  // فيكفي كتابة الكود + Enter للقفز للصنف المطابق.
+  const locateOptions = useMemo(
+    () => sortedProducts.map((p) => ({
+      id: p.id,
+      label: `${p.sku} — ${p.name_ar || p.name_en || ""}`.trim(),
+      sub: p.quantity_on_hand != null ? `رصيد ${p.quantity_on_hand}` : "",
+    })),
+    [sortedProducts],
+  );
+
+  // يُنزل القائمة على سطر الصنف ويضع المؤشّر في خانة الكمية (للعدّ من ورقة بترتيب مختلف).
+  const locateProduct = (id: number) => {
+    const el = document.querySelector<HTMLInputElement>(`[data-qty-for="${id}"]`);
+    if (el) {
+      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      el.focus();
+      el.select();
+    }
+  };
+
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   const addLine = () => setLines((ls) => [...ls, { product: "", counted_quantity: "0" }]);
@@ -187,6 +208,18 @@ export const StocktakePage: React.FC = () => {
                   <input className="aseel-input" value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
               </div>
 
+              {/* قفز لصنف: اكتب الكود/الاسم → اختر أو Enter ⇒ تنزل القائمة على الصنف والمؤشّر بخانة الكمية */}
+              <div id="stocktake-locate" style={{ marginBottom: 8, maxWidth: 480 }}>
+                <span className="aseel-field-label">🔎 قفز لصنف (اكتب الكود ثم Enter — للعدّ بأي ترتيب)</span>
+                <AseelAutocomplete
+                  value=""
+                  options={locateOptions}
+                  onPick={(id) => locateProduct(Number(id))}
+                  placeholder="اكتب رقم/اسم الصنف… ثم Enter للقفز إليه"
+                  maxResults={12}
+                />
+              </div>
+
               <table className="aseel-grid" data-variant="list" style={{ marginBottom: 8 }}>
                 <thead><tr><th>الصنف</th><th style={{ width: 110 }}>رصيد النظام</th><th style={{ width: 120 }}>الكمية المعدودة</th><th style={{ width: 40 }}></th></tr></thead>
                 <tbody>
@@ -204,7 +237,16 @@ export const StocktakePage: React.FC = () => {
                         </td>
                         <td style={{ textAlign: "center", color: "var(--aseel-ink-soft)" }}>{p?.quantity_on_hand ?? "—"}</td>
                         <td><input type="number" min="0" step="any" className="aseel-input" style={{ width: "100%" }}
-                          value={l.counted_quantity} onChange={(e) => updateLine(i, { counted_quantity: e.target.value })} /></td>
+                          data-qty-for={l.product}
+                          value={l.counted_quantity}
+                          onChange={(e) => updateLine(i, { counted_quantity: e.target.value })}
+                          onKeyDown={(e) => {
+                            // بعد كتابة العدد + Enter ⇒ يرجع المؤشّر لمربع البحث للصنف التالي.
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              document.querySelector<HTMLInputElement>("#stocktake-locate input")?.focus();
+                            }
+                          }} /></td>
                         <td style={{ textAlign: "center" }}>
                           <button className="aseel-iconbtn" onClick={() => removeLine(i)} title="حذف"><Trash2 className="h-3 w-3" /></button>
                         </td>
