@@ -7,7 +7,7 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import { AseelDocumentShell, AseelAutocomplete, type AseelToolbarAction } from "../aseel";
-import { Plus, Send, Trash2, RefreshCw, X, List } from "lucide-react";
+import { Plus, Send, Trash2, RefreshCw, X, List, Save } from "lucide-react";
 
 type Wh = { id: number; name: string };
 type Prod = { id: number; sku: string; name_ar?: string; name_en?: string; quantity_on_hand?: string };
@@ -123,7 +123,8 @@ export const StocktakePage: React.FC = () => {
     setLines([{ product: "", counted_quantity: "0" }]); setShowForm(false);
   };
 
-  const saveAndPost = async () => {
+  // حفظ الجرد: post=false ⇒ مسودة فقط (تُرحَّل لاحقاً من القائمة)، post=true ⇒ حفظ وترحيل.
+  const save = async (post: boolean) => {
     setErr(null); setMsg(null);
     const filled = lines.filter((l) => l.product !== "");
     if (!filled.length) { setErr("أضف بنداً واحداً على الأقل"); return; }
@@ -135,12 +136,14 @@ export const StocktakePage: React.FC = () => {
         notes,
         lines: filled.map((l) => ({ product: l.product, counted_quantity: l.counted_quantity || "0" })),
       });
-      await inventoryApi.postStocktake(created.id);
-      setMsg("✓ تم إنشاء الجرد وترحيله (تسوية المخزون + قيد الفرق)");
+      if (post) await inventoryApi.postStocktake(created.id);
+      setMsg(post
+        ? "✓ تم إنشاء الجرد وترحيله (تسوية المخزون + قيد الفرق)"
+        : "✓ تم حفظ الجرد كمسودة (بدون ترحيل) — يمكنك ترحيله لاحقاً من القائمة");
       resetForm();
       await load();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "فشل الحفظ/الترحيل");
+      setErr(e instanceof Error ? e.message : "فشل الحفظ");
     } finally {
       setSaving(false);
     }
@@ -213,7 +216,10 @@ export const StocktakePage: React.FC = () => {
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="aseel-toolbtn" onClick={addLine}><Plus className="h-4 w-4" /> سطر</button>
                 <button className="aseel-toolbtn" onClick={loadAllProducts} title="إدراج كافة الأصناف المسجلة"><List className="h-4 w-4" /> إدراج كل الأصناف</button>
-                <button className="aseel-toolbtn" onClick={saveAndPost} disabled={saving} style={{ marginInlineStart: "auto" }}>
+                <button className="aseel-toolbtn" onClick={() => void save(false)} disabled={saving} style={{ marginInlineStart: "auto" }} title="حفظ كمسودة بدون ترحيل — تُرحَّل لاحقاً من القائمة">
+                  {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} حفظ
+                </button>
+                <button className="aseel-toolbtn" onClick={() => void save(true)} disabled={saving} title="حفظ وترحيل فوراً (تسوية المخزون + قيد الفرق)">
                   {saving ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} حفظ وترحيل
                 </button>
               </div>
