@@ -3,10 +3,10 @@
  * إنشاء + ترحيل: يسوّي رصيد كل صنف ليطابق العدّ (ADJUST_IN/OUT) ويُنشئ قيد فرق
  * الجرد (المخزون ↔ ت.ب.م). يعتمد على /api/inventory/stocktakes/.
  */
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
-import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
+import { AseelDocumentShell, AseelAutocomplete, type AseelToolbarAction } from "../aseel";
 import { Plus, Send, Trash2, RefreshCw, X, List } from "lucide-react";
 
 type Wh = { id: number; name: string };
@@ -18,6 +18,21 @@ type StocktakeRow = {
 };
 
 const prodLabel = (p?: Prod) => (p ? `${p.sku} — ${p.name_ar || p.name_en || ""}` : "");
+
+/**
+ * يستخرج مقاس الإطار (عرض/نسبة/قطر مثل 255/65/15 أو 31/10.5/15) من اسم الصنف
+ * لتجميع المقاسات المتطابقة بجانب بعضها — دون الحاجة لكود مخصّص. النمط مشدَّد على
+ * أبعاد إطار معقولة (عرض 2-3 خانات، نسبة 1-2، قطر خانتان) كي لا تُلتقط أرقام أو
+ * تواريخ عادية بالخطأ. يُرجع null لأي اسم لا يحوي مقاساً (الأصناف العادية) ⇒ تُرتَّب
+ * هذه بترتيب الكود الطبيعي، فلا يتأثر أصحاب الأصناف غير العجال.
+ */
+const tireSizeKey = (name: string): { d: number; w: number; a: number } | null => {
+  // حدّان (?<!\d) و (?!\d) يجعلان المقاس «رمزاً مستقلاً» فلا يُلتقط جزء من رقم أطول
+  // أو تاريخ (مثل 12/5/2024 ⇒ القطر 2024 من 4 خانات يفشل) ولا من 1255/65/15.
+  const m = (name || "").match(/(?<!\d)(\d{2,3})\s*\/\s*(\d{1,2}(?:\.\d)?)\s*\/\s*(\d{2}(?:\.\d)?)(?!\d)/);
+  if (!m) return null;
+  return { w: parseFloat(m[1]), a: parseFloat(m[2]), d: parseFloat(m[3]) };
+};
 
 export const StocktakePage: React.FC = () => {
   const navigate = useNavigate();
@@ -58,14 +73,45 @@ export const StocktakePage: React.FC = () => {
   useEffect(() => { void load(); }, [load]);
 
   const prodById = (id: number | "") => products.find((p) => p.id === Number(id));
+
+  // ترتيب الأصناف بحيث تتجاور المقاسات المتطابقة (مثل 255/65/15 بمختلف الشركات)؛
+  // الأصناف بلا مقاس تُرتَّب أخيراً أبجدياً. مشتق من الاسم — بلا كود مخصّص.
+  const sortedProducts = useMemo(() => {
+    const nameOf = (p: Prod) => p.name_ar || p.name_en || p.sku;
+    // ترتيب الكود الطبيعي (000073 < 000087) — هو الترتيب الافتراضي لمن لا مقاس لهم.
+    const byCode = (a: Prod, b: Prod) =>
+      (a.sku || "").localeCompare(b.sku || "", undefined, { numeric: true });
+    return [...products].sort((x, y) => {
+      const kx = tireSizeKey(nameOf(x)), ky = tireSizeKey(nameOf(y));
+      // كلاهما بمقاس ⇒ تجميع المقاسات المتطابقة (ثم بالكود داخل المقاس الواحد).
+      if (kx && ky) {
+        return (kx.d - ky.d) || (kx.w - ky.w) || (kx.a - ky.a) || byCode(x, y);
+      }
+      // ذو المقاس يسبق عديم المقاس؛ والباقي (الأصناف العادية) بترتيب الكود.
+      if (kx) return -1;
+      if (ky) return 1;
+      return byCode(x, y);
+    });
+  }, [products]);
+
+  // خيارات المنتقي بالبحث: يطابق الاسم (يحوي المقاس) ثم الكود/الرصيد.
+  const productOptions = useMemo(
+    () => sortedProducts.map((p) => ({
+      id: p.id,
+      label: p.name_ar || p.name_en || p.sku,
+      sub: `${p.sku}${p.quantity_on_hand != null ? ` · رصيد ${p.quantity_on_hand}` : ""}`,
+    })),
+    [sortedProducts],
+  );
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   const addLine = () => setLines((ls) => [...ls, { product: "", counted_quantity: "0" }]);
   const removeLine = (i: number) => setLines((ls) => (ls.length <= 1 ? ls : ls.filter((_, idx) => idx !== i)));
 
   const loadAllProducts = () => {
-    if (products.length === 0) return;
-    const newLines = products.map((p) => ({
+    if (sortedProducts.length === 0) return;
+    // الإدراج بالترتيب المُجمَّع بالمقاس ليسهل العدّ (المتطابقات متجاورة).
+    const newLines = sortedProducts.map((p) => ({
       product: p.id,
       counted_quantity: p.quantity_on_hand || "0",
     }));
@@ -146,11 +192,12 @@ export const StocktakePage: React.FC = () => {
                     return (
                       <tr key={i}>
                         <td>
-                          <select className="aseel-input" style={{ width: "100%" }} value={l.product}
-                            onChange={(e) => updateLine(i, { product: e.target.value ? Number(e.target.value) : "" })}>
-                            <option value="">— اختر صنفاً —</option>
-                            {products.map((pp) => <option key={pp.id} value={pp.id}>{prodLabel(pp)}</option>)}
-                          </select>
+                          <AseelAutocomplete
+                            value={p ? (p.name_ar || p.name_en || p.sku) : ""}
+                            options={productOptions}
+                            onPick={(id) => updateLine(i, { product: Number(id) })}
+                            placeholder="اكتب المقاس أو الاسم أو الكود للبحث…"
+                          />
                         </td>
                         <td style={{ textAlign: "center", color: "var(--aseel-ink-soft)" }}>{p?.quantity_on_hand ?? "—"}</td>
                         <td><input type="number" min="0" step="any" className="aseel-input" style={{ width: "100%" }}
