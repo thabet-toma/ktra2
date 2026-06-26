@@ -1170,6 +1170,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           if (it) {
             const lastPrice = await resolveSuggestedPrice(it.id);
             applyItemAt(rowIndex, it, lastPrice);
+            setTimeout(() => {
+              document.getElementById(`aseel-grid-input-${rowIndex}-quantity`)?.focus();
+            }, 50);
           }
         }}
         onInfo={(id) => { const pid = Number(id); if (pid) { setCardCanAdd(false); setCardProductId(pid); } }}

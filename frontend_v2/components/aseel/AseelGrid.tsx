@@ -50,8 +50,11 @@ export function AseelGrid<T>({
     prevRowsLength.current = rows.length;
   }, [rows.length]);
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>, rowIndex: number) => {
-      const td = (e.target as HTMLElement).closest('td');
+    (e: React.KeyboardEvent, rowIndex: number) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName !== 'INPUT' && target.tagName !== 'SELECT') return;
+
+      const td = target.closest('td');
       const tr = td?.parentElement as HTMLTableRowElement | null;
       if (!tr) return;
       const colIndex = td ? Array.prototype.indexOf.call(tr.children, td) : -1;
@@ -62,22 +65,60 @@ export function AseelGrid<T>({
           | HTMLTableRowElement
           | undefined;
         const cell = targetRow?.children[c] as HTMLElement | undefined;
-        const input = cell?.querySelector('input,select') as
+        const input = cell?.querySelector('input,select,button') as
           | HTMLElement
           | undefined;
         input?.focus();
       };
 
-      if (e.key === 'Enter' || e.key === 'ArrowDown') {
+      if (e.key === 'Enter') {
+        const isCombobox = target.getAttribute('role') === 'combobox';
+        const isExpanded = target.getAttribute('aria-expanded') === 'true';
+        if (isCombobox && !isExpanded) return;
+
+        e.preventDefault();
+        const currentKey = columns[colIndex]?.key;
+
+        if (currentKey === 'product' || currentKey === 'name' || currentKey === 'itemId') {
+          const qtyIndex = columns.findIndex(c => c.key === 'quantity' || c.key === 'qty');
+          if (qtyIndex !== -1) {
+            focusCell(rowIndex, qtyIndex);
+            return;
+          }
+        }
+
+        if (currentKey === 'quantity' || currentKey === 'qty') {
+          const priceIndex = columns.findIndex(c => c.key === 'unit_price' || c.key === 'unitPrice' || c.key === 'price');
+          if (priceIndex !== -1) {
+            focusCell(rowIndex, priceIndex);
+            return;
+          }
+        }
+
+        if (currentKey === 'unit_price' || currentKey === 'unitPrice' || currentKey === 'price') {
+          let productIndex = columns.findIndex(c => c.key === 'product' || c.key === 'name');
+          if (productIndex === -1) {
+             productIndex = columns.findIndex(c => c.key === 'itemId');
+          }
+          if (productIndex !== -1) {
+            if (rowIndex === rows.length - 1 && onAddRow) onAddRow();
+            setTimeout(() => focusCell(rowIndex + 1, productIndex), 50);
+            return;
+          }
+        }
+
+        if (rowIndex === rows.length - 1 && onAddRow) onAddRow();
+        setTimeout(() => focusCell(rowIndex + 1, colIndex), 50);
+      } else if (e.key === 'ArrowDown') {
         e.preventDefault();
         if (rowIndex === rows.length - 1 && onAddRow) onAddRow();
-        focusCell(rowIndex + 1, colIndex);
+        setTimeout(() => focusCell(rowIndex + 1, colIndex), 50);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         if (rowIndex > 0) focusCell(rowIndex - 1, colIndex);
       }
     },
-    [rows.length, onAddRow],
+    [rows.length, onAddRow, columns],
   );
 
   return (
@@ -108,6 +149,7 @@ export function AseelGrid<T>({
                 key={getRowKey(row, ri)}
                 className={ri === selectedIndex ? 'aseel-row--sel' : undefined}
                 onMouseDown={() => onSelectRow?.(ri)}
+                onKeyDown={(e) => handleKeyDown(e, ri)}
               >
                 {columns.map((c) => {
                   const val = getCell(row, c.key);
@@ -121,11 +163,11 @@ export function AseelGrid<T>({
                         <span>{val ?? ''}</span>
                       ) : (
                         <input
+                          id={`aseel-grid-input-${ri}-${c.key}`}
                           data-aseel-key="1"
                           inputMode={c.type === 'number' ? 'decimal' : undefined}
                           value={val == null ? '' : String(val)}
                           onChange={(e) => onChange(ri, c.key, e.target.value)}
-                          onKeyDown={(e) => handleKeyDown(e, ri)}
                         />
                       )}
                     </td>

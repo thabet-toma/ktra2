@@ -544,6 +544,65 @@ def attach_voucher_and_post(
     return invoice
 
 
+def _auto_settle_cash_sale(invoice: SalesInvoice, *, user=None) -> None:
+    """T-CASH2: البيع النقدي مدفوع فوراً — تسوية تلقائية فور الترحيل.
+
+    يُنشئ ويُرحّل «سند قبض» (CustomerPayment) بكامل المتبقّي على فاتورة بيع
+    نقدية، فيُفرّغ ذمم العميل (Dr صندوق / Cr ذمم) ويحوّله من «مدين» إلى «مسدَّد».
+
+    هذا يُكمل تصميم Feature 2 (قيد الفاتورة لا يُسوّي النقدية إطلاقاً؛ التحصيل
+    سند مستقل يظهر في كشف حساب العميل) — كانت الأتمتة غير مربوطة سابقاً فبقي
+    البيع النقدي مديناً للأبد. لا يلمس قيد الفاتورة، فيبقى اختبار التوجيه الفرعي
+    (`test_subledger_routing`) سليماً: التسوية قيد منفصل.
+
+    آمن: يقتصر على فواتير **البيع النقدية** (لا المراجيع/الآجل)، ويعتمد على
+    المتبقّي (grand − amount_paid) فلا يُسوّي مرتين عند إعادة الترحيل/الشيكات.
+    إن غاب حساب الصندوق يُسجَّل تحذير ويُتخطّى دون كسر الترحيل.
+    """
+    if invoice.invoice_type != SalesInvoice.INVOICE_CASH:
+        return
+    if (invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE) != SalesInvoice.INVOICE_KIND_SALE:
+        return
+    remaining = (
+        Decimal(str(invoice.grand_total or 0)) - Decimal(str(invoice.amount_paid or 0))
+    ).quantize(DEC)
+    if remaining <= DEC:
+        return
+    # حساب الصندوق: حساب الفاتورة النقدي → النقدي المرفق → افتراضي الإعدادات.
+    cash_account_id = invoice.cash_or_bank_account_id or invoice.attached_cash_account_id
+    if not cash_account_id:
+        ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
+        cash_account_id = ss.default_cash_account_id if ss else None
+    if not cash_account_id:
+        logger.warning(
+            "Cash sale %s posted without a cash account — customer left as debtor "
+            "(no auto-settlement). Set SalesSettings.default_cash_account.",
+            invoice.invoice_number,
+        )
+        return
+    payment = CustomerPayment.objects.create(
+        tenant_id=invoice.tenant_id,
+        partner_id=invoice.customer_id,
+        payment_date=invoice.invoice_date,
+        amount=remaining,
+        currency_id=invoice.currency_id,
+        exchange_rate=invoice.exchange_rate or Decimal("1"),
+        cash_or_bank_account_id=cash_account_id,
+        notes=f"تحصيل نقدي تلقائي — فاتورة {invoice.invoice_number}",
+    )
+    PaymentAllocation.objects.create(
+        tenant_id=invoice.tenant_id,
+        payment=payment,
+        invoice=invoice,
+        amount=remaining,
+    )
+    post_customer_payment(payment, user=user)
+    logger.info(
+        "Auto-settled cash sale %s via customer payment %s (amount %s).",
+        invoice.invoice_number, payment.id, remaining,
+    )
+
+
 def post_sales_invoice(
     invoice: SalesInvoice,
     *,
@@ -553,6 +612,9 @@ def post_sales_invoice(
 
     N8-T11: يَدعم الآن 4 أنواع (فاتورة بيع/مرجع بيع/فاتورة شراء/مرجع شراء)
     عبر حقل `invoice_kind`. للمراجيع، تُعكس إشارات القيد والمخزون.
+
+    T-CASH2: بعد ترحيل قيد فاتورة بيع **نقدية** تُسوَّى تلقائياً بسند قبض مستقل
+    (`_auto_settle_cash_sale`) فلا يبقى العميل مديناً.
     """
     if invoice.status == SalesInvoice.STATUS_POSTED:
         raise ValidationError("الفاتورة مرحّلة مسبقاً.")
@@ -715,7 +777,9 @@ def post_sales_invoice(
             journal_lines.append(
                 {
                     "account": uc_acc.id,
-                    "partner": invoice.customer_id,
+                    # شيكات برسم التحصيل أصل وليس الحساب الرقابي للذمم — بلا شريك
+                    # وإلا ضُمّت إلى رصيد كشف حساب العميل فضخّمت ما يدين به.
+                    "partner": None,
                     "debit": cheques_total,
                     "credit": Decimal("0"),
                     "description": f"مدفوع شيكات — {invoice.invoice_number}",
@@ -799,7 +863,9 @@ def post_sales_invoice(
             )
             journal_lines.append({
                 "account": disc_acct.id,
-                "partner": invoice.customer_id,
+                # خصم المصدر مطالبة على مصلحة الضرائب لا على العميل — بلا شريك،
+                # وإلا أُعيد المبلغُ المخصومُ من سطر الذمم إلى رصيد العميل فضخّمه.
+                "partner": None,
                 "debit": src_disc_amt,
                 "credit": Decimal("0"),
                 "description": f"خصم مصدر{desc_pct} — {invoice.invoice_number}",
@@ -908,6 +974,10 @@ def post_sales_invoice(
             object_id=invoice.id,
             change_details=f"Posted sales invoice {invoice.invoice_number} journal={jh.id}",
         )
+
+        # T-CASH2: البيع النقدي = مدفوع فوراً ⇒ سوِّه بسند قبض مستقل داخل نفس
+        # المعاملة (ذرّياً مع الترحيل) فلا يبقى العميل مديناً.
+        _auto_settle_cash_sale(invoice, user=user)
 
     return invoice
 
@@ -1185,8 +1255,11 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
 
         lines_data: list[dict] = [
             {
+                # T-CASH2: سطر الصندوق/البنك ليس جزءاً من ذمم العميل — لا يُوسَم
+                # بالشريك، وإلا تضخّم رصيد كشف الحساب (مدين الصندوق يُحسب على العميل
+                # فيبقى «مديناً» رغم تحصيله). الوسم بالشريك يقتصر على سطر الذمم.
                 "account": payment.cash_or_bank_account_id,
-                "partner": payment.partner_id,
+                "partner": None,
                 "debit": payment.amount,
                 "credit": Decimal("0"),
                 "description": f"تحصيل عميل — دفعة {payment.id}",
@@ -1804,7 +1877,10 @@ def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'Supplier
                 },
                 {
                     "account": payment.cash_or_bank_account_id,
-                    "partner": payment.partner_id,
+                    # T-CASH2: حساب الصندوق/البنك لا يَحمل المورد — وإلا حُسبت
+                    # حركة النقدية ضمن ذمم المورد فلا يُصفّر السند رصيده. فقط
+                    # سطر الذمم (AP) يَحمل الشريك.
+                    "partner": None,
                     "debit": Decimal("0"),
                     "credit": Decimal(str(payment.amount)),
                     "description": f"من الصندوق — {payment.partner.name}",

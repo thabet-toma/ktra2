@@ -14,6 +14,7 @@ import { X, ExternalLink, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { apiGetObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
+import { formatQuantity, formatMoney } from "../../utils/formatNumber";
 
 interface ProductProfile {
   id: number;
@@ -29,12 +30,6 @@ interface ProductProfile {
   sold_value: string;
 }
 
-/** تنسيق رقم نصّي بمنزلتين عشريتين للعرض فقط (DEF-003). */
-const fmt2 = (v: string | number | null | undefined): string => {
-  const n = Number(v);
-  if (v == null || v === "" || Number.isNaN(n)) return "—";
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
 
 /** DEF-005 / T-R2: مصدر السعر المقترح للشارة داخل البطاقة. */
 export type ProductCardPriceSource = "last_invoice" | "quote" | "default" | null;
@@ -138,12 +133,12 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               <Kpi label="SKU" value={profile.sku || "—"} />
               <Kpi label="التصنيف" value={profile.category || "—"} />
-              <Kpi label="المخزون الحالي" value={fmt2(profile.quantity_on_hand)} />
-              <Kpi label="متوسط التكلفة" value={fmt2(profile.avg_cost)} />
-              <Kpi label="تقييم المخزون" value={fmt2(profile.inventory_valuation)} />
-              <Kpi label="إجمالي المشتراة (كمية)" value={fmt2(profile.purchased_qty)} />
-              <Kpi label="إجمالي المباعة (كمية)" value={fmt2(profile.sold_qty)} />
-              <Kpi label="إجمالي المباعة (قيمة)" value={fmt2(profile.sold_value)} />
+              <Kpi label="المخزون الحالي" value={formatQuantity(profile.quantity_on_hand, "—")} />
+              <Kpi label="متوسط التكلفة" value={formatMoney(profile.avg_cost, "—")} />
+              <Kpi label="تقييم المخزون" value={formatMoney(profile.inventory_valuation, "—")} />
+              <Kpi label="إجمالي المشتراة (كمية)" value={formatQuantity(profile.purchased_qty, "—")} />
+              <Kpi label="إجمالي المباعة (كمية)" value={formatQuantity(profile.sold_qty, "—")} />
+              <Kpi label="إجمالي المباعة (قيمة)" value={formatMoney(profile.sold_value, "—")} />
             </div>
           ) : null}
 

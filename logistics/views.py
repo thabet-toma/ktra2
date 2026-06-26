@@ -2274,18 +2274,22 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         # المبلغ الذي سيمرّ عبر الوسيط ثم يُرحَّل لقيد الاستلام (للفاتورة المحلية).
         goods_clearing_amt = inventory_debit if inventory_debit > 0 else Decimal('0')
 
+        # توجيه الـsubledger: فقط سطر الحساب الرقابي (ذمم المورد) يَحمل الشريك.
+        # سطور المخزون/الوسيط/الضريبة/المصروف ليست ذمماً دائنة على المورد، فلو
+        # وُسِمت به لَلوّثت كشف حسابه وألغى مدينُها (المخزون) دائنَ الذمم فظهر
+        # رصيده صفراً رغم أن المبلغ مستحق فعلاً (partner_posted_balance بلا فلتر حساب).
         if inventory_debit > 0:
             lines_payload.append({
                 'account': (gr_ir_account.id if use_gr_ir else inventory_account.id),
                 'debit': inventory_debit.quantize(Decimal('0.01')),
                 'credit': Decimal('0'),
-                'partner': partner.id,
+                'partner': None,
                 'description': (
                     f"وسيط استلام (بضاعة لم تُفوتَر) — {invoice.invoice_number}" if use_gr_ir
                     else f"بضاعة/مخزون — {invoice.invoice_number}"
                 ),
             })
-            
+
         for acc_id, data in mapped_lines.items():
             names = "، ".join(data['desc'])
             if len(data['desc']) == 3: names += "..."
@@ -2293,7 +2297,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 'account': acc_id,
                 'debit': data['amount'].quantize(Decimal('0.01')),
                 'credit': Decimal('0'),
-                'partner': partner.id,
+                'partner': None,
                 'description': f"بند مشتريات: {names} — {invoice.invoice_number}"[:500],
             })
 
@@ -2302,7 +2306,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 'account': vat_input_account.id,
                 'debit': tax_amt.quantize(Decimal('0.01')),
                 'credit': Decimal('0'),
-                'partner': partner.id,
+                'partner': None,
                 'description': f"ضريبة مدخلات — {invoice.invoice_number}",
             })
 
@@ -2314,12 +2318,13 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 'account': fee.expense_account_id,
                 'debit': amt.quantize(Decimal('0.01')),
                 'credit': Decimal('0'),
-                'partner': partner.id,
+                'partner': None,
                 'description': f"{fee.description} — {invoice.invoice_number}"[:500],
             })
 
         credit_total = grand + fees_total
 
+        # سطر الذمم (الحساب الرقابي) هو الوحيد الذي يَحمل المورد — جوهر الـsubledger.
         lines_payload.append({
             'account': credit_account.id,
             'debit': Decimal('0'),
@@ -2362,6 +2367,12 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                         goods_clearing_amt=goods_clearing_amt, transaction_date=td,
                         request=request,
                     )
+
+                # T-CASH2 (شراء): الشراء النقدي = مدفوع فوراً ⇒ سوِّه بسند صرف
+                # مستقل داخل نفس المعاملة (ذرّياً مع الترحيل) فلا يبقى المورد دائناً.
+                self._auto_settle_cash_purchase(
+                    invoice, settle_amount=credit_total, request=request,
+                )
         except (ValidationError, DjangoValidationError, IntegrityError) as e:
             msg = e.message if hasattr(e, 'message') else str(e)
             return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
@@ -2453,12 +2464,14 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             reference_type="PURCHASE_GRN",
             reference_id=invoice.pk,
             description=f"استلام بضاعة فاتورة {invoice.invoice_number} | {invoice.partner.name}"[:500],
+            # قيد الاستلام لا يمسّ ذمم المورد — لا المخزون ولا الوسيط حساب رقابي،
+            # فكلاهما بلا شريك حتى لا يتلوّث كشف حساب المورد (partner=None).
             lines_data=[
                 {'account': inventory_account.id, 'debit': goods_clearing_amt.quantize(Decimal('0.01')),
-                 'credit': Decimal('0'), 'partner': invoice.partner_id,
+                 'credit': Decimal('0'), 'partner': None,
                  'description': f"مخزون مستلَم — {invoice.invoice_number}"[:500]},
                 {'account': gr_ir_account.id, 'debit': Decimal('0'),
-                 'credit': goods_clearing_amt.quantize(Decimal('0.01')), 'partner': invoice.partner_id,
+                 'credit': goods_clearing_amt.quantize(Decimal('0.01')), 'partner': None,
                  'description': f"تصفية وسيط الاستلام — {invoice.invoice_number}"[:500]},
             ],
             currency=invoice.currency,
@@ -2479,6 +2492,51 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             invoice.id, receipt_journal.id, movements, goods_clearing_amt,
         )
         return {'journal_id': receipt_journal.id, 'movements': movements}
+
+    def _auto_settle_cash_purchase(self, invoice, *, settle_amount, request=None):
+        """T-CASH2 (شراء): فاتورة الشراء النقدية مدفوعة فوراً — تسوية تلقائية فور
+        الترحيل عبر «سند صرف» (SupplierPayment) مستقل بكامل قيمة الفاتورة، فيُفرّغ
+        ذمم المورد (Dr ذمم / Cr صندوق) ويحوّله من «دائن» إلى «مسدَّد».
+
+        يُكمل تصميم Feature 2 (شراء): قيد الفاتورة يدائن ذمم المورد بالكامل ولا
+        يُسوّي النقدية إطلاقاً. كانت أتمتة التسوية غير مربوطة فبقي الشراء النقدي
+        دائناً للأبد — تماماً كما كان البيع النقدي مديناً (مرآة `_auto_settle_cash_sale`).
+        لا يلمس قيد الفاتورة فالتسوية قيد منفصل يظهر في كشف حساب المورد.
+
+        يقتصر على فواتير الشراء النقدية (payment_type='cash')؛ إن غاب حساب الصندوق
+        يُسجَّل تحذير ويُتخطّى دون كسر الترحيل (يبقى المورد دائناً).
+        """
+        from sales.services import post_supplier_payment
+        if invoice.payment_type != PurchaseInvoice.PAYMENT_TYPE_CASH:
+            return
+        amount = Decimal(str(settle_amount or 0)).quantize(Decimal('0.01'))
+        if amount <= 0:
+            return
+        cash_account_id = invoice.cash_or_bank_account_id
+        if not cash_account_id:
+            logger.warning(
+                "Cash purchase %s posted without a cash account — supplier left as "
+                "creditor (no auto-settlement). Set the invoice cash/bank account.",
+                invoice.invoice_number,
+            )
+            return
+        user = getattr(request, 'user', None)
+        user = user if (user is not None and user.is_authenticated) else None
+        payment = SupplierPayment.objects.create(
+            tenant=invoice.tenant,
+            partner=invoice.partner,
+            payment_date=invoice.invoice_date or datetime.date.today(),
+            amount=amount,
+            currency=invoice.currency,
+            exchange_rate=invoice.exchange_rate or Decimal('1'),
+            cash_or_bank_account_id=cash_account_id,
+            notes=f"صرف نقدي تلقائي — فاتورة شراء {invoice.invoice_number}",
+        )
+        post_supplier_payment(payment, user=user)
+        logger.info(
+            "Auto-settled cash purchase %s via supplier payment %s (amount %s).",
+            invoice.invoice_number, payment.id, amount,
+        )
 
     def perform_update(self, serializer):
         instance = serializer.instance

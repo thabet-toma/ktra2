@@ -1,5 +1,62 @@
 # PROJECT_MAP — K.T.R.A
 
+## [AUDIT — T-CASH2 (موردون): تسوية الشراء النقدي تلقائياً + إصلاح وسم الصندوق, 2026-06-26]
+مرآة بلاغ البيع النقدي على جانب الموردين — **سببان جذريان** بنفس النمط:
+1. **وسم خاطئ** في `sales.services.post_supplier_payment`: سطر الصندوق/البنك كان يُوسَم
+   بالمورد (`partner=payment.partner_id`)، فتُحسب حركة النقدية ضمن ذمم المورد في كشف
+   الحساب ⇒ سند الصرف لا يُصفّر رصيد المورد (يبقى منتفخاً). صار `partner=None` (فقط سطر
+   الذمم AP يَحمل الشريك) — يُصلح كشوف الحسابات لكل سندات الصرف.
+2. **Feature 2 ناقص** (شراء): فاتورة الشراء النقدية (`logistics`, `payment_type='cash'`)
+   كانت تدائن ذمم المورد بالكامل دون أي تسوية نقدية ⇒ يبقى المورد دائناً للأبد. الأتمتة
+   لم تُربَط قط (نفس فجوة البيع النقدي).
+الحل:
+- **`PurchaseInvoiceViewSet._auto_settle_cash_purchase`** (جديد، `logistics/views.py`) — بعد
+  ترحيل قيد فاتورة **شراء نقدية**، يُنشئ ويُرحّل `SupplierPayment` بكامل قيمة الفاتورة
+  (Dr ذمم المورد / Cr صندوق) ذرّياً ضمن نفس المعاملة عبر `post_supplier_payment`. يُتخطّى
+  بأمان إن غاب حساب الصندوق. قيد الفاتورة لم يُمَس ⇒ `test_pi_subledger_routing` سليم.
+- **ملاحظة (تلوّث subledger سابق، خارج النطاق)**: ترحيل فاتورة الشراء يَسِم **كل** السطور
+  (المخزون/الوسيط GR-IR/الضريبة/الرسوم) بالمورد لا سطر الذمم فقط، فيلوّث `partner_posted_balance`
+  للموردين. القياس الصحيح لرصيد المورد هو الحساب الرقابي AP تحديداً.
+تحقّق: **165 اختبار** في `logistics/ sales/ accounting/` ناجح (+ اختبارا
+`test_supplier_payment_zeroes_supplier_balance` و`test_cash_purchase_auto_settled_supplier_not_creditor`).
+
+## [AUDIT — T-CASH2: تسوية البيع النقدي تلقائياً + إصلاح وسم الصندوق, 2026-06-26]
+بلاغ المالك: عند اختيار «نقدي» يبقى العميل **مديناً** في كشف الحساب رغم أن البيع نقدي.
+**سببان جذريان** اكتُشفا:
+1. **Feature 2 ناقص** (`sales/services.py`): قيد الفاتورة لا يُسوّي النقدية (التحصيل سند
+   مستقل) — لكن **الأتمتة لم تُربَط قط**، فبقي البيع النقدي مديناً للأبد.
+2. **وسم خاطئ** في `post_customer_payment`: سطر الصندوق/البنك كان يُوسَم بالشريك، فيُحسب
+   مدين الصندوق على العميل في كشف الحساب ⇒ التحصيل لا يُصفّر الرصيد (2000−1000=1000).
+
+الحل (خادمي — مصدر حقيقة واحد لكل المسارات: UI/auto-post/API/استيراد):
+- **`sales.services._auto_settle_cash_sale`** (جديد) — بعد ترحيل قيد فاتورة **بيع نقدية**،
+  يُنشئ ويُرحّل CustomerPayment بكامل المتبقّي (Dr صندوق / Cr ذمم) ذرّياً ضمن نفس
+  المعاملة. آمن للتكرار (يعتمد على `grand − amount_paid`). يُستدعى من `post_sales_invoice`.
+  قيد الفاتورة لم يُمَس ⇒ `test_subledger_routing` سليم (التسوية قيد منفصل).
+- **إصلاح الوسم**: سطر الصندوق في `post_customer_payment` صار `partner=None` (الصندوق ليس
+  ذمماً للعميل) — يُصلح أيضاً كشوف الحسابات لكل سندات القبض اليدوية.
+- **واجهة** (`SalesInvoiceEditor`): حقل «المبلغ نقداً» يُعطَّل ويُملأ بالإجمالي تلقائياً
+  للبيع النقدي (للعرض)، وتخطّي إرفاق السند المالي للفواتير النقدية (تُسوّى خادمياً).
+- **أمر `backfill_cash_settlements`** (dry-run افتراضاً، `--apply` للتطبيق) — يُسوّي
+  الفواتير النقدية المرحَّلة قديماً (الباقية مدينة) بإعادة استخدام نفس الدالة.
+تحقّق: **277 اختبار backend ناجح** (+ اختبار جديد `test_cash_sale_auto_settled_*`: رصيد
+العميل الصافي = 0) · `tsc` نظيف.
+
+## [AUDIT — G1 rollout: شاشات الكميات/المخزون, 2026-06-26]
+المشكلة المُبلَّغة: صفحة الجرد (وبقية الشاشات) تعرض كميات بأصفار عشرية زائدة (`6.00000`).
+الحل الجراحي — تمرير كل عرض رقمي عبر المُنسّق الموحّد `formatNumber.ts` (G1):
+- **StocktakePage** — عمود «رصيد النظام» وملخّصات منتقي البحث كانت تعرض `quantity_on_hand`
+  الخام (نص API بخمس منازل)؛ الآن عبر `formatQuantity` (مع `trimQty` للقيمة الغائبة ⇒ «—»).
+  `trimNum` المحلي يُفوّض الآن إلى `formatQuantity` (مصدر حقيقة واحد، لا تكرار).
+- **ProductProfilePage · ProductCardModal** — مؤشّرات البطاقة (`fmt2`/خام) كانت تثبّت منزلتين
+  (`6.00`)؛ الآن كميات عبر `formatQuantity` وقيم مالية عبر `formatMoney` (حُذف `fmt2` اليتيم).
+- **StockLevelsPage · StockMovementsPage · InventoryValuationPage · ItemsManagement ·
+  AccountingLandedCostPage** — `fmt` المحلي (toLocaleString min:2) أُعيد تعريفه إلى
+  `formatMoney`، وأعمدة الكمية حُوّلت إلى `formatQuantity`.
+- **SalesQuotationsPage** — ملخّص «رصيد» في المنتقي عبر `formatQuantity`.
+تحقّق: `tsc --noEmit` نظيف · سلوك `formatQuantity`: `6.00000⇒6`، `6.5⇒6.5`، `6.55⇒6.55`.
+ملاحظة: الفاصل العشري نقطة (.) مطابقةً لكامل المنصة (لم يُغيَّر إلى فاصلة).
+
 ## [AI_TOOLING]
 - **Ruflo** (Multi-Agent Orchestrator): `.clone/ruflo/` — استخدمه دائماً للمهام المعقدة
   - تشغيل: `npx ruflo init` أو `node .clone/ruflo/bin/ruflo.js`
@@ -1248,3 +1305,5 @@ User pushed back on the «pending» list and asked for all of it. Closed every r
 ## [AUDIT — task28 الاستيراد، المرحلة 2 (الواجهة)، 2026-06-24] (فصل شاشتي الفاتورة + أقسام المخزن)
 
 - **الواجهة (مُنفَّذة):** `PurchaseInvoice.tsx` صار يقبل `invoiceType` (افتراضي local) + `listPath`؛ شاشة الشراء الحالية تعرض المحلية فقط ويختفي زر «استيراد من تخليص جمركي» منها. شاشة **«الفواتير الدولية»** الجديدة (view `international-invoices`، مسار `/international-invoices`، تحت مجموعة الاستيراد) تعيد استخدام نفس المكوّن بـ `invoiceType="international"` وتعرض زر الاستيراد/التحويل؛ محرّر الفاتورة يبقى مشتركاً على `/purchase-invoices/:id` (يُفتح بتبويب جديد). `canAccessImport` صار تفاعلياً للشركة النشطة عبر `CompanyContext` (يشترط تفعيل الشركة للجميع). شاشة حركات المخزون أُضيف لها فلتر «المصدر» (محلي/دولي عبر `?origin=`) + عمود شارة. `tsc` 0.
+
+- **Task 38:** Updated AseelGrid `handleKeyDown` to support a full, rapid data-entry sequence using the 'Enter' key: pressing 'Enter' now moves focus sequentially from 'Product' → 'Quantity' → 'Price' → 'Product' on the next row (creating a new row if necessary). The event listener was also moved to the row level to properly capture events from custom renderers like `AseelAutocomplete`.

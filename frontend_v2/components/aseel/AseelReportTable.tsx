@@ -85,21 +85,25 @@ export function AseelReportTable<T>({
 
   return (
     <div className={`aseel-report-table ${className}`}>
-      {(filterBar || exportable) && (
-        <div className="aseel-report-toolbar">
-          {filterBar}
-          {exportable && (
-            <button className="aseel-btn" onClick={handleExport} title="تصدير CSV">
-              تصدير
-            </button>
-          )}
-        </div>
-      )}
       <table className="aseel-grid" data-variant="report">
-        <thead>
-          <tr>
+        <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--aseel-surface)', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
+          {(filterBar || exportable) && (
+            <tr>
+              <td colSpan={columns.length} style={{ padding: 0, border: 'none', borderBottom: '1px solid var(--aseel-border-soft)' }}>
+                <div className="aseel-report-toolbar" style={{ border: 'none', borderRadius: 0, margin: 0 }}>
+                  {filterBar}
+                  {exportable && (
+                    <button className="aseel-btn" onClick={handleExport} title="تصدير CSV">
+                      تصدير
+                    </button>
+                  )}
+                </div>
+              </td>
+            </tr>
+          )}
+          <tr style={{ background: 'var(--aseel-table-head)' }}>
             {columns.map((col) => (
-              <th key={col.key} style={{ width: col.width, textAlign: getAlign(col) as any }}>
+              <th key={col.key} style={{ width: col.width, textAlign: getAlign(col) as any, top: 0 }}>
                 {col.header}
               </th>
             ))}

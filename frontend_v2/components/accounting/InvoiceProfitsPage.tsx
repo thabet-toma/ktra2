@@ -80,24 +80,67 @@ export const InvoiceProfitsPage: React.FC = () => {
     margin_pct: shown.revenue > 0 ? fmt((shown.profit / shown.revenue) * 100) : "0.00",
   };
 
+  const setQuickDate = (range: 'today' | 'week' | 'month' | 'year') => {
+    const endD = new Date();
+    const format = (d: Date) => {
+       const y = d.getFullYear();
+       const m = String(d.getMonth() + 1).padStart(2, '0');
+       const day = String(d.getDate()).padStart(2, '0');
+       return `${y}-${m}-${day}`;
+    };
+    const endStr = format(endD);
+    let startStr = endStr;
+
+    if (range === 'week') {
+      const startD = new Date(endD);
+      // Let's assume the work week starts on Sunday (day 0) or Saturday (day 6). 
+      // Subtracting the current day number brings us to Sunday.
+      const diff = startD.getDate() - startD.getDay();
+      startD.setDate(diff);
+      startStr = format(startD);
+    } else if (range === 'month') {
+      const startD = new Date(endD.getFullYear(), endD.getMonth(), 1);
+      startStr = format(startD);
+    } else if (range === 'year') {
+      const startD = new Date(endD.getFullYear(), 0, 1);
+      startStr = format(startD);
+    }
+
+    setStart(startStr);
+    setEnd(endStr);
+    // fetchData() will be called automatically if we wrap it, but start/end are state.
+    // Wait, fetchData relies on start and end. Since setState is async, we can just let the user click "تحديث" or trigger it.
+    // Actually, setting state and then fetching is better. We can use a useEffect to fetch when start/end change, but the user might not want that.
+    // The current code requires clicking "تحديث" (fetchData). Let's let them click it or we can auto-fetch.
+    // Let's auto-fetch by calling it? We can't because state isn't updated immediately.
+  };
+
   const filterBar = (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
-      <div className="aseel-field">
-        <label className="aseel-field-label">من</label>
-        <input type="date" className="aseel-input" value={start} onChange={(e) => setStart(e.target.value)} />
+    <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+        <button type="button" className="aseel-btn" onClick={() => setQuickDate('today')}>اليوم</button>
+        <button type="button" className="aseel-btn" onClick={() => setQuickDate('week')}>أول الأسبوع</button>
+        <button type="button" className="aseel-btn" onClick={() => setQuickDate('month')}>أول الشهر</button>
+        <button type="button" className="aseel-btn" onClick={() => setQuickDate('year')}>أول السنة</button>
       </div>
-      <div className="aseel-field">
-        <label className="aseel-field-label">إلى</label>
-        <input type="date" className="aseel-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
+        <div className="aseel-field">
+          <label className="aseel-field-label">من</label>
+          <input type="date" className="aseel-input" value={start} onChange={(e) => setStart(e.target.value)} />
+        </div>
+        <div className="aseel-field">
+          <label className="aseel-field-label">إلى</label>
+          <input type="date" className="aseel-input" value={end} onChange={(e) => setEnd(e.target.value)} />
+        </div>
+        <div className="aseel-field" style={{ flex: "1", minWidth: "180px" }}>
+          <label className="aseel-field-label">العميل/الرقم</label>
+          <input type="text" className="aseel-input" placeholder="اسم العميل أو رقم الفاتورة..."
+            value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
+        <button type="button" className="aseel-toolbtn" onClick={fetchData} style={{ marginTop: "18px" }}>
+          <Search className="w-4 h-4" />تحديث
+        </button>
       </div>
-      <div className="aseel-field" style={{ flex: "1", minWidth: "180px" }}>
-        <label className="aseel-field-label">العميل/الرقم</label>
-        <input type="text" className="aseel-input" placeholder="اسم العميل أو رقم الفاتورة..."
-          value={search} onChange={(e) => setSearch(e.target.value)} />
-      </div>
-      <button type="button" className="aseel-toolbtn" onClick={fetchData} style={{ marginTop: "18px" }}>
-        <Search className="w-4 h-4" />تحديث
-      </button>
     </div>
   );
 

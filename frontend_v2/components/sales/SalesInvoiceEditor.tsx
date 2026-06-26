@@ -378,6 +378,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     [lineInputsForMath, taxRateMap, invoiceDiscount]
   );
 
+  // T-CASH2: في البيع النقدي «المبلغ نقداً» = إجمالي الفاتورة دائماً (للعرض فقط؛
+  // التسوية تتمّ خادمياً بالكامل بسند قبض مستقل عند الترحيل). يبقى الحقل مُعطَّلاً
+  // ومتزامناً مع الإجمالي. لا يلمس فواتير «الذمم» (قيمتها يدوية).
+  useEffect(() => {
+    if (invoiceStatus === "posted" || invType !== "cash") return;
+    const g = String(totals.grandTotal || 0);
+    setAttachedCashAmount((prev) => (prev === g ? prev : g));
+  }, [invType, totals.grandTotal, invoiceStatus]);
+
   /** حساب افتراضي لحساب الإيراد عند وصول قائمة الحسابات (أول Revenue). */
   useEffect(() => {
     if (revenueAccountId !== "") return;
@@ -1029,8 +1038,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         }
       }
 
-      // Auto-save payment voucher
-      if (activeDraftId) {
+      // Auto-save payment voucher — للفواتير الآجلة فقط. البيع النقدي يُسوّى
+      // خادمياً بالكامل (سند قبض تلقائي) فلا حاجة لسند نقدي مرفق (T-CASH2).
+      if (activeDraftId && invType !== "cash") {
         try {
           const updatedWithVoucher = await attachPaymentVoucher(activeDraftId, {
             cash_amount: attachedCashAmount || "0",
@@ -1091,6 +1101,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       const posted = await postSalesInvoice(draftId);
       setInvoiceStatus(posted.status || "posted");
       setPostedJournalId(posted.journal ?? null);
+      // T-CASH2: تسوية البيع النقدي تتمّ خادمياً ذرّياً مع الترحيل (سند قبض مستقل).
       setMsg(
         posted.journal
           ? `تم الترحيل — القيد #${posted.journal}`
@@ -1719,7 +1730,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     [products, customerPriceMap],
   );
 
-  const renderProductCell = (row: DraftLine) => {
+  const renderProductCell = (row: DraftLine, ri: number) => {
     const selectedId = row.product && Number(row.product) > 0 ? Number(row.product) : null;
     return (
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
@@ -1731,7 +1742,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         options={productOptions}
         disabled={readOnly}
         placeholder="اكتب اسم الصنف…"
-        onPick={(id) => void onSelectProduct(row.key, Number(id))}
+        onPick={(id) => {
+          void onSelectProduct(row.key, Number(id));
+          setTimeout(() => {
+            document.getElementById(`aseel-grid-input-${ri}-quantity`)?.focus();
+          }, 50);
+        }}
         onInfo={(id) => { setCardCanAdd(false); setCardProductId(Number(id)); }}
       />
       {/* DEF-008: أيقونة (i) بجانب المنتج المختار على السطر → بطاقة الصنف */}
@@ -2182,7 +2198,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           <span className="aseel-field-label">المبلغ نقدا</span>
           <input
             className="aseel-input"
-            disabled={readOnly || isPosted}
+            disabled={readOnly || isPosted || invType === "cash"}
+            title={invType === "cash" ? "بيع نقدي — مدفوع بالكامل ويُسوّى تلقائياً عند الترحيل" : undefined}
             data-aseel-key="1"
             type="number"
             min={0}
@@ -2735,7 +2752,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             <div className="aseel-total-row">
               <span>مدفوع نقداً</span>
               <span className="aseel-total-value">
-                {readOnly || isPosted ? (
+                {readOnly || isPosted || invType === "cash" ? (
                   fmt(Number(attachedCashAmount) || 0)
                 ) : (
                   <input
@@ -2853,7 +2870,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                     <span className="aseel-field-label">المبلغ نقداً</span>
                     <input
                       className="aseel-input"
-                      disabled={readOnly || isPosted}
+                      disabled={readOnly || isPosted || invType === "cash"}
+                      title={invType === "cash" ? "بيع نقدي — مدفوع بالكامل ويُسوّى تلقائياً عند الترحيل" : undefined}
                       type="number"
                       min={0}
                       step={0.01}

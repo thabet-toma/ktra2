@@ -3,9 +3,10 @@ import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct, StockSummaryResponse } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { RefreshCw, Download, Printer } from "lucide-react";
+import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 
-const fmt = (n: number | string) =>
-  Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// مبالغ مالية — يحذف الأصفار العشرية غير الدالّة (6.00 ⇒ 6، 6.50 ⇒ 6.5) عبر المُنسّق الموحّد.
+const fmt = (n: number | string) => formatMoney(n, "0");
 
 export const StockLevelsPage: React.FC = () => {
   const [products, setProducts] = useState<SqlProduct[]>([]);
@@ -197,7 +198,7 @@ export const StockLevelsPage: React.FC = () => {
       render: (p) => {
         const qty = Number(p.quantity_on_hand);
         const low = qty <= (p.min_stock_level || 0);
-        return <span style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{fmt(qty)}</span>;
+        return <span style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{formatQuantity(qty)}</span>;
       }
     },
     { key: "min", header: "الحد الأدنى", width: "90px", align: "center", numeric: true,

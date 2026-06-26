@@ -10,6 +10,7 @@ import { resolveTenantId } from '../../utils/tenantContext';
 import { AseelDocumentShell, AseelTab } from '../aseel';
 import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTable';
 import { openInNewTab } from '../../utils/openInNewTab';
+import { formatQuantity, formatMoney } from '../../utils/formatNumber';
 
 interface ProductProfile {
   id: number;
@@ -160,13 +161,13 @@ export const ProductProfilePage: React.FC = () => {
         <div className="p-4 grid grid-cols-2 md:grid-cols-3 gap-3">
           {profile ? (
             <>
-              <Kpi label="المخزون الحالي" value={profile.quantity_on_hand} />
-              <Kpi label="متوسط التكلفة" value={profile.avg_cost} />
-              <Kpi label="تقييم المخزون" value={profile.inventory_valuation} />
-              <Kpi label="إجمالي المشتراة (كمية)" value={profile.purchased_qty} />
-              <Kpi label="إجمالي المشتراة (قيمة)" value={profile.purchased_value} />
-              <Kpi label="إجمالي المباعة (كمية)" value={profile.sold_qty} />
-              <Kpi label="إجمالي المباعة (قيمة)" value={profile.sold_value} />
+              <Kpi label="المخزون الحالي" value={formatQuantity(profile.quantity_on_hand, '—')} />
+              <Kpi label="متوسط التكلفة" value={formatMoney(profile.avg_cost, '—')} />
+              <Kpi label="تقييم المخزون" value={formatMoney(profile.inventory_valuation, '—')} />
+              <Kpi label="إجمالي المشتراة (كمية)" value={formatQuantity(profile.purchased_qty, '—')} />
+              <Kpi label="إجمالي المشتراة (قيمة)" value={formatMoney(profile.purchased_value, '—')} />
+              <Kpi label="إجمالي المباعة (كمية)" value={formatQuantity(profile.sold_qty, '—')} />
+              <Kpi label="إجمالي المباعة (قيمة)" value={formatMoney(profile.sold_value, '—')} />
               <Kpi label="التصنيف" value={profile.category || '—'} />
               <Kpi label="SKU" value={profile.sku} />
             </>
@@ -229,7 +230,7 @@ export const ProductProfilePage: React.FC = () => {
         status={
           error ? <span className="text-[var(--aseel-danger)]">تعذّر تحميل البطاقة: {error}</span> :
           loading ? <span>جاري التحميل...</span> :
-          <span className="aseel-status-item">{profile ? `المخزون ${profile.quantity_on_hand} · تقييم ${profile.inventory_valuation}` : ''}</span>
+          <span className="aseel-status-item">{profile ? `المخزون ${formatQuantity(profile.quantity_on_hand, '—')} · تقييم ${formatMoney(profile.inventory_valuation, '—')}` : ''}</span>
         }
       >
         {error && (

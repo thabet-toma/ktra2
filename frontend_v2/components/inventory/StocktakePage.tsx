@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import { AseelDocumentShell, AseelAutocomplete, type AseelToolbarAction } from "../aseel";
 import { ProductCardModal } from "../shared/ProductCardModal";
+import { formatQuantity } from "../../utils/formatNumber";
 import { Plus, Send, Trash2, RefreshCw, X, List, Save, Printer, Info } from "lucide-react";
 
 type Wh = { id: number; name: string };
@@ -23,10 +24,10 @@ type StocktakeRow = {
 const prodLabel = (p?: Prod) => (p ? `${p.sku} — ${p.name_ar || p.name_en || ""}` : "");
 
 /** يُنسّق كمية/فرقاً نصياً مع تشذيب الأصفار الزائدة (255.0000 ⇒ 255، 2.5000 ⇒ 2.5). */
-const trimNum = (n: number) => {
-  if (!Number.isFinite(n)) return "0";
-  return n.toFixed(4).replace(/\.?0+$/, "");
-};
+const trimNum = (n: number) => formatQuantity(n, "0");
+/** يُنسّق رصيداً قادماً من الـ API (نص مثل "6.00000") للعرض؛ يُرجع "—" إذا غاب. */
+const trimQty = (v: unknown) =>
+  v === null || v === undefined || v === "" ? "—" : formatQuantity(v, "—");
 
 /**
  * يستخرج مقاس الإطار (عرض/نسبة/قطر مثل 255/65/15 أو 31/10.5/15) من اسم الصنف
@@ -103,7 +104,7 @@ export const StocktakePage: React.FC = () => {
 
   // رصيد النظام المعروض: لقطة المستند عند العرض المُرحَّل، وإلا الرصيد الحالي الحي.
   const lineSys = (l: Line): string =>
-    editingPosted ? (l.sys ?? "—") : (prodById(l.product)?.quantity_on_hand ?? "—");
+    editingPosted ? trimQty(l.sys) : trimQty(prodById(l.product)?.quantity_on_hand);
   // الفرق المعروض: المخزَّن عند العرض المُرحَّل، وإلا المحسوب حياً من رصيد النظام.
   const lineVariance = (l: Line): number | null =>
     editingPosted ? (l.variance != null ? Number(l.variance) : null) : lineDiff(l);
@@ -147,7 +148,7 @@ export const StocktakePage: React.FC = () => {
     () => sortedProducts.map((p) => ({
       id: p.id,
       label: p.name_ar || p.name_en || p.sku,
-      sub: `${p.sku}${p.quantity_on_hand != null ? ` · رصيد ${p.quantity_on_hand}` : ""}`,
+      sub: `${p.sku}${p.quantity_on_hand != null ? ` · رصيد ${trimQty(p.quantity_on_hand)}` : ""}`,
     })),
     [sortedProducts],
   );
@@ -157,7 +158,7 @@ export const StocktakePage: React.FC = () => {
     () => sortedProducts.map((p) => ({
       id: p.id,
       label: `${p.sku} — ${p.name_ar || p.name_en || ""}`.trim(),
-      sub: p.quantity_on_hand != null ? `رصيد ${p.quantity_on_hand}` : "",
+      sub: p.quantity_on_hand != null ? `رصيد ${trimQty(p.quantity_on_hand)}` : "",
     })),
     [sortedProducts],
   );

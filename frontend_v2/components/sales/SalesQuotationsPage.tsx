@@ -30,6 +30,7 @@ import {
 import { accountingApi } from "../../services/accountingApi";
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
+import { formatQuantity } from "../../utils/formatNumber";
 import type { SqlProduct } from "../../types/inventory";
 import {
   AseelDocumentShell,
@@ -315,7 +316,7 @@ export const SalesQuotationsPage: React.FC = () => {
     () => products.map((p) => ({
       id: p.id,
       label: formatProductPrimaryName(p),
-      sub: `رصيد ${p.quantity_on_hand || 0}`,
+      sub: `رصيد ${formatQuantity(p.quantity_on_hand, "0")}`,
     })),
     [products]
   );

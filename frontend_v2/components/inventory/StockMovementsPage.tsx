@@ -6,6 +6,7 @@ import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { Plus, RefreshCw, X, Save, Loader2, Warehouse as WhIcon } from "lucide-react";
 import { invoicePathForReference, productPath } from "../../utils/entityLinks";
 import { openInNewTab } from "@/utils/openInNewTab";
+import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 
 const TYPES: Record<string, string> = {
   IN: "استلام", OUT: "صرف",
@@ -13,8 +14,8 @@ const TYPES: Record<string, string> = {
   RETURN_IN: "مرتجع ←", RETURN_OUT: "مرتجع →",
 };
 
-const fmt = (n: string | number) =>
-  Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// مبالغ مالية — يحذف الأصفار العشرية غير الدالّة عبر المُنسّق الموحّد.
+const fmt = (n: string | number) => formatMoney(n, "0");
 
 const fmtDate = (d: string) => {
   if (!d) return "—";
@@ -127,7 +128,7 @@ export const StockMovementsPage: React.FC = () => {
       }
     },
     { key: "qty", header: "الكمية", width: "80px", align: "center", numeric: true,
-      render: (m) => <>{fmt(m.quantity)}</> },
+      render: (m) => <>{formatQuantity(m.quantity)}</> },
     { key: "cost", header: "سعر الوحدة", width: "100px", align: "center", numeric: true,
       render: (m) => <>{fmt(m.unit_cost)}</> },
     { key: "total", header: "الإجمالي", width: "110px", align: "center", numeric: true,

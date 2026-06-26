@@ -16,9 +16,10 @@ import { StalenessBadge } from "../offline";
 import db from "../../services/offline/db";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { clientLogger } from "../../services/logger";
+import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 
-const fmt = (n: number | string) =>
-  Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// مبالغ مالية — يحذف الأصفار العشرية غير الدالّة عبر المُنسّق الموحّد.
+const fmt = (n: number | string) => formatMoney(n, "0");
 
 type View = "list" | "form";
 type StockStatus = "" | "out_of_stock" | "low_stock" | "in_stock";
@@ -253,7 +254,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       render: (p) => {
         const qty = Number(p.quantity_on_hand);
         const low = qty <= 0;
-        return <span style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{fmt(qty)}</span>;
+        return <span style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{formatQuantity(qty)}</span>;
       }
     },
     { key: "avg_cost", header: "متوسط التكلفة", width: "110px", align: "center", numeric: true, sortable: true,

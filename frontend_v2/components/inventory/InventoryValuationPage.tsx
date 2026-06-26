@@ -8,6 +8,7 @@ import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct, StockMovementDto } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { RefreshCw, BarChart2, Info } from "lucide-react";
+import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 
 type ValuationMethod =
   | "avg_cost"
@@ -45,8 +46,8 @@ const BONUS_LABELS: Record<BonusCalc, string> = {
   from_card: "من كارت الصنف",
 };
 
-const fmt = (n: number) =>
-  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// مبالغ مالية — يحذف الأصفار العشرية غير الدالّة عبر المُنسّق الموحّد.
+const fmt = (n: number) => formatMoney(n, "0");
 
 /**
  * يَحسب سعر الوحدة لصنف معيَّن حسب الطريقة المختارة.
@@ -189,7 +190,7 @@ export const InventoryValuationPage: React.FC = () => {
       width: "90px",
       align: "center",
       numeric: true,
-      render: (r) => <>{fmt(r.quantity)}</>,
+      render: (r) => <>{formatQuantity(r.quantity)}</>,
     },
     {
       key: "unitPrice",

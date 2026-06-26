@@ -8,6 +8,7 @@ import {
 import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
 import { Search, ChevronRight, ChevronDown, Package, AlertCircle } from "lucide-react";
 import { Spinner } from "../ui";
+import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 
 export const AccountingLandedCostPage: React.FC = () => {
   const today = new Date();
@@ -63,11 +64,8 @@ export const AccountingLandedCostPage: React.FC = () => {
     fetchReport();
   }, [fetchReport]);
 
-  const fmt = (n: number | null | undefined) =>
-    (Number(n) || 0).toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+  // مبالغ مالية — يحذف الأصفار العشرية غير الدالّة عبر المُنسّق الموحّد.
+  const fmt = (n: number | null | undefined) => formatMoney(n, "0");
 
   const shipments = data?.shipments || [];
 
@@ -224,7 +222,7 @@ const ShipmentDetail: React.FC<{
                   {d.purchase_invoice.items.map((it) => (
                     <tr key={it.id} style={{ borderTop: "1px solid var(--aseel-border)" }}>
                       <td style={{ padding: "4px 8px" }}>{it.name}</td>
-                      <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(it.quantity)}</td>
+                      <td style={{ padding: "4px 8px", textAlign: "right" }}>{formatQuantity(it.quantity)}</td>
                       <td style={{ padding: "4px 8px", textAlign: "right" }}>{fmt(it.unit_price)}</td>
                       <td style={{ padding: "4px 8px", textAlign: "right", fontWeight: "600" }}>
                         {it.landed_unit_price_ils != null ? fmt(it.landed_unit_price_ils) : "—"}
