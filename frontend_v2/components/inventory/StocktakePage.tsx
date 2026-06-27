@@ -9,6 +9,7 @@ import { inventoryApi } from "../../services/inventoryApi";
 import { AseelDocumentShell, AseelAutocomplete, type AseelToolbarAction } from "../aseel";
 import { ProductCardModal } from "../shared/ProductCardModal";
 import { formatQuantity } from "../../utils/formatNumber";
+import { clientLogger } from "../../services/logger";
 import { Plus, Send, Trash2, RefreshCw, X, List, Save, Printer, Info } from "lucide-react";
 
 type Wh = { id: number; name: string };
@@ -16,6 +17,18 @@ type Prod = { id: number; sku: string; name_ar?: string; name_en?: string; quant
 // sys/variance: لقطة محفوظة تُستخدم فقط عند عرض جرد مُرحَّل (read-only)؛ في المسودة
 // يُحسب الفرق حياً من رصيد النظام الحالي.
 type Line = { product: number | ""; counted_quantity: string; sys?: string; variance?: string; selected?: boolean };
+// أوضاع فلتر مراجعة الجرد: الكل / المعدود / غير المعدود / الفروقات فقط.
+type FilterMode = "all" | "counted" | "uncounted" | "variance";
+const FILTER_OPTIONS: { value: FilterMode; label: string }[] = [
+  { value: "all", label: "الكل" },
+  { value: "counted", label: "المعدود فقط" },
+  { value: "uncounted", label: "غير المعدود فقط" },
+  { value: "variance", label: "الفروقات فقط" },
+];
+// لاحقة عنوان الطباعة حسب الفلتر (الكل بلا لاحقة).
+const FILTER_PRINT_SUFFIX: Record<FilterMode, string> = {
+  all: "", counted: " — المعدود", uncounted: " — غير المعدود", variance: " — الفروقات فقط",
+};
 type StocktakeRow = {
   id: number; stocktake_number: string; stocktake_date: string;
   warehouse_name?: string | null; is_posted: boolean; journal?: number | null;
@@ -60,8 +73,8 @@ export const StocktakePage: React.FC = () => {
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<Line[]>([{ product: "", counted_quantity: "", selected: false }]);
   const [saving, setSaving] = useState(false);
-  // فلتر المراجعة: إظهار الأصناف ذات الفرق فقط (counted ≠ النظام) — للطباعة والمراجعة.
-  const [showOnlyVariance, setShowOnlyVariance] = useState(false);
+  // فلتر المراجعة: الكل / المعدود / غير المعدود / الفروقات فقط — للعرض والطباعة.
+  const [filterMode, setFilterMode] = useState<FilterMode>("all");
   // بطاقة الصنف (مودال مشترك) — تُفتح بالنقر على زر المعلومات بجانب الصنف.
   const [cardProductId, setCardProductId] = useState<number | null>(null);
   // فتح مستند محفوظ: editingId = معرّف الجرد المفتوح (null = إنشاء جديد)؛
@@ -108,6 +121,19 @@ export const StocktakePage: React.FC = () => {
   // الفرق المعروض: المخزَّن عند العرض المُرحَّل، وإلا المحسوب حياً من رصيد النظام.
   const lineVariance = (l: Line): number | null =>
     editingPosted ? (l.variance != null ? Number(l.variance) : null) : lineDiff(l);
+
+  // هل يطابق السطر الفلتر الحالي — مصدر حقيقة واحد للعرض والطباعة (DRY).
+  // الأسطر الفارغة (بلا صنف) لا تطابق أي فلتر مقيّد؛ في وضع «الكل» تبقى ظاهرة للإضافة.
+  const matchesFilter = (l: Line): boolean => {
+    if (l.product === "") return false;
+    const counted = String(l.counted_quantity).trim() !== "";
+    switch (filterMode) {
+      case "counted": return counted;
+      case "uncounted": return !counted;
+      case "variance": { const d = lineVariance(l); return d !== null && d !== 0; }
+      default: return true;
+    }
+  };
 
   // ملخص المراجعة: كم صنفاً عُدّ، كم منها فرقه ≠ 0، وكم أُدرج بلا عدّ بعد.
   const { countedCount, varianceCount, uncountedCount } = useMemo(() => {
@@ -192,7 +218,7 @@ export const StocktakePage: React.FC = () => {
   };
 
   const resetForm = () => {
-    setDate(today); setWarehouse(""); setNotes(""); setShowOnlyVariance(false);
+    setDate(today); setWarehouse(""); setNotes(""); setFilterMode("all");
     setLines([{ product: "", counted_quantity: "", selected: false }]); setShowForm(false);
     setEditingId(null); setEditingPosted(false);
   };
@@ -214,7 +240,7 @@ export const StocktakePage: React.FC = () => {
       })));
       setEditingId(id);
       setEditingPosted(!!d.is_posted);
-      setShowOnlyVariance(false);
+      setFilterMode("all");
       setShowForm(true);
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
@@ -272,9 +298,7 @@ export const StocktakePage: React.FC = () => {
     const explicitSelection = lines.some(l => l.selected);
     const rows = lines.filter((l) => l.product !== "").filter((l) => {
       if (explicitSelection) return l.selected;
-      if (!showOnlyVariance) return true;
-      const d = lineVariance(l);
-      return d !== null && d !== 0;
+      return matchesFilter(l);
     });
     if (!rows.length) { setErr("لا أصناف للطباعة (راجع الفلتر أو حدد أصنافاً)"); return; }
     const whName = warehouses.find((w) => w.id === Number(warehouse))?.name || "كل المخزون";
@@ -299,7 +323,7 @@ export const StocktakePage: React.FC = () => {
       + `th,td{border:1px solid #bbb;padding:6px 8px;text-align:center}`
       + `th{background:#f0f0f0}@media print{button{display:none}}`
       + `</style></head><body>`
-      + `<h1>نتيجة الجرد${showOnlyVariance ? " — الفروقات فقط" : ""}</h1>`
+      + `<h1>نتيجة الجرد${FILTER_PRINT_SUFFIX[filterMode]}</h1>`
       + `<div class="meta">التاريخ: ${esc(date)} · المستودع: ${esc(whName)}`
       + `${notes ? ` · ملاحظات: ${esc(notes)}` : ""} · عدد الأصناف: ${rows.length}</div>`
       + `<table><thead><tr><th>الكود</th><th>الصنف</th><th>رصيد النظام</th><th>المعدودة</th><th>الفرق</th></tr></thead>`
@@ -359,23 +383,21 @@ export const StocktakePage: React.FC = () => {
               </div>
               )}
 
-              {/* ملخص المراجعة + فلتر «الفروقات فقط» للعرض والطباعة */}
+              {/* ملخص المراجعة + فلتر العرض (الكل/المعدود/غير المعدود/الفروقات) للعرض والطباعة */}
               <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 6, fontSize: 13 }}>
                 <span style={{ color: "var(--aseel-ink-soft)" }}>
                   معدود: <b>{countedCount}</b> · فروقات: <b style={{ color: varianceCount ? "#b45309" : undefined }}>{varianceCount}</b> · غير معدود: <b>{uncountedCount}</b>
                 </span>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", marginInlineStart: "auto" }} title="إظهار الأصناف ذات الفرق فقط وتحديدها للطباعة">
-                  <input type="checkbox" checked={showOnlyVariance} onChange={(e) => {
-                    const checked = e.target.checked;
-                    setShowOnlyVariance(checked);
-                    if (checked) {
-                      setLines(ls => ls.map(l => {
-                        const d = lineVariance(l);
-                        return { ...l, selected: (d !== null && d !== 0) || l.selected };
-                      }));
-                    }
-                  }} />
-                  أظهر الفروقات فقط
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, marginInlineStart: "auto" }} title="تصفية الأصناف المعروضة (لا تؤثر على التحديد اليدوي)">
+                  <span className="aseel-field-label">تصفية</span>
+                  <select className="aseel-input" style={{ width: "auto" }} value={filterMode}
+                    onChange={(e) => {
+                      const mode = e.target.value as FilterMode;
+                      setFilterMode(mode);
+                      clientLogger.info("stocktake.filter", { mode });
+                    }}>
+                    {FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
                 </label>
                 <button className="aseel-toolbtn" onClick={printSheet} title="طباعة ورقة نتيجة الجرد (تحترم الفلتر)"><Printer className="h-4 w-4" /> طباعة</button>
               </div>
@@ -398,8 +420,9 @@ export const StocktakePage: React.FC = () => {
                   {lines.map((l, i) => {
                     const p = prodById(l.product);
                     const d = lineVariance(l);
-                    // فلتر «الفروقات فقط»: نُخفي ما لا فرق له والأسطر غير المعدودة/الفارغة.
-                    if (showOnlyVariance && !(l.product !== "" && d !== null && d !== 0)) return null;
+                    // الفلتر يُخفي ما لا يطابق الوضع المختار؛ وضع «الكل» يُبقي كل الأسطر
+                    // (بما فيها الفارغة للإضافة). الأسطر المقيّدة تُخفي الفارغة تلقائياً.
+                    if (filterMode !== "all" && !matchesFilter(l)) return null;
                     const diffColor = d === null || d === 0 ? "var(--aseel-ink-soft)" : d > 0 ? "#15803d" : "#b91c1c";
                     return (
                       <tr key={i}>
