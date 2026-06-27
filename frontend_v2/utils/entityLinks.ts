@@ -26,12 +26,16 @@ export function invoicePathForReference(
 }
 
 /**
- * task16 A4: روابط الكيانات (مورد/عميل/صنف). لا توجد مسارات تفصيل مستقلة لكل
- * كيان في النظام الحالي — يفتح الرابط صفحة إدارة الكيان (يمكن لاحقاً توجيهه
- * لصفحة تفصيل مخصّصة دون تغيير المستهلكين).
+ * task16 A4 / ربط المنتجات: رابط بطاقة الصنف. أي «ذكر لمنتج» في الموقع يجب أن
+ * يكون قابلاً للنقر ويفتح بطاقة الصنف على تبويب «حركة المخزون» (لا النظرة العامة)
+ * — مصدر حقيقة واحد كي لا يتكرر بناء المسار في كل شاشة (DRY). التبويب يُمرَّر
+ * عبر `?tab=` ويُقرأ في `ProductProfilePage` كـ `initialTab`.
  */
-export function productPath(): string {
-  return "/items";
+export function productProfilePath(
+  productId: number | string,
+  tab: "kpis" | "invoices" | "ledger" = "ledger"
+): string {
+  return `/products/${productId}?tab=${tab}`;
 }
 
 export function supplierPath(): string {

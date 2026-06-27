@@ -15,7 +15,7 @@ type Wh = { id: number; name: string };
 type Prod = { id: number; sku: string; name_ar?: string; name_en?: string; quantity_on_hand?: string };
 // sys/variance: لقطة محفوظة تُستخدم فقط عند عرض جرد مُرحَّل (read-only)؛ في المسودة
 // يُحسب الفرق حياً من رصيد النظام الحالي.
-type Line = { product: number | ""; counted_quantity: string; sys?: string; variance?: string };
+type Line = { product: number | ""; counted_quantity: string; sys?: string; variance?: string; selected?: boolean };
 type StocktakeRow = {
   id: number; stocktake_number: string; stocktake_date: string;
   warehouse_name?: string | null; is_posted: boolean; journal?: number | null;
@@ -58,7 +58,7 @@ export const StocktakePage: React.FC = () => {
   const [date, setDate] = useState(today);
   const [warehouse, setWarehouse] = useState<number | "">("");
   const [notes, setNotes] = useState("");
-  const [lines, setLines] = useState<Line[]>([{ product: "", counted_quantity: "" }]);
+  const [lines, setLines] = useState<Line[]>([{ product: "", counted_quantity: "", selected: false }]);
   const [saving, setSaving] = useState(false);
   // فلتر المراجعة: إظهار الأصناف ذات الفرق فقط (counted ≠ النظام) — للطباعة والمراجعة.
   const [showOnlyVariance, setShowOnlyVariance] = useState(false);
@@ -175,7 +175,7 @@ export const StocktakePage: React.FC = () => {
 
   const updateLine = (i: number, patch: Partial<Line>) =>
     setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
-  const addLine = () => setLines((ls) => [...ls, { product: "", counted_quantity: "" }]);
+  const addLine = () => setLines((ls) => [...ls, { product: "", counted_quantity: "", selected: false }]);
   const removeLine = (i: number) => setLines((ls) => (ls.length <= 1 ? ls : ls.filter((_, idx) => idx !== i)));
 
   const loadAllProducts = () => {
@@ -186,13 +186,14 @@ export const StocktakePage: React.FC = () => {
     const newLines = sortedProducts.map((p) => ({
       product: p.id,
       counted_quantity: "",
+      selected: false,
     }));
     setLines(newLines);
   };
 
   const resetForm = () => {
     setDate(today); setWarehouse(""); setNotes(""); setShowOnlyVariance(false);
-    setLines([{ product: "", counted_quantity: "" }]); setShowForm(false);
+    setLines([{ product: "", counted_quantity: "", selected: false }]); setShowForm(false);
     setEditingId(null); setEditingPosted(false);
   };
 
@@ -209,6 +210,7 @@ export const StocktakePage: React.FC = () => {
         counted_quantity: ln.counted_quantity != null ? trimNum(Number(ln.counted_quantity)) : "",
         sys: ln.system_quantity != null ? trimNum(Number(ln.system_quantity)) : undefined,
         variance: ln.variance != null ? String(ln.variance) : undefined,
+        selected: false,
       })));
       setEditingId(id);
       setEditingPosted(!!d.is_posted);
@@ -265,14 +267,16 @@ export const StocktakePage: React.FC = () => {
     }
   };
 
-  // طباعة ورقة نتيجة الجرد — تحترم فلتر «الفروقات فقط» المعروض حالياً.
+  // طباعة ورقة نتيجة الجرد — تحترم التحديد اليدوي (أو الفلتر كوضع افتراضي).
   const printSheet = () => {
+    const explicitSelection = lines.some(l => l.selected);
     const rows = lines.filter((l) => l.product !== "").filter((l) => {
+      if (explicitSelection) return l.selected;
       if (!showOnlyVariance) return true;
       const d = lineVariance(l);
       return d !== null && d !== 0;
     });
-    if (!rows.length) { setErr("لا أصناف للطباعة (راجع الفلتر)"); return; }
+    if (!rows.length) { setErr("لا أصناف للطباعة (راجع الفلتر أو حدد أصنافاً)"); return; }
     const whName = warehouses.find((w) => w.id === Number(warehouse))?.name || "كل المخزون";
     const esc = (s: string) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
     const body = rows.map((l) => {
@@ -360,15 +364,36 @@ export const StocktakePage: React.FC = () => {
                 <span style={{ color: "var(--aseel-ink-soft)" }}>
                   معدود: <b>{countedCount}</b> · فروقات: <b style={{ color: varianceCount ? "#b45309" : undefined }}>{varianceCount}</b> · غير معدود: <b>{uncountedCount}</b>
                 </span>
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", marginInlineStart: "auto" }} title="إظهار الأصناف ذات الفرق فقط (للمراجعة والطباعة)">
-                  <input type="checkbox" checked={showOnlyVariance} onChange={(e) => setShowOnlyVariance(e.target.checked)} />
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", marginInlineStart: "auto" }} title="إظهار الأصناف ذات الفرق فقط وتحديدها للطباعة">
+                  <input type="checkbox" checked={showOnlyVariance} onChange={(e) => {
+                    const checked = e.target.checked;
+                    setShowOnlyVariance(checked);
+                    if (checked) {
+                      setLines(ls => ls.map(l => {
+                        const d = lineVariance(l);
+                        return { ...l, selected: (d !== null && d !== 0) || l.selected };
+                      }));
+                    }
+                  }} />
                   أظهر الفروقات فقط
                 </label>
                 <button className="aseel-toolbtn" onClick={printSheet} title="طباعة ورقة نتيجة الجرد (تحترم الفلتر)"><Printer className="h-4 w-4" /> طباعة</button>
               </div>
 
               <table className="aseel-grid" data-variant="list" style={{ marginBottom: 8 }}>
-                <thead><tr><th>الصنف</th><th style={{ width: 100 }}>رصيد النظام</th><th style={{ width: 120 }}>الكمية المعدودة</th><th style={{ width: 90 }}>الفرق</th><th style={{ width: 40 }}></th></tr></thead>
+                <thead><tr>
+                  <th style={{ width: 36, textAlign: "center" }}>
+                    <input type="checkbox" onChange={(e) => {
+                      const checked = e.target.checked;
+                      setLines(ls => ls.map(l => ({ ...l, selected: checked })));
+                    }} title="تحديد/إلغاء تحديد الكل للطباعة" />
+                  </th>
+                  <th>الصنف</th>
+                  <th style={{ width: "15%" }}>رصيد النظام</th>
+                  <th style={{ width: "25%" }}>الكمية المعدودة</th>
+                  <th style={{ width: "15%" }}>الفرق</th>
+                  <th style={{ width: 40 }}></th>
+                </tr></thead>
                 <tbody>
                   {lines.map((l, i) => {
                     const p = prodById(l.product);
@@ -378,14 +403,31 @@ export const StocktakePage: React.FC = () => {
                     const diffColor = d === null || d === 0 ? "var(--aseel-ink-soft)" : d > 0 ? "#15803d" : "#b91c1c";
                     return (
                       <tr key={i}>
+                        <td style={{ textAlign: "center" }}>
+                          {l.product !== "" && (
+                            <input 
+                              type="checkbox" 
+                              checked={!!l.selected} 
+                              onChange={(e) => updateLine(i, { selected: e.target.checked })} 
+                              title="تحديد للطباعة"
+                            />
+                          )}
+                        </td>
                         <td>
                           {l.product !== "" ? (
                             // الصنف المختار يُعرض كاسم ثابت (غير قابل للتعديل) كي لا يتغيّر
                             // اسمه أو يُمحى بالخطأ؛ زر المعلومات يفتح بطاقة الصنف.
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
-                              <span style={{ fontWeight: 600 }} title={p ? `${p.sku} — ${p.name_ar || p.name_en || ""}` : ""}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-start" }}>
+                              {/* اسم الصنف قابل للنقر — يفتح بطاقة الصنف (كرت الصنف). */}
+                              <button
+                                type="button"
+                                className="text-blue-700 hover:underline text-right"
+                                style={{ fontWeight: 600, background: "none", border: "none", padding: 0, cursor: "pointer" }}
+                                onClick={() => setCardProductId(Number(l.product))}
+                                title={p ? `بطاقة الصنف: ${p.sku} — ${p.name_ar || p.name_en || ""}` : "بطاقة الصنف"}
+                              >
                                 {p ? (p.name_ar || p.name_en || p.sku) : "—"}
-                              </span>
+                              </button>
                               <button className="aseel-iconbtn" onClick={() => setCardProductId(Number(l.product))} title="بطاقة الصنف"><Info className="h-3 w-3" /></button>
                             </div>
                           ) : (

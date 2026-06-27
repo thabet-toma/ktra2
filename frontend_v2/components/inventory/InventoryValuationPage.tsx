@@ -9,6 +9,8 @@ import type { SqlProduct, StockMovementDto } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { RefreshCw, BarChart2, Info } from "lucide-react";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { productProfilePath } from "../../utils/entityLinks";
+import { openInNewTab } from "../../utils/openInNewTab";
 
 type ValuationMethod =
   | "avg_cost"
@@ -182,7 +184,17 @@ export const InventoryValuationPage: React.FC = () => {
 
   const columns: DenseColumn<ValuationRow>[] = [
     { key: "sku", header: "رقم الصنف", width: "110px", render: (r) => <b>{r.sku}</b> },
-    { key: "name", header: "اسم الصنف", render: (r) => <>{r.name}</> },
+    { key: "name", header: "اسم الصنف", render: (r) => (
+        // اسم الصنف قابل للنقر — يفتح حركة مخزون الصنف.
+        <button
+          type="button"
+          className="text-blue-700 hover:underline text-right"
+          onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(r.id)); }}
+          title="فتح حركة مخزون الصنف"
+        >
+          {r.name}
+        </button>
+      ) },
     { key: "category", header: "التصنيف", width: "140px", render: (r) => <>{r.category}</> },
     {
       key: "quantity",

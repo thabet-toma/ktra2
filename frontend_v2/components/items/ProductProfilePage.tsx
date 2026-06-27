@@ -32,11 +32,22 @@ interface LedgerRow {
   movement_type_label: string;
   reference_type: string | null;
   reference_id: number | null;
+  party: string | null;
   warehouse: string | null;
   qty_in: string;
   qty_out: string;
   running_balance: string;
 }
+
+/**
+ * نوع الحركة المعروض في «حركة المخزون» — مثل تبويب الفواتير المرتبطة: مشتريات/مبيعات
+ * مشتقّة من نوع المستند المرجعي، وما عداها يبقى على وصف نوع الحركة كما هو.
+ */
+const ledgerTypeLabel = (r: LedgerRow): string => {
+  if (r.reference_type === 'PURCHASE_INVOICE') return 'مشتريات';
+  if (r.reference_type === 'SALE') return 'مبيعات';
+  return r.movement_type_label;
+};
 
 interface InvoiceRow {
   document_type: string;
@@ -57,6 +68,11 @@ export const ProductProfilePage: React.FC = () => {
     const m = location.pathname.match(/\/products\/([^/]+)/);
     return m ? m[1] : undefined;
   }, [location.pathname]);
+  // التبويب الابتدائي عبر ?tab= — أي رابط «ذكر لمنتج» يفتح «حركة المخزون» مباشرة.
+  const initialTab = useMemo(() => {
+    const t = new URLSearchParams(location.search).get("tab");
+    return t === "ledger" || t === "invoices" || t === "kpis" ? t : undefined;
+  }, [location.search]);
   const navigate = useNavigate();
   const tenantId = useMemo(() => resolveTenantId(), []);
 
@@ -114,7 +130,8 @@ export const ProductProfilePage: React.FC = () => {
 
   const ledColumns: LedgerColumn<LedgerRow>[] = [
     { key: 'date', header: 'التاريخ', render: (r) => r.date || '—' },
-    { key: 'movement_type_label', header: 'النوع', render: (r) => r.movement_type_label },
+    { key: 'movement_type_label', header: 'النوع', render: (r) => ledgerTypeLabel(r) },
+    { key: 'party', header: 'الطرف', render: (r) => r.party || '—' },
     {
       key: 'reference',
       header: 'المستند',
@@ -222,6 +239,7 @@ export const ProductProfilePage: React.FC = () => {
     <div data-skin="aseel" className="min-h-[calc(100vh-5rem)]">
       <AseelDocumentShell
         title={title}
+        initialTab={initialTab}
         actions={[
           { key: 'cost', label: 'تكلفة المنتجات', onClick: () => openInNewTab(`/product-cost?product=${id}`) },
           { key: 'back', label: 'عودة', onClick: () => navigate(-1) },

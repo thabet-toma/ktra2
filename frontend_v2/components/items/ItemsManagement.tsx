@@ -15,6 +15,7 @@ import type { Item } from "../../types";
 import { StalenessBadge } from "../offline";
 import db from "../../services/offline/db";
 import { openInNewTab } from "@/utils/openInNewTab";
+import { productProfilePath } from "../../utils/entityLinks";
 import { clientLogger } from "../../services/logger";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 
@@ -57,7 +58,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<View>("list");
   // T-N3: عرض الأصناف كشجرة تصنيفات (مثل شجرة المنتجات في الفواتير) أو كجدول.
-  const [displayMode, setDisplayMode] = useState<"tree" | "table">("tree");
+  // الافتراضي «جدول» (بطلب المالك) — يفتح على وضعية الجدول مباشرةً.
+  const [displayMode, setDisplayMode] = useState<"tree" | "table">("table");
   const [editId, setEditId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -244,7 +246,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         type="button"
         className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
         title="عرض بطاقة الصنف"
-        onClick={(e) => { e.stopPropagation(); openInNewTab(`/products/${p.id}`); }}
+        onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(p.id)); }}
       >
         {p.name_ar || p.name_en || "—"}
       </button>
@@ -409,7 +411,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
               name: p.name_ar || p.name_en || p.sku || "",
               categoryId: (p as unknown as { category?: number | string }).category ?? "",
             })) as Item[]}
-            onShowCard={(it) => openInNewTab(`/products/${it.id}`)}
+            onShowCard={(it) => openInNewTab(productProfilePath(it.id))}
             onPickItem={(it) => { setEditId(Number(it.id)); setView("form"); }}
             onItemCreated={() => reload()}
           />

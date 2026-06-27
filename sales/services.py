@@ -1269,7 +1269,7 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
                 "partner": payment.partner_id,
                 "debit": Decimal("0"),
                 "credit": ar_credit,
-                "description": f"تخفيض ذمم — دفعة {payment.id}",
+                "description": f"تسديد ذمم — دفعة {payment.id}",
             },
         ]
 

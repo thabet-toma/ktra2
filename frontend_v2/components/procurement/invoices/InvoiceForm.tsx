@@ -1020,7 +1020,39 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
     { key: "itemId", header: "رقم الصنف", width: "100px" },
     { key: "name", header: "اسم الصنف", width: "25%" },
-    { key: "specifications", header: "بيان", width: "20%" },
+    { 
+      key: "specifications", 
+      header: "بيان", 
+      width: "1%",
+      render: (r, ri) => (
+        <input
+          id={`aseel-grid-input-${ri}-specifications`}
+          data-aseel-key="1"
+          size={Math.max(4, (r.specifications || "").length)}
+          style={{
+            minWidth: "45px",
+            width: "max-content",
+            fieldSizing: "content",
+            border: "1px solid transparent",
+            background: "transparent",
+            padding: "0 3px",
+            font: "inherit",
+            height: "20px",
+            outline: "none"
+          }}
+          value={r.specifications == null ? "" : String(r.specifications)}
+          onChange={(e) => handleUpdateItem(ri, "specifications", e.target.value)}
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = "var(--aseel-accent)";
+            e.currentTarget.style.background = "var(--aseel-field-focus)";
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = "transparent";
+            e.currentTarget.style.background = "transparent";
+          }}
+        />
+      )
+    },
     { key: "quantity", header: "الكمية", width: "80px", align: "center", type: "number" },
     { key: "unitPrice", header: "سعر الوحدة", width: "100px", align: "center", type: "number" },
     { key: "totalPrice", header: "الإجمالي", width: "100px", align: "center", readOnly: true },

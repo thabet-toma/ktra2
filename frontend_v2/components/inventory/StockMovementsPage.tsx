@@ -4,7 +4,7 @@ import { inventoryApi } from "../../services/inventoryApi";
 import type { StockMovementDto, SqlProduct } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { Plus, RefreshCw, X, Save, Loader2, Warehouse as WhIcon } from "lucide-react";
-import { invoicePathForReference, productPath } from "../../utils/entityLinks";
+import { invoicePathForReference, productProfilePath } from "../../utils/entityLinks";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 
@@ -108,13 +108,13 @@ export const StockMovementsPage: React.FC = () => {
       render: (m) => <>{m.product_sku}</> },
     { key: "name", header: "الصنف",
       render: (m) => (
-        // task16 A4: اسم الصنف رابط يفتح صفحة الأصناف
+        // task16 A4: اسم الصنف رابط يفتح بطاقة الصنف على «حركة المخزون» مباشرة
         m.product_name ? (
           <button
             type="button"
             className="text-blue-700 hover:underline text-right"
-            onClick={() => openInNewTab(productPath())}
-            title="فتح الأصناف"
+            onClick={() => openInNewTab(productProfilePath(m.product))}
+            title="فتح حركة مخزون الصنف"
           >
             {m.product_name}
           </button>

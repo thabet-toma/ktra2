@@ -1149,7 +1149,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setCustomerId(salesSettings?.default_customer ?? "");
     setInvDate(new Date().toISOString().slice(0, 10));
     setDueDate("");
-    setInvType(salesSettings?.default_payment_type ?? "credit");
+    setInvType("credit");
     if (salesSettings?.default_currency) setCurrencyId(salesSettings.default_currency);
     else if (currencies.length) setCurrencyId(currencies[0].CurrencyID);
     setExchangeRate("1");
@@ -2457,15 +2457,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               <div className="flex-1 flex flex-col gap-1 xl:border-l border-gray-100 dark:border-gray-700 pl-2 w-full">
                 <div className="flex items-center gap-1">
                   <span className="font-bold text-gray-800 dark:text-gray-100 min-w-[35px] text-xs">العميل</span>
-                  <select
-                    className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-xs rounded px-1 py-0.5 focus:ring-1 focus:ring-emerald-500 outline-none"
-                    disabled={readOnly}
-                    value={invType}
-                    onChange={(e) => { setInvType(e.target.value as "cash" | "credit"); markDirty(); }}
-                  >
-                    <option value="credit">ذمم</option>
-                    <option value="cash">نقدي</option>
-                  </select>
                   <div className="flex-1 relative min-w-[120px]">
                     <input 
                       className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-1.5 py-0.5 text-xs focus:ring-1 focus:ring-emerald-500 outline-none cursor-pointer"
@@ -2486,6 +2477,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                       بطاقة
                     </button>
                   )}
+                  <select
+                    className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-xs rounded px-1 py-0.5 focus:ring-1 focus:ring-emerald-500 outline-none"
+                    disabled={readOnly}
+                    value={invType}
+                    onChange={(e) => { setInvType(e.target.value as "cash" | "credit"); markDirty(); }}
+                  >
+                    <option value="credit">أجل</option>
+                    <option value="cash">نقدي</option>
+                  </select>
                 </div>
 
                 {selectedCustomer && creditHint && (() => {

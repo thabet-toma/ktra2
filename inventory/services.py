@@ -591,7 +591,7 @@ def product_stock_ledger(*, tenant_id: int, product_id: int, limit: int = 50, of
     """
     base = (
         StockMovement.objects.filter(tenant_id=tenant_id, product_id=product_id)
-        .select_related('warehouse')
+        .select_related('warehouse', 'partner')
         .order_by('movement_date', 'id')
     )
     total = base.count()
@@ -606,6 +606,8 @@ def product_stock_ledger(*, tenant_id: int, product_id: int, limit: int = 50, of
             'movement_type_label': m.get_movement_type_display(),
             'reference_type': m.reference_type,
             'reference_id': m.reference_id,
+            # الطرف (المورد في المشتريات / الزبون في المبيعات) — مثل تبويب الفواتير المرتبطة.
+            'party': m.partner.name if m.partner_id else None,
             'warehouse': m.warehouse.name if m.warehouse_id else None,
             'qty_in': str(qty) if is_in else '0',
             'qty_out': str(qty) if not is_in else '0',

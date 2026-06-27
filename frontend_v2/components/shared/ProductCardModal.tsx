@@ -15,6 +15,8 @@ import { useNavigate } from "react-router-dom";
 import { apiGetObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { formatQuantity, formatMoney } from "../../utils/formatNumber";
+import { productProfilePath } from "../../utils/entityLinks";
+import { LedgerTable, DocRefCell, type LedgerColumn } from "./LedgerTable";
 
 interface ProductProfile {
   id: number;
@@ -30,6 +32,27 @@ interface ProductProfile {
   sold_value: string;
 }
 
+
+/** صف حركة المخزون (دفتر الرصيد الجاري) — يُعرض داخل البطاقة لاستغلال المساحة. */
+interface LedgerRow {
+  id: number;
+  date: string | null;
+  movement_type_label: string;
+  reference_type: string | null;
+  reference_id: number | null;
+  party: string | null;
+  warehouse: string | null;
+  qty_in: string;
+  qty_out: string;
+  running_balance: string;
+}
+
+/** نوع الحركة المعروض — مشتقّ من نوع المستند المرجعي (مطابق لـ ProductProfilePage). */
+const ledgerTypeLabel = (r: LedgerRow): string => {
+  if (r.reference_type === "PURCHASE_INVOICE") return "مشتريات";
+  if (r.reference_type === "SALE") return "مبيعات";
+  return r.movement_type_label;
+};
 
 /** DEF-005 / T-R2: مصدر السعر المقترح للشارة داخل البطاقة. */
 export type ProductCardPriceSource = "last_invoice" | "quote" | "default" | null;
@@ -63,6 +86,10 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
   const [profile, setProfile] = useState<ProductProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // حركة المخزون داخل البطاقة (آخر الحركات) — تُعرض في وضع العرض فقط (لا الإضافة).
+  const [ledger, setLedger] = useState<LedgerRow[]>([]);
+  const [ledLoading, setLedLoading] = useState(false);
+  const [ledError, setLedError] = useState<string | null>(null);
   // T-R2: الكمية والسعر المُدخلان في وضع الإضافة.
   const [qty, setQty] = useState("1");
   const [price, setPrice] = useState<string>(
@@ -88,6 +115,22 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
     return () => { cancelled = true; };
   }, [productId]);
 
+  // آخر حركات المخزون (حتى 8) — لملء مساحة البطاقة في وضع العرض فقط.
+  useEffect(() => {
+    if (addMode) return;
+    let cancelled = false;
+    setLedLoading(true);
+    setLedError(null);
+    apiGetObject<{ results: LedgerRow[]; count: number }>(
+      `inventory/products/${productId}/stock-ledger/?limit=8&offset=0`,
+      { tenantId: resolveTenantId() },
+    )
+      .then((d) => { if (!cancelled) setLedger(Array.isArray(d.results) ? d.results : []); })
+      .catch((err) => { if (!cancelled) setLedError(err instanceof Error ? err.message : String(err)); })
+      .finally(() => { if (!cancelled) setLedLoading(false); });
+    return () => { cancelled = true; };
+  }, [productId, addMode]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -106,6 +149,25 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
     </div>
   );
 
+  // أعمدة حركة المخزون المعروضة داخل البطاقة (مختصرة — نفس دفتر ProductProfilePage).
+  const ledColumns: LedgerColumn<LedgerRow>[] = [
+    { key: "date", header: "التاريخ", render: (r) => r.date || "—" },
+    { key: "type", header: "النوع", render: (r) => ledgerTypeLabel(r) },
+    {
+      key: "ref", header: "المستند",
+      render: (r) => (
+        <DocRefCell
+          referenceType={r.reference_type}
+          referenceId={r.reference_id}
+          label={r.reference_id != null ? `${r.reference_type || ""} #${r.reference_id}` : "—"}
+        />
+      ),
+    },
+    { key: "qty_in", header: "وارد", align: "center", render: (r) => (Number(r.qty_in) ? formatQuantity(r.qty_in) : "—") },
+    { key: "qty_out", header: "صادر", align: "center", render: (r) => (Number(r.qty_out) ? formatQuantity(r.qty_out) : "—") },
+    { key: "bal", header: "الرصيد", align: "center", render: (r) => <b>{formatQuantity(r.running_balance)}</b> },
+  ];
+
   return createPortal(
     // البطاقة تُحقن في <body> عبر بورتال، خارج شجرة `.aseel-doc`. أنماط
     // `.aseel-picker-mask` مُحدَّدة بـ `[data-skin="aseel"] .aseel-picker-mask`
@@ -117,12 +179,12 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
       data-aseel-modal="1"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="aseel-picker" role="dialog" aria-modal="true" aria-label="بطاقة الصنف" style={{ maxWidth: 560, width: "92vw" }}>
+      <div className="aseel-picker" role="dialog" aria-modal="true" aria-label="بطاقة الصنف" style={{ maxWidth: addMode ? 560 : 760, width: "92vw" }}>
         <div className="aseel-picker-head">
           <span>{title ? `بطاقة الصنف: ${title}` : "بطاقة الصنف"}</span>
           <button type="button" className="aseel-toolbtn" onClick={onClose} aria-label="إغلاق"><X /></button>
         </div>
-        <div className="aseel-picker-body" style={{ padding: "10px" }}>
+        <div className="aseel-picker-body" style={{ padding: "10px", maxHeight: "72vh", overflowY: "auto" }}>
           {loading ? (
             <div className="p-4 text-center text-[var(--aseel-ink-soft)]">جاري التحميل…</div>
           ) : error ? (
@@ -141,6 +203,30 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
               <Kpi label="إجمالي المباعة (قيمة)" value={formatMoney(profile.sold_value, "—")} />
             </div>
           ) : null}
+
+          {/* حركة المخزون داخل البطاقة — تملأ المساحة في وضع العرض (لا الإضافة). */}
+          {!addMode && (
+            <div className="mt-3 pt-3 border-t border-[var(--aseel-border)]">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm font-bold text-[var(--aseel-ink)]">حركة المخزون (آخر الحركات)</span>
+                <button
+                  type="button"
+                  className="text-xs text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
+                  onClick={() => { onClose(); navigate(productProfilePath(productId)); }}
+                  title="عرض كامل حركة المخزون"
+                >
+                  عرض الكل
+                </button>
+              </div>
+              <LedgerTable<LedgerRow>
+                columns={ledColumns}
+                rows={ledger}
+                loading={ledLoading}
+                error={ledError}
+                emptyText="لا توجد حركات مخزون لهذا الصنف."
+              />
+            </div>
+          )}
 
           {/* T-R2: حقل الكمية والسعر مع شارة المصدر — يظهر فقط في وضع الإضافة. */}
           {addMode && onConfirm && (
@@ -182,8 +268,8 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
           <button
             type="button"
             className="aseel-toolbtn"
-            onClick={() => { onClose(); navigate(`/products/${productId}`); }}
-            title="فتح بطاقة الصنف الكاملة"
+            onClick={() => { onClose(); navigate(productProfilePath(productId)); }}
+            title="فتح بطاقة الصنف الكاملة (حركة المخزون)"
           >
             <ExternalLink className="w-4 h-4" /> البطاقة الكاملة
           </button>

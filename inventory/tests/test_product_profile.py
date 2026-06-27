@@ -202,6 +202,26 @@ def test_reconcile_cogs_fixes_sell_before_buy(env):
     assert again["journal_id"] is None
 
 
+def test_stock_ledger_exposes_party(env):
+    """حركة المخزون تحمل اسم الطرف ونوع المستند — كتبويب الفواتير المرتبطة:
+    المورد في حركة الشراء والزبون في حركة البيع."""
+    tenant, ils, sup, product = env
+    customer = Partner.objects.create(tenant=tenant, name="زبون", partner_type="Customer")
+    record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("10"),
+        unit_cost=Decimal("5"), reference_type="PURCHASE_INVOICE", reference_id=1,
+        partner=sup, movement_date="2026-06-01", tenant=tenant)
+    record_stock_movement(
+        product=product, movement_type="OUT", quantity=Decimal("3"),
+        reference_type="SALE", reference_id=2,
+        partner=customer, movement_date="2026-06-02", tenant=tenant)
+
+    rows = product_stock_ledger(tenant_id=tenant.TenantID, product_id=product.id)["results"]
+    by_ref = {r["reference_type"]: r for r in rows}
+    assert by_ref["PURCHASE_INVOICE"]["party"] == sup.name
+    assert by_ref["SALE"]["party"] == "زبون"
+
+
 class ProductProfileEndpointTest(APITestCase):
     @classmethod
     def setUpTestData(cls):

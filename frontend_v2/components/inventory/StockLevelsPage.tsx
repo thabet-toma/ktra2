@@ -4,6 +4,8 @@ import type { SqlProduct, StockSummaryResponse } from "../../types/inventory";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { RefreshCw, Download, Printer } from "lucide-react";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { productProfilePath } from "../../utils/entityLinks";
+import { openInNewTab } from "../../utils/openInNewTab";
 
 // مبالغ مالية — يحذف الأصفار العشرية غير الدالّة (6.00 ⇒ 6، 6.50 ⇒ 6.5) عبر المُنسّق الموحّد.
 const fmt = (n: number | string) => formatMoney(n, "0");
@@ -192,7 +194,17 @@ export const StockLevelsPage: React.FC = () => {
       ),
     },
     { key: "sku", header: "SKU", width: "110px" },
-    { key: "name", header: "الصنف", render: (p) => <>{p.name_ar || p.name_en || "—"}</> },
+    { key: "name", header: "الصنف", render: (p) => (
+        // اسم الصنف قابل للنقر — يفتح حركة مخزون الصنف.
+        <button
+          type="button"
+          className="text-blue-700 hover:underline text-right"
+          onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(p.id)); }}
+          title="فتح حركة مخزون الصنف"
+        >
+          {p.name_ar || p.name_en || "—"}
+        </button>
+      ) },
     { key: "cat", header: "التصنيف", width: "130px", render: (p) => <>{p.category_name || "—"}</> },
     { key: "qty", header: "المتاح", width: "90px", align: "center", numeric: true,
       render: (p) => {
