@@ -89,10 +89,58 @@ export const CategoriesManagement: React.FC = () => {
     }
   };
 
-  const displayList = [...list];
+  // خرائط الشجرة: الاسم بالمعرّف + العمق (لإزاحة الأبناء) + ترتيب DFS (الابن تحت أبيه).
+  const nameById = new Map(list.map((c) => [c.id, c.name]));
+  const childrenOf = new Map<number | null, Category[]>();
+  for (const c of list) {
+    const p = c.parent ?? null;
+    if (!childrenOf.has(p)) childrenOf.set(p, []);
+    childrenOf.get(p)!.push(c);
+  }
+  const depthOf = (c: Category): number => {
+    let d = 0, cur: number | null = c.parent ?? null, guard = 0;
+    while (cur != null && guard++ < 50) { d++; cur = nameById.has(cur) ? (list.find((x) => x.id === cur)?.parent ?? null) : null; }
+    return d;
+  };
+  // ترتيب الشجرة (أب ثم أبناؤه ثم أحفاده) عبر DFS من الجذور.
+  const orderedTree: Category[] = [];
+  const walk = (parent: number | null) => {
+    for (const c of (childrenOf.get(parent) || [])) { orderedTree.push(c); walk(c.id); }
+  };
+  walk(null);
+  // التصنيفات اليتيمة (أبٌ غير موجود) لا تظهر تحت أحد — ألحِقها كي لا تختفي.
+  for (const c of list) if (!orderedTree.includes(c)) orderedTree.push(c);
+
+  // كل أحفاد تصنيف (لمنع اختياره أباً لنفسه/أحد أبنائه — يكسر الشجرة).
+  const descendantsOf = (id: number): Set<number> => {
+    const out = new Set<number>();
+    const stack = [...(childrenOf.get(id) || [])];
+    while (stack.length) { const c = stack.pop()!; out.add(c.id); stack.push(...(childrenOf.get(c.id) || [])); }
+    return out;
+  };
+  const parentOptions = (selfId: number): Category[] => {
+    const banned = selfId ? descendantsOf(selfId) : new Set<number>();
+    return orderedTree.filter((c) => c.id !== selfId && !banned.has(c.id));
+  };
+
+  const displayList = [...orderedTree];
   if (editId === 0) {
     displayList.unshift({ id: 0, name: editName, parent: editParent });
   }
+
+  // محرّر الأب المشترك (للجديد والتعديل) — هذا ما كان ناقصاً فتعذّر إنشاء أب/ابن/حفيد.
+  const parentSelect = (selfId: number) => (
+    <select
+      className="aseel-input w-full"
+      value={editParent ?? ""}
+      onChange={(e) => setEditParent(e.target.value ? Number(e.target.value) : null)}
+    >
+      <option value="">— تصنيف رئيسي (بدون أب) —</option>
+      {parentOptions(selfId).map((c) => (
+        <option key={c.id} value={c.id}>{"— ".repeat(depthOf(c))}{c.name}</option>
+      ))}
+    </select>
+  );
 
   const columns: DenseColumn<Category>[] = [
     {
@@ -120,7 +168,24 @@ export const CategoriesManagement: React.FC = () => {
             />
           );
         }
-        return c.name;
+        // إزاحة بصرية حسب العمق لإظهار الشجرة (أب ⇠ ابن ⇠ حفيد).
+        return (
+          <span style={{ paddingInlineStart: `${depthOf(c) * 18}px` }}>
+            {depthOf(c) > 0 && <span style={{ color: "var(--aseel-ink-soft)" }}>└ </span>}
+            {c.name}
+          </span>
+        );
+      }
+    },
+    {
+      key: "parent",
+      header: "الصنف الأب",
+      width: "220px",
+      render: (c) => {
+        if (editId === c.id) return parentSelect(c.id);
+        return c.parent != null
+          ? (nameById.get(c.parent) || `#${c.parent}`)
+          : <span className="text-gray-400">— رئيسي —</span>;
       }
     },
     {

@@ -14,7 +14,9 @@ import { ProductDetailPage } from './components/store/ProductDetailPage'; // ا�
 import { AuthProvider } from './contexts/AuthContext';
 import { CompanyProvider } from './contexts/CompanyContext';
 import { ConfirmProvider } from './contexts/ConfirmContext';
+import { ToastProvider } from './contexts/ToastContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { PriceVisibilityProvider } from './contexts/PriceVisibilityContext';
 
 import './styles/index.css';
 
@@ -43,23 +45,11 @@ root.render(
     <BrowserRouter>
       <Routes>
         {/* مسار App للوحة التحكم والتطبيق الداخلي */}
-        <Route path="/*" element={<AuthProvider><CompanyProvider><ThemeProvider><ConfirmProvider><App /></ConfirmProvider></ThemeProvider></CompanyProvider></AuthProvider>} />
+        <Route path="/*" element={<AuthProvider><CompanyProvider><ThemeProvider><PriceVisibilityProvider><ConfirmProvider><ToastProvider><App /></ToastProvider></ConfirmProvider></PriceVisibilityProvider></ThemeProvider></CompanyProvider></AuthProvider>} />
 
-        {/* الصفحات العامة */}
+        {/* الصفحات العامة المنفصلة بالكامل */}
         <Route path="/store" element={<StorePage />} />
         <Route path="/store/product/:id" element={<ProductDetailPage />} />
-
-        {/* باقي الصفحات العامة مع PublicLayout */}
-        <Route element={<PublicLayout />}>
-          <Route path="/about-us" element={<AboutUs />} />
-          <Route path="/gallery" element={<PublicGallery />} />
-          <Route path="/public-gallery" element={<PublicGallery />} />
-
-          {/* صفحة اتصل بنا مع المودال الخاص بها */}
-          <Route path="/contact" element={<Contact />}>
-            <Route path=":departmentId" element={<DepartmentModal />} />
-          </Route>
-        </Route>
 
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

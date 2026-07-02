@@ -68,7 +68,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     serializer_class = ProductSerializer
     pagination_class = OptionalPageNumberPagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['sku', 'barcode', 'name_ar', 'name_en', 'category__name']
+    search_fields = ['sku', 'barcode', 'name_ar', 'name_en', 'brand', 'category__name']
     ordering_fields = ['id', 'sku', 'name_ar', 'quantity_on_hand', 'avg_cost', 'min_stock_level', 'created_at']
     ordering = ['-id']
 
@@ -112,21 +112,33 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def _handle_attachments(self, product, data, tenant):
         from core.models import SystemAttachment
-        image_url = data.get('image_url') or data.get('image_path')
-        if image_url and isinstance(image_url, str) and image_url.startswith('http'):
+
+        def _save(url, file_type):
+            if not (url and isinstance(url, str) and url.startswith('http')):
+                return
             if not SystemAttachment.objects.filter(
                 tenant=tenant,
                 related_table='products',
                 related_id=product.id,
-                file_path=image_url
+                file_path=url
             ).exists():
                 SystemAttachment.objects.create(
                     tenant=tenant,
                     related_table='products',
                     related_id=product.id,
-                    file_type='Product Image',
-                    file_path=image_url
+                    file_type=file_type,
+                    file_path=url
                 )
+
+        _save(data.get('image_url') or data.get('image_path'), 'Product Image')
+
+        # داتا شيت — يقبل رابطاً مفرداً (datasheet_url) أو قائمة روابط (datasheet_urls)
+        datasheets = data.get('datasheet_urls') or data.get('datasheet_url')
+        if isinstance(datasheets, str):
+            datasheets = [datasheets]
+        if isinstance(datasheets, (list, tuple)):
+            for url in datasheets:
+                _save(url, 'Datasheet')
 
     def _validate_category_tenant(self, serializer, tenant):
         # DEF-A1: التصنيف FK يجب أن يكون من نفس الشركة
@@ -134,11 +146,38 @@ class ProductViewSet(viewsets.ModelViewSet):
         if category and category.tenant_id != tenant.pk:
             raise serializers.ValidationError({'category': 'التصنيف غير موجود لهذه الشركة.'})
 
+    def _auto_create_group_category(self, serializer, tenant):
+        variant_group = (serializer.validated_data.get('variant_group') or '').strip()
+        base_category = serializer.validated_data.get('category')
+        
+        if variant_group and base_category:
+            # If editing and the incoming category is the old group category itself, use its parent as the base.
+            if getattr(self, 'action', '') in ['update', 'partial_update'] and self.instance:
+                old_category_id = getattr(self.instance, 'category_id', None)
+                old_variant_group = (getattr(self.instance, 'variant_group', '') or '').strip()
+                if old_category_id == base_category.id and base_category.name == old_variant_group and base_category.parent:
+                    base_category = base_category.parent
+
+            if base_category.name == variant_group:
+                return
+            cat, _ = ProductCategory.objects.get_or_create(
+                tenant=tenant,
+                name=variant_group,
+                parent=base_category,
+                defaults={
+                    'revenue_account': base_category.revenue_account,
+                    'cogs_account': base_category.cogs_account,
+                    'inventory_account': base_category.inventory_account,
+                }
+            )
+            serializer.validated_data['category'] = cat
+
     def create(self, request, *args, **kwargs):
         tenant = self._get_tenant()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self._validate_category_tenant(serializer, tenant)
+        self._auto_create_group_category(serializer, tenant)
 
         # task14 M2 (DEF-A2): SKU يولَّد خادمياً عند الغياب — مع إعادة محاولة عند السباق
         explicit_sku = (serializer.validated_data.get('sku') or '').strip()
@@ -167,6 +206,7 @@ class ProductViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(instance, data=request.data, partial=kwargs.get('partial', False))
         serializer.is_valid(raise_exception=True)
         self._validate_category_tenant(serializer, tenant)
+        self._auto_create_group_category(serializer, tenant)
         # task14 M2: SKU فارغ في التعديل = «أبقِ الرقم الحالي» — لا تمسحه
         new_sku = (serializer.validated_data.get('sku') or '').strip()
         if 'sku' in serializer.validated_data:
@@ -179,6 +219,26 @@ class ProductViewSet(viewsets.ModelViewSet):
         product = serializer.save()
         self._handle_attachments(product, request.data, tenant)
         return Response(self.get_serializer(product).data)
+
+    @action(detail=True, methods=['delete'], url_path='datasheets/(?P<att_id>[0-9]+)')
+    def remove_datasheet(self, request, pk=None, att_id=None):
+        """حذف مرفق داتا شيت محفوظ من SQL + محاولة حذف الأصل من Cloudinary (أفضل-جهد).
+        مقيّد بشركة المستخدم ومنتجه ونوع Datasheet حصراً (get_object يفلتر tenant)."""
+        from core.models import SystemAttachment
+        from core.media_views import destroy_cloudinary_asset
+        product = self.get_object()  # tenant-scoped
+        att = SystemAttachment.objects.filter(
+            tenant_id=product.tenant_id,
+            related_table='products',
+            related_id=product.id,
+            id=att_id,
+            file_type='Datasheet',
+        ).first()
+        if not att:
+            return Response({'detail': 'المرفق غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+        destroy_cloudinary_asset(att.file_path)
+        att.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=['get'], url_path='stock-movements')
     def stock_movements(self, request, pk=None):
@@ -221,6 +281,87 @@ class ProductViewSet(viewsets.ModelViewSet):
         product = self.get_object()
         return Response(product_cost_breakdown(
             tenant_id=product.tenant_id, product_id=product.id))
+
+    # ── تجميع البراندات: الكرت المجمّع (مجموع كل البراندات لنفس المقاس/الأساس) ──
+    # تمرّر الواجهة معرّفات أعضاء المجموعة عبر ?ids=1,2,3 (تحسبها من group_key)؛
+    # العزل بالشركة في الخدمة. النقر على عقدة الأب في الشجرة/الجرد يفتح هذه الكروت.
+    def _group_ids(self, request):
+        raw = request.query_params.get('ids', '')
+        ids = []
+        for part in raw.split(','):
+            part = part.strip()
+            if part.isdigit():
+                ids.append(int(part))
+        return ids
+
+    def _distinct_values(self, tenant, field):
+        vals = (
+            Product.objects.filter(tenant=tenant)
+            .exclude(**{field: ''}).exclude(**{f'{field}__isnull': True})
+            .values_list(field, flat=True)
+        )
+        return sorted({(v or '').strip() for v in vals if (v or '').strip()})
+
+    @action(detail=False, methods=['get'], url_path='brands')
+    def brands(self, request):
+        """قائمة البراندات المستخدمة (مميّزة) للشركة — لمنتقي البراند (اختر/أضف)."""
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response([])
+        return Response(self._distinct_values(tenant, 'brand'))
+
+    @action(detail=False, methods=['get'], url_path='groups')
+    def groups(self, request):
+        """قائمة المجموعات (الأصناف الفرعية) المستخدمة — لمنتقي المجموعة (اختر/أضف)."""
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response([])
+        return Response(self._distinct_values(tenant, 'variant_group'))
+
+    @action(detail=False, methods=['get'], url_path='names')
+    def names(self, request):
+        """أسماء المنتجات المميّزة — لمنتقي «اسم المنتج» (اختر موجوداً لإضافة براند
+        آخر، أو اكتب اسماً جديداً فيُنشأ تصنيف فرعي باسمه)."""
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response([])
+        return Response(self._distinct_values(tenant, 'name_ar'))
+
+    @action(detail=False, methods=['get'], url_path='group-profile')
+    def group_profile(self, request):
+        from inventory.services import product_group_profile
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(product_group_profile(
+            tenant_id=tenant.pk, product_ids=self._group_ids(request)))
+
+    @action(detail=False, methods=['get'], url_path='group-ledger')
+    def group_ledger(self, request):
+        from inventory.services import product_stock_ledger
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            limit = min(int(request.query_params.get('limit', 50)), 200)
+        except (TypeError, ValueError):
+            limit = 50
+        try:
+            offset = max(int(request.query_params.get('offset', 0)), 0)
+        except (TypeError, ValueError):
+            offset = 0
+        return Response(product_stock_ledger(
+            tenant_id=tenant.pk, product_ids=self._group_ids(request),
+            limit=limit, offset=offset))
+
+    @action(detail=False, methods=['get'], url_path='group-invoices')
+    def group_invoices(self, request):
+        from inventory.services import product_linked_invoices
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(product_linked_invoices(
+            tenant_id=tenant.pk, product_ids=self._group_ids(request)))
 
 
 class WarehouseViewSet(viewsets.ModelViewSet):

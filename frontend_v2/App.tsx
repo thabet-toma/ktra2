@@ -82,6 +82,9 @@ import { EmployeeAttendance } from "./components/EmployeeAttendance";
 import { AttendanceManagement } from "./components/AttendanceManagement";
 import { PurchaseInvoice } from "./components/procurement/PurchaseInvoice";
 import { autoDisableScheduler } from "./services/autoDisableScheduler";
+import AboutUs from "./components/AboutUs";
+import Contact from "./components/pages/Contact";
+import { PublicNavbar } from "./components/layout/PublicNavbar";
 import PublicGallery from "./components/PublicGallery";
 import { TaskDetailsModal } from "./components/TaskDetailsModal";
 import { OldPurchaseInvoice } from "./components/OldPurchaseInvoice";
@@ -119,6 +122,7 @@ import { ProductCostPage } from "./components/inventory/ProductCostPage";
 import { PropertyRentalPage } from "./components/realestate/PropertyRentalPage";
 import { PartnerProfilePage } from "./components/partners/PartnerProfilePage";
 import { ProductProfilePage } from "./components/items/ProductProfilePage";
+import { GroupProfilePage } from "./components/items/GroupProfilePage";
 import { SalesInvoicesPage } from "./components/sales/SalesInvoicesPage";
 import { SalesCustomersPage } from "./components/sales/SalesCustomersPage";
 import SalesCustomerPaymentsPage from "./components/sales/SalesCustomerPaymentsPage";
@@ -177,6 +181,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "warehouse-transfer": "/warehouse-transfer",
   "stocktake": "/stocktake",
   "product-cost": "/product-cost",
+  "product-group": "/product-group",
   "accounting-coa": "/accounting/coa",
   "accounting-journals": "/accounting/journals",
   "accounting-cheques": "/accounting/cheques",
@@ -194,6 +199,8 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "cash-boxes": "/cash-boxes",
   reports: "/reports",
   gallery: "/gallery",
+  "about-us": "/about-us",
+  contact: "/contact",
   settings: "/settings",
   sourcing: "/sourcing",
   store: "/store",
@@ -425,6 +432,21 @@ const App: React.FC = () => {
 
   // مسارات الصفقات + ?view= القديم؛ لا نفرض شاشة الدور عند كل زيارة لـ /
   useEffect(() => {
+    const path = (location.pathname || "/").replace(/\/$/, "") || "/";
+    if (path.startsWith("/settings")) {
+      setAppView("settings");
+    } else if (path.startsWith("/store")) {
+      setAppView("store");
+    } else if (path.startsWith("/about-us")) {
+      setAppView("about-us");
+    } else if (path.startsWith("/contact")) {
+      setAppView("contact");
+    } else if (path.startsWith("/gallery") || path.startsWith("/public-gallery")) {
+      setAppView("gallery");
+    } else if (path.startsWith("/group-constants")) {
+      setAppView("group-constants");
+    }
+
     if (!currentUser?.isApproved) return;
     const params = new URLSearchParams(location.search);
     const idLegacy = params.get("id");
@@ -433,7 +455,6 @@ const App: React.FC = () => {
       navigate(`/deals/${encodeURIComponent(idLegacy)}`, { replace: true });
       return;
     }
-    const path = (location.pathname || "/").replace(/\/$/, "") || "/";
     /** روابط قديمة على الرئيسية: ?view=purchase-invoices&id= → مسار مخصص */
     if (path === "/" && viewParam === "purchase-invoices") {
       if (idLegacy) {
@@ -1507,6 +1528,12 @@ const App: React.FC = () => {
       case "gallery":
         return <PublicGallery />;
 
+      case "about-us":
+        return <AboutUs />;
+
+      case "contact":
+        return <Contact currentUser={currentUser} />;
+
       case "accounting-coa":
         if (currentUser!.role !== "manager") {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
@@ -1751,6 +1778,9 @@ const App: React.FC = () => {
       case "product-profile":
         return <ProductProfilePage />;
 
+      case "product-group":
+        return <GroupProfilePage />;
+
       default:
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
     }
@@ -1798,6 +1828,37 @@ const App: React.FC = () => {
   }
 
   if (!currentUser) {
+    if (appView === "about-us") {
+      return (
+        <div className={theme}>
+          <PublicNavbar />
+          <div className="pt-20 min-h-screen bg-gray-50 dark:bg-gray-900">
+            <AboutUs />
+          </div>
+        </div>
+      );
+    }
+    if (appView === "gallery") {
+      return (
+        <div className={theme}>
+          <PublicNavbar />
+          <div className="pt-20 min-h-screen bg-gray-50 dark:bg-gray-900">
+            <PublicGallery />
+          </div>
+        </div>
+      );
+    }
+    if (appView === "contact") {
+      return (
+        <div className={theme}>
+          <PublicNavbar />
+          <div className="pt-20 min-h-screen bg-gray-50 dark:bg-gray-900">
+            <Contact currentUser={null} />
+          </div>
+        </div>
+      );
+    }
+
     if (authView === "signup") {
       return (
         <div className={theme}>

@@ -1,61 +1,26 @@
-export class CloudinaryService {
-  private readonly cloudName = 'dc66alhhk';
-  private readonly uploadPreset = 'kitra_66';
-  private readonly folder = 'Smart_product_system_KTRA';
+import { apiPostFormData } from './restApi';
 
+/**
+ * رفع الملفات عبر خادم KTRA (‎/api/media/upload/‎) إلى Cloudinary.
+ * السرّ محفوظ على الخادم (settings.CLOUDINARY_STORAGE) — لا يُعرَّض للمتصفح.
+ * أي موقع يستدعي uploadFile يستفيد تلقائياً من السحابة المضبوطة على الخادم.
+ */
+export class CloudinaryService {
   /**
-   * رفع ملف (صورة أو PDF) وإرجاع الرابط
+   * رفع ملف (صورة أو PDF/داتا شيت) وإرجاع الرابط الآمن.
    */
   async uploadFile(file: File): Promise<string> {
     const formData = new FormData();
-
-    // تحديد نوع المورد والمجلد بناءً على نوع الملف
-    let resourceType = 'auto'; // القيمة الافتراضية
-    let subFolder = 'others';
-
-    if (file.type.startsWith('image/')) {
-      resourceType = 'image';
-      subFolder = 'images';
-    } else if (file.type === 'application/pdf') {
-      // ✅ للملفات غير الصور، يفضل استخدام raw أو تحديدها بدقة لتجنب مشاكل الـ Unsigned
-      resourceType = 'raw';
-      subFolder = 'documents';
-    }
-
     formData.append('file', file);
-    formData.append('upload_preset', this.uploadPreset);
-    // ملاحظة: الـ Unsigned upload قد يرفض تحديد المجلد (folder) إذا لم يكن مسموحاً به في إعدادات الـ Preset 
-    // إذا استمر الخطأ، جرب تعطيل سطر الـ folder مؤقتاً للتأكد
-    formData.append('folder', `${this.folder}/${subFolder}`);
 
-    try {
-      // ✅ نستخدم resourceType المتغير هنا (image أو raw أو auto)
-      const response = await fetch(
-        `https://api.cloudinary.com/v1_1/${this.cloudName}/${resourceType}/upload`,
-        {
-          method: 'POST',
-          body: formData, // لا تضع Headers يدوية مثل Content-Type، المتصفح سيتكفل بها مع FormData
-        }
-      );
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        // console suppressed
-        throw new Error(`فشل في الرفع: ${errorData.error?.message || response.status}`);
-      }
-
-      const data = await response.json();
-      return data.secure_url || data.url;
-
-    } catch (error) {
-      // console suppressed
-      throw error;
+    const data = await apiPostFormData<{ url?: string }>('media/upload/', formData);
+    if (!data?.url) {
+      throw new Error('فشل في الرفع: لم يُعَد رابط الملف');
     }
+    return data.url;
   }
-  /**
-   * دالة للإبقاء على التوافق مع الكود القديم إذا كان مستخدماً في أماكن أخرى
-   * (يمكنك استخدام uploadFile مباشرة للكل)
-   */
+
+  /** توافق مع الشيفرة القديمة */
   async uploadImage(file: File): Promise<string> {
     return this.uploadFile(file);
   }

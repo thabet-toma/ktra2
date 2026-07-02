@@ -633,9 +633,8 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               selectable
               selectedKey={selectedKey}
               onSelect={(k) => setSelectedKey(k as number | null)}
-              onRowDoubleClick={(r) => {
-                if (r.status === "draft") openEdit(r.id);
-              }}
+              onRowClick={(r) => openEdit(r.id)}
+              onRowDoubleClick={(r) => openEdit(r.id)}
             />
           </div>
         </AseelDocumentShell>
@@ -668,7 +667,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             onDraftEditConsumed={() => setDraftToEditId(null)}
             onClose={closeEditor}
             onInvoiceSaved={() => {
-              closeEditor();
+              load();
             }}
             invoiceList={rows}
             onOpenGeneralLedger={onOpenGeneralLedger}

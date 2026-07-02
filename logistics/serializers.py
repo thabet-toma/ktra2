@@ -861,7 +861,8 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
 
     def get_product_name(self, obj):
         if obj.product:
-            return obj.product.name_ar or obj.product.name_en or obj.product.sku
+            from inventory.services import product_display_name
+            return product_display_name(obj.product)
         return obj.name
 
 

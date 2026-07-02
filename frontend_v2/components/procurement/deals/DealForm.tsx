@@ -26,6 +26,8 @@ import {
   itemsService,
   suppliersService,
 } from "../../../services/firestoreService";
+import { purchaseInvoiceApi } from "../../../services/purchaseInvoiceApi";
+import { formatMoney } from "../../../utils/formatNumber";
 import {
   Save,
   X,
@@ -221,6 +223,27 @@ export const DealForm: React.FC<DealFormProps> = ({
       setDealsList(fetchedDeals);
     });
     return () => unsub();
+  }, []);
+
+  const [purchasePriceMap, setPurchasePriceMap] = useState<
+    Map<number, { price: string; label: string; prices?: any[] }>
+  >(new Map());
+  useEffect(() => {
+    let cancelled = false;
+    purchaseInvoiceApi
+      .priceList()
+      .then((rows) => {
+        if (cancelled) return;
+        const m = new Map<number, { price: string; label: string; prices?: any[] }>();
+        for (const r of rows) {
+          if (r.unit_price != null && Number(r.unit_price) > 0) {
+            m.set(r.product_id, { price: r.unit_price, label: r.source_label, prices: r.prices });
+          }
+        }
+        setPurchasePriceMap(m);
+      })
+      .catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
   }, []);
 
   const [showItemSearch, setShowItemSearch] = useState(false);
@@ -737,12 +760,21 @@ export const DealForm: React.FC<DealFormProps> = ({
      السطر نفسه (المودال القديم كان يضيف سطراً جديداً دائماً ويأكل الشاشة).
      زر «#» في عمود رقم الصنف يبقى فاتحاً الفهرس الكامل كمسار ثانوي. */
   const itemOptions = useMemo(
-    () => allDbItems.map((it) => ({
-      id: it.id,
-      label: it.name,
-      sub: it.modelNumber || it.categoryName || "",
-    })),
-    [allDbItems],
+    () => allDbItems.map((it) => {
+      const pp = purchasePriceMap.get(Number(it.id));
+      return {
+        id: it.id,
+        label: it.name,
+        price: pp ? formatMoney(Number(pp.price)) : undefined,
+        priceLabel: pp ? pp.label : "بدون سعر",
+        prices: pp?.prices?.map((p: any) => ({
+          label: p.source_label || p.label,
+          value: formatMoney(Number(p.unit_price)),
+          link: p.document_id ? `/purchase-invoices/${p.document_id}` : undefined,
+        })),
+      };
+    }),
+    [allDbItems, purchasePriceMap],
   );
 
   const fillRowWithItem = (rowId: string, item: Item) => {

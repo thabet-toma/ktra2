@@ -5,6 +5,10 @@
  */
 import { clientLogger } from "./logger";
 import { resolveBranchId } from "../utils/tenantContext";
+import db from "./offline/db";
+
+/** فشل شبكة/مهلة (أوفلاين) — يميّزه عن أخطاء HTTP كي يرجع القارئ لكاش الأوفلاين. */
+export class NetworkError extends Error {}
 
 /** إذا وُضع عنوان الخادم بدون مسار (مثل http://localhost:8000) يُضاف /api تلقائياً. */
 export function resolveApiBase(raw: string): string {
@@ -69,18 +73,18 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
       }
 
       if (isTimeout) {
-        throw new Error(
+        throw new NetworkError(
           "انتهت مهلة انتظار الخادم (دقيقتان). تحقق من تشغيل Django والشبكة، ثم أعد المحاولة."
         );
       }
       if (isNetwork) {
-        throw new Error(NETWORK_HINT);
+        throw new NetworkError(NETWORK_HINT);
       }
       throw e;
     }
   }
   // لا يُفترض الوصول هنا (الحلقة إمّا تُرجع استجابة أو ترمي خطأً)
-  throw new Error(NETWORK_HINT);
+  throw new NetworkError(NETWORK_HINT);
 }
 
 function getHeaders(extra?: Record<string, string>, withJsonContentType: boolean = true) {
@@ -108,6 +112,31 @@ function toList<T = any>(payload: any): T[] {
   if (Array.isArray(payload)) return payload as T[];
   if (payload && Array.isArray(payload.results)) return payload.results as T[];
   return [];
+}
+
+// ── كاش القراءة أوفلاين (قراءة فقط) ─────────────────────────────────────────
+// مفتاح الكاش = URL كامل + المستأجر + الفرع النشط، فلا تتداخل الشركات/الفروع.
+function listCacheKey(url: string, tenantId?: number): string {
+  const branchId = resolveBranchId();
+  return `${url}|t=${tenantId ?? ""}|b=${branchId ?? ""}`;
+}
+
+/** يخزّن آخر قائمة ناجحة (fire-and-forget). فشل IndexedDB لا يعطّل الطلب. */
+async function writeListCache(key: string, list: unknown[]): Promise<void> {
+  try {
+    const now = new Date().toISOString();
+    await db.api_list_cache.put({ url: key, data: JSON.stringify(list), updated_at: now });
+    // علامة تُشعِر OfflineBanner بوجود بيانات محفوظة (لون أصفر بدل الأحمر).
+    await db.cache_meta.put({ key: "api_list_cache", updated_at: now });
+  } catch { /* IndexedDB غير متاح — تجاهل */ }
+}
+
+async function readListCache<T>(key: string): Promise<T[] | null> {
+  try {
+    const row = await db.api_list_cache.get(key);
+    if (row) return JSON.parse(row.data) as T[];
+  } catch { /* تجاهل */ }
+  return null;
 }
 
 /** يسطح أخطاء DRF المتداخلة (مثل {lines: [{product: ["..."]}]} أو {customer: ["..."]}) إلى نص واحد. */
@@ -155,19 +184,35 @@ export async function apiGetList<T = any>(
   });
 
   const url = `${API_BASE}/${path.replace(/^\/+/, "")}${q.toString() ? `?${q}` : ""}`;
-  const res = await apiFetch(url, {
-    // GET should avoid Content-Type header to reduce unnecessary CORS preflight failures.
-    headers: getHeaders(
-      opts?.tenantId ? { "X-Tenant-Id": String(opts.tenantId) } : undefined,
-      false
-    ),
-  });
+  const cacheKey = listCacheKey(url, opts?.tenantId);
+  try {
+    const res = await apiFetch(url, {
+      // GET should avoid Content-Type header to reduce unnecessary CORS preflight failures.
+      headers: getHeaders(
+        opts?.tenantId ? { "X-Tenant-Id": String(opts.tenantId) } : undefined,
+        false
+      ),
+    });
 
-  if (!res.ok) {
-    await handleResponseError(res, path);
+    if (!res.ok) {
+      await handleResponseError(res, path);
+    }
+
+    const list = toList<T>(await res.json());
+    void writeListCache(cacheKey, list);
+    return list;
+  } catch (e) {
+    // أوفلاين للقراءة فقط: عند فشل الشبكة نرجع لآخر قائمة محفوظة. أخطاء HTTP/التطبيق
+    // (401/500…) تُرمى كما هي — لا نُخفيها بكاش قديم.
+    if (e instanceof NetworkError) {
+      const cached = await readListCache<T>(cacheKey);
+      if (cached) {
+        clientLogger.warn("api.offline_cache_hit", { path });
+        return cached;
+      }
+    }
+    throw e;
   }
-
-  return toList<T>(await res.json());
 }
 
 export async function apiGetObject<T = any>(

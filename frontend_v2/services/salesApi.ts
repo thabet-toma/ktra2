@@ -256,6 +256,13 @@ export type CustomerPriceRow = {
   source_label: string;
   editable: boolean;
   invoice_number: string | null;
+  prices?: Array<{
+    label: string;
+    unit_price: string;
+    source_type: string;
+    document_id: number | null;
+    invoice_number: string | null;
+  }>;
 };
 
 export async function getCustomerPriceList(customerId: number | string): Promise<CustomerPriceRow[]> {
@@ -441,6 +448,8 @@ export type SalesSettings = {
   show_journal_preview: boolean;
   /** T-S2: تنبيه عند تكرار الصنف (يقود T-R3). */
   warn_on_duplicate_item: boolean;
+  /** منع حفظ/ترحيل فاتورة بيع بخسارة (الافتراضي مُعطّل). */
+  block_loss_invoices: boolean;
   default_shipping_origin: string;
   default_shipping_destination: string;
   updated_at?: string;

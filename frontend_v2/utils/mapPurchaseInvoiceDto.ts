@@ -16,7 +16,7 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     items: (dto.items || []).map((item, idx) => ({
       id: String(item.id || idx),
       itemId: item.product ? String(item.product) : "",
-      name: item.name,
+      name: item.product_name || item.name,
       categoryId: "",
       categoryName: "",
       specifications: "",

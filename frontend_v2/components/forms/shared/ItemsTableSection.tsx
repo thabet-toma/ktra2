@@ -649,7 +649,7 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
   };
 
   const calculateItemTotal = (item: any) => {
-    const baseTotal = (item.quantity || 0) * (item.unitPrice || 0);
+    const baseTotal = Number(item.quantity || 0) * Number(item.unitPrice || 0);
     const itemDiscount = parseFloat(item.itemDiscount) || 0;
     return Math.max(0, baseTotal - itemDiscount);
   };
@@ -714,7 +714,7 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
 
   const commitItemDiscount = (index: number) => {
     const item = items[index];
-    const maxDiscount = (item.quantity || 0) * (item.unitPrice || 0);
+    const maxDiscount = Number(item.quantity || 0) * Number(item.unitPrice || 0);
     let val = parseFloat(tempItemDiscountValue);
     if (isNaN(val)) val = 0;
     const validDiscount = Math.min(maxDiscount, Math.max(0, val));
@@ -821,18 +821,18 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
                       </td>
                       <td className="px-4 py-3 text-center">
                         <input
-                          type="number" min="1"
-                          value={item.quantity || ''}
-                          onChange={(e) => onUpdateItem(index, 'quantity', parseInt(e.target.value) || 1)}
+                          type="text" inputMode="decimal"
+                          value={item.quantity ?? ''}
+                          onChange={(e) => onUpdateItem(index, 'quantity', e.target.value)}
                           disabled={readOnly}
                           className="w-16 p-1.5 text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
                         />
                       </td>
                       <td className="px-4 py-3 text-center">
                         <input
-                          type="number" step="0.01"
-                          value={item.unitPrice || ''}
-                          onChange={(e) => onUpdateItem(index, 'unitPrice', parseFloat(e.target.value) || 0)}
+                          type="text" inputMode="decimal"
+                          value={item.unitPrice ?? ''}
+                          onChange={(e) => onUpdateItem(index, 'unitPrice', e.target.value)}
                           disabled={readOnly}
                           className="w-20 p-1.5 text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
                         />

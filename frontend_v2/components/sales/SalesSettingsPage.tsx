@@ -159,6 +159,7 @@ export const SalesSettingsPage: React.FC = () => {
         auto_post_invoices: rest.auto_post_invoices,
         show_journal_preview: rest.show_journal_preview,
         warn_on_duplicate_item: rest.warn_on_duplicate_item,
+        block_loss_invoices: rest.block_loss_invoices,
         default_shipping_origin: rest.default_shipping_origin,
         default_shipping_destination: rest.default_shipping_destination,
       };
@@ -581,6 +582,16 @@ export const SalesSettingsPage: React.FC = () => {
           >
             <option value="yes">إظهار رسالة تنبيه وتأكيد (مُوصى)</option>
             <option value="no">إضافة سطر جديد مباشرة بلا تنبيه</option>
+          </select>
+        </FieldLabel>
+        <FieldLabel label="فاتورة البيع بخسارة (سعر أقل من التكلفة)">
+          <select
+            className={input}
+            value={settings.block_loss_invoices ? "yes" : "no"}
+            onChange={(e) => setField("block_loss_invoices", e.target.value === "yes")}
+          >
+            <option value="no">السماح بالحفظ (افتراضي)</option>
+            <option value="yes">منع الحفظ والترحيل</option>
           </select>
         </FieldLabel>
       </Section>

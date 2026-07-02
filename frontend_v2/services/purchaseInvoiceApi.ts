@@ -269,6 +269,13 @@ export const purchaseInvoiceApi = {
     unit_price: string | null;
     source_type: string;
     source_label: string;
+    prices?: Array<{
+      label: string;
+      unit_price: string;
+      source_type: string;
+      source_label: string;
+      document_id: number | null;
+    }>;
   }>> => {
     const res = await safeFetch(`${BASE}/price-list/`, { headers: headers() });
     await handle(res, "purchasePriceList");

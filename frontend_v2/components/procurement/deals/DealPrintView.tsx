@@ -35,7 +35,7 @@ export const DealPrintView: React.FC<DealPrintViewProps> = ({ deal, currentUser,
     };
 
     return (
-        <div className="fixed inset-0 z-50 aseel-bg-panel flex justify-center overflow-auto py-8 print:p-0 print:aseel-bg-field print:static print:block" dir="rtl">
+        <div className="w-full min-h-screen aseel-bg-panel flex justify-center overflow-auto py-8 print:p-0 print:aseel-bg-field print:static print:block relative" dir="rtl">
             <style>
                 {`
                     @media print {
@@ -54,7 +54,7 @@ export const DealPrintView: React.FC<DealPrintViewProps> = ({ deal, currentUser,
             </style>
 
             {/* Print Controls */}
-            <div className="fixed top-4 right-4 flex gap-2 no-print z-[60]">
+            <div className="absolute top-4 right-4 flex gap-2 no-print z-[60]">
                 <button onClick={handlePrint} className="flex items-center gap-2 aseel-bg-panel text-white px-4 py-2 rounded-full shadow-lg hover:aseel-bg-panel font-bold text-sm">
                     <Printer size={16} /> طباعة التقرير
                 </button>

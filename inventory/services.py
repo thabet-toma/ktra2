@@ -6,6 +6,7 @@ All stock changes go through record_stock_movement() which:
 2. Updates Product.quantity_on_hand and Product.avg_cost atomically
 """
 import logging
+import re
 from decimal import Decimal
 from django.db import transaction
 from django.core.exceptions import ValidationError
@@ -13,6 +14,62 @@ from django.core.exceptions import ValidationError
 from .models import Product, StockMovement
 
 logger = logging.getLogger(__name__)
+
+# ──────────────────────────────────────────────────────────────────────────
+# تجميع البراندات: «المقاس/الأساس» مصدر حقيقة واحد (DRY) للشجرة + الجرد + الكرت
+# المجمّع. المنتجات بنفس group_key (مثل عجل 185/65/14 بمختلف البراندات) تُجمَّع
+# تحت عقدة أب واحدة، والبراند يميّز الورقة.
+# ──────────────────────────────────────────────────────────────────────────
+
+# مقاس إطار (عرض/نسبة/قطر مثل 185/65/14 أو 31/10.5/15). الحدّان (?<!\d)/(?!\d)
+# يمنعان التقاط جزء من رقم أطول أو تاريخ. مرآة لـ tireSizeKey في الواجهة.
+_TIRE_SIZE_RE = re.compile(
+    r'(?<!\d)(\d{2,3})\s*/\s*(\d{1,2}(?:\.\d)?)\s*/\s*(\d{2}(?:\.\d)?)(?!\d)'
+)
+
+
+def tire_size_key(name: str) -> str | None:
+    """يستخرج مقاس الإطار المعياري «W/A/D» من الاسم، أو None لغير العجال."""
+    if not name:
+        return None
+    m = _TIRE_SIZE_RE.search(name)
+    if not m:
+        return None
+    return f"{m.group(1)}/{m.group(2)}/{m.group(3)}"
+
+
+def product_group_key(product) -> str:
+    """مفتاح تجميع المنتج (اسم الصنف الفرعي/عقدة الأب). الأولوية:
+    1) `variant_group` الصريح الذي يدخله المستخدم (مثل 185/65/14) — يُنشئ مجلّداً
+       يتجمّع تحته حتى لو منتج واحد.
+    2) مقاس الإطار المُستخرَج من الاسم (توافق مع البيانات القائمة للعجال).
+    3) البراند — فالمنتجات بنفس البراند تتجمّع تلقائياً (≥2) دون إدخال إضافي.
+    4) الاسم الأساسي. مصدر حقيقة واحد للتجميع."""
+    explicit = (getattr(product, 'variant_group', '') or '').strip()
+    if explicit:
+        return explicit
+    name = (product.name_ar or product.name_en or '').strip()
+    size = tire_size_key(name)
+    if size:
+        return size
+    brand = (getattr(product, 'brand', '') or '').strip()
+    if brand:
+        return brand
+    return name or (product.sku or '')
+
+
+def product_has_explicit_group(product) -> bool:
+    """هل عُيِّن للمنتج صنف فرعي صريح — فيظهر مجلّده حتى لو منتجاً واحداً."""
+    return bool((getattr(product, 'variant_group', '') or '').strip())
+
+
+def product_display_name(product) -> str:
+    """اسم العرض للورقة: الاسم + البراند بين قوسين (إن لم يكن مذكوراً أصلاً)."""
+    name = (product.name_ar or product.name_en or product.sku or '').strip()
+    brand = (getattr(product, 'brand', '') or '').strip()
+    if brand and brand not in name:
+        return f"{name} ({brand})".strip()
+    return name
 
 INBOUND_TYPES = {'IN', 'ADJUST_IN', 'RETURN_IN'}
 OUTBOUND_TYPES = {'OUT', 'ADJUST_OUT', 'RETURN_OUT'}
@@ -579,21 +636,87 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
     }
 
 
+def _group_products(tenant_id: int, product_ids: list[int]) -> list:
+    """يحلّ ويصفّي قائمة معرّفات إلى منتجات الشركة فقط (عزل المستأجر)."""
+    return list(
+        Product.objects.select_related('category')
+        .filter(tenant_id=tenant_id, id__in=product_ids)
+        .order_by('brand', 'sku')
+    )
+
+
+def product_group_profile(*, tenant_id: int, product_ids: list[int]) -> dict:
+    """الكرت المجمّع: يجمع مؤشّرات كل البراندات (المنتجات) التي تشترك بنفس المقاس/
+    الأساس في بطاقة واحدة — المخزون والمشتريات والمبيعات الإجمالية + تفصيل كل براند.
+
+    يعيد استخدام منطق `product_profile` لكل عضو (DRY) ثم يجمع، فيبقى مصدر حقيقة
+    واحد لطريقة احتساب المؤشّرات."""
+    members = _group_products(tenant_id, product_ids)
+    if not members:
+        return {
+            'name': '', 'category': None, 'member_count': 0, 'members': [],
+            'quantity_on_hand': '0', 'inventory_valuation': '0.00',
+            'purchased_qty': '0', 'purchased_value': '0',
+            'sold_qty': '0', 'sold_value': '0',
+        }
+
+    qty = val = pq = pv = sq = sv = Decimal('0')
+    member_rows = []
+    for p in members:
+        prof = product_profile(tenant_id=tenant_id, product_id=p.id)
+        qty += Decimal(prof['quantity_on_hand'])
+        val += Decimal(prof['inventory_valuation'])
+        pq += Decimal(prof['purchased_qty'])
+        pv += Decimal(prof['purchased_value'])
+        sq += Decimal(prof['sold_qty'])
+        sv += Decimal(prof['sold_value'])
+        member_rows.append({
+            'id': p.id,
+            'sku': p.sku,
+            'brand': (p.brand or '').strip(),
+            'name': product_display_name(p),
+            'quantity_on_hand': prof['quantity_on_hand'],
+            'avg_cost': prof['avg_cost'],
+            'inventory_valuation': prof['inventory_valuation'],
+            'sold_qty': prof['sold_qty'],
+        })
+
+    first = members[0]
+    return {
+        'name': product_group_key(first),
+        'category': first.category.name if first.category_id else None,
+        'member_count': len(members),
+        'members': member_rows,
+        'quantity_on_hand': str(qty),
+        'inventory_valuation': str(val.quantize(Decimal('0.01'))),
+        'purchased_qty': str(pq),
+        'purchased_value': str(pv),
+        'sold_qty': str(sq),
+        'sold_value': str(sv),
+    }
+
+
 _STOCK_IN_TYPES = {'IN', 'ADJUST_IN', 'RETURN_IN'}
 
 
-def product_stock_ledger(*, tenant_id: int, product_id: int, limit: int = 50, offset: int = 0) -> dict:
+def product_stock_ledger(
+    *, tenant_id: int, product_id: int | None = None,
+    product_ids: list[int] | None = None, limit: int = 50, offset: int = 0,
+) -> dict:
     """Chronological stock ledger for a product, with a running balance per row.
 
     The running balance reuses the movement's stored `quantity_after` — the
     canonical per-product on-hand after that movement — so it reconciles exactly
     to current stock (A4) without a parallel computation. Paginated.
+
+    تمرير `product_ids` يجمع دفتر الحركة لعدة براندات (الكرت المجمّع) ويضيف اسم
+    المنتج لكل سطر؛ الرصيد الجاري يبقى رصيد كل صنف على حدة (لقطته بعد حركته).
     """
-    base = (
-        StockMovement.objects.filter(tenant_id=tenant_id, product_id=product_id)
-        .select_related('warehouse', 'partner')
-        .order_by('movement_date', 'id')
-    )
+    if product_ids:
+        base = StockMovement.objects.filter(tenant_id=tenant_id, product_id__in=product_ids)
+    else:
+        base = StockMovement.objects.filter(tenant_id=tenant_id, product_id=product_id)
+    base = base.select_related('warehouse', 'partner', 'product').order_by('movement_date', 'id')
     total = base.count()
     rows = []
     for m in base[offset:offset + limit]:
@@ -609,6 +732,8 @@ def product_stock_ledger(*, tenant_id: int, product_id: int, limit: int = 50, of
             # الطرف (المورد في المشتريات / الزبون في المبيعات) — مثل تبويب الفواتير المرتبطة.
             'party': m.partner.name if m.partner_id else None,
             'warehouse': m.warehouse.name if m.warehouse_id else None,
+            # اسم البراند للكرت المجمّع (يميّز أي براند يخصّ السطر).
+            'product_name': product_display_name(m.product),
             'qty_in': str(qty) if is_in else '0',
             'qty_out': str(qty) if not is_in else '0',
             'running_balance': str(m.quantity_after),
@@ -616,15 +741,22 @@ def product_stock_ledger(*, tenant_id: int, product_id: int, limit: int = 50, of
     return {'results': rows, 'count': total, 'limit': limit, 'offset': offset}
 
 
-def product_linked_invoices(*, tenant_id: int, product_id: int) -> list[dict]:
-    """All purchase + sales invoices that contain this product (clickable)."""
+def product_linked_invoices(
+    *, tenant_id: int, product_id: int | None = None,
+    product_ids: list[int] | None = None,
+) -> list[dict]:
+    """All purchase + sales invoices that contain this product (clickable).
+
+    تمرير `product_ids` يجمع فواتير عدة براندات في قائمة واحدة (الكرت المجمّع)."""
     from logistics.models import PurchaseInvoiceItem
     from sales.models import SalesInvoiceLine
+
+    pid_filter = {'product_id__in': product_ids} if product_ids else {'product_id': product_id}
 
     out: list[dict] = []
     pis = (
         PurchaseInvoiceItem.objects.filter(
-            invoice__tenant_id=tenant_id, product_id=product_id,
+            invoice__tenant_id=tenant_id, **pid_filter,
         )
         .select_related('invoice', 'invoice__partner')
         .order_by('-invoice__invoice_date', '-invoice_id')
@@ -644,7 +776,7 @@ def product_linked_invoices(*, tenant_id: int, product_id: int) -> list[dict]:
             'is_posted': bool(inv.is_posted),
         })
     sls = (
-        SalesInvoiceLine.objects.filter(tenant_id=tenant_id, product_id=product_id)
+        SalesInvoiceLine.objects.filter(tenant_id=tenant_id, **pid_filter)
         .select_related('invoice', 'invoice__customer')
         .order_by('-invoice__invoice_date', '-invoice_id')
     )

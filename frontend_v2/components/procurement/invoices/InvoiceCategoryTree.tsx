@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronLeft,
   FolderTree,
+  Layers,
   Package,
   Plus,
   Search,
@@ -13,6 +14,7 @@ import {
   FolderPlus,
   PackagePlus,
   Pencil,
+  Trash2,
   PanelRightClose,
   PanelRightOpen,
 } from "lucide-react";
@@ -37,9 +39,15 @@ interface Props {
   onPickItem: (item: Item) => void;
   /** DEF-007: فتح بطاقة المنتج (نقر مفرد). */
   onShowCard?: (item: Item) => void;
+  /** تجميع البراندات: فتح الكرت المجمّع لعقدة المقاس (مجموع كل البراندات). */
+  onShowGroup?: (memberIds: string[], name: string) => void;
   onItemCreated?: (item: Item) => void;
   disabled?: boolean;
+  manageMode?: boolean; // If true, hides product-specific UI and acts purely as a category manager.
 }
+
+// تجميع البراندات أصبح حقيقياً (Category).
+const displayNameOf = (it: Item) => String((it as unknown as { display_name?: string }).display_name || it.name || "");
 
 const UNCAT = "__uncat__";
 
@@ -49,7 +57,7 @@ const ctxItemStyle: React.CSSProperties = {
   fontSize: 13, color: "#333426", textAlign: "start", borderRadius: 5,
 };
 
-export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShowCard, onItemCreated, disabled }) => {
+export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShowCard, onShowGroup, onItemCreated, disabled, manageMode }) => {
   // نقرة مفردة على الصنف → تفتح بطاقة الصنف (وفيها «موافق» للإضافة). لا إدراج
   // بالنقر المزدوج. (الإدراج المباشر يبقى فقط عند إنشاء صنف جديد من الشجرة.)
   const handleLeafClick = (it: Item) => {
@@ -144,14 +152,24 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
     }
   };
 
-  const renameCat = async (id: string, name: string) => {
-    const n = name.trim();
-    if (!n) return;
+  const renameCat = async () => {
+    if (!editId || !editName.trim()) return;
     try {
-      await inventoryApi.updateCategory(Number(id), { name: n });
+      await inventoryApi.updateCategory(Number(editId), { name: editName.trim() });
+      setEditId(null);
       await loadCats();
     } catch {
       /* تجاهل */
+    }
+  };
+
+  const deleteCat = async (id: string) => {
+    if (!window.confirm("هل أنت متأكد من حذف هذا الصنف؟")) return;
+    try {
+      await inventoryApi.deleteCategory(Number(id));
+      await loadCats();
+    } catch {
+      alert("لا يمكن حذف الصنف. قد يكون مرتبطاً بمنتجات أو أصناف فرعية.");
     }
   };
 
@@ -167,22 +185,30 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
     setMenu({ x: e.clientX, y: e.clientY, catId });
   };
 
+  // ورقة منتج مفردة (نقرة → بطاقة الصنف). اسم العرض يحمل البراند.
+  const leafButton = (it: Item) => (
+    <button
+      key={it.id}
+      type="button"
+      disabled={disabled}
+      className="aseel-tree-leaf"
+      onClick={() => handleLeafClick(it)}
+      title={`${displayNameOf(it)} — انقر لعرض بطاقة الصنف`}
+    >
+      <Package className="w-3 h-3 shrink-0" />
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayNameOf(it)}</span>
+    </button>
+  );
+
+  // عرض المنتجات كأوراق تحت الصنف مباشرة
   const renderItems = (catId: string) => {
     const list = (itemsByCat.get(catId) || []).filter(itemMatches);
     if (!list.length) return null;
-    return list.slice(0, 200).map((it) => (
-      <button
-        key={it.id}
-        type="button"
-        disabled={disabled}
-        className="aseel-tree-leaf"
-        onClick={() => handleLeafClick(it)}
-        title={`${it.name} — انقر لعرض بطاقة الصنف`}
-      >
-        <Package className="w-3 h-3 shrink-0" />
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name}</span>
-      </button>
-    ));
+    return (
+      <div className="mt-0.5" style={{ marginInlineStart: "12px" }}>
+        {list.slice(0, 400).map((it) => leafButton(it))}
+      </div>
+    );
   };
 
   const descendantHasMatch = (cat: Cat): boolean => {
@@ -190,10 +216,16 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
     return (childrenOf.get(cat.id) || []).some(descendantHasMatch);
   };
 
+  // كل معرّفات المنتجات تحت تصنيف (وكل أحفاده) — للكرت المجمّع الشامل.
+  const descendantItemIds = (catId: string): string[] => {
+    const ids = (itemsByCat.get(catId) || []).map((m) => String(m.id));
+    for (const ch of childrenOf.get(catId) || []) ids.push(...descendantItemIds(ch.id));
+    return ids;
+  };
+
   const renderNode = (c: Cat, depth: number): React.ReactNode => {
     if (q && !descendantHasMatch(c)) return null;
     const kids = childrenOf.get(c.id) || [];
-    const directItems = (itemsByCat.get(c.id) || []).filter(itemMatches);
     const open = q ? true : (expanded[c.id] ?? false);
     const isEditing = editId === c.id;
 
@@ -212,17 +244,24 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") { void renameCat(c.id, editName); setEditId(null); }
+                  if (e.key === "Enter") { void renameCat(); }
                   if (e.key === "Escape") setEditId(null);
                 }}
               />
-              <button type="button" className="aseel-tree-act" title="حفظ" onClick={() => { void renameCat(c.id, editName); setEditId(null); }}><Check className="w-3.5 h-3.5" /></button>
+              <button type="button" className="aseel-tree-act" title="حفظ" onClick={() => { void renameCat(); }}><Check className="w-3.5 h-3.5" /></button>
               <button type="button" className="aseel-tree-act" title="إلغاء" onClick={() => setEditId(null)}><X className="w-3.5 h-3.5" /></button>
             </span>
           ) : (
             <>
-              <button type="button" className="truncate flex-1 text-start" onClick={() => toggle(c.id)} title="انقر للفتح/الطيّ — كبسة يمين لخيارات">{c.name}</button>
-              <span className="aseel-tree-count">{directItems.length || ""}</span>
+              <button
+                type="button"
+                className="truncate flex-1 text-start"
+                onClick={() => (onShowGroup ? onShowGroup(descendantItemIds(c.id), c.name) : toggle(c.id))}
+                title={onShowGroup ? "كبسة ⇒ الكرت المجمّع لكل ما تحته — السهم للفتح/الطيّ — كبسة يمين لخيارات" : "نقر للفتح/الطيّ — كبسة يمين لخيارات"}
+              >
+                {c.name}
+              </button>
+              <span className="aseel-tree-count">{descendantItemIds(c.id).length || ""}</span>
             </>
           )}
         </div>
@@ -258,35 +297,31 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
   const rootCats = childrenOf.get(null) || [];
   const uncategorizedItems = (itemsByCat.get(UNCAT) || []).filter(itemMatches);
 
-  if (panelCollapsed) {
+  if (panelCollapsed && !manageMode) {
     return (
-      <button
-        type="button"
-        className="aseel-tree-rail"
-        title="إظهار شجرة المنتجات"
-        onClick={() => setPanelCollapsed(false)}
-      >
-        <PanelRightOpen className="w-4 h-4" />
-        <span className="aseel-tree-rail-label">شجرة المنتجات</span>
-      </button>
+      <div className="aseel-tree-panel w-10 shrink-0 flex flex-col items-center py-2 cursor-pointer hover:bg-gray-50" onClick={() => setPanelCollapsed(false)} title="إظهار الشجرة">
+        <PanelRightOpen className="w-5 h-5 text-gray-500" />
+      </div>
     );
   }
 
   return (
-    <div className="aseel-tree-panel w-[280px] shrink-0">
+    <div className={`aseel-tree-panel shrink-0 flex-1 flex flex-col ${manageMode ? "w-full border-none" : "w-[280px]"}`}>
       <div className="aseel-tree-toolbar">
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-semibold" style={{ color: "var(--aseel-ink)" }}>شجرة المنتجات</span>
-          <button type="button" className="aseel-toolbtn" title="طيّ اللوحة" onClick={() => setPanelCollapsed(true)}>
-            <PanelRightClose className="w-4 h-4" />
-          </button>
+          <span className="text-xs font-semibold" style={{ color: "var(--aseel-ink)" }}>{manageMode ? "شجرة التصنيفات" : "شجرة المنتجات"}</span>
+          {!manageMode && (
+            <button type="button" className="aseel-toolbtn" title="طيّ اللوحة" onClick={() => setPanelCollapsed(true)}>
+              <PanelRightClose className="w-4 h-4" />
+            </button>
+          )}
         </div>
         <div className="relative">
           <input
             type="text"
             className="aseel-input w-full"
             style={{ paddingInlineStart: "26px" }}
-            placeholder="بحث عن منتج..."
+            placeholder={manageMode ? "بحث عن تصنيف..." : "بحث عن منتج..."}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
@@ -305,9 +340,11 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
             <button type="button" className="aseel-toolbtn" title="إضافة صنف رئيسي" onClick={() => { void createCat(newRootName, null); setNewRootName(""); }}>
               <FolderPlus className="w-4 h-4" />
             </button>
-            <button type="button" className="aseel-toolbtn" title="إضافة منتج (بدون صنف)" onClick={() => openAddItem(null)}>
-              <Plus className="w-4 h-4" />
-            </button>
+            {!manageMode && (
+              <button type="button" className="aseel-toolbtn" title="إضافة منتج (بدون صنف)" onClick={() => openAddItem(null)}>
+                <Plus className="w-4 h-4" />
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -321,7 +358,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
         ) : (
           <>
             {rootCats.map((c) => renderNode(c, 0))}
-            {uncategorizedItems.length > 0 && (
+            {!manageMode && uncategorizedItems.length > 0 && (
               <div className="mt-1">
                 <div className="aseel-tree-cat">
                   <FolderTree className="w-4 h-4 text-gray-400 shrink-0" />
@@ -350,22 +387,28 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button type="button" className="aseel-ctxmenu-item" style={ctxItemStyle} onClick={() => {
-            if (menu.catId) { setSubParent(menu.catId); setSubName(""); setExpanded((x) => ({ ...x, [menu.catId as string]: true })); }
-            setMenu(null);
-          }}>
+          <button type="button" className="aseel-ctxmenu-item" style={ctxItemStyle} onClick={() => { if (menu.catId) { setSubParent(menu.catId); setExpanded((e) => ({ ...e, [menu.catId!]: true })); setSubName(""); } else { const input = document.querySelector<HTMLInputElement>("input[placeholder='صنف رئيسي جديد...']"); input?.focus(); } setMenu(null); }}>
             <FolderPlus className="w-3.5 h-3.5" /> {menu.catId ? "إضافة صنف فرعي" : "إضافة صنف رئيسي"}
           </button>
-          <button type="button" className="aseel-ctxmenu-item" style={ctxItemStyle} onClick={() => { openAddItem(menu.catId); setMenu(null); }}>
-            <PackagePlus className="w-3.5 h-3.5" /> إضافة منتج{menu.catId ? " هنا" : ""}
-          </button>
-          {menu.catId && (
-            <button type="button" className="aseel-ctxmenu-item" style={ctxItemStyle} onClick={() => {
-              const c = cats.find((x) => x.id === menu.catId);
-              setEditId(menu.catId); setEditName(c?.name || ""); setMenu(null);
-            }}>
-              <Pencil className="w-3.5 h-3.5" /> تعديل اسم الصنف
+          {!manageMode && (
+            <button type="button" className="aseel-ctxmenu-item" style={ctxItemStyle} onClick={() => { openAddItem(menu.catId); setMenu(null); }}>
+              <PackagePlus className="w-3.5 h-3.5" /> إضافة منتج هنا
             </button>
+          )}
+          {menu.catId && (
+            <>
+              <button type="button" className="aseel-ctxmenu-item" style={ctxItemStyle} onClick={() => {
+                const c = cats.find((x) => x.id === menu.catId);
+                setEditId(menu.catId); setEditName(c?.name || ""); setMenu(null);
+              }}>
+                <Pencil className="w-3.5 h-3.5" /> تعديل اسم الصنف
+              </button>
+              <button type="button" className="aseel-ctxmenu-item text-red-600 hover:bg-red-50" style={{...ctxItemStyle, color: "#dc2626"}} onClick={() => {
+                const id = menu.catId; setMenu(null); void deleteCat(id!);
+              }}>
+                <Trash2 className="w-3.5 h-3.5" /> حذف الصنف
+              </button>
+            </>
           )}
         </div>,
         document.body,

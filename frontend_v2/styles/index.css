@@ -800,7 +800,7 @@ tbody td {
 }
 .aseel-autocomplete-row--sel { background: #cbd9e8; }
 .aseel-autocomplete-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
-.aseel-autocomplete-sub { color: #6b6952; font-size: 11px; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 45%; }
+.aseel-autocomplete-sub { color: #6b6952; font-size: 10px; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 25%; }
 .aseel-autocomplete-empty { padding: 8px; color: #6b6952; text-align: center; }
 /* task24: السعر المقترح + مصدره داخل خيار المنتقي (يظهر بلا نقر) */
 .aseel-autocomplete-price {
@@ -813,7 +813,7 @@ tbody td {
   background: #dcfce7; border-radius: 6px; padding: 1px 4px;
 }
 /* لا سعر مُعرّف (لا آخر بيع/شراء ولا عرض) — نص رمادي بدل الفراغ */
-.aseel-autocomplete-price--none { color: #9a9784; font-weight: 600; font-size: 11px; }
+.aseel-autocomplete-price--none { color: #a3a193; font-weight: 500; font-size: 9px; opacity: 0.8; }
 .aseel-autocomplete-row--create { color: #2f5f8f; font-weight: 700; justify-content: flex-start; border-bottom: none; }
 /* DEF-008: زرّ المحتوى الأساسي داخل صف القائمة + أيقونة (i) لفتح بطاقة الصنف */
 .aseel-autocomplete-main {

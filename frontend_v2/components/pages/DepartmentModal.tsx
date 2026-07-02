@@ -1,17 +1,15 @@
-import { departments } from '@/data/departments';
 import React, { useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { Department } from '../../services/firestoreService';
 
-const DepartmentModal: React.FC = () => {
-  const { departmentId } = useParams();
-  const navigate = useNavigate();
+interface DepartmentModalProps {
+  department: Department;
+  onClose: () => void;
+}
 
-  // Find the specific department based on URL param
-  const department = departments.find((d) => d.id === departmentId);
-
-  // Close handler: Navigate back to the main contact page
+const DepartmentModal: React.FC<DepartmentModalProps> = ({ department, onClose }) => {
+  // Close handler
   const handleClose = () => {
-    navigate('/contact');
+    onClose();
   };
 
   // Close on Escape key
@@ -21,7 +19,7 @@ const DepartmentModal: React.FC = () => {
     };
     window.addEventListener('keydown', handleEsc);
     return () => window.removeEventListener('keydown', handleEsc);
-  }, []);
+  }, [onClose]);
 
   if (!department) return null;
 

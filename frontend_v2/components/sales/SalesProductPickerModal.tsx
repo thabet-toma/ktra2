@@ -22,7 +22,8 @@ type Props = {
 };
 
 /** عنوان مقروء للعرض — الاسم أولاً، وليس الـ SKU الطويل كعنوان رئيسي */
-export function formatProductPrimaryName(p: SalesProductPickerItem): string {
+export function formatProductPrimaryName(p: SalesProductPickerItem & { display_name?: string }): string {
+  if (p.display_name) return p.display_name;
   const ar = (p.name_ar || "").trim();
   const en = (p.name_en || "").trim();
   const n = ((p as any).name || "").trim();

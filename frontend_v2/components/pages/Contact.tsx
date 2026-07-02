@@ -1,7 +1,8 @@
-import { departments } from '@/data/departments';
-import React from 'react';
-import { Outlet } from 'react-router-dom';
+import { departments as defaultDepartments } from '@/data/departments';
+import React, { useState, useEffect } from 'react';
 import DepartmentCard from '../DepartmentCard';
+import DepartmentModal from './DepartmentModal';
+import { departmentsService, Department } from '../../services/firestoreService';
 
 // مكون بسيط لأيقونات التواصل الاجتماعي (SVG)
 const SocialIcon = ({ path, href, colorClass }: { path: string; href: string; colorClass: string }) => (
@@ -17,7 +18,56 @@ const SocialIcon = ({ path, href, colorClass }: { path: string; href: string; co
   </a>
 );
 
-const Contact: React.FC = () => {
+export const Contact: React.FC<{ currentUser?: any }> = ({ currentUser }) => {
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editingDept, setEditingDept] = useState<Department | null>(null);
+  const [selectedDept, setSelectedDept] = useState<Department | null>(null);
+
+  const isManager = currentUser?.role === 'manager';
+
+  useEffect(() => {
+    const unsub = departmentsService.subscribeToDepartments((deps) => {
+      if (deps.length === 0) {
+        setDepartments(defaultDepartments as any);
+      } else {
+        setDepartments(deps);
+      }
+      setLoading(false);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDept) return;
+    
+    try {
+      const existingDeps = await departmentsService.getDepartments();
+      if (existingDeps.length === 0) {
+        // Seed first
+        for (const dept of defaultDepartments) {
+          if (dept.id === editingDept.id) {
+            await departmentsService.addDepartment(editingDept);
+          } else {
+            await departmentsService.addDepartment(dept as any);
+          }
+        }
+      } else {
+        // Update existing
+        const exists = existingDeps.find(d => d.id === editingDept.id);
+        if (exists) {
+          await departmentsService.updateDepartment(editingDept.id, editingDept);
+        } else {
+          await departmentsService.addDepartment(editingDept);
+        }
+      }
+      setEditingDept(null);
+    } catch (err) {
+      console.error(err);
+      alert('حدث خطأ أثناء الحفظ');
+    }
+  };
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 font-sans transition-colors duration-300" dir="rtl">
       
@@ -38,21 +88,78 @@ const Contact: React.FC = () => {
       </header>
 
       {/* --- قسم الأقسام --- */}
-      <main className="container mx-auto px-4 py-8">
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-5 mb-6 border border-slate-100 dark:border-slate-700">
-          <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-4 text-center">
-            أقسام الشركة
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {departments.map((dept) => (
-              <DepartmentCard key={dept.id} department={dept} />
-            ))}
+      <main className="container mx-auto px-4 py-8 relative">
+        {loading ? (
+          <div className="flex justify-center items-center py-20">
+             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-cyan-600"></div>
           </div>
-        </div>
+        ) : (
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-5 mb-6 border border-slate-100 dark:border-slate-700">
+            <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-4 text-center">
+              أقسام الشركة
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {departments.map((dept) => (
+                <DepartmentCard 
+                  key={dept.id} 
+                  department={dept} 
+                  onEdit={isManager ? setEditingDept : undefined}
+                  onClick={setSelectedDept}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Modal for editing */}
+        {editingDept && isManager && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+             <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditingDept(null)} />
+             <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-6 animate-in fade-in zoom-in duration-200">
+                <h3 className="text-xl font-bold mb-4 dark:text-white">تعديل القسم</h3>
+                <form onSubmit={handleSave} className="space-y-4">
+                  <div>
+                    <label className="block text-sm mb-1 dark:text-slate-300">اسم القسم (عربي)</label>
+                    <input required value={editingDept.name} onChange={e => setEditingDept({...editingDept, name: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-sm mb-1 dark:text-slate-300">اسم القسم (انجليزي)</label>
+                    <input required value={editingDept.nameEn} onChange={e => setEditingDept({...editingDept, nameEn: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-sm mb-1 dark:text-slate-300">لقب المسؤول</label>
+                      <input required value={editingDept.managerTitle} onChange={e => setEditingDept({...editingDept, managerTitle: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-sm mb-1 dark:text-slate-300">اسم المسؤول</label>
+                      <input required value={editingDept.managerName} onChange={e => setEditingDept({...editingDept, managerName: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm mb-1 dark:text-slate-300">البريد الإلكتروني</label>
+                    <input required type="email" value={editingDept.email} onChange={e => setEditingDept({...editingDept, email: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-white" />
+                  </div>
+                  <div>
+                    <label className="block text-sm mb-1 dark:text-slate-300">رقم الواتساب</label>
+                    <input required value={editingDept.whatsapp} onChange={e => setEditingDept({...editingDept, whatsapp: e.target.value})} className="w-full p-2 border rounded dark:bg-slate-700 dark:border-slate-600 dark:text-white" dir="ltr" />
+                  </div>
+                  <div className="flex gap-2 justify-end mt-4">
+                    <button type="button" onClick={() => setEditingDept(null)} className="px-4 py-2 text-slate-500 hover:bg-slate-100 rounded">إلغاء</button>
+                    <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">حفظ التغييرات</button>
+                  </div>
+                </form>
+             </div>
+          </div>
+        )}
       </main>
 
-      {/* نافذة منبثقة */}
-      <Outlet />
+      {selectedDept && (
+        <DepartmentModal 
+          department={selectedDept} 
+          onClose={() => setSelectedDept(null)} 
+        />
+      )}
       
       {/* --- الفوتر مع الشعار الصغير (مصغر) --- */}
       <footer className="bg-slate-800 dark:bg-slate-900 pt-6 pb-4 px-4 border-t border-slate-700">

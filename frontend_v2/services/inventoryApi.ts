@@ -70,6 +70,24 @@ export const inventoryApi = {
     });
   },
 
+  getAllProducts: async (params?: Record<string, string | number>) => {
+    const allRows: any[] = [];
+    let pg = 1;
+    for (;;) {
+      const p = { ...params, page: pg, page_size: 200 };
+      const q = `?${new URLSearchParams(p as unknown as Record<string, string>)}`;
+      const res = await fetch(`${INV}/products/${q}`, { headers: headers() });
+      await handle(res, "inventory");
+      const data = await res.json();
+      const rows = Array.isArray(data) ? data : (data.results ?? []);
+      allRows.push(...rows);
+      const count = Array.isArray(data) ? rows.length : (data.count ?? allRows.length);
+      if (rows.length === 0 || allRows.length >= count) break;
+      pg++;
+    }
+    return allRows;
+  },
+
   // ─── Categories ───
 
   getCategories: () =>
@@ -154,6 +172,47 @@ export const inventoryApi = {
     return res.json();
   },
 
+  // ─── البراندات/المجموعات المستخدمة (مميّزة) — لمنتقيات اختر/أضف ───
+  getBrands: async (): Promise<string[]> => {
+    const res = await fetch(`${INV}/products/brands/`, { headers: headers() });
+    await handle(res, "getBrands");
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  },
+  getGroups: async (): Promise<string[]> => {
+    const res = await fetch(`${INV}/products/groups/`, { headers: headers() });
+    await handle(res, "getGroups");
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  },
+  // أسماء المنتجات المميّزة — لمنتقي «اسم المنتج».
+  getProductNames: async (): Promise<string[]> => {
+    const res = await fetch(`${INV}/products/names/`, { headers: headers() });
+    await handle(res, "getProductNames");
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
+  },
+
+  // ─── الكرت المجمّع: مجموع كل البراندات لنفس المقاس/الأساس ───
+  // تمرَّر معرّفات أعضاء المجموعة (تُحسب في الواجهة من group_key).
+  getProductGroupProfile: async (ids: number[]) => {
+    const res = await fetch(`${INV}/products/group-profile/?ids=${ids.join(",")}`, { headers: headers() });
+    await handle(res, "getProductGroupProfile");
+    return res.json();
+  },
+  getProductGroupLedger: async (ids: number[], limit = 50, offset = 0) => {
+    const res = await fetch(
+      `${INV}/products/group-ledger/?ids=${ids.join(",")}&limit=${limit}&offset=${offset}`,
+      { headers: headers() });
+    await handle(res, "getProductGroupLedger");
+    return res.json();
+  },
+  getProductGroupInvoices: async (ids: number[]) => {
+    const res = await fetch(`${INV}/products/group-invoices/?ids=${ids.join(",")}`, { headers: headers() });
+    await handle(res, "getProductGroupInvoices");
+    return res.json();
+  },
+
   // ─── تكلفة المنتجات: تكلفة كل فاتورة + متوسط مرجّح بالكمية ───
   getProductCostBreakdown: async (productId: number) => {
     const res = await fetch(`${INV}/products/${productId}/cost-breakdown/`, {
@@ -218,6 +277,15 @@ export const inventoryApi = {
       headers: headers(),
     });
     await handle(res, "deleteProduct");
+  },
+
+  // حذف مرفق داتا شيت محفوظ (SQL + Cloudinary أفضل-جهد على الخادم)
+  removeDatasheet: async (productId: number, attachmentId: number) => {
+    const res = await fetch(`${INV}/products/${productId}/datasheets/${attachmentId}/`, {
+      method: "DELETE",
+      headers: headers(),
+    });
+    await handle(res, "removeDatasheet");
   },
 
   // ── Phase 7 (T-I1): تحويل بين المستودعات ──────────────────────────

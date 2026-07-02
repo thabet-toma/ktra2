@@ -10,6 +10,7 @@ import {
 import {
   ThemeToggle,
 } from './ThemeToggle';
+import { PriceVisibilityToggle } from './PriceVisibilityToggle';
 import {
   GlobalSearch,
 } from './GlobalSearch';
@@ -27,6 +28,7 @@ import {
   Zap,
   Sparkles,
   LogOut,
+  Copy,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -123,7 +125,16 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           {/* task16 E15: حاسبة بأيقونة — تفتح عند الطلب فقط */}
           <AseelCalculatorButton />
           <DensitySwitch value={density} onChange={setDensity} />
+          <PriceVisibilityToggle />
           <ThemeToggle />
+          <button
+            onClick={() => window.open(window.location.href, '_blank')}
+            className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 transition-colors flex items-center justify-center"
+            title="فتح في علامة تبويب جديدة (تكرار الصفحة)"
+            aria-label="تكرار الصفحة"
+          >
+            <Copy className="w-4 h-4" />
+          </button>
           <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-1"></div>
           <button
             onClick={() => {

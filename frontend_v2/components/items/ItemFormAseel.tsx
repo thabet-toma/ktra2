@@ -13,8 +13,10 @@ import {
   type AseelGridColumn,
   type AseelToolbarAction,
 } from "../aseel";
-import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Info } from "lucide-react";
+import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Info, Upload, FileText } from "lucide-react";
 import { CategoryPicker } from "../inventory/CategoryPicker";
+import { ValuePicker } from "../inventory/ValuePicker";
+import { cloudinaryService } from "../../services/cloudinaryService";
 
 const pendingN8 = (msg: string) => (
   <div className="aseel-banner" style={{
@@ -30,6 +32,7 @@ const pendingN8 = (msg: string) => (
 
 type Props = {
   productId: number | null;
+  duplicateId?: number | null;
   products: SqlProduct[];
   onSaved: () => void;
   onCancel: () => void;
@@ -41,8 +44,18 @@ const blankTier = (): PriceTier => ({ price: "0", currency: "ILS", tax_inclusive
 type ComponentLine = { key: string; component_sku: string; quantity: string };
 const newCmpKey = () => `cmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
+// الداتا شيت: المحفوظ له id (للحذف من SQL/Cloudinary)، والمرفوع حديثاً id=null.
+type DatasheetRef = { id: number | null; url: string };
+const extractDatasheets = (p: Record<string, unknown>): DatasheetRef[] =>
+  Array.isArray(p.attachments)
+    ? (p.attachments as Array<{ id?: number; file_path?: string; file_type?: string }>)
+        .filter((a) => a?.file_type === "Datasheet" && a?.file_path)
+        .map((a) => ({ id: typeof a.id === "number" ? a.id : null, url: a.file_path as string }))
+    : [];
+
 type FormState = {
   sku: string; catalog_no: string; name_ar: string; name_en: string;
+  brand: string;
   description: string; location: string;
   uom_primary: string; uom2: string; uom2_factor: string;
   uom3: string; uom3_factor: string;
@@ -55,10 +68,12 @@ type FormState = {
   category: number | null; category_name: string; item_type: string;
   bonus_after_qty: string; bonus_every_qty: string;
   components: ComponentLine[];
+  datasheets: DatasheetRef[];
 };
 
 const blankForm = (): FormState => ({
   sku: "", catalog_no: "", name_ar: "", name_en: "",
+  brand: "",
   description: "", location: "",
   uom_primary: "عدد", uom2: "", uom2_factor: "1",
   uom3: "", uom3_factor: "1",
@@ -71,6 +86,7 @@ const blankForm = (): FormState => ({
   category: null, category_name: "", item_type: "goods",
   bonus_after_qty: "", bonus_every_qty: "1",
   components: [],
+  datasheets: [],
 });
 
 const fld = (label: string, node: React.ReactNode, span?: number) => (
@@ -86,24 +102,59 @@ const ITEM_TYPES = [
   { v: "composite", l: "تجميعي" },
 ];
 
-export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, onCancel }) => {
+export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, products, onSaved, onCancel }) => {
   const [form, setForm] = useState<FormState>(blankForm());
   const [currentId, setCurrentId] = useState<number | null>(productId);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [lastKey, setLastKey] = useState("—");
+  const [dsUploading, setDsUploading] = useState(false);
+
+  const handleDatasheetUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setDsUploading(true); setErr(null); setMsg(null);
+    try {
+      const url = await cloudinaryService.uploadFile(file);
+      setForm((f) => ({ ...f, datasheets: [...f.datasheets, { id: null, url }] }));
+      setMsg("تم رفع الملف — احفظ (F12) لتخزين الرابط.");
+    } catch (ex: unknown) {
+      setErr(ex instanceof Error ? ex.message : "فشل رفع الملف");
+    } finally {
+      setDsUploading(false);
+    }
+  };
+
+  const handleDatasheetRemove = async (index: number) => {
+    const item = form.datasheets[index];
+    if (!item) return;
+    // المحفوظ (له id) يُحذف من الخادم (SQL + Cloudinary)؛ المرفوع حديثاً يُزال من القائمة فقط.
+    if (item.id != null && currentId != null) {
+      try {
+        await inventoryApi.removeDatasheet(currentId, item.id);
+      } catch (ex: unknown) {
+        setErr(ex instanceof Error ? ex.message : "فشل حذف الملف");
+        return;
+      }
+    }
+    setForm((f) => ({ ...f, datasheets: f.datasheets.filter((_, j) => j !== index) }));
+  };
 
   const patch = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const applyProduct = useCallback((p: Record<string, unknown>) => {
+  const applyProduct = useCallback((p: Record<string, unknown>, isDuplicate = false) => {
     setForm((prev) => ({
       ...prev,
-      sku: String(p.sku ?? ""),
-      catalog_no: String(p.catalog_no ?? p.barcode ?? ""),
+      sku: isDuplicate ? "" : String(p.sku ?? ""),
+      catalog_no: isDuplicate ? "" : String(p.catalog_no ?? p.barcode ?? ""),
+      // التكرار (براند آخر): الاسم والتصنيف يبقيان كما هما، فيُحفظ المنتج تحت نفس
+      // التصنيف بجانب إخوته؛ يُفرّغ البراند فقط ليكتبه المستخدم.
       name_ar: String(p.name_ar ?? ""),
-      name_en: String(p.name_en ?? ""),
+      name_en: isDuplicate ? "" : String(p.name_en ?? ""),
+      brand: isDuplicate ? "" : String(p.brand ?? ""),
       description: String(p.description ?? ""),
       location: String(p.location ?? ""),
       uom_primary: String(p.uom_primary ?? "عدد"),
@@ -121,40 +172,73 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
       purchase_return_account: String(p.purchase_return_account_override ?? ""),
       supplier_account: String(p.supplier_account_override ?? ""),
       ending_inventory_account: String(p.ending_inventory_account_override ?? ""),
+      // الداتا شيت مرفقات المنتج (file_type='Datasheet') — لا تُنسَخ عند التكرار.
+      datasheets: isDuplicate ? [] : extractDatasheets(p),
     }));
-    setCurrentId(Number(p.id));
-    setErr(null); setMsg(null);
+    setCurrentId(isDuplicate ? null : Number(p.id));
+    setErr(null); setMsg(isDuplicate ? "أنت الآن تقوم بإضافة صنف جديد كنسخة من صنف آخر. قم بتغيير البراند أو الاسم." : null);
   }, []);
 
   useEffect(() => {
+    if (duplicateId != null) {
+      inventoryApi.getProduct(duplicateId).then(p => applyProduct(p, true)).catch((e: unknown) => {
+        setErr(e instanceof Error ? e.message : "فشل التحميل للنسخ");
+      });
+      return;
+    }
     if (productId == null) { setForm(blankForm()); setCurrentId(null); return; }
-    inventoryApi.getProduct(productId).then(applyProduct).catch((e: unknown) => {
+    inventoryApi.getProduct(productId).then(p => applyProduct(p, false)).catch((e: unknown) => {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
     });
-  }, [productId, applyProduct]);
+  }, [productId, duplicateId, applyProduct]);
 
   const handleSave = async () => {
     if (!form.name_ar.trim() && !form.name_en.trim()) { setErr("اسم الصنف مطلوب."); return; }
     setSaving(true); setErr(null); setMsg(null);
     try {
+      // التصنيف الفعلي للمنتج = تصنيف فرعي اسمه اسم المنتج: إن وُجد نستخدمه (فيُحفظ
+      // المنتج بجانب إخوته)، وإلا نُنشئه تحت التصنيف الأب المختار (شجرة بأي عمق).
+      const name = (form.name_ar || form.name_en || "").trim();
+      let categoryId: number | null = form.category;
+      try {
+        const cats = await inventoryApi.getCategories() as Array<{ id: number; name: string }>;
+        const existing = cats.find((c) => (c.name || "").trim() === name);
+        if (existing) {
+          categoryId = existing.id;
+        } else if (name) {
+          const createdCat = await inventoryApi.createCategory({ name, parent: form.category || null }) as { id: number };
+          categoryId = createdCat.id;
+        }
+      } catch { /* تعذّر — نستخدم التصنيف المختار كما هو */ }
+
       // ProductSerializer.Meta.fields only — أي حقول إضافية سيَتجاهلها DRF بصمت.
-      // الحقول المتأخرة (catalog_no, item_type, sale_tiers, *_account_override, …)
-      // ستُضاف عند تَنفيذ N8-T9 + N8-T10.
       const payload: Record<string, unknown> = {
         name_ar: form.name_ar || null,
         name_en: form.name_en || null,
+        brand: form.brand.trim(),
         min_stock_level: form.min_stock_level ? Number(form.min_stock_level) : null,
-        category: form.category,
+        category: categoryId,
+        // روابط الداتا شيت — يلتقطها الخادم في _handle_attachments (خارج حقول الـserializer).
+        datasheet_urls: form.datasheets.map((d) => d.url),
       };
       if (form.sku.trim()) payload.sku = form.sku.trim();
+      let savedId: number;
       if (currentId) {
         await inventoryApi.updateProduct(currentId, payload);
+        savedId = currentId;
         setMsg("تم الحفظ.");
       } else {
         const created = await inventoryApi.createProduct(payload) as Record<string, unknown>;
-        setCurrentId(Number(created.id));
+        savedId = Number(created.id);
+        setCurrentId(savedId);
         setMsg(`تم إنشاء الصنف ${created.sku}.`);
       }
+      // زامن معرّفات الداتا شيت بعد الحفظ: الرفوعات الجديدة صارت صفوفاً محفوظة لها id
+      // (فيعمل زر الحذف من الخادم دون إعادة تحميل الصفحة). التزامن ليس حرجاً إن فشل.
+      try {
+        const refreshed = await inventoryApi.getProduct(savedId) as Record<string, unknown>;
+        patch("datasheets", extractDatasheets(refreshed));
+      } catch { /* تجاهل */ }
       onSaved();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحفظ");
@@ -167,7 +251,7 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
     items: products, getId: (p) => p.id, currentId,
     onSelect: (id) => {
       if (id == null) { setForm(blankForm()); setCurrentId(null); return; }
-      inventoryApi.getProduct(Number(id)).then(applyProduct).catch((e: unknown) => {
+      inventoryApi.getProduct(Number(id)).then(p => applyProduct(p, false)).catch((e: unknown) => {
         setErr(e instanceof Error ? e.message : "فشل التحميل");
       });
     },
@@ -209,18 +293,25 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
         onChange={(e) => patch("item_type", e.target.value)}>
         {ITEM_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
       </select>)}
-      {fld("اسم الصنف (عربي)", <input className="aseel-input" value={form.name_ar}
-        onChange={(e) => patch("name_ar", e.target.value)} />, 2)}
+      {fld("اسم المنتج (اختر موجوداً لبراند آخر، أو اكتب جديداً)",
+        <ValuePicker value={form.name_ar} onChange={(v) => patch("name_ar", v)}
+          fetchOptions={inventoryApi.getProductNames}
+          emptyLabel="— اختر منتجاً —" addPlaceholder="مثال: 195/65/15" addTitle="منتج جديد" />, 2)}
       {fld("اسم الصنف (إنجليزي)", <input className="aseel-input" value={form.name_en}
         onChange={(e) => patch("name_en", e.target.value)} />)}
+      {fld("البراند (يظهر بين قوسين)",
+        <ValuePicker value={form.brand} onChange={(b) => patch("brand", b)}
+          fetchOptions={inventoryApi.getBrands}
+          emptyLabel="— بدون براند —" addPlaceholder="مثال: روك بيلد" addTitle="إضافة براند جديد" />)}
       {fld("تفصيل / بيان الصنف", <input className="aseel-input" value={form.description}
         onChange={(e) => patch("description", e.target.value)} />, 2)}
       {fld("الموقع (الرف)", <input className="aseel-input" value={form.location}
         onChange={(e) => patch("location", e.target.value)} />)}
-      {fld("التصنيف", <CategoryPicker value={form.category} onChange={(id, name) => {
-        patch("category", id);
-        if (name) patch("category_name", name);
-      }} />)}
+      {fld("تحت أي تصنيف (الأب — عند منتج جديد يُنشأ فرعي باسمه)",
+        <CategoryPicker value={form.category} onChange={(id, name) => {
+          patch("category", id);
+          if (name) patch("category_name", name);
+        }} />)}
       {fld("الوحدة الرئيسية", <input className="aseel-input" value={form.uom_primary}
         onChange={(e) => patch("uom_primary", e.target.value)} placeholder="عدد، كيلو، لتر…" />)}
       {fld("وحدة 2", <input className="aseel-input" value={form.uom2}
@@ -231,6 +322,44 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, products, onSaved, o
         onChange={(e) => patch("uom3", e.target.value)} />)}
       {fld("معامل الوحدة 3", <input className="aseel-input" type="number" min="0" step="0.001"
         value={form.uom3_factor} onChange={(e) => patch("uom3_factor", e.target.value)} />)}
+      {fld("ملفات الداتا شيت (PDF أو صور)",
+        <div>
+          <label className="aseel-input" style={{
+            display: "inline-flex", alignItems: "center", gap: 6, cursor: dsUploading ? "wait" : "pointer",
+            width: "max-content",
+          }}>
+            {dsUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+            <span>{dsUploading ? "...جارٍ الرفع" : "رفع ملف"}</span>
+            <input type="file" accept="application/pdf,image/*" hidden disabled={dsUploading}
+              onChange={handleDatasheetUpload} />
+          </label>
+          {form.datasheets.length === 0 ? (
+            <span style={{ marginInlineStart: 8, color: "var(--aseel-ink-soft)", fontSize: "var(--aseel-fs-sm)" }}>
+              لا ملفات بعد
+            </span>
+          ) : (
+            <ul style={{ listStyle: "none", margin: "6px 0 0", padding: 0, display: "grid", gap: 4 }}>
+              {form.datasheets.map((d, i) => (
+                <li key={d.url} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <FileText className="h-3.5 w-3.5 shrink-0" />
+                  <a href={d.url} target="_blank" rel="noreferrer"
+                    style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {decodeURIComponent(d.url.split("/").pop() || d.url)}
+                  </a>
+                  {d.id == null && (
+                    <span style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-warn, #b8800a)" }}>
+                      (غير محفوظ)
+                    </span>
+                  )}
+                  <button type="button" className="aseel-iconbtn aseel-iconbtn--danger"
+                    title="حذف الملف" onClick={() => void handleDatasheetRemove(i)}>
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>, 3)}
     </div>
   );
 

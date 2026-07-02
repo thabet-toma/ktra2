@@ -17,13 +17,14 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
-from core import assistant_views, agent_db_view, dashboard_api, health
+from core import assistant_views, agent_db_view, dashboard_api, health, media_views
 
 urlpatterns = [
     path('api/health/', health.health_check),
     path('api/client-logs/', health.client_logs),
     path('admin/', admin.site.urls),
     path('api/mapper/', include('bridge.urls')),
+    path('api/media/upload/', media_views.media_upload),
     path('api/assistant/chat/', assistant_views.assistant_chat),
     path('api/assistant/files/', assistant_views.assistant_upload),
     path('api/assistant/openclaw-status/', assistant_views.assistant_openclaw_status),

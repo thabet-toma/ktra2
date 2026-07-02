@@ -235,24 +235,27 @@ def purchase_price_list(*, tenant_id: int, strategy: str | None = None) -> dict[
         .order_by("product_id", "-invoice__invoice_date", "-invoice_id", "-id")
     )
     result: dict[int, dict] = {}
-    if strategy == PriceStrategy.LOWEST_PURCHASE:
-        for item in qs:
-            unit = _dec(item.unit_price)
-            cur = result.get(item.product_id)
-            if cur is None or unit < _dec(cur["unit_price"]):
-                result[item.product_id] = {
-                    "unit_price": str(unit.quantize(_UNIT_Q)),
-                    "source_type": "PURCHASE_INVOICE",
-                    "source_label": "أقل شراء",
-                }
-    else:  # LAST_PURCHASE — أحدث فاتورة شراء مرحَّلة لكل منتج (أول صف في الترتيب)
-        for item in qs:
-            if item.product_id in result:
-                continue
-            result[item.product_id] = {
-                "unit_price": str(_dec(item.unit_price).quantize(_UNIT_Q)),
+    for item in qs:
+        unit = _dec(item.unit_price)
+        cur = result.setdefault(item.product_id, {
+            "last": None,
+            "lowest": None,
+        })
+        
+        if cur["last"] is None:
+            cur["last"] = {
+                "unit_price": str(unit.quantize(_UNIT_Q)),
                 "source_type": "PURCHASE_INVOICE",
                 "source_label": "آخر شراء",
+                "document_id": item.invoice_id,
+            }
+            
+        if cur["lowest"] is None or unit < _dec(cur["lowest"]["unit_price"]):
+            cur["lowest"] = {
+                "unit_price": str(unit.quantize(_UNIT_Q)),
+                "source_type": "PURCHASE_INVOICE",
+                "source_label": "أقل شراء",
+                "document_id": item.invoice_id,
             }
 
     # احتياطي: متوسط تكلفة المنتج لمن لا تاريخ شراء له.
@@ -262,15 +265,36 @@ def purchase_price_list(*, tenant_id: int, strategy: str | None = None) -> dict[
         cost = _dec(p.avg_cost)
         if cost > 0:
             result[p.id] = {
-                "unit_price": str(cost.quantize(_UNIT_Q)),
-                "source_type": "PRODUCT_AVG_COST",
-                "source_label": "متوسط التكلفة",
+                "last": {
+                    "unit_price": str(cost.quantize(_UNIT_Q)),
+                    "source_type": "PRODUCT_AVG_COST",
+                    "source_label": "متوسط التكلفة",
+                    "document_id": None,
+                },
+                "lowest": None
             }
+
+    final_result: dict[int, dict] = {}
+    for pid, data in result.items():
+        prices = []
+        if data["last"]:
+            prices.append(data["last"])
+        if data["lowest"] and (not data["last"] or data["lowest"]["document_id"] != data["last"]["document_id"]):
+            prices.append(data["lowest"])
+            
+        if prices:
+            final_result[pid] = {
+                "unit_price": prices[0]["unit_price"],
+                "source_type": prices[0]["source_type"],
+                "source_label": prices[0]["source_label"],
+                "prices": prices,
+            }
+
     logger.info(
-        "price_list purchase tenant=%s strategy=%s -> %s products",
-        tenant_id, strategy, len(result),
+        "price_list purchase tenant=%s -> %s products",
+        tenant_id, len(final_result),
     )
-    return result
+    return final_result
 
 
 def _src_purchase_rate(item) -> Decimal:

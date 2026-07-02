@@ -4,6 +4,16 @@ export interface SqlProduct {
   barcode?: string | null;
   name_ar?: string | null;
   name_en?: string | null;
+  /** الصنف الفرعي/المجموعة الصريحة (مثل 185/65/14) — يصير عقدة أب يتجمّع تحتها. */
+  variant_group?: string | null;
+  /** البراند (روك بيلد/جلاكسي…) — يظهر بين قوسين على الورقة. */
+  brand?: string | null;
+  /** مفتاح التجميع (المجموعة الصريحة أو المقاس/الأساس) — يُحسب خادمياً. */
+  group_key?: string | null;
+  /** اسم العرض = الاسم + البراند بين قوسين (للورقة في الشجرة/الجرد/الجدول). */
+  display_name?: string | null;
+  /** هل المجموعة صريحة — فيظهر المجلّد حتى لو منتج واحد. */
+  has_group?: boolean;
   category?: number | null;
   category_name?: string | null;
   uom_id?: number | null;

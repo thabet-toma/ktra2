@@ -3,12 +3,16 @@ import { API_BASE } from '../services/restApi';
 
 export interface OnlineStatus {
   online: boolean;
+  /** رأي نظام التشغيل في الاتصال (navigator.onLine). إذا كان true بينما online=false
+   *  فالمتصفح متصل بالشبكة لكن نبض الخادم يفشل ⇒ اتصال/كاش عالق (يستدعي «إصلاح الاتصال»). */
+  browserOnline: boolean;
   lastOnline: Date;
   latencyMs: number;
 }
 
 export function useOnlineStatus(): OnlineStatus {
   const [online, setOnline] = useState(navigator.onLine);
+  const [browserOnline, setBrowserOnline] = useState(navigator.onLine);
   const [latencyMs, setLatencyMs] = useState(0);
   const lastOnlineRef = useRef(new Date());
   const intervalRef = useRef<ReturnType<typeof setInterval>>();
@@ -33,8 +37,8 @@ export function useOnlineStatus(): OnlineStatus {
   }, []);
 
   useEffect(() => {
-    const goOnline = () => { setOnline(true); lastOnlineRef.current = new Date(); };
-    const goOffline = () => setOnline(false);
+    const goOnline = () => { setBrowserOnline(true); setOnline(true); lastOnlineRef.current = new Date(); };
+    const goOffline = () => { setBrowserOnline(false); setOnline(false); };
 
     window.addEventListener('online', goOnline);
     window.addEventListener('offline', goOffline);
@@ -49,5 +53,5 @@ export function useOnlineStatus(): OnlineStatus {
     };
   }, [heartbeat]);
 
-  return { online, lastOnline: lastOnlineRef.current, latencyMs };
+  return { online, browserOnline, lastOnline: lastOnlineRef.current, latencyMs };
 }

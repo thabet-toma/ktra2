@@ -24,6 +24,15 @@ GLOBAL_COLLECTIONS = {
     'attendanceRecords',
     'pointsHistory',
     'publicGallery',
+    'departments',
+    'aboutLinks',
+}
+
+# Collections that can be read by unauthenticated users (GET only)
+PUBLIC_COLLECTIONS = {
+    'publicGallery',
+    'departments',
+    'aboutLinks',
 }
 
 
@@ -315,14 +324,21 @@ class MapperView(View):
     def _gate(self, request, path: str):
         """Auth + tenant resolution. Returns (tenant, error_response)."""
         user = _resolve_user(request)
-        if user is None:
+        
+        root_col = _root_collection(path)
+        is_public_read = request.method == 'GET' and root_col in PUBLIC_COLLECTIONS
+
+        if user is None and not is_public_read:
             return None, JsonResponse(
                 {'detail': 'Authentication credentials were not provided.'}, status=401
             )
+            
         tenant, err = _resolve_tenant(request)
-        if err is not None:
+        # If public read and unauthenticated, tenant will be None. We only care about tenant errors if not public.
+        if err is not None and not is_public_read:
             return None, err
-        if _is_tenant_scoped(path) and tenant is None:
+            
+        if _is_tenant_scoped(path) and tenant is None and not is_public_read:
             return None, JsonResponse(
                 {'detail': 'لم يتم تحديد الشركة. أرسل X-Tenant-Id في الهيدر.'}, status=400
             )

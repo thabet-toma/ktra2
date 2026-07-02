@@ -47,6 +47,7 @@ export type AppView =
     | "sales-settings"
     | "purchase-settings"
     | "product-profile"
+    | "product-group"
     | "local-shipping"
     | "sql-products"
     | "sql-partners"
@@ -81,7 +82,9 @@ export type AppView =
     | "supplier-payments"
     | "invoice-profits"
     | "partner-profile"
-    | "import-flow";
+    | "import-flow"
+    | "about-us"
+    | "contact";
 
 export interface Attachment {
     id: string;

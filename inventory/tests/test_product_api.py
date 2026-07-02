@@ -4,6 +4,8 @@
 """
 import datetime
 
+from unittest.mock import patch
+
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
@@ -158,3 +160,47 @@ class ProductApiTest(APITestCase):
         # min_stock_level قابل للترتيب الآن (كان غائباً عن ordering_fields)
         by_min = [r["sku"] for r in self._get("?ordering=min_stock_level").json()]
         assert by_min == ["ST-OK", "ST-LOW", "ST-OUT"]
+
+    # ── داتا شيت المنتج: رابط Cloudinary يُوجَّه لمرفق file_type='Datasheet' ──
+    # SystemAttachment مُدار خارجياً (managed=False) فلا يُبنى جدوله في قاعدة الاختبار،
+    # لذا نُموّهه ونتحقّق أن مسار الحفظ يستدعي create بالنوع والرابط الصحيحين.
+    def test_datasheet_url_routed_to_attachment_create(self):
+        self._auth()
+        url = "https://res.cloudinary.com/dd63wjj5x/raw/upload/ds.pdf"
+        with patch("core.models.SystemAttachment") as MockSA:
+            MockSA.objects.filter.return_value.exists.return_value = False
+            res = self._post({"name_ar": "صنف بداتا شيت", "datasheet_url": url})
+            assert res.status_code == 201, res.content[:300]
+            ds_calls = [
+                c.kwargs for c in MockSA.objects.create.call_args_list
+                if c.kwargs.get("file_type") == "Datasheet"
+            ]
+            assert len(ds_calls) == 1
+            assert ds_calls[0]["file_path"] == url
+            assert ds_calls[0]["related_table"] == "products"
+
+    def test_remove_datasheet_deletes_row_and_destroys_cloudinary(self):
+        from unittest.mock import MagicMock
+        self._auth()
+        pid = self._post({"name_ar": "صنف للحذف"}).json()["id"]
+        url = "https://res.cloudinary.com/dd63wjj5x/raw/upload/v1/ktra_uploads/ds.pdf"
+        att = MagicMock(id=77, file_path=url)
+        with patch("core.models.SystemAttachment") as MockSA, \
+                patch("core.media_views.destroy_cloudinary_asset") as mock_destroy:
+            MockSA.objects.filter.return_value.first.return_value = att
+            res = self.client.delete(
+                f"{PRODUCTS_URL}{pid}/datasheets/77/", HTTP_X_TENANT_ID=self._tenant_id,
+            )
+            assert res.status_code == 204, res.content[:300]
+            mock_destroy.assert_called_once_with(url)  # يُحاول حذف Cloudinary بالرابط
+            att.delete.assert_called_once()             # ويحذف صف SQL
+
+    def test_remove_datasheet_missing_is_404(self):
+        self._auth()
+        pid = self._post({"name_ar": "صنف بلا مرفق"}).json()["id"]
+        with patch("core.models.SystemAttachment") as MockSA:
+            MockSA.objects.filter.return_value.first.return_value = None
+            res = self.client.delete(
+                f"{PRODUCTS_URL}{pid}/datasheets/999/", HTTP_X_TENANT_ID=self._tenant_id,
+            )
+            assert res.status_code == 404

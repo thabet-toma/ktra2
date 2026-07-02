@@ -6,8 +6,9 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
-import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
-import { Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2, Printer } from "lucide-react";
+import { type DenseColumn } from "../aseel/AseelDenseTable";
+import { GroupedItemsTable, type TreeCategory } from "./GroupedItemsTable";
+import { Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2, Printer, Copy } from "lucide-react";
 import { ItemFormAseel } from "./ItemFormAseel";
 import { CategoriesManagement } from "./CategoriesManagement";
 import { InvoiceCategoryTree } from "../procurement/invoices/InvoiceCategoryTree";
@@ -54,6 +55,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   }, [initialTab]);
 
   const [products, setProducts] = useState<SqlProduct[]>([]);
+  // شجرة التصنيفات (أي عمق) لعرض الجدول الشجري + الكرت المجمّع لكل تصنيف.
+  const [treeCategories, setTreeCategories] = useState<TreeCategory[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<View>("list");
@@ -61,8 +64,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   // الافتراضي «جدول» (بطلب المالك) — يفتح على وضعية الجدول مباشرةً.
   const [displayMode, setDisplayMode] = useState<"tree" | "table">("table");
   const [editId, setEditId] = useState<number | null>(null);
+  const [duplicateId, setDuplicateId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
-  const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   // جدول الأصناف: فلتر حالة المخزون + ترتيب حسب العمود (خادمي) + قائمة التصدير.
   const [statusFilter, setStatusFilter] = useState<StockStatus>("");
@@ -81,26 +84,30 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const [fromCache, setFromCache] = useState(false);
 
   const load = useCallback(async (opts: {
-    page?: number; search?: string; status?: StockStatus; ordering?: string;
+    search?: string; status?: StockStatus; ordering?: string;
   } = {}) => {
-    const { page: currentPage = 1, search: currentSearch = "", status = "", ordering = "" } = opts;
+    const { search: currentSearch = "", status = "", ordering = "" } = opts;
     setLoading(true);
     setErr(null);
     try {
-      const params: Record<string, string | number> = { page: currentPage, page_size: pageSize };
+      const params: Record<string, string | number> = {};
       if (currentSearch) params.search = currentSearch;
       if (status) params.stock_status = status;
       if (ordering) params.ordering = ordering;
-      const data = await inventoryApi.getProducts(params);
-      const rows = Array.isArray(data) ? data : (data.results ?? []);
-      setProducts(rows as SqlProduct[]);
-      setTotal(data.count ?? rows.length);
+      const allRows = await inventoryApi.getAllProducts(params);
+      setProducts(allRows as SqlProduct[]);
+      setTotal(allRows.length);
+      // شجرة التصنيفات (لعرض الجدول الشجري) — غير حظري.
+      try {
+        const cats = await inventoryApi.getCategories() as Array<{ id: number; name: string; parent: number | null }>;
+        setTreeCategories(cats.map((c) => ({ id: c.id, name: c.name, parent: c.parent ?? null })));
+      } catch { /* non-fatal */ }
       const now = new Date().toISOString();
       setLastSync(now);
       setFromCache(false);
       // Mirror into Dexie so the offline fallback below has fresh data.
       try {
-        for (const p of rows) {
+        for (const p of allRows) {
           await db.products.put({
             id: p.id,
             tenant_id: (p as { tenant?: number }).tenant ?? 0,
@@ -132,18 +139,18 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
     }
   }, [pageSize]);
 
-  // مصدر تحميل واحد: يتفاعل مع البحث (debounced) + فلتر الحالة + الترتيب + الصفحة.
+  // مصدر تحميل واحد: يتفاعل مع البحث (debounced) + فلتر الحالة + الترتيب.
   useEffect(() => {
     const t = setTimeout(() => {
-      load({ page, search, status: statusFilter, ordering: orderingParam });
+      load({ search, status: statusFilter, ordering: orderingParam });
     }, 250);
     return () => clearTimeout(t);
-  }, [load, page, search, statusFilter, orderingParam]);
+  }, [load, search, statusFilter, orderingParam]);
 
   // إعادة تحميل يدوي (زر التحديث / بعد الحفظ) يحافظ على الفلاتر الحالية.
   const reload = useCallback(() => {
-    load({ page, search, status: statusFilter, ordering: orderingParam });
-  }, [load, page, search, statusFilter, orderingParam]);
+    load({ search, status: statusFilter, ordering: orderingParam });
+  }, [load, search, statusFilter, orderingParam]);
 
   // تصدير PDF للطباعة بخيارات: الكل / ما نفذ / المنخفضة — يجلب كل الصفحات المطابقة
   // (لا الصفحة الحالية فقط) ثم يفتح نافذة طباعة بنفس نمط تقرير أرصدة المخزون (DRY).
@@ -248,10 +255,9 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         title="عرض بطاقة الصنف"
         onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(p.id)); }}
       >
-        {p.name_ar || p.name_en || "—"}
+        {p.display_name || p.name_ar || p.name_en || "—"}
       </button>
     ) },
-    { key: "cat", header: "التصنيف", width: "140px", render: (p) => <>{p.category_name || "—"}</> },
     { key: "qty", header: "الكمية", width: "80px", align: "center", numeric: true, sortable: true,
       render: (p) => {
         const qty = Number(p.quantity_on_hand);
@@ -270,12 +276,18 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         return <span style={{ color: "var(--aseel-ok,#267346)" }}>متوفر</span>;
       }
     },
-    { key: "edit", header: "", width: "40px", align: "center",
+    { key: "edit", header: "", width: "70px", align: "center",
       render: (p) => (
-        <button className="aseel-iconbtn" title="تعديل"
-          onClick={(e) => { e.stopPropagation(); setEditId(p.id); setView("form"); }}>
-          <Edit2 className="h-3 w-3" />
-        </button>
+        <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
+          <button className="aseel-iconbtn" title="تعديل"
+            onClick={(e) => { e.stopPropagation(); setEditId(p.id); setDuplicateId(null); setView("form"); }}>
+            <Edit2 className="h-3.5 w-3.5" />
+          </button>
+          <button className="aseel-iconbtn text-indigo-600 hover:bg-indigo-50" title="إضافة براند آخر (تكرار)"
+            onClick={(e) => { e.stopPropagation(); setDuplicateId(p.id); setEditId(null); setView("form"); }}>
+            <Copy className="h-3.5 w-3.5" />
+          </button>
+        </div>
       )
     },
   ];
@@ -284,9 +296,10 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
     return (
       <ItemFormAseel
         productId={editId}
+        duplicateId={duplicateId}
         products={products}
-        onSaved={() => { reload(); setView("list"); setEditId(null); }}
-        onCancel={() => { setView("list"); setEditId(null); }}
+        onSaved={() => { reload(); setView("list"); setEditId(null); setDuplicateId(null); }}
+        onCancel={() => { setView("list"); setEditId(null); setDuplicateId(null); }}
       />
     );
   }
@@ -351,11 +364,11 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         <div style={{ flex: 1 }} />
         <input className="aseel-input" style={{ width: 200 }}
           placeholder="بحث SKU / الاسم…"
-          value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
+          value={search} onChange={(e) => { setSearch(e.target.value); }} />
         {/* فلتر حالة المخزون: الكل / نفذ / منخفض / متوفر (خادمي) */}
         <select className="aseel-input" style={{ width: 130 }}
           value={statusFilter}
-          onChange={(e) => { setStatusFilter(e.target.value as StockStatus); setPage(1); }}
+          onChange={(e) => { setStatusFilter(e.target.value as StockStatus); }}
           title="فلترة حسب حالة المخزون">
           <option value="">كل الحالات</option>
           <option value="out_of_stock">نفذ</option>
@@ -393,7 +406,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         <button className="aseel-toolbtn" onClick={() => reload()} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
-        <button className="aseel-toolbtn" onClick={() => { setEditId(null); setView("form"); }} title="إضافة صنف (Ctrl+Ins)">
+        <button className="aseel-toolbtn" onClick={() => { setEditId(null); setDuplicateId(null); setView("form"); }} title="إضافة صنف (Ctrl+Ins)">
           <Plus className="h-4 w-4" /> إضافة
         </button>
       </div>
@@ -408,29 +421,35 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
             items={products.map((p) => ({
               ...(p as unknown as Item),
               id: String(p.id),
-              name: p.name_ar || p.name_en || p.sku || "",
+              // اسم الورقة = اسم العرض (الاسم + البراند) مع احتياطي.
+              name: p.display_name || p.name_ar || p.name_en || p.sku || "",
+              group_key: p.group_key,
+              display_name: p.display_name,
+              has_group: p.has_group,
               categoryId: (p as unknown as { category?: number | string }).category ?? "",
-            })) as Item[]}
+            })) as unknown as Item[]}
             onShowCard={(it) => openInNewTab(productProfilePath(it.id))}
+            onShowGroup={(ids, name) =>
+              openInNewTab(`/product-group?ids=${ids.join(",")}&name=${encodeURIComponent(name)}`)}
             onPickItem={(it) => { setEditId(Number(it.id)); setView("form"); }}
             onItemCreated={() => reload()}
           />
         </div>
       ) : (
-        <AseelDenseTable<SqlProduct>
+        // تجميع البراندات: عقدة «مجموعة» قابلة للطيّ بالجدول + كرت مجمّع (DRY مع الشجرة).
+        <GroupedItemsTable
           columns={columns}
           rows={products} // search is server-side now
+          categories={treeCategories}
           getRowKey={(p) => p.id}
           loading={loading}
           emptyHint="لا توجد أصناف"
           onRowDoubleClick={(p) => { setEditId(p.id); setView("form"); }}
+          onShowGroup={(ids, name) =>
+            openInNewTab(`/product-group?ids=${ids.join(",")}&name=${encodeURIComponent(name)}`)}
           sortKey={sortKey}
           sortDir={sortDir}
-          onSort={(key, dir) => { setSortKey(key); setSortDir(dir); setPage(1); }}
-          pagination={total > pageSize ? {
-            page, pageSize, total,
-            onChange: (p) => setPage(p)
-          } : undefined}
+          onSort={(key, dir) => { setSortKey(key); setSortDir(dir); }}
         />
       )}
         </div>

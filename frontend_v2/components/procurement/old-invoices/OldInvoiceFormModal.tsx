@@ -371,7 +371,6 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
             };
 
             await onSave(invoiceData);
-            onClose();
         } catch (error) {
             // console suppressed
             alert('حدث خطأ أثناء الحفظ');

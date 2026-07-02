@@ -20,6 +20,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'sales-settings': 'إعدادات المبيعات',
   'purchase-settings': 'إعدادات الشراء',
   'product-profile': 'بطاقة الصنف',
+  'product-group': 'كرت مجمّع (براندات)',
   'purchase-invoices': 'فواتير الشراء',
   'international-invoices': 'الفواتير الدولية',
   'old-invoices': 'أرشيف الفواتير',

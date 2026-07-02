@@ -86,7 +86,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     }, [location.pathname]);
 
     const confirm = useConfirm();
-    const [viewMode, setViewMode] = useState<'list' | 'form'>('list');
+    const [viewMode, setViewMode] = useState<'list' | 'form' | 'view'>('list');
     const [deals, setDeals] = useState<Deal[]>([]);
     const [priceOffers, setPriceOffers] = useState<PriceOffer[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -136,7 +136,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 );
                 if (target) {
                     setCurrentDeal({ ...target });
-                    setViewMode('form');
+                    setViewMode('view');
                 }
             }
             return;
@@ -147,7 +147,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
             const target = deals.find((d) => String(d.id) === String(id));
             if (target) {
                 setCurrentDeal({ ...target });
-                setViewMode('form');
+                setViewMode('view');
             } else {
                 navigate('/deals', { replace: true });
             }
@@ -417,6 +417,24 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 }}
                 compactMode={true}
                 onOpenAccountingJournal={onOpenAccountingJournal}
+            />
+        );
+    }
+
+    if (viewMode === 'view' && currentDeal) {
+        return (
+            <DealPrintView
+                deal={currentDeal as Deal}
+                supplier={suppliers.find(s => s.id === currentDeal.supplierId)}
+                currentUser={currentUser}
+                onClose={() => {
+                    setViewMode('list');
+                    setCurrentDeal(null);
+                    navigate('/deals');
+                }}
+                onEdit={() => {
+                    setViewMode('form');
+                }}
             />
         );
     }

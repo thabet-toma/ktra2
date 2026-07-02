@@ -98,6 +98,64 @@ export const aboutLinksService = {
   },
 };
 
+// --- Departments Service (Contact Us) ---
+export interface Department {
+  id: string;
+  name: string;
+  nameEn: string;
+  managerTitle: string;
+  managerName: string;
+  email: string;
+  whatsapp: string;
+  iconType: 'shipping' | 'finance' | 'support' | 'it' | 'marketing' | 'logistics';
+  createdAt?: string;
+}
+
+export const departmentsService = {
+  subscribeToDepartments: (callback: (deps: Department[]) => void) => {
+    try {
+      const q = query(collection(db, "departments"), orderBy("createdAt", "asc"));
+      return onSnapshot(q, (snapshot) => {
+        const items = snapshot.docs.map((d) => ({ ...(d.data() as any), id: d.id }));
+        callback(items);
+      });
+    } catch (error) {
+      return () => { };
+    }
+  },
+
+  getDepartments: async (): Promise<Department[]> => {
+    try {
+      const q = query(collection(db, "departments"), orderBy("createdAt", "asc"));
+      const snap = await getDocs(q);
+      return snap.docs.map((d) => ({ ...(d.data() as any), id: d.id }));
+    } catch (error) {
+      return [];
+    }
+  },
+
+  addDepartment: async (dept: Omit<Department, "id">) => {
+    const ref = doc(collection(db, "departments"));
+    const id = ref.id;
+    const payload = {
+      ...dept,
+      id,
+      createdAt: new Date().toISOString(),
+    };
+    await setDoc(ref, payload);
+    return id;
+  },
+
+  updateDepartment: async (id: string, updates: Partial<Department>) => {
+    const ref = doc(db, "departments", id);
+    await updateDoc(ref, updates as any);
+  },
+
+  deleteDepartment: async (id: string) => {
+    await deleteDoc(doc(db, "departments", id));
+  },
+};
+
 // إعدادات النظام الافتراضية
 const DEFAULT_POINTS_SYSTEM: PointsSystem = {
   activityPointsPerClick: 1,
@@ -1198,7 +1256,7 @@ export const itemsService = {
     const urls = attach.map((a: any) => a.file_path).filter(Boolean);
     return {
       id: String(p.id),
-      name: p.name_ar || p.name_en || p.sku || `Item ${p.id}`,
+      name: p.display_name || p.name_ar || p.name_en || p.sku || `Item ${p.id}`,
       modelNumber: p.sku || "",
       categoryId: p.category ? String(p.category) : "",
       categoryName: p.category_name || "",

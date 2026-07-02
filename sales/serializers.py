@@ -478,6 +478,7 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "auto_post_invoices",
             "show_journal_preview",
             "warn_on_duplicate_item",
+            "block_loss_invoices",
             "default_shipping_origin",
             "default_shipping_destination",
             "updated_at",

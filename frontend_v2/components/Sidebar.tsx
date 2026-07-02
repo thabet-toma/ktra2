@@ -344,12 +344,21 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           </div>
 
           <button
-            onClick={() => { window.history.pushState({}, '', '/about-us'); window.dispatchEvent(new PopStateEvent('popstate')); if (isMobile) setIsMobileMenuOpen(false); }}
-            className="flex items-center w-full p-3 rounded-lg text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+            onClick={() => { setView("about-us"); if (isMobile) setIsMobileMenuOpen(false); }}
+            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("about-us") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
             title="من نحن"
           >
             <Info className="h-5 w-5 flex-shrink-0" />
             {showText && <span className="mr-3 text-right flex-1">من نحن</span>}
+          </button>
+
+          <button
+            onClick={() => { setView("contact"); if (isMobile) setIsMobileMenuOpen(false); }}
+            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("contact") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+            title="تواصل معنا"
+          >
+            <Users className="h-5 w-5 flex-shrink-0" />
+            {showText && <span className="mr-3 text-right flex-1">تواصل معنا</span>}
           </button>
 
           {/* 8) إدارة المهام — في الأسفل تماماً (Section 9) */}

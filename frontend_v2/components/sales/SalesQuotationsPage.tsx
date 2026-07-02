@@ -316,7 +316,6 @@ export const SalesQuotationsPage: React.FC = () => {
     () => products.map((p) => ({
       id: p.id,
       label: formatProductPrimaryName(p),
-      sub: `رصيد ${formatQuantity(p.quantity_on_hand, "0")}`,
     })),
     [products]
   );

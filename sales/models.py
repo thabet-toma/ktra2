@@ -185,6 +185,12 @@ class SalesSettings(models.Model):
         db_column="WarnOnDuplicateItem",
         help_text="عند تكرار المادة في الفاتورة: إظهار رسالة تنبيه وتأكيد",
     )
+    # منع حفظ/ترحيل فاتورة بيع بخسارة (الإيراد الصافي < التكلفة بمتوسط التكلفة).
+    block_loss_invoices = models.BooleanField(
+        default=False,
+        db_column="BlockLossInvoices",
+        help_text="رفض حفظ/ترحيل فاتورة بيع فيها خسارة (سعر البيع أقل من التكلفة)",
+    )
 
     default_shipping_origin = models.CharField(
         max_length=200, blank=True, default="", db_column="DefaultShippingOrigin"

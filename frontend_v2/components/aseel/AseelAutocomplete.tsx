@@ -11,6 +11,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, Info } from 'lucide-react';
+import { usePriceVisibility } from '../../contexts/PriceVisibilityContext';
+
+export interface AseelPriceInfo {
+  label: string;
+  value: string;
+  link?: string;
+}
 
 export interface AseelAutocompleteOption {
   id: string | number;
@@ -18,6 +25,8 @@ export interface AseelAutocompleteOption {
   label: string;
   /** سطر ثانوي اختياري (موديل / SKU / رصيد) — هدف مطابقة ثانٍ */
   sub?: string;
+  /** أسعار متعددة قابلة للنقر (آخر شراء، أقل سعر، الخ) */
+  prices?: AseelPriceInfo[];
   /** task24: السعر المقترح معروض مباشرة في الخيار (نص منسّق) — بلا نقر. */
   price?: string;
   /** task24: تسمية مصدر السعر (آخر بيع/شراء، عرض سعر، افتراضي…). */
@@ -69,6 +78,7 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
   disabled,
   maxResults = MAX_DEFAULT,
 }) => {
+  const { visible: showPrices } = usePriceVisibility(); // خصوصية: إخفاء الأسعار أمام الزبون
   const [query, setQuery] = useState<string | null>(null); // null = غير مفتوح، يعرض value
   const [sel, setSel] = useState(0);
   const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
@@ -183,7 +193,33 @@ export const AseelAutocomplete: React.FC<AseelAutocompleteProps> = ({
               >
                 <span className="aseel-autocomplete-label">{opt.label}</span>
                 {opt.sub && <span className="aseel-autocomplete-sub">{opt.sub}</span>}
-                {opt.price ? (
+                {!showPrices ? null : opt.prices && opt.prices.length > 0 ? (
+                  <div className="flex gap-2 items-center ml-auto">
+                    {opt.prices.map((p, idx) => {
+                      const content = (
+                        <span className="aseel-autocomplete-price !ml-0" title={p.label}>
+                          {p.value}
+                          {p.label && <em className="aseel-autocomplete-price-src">{p.label}</em>}
+                        </span>
+                      );
+                      return p.link ? (
+                        <a 
+                          key={idx} 
+                          href={p.link} 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          className="hover:opacity-80 transition-opacity"
+                          onMouseDown={(e) => e.stopPropagation()}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {content}
+                        </a>
+                      ) : (
+                        <React.Fragment key={idx}>{content}</React.Fragment>
+                      );
+                    })}
+                  </div>
+                ) : opt.price ? (
                   <span className="aseel-autocomplete-price" title={opt.priceLabel}>
                     {opt.price}
                     {opt.priceLabel && (

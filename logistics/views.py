@@ -1859,6 +1859,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 "unit_price": d["unit_price"],
                 "source_type": d["source_type"],
                 "source_label": d["source_label"],
+                "prices": d.get("prices", []),
             }
             for pid, d in prices.items()
         ]

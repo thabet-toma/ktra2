@@ -62,6 +62,12 @@ class Product(models.Model):
     barcode = models.CharField(max_length=50, blank=True, null=True, db_column='Barcode')
     name_ar = models.CharField(max_length=200, blank=True, null=True, db_column='Name_AR')
     name_en = models.CharField(max_length=200, blank=True, null=True, db_column='Name_EN')
+    # تجميع البراندات تحت «صنف فرعي» (المقاس/الموديل مثل 185/65/14): المنتجات بنفس
+    # variant_group تظهر تحت عقدة أب واحدة في الشجرة/الجرد/الجدول، والبراند يميّز
+    # الورقة (يظهر بين قوسين). إن تُرك variant_group فارغاً يُشتقّ group_key خادمياً
+    # من الاسم (مقاس الإطار أو الاسم) — توافقاً مع البيانات القديمة.
+    variant_group = models.CharField(max_length=120, blank=True, default='', db_column='VariantGroup')
+    brand = models.CharField(max_length=100, blank=True, default='', db_column='Brand')
     category = models.ForeignKey(ProductCategory, on_delete=models.SET_NULL, null=True, blank=True, db_column='CategoryID', related_name='products')
     uom = models.ForeignKey(UnitOfMeasure, on_delete=models.SET_NULL, null=True, blank=True, db_column='UOMID', related_name='products')
     uom_legacy = models.CharField(max_length=20, blank=True, null=True, db_column='UOM') 

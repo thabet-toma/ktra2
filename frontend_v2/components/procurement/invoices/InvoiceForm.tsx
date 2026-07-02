@@ -13,6 +13,7 @@ import {
   Save,
   ArrowRight,
   Loader2,
+  Pencil,
   Plus,
   Printer,
   RefreshCw,
@@ -73,6 +74,8 @@ import {
   type AseelToolbarAction,
 } from "../../aseel";
 import { formatInvoiceImportLogisticsLine } from "@/utils/invoiceConversionUtils";
+import { useToast } from "@/contexts/ToastContext";
+import { useConfirm } from "@/contexts/ConfirmContext";
 
 interface InvoiceFormProps {
   invoice: Partial<Invoice> | null;
@@ -94,6 +97,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   dealData,
   readOnly = false,
 }) => {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [formData, setFormData] = useState<Partial<Invoice>>(
     initialInvoice || {}
   );
@@ -143,6 +148,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [supplierBalance, setSupplierBalance] = useState<PartnerBalanceResponse | null>(null);
 
   // حارس التغييرات غير المحفوظة (Dirty state tracking)
+  const [viewMode, setViewMode] = useState<boolean>(!!initialInvoice?.id);
+  const effectiveReadOnly = readOnly || viewMode;
   const dirtyRef = useRef(false);
   const markDirty = () => {
     dirtyRef.current = true;
@@ -215,27 +222,27 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     },
   });
 
-  const guardedCancel = () => {
+  const guardedCancel = async () => {
     if (!formData.id && !(formData.items || []).some(i => i.itemId) && !formData.supplierId) {
       // Empty draft, no need to warn
       onCancel();
       return;
     }
     if (dirtyRef.current) {
-      if (!window.confirm("لديك تغييرات غير محفوظة. هل أنت متأكد من الخروج دون حفظ؟")) {
+      if (!(await confirm({ message: "لديك تغييرات غير محفوظة. هل أنت متأكد من الخروج دون حفظ؟", confirmText: "خروج دون حفظ", cancelText: "بقاء", danger: false }))) {
         return;
       }
     }
     onCancel();
   };
 
-  const guardedNew = () => {
+  const guardedNew = async () => {
     if (!formData.id && !(formData.items || []).some(i => i.itemId) && !formData.supplierId) {
       nav?.goNew?.();
       return;
     }
     if (dirtyRef.current) {
-      if (!window.confirm("لديك تغييرات غير محفوظة. هل أنت متأكد من فتح فاتورة جديدة وتجاهل التغييرات؟")) {
+      if (!(await confirm({ message: "لديك تغييرات غير محفوظة. هل أنت متأكد من فتح فاتورة جديدة وتجاهل التغييرات؟", confirmText: "متابعة", cancelText: "إلغاء", danger: false }))) {
         return;
       }
     }
@@ -407,11 +414,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   const handleSave = async () => {
     if (!formData.supplierId) {
-      alert("الرجاء اختيار المورد");
+      toast("الرجاء اختيار المورد", "error");
       return;
     }
     if (!formData.items || formData.items.length === 0) {
-      alert("الرجاء إضافة صنف واحد على الأقل");
+      toast("الرجاء إضافة صنف واحد على الأقل", "error");
       return;
     }
 
@@ -504,7 +511,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         setFormData((prev) => ({ ...prev, id: savedSqlId }));
       } else {
         if (formData.isHistorical) {
-          alert("لا يمكن تعديل الفواتير المؤرشفة");
+          toast("لا يمكن تعديل الفواتير المؤرشفة", "error");
           setSaving(false);
           return;
         }
@@ -528,9 +535,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           /* نفس الأمر — الشحنة قد لا تكون في SQL */
         }
       }
-
+      setAccMsg(null);
+      setViewMode(true);
       if (onSave) onSave({ id: savedSqlId });
-      alert("تم حفظ الفاتورة بنجاح");
+      toast("تم حفظ الفاتورة بنجاح", "success");
       dirtyRef.current = false;
     } catch (error) {
       // console suppressed
@@ -538,7 +546,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         error instanceof Error && error.message?.trim()
           ? error.message.trim()
           : "حدث خطأ أثناء الحفظ";
-      alert(msg);
+      toast(msg, "error");
     } finally {
       setSaving(false);
     }
@@ -566,6 +574,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     try {
       const res = await purchaseInvoiceApi.postToAccounting(Number(formData.id));
       setAccMsg(res.message || `تم الترحيل — قيد محاسبي #${res.journal_id}`);
+      setViewMode(true);
       await reloadInvoice();
       if (onSave) onSave({ id: String(formData.id) });
     } catch (e) {
@@ -578,16 +587,19 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   // M2: التراجع عن الترحيل — حذف القيود وإرجاع الفاتورة مسودة (Feature 1).
   const handleUnpost = async () => {
     if (!formData.id || posting) return;
-    if (!window.confirm(
-      "هذا المستند مرحَّل. سيؤدي التراجع عن الترحيل إلى حذف كل قيود اليومية " +
-      "وحركات المخزون الخاصة بهذه الفاتورة وإرجاعها مسودة قابلة للتعديل/الحذف. متابعة؟"
-    )) return;
+    if (!(await confirm({
+      message:
+        "هذا المستند مرحَّل. سيؤدي التراجع عن الترحيل إلى حذف كل قيود اليومية " +
+        "وحركات المخزون الخاصة بهذه الفاتورة وإرجاعها مسودة قابلة للتعديل/الحذف. متابعة؟",
+      confirmText: "متابعة",
+    }))) return;
     setAccErr(null);
     setAccMsg(null);
     setPosting(true);
     try {
       await purchaseInvoiceApi.unpost(Number(formData.id));
       setAccMsg("تم التراجع عن الترحيل وحذف القيود. الفاتورة الآن مسودة.");
+      setViewMode(true);
       await reloadInvoice();
       if (onSave) onSave({ id: String(formData.id) });
     } catch (e) {
@@ -617,7 +629,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     }
   };
 
-  const applyItemAt = (index: number | null, item: Item, lastPrice?: number, qtyOverride?: number) => {
+  const applyItemAt = async (index: number | null, item: Item, lastPrice?: number, qtyOverride?: number) => {
     // task18 DEF-C3: إن كان الصنف موجوداً في سطر آخر — نبّه المستخدم ودعه يختار:
     // موافق = دمج الكمية في السطر القائم · إلغاء = إضافته كسطر مستقل (سعر مختلف).
     const current = formData.items || [];
@@ -625,11 +637,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       (r, i) => i !== index && String(r.itemId) === String(item.id) && r.itemId !== ""
     );
     if (dupIndex >= 0) {
-      const merge = window.confirm(
-        `الصنف «${item.name}» مضاف مسبقاً في الفاتورة.\n\n` +
-        `موافق = دمج الكمية في السطر الموجود\n` +
-        `إلغاء = إضافته كسطر جديد مستقل (سعر مختلف)`
-      );
+      const merge = await confirm({
+        message: `الصنف «${item.name}» مضاف مسبقاً في الفاتورة. اختر الإجراء:`,
+        confirmText: "دمج الكمية",
+        cancelText: "سطر جديد مستقل",
+        danger: false,
+      });
       if (merge) {
         const updated = [...current];
         const existing = { ...updated[dupIndex] };
@@ -684,22 +697,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       updatedItems.push(newItem);
     }
 
-    const lastLineIndex = updatedItems.length - 1;
-    if (index === lastLineIndex || index === null) {
-      updatedItems.push({
-        id: crypto.randomUUID(),
-        itemId: "",
-        name: "",
-        categoryId: "",
-        categoryName: "",
-        specifications: "",
-        imageUrls: [],
-        quantity: 1,
-        unitPrice: 0,
-        totalPrice: 0,
-      });
-    }
-
+    // ملاحظة: لا نُضيف سطراً فارغاً تلقائياً عند اختيار صنف (طلب المالك) — يُضاف
+    // السطر يدوياً بزر «أضف صف» أو من الشجرة. كان السلوك السابق يفتح سطراً بنفسه.
     recalculateTotals({ items: updatedItems });
     markDirty();
   };
@@ -821,7 +820,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   const handleRecalculateLanded = async () => {
     if (!formData.shipment || !formData.id) {
-      alert("لا توجد شحنة مرتبطة أو الفاتورة غير محفوظة بعد.");
+      toast("لا توجد شحنة مرتبطة أو الفاتورة غير محفوظة بعد.", "error");
       return;
     }
     const meta = formData.conversionMetadata as Record<string, unknown> | undefined;
@@ -856,10 +855,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           : res?.updated
             ? "تم إعادة حساب تكلفة الرسوم والبنود من الخادم."
             : "لم تُحدَّث الفاتورة من الخادم.";
-      alert(msg);
+      toast(msg, res?.updated ? "success" : "info");
     } catch (e) {
       // console suppressed
-      alert(e instanceof Error ? e.message : "تعذّر إعادة الحساب");
+      toast(e instanceof Error ? e.message : "تعذّر إعادة الحساب", "error");
     } finally {
       setRecalcBusy(false);
     }
@@ -944,7 +943,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   /** فواتير شيكل بنسبة: مزامنة taxAmount/grandTotal مع الأساس (غالباً كانت tax_amount=0 في DB) */
   useEffect(() => {
-    if (readOnly || formData.isHistorical) return;
+    if (effectiveReadOnly) return;
     if (formData.currency !== "ILS") return;
     if (formData.taxType === "amount") return;
     if (!(formData.items || []).length) return;
@@ -1137,7 +1136,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     <button
       type="button"
       className="aseel-cell-picker"
-      disabled={readOnly || formData.isHistorical}
+      disabled={effectiveReadOnly}
       data-aseel-key="1"
       onClick={() => {
         setActiveItemSearchIndex(rowIndex);
@@ -1152,7 +1151,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   /* task24: خريطة سعر الشراء المقترح (آخر/أقل شراء أو متوسط التكلفة) لكامل
      الكتالوج — تُجلب دفعة واحدة لعرض السعر داخل خيارات المنتقي بلا نقر. */
   const [purchasePriceMap, setPurchasePriceMap] = useState<
-    Map<number, { price: string; label: string }>
+    Map<number, { price: string; label: string; prices?: any[] }>
   >(new Map());
   useEffect(() => {
     let cancelled = false;
@@ -1160,10 +1159,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       .priceList()
       .then((rows) => {
         if (cancelled) return;
-        const m = new Map<number, { price: string; label: string }>();
+        const m = new Map<number, { price: string; label: string; prices?: any[] }>();
         for (const r of rows) {
           if (r.unit_price != null && Number(r.unit_price) > 0) {
-            m.set(r.product_id, { price: r.unit_price, label: r.source_label });
+            m.set(r.product_id, { price: r.unit_price, label: r.source_label, prices: r.prices });
           }
         }
         setPurchasePriceMap(m);
@@ -1179,10 +1178,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       return {
         id: it.id,
         label: it.name,
-        sub: it.modelNumber || it.categoryName || "",
         price: pp ? formatMoney(Number(pp.price)) : undefined,
-        // لا آخر/أقل شراء ولا متوسط تكلفة → نص «السعر غير معرف» بدل الفراغ.
-        priceLabel: pp ? pp.label : "السعر غير معرف",
+        // لا آخر/أقل شراء ولا متوسط تكلفة → نص «بدون سعر» بدل الفراغ.
+        priceLabel: pp ? pp.label : "بدون سعر",
+        prices: pp?.prices?.map((p: any) => ({
+          label: p.source_label || p.label,
+          value: formatMoney(Number(p.unit_price)),
+          link: p.document_id ? `/purchase-invoices/${p.document_id}` : undefined,
+        })),
       };
     }),
     [allDbItems, purchasePriceMap],
@@ -1195,7 +1198,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       <AseelAutocomplete
         value={row.name || ""}
         options={itemOptions}
-        disabled={readOnly || formData.isHistorical}
+        disabled={effectiveReadOnly}
         placeholder="اكتب اسم الصنف…"
         onPick={async (id) => {
           const it = allDbItems.find((x) => String(x.id) === String(id));
@@ -1228,7 +1231,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   const renderDeleteCell = (row: InvoiceItem) =>
-    readOnly || formData.isHistorical ? null : (
+    effectiveReadOnly ? null : (
       <button
         type="button"
         className="aseel-iconbtn aseel-iconbtn--danger"
@@ -1249,7 +1252,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       className="aseel-input"
       rows={3}
       style={{ width: "100%" }}
-      disabled={readOnly || formData.isHistorical}
+      disabled={effectiveReadOnly}
       value={formData.notes || formData.dealInfo?.internalNotes || ""}
       onChange={(e) => handleDealInfoUpdate("internalNotes", e.target.value)}
     />
@@ -1277,7 +1280,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         data={formData}
         setData={(val) => { setFormData(val); markDirty(); }}
         suppliers={suppliers}
-        readOnly={readOnly || formData.isHistorical}
+        readOnly={effectiveReadOnly}
         items={formData.items}
         onOpenAddSupplier={() => setShowAddSupplierModal(true)}
       />
@@ -1313,7 +1316,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             localPayments={formData.localPayments || {}}
             taxableBaseIls={ilsMerchandiseBase}
             vatBaseIls={ilsVatBase}
-            readOnly={readOnly || !!formData.isHistorical}
+            readOnly={effectiveReadOnly}
             onFinancial={handleUpdateFinancial}
           />
           <NISFinancialSummary
@@ -1337,7 +1340,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           onRemoveItem={handleRemoveItem}
           onPreviewImage={setPreviewImage}
           supplierId={formData.supplierId}
-          readOnly={readOnly || formData.isHistorical}
+          readOnly={effectiveReadOnly}
           allDbItems={allDbItems}
           discountAmount={formData.discountAmount}
           taxRate={formData.taxRate || 0}
@@ -1426,7 +1429,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       <label className="aseel-field aseel-field--inline">
         <input
           type="checkbox"
-          disabled={readOnly || formData.isHistorical}
+          disabled={effectiveReadOnly}
           checked={formData.shippingIncluded || false}
           onChange={(e) => { handleUpdateFinancial("shippingIncluded", e.target.checked); markDirty(); }}
         />
@@ -1446,6 +1449,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   const toolbarActions: AseelToolbarAction[] = [
     { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => { handleSave(); dirtyRef.current = false; } : undefined, disabled: saving || isPosted },
+    ...(viewMode && !isPosted && !formData.isHistorical ? [{ key: "edit", label: "تحرير", icon: <Pencil />, onClick: () => setViewMode(false), separatorBefore: true } as AseelToolbarAction] : []),
     { key: "new", label: "جديدة", icon: <Plus />, onClick: guardedNew, separatorBefore: true },
     {
       key: "post",
@@ -1501,7 +1505,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             "التاريخ",
             <AseelDatePicker
               className="aseel-input"
-              disabled={readOnly || formData.isHistorical}
+              disabled={effectiveReadOnly}
               value={formData.invoiceDate || ""}
               onChange={(val) => handleUpdateFinancial("invoiceDate", val)}
             />
@@ -1510,7 +1514,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             "تاريخ الاستحقاق",
             <AseelDatePicker
               className="aseel-input"
-              disabled={readOnly || formData.isHistorical}
+              disabled={effectiveReadOnly}
               value={formData.dealInfo?.dueDate || ""}
               onChange={(val) => handleDealInfoUpdate("dueDate", val)}
             />
@@ -1519,7 +1523,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             "رقم المستند",
             <input
               className="aseel-input"
-              disabled={readOnly || formData.isHistorical}
+              disabled={effectiveReadOnly}
               value={formData.supplierInvoiceNumber || ""}
               onChange={(e) => handleUpdateFinancial("supplierInvoiceNumber", e.target.value)}
               placeholder="رقم فاتورة المورد"
@@ -1533,7 +1537,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                 data-aseel-field="supplier"
                 data-aseel-key="1"
                 readOnly
-                disabled={readOnly || formData.isHistorical}
+                disabled={effectiveReadOnly}
                 value={selectedSupplier ? `#${selectedSupplier.id}` : ""}
                 placeholder="+ للفهرس"
                 onClick={() => !readOnly && !formData.isHistorical && setShowSupplierPicker(true)}
@@ -1541,7 +1545,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               <button
                 type="button"
                 className="aseel-ellipsis"
-                disabled={readOnly || formData.isHistorical}
+                disabled={effectiveReadOnly}
                 onClick={() => setShowSupplierPicker(true)}
                 title="فهرس الموردين (+)"
               >
@@ -1561,7 +1565,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             "العملة",
             <select
               className="aseel-input"
-              disabled={readOnly || formData.isHistorical}
+              disabled={effectiveReadOnly}
               value={formData.currency || "ILS"}
               onChange={(e) => handleUpdateFinancial("currency", e.target.value)}
             >
@@ -1578,7 +1582,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               min={0}
               max={100}
               step={0.01}
-              disabled={readOnly || formData.isHistorical}
+              disabled={effectiveReadOnly}
               value={formData.taxRate || 0}
               onChange={(e) => handleUpdateFinancial("taxRate", Number(e.target.value))}
             />
@@ -1587,7 +1591,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             "مشتغل مرخص",
             <input
               className="aseel-input"
-              disabled={readOnly || formData.isHistorical}
+              disabled={effectiveReadOnly}
               value={formData.dealInfo?.licensedDealerNo || ""}
               onChange={(e) => handleDealInfoUpdate("licensedDealerNo", e.target.value)}
               placeholder="رقم المشتغل المرخص"
@@ -1620,7 +1624,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           <label className="aseel-field aseel-field--inline">
             <input
               type="checkbox"
-              disabled={readOnly || formData.isHistorical}
+              disabled={effectiveReadOnly}
               checked={formData.shippingIncluded || false}
               onChange={(e) => handleUpdateFinancial("shippingIncluded", e.target.checked)}
             />
@@ -1704,7 +1708,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           )}
           <span className="aseel-status-item">الحالة <b>{formData.isPosted ? "مرحّلة" : formData.isHistorical ? "مؤرشفة" : formData.id ? "مسودة" : "جديدة"}</b></span>
           <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
-          <span className="aseel-status-item">{readOnly || formData.isHistorical ? "للقراءة فقط" : "قابل للتعديل ✓"}</span>
+          <span className="aseel-status-item">{effectiveReadOnly ? "للقراءة فقط" : "قابل للتعديل ✓"}</span>
         </>
       }
     >
@@ -1716,8 +1720,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             rows={formData.items || []}
             getCell={itemGetCell}
             getRowKey={(r) => r.id}
-            onChange={readOnly || formData.isHistorical ? undefined : itemOnChange}
-            onAddRow={readOnly || formData.isHistorical ? undefined : addRow}
+            onChange={effectiveReadOnly ? undefined : itemOnChange}
+            onAddRow={effectiveReadOnly ? undefined : addRow}
             emptyHint="لا توجد بنود — أضف صنفاً من الشجرة أو اكتب اسمه"
           />
           {!readOnly && !formData.isHistorical && (
@@ -1844,10 +1848,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         <ProductCardModal
           productId={cardProductId}
           productName={it ? it.name : undefined}
-          addMode={!(!cardCanAdd || readOnly || formData.isHistorical || !it)}
+          addMode={!(!cardCanAdd || effectiveReadOnly || !it)}
           suggestedPrice={cardSuggestedPrice}
           priceSource={cardSuggestedPrice != null ? "last_invoice" : "default"}
-          onConfirm={(!cardCanAdd || readOnly || formData.isHistorical || !it) ? undefined : (opts) => {
+          onConfirm={(!cardCanAdd || effectiveReadOnly || !it) ? undefined : (opts) => {
             const price = opts?.unitPrice ?? cardSuggestedPrice ?? 0;
             applyItemAt(null, it, price, opts?.quantity);
           }}

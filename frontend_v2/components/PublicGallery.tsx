@@ -242,8 +242,6 @@ const PublicGallery: React.FC = () => {
     }, 1000);
   };
 
-  const goToHome = () => { window.location.href = '/'; };
-
   // --- Render ---
   return (
     <div 
@@ -254,14 +252,7 @@ const PublicGallery: React.FC = () => {
       <div className="max-w-7xl mx-auto p-4 sm:p-8">
         {/* --- Header --- */}
         <header className="mb-10 relative flex flex-col items-center">
-          <button
-            onClick={goToHome}
-            className="self-end sm:absolute sm:right-0 sm:top-0 flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors shadow-sm"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>عودة</span>
-          </button>
-          
+
           <div className="text-center mt-4 sm:mt-0">
             <h2 className="text-3xl sm:text-4xl font-extrabold text-blue-600 dark:text-blue-400 flex items-center justify-center gap-3 mb-2">
               <Camera className="w-8 h-8 sm:w-10 sm:h-10" />

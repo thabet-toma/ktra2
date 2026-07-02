@@ -18,6 +18,7 @@ import {
   type SalesInvoiceRow,
 } from "../../services/salesApi";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import { useStaleConfirm } from "../offline/StaleDataConfirm";
 import { DocumentPaymentsTab } from "../shared/DocumentPaymentsTab";
 import { AseelDatePicker } from "../ui/AseelDatePicker";
@@ -154,6 +155,8 @@ type Props = {
     show_journal_preview: boolean;
     /** T-R3: تنبيه عند تكرار الصنف على سطر جديد (الافتراضي مُفعّل). */
     warn_on_duplicate_item?: boolean;
+    /** منع حفظ/ترحيل فاتورة بيع بخسارة (الافتراضي مُعطّل). */
+    block_loss_invoices?: boolean;
   } | null;
 };
 
@@ -198,7 +201,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   onOpenGeneralLedger,
   salesSettings,
 }) => {
+  const confirm = useConfirm();
   const [draftId, setDraftId] = useState<number | null>(null);
+  const [viewMode, setViewMode] = useState<boolean>(!!draftToEditId);
   const [invoiceNumber, setInvoiceNumber] = useState<string>("");
   const [customerId, setCustomerId] = useState<number | "">("");
   const [invDate, setInvDate] = useState(() => new Date().toISOString().slice(0, 10));
@@ -732,6 +737,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   useEffect(() => {
     if (draftToEditId == null) return;
+    setViewMode(true);
     let cancelled = false;
     (async () => {
       try {
@@ -814,7 +820,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   };
 
   const isPosted = invoiceStatus === "posted";
-  const readOnly = isPosted;
+  const readOnly = isPosted || viewMode;
 
   const buildPayload = useCallback(() => {
     const body: Record<string, unknown> = {
@@ -1008,12 +1014,33 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     return null;
   };
 
+  // منع فاتورة الخسارة (إعداد اختياري) — يُطابق الحارس الخادمي في post_sales_invoice.
+  // يُرجع رسالة الخطأ إن كان البيع بخسارة والمنع مُفعّل، وإلا null.
+  const lossBlockMessage = (): string | null => {
+    if (
+      salesSettings?.block_loss_invoices &&
+      journalPreview.cogs > 0 &&
+      journalPreview.grossProfit < 0
+    ) {
+      return (
+        `لا يُسمح بحفظ فاتورة بخسارة (الربح الإجمالي ${fmt(journalPreview.grossProfit)}). ` +
+        "سعر البيع أقل من التكلفة — عدّل الأسعار أو عطّل المنع من إعدادات المبيعات."
+      );
+    }
+    return null;
+  };
+
   const handleSaveDraft = async () => {
     setLocalErr(null);
     setMsg(null);
     const v = validateClient();
     if (v) {
       setLocalErr(v);
+      return;
+    }
+    const lossErr = lossBlockMessage();
+    if (lossErr) {
+      setLocalErr(lossErr);
       return;
     }
     setSaving(true);
@@ -1089,6 +1116,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       setLocalErr(v);
       return;
     }
+    const lossErr = lossBlockMessage();
+    if (lossErr) {
+      setLocalErr(lossErr);
+      return;
+    }
     if (!journalPreview.balanced || journalPreview.errors.length) {
       setLocalErr(
         "القيد غير صالح أو غير متوازن في المعاينة. صحّح الأخطاء المعروضة ثم أعد المحاولة."
@@ -1120,10 +1152,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   // Feature 1: التراجع عن الترحيل — حذف قيود الفاتورة وإرجاعها مسودة قابلة للتعديل/الحذف.
   const handleUnpost = async () => {
     if (!draftId) return;
-    if (!window.confirm(
-      "هذا المستند مرحَّل. سيؤدي التراجع عن الترحيل إلى حذف كل قيود اليومية " +
-      "وحركات المخزون الخاصة بهذه الفاتورة وإرجاعها مسودة. متابعة؟"
-    )) return;
+    if (!(await confirm({
+      message:
+        "هذا المستند مرحَّل. سيؤدي التراجع عن الترحيل إلى حذف كل قيود اليومية " +
+        "وحركات المخزون الخاصة بهذه الفاتورة وإرجاعها مسودة. متابعة؟",
+      confirmText: "متابعة",
+    }))) return;
     setLocalErr(null);
     setMsg(null);
     setPosting(true);
@@ -1185,21 +1219,25 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   // T-R4: حارس التغييرات غير المحفوظة — يُستدعى من «إضافة/جديدة» و«إلغاء». بدل
   // التجاهل الصامت للعمل، يسأل المستخدم ويُتيح الحفظ قبل المغادرة (سلوك احترافي).
-  const guardedReset = () => {
+  const guardedReset = async () => {
     const hasContent = lines.some((l) => l.product !== "" && l.product !== -1);
     if (!isPosted && dirtyRef.current && hasContent) {
-      const proceed = window.confirm(
-        "لديك تغييرات غير محفوظة في هذه الفاتورة.\n«موافق» للمتابعة بفاتورة جديدة · «إلغاء» للعودة."
-      );
+      const proceed = await confirm({
+        message: "لديك تغييرات غير محفوظة في هذه الفاتورة. المتابعة بفاتورة جديدة؟",
+        confirmText: "متابعة",
+        cancelText: "عودة",
+        danger: false,
+      });
       if (!proceed) return;
-      const save = window.confirm(
-        "هل تريد حفظ هذه الفاتورة قبل البدء بفاتورة جديدة؟\n«موافق» = حفظ ثم جديدة · «إلغاء» = تجاهل التغييرات."
-      );
+      const save = await confirm({
+        message: "هل تريد حفظ هذه الفاتورة قبل البدء بفاتورة جديدة؟",
+        confirmText: "حفظ ثم جديدة",
+        cancelText: "تجاهل التغييرات",
+        danger: false,
+      });
       if (save) {
-        void (async () => {
-          await handleSaveDraft();
-          resetForm();
-        })();
+        await handleSaveDraft();
+        resetForm();
         return;
       }
     }
@@ -1327,11 +1365,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       (l) => l.key !== key && l.product !== "" && l.product !== -1 && Number(l.product) === Number(productId)
     );
     if (isDuplicate && (salesSettings?.warn_on_duplicate_item ?? true)) {
-      const merge = window.confirm(
-        `الصنف «${pr?.name_ar || productId}» مضاف مسبقاً في الفاتورة.\n\n` +
-        `موافق = دمج الكمية في السطر الموجود\n` +
-        `إلغاء = إضافته كسطر جديد مستقل (سعر مختلف)`
-      );
+      const merge = await confirm({
+        message: `الصنف «${pr?.name_ar || productId}» مضاف مسبقاً في الفاتورة. اختر الإجراء:`,
+        confirmText: "دمج الكمية",
+        cancelText: "سطر جديد مستقل",
+        danger: false,
+      });
       if (merge) {
         // ابحث عن السطر الأصلي الذي يحوي هذا الصنف واجمع الكميات
         setLines((prev) => {
@@ -1679,7 +1718,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   /* task24: خريطة سعر العميل (آخر بيع/عرض سعر) لكامل الكتالوج — تُجلب دفعة واحدة
      عند تغيّر العميل لعرض السعر داخل خيارات المنتقي بلا نقر. */
   const [customerPriceMap, setCustomerPriceMap] = useState<
-    Map<number, { price: string; source: "last_invoice" | "quote" }>
+    Map<number, { price: string; source: "last_invoice" | "quote"; prices?: any[] }>
   >(new Map());
   useEffect(() => {
     if (customerId === "" || !networkOnline) { setCustomerPriceMap(new Map()); return; }
@@ -1687,10 +1726,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     getCustomerPriceList(customerId)
       .then((rows) => {
         if (cancelled) return;
-        const m = new Map<number, { price: string; source: "last_invoice" | "quote" }>();
+        const m = new Map<number, { price: string; source: "last_invoice" | "quote"; prices?: any[] }>();
         for (const r of rows) {
           if (r.price != null && Number(r.price) > 0) {
-            m.set(r.product_id, { price: r.price, source: r.source });
+            m.set(r.product_id, { price: r.price, source: r.source, prices: r.prices });
           }
         }
         setCustomerPriceMap(m);
@@ -1709,22 +1748,28 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       const cp = customerPriceMap.get(p.id);
       let price: string | undefined;
       let priceLabel: string | undefined;
+      let prices: any[] | undefined;
       if (cp) {
         price = formatMoney(Number(cp.price));
         priceLabel = cp.source === "quote" ? "عرض سعر" : "آخر بيع";
+        prices = cp.prices?.map((pr: any) => ({
+          label: pr.label,
+          value: formatMoney(Number(pr.unit_price)),
+          link: pr.document_id ? `/sales/invoices/${pr.document_id}` : undefined,
+        }));
       } else if (p.online_price != null && p.online_price !== "" && Number(p.online_price) > 0) {
         price = formatMoney(Number(p.online_price));
         priceLabel = "افتراضي";
       } else {
         // لا آخر بيع لهذا العميل ولا عرض سعر ولا سعر بيع افتراضي.
-        priceLabel = "السعر غير معرف";
+        priceLabel = "بدون سعر";
       }
       return {
         id: p.id,
         label: formatProductPrimaryName(p),
-        sub: `${p.sku || ""} · رصيد ${Number(p.quantity_on_hand) || 0}`,
         price,
         priceLabel,
+        prices,
       };
     }),
     [products, customerPriceMap],
@@ -1787,9 +1832,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       <div style={{ display: "flex", flexDirection: "column", gap: "2px", alignItems: "center" }}>
         <input
           className={`aseel-input ${belowCost ? "border-red-500 focus:ring-red-500" : ""}`}
-          type="number"
-          min={0}
-          step={0.01}
+          type="text"
+          inputMode="decimal"
           value={row.unit_price}
           disabled={readOnly || isPosted}
           style={{ textAlign: "center", ...(belowCost ? { color: "#ef4444", borderColor: "#ef4444" } : {}) }}
@@ -1949,6 +1993,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       ? [{ key: "back", label: "الفواتير", icon: <ArrowRight />, onClick: onClose } as AseelToolbarAction]
       : []),
     { key: "new", label: "إضافة", icon: <Plus />, onClick: guardedReset },
+    ...(viewMode && !isPosted ? [{
+      key: "edit",
+      label: "تحرير",
+      icon: <Pencil />,
+      onClick: () => setViewMode(false),
+      separatorBefore: true,
+    } as AseelToolbarAction] : []),
     {
       key: "save",
       label: saving ? "...تخزين" : "تخزين",
@@ -2065,9 +2116,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       <button
         type="button"
         className="mr-3 underline font-semibold hover:no-underline"
-        onClick={() => {
+        onClick={async () => {
           if (dirtyRef.current) {
-            const confirmed = window.confirm("لديك تعديلات غير محفوظة حالياً. هل أنت متأكد من استعادة المسودة وفقدان هذه التعديلات؟");
+            const confirmed = await confirm({
+              message: "لديك تعديلات غير محفوظة حالياً. هل أنت متأكد من استعادة المسودة وفقدان هذه التعديلات؟",
+              confirmText: "استعادة",
+              cancelText: "إلغاء",
+              danger: false,
+            });
             if (!confirmed) return;
           }
           hydrateFromLocalDraft(recoverableDraft.data);

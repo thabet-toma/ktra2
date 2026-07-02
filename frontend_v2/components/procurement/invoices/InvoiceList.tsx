@@ -331,6 +331,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             selectable
             selectedKey={selectedKey}
             onSelect={(k) => setSelectedKey(k as string | null)}
+            onRowClick={(r) => onEdit(r)}
             onRowDoubleClick={(r) => onEdit(r)}
           />
         </div>

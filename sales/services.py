@@ -350,6 +350,57 @@ def _build_cogs_journal_line_dicts(
     return rows
 
 
+def invoice_gross_profit(
+    invoice: SalesInvoice,
+    lines: list[SalesInvoiceLine],
+    products_by_id: dict[int, Product],
+) -> Decimal:
+    """الربح الإجمالي التقديري = الإيراد الصافي (بلا ضريبة، بعد خصم الفاتورة) − التكلفة
+    (كمية × متوسط التكلفة، بنفس أساس قيد COGS). سالب ⇒ خسارة.
+
+    مصدر حقيقة واحد لفحص «منع فاتورة الخسارة» في الحفظ (خادمياً عند الترحيل) —
+    يُطابق منطق `invoice_profits` (الإيراد) و`_build_cogs_journal_line_dicts` (التكلفة).
+    """
+    revenue = (
+        Decimal(str(invoice.subtotal_excl_tax or 0))
+        - Decimal(str(invoice.invoice_discount or 0))
+    ).quantize(DEC)
+    cost = Decimal("0")
+    for line in lines:
+        p = products_by_id.get(line.product_id)
+        if p is None or getattr(p, "is_service", False):
+            continue
+        cost += (Decimal(str(line.quantity)) * Decimal(str(p.avg_cost or 0))).quantize(DEC)
+    return (revenue - cost).quantize(DEC)
+
+
+def _guard_loss_invoice(
+    invoice: SalesInvoice,
+    lines: list[SalesInvoiceLine],
+    products_by_id: dict[int, Product],
+) -> None:
+    """يمنع ترحيل فاتورة بيع بخسارة إذا فعّل الإعداد `block_loss_invoices`.
+
+    يقتصر على فواتير البيع (لا المراجيع). يُسجَّل تحذير ويُرفع ValidationError واضح.
+    """
+    kind = invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE
+    if kind != SalesInvoice.INVOICE_KIND_SALE:
+        return
+    ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
+    if not (ss and ss.block_loss_invoices):
+        return
+    profit = invoice_gross_profit(invoice, lines, products_by_id)
+    if profit < 0:
+        logger.warning(
+            "Blocked loss invoice %s (gross profit %s) — block_loss_invoices on.",
+            invoice.invoice_number, profit,
+        )
+        raise ValidationError(
+            f"لا يُسمح بحفظ فاتورة بخسارة (الربح الإجمالي {profit}). "
+            "سعر البيع أقل من التكلفة — عدّل الأسعار أو عطّل المنع من إعدادات المبيعات."
+        )
+
+
 def _partner_open_balance_excluding_invoice(partner: Partner, exclude_invoice_id: int | None) -> Decimal:
     """يجمع المتبقي على الفواتير بالعملة الأساسية (exchange_rate) لتجنّب خلط عملات مختلفة."""
     qs = SalesInvoice.objects.filter(
@@ -682,6 +733,9 @@ def post_sales_invoice(
         products_by_id = _lock_products_for_lines(lines)
         for line in lines:
             line.product = products_by_id[line.product_id]
+
+        # منع فاتورة الخسارة (إعداد اختياري) — بعد قفل الأصناف وتحديث الإجماليات.
+        _guard_loss_invoice(invoice, lines, products_by_id)
 
         journal_lines: list[dict] = []
 
@@ -1495,8 +1549,8 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
     """
     from .models import CustomerProductQuote
 
-    # آخر سطر بيع مرحَّل لهذا العميل لكل منتج (دفعة واحدة).
     last_by_product: dict[int, SalesInvoiceLine] = {}
+    lowest_by_product: dict[int, SalesInvoiceLine] = {}
     lines = (
         SalesInvoiceLine.objects.filter(
             tenant_id=tenant_id,
@@ -1510,6 +1564,8 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
     for ln in lines:
         if ln.product_id not in last_by_product:
             last_by_product[ln.product_id] = ln
+        if ln.product_id not in lowest_by_product or ln.unit_price < lowest_by_product[ln.product_id].unit_price:
+            lowest_by_product[ln.product_id] = ln
 
     quotes = {
         q.product_id: q
@@ -1519,30 +1575,61 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
     rows: list[dict] = []
     products = Product.objects.filter(tenant_id=tenant_id).order_by("name_ar", "sku")
     for p in products:
-        ln = last_by_product.get(p.id)
+        ln_last = last_by_product.get(p.id)
+        ln_lowest = lowest_by_product.get(p.id)
         q = quotes.get(p.id)
         name = p.name_ar or p.name_en or p.sku or f"#{p.id}"
-        if ln is not None:
+        
+        prices = []
+        if ln_last:
+            prices.append({
+                "label": "آخر فاتورة",
+                "unit_price": str(ln_last.unit_price),
+                "source_type": "SALES_INVOICE",
+                "document_id": ln_last.invoice_id,
+                "invoice_number": ln_last.invoice.invoice_number,
+            })
+        if ln_lowest and (not ln_last or ln_lowest.invoice_id != ln_last.invoice_id):
+            prices.append({
+                "label": "أقل سعر",
+                "unit_price": str(ln_lowest.unit_price),
+                "source_type": "SALES_INVOICE",
+                "document_id": ln_lowest.invoice_id,
+                "invoice_number": ln_lowest.invoice.invoice_number,
+            })
+            
+        if not prices and q is not None:
+            prices.append({
+                "label": "عرض السعر",
+                "unit_price": str(q.unit_price),
+                "source_type": "QUOTE",
+                "document_id": q.id,
+                "invoice_number": None,
+            })
+
+        if prices:
             rows.append({
                 "product_id": p.id,
                 "sku": p.sku,
                 "name": name,
-                "price": str(ln.unit_price),
-                "source": "last_invoice",
-                "source_label": "آخر فاتورة",
-                "editable": False,
-                "invoice_number": ln.invoice.invoice_number,
+                "price": prices[0]["unit_price"],
+                "source": "last_invoice" if prices[0]["source_type"] == "SALES_INVOICE" else "quote",
+                "source_label": prices[0]["label"],
+                "editable": prices[0]["source_type"] == "QUOTE",
+                "invoice_number": prices[0]["invoice_number"],
+                "prices": prices,
             })
         else:
             rows.append({
                 "product_id": p.id,
                 "sku": p.sku,
                 "name": name,
-                "price": str(q.unit_price) if q is not None else None,
+                "price": None,
                 "source": "quote",
                 "source_label": "عرض السعر / يدوي",
                 "editable": True,
                 "invoice_number": None,
+                "prices": [],
             })
     return rows
 

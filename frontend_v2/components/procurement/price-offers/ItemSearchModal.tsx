@@ -19,7 +19,7 @@ interface ItemSearchModalProps {
  *  سطر الفاتورة — كان السطر يُعبَّأ بـ name=undefined لأن Product يحمل name_ar. */
 export const productToItem = (p: any): Item => ({
     id: String(p.id),
-    name: p.name_ar || p.name_en || p.sku || `صنف ${p.id ?? ""}`,
+    name: p.display_name || p.name_ar || p.name_en || p.sku || `صنف ${p.id ?? ""}`,
     categoryId: p.category != null ? String(p.category) : "",
     categoryName: p.category_name || "",
     modelNumber: p.sku || undefined,

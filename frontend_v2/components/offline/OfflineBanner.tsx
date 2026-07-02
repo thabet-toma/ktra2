@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { OnlineStatus } from '../../hooks/useOnlineStatus';
 import db from '../../services/offline/db';
+import { recoverConnection } from '../../utils/connectionRecovery';
 
 type Props = {
   status: OnlineStatus;
@@ -18,6 +19,16 @@ function relativeTime(date: Date): string {
 export default function OfflineBanner({ status, onRetry }: Props) {
   const [hasOfflineData, setHasOfflineData] = useState(false);
   const [customMessage, setCustomMessage] = useState('');
+  const [recovering, setRecovering] = useState(false);
+
+  // الخادم غير قابل للوصول بينما نظام التشغيل يرى الشبكة متصلة ⇒ اتصال/كاش/عامل
+  // خدمة عالق في هذا المتصفح (يعمل في التصفّح الخفي فقط). نعرض «إصلاح الاتصال».
+  const serverUnreachable = status.browserOnline;
+
+  const handleRecover = () => {
+    setRecovering(true);
+    void recoverConnection();
+  };
 
   useEffect(() => {
     db.cache_meta.count().then((count) => {
@@ -45,6 +56,8 @@ export default function OfflineBanner({ status, onRetry }: Props) {
       <span>
         {customMessage ? (
           customMessage
+        ) : serverUnreachable ? (
+          '🔴 تعذّر الاتصال بالخادم رغم وجود إنترنت. إن كانت الواجهات تفتح بلا بيانات فغالباً كاش عالق — اضغط «إصلاح الاتصال».'
         ) : (
           `🔴 بدون اتصال — تعرض آخر بيانات محفوظة ${
             status.lastOnline ? relativeTime(status.lastOnline) : ''
@@ -57,6 +70,16 @@ export default function OfflineBanner({ status, onRetry }: Props) {
       >
         أعِد المحاولة
       </button>
+      {serverUnreachable && (
+        <button
+          onClick={handleRecover}
+          disabled={recovering}
+          className="mr-3 underline hover:no-underline font-semibold disabled:opacity-60"
+          title="مسح كاش المتصفح وعامل الخدمة ثم إعادة التحميل — يعالج فتح الواجهات بلا بيانات دون الحاجة للتصفّح الخفي (يبقى تسجيل الدخول)"
+        >
+          {recovering ? 'جارٍ الإصلاح…' : 'إصلاح الاتصال'}
+        </button>
+      )}
     </div>
   );
 }

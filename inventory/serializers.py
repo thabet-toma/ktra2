@@ -46,6 +46,11 @@ class ProductSerializer(serializers.ModelSerializer):
     attachments = serializers.SerializerMethodField()
 
     stock_status = serializers.SerializerMethodField()
+    # تجميع البراندات: مفتاح الصنف الفرعي (للشجرة/الجرد/الجدول) + اسم العرض (الاسم+
+    # البراند بين قوسين) + هل المجموعة صريحة (فيظهر المجلّد حتى لمنتج واحد).
+    group_key = serializers.SerializerMethodField()
+    display_name = serializers.SerializerMethodField()
+    has_group = serializers.SerializerMethodField()
 
     # task14 M2 (DEF-A2): رقم الصنف اختياري — يولَّد خادمياً عند الغياب
     sku = serializers.CharField(max_length=50, required=False, allow_blank=True)
@@ -54,16 +59,29 @@ class ProductSerializer(serializers.ModelSerializer):
         model = Product
         fields = [
             'id', 'tenant', 'sku', 'barcode', 'name_ar', 'name_en',
+            'variant_group', 'brand',
             'category', 'category_name', 'uom_id', 'uom_name',
             'weight_kg', 'volume_cbm', 'hs_code', 'min_stock_level',
             'is_serialized', 'is_service',
             'is_for_sale_online', 'online_price', 'online_description',
             'quantity_on_hand', 'avg_cost',
-            'stock_status',
+            'stock_status', 'group_key', 'display_name', 'has_group',
             'created_at',
             'attachments',
         ]
         read_only_fields = ['id', 'tenant', 'quantity_on_hand', 'avg_cost', 'created_at']
+
+    def get_group_key(self, obj):
+        from .services import product_group_key
+        return product_group_key(obj)
+
+    def get_display_name(self, obj):
+        from .services import product_display_name
+        return product_display_name(obj)
+
+    def get_has_group(self, obj):
+        from .services import product_has_explicit_group
+        return product_has_explicit_group(obj)
 
     def validate(self, attrs):
         # task14 M2 (DEF-A2/A3): الاسم هو الحقل الإلزامي الوحيد — والخطأ يسمّي حقله الحقيقي
@@ -120,8 +138,9 @@ class StockMovementSerializer(serializers.ModelSerializer):
         ]
 
     def get_product_name(self, obj):
-        p = obj.product
-        return p.name_ar or p.name_en or p.sku
+        if not obj.product: return ""
+        from .services import product_display_name
+        return product_display_name(obj.product)
 
 
 # ── Phase 7 (T-I1/T-I2): مستندات المخزون ──────────────────────────────
@@ -135,8 +154,9 @@ class WarehouseTransferLineSerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
     def get_product_name(self, obj):
-        p = obj.product
-        return p.name_ar or p.name_en or p.sku
+        if not obj.product: return ""
+        from .services import product_display_name
+        return product_display_name(obj.product)
 
 
 class WarehouseTransferSerializer(serializers.ModelSerializer):
@@ -191,8 +211,9 @@ class StocktakeLineSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'system_quantity', 'variance']
 
     def get_product_name(self, obj):
-        p = obj.product
-        return p.name_ar or p.name_en or p.sku
+        if not obj.product: return ""
+        from .services import product_display_name
+        return product_display_name(obj.product)
 
 
 class StocktakeSerializer(serializers.ModelSerializer):

@@ -9,11 +9,17 @@ import { inventoryApi } from "../../services/inventoryApi";
 import { AseelDocumentShell, AseelAutocomplete, type AseelToolbarAction } from "../aseel";
 import { ProductCardModal } from "../shared/ProductCardModal";
 import { formatQuantity } from "../../utils/formatNumber";
+import { openInNewTab } from "../../utils/openInNewTab";
+import type { TreeCategory } from "../items/GroupedItemsTable";
 import { clientLogger } from "../../services/logger";
-import { Plus, Send, Trash2, RefreshCw, X, List, Save, Printer, Info } from "lucide-react";
+import { Plus, Send, Trash2, RefreshCw, X, List, Save, Printer, Info, ChevronDown, ChevronLeft } from "lucide-react";
 
 type Wh = { id: number; name: string };
-type Prod = { id: number; sku: string; name_ar?: string; name_en?: string; quantity_on_hand?: string };
+type Prod = {
+  id: number; sku: string; name_ar?: string; name_en?: string; quantity_on_hand?: string;
+  // التصنيف (لتجميع الجرد شجرياً بأي عمق) + اسم العرض (يحمل البراند).
+  category?: number | null; brand?: string | null; display_name?: string | null;
+};
 // sys/variance: لقطة محفوظة تُستخدم فقط عند عرض جرد مُرحَّل (read-only)؛ في المسودة
 // يُحسب الفرق حياً من رصيد النظام الحالي.
 type Line = { product: number | ""; counted_quantity: string; sys?: string; variance?: string; selected?: boolean };
@@ -77,6 +83,11 @@ export const StocktakePage: React.FC = () => {
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
   // بطاقة الصنف (مودال مشترك) — تُفتح بالنقر على زر المعلومات بجانب الصنف.
   const [cardProductId, setCardProductId] = useState<number | null>(null);
+  // تجميع الجرد شجرياً حسب التصنيفات (بأي عمق). المطويّة الافتراض: الكل مفتوح.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = (k: string) =>
+    setCollapsedGroups((s) => { const n = new Set(s); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const [treeCategories, setTreeCategories] = useState<TreeCategory[]>([]);
   // فتح مستند محفوظ: editingId = معرّف الجرد المفتوح (null = إنشاء جديد)؛
   // editingPosted = هل هو مُرحَّل (عرض فقط، لا تعديل).
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -86,14 +97,16 @@ export const StocktakePage: React.FC = () => {
     setLoading(true);
     setErr(null);
     try {
-      const [whs, prods, takes] = await Promise.all([
+      const [whs, prods, takes, cats] = await Promise.all([
         inventoryApi.getWarehouses({ active_only: "true" }) as Promise<Wh[]>,
-        inventoryApi.getProducts() as Promise<Prod[]>,
+        inventoryApi.getAllProducts() as Promise<Prod[]>,
         inventoryApi.getStocktakes() as Promise<StocktakeRow[]>,
+        inventoryApi.getCategories() as Promise<Array<{ id: number; name: string; parent: number | null }>>,
       ]);
       setWarehouses(whs || []);
-      setProducts((Array.isArray(prods) ? prods : []) as Prod[]);
+      setProducts(prods || []);
       setRows(takes || []);
+      setTreeCategories((cats || []).map((c) => ({ id: c.id, name: c.name, parent: c.parent ?? null })));
     } catch (e) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
     } finally {
@@ -135,6 +148,13 @@ export const StocktakePage: React.FC = () => {
     }
   };
 
+  // اسم عرض السطر (يحمل البراند) في جدول الجرد.
+  const lineName = (l: Line): string => {
+    const p = prodById(l.product);
+    if (!p) return "—";
+    return p.display_name || p.name_ar || p.name_en || p.sku;
+  };
+
   // ملخص المراجعة: كم صنفاً عُدّ، كم منها فرقه ≠ 0، وكم أُدرج بلا عدّ بعد.
   const { countedCount, varianceCount, uncountedCount } = useMemo(() => {
     let counted = 0, variance = 0, uncounted = 0;
@@ -173,8 +193,7 @@ export const StocktakePage: React.FC = () => {
   const productOptions = useMemo(
     () => sortedProducts.map((p) => ({
       id: p.id,
-      label: p.name_ar || p.name_en || p.sku,
-      sub: `${p.sku}${p.quantity_on_hand != null ? ` · رصيد ${trimQty(p.quantity_on_hand)}` : ""}`,
+      label: p.display_name || p.name_ar || p.name_en || p.sku || `صنف #${p.id}`,
     })),
     [sortedProducts],
   );
@@ -183,8 +202,7 @@ export const StocktakePage: React.FC = () => {
   const locateOptions = useMemo(
     () => sortedProducts.map((p) => ({
       id: p.id,
-      label: `${p.sku} — ${p.name_ar || p.name_en || ""}`.trim(),
-      sub: p.quantity_on_hand != null ? `رصيد ${trimQty(p.quantity_on_hand)}` : "",
+      label: p.display_name || p.name_ar || p.name_en || p.sku || `صنف #${p.id}`,
     })),
     [sortedProducts],
   );
@@ -335,6 +353,124 @@ export const StocktakePage: React.FC = () => {
     win.document.close();
   };
 
+  // ── تجميع البراندات في جدول الجرد ──────────────────────────────────────
+  // سطر براند مفرد (قابل للعدّ). indent للإزاحة تحت عقدة المقاس.
+  const renderLineRow = (l: Line, i: number, depth: number) => {
+    const p = prodById(l.product);
+    const d = lineVariance(l);
+    const diffColor = d === null || d === 0 ? "var(--aseel-ink-soft)" : d > 0 ? "#15803d" : "#b91c1c";
+    return (
+      <tr key={i}>
+        <td style={{ textAlign: "center" }}>
+          {l.product !== "" && (
+            <input type="checkbox" checked={!!l.selected}
+              onChange={(e) => updateLine(i, { selected: e.target.checked })} title="تحديد للطباعة" />
+          )}
+        </td>
+        <td>
+          {l.product !== "" ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-start", paddingInlineStart: depth * 22 }}>
+              <button type="button" className="text-blue-700 hover:underline text-right"
+                style={{ fontWeight: 600, background: "none", border: "none", padding: 0, cursor: "pointer" }}
+                onClick={() => setCardProductId(Number(l.product))}
+                title={p ? `بطاقة الصنف: ${p.sku} — ${p.name_ar || p.name_en || ""}` : "بطاقة الصنف"}>
+                {lineName(l)}
+              </button>
+              <button className="aseel-iconbtn" onClick={() => setCardProductId(Number(l.product))} title="بطاقة الصنف"><Info className="h-3 w-3" /></button>
+            </div>
+          ) : (
+            <AseelAutocomplete value="" options={productOptions}
+              onPick={(id) => updateLine(i, { product: Number(id) })}
+              onInfo={(id) => setCardProductId(Number(id))}
+              placeholder="اكتب المقاس أو الاسم أو الكود للبحث…" />
+          )}
+        </td>
+        <td style={{ textAlign: "center", color: "var(--aseel-ink-soft)" }}>{lineSys(l)}</td>
+        <td><input type="number" min="0" step="any" className="aseel-input" style={{ width: "100%" }}
+          data-qty-for={l.product} value={l.counted_quantity} placeholder="عدّ…" disabled={editingPosted}
+          onChange={(e) => updateLine(i, { counted_quantity: e.target.value })}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); document.querySelector<HTMLInputElement>("#stocktake-locate input")?.focus(); } }} /></td>
+        <td style={{ textAlign: "center", fontWeight: 700, color: diffColor }}>
+          {d === null ? "—" : d > 0 ? `+${trimNum(d)}` : trimNum(d)}
+        </td>
+        <td style={{ textAlign: "center" }}>
+          {!editingPosted && (<button className="aseel-iconbtn" onClick={() => removeLine(i)} title="حذف"><Trash2 className="h-3 w-3" /></button>)}
+        </td>
+      </tr>
+    );
+  };
+
+  // ── تجميع الجرد شجرياً حسب التصنيفات (بأي عمق) ──────────────────────────
+  const _catById = new Map(treeCategories.map((c) => [c.id, c]));
+  const _childrenOfCat = new Map<number | null, TreeCategory[]>();
+  for (const c of treeCategories) {
+    const p = c.parent ?? null;
+    if (!_childrenOfCat.has(p)) _childrenOfCat.set(p, []);
+    _childrenOfCat.get(p)!.push(c);
+  }
+  const UNCAT = -1;
+  // أسطر الجرد (ذات الصنف) مفهرسة حسب تصنيف الصنف.
+  const _lineIdxByCat = new Map<number, number[]>();
+  lines.forEach((l, i) => {
+    if (l.product === "") return;
+    const p = prodById(l.product);
+    const cid = p && p.category != null && _catById.has(Number(p.category)) ? Number(p.category) : UNCAT;
+    if (!_lineIdxByCat.has(cid)) _lineIdxByCat.set(cid, []);
+    _lineIdxByCat.get(cid)!.push(i);
+  });
+  // كل أسطر التصنيف وأحفاده (recursive) — لمجاميع الأب.
+  const descendantLineIdxs = (catId: number): number[] => {
+    const out = [...(_lineIdxByCat.get(catId) || [])];
+    for (const ch of _childrenOfCat.get(catId) || []) out.push(...descendantLineIdxs(ch.id));
+    return out;
+  };
+
+  // صفّ تصنيف: سهم طيّ + اسم + مجموع رصيد النظام/المعدود/الفرق لكل ما تحته (recursive).
+  const renderCatHeader = (catId: number, name: string, depth: number) => {
+    const key = `c${catId}`;
+    const collapsed = collapsedGroups.has(key);
+    const members = descendantLineIdxs(catId);
+    let sys = 0, cnt = 0, varSum = 0, anyCnt = false;
+    for (const idx of members) {
+      const l = lines[idx];
+      const s = editingPosted ? Number(l.sys ?? 0) : Number(prodById(l.product)?.quantity_on_hand ?? 0);
+      if (Number.isFinite(s)) sys += s;
+      if (String(l.counted_quantity).trim() !== "") { cnt += Number(l.counted_quantity) || 0; anyCnt = true; }
+      const v = lineVariance(l);
+      if (v !== null) varSum += v;
+    }
+    const ids = members.map((idx) => lines[idx].product).filter((x) => x !== "") as number[];
+    const allSel = members.length > 0 && members.every((idx) => lines[idx].selected);
+    const vColor = !anyCnt || varSum === 0 ? "var(--aseel-ink-soft)" : varSum > 0 ? "#15803d" : "#b91c1c";
+    return (
+      <tr key={`cat-${catId}`} style={{ background: depth === 0 ? "var(--aseel-bg-soft,#e7ecf1)" : "var(--aseel-bg-soft,#f1f3f5)" }}>
+        <td style={{ textAlign: "center" }}>
+          <input type="checkbox" checked={allSel} onChange={(e) => {
+            const c = e.target.checked;
+            setLines((ls) => ls.map((l, idx) => (members.includes(idx) ? { ...l, selected: c } : l)));
+          }} title="تحديد كل ما تحت التصنيف للطباعة" />
+        </td>
+        <td>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, paddingInlineStart: depth * 22 }}>
+            <button type="button" className="aseel-iconbtn" onClick={() => toggleGroup(key)} title={collapsed ? "فتح" : "طيّ"}>
+              {collapsed ? <ChevronLeft className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+            <button type="button" className="text-indigo-700 hover:underline"
+              style={{ fontWeight: 700, background: "none", border: "none", padding: 0, cursor: "pointer" }}
+              onClick={() => (ids.length ? openInNewTab(`/product-group?ids=${ids.join(",")}&name=${encodeURIComponent(name)}`) : toggleGroup(key))}
+              title="كرت مجمّع لكل ما تحت التصنيف">
+              {name} <span style={{ color: "var(--aseel-ink-soft)", fontWeight: 400 }}>({ids.length})</span>
+            </button>
+          </div>
+        </td>
+        <td style={{ textAlign: "center", fontWeight: 700 }}>{trimNum(sys)}</td>
+        <td style={{ textAlign: "center", color: "var(--aseel-ink-soft)" }}>{anyCnt ? trimNum(cnt) : "—"}</td>
+        <td style={{ textAlign: "center", fontWeight: 700, color: vColor }}>{!anyCnt ? "—" : varSum > 0 ? `+${trimNum(varSum)}` : trimNum(varSum)}</td>
+        <td></td>
+      </tr>
+    );
+  };
+
   const actions: AseelToolbarAction[] = [
     { key: "new", label: showForm ? "إخفاء النموذج" : "جرد جديد", icon: <Plus />, onClick: () => { if (showForm) setShowForm(false); else { resetForm(); setShowForm(true); } } },
     { key: "refresh", label: "تحديث", icon: <RefreshCw className={loading ? "animate-spin" : ""} />, onClick: () => void load(), separatorBefore: true },
@@ -417,77 +553,33 @@ export const StocktakePage: React.FC = () => {
                   <th style={{ width: 40 }}></th>
                 </tr></thead>
                 <tbody>
-                  {lines.map((l, i) => {
-                    const p = prodById(l.product);
-                    const d = lineVariance(l);
-                    // الفلتر يُخفي ما لا يطابق الوضع المختار؛ وضع «الكل» يُبقي كل الأسطر
-                    // (بما فيها الفارغة للإضافة). الأسطر المقيّدة تُخفي الفارغة تلقائياً.
-                    if (filterMode !== "all" && !matchesFilter(l)) return null;
-                    const diffColor = d === null || d === 0 ? "var(--aseel-ink-soft)" : d > 0 ? "#15803d" : "#b91c1c";
-                    return (
-                      <tr key={i}>
-                        <td style={{ textAlign: "center" }}>
-                          {l.product !== "" && (
-                            <input 
-                              type="checkbox" 
-                              checked={!!l.selected} 
-                              onChange={(e) => updateLine(i, { selected: e.target.checked })} 
-                              title="تحديد للطباعة"
-                            />
-                          )}
-                        </td>
-                        <td>
-                          {l.product !== "" ? (
-                            // الصنف المختار يُعرض كاسم ثابت (غير قابل للتعديل) كي لا يتغيّر
-                            // اسمه أو يُمحى بالخطأ؛ زر المعلومات يفتح بطاقة الصنف.
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "flex-start" }}>
-                              {/* اسم الصنف قابل للنقر — يفتح بطاقة الصنف (كرت الصنف). */}
-                              <button
-                                type="button"
-                                className="text-blue-700 hover:underline text-right"
-                                style={{ fontWeight: 600, background: "none", border: "none", padding: 0, cursor: "pointer" }}
-                                onClick={() => setCardProductId(Number(l.product))}
-                                title={p ? `بطاقة الصنف: ${p.sku} — ${p.name_ar || p.name_en || ""}` : "بطاقة الصنف"}
-                              >
-                                {p ? (p.name_ar || p.name_en || p.sku) : "—"}
-                              </button>
-                              <button className="aseel-iconbtn" onClick={() => setCardProductId(Number(l.product))} title="بطاقة الصنف"><Info className="h-3 w-3" /></button>
-                            </div>
-                          ) : (
-                            <AseelAutocomplete
-                              value=""
-                              options={productOptions}
-                              onPick={(id) => updateLine(i, { product: Number(id) })}
-                              onInfo={(id) => setCardProductId(Number(id))}
-                              placeholder="اكتب المقاس أو الاسم أو الكود للبحث…"
-                            />
-                          )}
-                        </td>
-                        <td style={{ textAlign: "center", color: "var(--aseel-ink-soft)" }}>{lineSys(l)}</td>
-                        <td><input type="number" min="0" step="any" className="aseel-input" style={{ width: "100%" }}
-                          data-qty-for={l.product}
-                          value={l.counted_quantity}
-                          placeholder="عدّ…"
-                          disabled={editingPosted}
-                          onChange={(e) => updateLine(i, { counted_quantity: e.target.value })}
-                          onKeyDown={(e) => {
-                            // بعد كتابة العدد + Enter ⇒ يرجع المؤشّر لمربع البحث للصنف التالي.
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              document.querySelector<HTMLInputElement>("#stocktake-locate input")?.focus();
-                            }
-                          }} /></td>
-                        <td style={{ textAlign: "center", fontWeight: 700, color: diffColor }}>
-                          {d === null ? "—" : d > 0 ? `+${trimNum(d)}` : trimNum(d)}
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          {!editingPosted && (
-                            <button className="aseel-iconbtn" onClick={() => removeLine(i)} title="حذف"><Trash2 className="h-3 w-3" /></button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
+                  {(() => {
+                    // الأوضاع المقيّدة (فلتر): قائمة مسطّحة سريعة للمراجعة.
+                    if (filterMode !== "all") {
+                      return lines.map((l, i) => (matchesFilter(l) ? renderLineRow(l, i, 0) : null));
+                    }
+                    // وضع «الكل»: شجرة التصنيفات بأي عمق — كل تصنيف أب يجمع رصيد كل ما
+                    // تحته (recursive) لحد ما نوصل المنتج+البراند (ورقة). تُخطّى التصنيفات
+                    // الفارغة (بلا أصناف مُدرَجة).
+                    const out: React.ReactNode[] = [];
+                    const walk = (cat: TreeCategory, depth: number) => {
+                      if (descendantLineIdxs(cat.id).length === 0) return;
+                      out.push(renderCatHeader(cat.id, cat.name, depth));
+                      if (collapsedGroups.has(`c${cat.id}`)) return;
+                      for (const ch of _childrenOfCat.get(cat.id) || []) walk(ch, depth + 1);
+                      for (const idx of _lineIdxByCat.get(cat.id) || []) out.push(renderLineRow(lines[idx], idx, depth + 1));
+                    };
+                    for (const root of _childrenOfCat.get(null) || []) walk(root, 0);
+                    // أصناف بلا تصنيف (إن وُجدت).
+                    const uncat = _lineIdxByCat.get(UNCAT) || [];
+                    if (uncat.length) {
+                      out.push(renderCatHeader(UNCAT, "بدون تصنيف", 0));
+                      if (!collapsedGroups.has(`c${UNCAT}`)) for (const idx of uncat) out.push(renderLineRow(lines[idx], idx, 1));
+                    }
+                    // أسطر الإضافة الفارغة (بلا صنف) في الأسفل للإدخال.
+                    lines.forEach((l, i) => { if (l.product === "") out.push(renderLineRow(l, i, 0)); });
+                    return out;
+                  })()}
                 </tbody>
               </table>
               {editingPosted ? (

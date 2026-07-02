@@ -47,6 +47,17 @@ export interface CacheMeta {
   updated_at: string;
 }
 
+/**
+ * كاش عام لقوائم الـ API (قراءة فقط) — يملؤه `apiGetList` عند كل نجاح شبكة،
+ * ويُقرأ عند فشل الشبكة (أوفلاين) لعرض آخر بيانات محفوظة. المفتاح = URL كامل +
+ * المستأجر + الفرع (لمنع تداخل الشركات/الفروع على نفس المسار).
+ */
+export interface ApiListCache {
+  url: string;
+  data: string;
+  updated_at: string;
+}
+
 export interface MutationEntry {
   id?: number;
   status: 'pending' | 'syncing' | 'failed' | 'synced';
@@ -92,6 +103,7 @@ const db = new Dexie('ktra_offline') as Dexie & {
   sync_log: EntityTable<SyncLogEntry, 'id'>;
   id_mappings: EntityTable<IdMapping, 'temp_id'>;
   invoice_drafts: EntityTable<InvoiceDraft, 'draft_id'>;
+  api_list_cache: EntityTable<ApiListCache, 'url'>;
 };
 
 db.version(1).stores({
@@ -108,6 +120,10 @@ db.version(1).stores({
 
 db.version(2).stores({
   invoice_drafts: 'draft_id, tenant_id, updated_at',
+});
+
+db.version(3).stores({
+  api_list_cache: 'url, updated_at',
 });
 
 export default db;
