@@ -19,6 +19,7 @@ import {
 } from "../../services/salesApi";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
 import { useConfirm } from "../../contexts/ConfirmContext";
+import { usePriceVisibility } from "../../contexts/PriceVisibilityContext";
 import { useStaleConfirm } from "../offline/StaleDataConfirm";
 import { DocumentPaymentsTab } from "../shared/DocumentPaymentsTab";
 import { AseelDatePicker } from "../ui/AseelDatePicker";
@@ -29,6 +30,7 @@ import db from "../../services/offline/db";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
 import { formatMoney } from "../../utils/formatNumber";
 import { openInNewTab } from "../../utils/openInNewTab";
+import { clientLogger } from "../../services/logger";
 import { apiPostObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import {
@@ -110,8 +112,10 @@ type DraftLine = {
   /** FEAT-2 edit-protection: مضبوط عندما يحرّر المستخدم سعر السطر يدوياً.
    *  السعر المقترح لا يُدَس على سطر مَلموس عند تغيير العميل. */
   priceTouched?: boolean;
-  /** DEF-005: مصدر السعر المقترح للشارة — آخر فاتورة للعميل أو عرض السعر اليدوي. */
-  priceSource?: "last_invoice" | "quote" | null;
+  /** DEF-005: مصدر السعر المقترح للشارة — آخر فاتورة / عرض كرت الزبون / عرض واجهة العروض. */
+  priceSource?: "last_invoice" | "quote" | "sales_quote" | null;
+  /** رابط فتح مصدر السعر عند النقر (عرض العروض أو تبويب عرض السعر بكرت الزبون). */
+  priceSourceLink?: string | null;
 };
 
 const newLineKey = () => `ln-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -202,6 +206,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   salesSettings,
 }) => {
   const confirm = useConfirm();
+  // الربح الإجمالي يتبع زر العين (الخصوصية): يختفي حين تُخفى الأسعار/الأرباح.
+  const { visible: profitVisible } = usePriceVisibility();
   const [draftId, setDraftId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<boolean>(!!draftToEditId);
   const [invoiceNumber, setInvoiceNumber] = useState<string>("");
@@ -1349,7 +1355,18 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   // DEF-005: ترجمة نوع مصدر السعر من الـ resolver إلى شارة السطر.
   const priceSourceFromResolve = (docType?: string): DraftLine["priceSource"] => {
     if (docType === "SALES_INVOICE") return "last_invoice";
+    if (docType === "SALES_QUOTATION") return "sales_quote";
     if (docType === "CUSTOMER_QUOTE") return "quote";
+    return null;
+  };
+  // رابط فتح مصدر السعر: عرض «واجهة العروض» أو تبويب «عرض السعر» بكرت الزبون.
+  const priceSourceLinkFromResolve = (
+    source?: { document_type?: string; document_id?: number | null },
+  ): string | null => {
+    if (source?.document_type === "SALES_QUOTATION" && source.document_id != null)
+      return `/sales/quotations?open=${source.document_id}`;
+    if (source?.document_type === "CUSTOMER_QUOTE" && customerId !== "")
+      return `/partners/${customerId}?tab=price_list`;
     return null;
   };
 
@@ -1446,13 +1463,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         .then((res) => {
           if (res?.unit_price == null) return;
           const src = priceSourceFromResolve(res.source?.document_type);
+          const link = priceSourceLinkFromResolve(res.source);
           // DEF-003: عرض السعر المقترح بمنزلتين (يبقى قابلاً للتحرير).
           const shown = Number(res.unit_price);
           const priceStr = Number.isNaN(shown) ? String(res.unit_price) : shown.toFixed(2);
           setLines((prev) =>
             prev.map((r) =>
               r.key === key && !r.priceTouched
-                ? { ...r, unit_price: priceStr, priceSource: src }
+                ? { ...r, unit_price: priceStr, priceSource: src, priceSourceLink: link }
                 : r,
             ),
           );
@@ -1489,12 +1507,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             .then((res) => {
               if (cancelled || res?.unit_price == null) return;
               const src = priceSourceFromResolve(res.source?.document_type);
+              const link = priceSourceLinkFromResolve(res.source);
               const shown = Number(res.unit_price);
               const priceStr = Number.isNaN(shown) ? String(res.unit_price) : shown.toFixed(2);
               setLines((cur) =>
                 cur.map((r) =>
                   r.key === l.key && !r.priceTouched
-                    ? { ...r, unit_price: priceStr, priceSource: src }
+                    ? { ...r, unit_price: priceStr, priceSource: src, priceSourceLink: link }
                     : r,
                 ),
               );
@@ -1808,9 +1827,26 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       {row.priceSource === "last_invoice" && (
         <span className="aseel-price-badge aseel-price-badge--last" title="السعر من آخر فاتورة لهذا العميل">من آخر فاتورة</span>
       )}
-      {row.priceSource === "quote" && (
-        <span className="aseel-price-badge aseel-price-badge--quote" title="السعر من عرض السعر اليدوي للعميل">من عرض السعر</span>
-      )}
+      {(row.priceSource === "quote" || row.priceSource === "sales_quote") && (() => {
+        // sales_quote ⇒ عرض «واجهة العروض»؛ quote ⇒ عرض كرت الزبون (رابط احتياطي).
+        const link = row.priceSourceLink
+          ?? (row.priceSource === "quote" && customerId !== "" ? `/partners/${customerId}?tab=price_list` : null);
+        const title = row.priceSource === "sales_quote" ? "فتح عرض السعر في واجهة العروض" : "فتح عرض السعر في كرت الزبون";
+        return link ? (
+          <button
+            type="button"
+            className="aseel-price-badge aseel-price-badge--quote"
+            style={{ cursor: "pointer", textDecoration: "underline" }}
+            title={title}
+            onClick={() => {
+              clientLogger.info("invoice.open_quote", { source: row.priceSource, link });
+              openInNewTab(link);
+            }}
+          >من عرض السعر</button>
+        ) : (
+          <span className="aseel-price-badge aseel-price-badge--quote" title="السعر من عرض السعر">من عرض السعر</span>
+        );
+      })()}
       <button
         type="button"
         className="aseel-ellipsis"
@@ -2736,7 +2772,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               <span>الضريبة المضافة</span>
               <span className="aseel-total-value">{fmt(totals.taxAmount)}</span>
             </div>
-            {journalPreview.revenue > 0 && journalPreview.cogs > 0 && (
+            {profitVisible && journalPreview.revenue > 0 && journalPreview.cogs > 0 && (
               <div className="aseel-total-row">
                 <span>الربح الإجمالي</span>
                 <span

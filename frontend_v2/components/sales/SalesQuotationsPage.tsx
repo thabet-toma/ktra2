@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import {
   FileText,
@@ -24,9 +25,11 @@ import {
   updateQuotation,
   deleteQuotation,
   convertQuotationToInvoice,
+  getCustomerPriceList,
   type SalesQuotationRow,
   type SalesQuotationDetail,
 } from "../../services/salesApi";
+import { clientLogger } from "../../services/logger";
 import { accountingApi } from "../../services/accountingApi";
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -81,8 +84,71 @@ export const SalesQuotationsPage: React.FC = () => {
 
   const [productPickerLineIdx, setProductPickerLineIdx] = useState<number | null>(null);
 
+  // معاينة بنود العرض داخل القائمة (طيّ/فتح) — لتُرى البنود بلا فتح النموذج.
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [expandedLines, setExpandedLines] = useState<
+    Record<number, Array<{ name: string; quantity: string; unit_price: string; line_total: string }>>
+  >({});
+
+  // سعر الزبون من كرته (عرض السعر اليدوي / آخر فاتورة) — يُملأ عند اختيار المنتج.
+  const [customerPriceMap, setCustomerPriceMap] = useState<Map<number, string>>(new Map());
+  useEffect(() => {
+    if (!formCustomer) { setCustomerPriceMap(new Map()); return; }
+    let alive = true;
+    getCustomerPriceList(formCustomer)
+      .then((rows) => {
+        if (!alive) return;
+        const m = new Map<number, string>();
+        for (const r of rows) {
+          if (r.price != null && String(r.price).trim() !== "") m.set(r.product_id, String(r.price));
+        }
+        setCustomerPriceMap(m);
+      })
+      .catch(() => { if (alive) setCustomerPriceMap(new Map()); });
+    return () => { alive = false; };
+  }, [formCustomer]);
+
+  // السعر المقترح لبند العرض: سعر كرت الزبون إن وُجد، وإلا سعر المنتج الافتراضي.
+  const quotePriceFor = useCallback(
+    (productId: number, fallback?: string): string => {
+      const cp = customerPriceMap.get(productId);
+      if (cp != null && cp !== "") {
+        clientLogger.info("quotation.customer_price_applied", { product: productId });
+        return cp;
+      }
+      return fallback || "0";
+    },
+    [customerPriceMap]
+  );
+
   // Aseel Navigation
   const [showPartnerPicker, setShowPartnerPicker] = useState(false);
+
+  // تحميل عرض سعر وفتح نموذجه (يعرض البنود) — مصدر واحد يخدم «تعديل» ورقم العرض
+  // والرابط العميق (?open=) القادم من شارة الفاتورة.
+  const openQuotation = useCallback(async (id: number) => {
+    try {
+      const detail = await getQuotation(id);
+      setSelectedId(detail.id);
+      setFormCustomer(String(detail.customer));
+      setFormDate(detail.quotation_date?.slice(0, 10) || "");
+      setFormValidUntil(detail.valid_until?.slice(0, 10) || "");
+      setFormNotes(detail.notes || "");
+      setFormLines((detail.lines || []).map((l) => ({
+        id: l.id,
+        product_id: String(l.product),
+        product_name: l.product_name || "",
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        discount: l.line_discount || "0",
+        tax_rate: String(l.tax_rate || 0),
+        total: l.line_total,
+      })));
+      setShowForm(true);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "فشل التحميل");
+    }
+  }, []);
 
   const nav = useRecordNavigation<SalesQuotationRow>({
     items: quotations,
@@ -93,30 +159,36 @@ export const SalesQuotationsPage: React.FC = () => {
         resetForm();
         setShowForm(true);
       } else {
-        try {
-          const detail = await getQuotation(Number(id));
-          setSelectedId(detail.id);
-          setFormCustomer(String(detail.customer));
-          setFormDate(detail.quotation_date?.slice(0, 10) || "");
-          setFormValidUntil(detail.valid_until?.slice(0, 10) || "");
-          setFormNotes(detail.notes || "");
-          setFormLines((detail.lines || []).map((l) => ({
-            id: l.id,
-            product_id: String(l.product),
-            product_name: l.product_name || "",
-            quantity: l.quantity,
-            unit_price: l.unit_price,
-            discount: l.line_discount || "0",
-            tax_rate: String(l.tax_rate || 0),
-            total: l.line_total,
-          })));
-          setShowForm(true);
-        } catch (e) {
-          setErr(e instanceof Error ? e.message : "فشل التحميل");
-        }
+        await openQuotation(Number(id));
       }
     },
   });
+
+  // رابط عميق: فتح عرض محدد عند وصول ?open=<id> (من شارة «عرض السعر» بالفاتورة).
+  const location = useLocation();
+  useEffect(() => {
+    const m = location.search.match(/[?&]open=(\d+)/);
+    if (m) void openQuotation(Number(m[1]));
+  }, [location.search, openQuotation]);
+
+  // طيّ/فتح معاينة البنود داخل القائمة — يجلب البنود عند أول فتح ويخزّنها.
+  const toggleExpand = useCallback(async (id: number) => {
+    setExpandedId((cur) => (cur === id ? null : id));
+    if (expandedLines[id]) return;
+    try {
+      const detail = await getQuotation(id);
+      const rows = (detail.lines || []).map((l) => {
+        const pr = products.find((p) => String(p.id) === String(l.product));
+        return {
+          name: l.product_name || (pr ? formatProductPrimaryName(pr) : `#${l.product}`),
+          quantity: l.quantity,
+          unit_price: l.unit_price,
+          line_total: l.line_total,
+        };
+      });
+      setExpandedLines((prev) => ({ ...prev, [id]: rows }));
+    } catch { /* تجاهل — تبقى الرسالة «جارٍ التحميل» ثم تُعاد المحاولة عند الطيّ/الفتح */ }
+  }, [expandedLines, products]);
 
   // M4-T5: Aseel keyboard shortcuts — real handlers.
   useAseelKeymap({
@@ -233,6 +305,12 @@ export const SalesQuotationsPage: React.FC = () => {
       setErr("يرجى اختيار العميل");
       return;
     }
+    // البنود بلا منتج تُستبعد؛ يجب وجود بند واحد صالح على الأقل.
+    const validLines = formLines.filter((l) => l.product_id);
+    if (validLines.length === 0) {
+      setErr("أضف صنفاً واحداً على الأقل للعرض.");
+      return;
+    }
     setSaving(true);
     setErr(null);
     try {
@@ -246,12 +324,13 @@ export const SalesQuotationsPage: React.FC = () => {
         quotation_date: formDate,
         valid_until: formValidUntil || null,
         notes: formNotes,
-        lines: formLines.map((l) => ({
+        lines: validLines.map((l) => ({
           product: Number(l.product_id),
           quantity: l.quantity,
           unit_price: l.unit_price,
           line_discount: l.discount,
-          tax_rate: Number(l.tax_rate),
+          // tax_rate مفتاح أجنبي لنسبة ضريبة — 0/فارغ يعني «بلا ضريبة» ⇒ null (لا 0).
+          tax_rate: l.tax_rate && Number(l.tax_rate) > 0 ? Number(l.tax_rate) : null,
         })),
       };
       if (selectedId) {
@@ -393,8 +472,16 @@ export const SalesQuotationsPage: React.FC = () => {
               {quotations.length === 0 ? (
                 <tr><td colSpan={7} className="p-6 text-center aseel-text-soft">لا توجد عروض</td></tr>
               ) : quotations.map((q) => (
-                <tr key={q.id} className="border-t hover:aseel-bg-panel">
-                  <td className="p-3 font-mono">{q.quotation_number}</td>
+                <React.Fragment key={q.id}>
+                <tr className="border-t hover:aseel-bg-panel">
+                  <td className="p-3 font-mono">
+                    <button
+                      type="button"
+                      onClick={() => toggleExpand(q.id)}
+                      className="aseel-text-accent hover:underline"
+                      title="عرض بنود عرض السعر"
+                    >{expandedId === q.id ? "▾ " : "▸ "}{q.quotation_number}</button>
+                  </td>
                   <td className="p-3">{q.customer_name || "-"}</td>
                   <td className="p-3">{q.quotation_date}</td>
                   <td className="p-3">{q.valid_until || "-"}</td>
@@ -405,13 +492,46 @@ export const SalesQuotationsPage: React.FC = () => {
                     </span>
                   </td>
                   <td className="p-3 flex gap-2">
-                    <button onClick={() => { setSelectedId(q.id); }} className="aseel-text-accent hover:underline text-xs">تعديل</button>
+                    <button onClick={() => openQuotation(q.id)} className="aseel-text-accent hover:underline text-xs">تعديل</button>
                     {q.status !== "converted" && (
                       <button onClick={() => handleConvert(q.id)} className="text-green-600 hover:underline text-xs">تحويل</button>
                     )}
                     <button onClick={() => handleDelete(q.id)} className="aseel-text-state hover:underline text-xs">حذف</button>
                   </td>
                 </tr>
+                {expandedId === q.id && (
+                  <tr className="aseel-bg-panel">
+                    <td colSpan={7} className="p-3">
+                      {!expandedLines[q.id] ? (
+                        <div className="text-xs aseel-text-soft">جارٍ التحميل…</div>
+                      ) : expandedLines[q.id].length === 0 ? (
+                        <div className="text-xs aseel-text-soft">لا بنود في هذا العرض.</div>
+                      ) : (
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="aseel-text-soft">
+                              <th className="text-right p-1">الصنف</th>
+                              <th className="text-right p-1">الكمية</th>
+                              <th className="text-right p-1">السعر</th>
+                              <th className="text-right p-1">الإجمالي</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {expandedLines[q.id].map((ln, i) => (
+                              <tr key={i} className="border-t">
+                                <td className="p-1">{ln.name}</td>
+                                <td className="p-1">{formatQuantity(ln.quantity)}</td>
+                                <td className="p-1">{Number(ln.unit_price).toLocaleString()}</td>
+                                <td className="p-1">{Number(ln.line_total).toLocaleString()}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
               ))}
             </tbody>
           </table>
@@ -512,7 +632,7 @@ export const SalesQuotationsPage: React.FC = () => {
                                 handleLineUpdate(idx, {
                                   product_id: String(id),
                                   product_name: formatProductPrimaryName(prod),
-                                  unit_price: prod.unit_price || "0"
+                                  unit_price: quotePriceFor(Number(id), prod.unit_price)
                                 });
                               } else {
                                 handleLineUpdate(idx, { product_id: String(id) });
@@ -554,11 +674,13 @@ export const SalesQuotationsPage: React.FC = () => {
                 products={products}
                 onSelect={(productId) => {
                   const prod = products.find(p => p.id === productId);
-                  handleLineChange(productPickerLineIdx, "product_id", String(productId));
-                  if (prod) {
-                    handleLineChange(productPickerLineIdx, "product_name", formatProductPrimaryName(prod));
-                    handleLineChange(productPickerLineIdx, "unit_price", prod.unit_price || "0");
-                  }
+                  handleLineUpdate(productPickerLineIdx, {
+                    product_id: String(productId),
+                    ...(prod ? {
+                      product_name: formatProductPrimaryName(prod),
+                      unit_price: quotePriceFor(productId, prod.unit_price),
+                    } : {}),
+                  });
                   setProductPickerLineIdx(null);
                 }}
                 onClose={() => setProductPickerLineIdx(null)}

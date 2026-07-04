@@ -5,6 +5,8 @@ import { resolveTenantId } from '../../utils/tenantContext';
 import { AseelDocumentShell, AseelTab } from '../aseel';
 import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTable';
 import { CustomerPriceListTab } from './CustomerPriceListTab';
+import { StatementDetailsModal } from './StatementDetailsModal';
+import { referenceTypeLabel, clarifyStatementDescription } from '../../utils/entityLinks';
 
 interface PartnerApi {
   id: number;
@@ -61,6 +63,11 @@ export const PartnerProfilePage: React.FC = () => {
     const m = location.pathname.match(/\/partners\/([^/]+)/);
     return m ? m[1] : undefined;
   }, [location.pathname]);
+  // فتح تبويب محدد عبر ?tab= (مثلاً من شارة «عرض السعر» في فاتورة المبيعات).
+  const initialTab = useMemo(() => {
+    const m = location.search.match(/[?&]tab=([^&]+)/);
+    return m ? decodeURIComponent(m[1]) : undefined;
+  }, [location.search]);
   const navigate = useNavigate();
   const [partner, setPartner] = useState<PartnerApi | null>(null);
   const [profile, setProfile] = useState<PartnerProfile | null>(null);
@@ -71,6 +78,9 @@ export const PartnerProfilePage: React.FC = () => {
   const [stmt, setStmt] = useState<{ rows: StatementRow[]; count: number }>({ rows: [], count: 0 });
   const [stmtOffset, setStmtOffset] = useState(0);
   const [stmtLoading, setStmtLoading] = useState(false);
+
+  // تفاصيل حركة كشف الحساب (نافذة)
+  const [detailRow, setDetailRow] = useState<StatementRow | null>(null);
 
   // invoices
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
@@ -132,19 +142,33 @@ export const PartnerProfilePage: React.FC = () => {
     { key: 'date', header: 'التاريخ', render: (r) => r.date || '—' },
     {
       key: 'reference',
-      header: 'المرجع',
+      header: 'الحركة',
       render: (r) => (
         <DocRefCell
           referenceType={r.reference_type}
           referenceId={r.reference_id}
-          label={r.reference_id != null ? `${r.reference_type || ''} #${r.reference_id}` : '—'}
+          label={`${referenceTypeLabel(r.reference_type)}${r.reference_id != null ? ` #${r.reference_id}` : ''}`}
         />
       ),
     },
-    { key: 'description', header: 'البيان', render: (r) => r.description || '—' },
+    { key: 'description', header: 'البيان', render: (r) => clarifyStatementDescription(r.reference_type, r.description) || '—' },
     { key: 'debit', header: 'مدين (Dr)', align: 'right', render: (r) => <span className="aseel-num">{r?.debit ?? ''}</span> },
     { key: 'credit', header: 'دائن (Cr)', align: 'right', render: (r) => <span className="aseel-num">{r?.credit ?? ''}</span> },
     { key: 'running_balance', header: 'الرصيد', align: 'right', render: (r) => <b className="aseel-num">{r?.running_balance ?? ''}</b> },
+    {
+      key: 'details',
+      header: 'تفاصيل',
+      align: 'center',
+      render: (r) => (
+        <button
+          type="button"
+          onClick={() => setDetailRow(r)}
+          className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
+        >
+          تفاصيل
+        </button>
+      ),
+    },
   ];
 
   const invColumns: LedgerColumn<InvoiceRow>[] = [
@@ -247,6 +271,7 @@ export const PartnerProfilePage: React.FC = () => {
                     }, 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                   </td>
                   <td className="px-2 py-2"></td>
+                  <td className="px-2 py-2"></td>
                 </tr>
               ) : undefined
             }
@@ -296,6 +321,7 @@ export const PartnerProfilePage: React.FC = () => {
             : []),
         ]}
         tabs={tabs}
+        initialTab={initialTab}
         status={
           error ? <span className="text-[var(--aseel-danger)]">{error}</span> :
           loading ? <span>جاري التحميل...</span> :
@@ -304,6 +330,7 @@ export const PartnerProfilePage: React.FC = () => {
       >
         <></>
       </AseelDocumentShell>
+      <StatementDetailsModal movement={detailRow} onClose={() => setDetailRow(null)} />
     </div>
   );
 };

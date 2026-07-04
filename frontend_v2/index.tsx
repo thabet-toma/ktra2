@@ -16,6 +16,7 @@ import { CompanyProvider } from './contexts/CompanyContext';
 import { ConfirmProvider } from './contexts/ConfirmContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { AppearanceProvider } from './contexts/AppearanceContext';
 import { PriceVisibilityProvider } from './contexts/PriceVisibilityContext';
 
 import './styles/index.css';
@@ -45,7 +46,7 @@ root.render(
     <BrowserRouter>
       <Routes>
         {/* مسار App للوحة التحكم والتطبيق الداخلي */}
-        <Route path="/*" element={<AuthProvider><CompanyProvider><ThemeProvider><PriceVisibilityProvider><ConfirmProvider><ToastProvider><App /></ToastProvider></ConfirmProvider></PriceVisibilityProvider></ThemeProvider></CompanyProvider></AuthProvider>} />
+        <Route path="/*" element={<AuthProvider><CompanyProvider><ThemeProvider><AppearanceProvider><PriceVisibilityProvider><ConfirmProvider><ToastProvider><App /></ToastProvider></ConfirmProvider></PriceVisibilityProvider></AppearanceProvider></ThemeProvider></CompanyProvider></AuthProvider>} />
 
         {/* الصفحات العامة المنفصلة بالكامل */}
         <Route path="/store" element={<StorePage />} />

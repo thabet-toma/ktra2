@@ -81,12 +81,16 @@ def _validate_stock_lines(tenant, lines_data, stock_on_post: bool) -> None:
 
 class SalesInvoiceLineSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
+    # اسم المنتج (قراءة فقط) لعرض بنود الفاتورة في «تفاصيل الحركة» بكشف الحساب —
+    # يتبع Product.__str__ (name_ar ← name_en ← sku)، فلا يتكرّر منطق التسمية.
+    product_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = SalesInvoiceLine
         fields = [
             "id",
             "product",
+            "product_name",
             "quantity",
             "unit_price",
             "line_discount",
@@ -101,6 +105,9 @@ class SalesInvoiceLineSerializer(serializers.ModelSerializer):
             "line_tax_percent",
         ]
         read_only_fields = ["line_total_excl_tax", "line_tax_amount"]
+
+    def get_product_name(self, obj):
+        return str(obj.product) if obj.product_id else None
 
 
 class SalesInvoiceListSerializer(serializers.ModelSerializer):
@@ -517,12 +524,15 @@ class DeliveryOrderSerializer(serializers.ModelSerializer):
 
 class SalesQuotationLineSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
+    # اسم المنتج (قراءة فقط) لعرض بنود عرض السعر بوضوح — يتبع Product.__str__.
+    product_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = SalesQuotationLine
         fields = [
             "id",
             "product",
+            "product_name",
             "quantity",
             "unit_price",
             "line_discount",
@@ -530,6 +540,9 @@ class SalesQuotationLineSerializer(serializers.ModelSerializer):
             "line_total",
         ]
         read_only_fields = ["line_total"]
+
+    def get_product_name(self, obj):
+        return str(obj.product) if obj.product_id else None
 
 
 class SalesQuotationSerializer(serializers.ModelSerializer):
@@ -541,8 +554,10 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
     customer = serializers.PrimaryKeyRelatedField(
         queryset=Partner.objects.all(),
     )
+    # رقم العرض يُولَّد خادمياً، والعملة تُفترَض الأساسية — فالواجهة لا تُدخلهما.
+    quotation_number = serializers.CharField(required=False, allow_blank=True)
     currency = serializers.PrimaryKeyRelatedField(
-        queryset=Currency.objects.all(),
+        queryset=Currency.objects.all(), required=False, allow_null=True,
     )
 
     class Meta:
@@ -583,6 +598,18 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         lines_data = validated_data.pop("lines")
         tenant = validated_data["tenant"]
+        # رقم العرض يُولَّد خادمياً إن لم تُرسله الواجهة (تسلسل مستقل للعروض).
+        if not validated_data.get("quotation_number"):
+            from .services import next_quotation_number
+            validated_data["quotation_number"] = next_quotation_number(tenant.TenantID)
+        # العملة تُفترَض الأساسية عند غيابها (لا منتقي عملة في شاشة العروض).
+        if not validated_data.get("currency"):
+            base = Currency.objects.filter(IsBaseCurrency=True).first()
+            if not base:
+                raise serializers.ValidationError(
+                    {"currency": "لا توجد عملة أساسية معرّفة. عيّن عملة أساسية أو اختر عملة."}
+                )
+            validated_data["currency"] = base
         subtotal = Decimal("0")
         for ln in lines_data:
             qty = Decimal(str(ln.get("quantity", 0)))
@@ -598,7 +625,26 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
         validated_data["grand_total"] = grand_total
         quotation = SalesQuotation.objects.create(**validated_data)
         for ln in lines_data:
-            SalesQuotationLine.objects.create(quotation=quotation, **ln)
+            SalesQuotationLine.objects.create(quotation=quotation, tenant=tenant, **ln)
+        # ربط واجهتَي «عرض السعر»: إن لم يكن للمنتج عرض سعر بكرت الزبون نملأه من هذا
+        # العرض (بلا كتابة فوق قيمة موجودة) — فيظهر السعر في خيارات فاتورة المبيعات
+        # وكرت الزبون. تُعيد استخدام نفس مخزن CustomerProductQuote (مصدر واحد، DRY).
+        from .models import CustomerProductQuote
+        for ln in lines_data:
+            prod = ln.get("product")
+            raw = ln.get("unit_price")
+            if not prod or raw in (None, ""):
+                continue
+            try:
+                price_dec = Decimal(str(raw))
+            except (TypeError, ValueError):
+                continue
+            if price_dec <= 0:
+                continue
+            CustomerProductQuote.objects.get_or_create(
+                tenant=tenant, customer=quotation.customer, product=prod,
+                defaults={"unit_price": price_dec},
+            )
         return quotation
 
 

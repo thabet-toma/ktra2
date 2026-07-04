@@ -146,6 +146,23 @@ export const departmentsService = {
     return id;
   },
 
+  /**
+   * حفظ قسم بمعرّفه **الثابت** (upsert idempotent). الكتابة على معرّف وثيقة ثابت
+   * تعني أن إعادة الحفظ/الزرع تُحدّث نفس الصف بدل إلحاق نسخة بمعرّف عشوائي جديد —
+   * وهو مصدر عيب «تكرار البطاقات». يُمرَّر `createdAt` للحفاظ على ترتيب العرض عند الزرع.
+   */
+  saveDepartment: async (dept: Department) => {
+    const id = dept.id;
+    if (!id) throw new Error("saveDepartment: معرّف القسم مطلوب");
+    const ref = doc(collection(db, "departments"), id);
+    await setDoc(ref, {
+      ...dept,
+      id,
+      createdAt: dept.createdAt || new Date().toISOString(),
+    });
+    return id;
+  },
+
   updateDepartment: async (id: string, updates: Partial<Department>) => {
     const ref = doc(db, "departments", id);
     await updateDoc(ref, updates as any);

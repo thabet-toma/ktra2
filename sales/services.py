@@ -1225,6 +1225,13 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
     ar = _resolve_ar_account_for_partner(payment.partner)
 
     with transaction.atomic():
+        # T-SPLIT: قفل صفّ الدفعة وإعادة فحص الترحيل — إذ نُنشئ قيداً لكل فاتورة
+        # بـ idempotent=False (نفس reference_id)، فلا يحمينا فحص post_journal من
+        # ترحيل مزدوج متزامن؛ القفل هنا يُسلسِل الطلبات ويمنع تكرار القيود.
+        payment = CustomerPayment.objects.select_for_update().get(pk=payment.pk)
+        if payment.is_posted:
+            raise ValidationError("الدفعة مرحّلة مسبقاً.")
+
         # قفل الفواتير (select_for_update) ومادّتها فعلياً في dict لمنع
         # سباق lost-update على amount_paid. لا بد من تقييم الـ queryset
         # (التكرار) حتى يصدر SELECT ... FOR UPDATE فعلياً.
@@ -1264,102 +1271,114 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
         total_alloc_in_inv_curr = sum(
             (amt for _alloc, amt, _rate in alloc_conversions), Decimal("0")
         )
-        forex_diff = Decimal("0")
-        forex_acc = None
-
-        # P-H-8: per-allocation FX. The previous implementation took
-        # alloc_conversions[0][0].invoice.currency_id as "the" source
-        # currency and converted the SUM of all allocations through it.
-        # That sum is meaningless when the payment covers invoices in
-        # mixed currencies (e.g. EUR invoice + ILS invoice with a USD
-        # payment): the EUR and ILS amounts get added before either is
-        # converted. The fix is to convert each allocation separately
-        # from its own invoice currency to the payment currency and
-        # accumulate the result.
-        if payment_currency_id and alloc_conversions:
-            total_in_pay_curr = Decimal("0")
-            any_mismatch = False
-            for alloc, amount_in_inv_curr, _rate in alloc_conversions:
-                inv_curr_id = alloc.invoice.currency_id
-                if inv_curr_id == payment_currency_id:
-                    total_in_pay_curr += amount_in_inv_curr
-                else:
-                    any_mismatch = True
-                    converted, _ = convert_amount(
-                        amount=amount_in_inv_curr,
-                        from_currency_id=inv_curr_id,
-                        to_currency_id=payment_currency_id,
-                        tenant_id=payment.tenant_id,
-                        effective_date=payment.payment_date,
-                    )
-                    total_in_pay_curr += converted
-            if any_mismatch:
-                forex_diff = (payment.amount - total_in_pay_curr).quantize(DEC)
-                if abs(forex_diff) > DEC:
-                    forex_acc = resolve_forex_account(payment.tenant_id)
-                    if not forex_acc:
-                        raise ValidationError(
-                            "فرق عملة مكتشف لكن لا يوجد حساب فروقات عملة. "
-                            "أنشئ حساباً باسم 'فرق عمل' من نوع Expense أو Revenue."
-                        )
-
-        # forex_diff > 0 → ربح (دفعنا أكثر من قيمة الفاتورة بالعملة المحوّلة)
-        # forex_diff < 0 → خسارة
-        ar_credit = (payment.amount - forex_diff).quantize(DEC)
-
-        lines_data: list[dict] = [
-            {
-                # T-CASH2: سطر الصندوق/البنك ليس جزءاً من ذمم العميل — لا يُوسَم
-                # بالشريك، وإلا تضخّم رصيد كشف الحساب (مدين الصندوق يُحسب على العميل
-                # فيبقى «مديناً» رغم تحصيله). الوسم بالشريك يقتصر على سطر الذمم.
-                "account": payment.cash_or_bank_account_id,
-                "partner": None,
-                "debit": payment.amount,
-                "credit": Decimal("0"),
-                "description": f"تحصيل عميل — دفعة {payment.id}",
-            },
-            {
-                "account": ar.id,
-                "partner": payment.partner_id,
-                "debit": Decimal("0"),
-                "credit": ar_credit,
-                "description": f"تسديد ذمم — دفعة {payment.id}",
-            },
-        ]
-
-        if forex_acc and abs(forex_diff) > DEC:
-            if forex_diff > 0:
-                # ربح صرف: دائن في حساب فروقات العملة يوازن فرق الذمم
-                lines_data.append({
-                    "account": forex_acc.id,
-                    "partner": None,
-                    "debit": Decimal("0"),
-                    "credit": forex_diff,
-                    "description": f"ربح فروق عملة — دفعة {payment.id}",
-                })
+        # T-SPLIT: قيد مستقل لكل فاتورة. سند القبض الواحد يُنتج قيداً منفصلاً لكل
+        # فاتورة سُدِّدت (Dr صندوق / Cr ذمم العميل [+ فرق عملة إن لزم]) فتظهر كل
+        # فاتورة كحركة/قيد مستقل في كشف الحساب ودفتر اليومية. كل القيود بنفس
+        # reference_type/reference_id فيُصفّرها التراجع (unpost_document) دفعةً واحدة.
+        # لكل فاتورة: cash = ما دُفع فعلاً بعملة الدفعة (مجموعه = مبلغ الدفعة)، و
+        # ar = ما يُسدَّد من الذمم (قيمة الفاتورة محوّلة لعملة الدفعة)؛ فرقهما = فرق عملة.
+        cash_by_invoice: dict[int, Decimal] = {}
+        ar_by_invoice: dict[int, Decimal] = {}
+        invoice_order: list[int] = []
+        for alloc, amount_in_inv_curr, _rate in alloc_conversions:
+            inv_curr_id = alloc.invoice.currency_id
+            if payment_currency_id and inv_curr_id and inv_curr_id != payment_currency_id:
+                # P-H-8: كل توزيع يُحوَّل من عملة فاتورته إلى عملة الدفعة على حدة.
+                ar_amt, _ = convert_amount(
+                    amount=amount_in_inv_curr,
+                    from_currency_id=inv_curr_id,
+                    to_currency_id=payment_currency_id,
+                    tenant_id=payment.tenant_id,
+                    effective_date=payment.payment_date,
+                )
             else:
-                # خسارة صرف: مدين في حساب فروقات العملة + الذمم دائن بأكثر
-                lines_data.append({
-                    "account": forex_acc.id,
+                ar_amt = Decimal(str(alloc.amount))  # نفس العملة — لا فرق صرف
+            if alloc.invoice_id not in cash_by_invoice:
+                invoice_order.append(alloc.invoice_id)
+                cash_by_invoice[alloc.invoice_id] = Decimal("0")
+                ar_by_invoice[alloc.invoice_id] = Decimal("0")
+            cash_by_invoice[alloc.invoice_id] += Decimal(str(alloc.amount))
+            ar_by_invoice[alloc.invoice_id] += ar_amt
+
+        # حساب فروقات العملة يُطلب مرّة واحدة إن اختلف الصندوق عن تسديد الذمم لأي فاتورة.
+        forex_acc = None
+        if any(
+            abs(cash_by_invoice[i] - ar_by_invoice[i]).quantize(DEC) > DEC
+            for i in invoice_order
+        ):
+            forex_acc = resolve_forex_account(payment.tenant_id)
+            if not forex_acc:
+                raise ValidationError(
+                    "فرق عملة مكتشف لكن لا يوجد حساب فروقات عملة. "
+                    "أنشئ حساباً باسم 'فرق عمل' من نوع Expense أو Revenue."
+                )
+
+        journals = []
+        for inv_id in invoice_order:
+            inv = locked_invoices[inv_id]
+            cash_amt = cash_by_invoice[inv_id].quantize(DEC)
+            ar_amt = ar_by_invoice[inv_id].quantize(DEC)
+            forex_diff = (cash_amt - ar_amt).quantize(DEC)  # >0 ربح، <0 خسارة
+            inv_lines: list[dict] = [
+                {
+                    # T-CASH2: سطر الصندوق لا يَحمل الشريك (لا يُحسب على ذمم العميل).
+                    "account": payment.cash_or_bank_account_id,
                     "partner": None,
-                    "debit": abs(forex_diff),
+                    "debit": cash_amt,
                     "credit": Decimal("0"),
-                    "description": f"خسارة فروق عملة — دفعة {payment.id}",
+                    "description": f"تحصيل عميل — فاتورة {inv.invoice_number}",
+                },
+            ]
+            if forex_acc and abs(forex_diff) > DEC:
+                # الذمم تُسدَّد بقيمة الفاتورة المحوّلة، والفرق لحساب فروقات العملة.
+                inv_lines.append({
+                    "account": ar.id,
+                    "partner": payment.partner_id,
+                    "debit": Decimal("0"),
+                    "credit": ar_amt,
+                    "description": f"تسديد ذمم — فاتورة {inv.invoice_number}",
                 })
+                if forex_diff > 0:
+                    inv_lines.append({
+                        "account": forex_acc.id, "partner": None,
+                        "debit": Decimal("0"), "credit": forex_diff,
+                        "description": f"ربح فروق عملة — فاتورة {inv.invoice_number}",
+                    })
+                else:
+                    inv_lines.append({
+                        "account": forex_acc.id, "partner": None,
+                        "debit": abs(forex_diff), "credit": Decimal("0"),
+                        "description": f"خسارة فروق عملة — فاتورة {inv.invoice_number}",
+                    })
+            else:
+                # نفس العملة (الشائع) — الذمم تُسدَّد بمبلغ الصندوق تماماً.
+                inv_lines.append({
+                    "account": ar.id,
+                    "partner": payment.partner_id,
+                    "debit": Decimal("0"),
+                    "credit": cash_amt,
+                    "description": f"تسديد ذمم — فاتورة {inv.invoice_number}",
+                })
+            jh = post_journal(
+                tenant_id=payment.tenant_id,
+                transaction_date=payment.payment_date,
+                reference_type="CUSTOMER_PAYMENT",
+                reference_id=payment.id,
+                description=(
+                    (payment.notes or f"تحصيل عميل {payment.partner.name}")
+                    + f" — فاتورة {inv.invoice_number}"
+                )[:500],
+                lines_data=inv_lines,
+                currency=payment.currency,
+                exchange_rate=payment.exchange_rate,
+                user=user,
+                idempotent=False,  # قيد مستقل لكل فاتورة رغم وحدة reference_id
+            )
+            journals.append(jh)
 
-        jh = post_journal(
-            tenant_id=payment.tenant_id,
-            transaction_date=payment.payment_date,
-            reference_type="CUSTOMER_PAYMENT",
-            reference_id=payment.id,
-            description=(payment.notes or f"تحصيل عميل {payment.partner.name}")[:500],
-            lines_data=lines_data,
-            currency=payment.currency,
-            exchange_rate=payment.exchange_rate,
-            user=user,
-        )
-
-        payment.journal = jh
+        # payment.journal حقل مفرد — نخزّن أول قيد للمرجعية؛ التراجع يعتمد
+        # reference_id فيشمل كل القيود. (حارس: بلا توزيعات لا قيد.)
+        payment.journal = journals[0] if journals else None
         payment.is_posted = True
         payment.save(update_fields=["journal", "is_posted"])
 
@@ -1572,12 +1591,28 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
         for q in CustomerProductQuote.objects.filter(tenant_id=tenant_id, customer_id=customer_id)
     }
 
+    # عرض سعر «واجهة العروض» (SalesQuotation) — أحدث سطر لكل منتج لهذا العميل. يظهر
+    # في القائمة (وخيارات الفاتورة) حتى للعروض القديمة التي لم تُعبّئ كرت الزبون.
+    from .models import SalesQuotationLine
+
+    sq_by_product: dict[int, SalesQuotationLine] = {}
+    for sl in (
+        SalesQuotationLine.objects.filter(
+            tenant_id=tenant_id, quotation__customer_id=customer_id,
+        )
+        .select_related("quotation")
+        .order_by("product_id", "-quotation__quotation_date", "-quotation_id", "-id")
+    ):
+        if sl.product_id not in sq_by_product:
+            sq_by_product[sl.product_id] = sl
+
     rows: list[dict] = []
     products = Product.objects.filter(tenant_id=tenant_id).order_by("name_ar", "sku")
     for p in products:
         ln_last = last_by_product.get(p.id)
         ln_lowest = lowest_by_product.get(p.id)
         q = quotes.get(p.id)
+        sq = sq_by_product.get(p.id)
         name = p.name_ar or p.name_en or p.sku or f"#{p.id}"
         
         prices = []
@@ -1598,6 +1633,14 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
                 "invoice_number": ln_lowest.invoice.invoice_number,
             })
             
+        if not prices and sq is not None and Decimal(str(sq.unit_price)) > 0:
+            prices.append({
+                "label": "عرض السعر",
+                "unit_price": str(sq.unit_price),
+                "source_type": "QUOTE",
+                "document_id": None,  # عرض (لا فاتورة) — نتفادى رابط فاتورة خاطئ
+                "invoice_number": sq.quotation.quotation_number,
+            })
         if not prices and q is not None:
             prices.append({
                 "label": "عرض السعر",
@@ -1731,6 +1774,15 @@ def next_invoice_number(tenant_id: int, book_number: int = 0, branch=None) -> st
     seq = next_document_number(
         tenant_id, 'sales_invoice', book_number=book_number, branch_id=branch_id)
     return f"{_invoice_number_prefix(tenant_id, book_number, branch)}{seq}"
+
+
+def next_quotation_number(tenant_id: int, book_number: int = 0) -> str:
+    """رقم عرض السعر التالي — thin wrapper حول next_document_number (تسلسل مستقل
+    لعروض الأسعار). الرقم يُولَّد خادمياً (الواجهة لا تُدخله)."""
+    from accounting.services import next_document_number
+
+    seq = next_document_number(tenant_id, 'sales_quotation', book_number=book_number)
+    return f"QUO-{seq}"
 
 
 def preview_next_invoice_number(tenant_id: int, book_number: int = 0, branch=None) -> str:

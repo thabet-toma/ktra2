@@ -54,6 +54,7 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
   lines: {
     id: number;
     product: number;
+    product_name?: string | null;
     quantity: string;
     unit_price: string;
     line_discount: string;

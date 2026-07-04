@@ -41,31 +41,51 @@ export const Contact: React.FC<{ currentUser?: any }> = ({ currentUser }) => {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingDept) return;
-    
+
     try {
       const existingDeps = await departmentsService.getDepartments();
       if (existingDeps.length === 0) {
-        // Seed first
-        for (const dept of defaultDepartments) {
-          if (dept.id === editingDept.id) {
-            await departmentsService.addDepartment(editingDept);
-          } else {
-            await departmentsService.addDepartment(dept as any);
-          }
+        // أول حفظ: نثبّت مجموعة الأقسام الافتراضية مرة واحدة (upsert بمعرّفات ثابتة —
+        // فلا تكرار حتى لو تكرّر النداء)، مع تطبيق التعديل الحالي على بطاقته. الترتيب
+        // يُحفظ عبر createdAt متدرّج. (سابقاً كان addDepartment يولّد معرّفاً عشوائياً
+        // في كل مرة ⇒ تُلحق نسخة كاملة من القائمة في كل حفظ = عيب تكرار البطاقات.)
+        for (let i = 0; i < defaultDepartments.length; i++) {
+          const dept = defaultDepartments[i] as Department;
+          const base = dept.id === editingDept.id ? editingDept : dept;
+          await departmentsService.saveDepartment({
+            ...base,
+            createdAt: new Date(Date.now() + i).toISOString(),
+          });
         }
       } else {
-        // Update existing
-        const exists = existingDeps.find(d => d.id === editingDept.id);
-        if (exists) {
-          await departmentsService.updateDepartment(editingDept.id, editingDept);
-        } else {
-          await departmentsService.addDepartment(editingDept);
-        }
+        // تحديث القسم المُعدَّل فقط بمعرّفه الثابت (upsert — لا نسخة جديدة).
+        await departmentsService.saveDepartment(editingDept);
       }
       setEditingDept(null);
     } catch (err) {
       console.error(err);
       alert('حدث خطأ أثناء الحفظ');
+    }
+  };
+
+  // تنظيف التكرارات القائمة: يحذف كل وثائق الأقسام ثم يعيد زرع المجموعة الافتراضية
+  // بمعرّفات ثابتة. للمدير فقط — إجراء صريح (لا يعمل تلقائياً) لتفادي أي حذف غير مقصود.
+  const handleResetDepartments = async () => {
+    if (!window.confirm('سيُعاد ضبط الأقسام للوضع الافتراضي وتُحذف أي بطاقات مكرّرة. متابعة؟')) return;
+    try {
+      const existingDeps = await departmentsService.getDepartments();
+      for (const dept of existingDeps) {
+        await departmentsService.deleteDepartment(dept.id);
+      }
+      for (let i = 0; i < defaultDepartments.length; i++) {
+        await departmentsService.saveDepartment({
+          ...(defaultDepartments[i] as Department),
+          createdAt: new Date(Date.now() + i).toISOString(),
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      alert('حدث خطأ أثناء إعادة التعيين');
     }
   };
   return (
@@ -95,9 +115,21 @@ export const Contact: React.FC<{ currentUser?: any }> = ({ currentUser }) => {
           </div>
         ) : (
           <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-5 mb-6 border border-slate-100 dark:border-slate-700">
-            <h2 className="text-xl font-bold text-slate-800 dark:text-white mb-4 text-center">
-              أقسام الشركة
-            </h2>
+            <div className="flex items-center justify-center relative mb-4">
+              <h2 className="text-xl font-bold text-slate-800 dark:text-white text-center">
+                أقسام الشركة
+              </h2>
+              {isManager && (
+                <button
+                  type="button"
+                  onClick={handleResetDepartments}
+                  className="absolute left-0 text-xs px-3 py-1.5 rounded-lg text-slate-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-slate-700 transition-colors"
+                  title="حذف البطاقات المكرّرة وإعادة الأقسام للوضع الافتراضي"
+                >
+                  إعادة تعيين الأقسام
+                </button>
+              )}
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {departments.map((dept) => (
                 <DepartmentCard 

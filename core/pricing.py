@@ -373,6 +373,46 @@ def resolve_sales_price(
         )
         return result
 
+    # عرض سعر «واجهة العروض» (SalesQuotation) — يُستخدم حين لم يشترِ العميل المنتج بعد.
+    # أولوية أعلى من عرض كرت الزبون، وأقل من آخر بيع فعلي. يُعاد رقم/معرّف العرض للربط
+    # (النقر على الشارة في الفاتورة يفتح العرض في واجهة العروض).
+    if customer_id:
+        from sales.models import SalesQuotationLine
+
+        qline = (
+            SalesQuotationLine.objects.filter(
+                tenant_id=tenant_id,
+                product_id=product_id,
+                quotation__customer_id=customer_id,
+            )
+            .select_related("quotation")
+            .order_by("-quotation__quotation_date", "-quotation_id", "-id")
+            .first()
+        )
+        if qline is not None and _dec(qline.unit_price) > 0:
+            price = _convert_currency(
+                _dec(qline.unit_price), source_rate=Decimal("1"), target_rate=target_rate
+            )
+            price = _convert_tax_basis(
+                price, source_inclusive=False, target_inclusive=bool(target_tax_inclusive),
+                tax_percent=_ZERO,
+            )
+            result = _resolved(
+                price,
+                strategy_requested=PriceStrategy.LAST_SALE_TO_CUSTOMER,
+                strategy_used=PriceStrategy.DEFAULT,
+                source={
+                    "document_type": "SALES_QUOTATION",
+                    "document_id": qline.quotation_id,
+                    "document_number": qline.quotation.quotation_number,
+                },
+            )
+            logger.info(
+                "price_resolve sales tenant=%s product=%s customer=%s fallback=quotation -> %s",
+                tenant_id, product_id, customer_id, result["unit_price"],
+            )
+            return result
+
     # DEF-005 fallback #1: the customer's manual quote ("عرض السعر") — used only
     # when the customer has NO posted sale of this product (last-sale always wins
     # above). Sales-only, no ledger impact. Stored in base currency.

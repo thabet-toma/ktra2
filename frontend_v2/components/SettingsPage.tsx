@@ -10,6 +10,8 @@ import {
     getQuickShortcuts,
     setQuickShortcuts,
 } from '../utils/quickShortcuts';
+import { usePriceVisibility } from '../contexts/PriceVisibilityContext';
+import { useAppearance, FONT_SCALE_OPTIONS, FONT_FAMILY_OPTIONS } from '../contexts/AppearanceContext';
 
 interface SettingsPageProps {
     user: User;
@@ -30,6 +32,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     const [loadingPassword, setLoadingPassword] = useState(false);
     // task16 D14: اختصارات الوصول السريع المختارة
     const [quickShortcuts, setQuickShortcutsState] = useState<AppView[]>(() => getQuickShortcuts());
+    // خصوصية عرض الأسعار/الأرباح (زر العين) — مصدر واحد عالمي في PriceVisibilityContext.
+    const { showToggle, setShowToggle, defaultVisible, setDefaultVisible } = usePriceVisibility();
+    // المظهر — حجم الخط ونوعه (تفضيل عام محلي في AppearanceContext).
+    const { fontScale, setFontScale, fontFamily, setFontFamily } = useAppearance();
 
     const toggleShortcut = (view: AppView) => {
         setQuickShortcutsState((prev) => {
@@ -215,6 +221,69 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
                             {s.label}
                         </label>
                     ))}
+                </div>
+            </div>
+
+            {/* المظهر — حجم الخط ونوعه */}
+            <div style={sectionStyle}>
+                <div style={sectionTitleStyle}>المظهر — الخط</div>
+                <p style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)', marginBottom: 12 }}>
+                    تحكّم بحجم الخط ونوعه في كامل الواجهة. يُطبَّق فوراً ويُحفظ لهذا المتصفح.
+                </p>
+                <div style={gridStyle}>
+                    <div style={fieldStyle}>
+                        <label style={labelStyle}>حجم الخط</label>
+                        <select
+                            className="aseel-input"
+                            value={fontScale}
+                            onChange={e => setFontScale(e.target.value as any)}
+                        >
+                            {FONT_SCALE_OPTIONS.map(o => (
+                                <option key={o.id} value={o.id}>{o.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div style={fieldStyle}>
+                        <label style={labelStyle}>نوع الخط</label>
+                        <select
+                            className="aseel-input"
+                            value={fontFamily}
+                            onChange={e => setFontFamily(e.target.value as any)}
+                        >
+                            {FONT_FAMILY_OPTIONS.map(o => (
+                                <option key={o.id} value={o.id}>{o.label}</option>
+                            ))}
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            {/* خصوصية عرض الأسعار والأرباح (زر العين) */}
+            <div style={sectionStyle}>
+                <div style={sectionTitleStyle}>خصوصية الأسعار والأرباح (زر العين)</div>
+                <p style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)', marginBottom: 12 }}>
+                    زر العين في الشريط العلوي يُظهر/يُخفي أسعار القوائم والربح الإجمالي في الفاتورة —
+                    للخصوصية حين يجلس الزبون أمام الشاشة.
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)' }}>
+                        <input
+                            type="checkbox"
+                            checked={showToggle}
+                            onChange={(e) => setShowToggle(e.target.checked)}
+                        />
+                        إظهار زر العين في الشريط العلوي (لإظهار/إخفاء الأسعار والأرباح)
+                    </label>
+                    {!showToggle && (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink)', paddingInlineStart: 24 }}>
+                            <input
+                                type="checkbox"
+                                checked={defaultVisible}
+                                onChange={(e) => setDefaultVisible(e.target.checked)}
+                            />
+                            إظهار الأرباح والتكاليف في الفاتورة افتراضياً (بما أن زر العين مخفي)
+                        </label>
+                    )}
                 </div>
             </div>
 
