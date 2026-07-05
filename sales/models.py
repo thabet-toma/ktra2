@@ -144,6 +144,17 @@ class SalesSettings(models.Model):
         db_column="AllowNegativeStockDefault",
         help_text="السماح ببيع المخزون بالسالب افتراضياً (يمكن تجاوزه على مستوى الصنف)",
     )
+    # طريقة احتساب تكلفة المخزون (متوسط التكلفة):
+    #   False (افتراضي) = النموذج الدوري «تكلفة المنتجات»: avg_cost = متوسط كل
+    #       فواتير الشراء مرجّحاً بالكمية، يُعاد ضبطه بعد كل استلام شراء (task23).
+    #   True = متوسط مرجّح متحرك (Moving WAC): تكلفة كل بيعة = المتوسط لحظتها،
+    #       يبنيه record_stock_movement تراكمياً (شراء يرفع المتوسط، بيع لا يغيّره)
+    #       — تماماً كالأنظمة المحاسبية الاحترافية. لا يُدهَس بعد استلام الشراء.
+    use_moving_average_cost = models.BooleanField(
+        default=False,
+        db_column="UseMovingAverageCost",
+        help_text="مفعّل = متوسط مرجّح متحرك (تكلفة لحظة البيع، مثل الأنظمة الاحترافية)؛ معطّل = متوسط كل فواتير الشراء (النموذج الدوري)",
+    )
 
     default_vat_rate = models.ForeignKey(
         TaxRate,
@@ -783,7 +794,9 @@ class SalesQuotation(models.Model):
 
     def _assert_valid_workflow_transition(self, old, new):
         allowed = {
-            self.STATUS_DRAFT: {self.STATUS_SENT, self.STATUS_EXPIRED},
+            # التحويل المباشر من مسودة مسموح — convert_quotation_to_invoice يقبل
+            # المسودة أو المقبول، والواجهة تُظهر «تحويل» على المسودة.
+            self.STATUS_DRAFT: {self.STATUS_SENT, self.STATUS_EXPIRED, self.STATUS_CONVERTED},
             self.STATUS_SENT: {self.STATUS_ACCEPTED, self.STATUS_REJECTED, self.STATUS_EXPIRED},
             self.STATUS_ACCEPTED: {self.STATUS_CONVERTED, self.STATUS_EXPIRED},
             self.STATUS_CONVERTED: set(),

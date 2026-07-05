@@ -228,7 +228,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
             <div style={sectionStyle}>
                 <div style={sectionTitleStyle}>المظهر — الخط</div>
                 <p style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)', marginBottom: 12 }}>
-                    تحكّم بحجم الخط ونوعه في كامل الواجهة. يُطبَّق فوراً ويُحفظ لهذا المتصفح.
+                    تحكّم بحجم الخط ونوعه في كامل الواجهة. يُطبَّق فوراً ويُحفظ لهذه الشركة (يثبت عند إعادة الدخول وعبر الأجهزة).
                 </p>
                 <div style={gridStyle}>
                     <div style={fieldStyle}>

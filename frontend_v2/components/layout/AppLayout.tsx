@@ -22,6 +22,7 @@ import {
 } from './BranchSwitcher';
 import { AseelCalculatorButton } from '../aseel';
 import { GlobalActionBar } from './GlobalActionBar';
+import { NotificationCenter } from '../notifications/NotificationCenter';
 import {
   User as UserIcon,
   Calendar,
@@ -29,6 +30,7 @@ import {
   Sparkles,
   LogOut,
   Copy,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -122,6 +124,20 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </div>
 
           <GlobalSearch userRole={user.role} onNavigate={onNavigate} />
+          {/* إشعارات الموقع (الجرس) — تذكيرات الزبائن/الشحنات */}
+          <NotificationCenter currentUserId={user.id} onNavigate={onNavigate} />
+          {/* ثوابت المجموعة — زر مرئي بديل للمفتاح F11 */}
+          {onOpenGroupConstants && (
+            <button
+              type="button"
+              onClick={onOpenGroupConstants}
+              className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 transition-colors flex items-center justify-center"
+              title="ثوابت المجموعة (F11)"
+              aria-label="ثوابت المجموعة"
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+            </button>
+          )}
           {/* task16 E15: حاسبة بأيقونة — تفتح عند الطلب فقط */}
           <AseelCalculatorButton />
           <DensitySwitch value={density} onChange={setDensity} />

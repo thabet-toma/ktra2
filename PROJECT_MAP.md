@@ -45,12 +45,21 @@ python manage.py check                                 # 0 مشاكل
   (createdAt متدرّج للحفاظ على الترتيب) والتعديل اللاحق upsert لبطاقة واحدة. لا تكرار أبداً
   حتى لو تكرّر النداء. + زر **«إعادة تعيين الأقسام»** (للمدير فقط، بتأكيد) يحذف كل الوثائق
   ثم يعيد زرع الافتراضي — لتنظيف التكرارات القائمة صراحةً (لا حذف تلقائي).
-- **الخط (feature)** — `contexts/AppearanceContext.tsx` (جديد، على نمط ThemeContext): تفضيل
-  محلي لكل متصفح (localStorage) لحجم الخط (صغير/متوسط/كبير/أكبر) ونوعه (افتراضي/Tahoma/Segoe/
-  Arial). يُطبَّق على `<html>` بضبط `--font-family-base`+`--aseel-font` ومرتكز rem
-  (`html.fontSize`) ومتغيّرات الأصيل بالبكسل (`--aseel-fs`/`-sm`/`-base`/`-title`) بنفس النسبة
-  ⇒ يسري على الواجهة العامة وسكِن الأصيل معاً. مُركَّب في `index.tsx` داخل ThemeProvider،
-  وقسم «المظهر — الخط» في `SettingsPage`. تتبّع `appearance.font_scale`/`font_family`.
+- **الخط (feature)** — `contexts/AppearanceContext.tsx` (على نمط ThemeContext): تفضيل حجم
+  الخط (صغير/متوسط/كبير/أكبر) ونوعه (افتراضي/Tahoma/Segoe/Arial). يُطبَّق على `<html>` بضبط
+  `--font-family-base`+`--aseel-font` ومرتكز rem (`html.fontSize`) ومتغيّرات الأصيل بالبكسل
+  (`--aseel-fs`/`-sm`/`-base`/`-title`) بنفس النسبة ⇒ يسري على الواجهة العامة وسكِن الأصيل
+  معاً. مُركَّب في `index.tsx` داخل ThemeProvider، وقسم «المظهر — الخط» في `SettingsPage`.
+  تتبّع `appearance.font_scale`/`font_family`.
+  **(task34) التخزين per-company على الخادم:** مصدر الحقيقة هو `TenantSettings.font_scale`/
+  `font_family` (+migration `0011_tenantsettings_appearance` +serializer) ⇒ يثبت عند إعادة
+  الدخول وعبر الأجهزة، ومعزول لكل شركة لا للمنصة. cache محلي مفتاحه رقم الشركة
+  (`ktra_font_scale::<tid>`) للتطبيق الفوري + ترحيل لطيف للمفتاح العام القديم. المزوّد
+  يجلب `tenants/settings/current/` عند التركيب (مُوثَّق بالتوكن) ويحفظ بـ PATCH عند التغيير
+  (غير حظري). تبديل الشركة يعيد تحميل الصفحة ⇒ يُعاد تركيب المزوّد بالشركة الجديدة.
+- **زر ثوابت المجموعة (feature)** — بديل مرئي للمفتاح F11 في يسار الشريط العلوي
+  (`AppLayout.tsx`، أيقونة `SlidersHorizontal`) يستدعي نفس `onOpenGroupConstants`.
+  ثوابت المجموعة أصلاً per-tenant في الخلفية (`TenantSettings`/`TenantBook`/`SalesSettings`).
 تحقّق: `tsc --noEmit` نظيف لملفاتي · بناء الإنتاج ناجح (SW+manifest) (الخطآن الباقيان في
 `DepartmentCard`/`Breadcrumb` **سابقان** لهذا التعديل ومستقلّان). (خلف الدخول + لا إطار اختبار
 React — لا تحقّق بصري، مطابقةً للنهج المعتمد.)
@@ -100,6 +109,56 @@ React — لا تحقّق بصري، مطابقةً للنهج المعتمد.)
   البنود بلا منتج + منع الحفظ بلا بند صالح (رسالة عربية).
 تحقّق: **sales 59 ناجح** (+`test_quotation_create`: إنشاء بلا رقم/عملة + بند بلا ضريبة +
 تسلسل أرقام فريد) · `tsc` نظيف لملفي (خطآ DepartmentCard/Breadcrumb سابقان).
+
+## [FEAT — ملاحظات/تذكيرات الزبون (CRM) + جرس إشعارات الموقع, 2026-07-04]
+طلب المالك: تبويب «ملاحظات الزبون» في بطاقة الزبون لإضافة ملاحظات وتذكيرات ليوم
+محدد؛ عند حلول اليوم يظهر تذكير في إشعارات الموقع، والنقر عليه يفتح تفاصيل الملاحظة.
+اكتشاف مهم: جرس الإشعارات (`NotificationCenter`) كان **غير مركَّب** أصلاً — `Header`
+كود ميت، و`AppLayout` (القشرة الحيّة) بلا جرس ⇒ لا إشعارات مرئية.
+البنية (خادمي = مصدر حقيقة، على نمط Django/DRF؛ الإشعار نفسه عبر شِمّ Firestore الحالي):
+- **`partners.CustomerNote`** (model + migration `0007_customer_notes`): tenant/partner FK،
+  title/body، `remind_on` (اختياري)، `is_done`، `created_by`. فهارس (tenant,partner,-created)
+  و(tenant,is_done,remind_on).
+- **`CustomerNoteViewSet`** (منطاق بالشركة، فلتر `?partner=`) + إجراء `reminders-due/` يُعيد
+  الملاحظات غير المنجزة `remind_on<=today` لمولّد الإشعارات. Logging غير حظري على الإنشاء.
+- **الواجهة:** `services/customerNotesApi.ts` (CRUD+due)، `components/partners/CustomerNotesTab.tsx`
+  (خط زمني احترافي: إضافة/إنجاز/حذف + شارات حالة متأخر/اليوم/غداً/بعد N/منجز)، تبويب جديد في
+  `PartnerProfilePage` (عملاء فقط، تبويب مُتحكَّم به عبر `activeTab/onTabChange`).
+- **الإشعارات:** `services/customerNoteReminders.ts` (يُنشئ إشعاراً لكل تذكير مستحق، dedupe
+  عبر localStorage لكل (شركة،ملاحظة،يوم))، مربوط في حلقة تذكيرات `App.tsx` بجانب الشحنات.
+  `NotificationCenter` عند النقر يخزّن `targetTab/targetSecondaryId` في sessionStorage قبل
+  التنقل، و`PartnerProfilePage` (effect على `location.key`) يقرؤها فيفتح تبويب الملاحظات
+  ويحدّد الملاحظة. `AppNotification` أُضيف له `targetTab?`/`targetSecondaryId?` +
+  نوع `customer_note_reminder`.
+- **`AppLayout`**: رُكِّب جرس `NotificationCenter` في الشريط العلوي (كان مفقوداً).
+- **إصلاحان ظهرا بعد تركيب الجرس (لم يُختبَرا سابقاً):** (1) `subscribeToNotifications`
+  كان يستعلم `where("userId","in",[...])` لكن شِمّ الـ mapper لا يدعم `in` ⇒ يُنتج
+  `userId__exact=«a,b»` فلا يطابق شيئاً ⇒ **لا تظهر أي إشعارات**. الحل: جلب إشعارات الشركة
+  (منطاقة بالـ tenant) والفلترة محلياً (`userId===me || "all_managers"`). (2) المولّد كان
+  يعمل عند الإقلاع/كل 6س فقط ⇒ ملاحظة أُنشئت بعد التحميل لا تُشعِر إلا بإعادة تحميل ⇒
+  `CustomerNotesTab` يستدعي المولّد فور إنشاء ملاحظة تذكيرها اليوم/فائت (dedupe يمنع التكرار).
+تحقّق: **partners 3 اختبارات جديدة** (إنشاء+عزل شركة+reminders-due) · **الحزمة الكاملة 182 ناجح**
+· `tsc` نظيف لملفاتي (خطآ DepartmentCard/Breadcrumb سابقان). (خلف الدخول ⇒ لا تحقّق بصري.)
+
+## [AUDIT — تحويل عرض السعر إلى فاتورة يفشل + توحيد لغة الأخطاء بالعربي, 2026-07-04]
+بلاغ المالك: حفظ العرض ينجح، لكن «تحويل» إلى فاتورة يرمي خطأً إنجليزياً:
+«customer: Incorrect type. Expected pk value, received Partner.; currency: … received Currency.».
+التشخيص — عيبان متسلسلان في `convert_quotation_to_invoice` (لم ينجح التحويل قط):
+- الخدمة تمرّر **كائنات** (`quotation.customer`/`.currency`) إلى `SalesInvoiceSerializer`
+  وحقولها `PrimaryKeyRelatedField` ⇒ تتوقّع pk. وكذلك `tenant` مُمرَّر داخل الـ data
+  بينما ليس حقلاً على الـ serializer ⇒ كان سيسقط ويُفشل `create` بـ KeyError بعد التحقق.
+- بعد ذلك يظهر عيب ثانٍ: FSM في `SalesQuotation.save` يمنع `draft → converted`، بينما
+  الخدمة **والواجهة** تسمحان بتحويل مسودة مباشرة ⇒ تناقض.
+الحل الجراحي (خادمي):
+- **`convert_quotation_to_invoice`**: تمرير `customer_id`/`currency_id` (pk)، وحقن
+  `tenant`/`created_by` عبر `save()` تماماً كما يفعل `SalesInvoiceViewSet.perform_create`
+  (مصدر حقن واحد، DRY).
+- **`SalesQuotation._assert_valid_workflow_transition`**: إضافة `CONVERTED` للانتقالات
+  المسموحة من `DRAFT` (مطابقةً لعقد الخدمة/الواجهة).
+- **`core.settings.LANGUAGE_CODE = 'ar'`**: العربية اللغة الفعّالة ⇒ رسائل DRF/Django
+  القياسية (حقل مطلوب/فارغ/عدد صحيح…) تُترجَم من الكتالوج المرفق (لا LocaleMiddleware).
+تحقّق: **sales 65 ناجح** (+`test_quotation_convert`: تحويل مسودة→فاتورة بحقول pk صحيحة
++ ثبات idempotent) · لا اختبار يعتمد على رسائل DRF الإنجليزية (لا انحدار).
 
 ## [AUDIT — عرض السعر: تعبئة سعر الزبون في العرض + شارة قابلة للنقر بالفاتورة, 2026-07-03]
 بلاغ المالك: (1) عند إنشاء عرض سعر بقائمة العروض واختيار الزبون ثم المنتج — إن كان له سعر
@@ -1774,3 +1833,5 @@ User pushed back on the «pending» list and asked for all of it. Closed every r
 - **الواجهة (مُنفَّذة):** `PurchaseInvoice.tsx` صار يقبل `invoiceType` (افتراضي local) + `listPath`؛ شاشة الشراء الحالية تعرض المحلية فقط ويختفي زر «استيراد من تخليص جمركي» منها. شاشة **«الفواتير الدولية»** الجديدة (view `international-invoices`، مسار `/international-invoices`، تحت مجموعة الاستيراد) تعيد استخدام نفس المكوّن بـ `invoiceType="international"` وتعرض زر الاستيراد/التحويل؛ محرّر الفاتورة يبقى مشتركاً على `/purchase-invoices/:id` (يُفتح بتبويب جديد). `canAccessImport` صار تفاعلياً للشركة النشطة عبر `CompanyContext` (يشترط تفعيل الشركة للجميع). شاشة حركات المخزون أُضيف لها فلتر «المصدر» (محلي/دولي عبر `?origin=`) + عمود شارة. `tsc` 0.
 
 - **Task 38:** Updated AseelGrid `handleKeyDown` to support a full, rapid data-entry sequence using the 'Enter' key: pressing 'Enter' now moves focus sequentially from 'Product' → 'Quantity' → 'Price' → 'Product' on the next row (creating a new row if necessary). The event listener was also moved to the row level to properly capture events from custom renderers like `AseelAutocomplete`.
+
+- **UserManagement Fix:** Fixed infinite re-rendering and UI flickering bug in `UserManagement.tsx` caused by re-fetching all activity statuses every 5 seconds. Replaced the `users` dependency in `useEffect` with a stable `employeeIds` string derived from `users.id`, and prevented `loadAllActivityStatuses` from showing a full-page loading spinner if background data is already present. This ensures smooth UX while maintaining real-time updates.

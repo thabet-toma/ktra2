@@ -167,8 +167,20 @@ export const SalesQuotationsPage: React.FC = () => {
   // رابط عميق: فتح عرض محدد عند وصول ?open=<id> (من شارة «عرض السعر» بالفاتورة).
   const location = useLocation();
   useEffect(() => {
-    const m = location.search.match(/[?&]open=(\d+)/);
-    if (m) void openQuotation(Number(m[1]));
+    const mOpen = location.search.match(/[?&]open=(\d+)/);
+    if (mOpen) {
+      void openQuotation(Number(mOpen[1]));
+      return;
+    }
+    const isNew = location.search.match(/[?&]action=new/);
+    if (isNew) {
+      setShowForm(true);
+      setSelectedId(null);
+      const mCust = location.search.match(/[?&]customer_id=(\d+)/);
+      if (mCust) {
+        setFormCustomer(mCust[1]);
+      }
+    }
   }, [location.search, openQuotation]);
 
   // طيّ/فتح معاينة البنود داخل القائمة — يجلب البنود عند أول فتح ويخزّنها.

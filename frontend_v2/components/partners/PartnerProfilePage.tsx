@@ -5,6 +5,7 @@ import { resolveTenantId } from '../../utils/tenantContext';
 import { AseelDocumentShell, AseelTab } from '../aseel';
 import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTable';
 import { CustomerPriceListTab } from './CustomerPriceListTab';
+import { CustomerNotesTab } from './CustomerNotesTab';
 import { StatementDetailsModal } from './StatementDetailsModal';
 import { referenceTypeLabel, clarifyStatementDescription } from '../../utils/entityLinks';
 
@@ -69,6 +70,9 @@ export const PartnerProfilePage: React.FC = () => {
     return m ? decodeURIComponent(m[1]) : undefined;
   }, [location.search]);
   const navigate = useNavigate();
+  // تبويب مُتحكَّم به: يبدأ من ?tab=، ويُتجاوَز بجسر إشعار التذكير (sessionStorage).
+  const [activeTabKey, setActiveTabKey] = useState<string | undefined>(initialTab);
+  const [focusNoteId, setFocusNoteId] = useState<string | null>(null);
   const [partner, setPartner] = useState<PartnerApi | null>(null);
   const [profile, setProfile] = useState<PartnerProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -105,6 +109,23 @@ export const PartnerProfilePage: React.FC = () => {
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setLoading(false));
   }, [id, tenantId]);
+
+  // مزامنة التبويب مع ?tab= في المسار (روابط خارجية مثل شارة «عرض السعر»).
+  useEffect(() => { if (initialTab) setActiveTabKey(initialTab); }, [initialTab]);
+
+  // جسر إشعار الموقع: عند الوصول من نقرة إشعار تذكير، افتح تبويب «ملاحظات الزبون»
+  // وحدّد الملاحظة المستهدفة (يُضبط في NotificationCenter قبل التنقل).
+  useEffect(() => {
+    try {
+      const tab = sessionStorage.getItem('ktra_focus_partner_tab');
+      if (tab) {
+        setActiveTabKey(tab);
+        setFocusNoteId(sessionStorage.getItem('ktra_focus_partner_note'));
+        sessionStorage.removeItem('ktra_focus_partner_tab');
+        sessionStorage.removeItem('ktra_focus_partner_note');
+      }
+    } catch { /* خاصية خاصة */ }
+  }, [location.key]);
 
   const loadStatement = useCallback(
     (offset: number) => {
@@ -302,6 +323,14 @@ export const PartnerProfilePage: React.FC = () => {
           content: <CustomerPriceListTab customerId={id} />,
         } as AseelTab]
       : []),
+    // ملاحظات الزبون (CRM) — للعملاء: ملاحظات + تذكيرات تظهر في إشعارات الموقع.
+    ...(!isSupplier && id
+      ? [{
+          key: 'customer_notes',
+          label: 'ملاحظات الزبون',
+          content: <CustomerNotesTab customerId={id} focusNoteId={focusNoteId} />,
+        } as AseelTab]
+      : []),
   ];
 
   return (
@@ -312,16 +341,29 @@ export const PartnerProfilePage: React.FC = () => {
           { key: 'back', label: 'عودة', onClick: () => navigate(-1) },
           // T-P2: سند قبض سريع من كشف الحساب — العميل مُعبّأ مسبقاً.
           ...(!isSupplier && id
-            ? [{
-                key: 'new-receipt',
-                label: 'سند قبض جديد',
-                onClick: () => navigate(`/sales/customer-payments?pay_partner=${id}`),
-                separatorBefore: true,
-              }]
+            ? [
+                {
+                  key: 'new-receipt',
+                  label: 'سند قبض جديد',
+                  onClick: () => navigate(`/sales/customer-payments?pay_partner=${id}`),
+                  separatorBefore: true,
+                },
+                {
+                  key: 'new-invoice',
+                  label: 'فاتورة مبيعات جديدة',
+                  onClick: () => navigate(`/sales/invoices/new?customer_id=${id}`),
+                },
+                {
+                  key: 'new-quotation',
+                  label: 'عرض سعر جديد',
+                  onClick: () => navigate(`/sales/quotations?action=new&customer_id=${id}`),
+                },
+              ]
             : []),
         ]}
         tabs={tabs}
-        initialTab={initialTab}
+        activeTab={activeTabKey}
+        onTabChange={setActiveTabKey}
         status={
           error ? <span className="text-[var(--aseel-danger)]">{error}</span> :
           loading ? <span>جاري التحميل...</span> :

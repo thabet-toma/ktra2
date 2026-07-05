@@ -146,6 +146,7 @@ type Props = {
   currentUserName?: string;
   /** M5: فتح الأستاذ العام لحساب العميل المرتبط (drill-down من رصيد العميل). */
   onOpenGeneralLedger?: (accountId: number) => void;
+  initialCustomerId?: number;
   salesSettings?: {
     default_customer: number | null;
     default_currency: number | null;
@@ -204,6 +205,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   currentUserName,
   onOpenGeneralLedger,
   salesSettings,
+  initialCustomerId,
 }) => {
   const confirm = useConfirm();
   // الربح الإجمالي يتبع زر العين (الخصوصية): يختفي حين تُخفى الأسعار/الأرباح.
@@ -211,7 +213,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [draftId, setDraftId] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<boolean>(!!draftToEditId);
   const [invoiceNumber, setInvoiceNumber] = useState<string>("");
-  const [customerId, setCustomerId] = useState<number | "">("");
+  const [customerId, setCustomerId] = useState<number | "">(initialCustomerId || "");
   const [invDate, setInvDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [dueDate, setDueDate] = useState("");
   const [invType, setInvType] = useState<"cash" | "credit">("credit");

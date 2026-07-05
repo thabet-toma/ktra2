@@ -379,7 +379,7 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
       {fld("تاريخ آخر حركة", <input className="aseel-input" readOnly value="(تلقائي)" />)}
       <div style={{ gridColumn: "1/-1", fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)" }}>
         ملاحظة: جميع حركات المخازن ذات التاريخ قبل بداية الفترة المالية ترحل إلى رصيد أول المدة.
-        للوصول إلى ثوابت المجموعة استخدم المفتاح F11.
+        للوصول إلى ثوابت المجموعة اضغط زر «ثوابت المجموعة» في الشريط العلوي أو المفتاح F11.
       </div>
     </div>
   );

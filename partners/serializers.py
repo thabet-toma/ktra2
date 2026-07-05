@@ -1,5 +1,18 @@
 from rest_framework import serializers
-from .models import Partner, PartnerBankAccount
+from .models import CustomerNote, Partner, PartnerBankAccount
+
+
+class CustomerNoteSerializer(serializers.ModelSerializer):
+    """ملاحظة/تذكير على بطاقة الزبون (CRM)."""
+    created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+
+    class Meta:
+        model = CustomerNote
+        fields = [
+            'id', 'partner', 'title', 'body', 'remind_on', 'is_done',
+            'created_by', 'created_by_name', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_by', 'created_by_name', 'created_at', 'updated_at']
 
 class PartnerBankAccountSerializer(serializers.ModelSerializer):
     class Meta:

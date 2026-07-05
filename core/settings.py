@@ -156,7 +156,10 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.0/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+# العربية لغة الواجهة الافتراضية ⇒ رسائل DRF/Django القياسية (حقل مطلوب،
+# لا يمكن أن يكون فارغاً، عدد صحيح غير صالح…) تُعرَض بالعربي من كتالوج الترجمة
+# المرفق. لا LocaleMiddleware ⇒ اللغة الفعّالة هي هذه القيمة لكل الطلبات.
+LANGUAGE_CODE = 'ar'
 
 TIME_ZONE = 'UTC'
 

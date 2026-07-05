@@ -583,6 +583,10 @@ const App: React.FC = () => {
       void import("./services/shipmentArrivalReminders").then((m) =>
         m.runShipmentArrivalReminders(currentUser.id)
       );
+      // تذكيرات ملاحظات الزبائن المستحقة اليوم — إشعار داخل الموقع.
+      void import("./services/customerNoteReminders").then((m) =>
+        m.runCustomerNoteReminders(currentUser.id)
+      );
     };
     run();
     const t = window.setInterval(run, 6 * 60 * 60 * 1000);

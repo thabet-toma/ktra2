@@ -98,6 +98,17 @@ class TenantSettings(models.Model):
         help_text="'index' = يفتح فهرس الأصناف, 'cashier' = يفتح فاتورة كاشير",
     )
 
+    # تفضيل المظهر (حجم/نوع الخط) — يُحفَظ خادمياً لكل شركة فيثبت عبر الأجهزة
+    # ولا يرجع للافتراضي عند إعادة فتح الموقع، ويُعزَل لكل شركة لا للمنصة كلها.
+    font_scale = models.CharField(
+        max_length=10, default='normal', db_column='FontScale',
+        help_text="small | normal | large | xlarge",
+    )
+    font_family = models.CharField(
+        max_length=20, default='default', db_column='FontFamily',
+        help_text="default | tahoma | segoe | arial",
+    )
+
     class Meta:
         db_table = 'tenant_settings'
         managed = True

@@ -2580,13 +2580,14 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 invoice.save(update_fields=['is_posted', 'journal', 'receipt_status'])
                 # إعادة كميات الاستلام للصفر (عُكِست حركات المخزون أعلاه)
                 invoice.items.update(received_quantity=0)
-                # أعد ضبط avg_cost على المتوسط المرجّح للمشتريات المتبقية المرحّلة.
-                from inventory.services import set_avg_cost_from_purchases
+                # أعد ضبط avg_cost حسب نموذج التكلفة: الدوري يعيده من المشتريات
+                # المتبقية؛ والمتوسط المتحرك يترك ما أعاده _recompute_product_stock.
+                from inventory.services import apply_purchase_cost_model
                 seen = set()
                 for it in invoice.items.select_related('product'):
                     if it.product_id and it.product_id not in seen:
                         seen.add(it.product_id)
-                        set_avg_cost_from_purchases(it.product)
+                        apply_purchase_cost_model(it.product)
         except Exception as e:
             # ValidationError (حارس الاعتمادية مثلاً) يحمل رسالة نظيفة في .messages.
             err = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)

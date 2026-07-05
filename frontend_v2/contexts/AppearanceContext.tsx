@@ -1,17 +1,27 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { clientLogger } from '../services/logger';
+import { apiGetObject, apiPatchObject } from '../services/restApi';
+import { resolveTenantId } from '../utils/tenantContext';
 
 /**
- * تفضيل المظهر — حجم الخط ونوعه. تفضيل عام محلي لكل متصفح (localStorage) على نمط
- * ThemeContext. يُطبَّق بضبط متغيّرات CSS على <html> فيسري على الواجهة العامة
- * (rem مرتكز على html) وعلى سكِن «الأصيل» (متغيّرات --aseel-*) معاً — مصدر تحكّم واحد.
+ * تفضيل المظهر — حجم الخط ونوعه. مصدر الحقيقة هو الخادم (TenantSettings) لكل
+ * شركة: يُحفَظ per-company فيثبت عبر الأجهزة ولا يرجع للافتراضي عند إعادة فتح
+ * الموقع، ومعزول لكل شركة لا للمنصة كلها. يُبقى cache محلي مفتاحه رقم الشركة
+ * للتطبيق الفوري قبل رد الخادم. يُطبَّق بضبط متغيّرات CSS على <html> فيسري على
+ * الواجهة العامة (rem مرتكز على html) وسكِن «الأصيل» (--aseel-*) معاً.
  * يُضبط من صفحة الإعدادات (قسم «الخط»).
  */
 const SCALE_KEY = 'ktra_font_scale';
 const FAMILY_KEY = 'ktra_font_family';
+/** مفاتيح cache خاصة بكل شركة (مع إبقاء المفتاح القديم كترحيل للتفضيل السابق). */
+const scaleCacheKey = (tid: number) => `${SCALE_KEY}::${tid}`;
+const familyCacheKey = (tid: number) => `${FAMILY_KEY}::${tid}`;
 
 export type FontScale = 'small' | 'normal' | 'large' | 'xlarge';
 export type FontFamilyId = 'default' | 'tahoma' | 'segoe' | 'arial';
+
+const SCALE_IDS = ['small', 'normal', 'large', 'xlarge'] as const;
+const FAMILY_IDS = ['default', 'tahoma', 'segoe', 'arial'] as const;
 
 /** نسبة تكبير الخط لكل مستوى (تُطبَّق على مرتكز rem ومتغيّرات الأصيل). */
 const SCALE_FACTOR: Record<FontScale, number> = {
@@ -52,13 +62,25 @@ interface AppearanceValue {
 
 const AppearanceContext = createContext<AppearanceValue | null>(null);
 
-const read = <T extends string>(key: string, allowed: readonly T[], fallback: T): T => {
+/** يقرأ التفضيل من cache الشركة، ثم المفتاح القديم العام (ترحيل)، ثم الافتراضي. */
+const readPref = <T extends string>(
+  perKey: string, legacyKey: string, allowed: readonly T[], fallback: T,
+): T => {
   try {
-    const v = localStorage.getItem(key) as T | null;
+    const v = (localStorage.getItem(perKey) ?? localStorage.getItem(legacyKey)) as T | null;
     return v && allowed.includes(v) ? v : fallback;
   } catch {
     return fallback;
   }
+};
+
+/** كتابة cache الشركة (لا تُفشل العملية إن امتلأت الذاكرة). */
+const writeCache = (key: string, v: string): void => {
+  try { localStorage.setItem(key, v); } catch { /* الذاكرة تكفي لهذه الجلسة */ }
+};
+
+const hasToken = (): boolean => {
+  try { return !!localStorage.getItem('token'); } catch { return false; }
 };
 
 /** يطبّق التفضيل على <html> عبر متغيّرات CSS (المرتكز العام + متغيّرات الأصيل). */
@@ -79,11 +101,14 @@ const applyAppearance = (scale: FontScale, family: FontFamilyId): void => {
 };
 
 export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // الشركة النشطة تُثبَّت عند التركيب؛ تبديل الشركة يعيد تحميل الصفحة بالكامل
+  // (CompanyContext.switchCompany) فيُعاد تركيب المزوّد بالشركة الجديدة.
+  const tenantId = resolveTenantId();
   const [fontScale, setFontScaleState] = useState<FontScale>(() =>
-    read(SCALE_KEY, ['small', 'normal', 'large', 'xlarge'] as const, 'normal'),
+    readPref(scaleCacheKey(tenantId), SCALE_KEY, SCALE_IDS, 'normal'),
   );
   const [fontFamily, setFontFamilyState] = useState<FontFamilyId>(() =>
-    read(FAMILY_KEY, ['default', 'tahoma', 'segoe', 'arial'] as const, 'default'),
+    readPref(familyCacheKey(tenantId), FAMILY_KEY, FAMILY_IDS, 'default'),
   );
 
   // تطبيق فوري عند التركيب وعند أي تغيير.
@@ -91,17 +116,59 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     applyAppearance(fontScale, fontFamily);
   }, [fontScale, fontFamily]);
 
+  /** حفظ التفضيل خادمياً (per-company). غير حظري — لا يُعطّل الواجهة. */
+  const persist = useCallback((patch: { font_scale?: FontScale; font_family?: FontFamilyId }) => {
+    if (!hasToken()) return; // زائر (صفحة الهبوط/الدخول) — cache محلي فقط
+    void apiPatchObject('tenants/settings/current/', patch, { tenantId })
+      .catch((e) => clientLogger.warn('appearance.persist_failed', { error: String(e) }));
+  }, [tenantId]);
+
+  // مزامنة أوّلية من الخادم (مصدر الحقيقة per-company). تعمل مرة لكل تركيب.
+  const syncedRef = useRef(false);
+  useEffect(() => {
+    if (syncedRef.current || !hasToken()) return;
+    syncedRef.current = true;
+    void (async () => {
+      try {
+        const s = await apiGetObject<{ font_scale?: string; font_family?: string }>(
+          'tenants/settings/current/', { tenantId },
+        );
+        const srvScale = SCALE_IDS.includes(s?.font_scale as FontScale) ? (s!.font_scale as FontScale) : null;
+        const srvFamily = FAMILY_IDS.includes(s?.font_family as FontFamilyId) ? (s!.font_family as FontFamilyId) : null;
+
+        // ترحيل لطيف: تفضيل محلي غير افتراضي والخادم افتراضي ⇒ ادفع المحلي مرة
+        // (حتى لا يفقد المستخدم تفضيله السابق المحفوظ محلياً بعد هذا التحديث).
+        const localScale = readPref(scaleCacheKey(tenantId), SCALE_KEY, SCALE_IDS, 'normal');
+        const localFamily = readPref(familyCacheKey(tenantId), FAMILY_KEY, FAMILY_IDS, 'default');
+        const migrate: { font_scale?: FontScale; font_family?: FontFamilyId } = {};
+        if (srvScale === 'normal' && localScale !== 'normal') migrate.font_scale = localScale;
+        if (srvFamily === 'default' && localFamily !== 'default') migrate.font_family = localFamily;
+        if (migrate.font_scale || migrate.font_family) {
+          persist(migrate);
+          return; // القيم المحلية مطبَّقة أصلاً — أبقها
+        }
+
+        if (srvScale) { setFontScaleState(srvScale); writeCache(scaleCacheKey(tenantId), srvScale); }
+        if (srvFamily) { setFontFamilyState(srvFamily); writeCache(familyCacheKey(tenantId), srvFamily); }
+      } catch (e) {
+        clientLogger.warn('appearance.sync_failed', { error: String(e) });
+      }
+    })();
+  }, [tenantId, persist]);
+
   const setFontScale = useCallback((v: FontScale) => {
     setFontScaleState(v);
-    try { localStorage.setItem(SCALE_KEY, v); } catch { /* الذاكرة تكفي لهذه الجلسة */ }
+    writeCache(scaleCacheKey(tenantId), v);
+    persist({ font_scale: v });
     clientLogger.info('appearance.font_scale', { fontScale: v });
-  }, []);
+  }, [tenantId, persist]);
 
   const setFontFamily = useCallback((v: FontFamilyId) => {
     setFontFamilyState(v);
-    try { localStorage.setItem(FAMILY_KEY, v); } catch { /* الذاكرة تكفي لهذه الجلسة */ }
+    writeCache(familyCacheKey(tenantId), v);
+    persist({ font_family: v });
     clientLogger.info('appearance.font_family', { fontFamily: v });
-  }, []);
+  }, [tenantId, persist]);
 
   const value = useMemo<AppearanceValue>(
     () => ({ fontScale, setFontScale, fontFamily, setFontFamily }),

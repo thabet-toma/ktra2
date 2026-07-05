@@ -1,4 +1,5 @@
 import json
+import logging
 
 from django.core.files.storage import default_storage
 from rest_framework import viewsets, status
@@ -9,8 +10,10 @@ from rest_framework.response import Response
 from core.api_defaults import ApiAuthAndUser
 from core.tenant_utils import get_tenant
 from tenants.models import Tenant
-from .models import Partner, PartnerBankAccount
-from .serializers import PartnerSerializer
+from .models import CustomerNote, Partner, PartnerBankAccount
+from .serializers import CustomerNoteSerializer, PartnerSerializer
+
+logger = logging.getLogger(__name__)
 
 
 class PartnerViewSet(viewsets.ModelViewSet):
@@ -300,4 +303,60 @@ class PartnerViewSet(viewsets.ModelViewSet):
         self._handle_attachments(partner, request.data, tenant)
 
         return Response(self.get_serializer(partner).data)
+
+
+class CustomerNoteViewSet(viewsets.ModelViewSet):
+    """ملاحظات/تذكيرات بطاقة الزبون (CRM) — CRUD مُنطاق بالشركة.
+
+    قائمة مفلترة بـ ?partner=<id>. تذكيرات مستحقة عبر reminders-due/ لمولّد
+    إشعارات الموقع (يُنشئ إشعاراً عند حلول يوم التذكير).
+    """
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    serializer_class = CustomerNoteSerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return CustomerNote.objects.none()
+        qs = CustomerNote.objects.filter(tenant=tenant).select_related('partner').order_by('-created_at')
+        partner_id = self.request.query_params.get('partner')
+        if partner_id:
+            qs = qs.filter(partner_id=partner_id)
+        return qs
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            raise ValidationError({'tenant': 'لا يوجد شركة محددة.'})
+        note = serializer.save(
+            tenant=tenant,
+            created_by=self.request.user if self.request.user.is_authenticated else None,
+        )
+        logger.info(
+            'customer_note.create id=%s partner=%s tenant=%s remind_on=%s',
+            note.id, note.partner_id, tenant.TenantID, note.remind_on,
+        )
+
+    @action(detail=False, methods=["get"], url_path="reminders-due")
+    def reminders_due(self, request):
+        """تذكيرات مستحقة اليوم أو قبله وغير منجزة — يستهلكها مولّد الإشعارات."""
+        from datetime import date
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response([])
+        qs = CustomerNote.objects.filter(
+            tenant=tenant, is_done=False,
+            remind_on__isnull=False, remind_on__lte=date.today(),
+        ).select_related('partner').order_by('remind_on')
+        return Response([
+            {
+                'id': n.id,
+                'title': n.title,
+                'remind_on': n.remind_on.isoformat(),
+                'partner_id': n.partner_id,
+                'partner_name': n.partner.name,
+            }
+            for n in qs
+        ])
 

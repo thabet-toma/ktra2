@@ -45,6 +45,9 @@ class TenantSettingsSerializer(serializers.ModelSerializer):
             # خيارات
             "mixture_auto_fill_enabled",
             "barcode_action",
+            # تفضيل المظهر (per-company)
+            "font_scale",
+            "font_family",
         ]
 
 

@@ -97,6 +97,41 @@ class Partner(models.Model):
         return self.name
 
 
+class CustomerNote(models.Model):
+    """ملاحظة/تذكير على بطاقة الزبون — نمط علاقات زبائن (CRM).
+
+    remind_on (اختياري): عند حلول هذا اليوم (أو تجاوزه) يظهر تذكير في إشعارات
+    الموقع لملاحظة غير منجزة. is_done: عند إنجازها يتوقف التذكير.
+    """
+    id = models.AutoField(primary_key=True, db_column='CustomerNoteID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='customer_notes', db_column='TenantID')
+    partner = models.ForeignKey(
+        Partner, on_delete=models.CASCADE, related_name='notes', db_column='PartnerID')
+    title = models.CharField(max_length=200, db_column='Title')
+    body = models.TextField(blank=True, default='', db_column='Body')
+    remind_on = models.DateField(
+        null=True, blank=True, db_column='RemindOn',
+        help_text='يوم التذكير — يظهر في إشعارات الموقع عند حلوله')
+    is_done = models.BooleanField(default=False, db_column='IsDone')
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy_UserID', related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+
+    class Meta:
+        db_table = 'partner_customer_notes'
+        managed = True
+        indexes = [
+            models.Index(fields=['tenant', 'partner', '-created_at'], name='pcn_tenant_partner_created'),
+            models.Index(fields=['tenant', 'is_done', 'remind_on'], name='pcn_tenant_done_remind'),
+        ]
+
+    def __str__(self):
+        return f"{self.title} — {self.partner_id}"
+
+
 class PartnerBankAccount(models.Model):
     id = models.AutoField(primary_key=True, db_column='PartnerBankAccountID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)

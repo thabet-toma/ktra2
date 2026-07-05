@@ -41,6 +41,16 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentU
         }
 
         if (notification.targetView) {
+            // جسر تحديد العنصر داخل الوجهة (مثلاً تبويب «ملاحظات الزبون» + الملاحظة)
+            // — يُقرأ ويُمسح في صفحة الوجهة بعد التنقل.
+            try {
+                if (notification.targetTab) {
+                    sessionStorage.setItem('ktra_focus_partner_tab', notification.targetTab);
+                    if (notification.targetSecondaryId) {
+                        sessionStorage.setItem('ktra_focus_partner_note', notification.targetSecondaryId);
+                    }
+                }
+            } catch { /* خاصية خاصة */ }
             onNavigate(notification.targetView, notification.targetId);
             setIsOpen(false);
         }

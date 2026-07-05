@@ -672,6 +672,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             invoiceList={rows}
             onOpenGeneralLedger={onOpenGeneralLedger}
             salesSettings={salesSettings}
+            initialCustomerId={new URLSearchParams(location.search).get("customer_id") ? Number(new URLSearchParams(location.search).get("customer_id")) : undefined}
           />
         </div>
       )}

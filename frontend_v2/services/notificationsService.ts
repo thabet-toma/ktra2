@@ -1,7 +1,6 @@
 import {
     collection,
     query,
-    where,
     onSnapshot,
     addDoc,
     updateDoc,
@@ -17,14 +16,16 @@ import { AppNotification } from "../types";
 const COLLECTION_NAME = "notifications";
 
 export const notificationsService = {
-    // Subscribe to unread notifications for a user OR public notifications (all_managers)
+    // Subscribe to notifications for a user OR public broadcasts (all_managers).
     subscribeToNotifications: (userId: string, callback: (notifications: AppNotification[]) => void) => {
         // حماية: إذا لم يكن هناك معرف مستخدم، لا تقم بالاستعلام
         if (!userId) return () => { };
 
+        // ملاحظة: شِمّ الـ mapper لا يدعم فلتر «in». نجلب إشعارات الشركة (منطاقة
+        // بالـ tenant خادمياً) ونفلتر محلياً لهذا المستخدم أو البث العام — كان
+        // فلتر userId__in يُنتج userId__exact=«a,b» فلا يطابق شيئاً ⇒ لا تظهر إشعارات.
         const q = query(
             collection(db, COLLECTION_NAME),
-            where("userId", "in", [userId, "all_managers"]),
             orderBy("createdAt", "desc"),
             limit(50)
         );
@@ -36,7 +37,10 @@ export const notificationsService = {
                     ...doc.data(),
                 })) as AppNotification[];
 
-                const uniqueNotifications = Array.from(new Map(notifications.map(item => [item.id, item])).values());
+                const mine = notifications.filter(
+                    (n) => n.userId === userId || n.userId === "all_managers"
+                );
+                const uniqueNotifications = Array.from(new Map(mine.map(item => [item.id, item])).values());
 
                 callback(uniqueNotifications);
             },

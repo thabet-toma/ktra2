@@ -366,12 +366,15 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
         # نموذج «تكلفة المنتجات»: اجعل avg_cost المتوسط المرجّح للمشتريات المرحّلة
         # (مصدر الحقيقة الجديد) كي يقرأ ترحيل COGS عند البيع القيمة الصحيحة.
         if invoice.is_posted:
-            from inventory.services import set_avg_cost_from_purchases
+            # النموذج الدوري يَضبط avg_cost من كل المشتريات؛ أما شركات المتوسط
+            # المرجّح المتحرك فيُترك WAC الذي بناه record_stock_movement (تكلفة
+            # لحظة البيع) كما هو. القرار مركزي في apply_purchase_cost_model.
+            from inventory.services import apply_purchase_cost_model
             seen = set()
             for it in product_items:
                 if it.product_id and it.product_id not in seen:
                     seen.add(it.product_id)
-                    set_avg_cost_from_purchases(it.product)
+                    apply_purchase_cost_model(it.product)
 
     logger.info(
         "Purchase invoice #%s received: %d movement(s), receipt_status=%s, journal=%s",

@@ -1834,12 +1834,15 @@ def convert_quotation_to_invoice(quotation, user=None):
             "tax_rate": ln.tax_rate_id,
         })
 
+    # customer/currency حقول PrimaryKeyRelatedField ⇒ تُمرَّر كـ pk لا ككائن،
+    # وtenant/created_by يُحقنان عبر save() تماماً كما يفعل الـ ViewSet (لا حقول
+    # على الـ serializer). خلاف ذلك يرفض الـ serializer الكائنات:
+    # "Incorrect type. Expected pk value, received Partner/Currency."
     inv_data = {
-        "tenant": tenant,
         "invoice_number": invoice_number,
-        "customer": quotation.customer,
+        "customer": quotation.customer_id,
         "invoice_date": quotation.quotation_date,
-        "currency": quotation.currency,
+        "currency": quotation.currency_id,
         "exchange_rate": quotation.exchange_rate,
         "invoice_type": "credit",
         "lines": lines_data,
@@ -1850,7 +1853,10 @@ def convert_quotation_to_invoice(quotation, user=None):
         raise ValueError(f"بيانات الفاتورة غير صالحة: {inv_ser.errors}")
 
     with transaction.atomic():
-        invoice = inv_ser.save()
+        invoice = inv_ser.save(
+            tenant=tenant,
+            created_by=user if (user and getattr(user, "is_authenticated", False)) else None,
+        )
         quotation.status = SalesQuotation.STATUS_CONVERTED
         quotation.invoice = invoice
         quotation.save(update_fields=["status", "invoice"])

@@ -898,6 +898,26 @@ def set_avg_cost_from_purchases(product) -> Decimal:
     return avg
 
 
+def apply_purchase_cost_model(product) -> None:
+    """يطبّق نموذج التكلفة حسب إعداد الشركة بعد استلام/تراجع فاتورة شراء.
+
+    - الشركة على **المتوسط المرجّح المتحرك** (`SalesSettings.use_moving_average_cost`)
+      ⇒ لا نفعل شيئاً: `avg_cost` الذي ضبطه `record_stock_movement` (WAC المتحرك،
+      أي تكلفة لحظة البيع) هو مصدر الحقيقة، فلا يُدهَس.
+    - غير ذلك ⇒ النموذج الدوري: `set_avg_cost_from_purchases` (متوسط كل المشتريات).
+
+    مصدر حقيقة واحد لقرار طريقة التكلفة، يستدعيه كل مسارات الشراء (استلام/تراجع).
+    """
+    from sales.models import SalesSettings
+    ss = (
+        SalesSettings.objects.filter(tenant_id=product.tenant_id)
+        .only('use_moving_average_cost').first()
+    )
+    if ss and ss.use_moving_average_cost:
+        return
+    set_avg_cost_from_purchases(product)
+
+
 def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = False, user=None) -> dict:
     """يصحّح تكلفة البضاعة المباعة وقائمة الدخل لصنف وفق نموذج «تكلفة المنتجات»
     (متوسط مرجّح بالكمية، periodic — يتحقق: COGS + مخزون آخر المدة = إجمالي المشتريات).

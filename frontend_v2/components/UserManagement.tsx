@@ -138,7 +138,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   // دالة لتحميل جميع بيانات النشاط للموظفين (لم تتغير)
   const loadAllActivityStatuses = async (): Promise<void> => {
-    setLoading(true);
+    if (Object.keys(activityStatuses).length === 0) {
+      setLoading(true);
+    }
     const employees = users.filter(
       (user) => user.role === "employee" || user.role === "procurement"
     );
@@ -160,19 +162,27 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     setLoading(false);
   };
 
+  const employeeIds = useMemo(() => {
+    return users
+      .filter((user) => user.role === "employee" || user.role === "procurement")
+      .map((user) => user.id)
+      .sort()
+      .join(",");
+  }, [users]);
+
   // الاشتراك في تحديثات حالة النشاط للموظفين (لم تتغير)
   useEffect(() => {
-    const employees = users.filter((user) => user.role === "employee" || user.role === "procurement");
+    const ids = employeeIds.split(",").filter(Boolean);
     const unsubscribes: (() => void)[] = [];
 
-    employees.forEach((employee) => {
+    ids.forEach((id) => {
       const unsubscribe = activityService.subscribeToActivityStatus(
-        employee.id,
+        id,
         (status: ActivityStatus | null) => {
           if (status) {
             setActivityStatuses((prev) => ({
               ...prev,
-              [employee.id]: status,
+              [id]: status,
             }));
           }
         }
@@ -183,14 +193,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     return () => {
       unsubscribes.forEach((unsubscribe) => unsubscribe());
     };
-  }, [users]);
+  }, [employeeIds]);
 
-  // تحميل بيانات النشاط عند التحميل الأولي (لم تتغير)
+  // تحميل بيانات النشاط عند التحميل الأولي أو تغير الموظفين
   useEffect(() => {
-    if (users.length > 0) {
+    if (employeeIds) {
       loadAllActivityStatuses();
+    } else {
+      setLoading(false);
     }
-  }, [users]);
+  }, [employeeIds]);
 
   // دالة الفلترة الرئيسية
   const filteredUsers = useMemo(() => {
