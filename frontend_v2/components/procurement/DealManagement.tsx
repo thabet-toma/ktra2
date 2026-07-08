@@ -58,8 +58,8 @@ const STATUS_COLORS: Record<string, string> = {
     cancelled:                'var(--aseel-danger, #c00)',
 };
 
-const fmtAmt = (n: number) =>
-    n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { formatMoney } from "@/utils/formatNumber";
+const fmtAmt = (n: number) => formatMoney(n);
 
 const fmtDate = (s: string | undefined) => {
     if (!s) return '—';

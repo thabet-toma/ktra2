@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useCompany, Tenant } from "../../contexts/CompanyContext";
+import { useTenantSettings } from "../../hooks/useTenantSettings";
 import { Building, Plus, ChevronDown, Check, Loader2, Settings2 } from "lucide-react";
 import { CompanyManagementModal, ROLE_LABELS } from "./CompanyManagementModal";
 
 export const CompanySwitcher: React.FC = () => {
   const { companies, currentCompany, switchCompany, createCompany, loading, refreshCompanies } = useCompany();
+  const { identity } = useTenantSettings();
   const [isOpen, setIsOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
@@ -68,7 +70,11 @@ export const CompanySwitcher: React.FC = () => {
         className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold rounded-lg bg-[var(--aseel-panel)] border border-[var(--aseel-border-soft)] hover:bg-[var(--aseel-panel-hover)] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-[var(--aseel-accent)]"
         style={{ color: "var(--aseel-ink)" }}
       >
-        <Building className="w-4 h-4 opacity-70" />
+        {identity?.logo_url ? (
+          <img src={identity.logo_url} alt="Logo" className="w-5 h-5 rounded object-cover bg-white" />
+        ) : (
+          <Building className="w-4 h-4 opacity-70" />
+        )}
         <span>{currentCompany?.CompanyName || "اختر الشركة"}</span>
         <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
       </button>

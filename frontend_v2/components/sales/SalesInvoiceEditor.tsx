@@ -28,7 +28,7 @@ import { ProductCardModal } from "../shared/ProductCardModal";
 import { Item } from "../../types";
 import db from "../../services/offline/db";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
-import { formatMoney } from "../../utils/formatNumber";
+import { formatMoney, formatQuantity, formatNumber } from "../../utils/formatNumber";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { clientLogger } from "../../services/logger";
 import { apiPostObject } from "../../services/restApi";
@@ -53,6 +53,7 @@ import {
 } from "lucide-react";
 import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
 import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
+import { SalesInvoicePrintView } from "./SalesInvoicePrintView";
 import {
   AseelDocumentShell,
   AseelGrid,
@@ -101,7 +102,7 @@ export type TaxRow = {
   tax_account_type?: string;
 };
 
-type DraftLine = {
+export type DraftLine = {
   key: string;
   id?: number;
   product: number | "";
@@ -285,6 +286,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   /** فهرس الحسابات (العميل) منبثق بمفتاح + أو زر «…». */
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
+  const [showPrintView, setShowPrintView] = useState(false);
   const navLoadingRef = useRef(false);
 
   const dirtyRef = useRef(false);
@@ -665,8 +667,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setDueDate(d.due_date || "");
     setInvType(d.invoice_type);
     setCurrencyId(d.currency);
-    setExchangeRate(String(d.exchange_rate ?? 1));
-    setInvoiceDiscount(String(d.invoice_discount ?? 0));
+    setExchangeRate(formatNumber(d.exchange_rate ?? 1, { maxDecimals: 6, fallback: "1" }));
+    setInvoiceDiscount(formatQuantity(d.invoice_discount ?? 0, "0"));
     setStockOnPost(d.stock_on_post !== false);
     setNotes(d.notes || "");
     setCashAccountId(d.cash_or_bank_account ?? "");
@@ -685,9 +687,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setLicensedDealerNo(d.licensed_dealer_no || "");
     setSettlementInvoiceNo(d.settlement_invoice_no || "");
     setPricesIncludeTax(Boolean(d.prices_include_tax));
-    setDiscountPercent(String(d.discount_percent ?? 0));
+    setDiscountPercent(formatQuantity(d.discount_percent ?? 0, "0"));
     // M2-T3
-    setAttachedCashAmount(String(d.attached_cash_amount ?? 0));
+    setAttachedCashAmount(formatQuantity(d.attached_cash_amount ?? 0, "0"));
     setAttachedCashAccountId(d.attached_cash_account ?? "");
     setAttachedCheques(
       (d.cheques ?? []).map((c) => ({
@@ -706,21 +708,21 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setSourceDiscountPctOverride(
       d.source_discount_percent_override == null
         ? ""
-        : String(d.source_discount_percent_override)
+        : formatQuantity(d.source_discount_percent_override, "")
     );
     setSourceDiscountAmtOverride(
       d.source_discount_amount_override == null
         ? ""
-        : String(d.source_discount_amount_override)
+        : formatQuantity(d.source_discount_amount_override, "")
     );
     setLines(
       d.lines.map((ln) => ({
         key: newLineKey(),
         id: ln.id,
         product: ln.product,
-        quantity: String(ln.quantity),
-        unit_price: String(ln.unit_price),
-        line_discount: String(ln.line_discount ?? 0),
+        quantity: formatQuantity(ln.quantity, "0"),
+        unit_price: formatQuantity(ln.unit_price, "0"),
+        line_discount: formatQuantity(ln.line_discount ?? 0, "0"),
         tax_rate: ln.tax_rate != null ? ln.tax_rate : null,
         // FEAT-2: أسعار فاتورة محمَّلة مُثبّتة — لا يُعاد تسعيرها عند تغيير العميل.
         priceTouched: true,
@@ -957,8 +959,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       if (p.invoice_type === "cash" || p.invoice_type === "credit")
         setInvType(p.invoice_type);
       setCurrencyId((p.currency as number) ?? "");
-      setExchangeRate(s(p.exchange_rate, "1"));
-      setInvoiceDiscount(s(p.invoice_discount, "0"));
+      setExchangeRate(formatNumber(p.exchange_rate ?? 1, { maxDecimals: 6, fallback: "1" }));
+      setInvoiceDiscount(formatQuantity(p.invoice_discount, "0"));
       setStockOnPost(p.stock_on_post !== false);
       setNotes(s(p.notes));
       setBookNumber(s(p.book_number, "0"));
@@ -966,16 +968,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       setLicensedDealerNo(s(p.licensed_dealer_no));
       setSettlementInvoiceNo(s(p.settlement_invoice_no));
       setPricesIncludeTax(Boolean(p.prices_include_tax));
-      setDiscountPercent(s(p.discount_percent, "0"));
+      setDiscountPercent(formatQuantity(p.discount_percent, "0"));
       setSourceDiscountPctOverride(
         p.source_discount_percent_override == null
           ? ""
-          : s(p.source_discount_percent_override)
+          : formatQuantity(p.source_discount_percent_override, "")
       );
       setSourceDiscountAmtOverride(
         p.source_discount_amount_override == null
           ? ""
-          : s(p.source_discount_amount_override)
+          : formatQuantity(p.source_discount_amount_override, "")
       );
       if (p.cash_or_bank_account != null)
         setCashAccountId(p.cash_or_bank_account as number);
@@ -987,9 +989,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             key: newLineKey(),
             id: typeof ln.id === "number" ? ln.id : undefined,
             product: (ln.product as number) ?? "",
-            quantity: s(ln.quantity, "0"),
-            unit_price: s(ln.unit_price, "0"),
-            line_discount: s(ln.line_discount, "0"),
+            quantity: formatQuantity(ln.quantity, "0"),
+            unit_price: formatQuantity(ln.unit_price, "0"),
+            line_discount: formatQuantity(ln.line_discount, "0"),
             tax_rate:
               ln.tax_rate === "" || ln.tax_rate == null ? null : (ln.tax_rate as number),
             // FEAT-2: أسعار مستعادة من المسودة مُثبّتة — لا يُعاد تسعيرها تلقائياً.
@@ -1466,9 +1468,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           if (res?.unit_price == null) return;
           const src = priceSourceFromResolve(res.source?.document_type);
           const link = priceSourceLinkFromResolve(res.source);
-          // DEF-003: عرض السعر المقترح بمنزلتين (يبقى قابلاً للتحرير).
+          // DEF-003: عرض السعر المقترح دون أصفار عشرية زائدة (يبقى قابلاً للتحرير).
           const shown = Number(res.unit_price);
-          const priceStr = Number.isNaN(shown) ? String(res.unit_price) : shown.toFixed(2);
+          const priceStr = Number.isNaN(shown) ? String(res.unit_price) : formatNumber(shown, { maxDecimals: 2 });
           setLines((prev) =>
             prev.map((r) =>
               r.key === key && !r.priceTouched
@@ -1511,7 +1513,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               const src = priceSourceFromResolve(res.source?.document_type);
               const link = priceSourceLinkFromResolve(res.source);
               const shown = Number(res.unit_price);
-              const priceStr = Number.isNaN(shown) ? String(res.unit_price) : shown.toFixed(2);
+              const priceStr = Number.isNaN(shown) ? String(res.unit_price) : formatNumber(shown, { maxDecimals: 2 });
               setLines((cur) =>
                 cur.map((r) =>
                   r.key === l.key && !r.priceTouched
@@ -2104,7 +2106,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       disabled: isPosted && (remainingDue <= 0 || creatingReceipt),
       separatorBefore: true,
     },
-    { key: "print", label: "طباعة", icon: <Printer />, onClick: () => window.print() },
+    { key: "print", label: "طباعة", icon: <Printer />, onClick: () => setShowPrintView(true) },
   ];
 
   const banner =
@@ -2785,7 +2787,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                   }}
                 >
                   {fmt(journalPreview.grossProfit)} (
-                  {journalPreview.marginPct.toFixed(1)}%)
+                  {formatNumber(journalPreview.marginPct, { maxDecimals: 1 })}%)
                 </span>
               </div>
             )}
@@ -3141,6 +3143,24 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       {/* Attached payment voucher modal removed - now a bottom tab */}
       {/* P3-2-b: stale-data confirmation portal for offline product picks */}
       {staleModal}
+      {showPrintView && (
+        <SalesInvoicePrintView
+          data={{
+            invoiceNumber,
+            invoiceDate: invDate,
+            dueDate,
+            invoiceType: invType,
+            customer: customerId !== "" ? customers.find((c) => c.id === Number(customerId)) : undefined,
+            lines,
+            productsById,
+            totals,
+            currentUserName,
+            notes,
+            currencyCode: currencyId !== "" ? currencies.find((c) => c.CurrencyID === currencyId)?.Code : undefined
+          }}
+          onClose={() => setShowPrintView(false)}
+        />
+      )}
     </div>
   );
 };

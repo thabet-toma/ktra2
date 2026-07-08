@@ -182,7 +182,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       const rowsHtml = all.map((p) => {
         const name = esc(p.name_ar || p.name_en || p.sku);
         const qty = Number(p.quantity_on_hand);
-        const avgCost = Number(p.avg_cost).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const avgCost = formatMoney(p.avg_cost);
         const cls = p.stock_status === "out_of_stock" ? "danger" : p.stock_status === "low_stock" ? "warn" : "";
         return `
           <tr>

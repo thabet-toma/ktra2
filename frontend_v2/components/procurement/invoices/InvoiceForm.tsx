@@ -62,6 +62,7 @@ import {
 import { ItemsTableSection } from "@/components/forms/shared/ItemsTableSection";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
 import { PurchaseInvoiceAccountingPanel } from "./PurchaseInvoiceAccountingPanel";
+import { InvoicePrintView } from "./InvoicePrintView";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import {
   AseelDocumentShell,
@@ -140,6 +141,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   // T-R2: السعر المقترح (آخر فاتورة شراء) ومصدره — لعرضهما داخل البطاقة.
   const [cardSuggestedPrice, setCardSuggestedPrice] = useState<number | null>(null);
   const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
+  const [showPrintView, setShowPrintView] = useState(false);
   const [showItemSearch, setShowItemSearch] = useState(false);
   const [activeItemSearchIndex, setActiveItemSearchIndex] = useState<number | null>(null);
   // task18 DEF-B1/B3: إنشاء صنف جديد inline من خلية اسم الصنف (النص المكتوب يُمرَّر مسبقاً)
@@ -251,7 +253,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   // M4-T1: Aseel keyboard shortcuts — real handlers.
   useAseelKeymap({
-    F2: () => window.print(),
+    F2: () => setShowPrintView(true),
     F6: () => {
       const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
       el?.focus();
@@ -1466,7 +1468,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       onClick: isPosted && !posting ? () => void handleUnpost() : undefined,
       disabled: !isPosted || posting,
     },
-    { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => window.print(), separatorBefore: true },
+    { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => setShowPrintView(true), separatorBefore: true },
     { key: "cancel", label: "إلغاء", icon: <X />, onClick: guardedCancel, danger: true, separatorBefore: true },
   ];
 
@@ -1859,6 +1861,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         />
       );
     })()}
+      {showPrintView && (
+        <InvoicePrintView
+          invoice={formData as Invoice}
+          currentUser={currentUser}
+          supplier={selectedSupplier}
+          onClose={() => setShowPrintView(false)}
+        />
+      )}
     </div>
   );
 };

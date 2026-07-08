@@ -12,11 +12,9 @@ import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab }
 import { CompactTimeline } from "./CompactTimeline";
 import OfflineGuard from "@/components/offline/OfflineGuard";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
+import { formatMoney } from "@/utils/formatNumber";
 const tid = () => resolveTenantId();
-const fmt = (v: number | string | null | undefined) => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n.toLocaleString("en", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "—";
-};
+const fmt = (v: number | string | null | undefined) => formatMoney(v, "—");
 
 const fld = (label: string, node: React.ReactNode) => (
   <label className="aseel-field">

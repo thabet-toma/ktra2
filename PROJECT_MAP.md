@@ -236,7 +236,9 @@ React — لا تحقّق بصري، مطابقةً للنهج المعتمد.)
   العين كلياً)، وحُدِّث العنوان إلى «الأسعار والأرباح» (صار يحكمهما معاً).
 - **`components/sales/SalesInvoiceEditor.tsx`**: صفّ «الربح الإجمالي» بات مشروطاً بـ
   `profitVisible` (`usePriceVisibility().visible`) قبل شرطه القائم `revenue>0 && cogs>0`
-  ⇒ يتبع العين (والافتراضي عند إخفائها).
+  ⇒ يتبع العين (والافتراضي عند إخفائها). وأيضاً تم ربط زر الطباعة بنافذة جديدة (SalesInvoicePrintView) لطباعة الفاتورة بشكل نظيف دون الواجهة.
+- **`components/sales/SalesInvoicePrintView.tsx`** (جديد): نافذة طباعة مخصصة للفواتير المبيعات (Printable Layout) تخفي التنبيهات والأدوات وتعرض بيانات الفاتورة فقط.
+- **`components/procurement/invoices/InvoiceForm.tsx` & `deals/DealForm.tsx`**: تم ربط زر الطباعة و(F2) فيهما بنوافذ الطباعة المخصصة القائمة (`InvoicePrintView` و `DealPrintView`) لمنع طباعة شاشة التحرير بأكملها.
 - **`components/SettingsPage.tsx`** (إعدادات المنصة): قسم جديد «خصوصية الأسعار والأرباح» —
   خانة إظهار زر العين، وعند تعطيلها تظهر خانة «إظهار الأرباح والتكاليف افتراضياً».
 تحقّق: `tsc --noEmit` نظيف لملفاتي (خطآ DepartmentCard/Breadcrumb سابقان). (خلف الدخول +
@@ -578,6 +580,14 @@ SW لا يخزّن الـ API (يتخطّى عابر الأصل، `sw.ts:50`) ف
 - **SalesQuotationsPage** — ملخّص «رصيد» في المنتقي عبر `formatQuantity`.
 تحقّق: `tsc --noEmit` نظيف · سلوك `formatQuantity`: `6.00000⇒6`، `6.5⇒6.5`، `6.55⇒6.55`.
 ملاحظة: الفاصل العشري نقطة (.) مطابقةً لكامل المنصة (لم يُغيَّر إلى فاصلة).
+
+## [AUDIT — G1 تعميم شامل + تطبيع حقول الإدخال, 2026-07-06]
+المشكلة المُبلَّغة (متكرّرة): الأصفار العشرية الزائدة «تعود بعد كل تعديل» و«تُصلَح بمكان وتُنسى بمكان». السبب الجذري: مصدرا trailing-zero منفصلان لم يمرّا عبر G1 — `.toFixed(2)` (95 موضعاً) و`.toLocaleString(…, {minimumFractionDigits:2})` (71 موضعاً) عبر ~50 ملفاً، إضافةً إلى **حقول الإدخال** التي تُربَط بنص API الخام (`value={row.unit_price}` ⇒ «110.0000»).
+الحل الجراحي — توحيد كامل عبر `formatNumber.ts` (لا حِيَل لكل حقل):
+- **حقول الإدخال (لبّ المشكلة):** تطبيع النص الرقمي **مرّة واحدة عند الترطيب من الـ API** (لا في كل رندر — ذلك يكسر الكتابة). في `SalesInvoiceEditor` (الكمية/السعر/الخصم + رأس الفاتورة: exchange/discount/percent/overrides/attached_cash في مساري الحفظ والمسودة + السعر المقترح)، و`Sales/PurchaseReturnEditor` (سعر مشتق من المنتج)، ومدفوعات العملاء/الموردين (setState لـ withholding/amount). عبر `formatQuantity`/`formatNumber({maxDecimals})`.
+- **العرض:** استبدال كل `toFixed`/`toLocaleString(min:2)` العرضية بـ `formatMoney`/`formatNumber`/`formatQuantity` — شمل تقارير المحاسبة (ميزان/دخل/ميزانية/دفتر أستاذ/ض.ق.م/قيود/شيكات/أرباح فواتير)، قوائم وطباعة الفواتير والصفقات (InvoiceList/InvoicePrintView/NIS*/Deal*)، الشحنات/التخليص/الأقساط، وكرت الشريك/قوائم الأسعار. المُنسّقات المحلية لكل ملف (`fmt`/`fmtMoney`/`fmtAmt`…) فُوّضت إلى الطبقة المشتركة (مصدر حقيقة واحد).
+- **لم يُمَسّ عمداً:** حسابات `Number(x.toFixed(2))`، وحمولات الـ API `String(x.toFixed(2))` (الـ backend يحتاج المنازل)، ومنسّقات الأعداد الصحيحة (min:0)، وأحجام الملفات KB/MB، وعملات 3-منازل (العقارات).
+تحقّق: `tsc --noEmit` نظيف (عدا خطأين سابقين غير متعلّقين: DepartmentCard/Breadcrumb) · صفر `minimumFractionDigits:2` وصفر `toFixed(2)` عرضية متبقّية في `components`.
 
 ## [AI_TOOLING]
 - **Ruflo** (Multi-Agent Orchestrator): `.clone/ruflo/` — استخدمه دائماً للمهام المعقدة

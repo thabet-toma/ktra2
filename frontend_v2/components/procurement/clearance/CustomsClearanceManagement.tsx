@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { formatMoney } from "../../../utils/formatNumber";
 import {
   Plus,
   RefreshCw,
@@ -95,7 +96,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
   const listColumns = [
     { key: "shipment", header: "الشحنة", width: "30%", render: (row: ClearanceRow) => <div className="font-bold">{clearanceShipmentTitle(row)}</div> },
     { key: "broker", header: "المخلص", render: (row: ClearanceRow) => row.broker_name || "—" },
-    { key: "total", header: "الإجمالي", render: (row: ClearanceRow) => `${sumLines(row.cost_lines || []).toLocaleString(undefined, { minimumFractionDigits: 2 })}` },
+    { key: "total", header: "الإجمالي", render: (row: ClearanceRow) => formatMoney(sumLines(row.cost_lines || [])) },
     { key: "status", header: "الحالة", render: (row: ClearanceRow) => row.status },
   ];
 

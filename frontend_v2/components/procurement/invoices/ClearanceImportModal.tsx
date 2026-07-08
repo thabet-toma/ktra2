@@ -17,6 +17,7 @@ import {
     type ClearanceRow,
 } from "@/services/clearanceApi";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
+import { formatMoney, formatNumber } from "@/utils/formatNumber";
 import {
     Search,
     X,
@@ -68,10 +69,7 @@ function importButtonFooterHint(args: {
         const u = preview.shipment_freight_unpaid_usd;
         const unpaid =
             u != null && Number.isFinite(Number(u))
-                ? Number(u).toLocaleString(undefined, {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                  })
+                ? formatMoney(u)
                 : "—";
         return {
             text: `الزر معطّل لأن شحن الشحنة غير مكتمل كدفع مؤكّد بالدولار على الخادم (المتبقي تقريباً $${unpaid}). أكمل دفعات وكيل الشحن من شاشة الشحنة حتى يساوي المدفوع إجمالي الشحن بالدولار ثم أعد المحاولة. ملاحظة: شارة حالة التخليص (مثل PROCESSING) لا تعطّل هذا الزر.`,
@@ -738,15 +736,16 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                                                 {String(row.ref_number ?? row.deal_id)}
                                                                             </td>
                                                                             <td className="px-3 py-2">
-                                                                                {(Number(row.share) * 100).toFixed(2)}%
+                                                                                {formatNumber(Number(row.share) * 100, { maxDecimals: 2 })}%
                                                                             </td>
                                                                             <td className="px-3 py-2">
-                                                                                {(
+                                                                                {formatNumber(
                                                                                     Number(
                                                                                         row.share_by_volume ??
                                                                                             row.share
-                                                                                    ) * 100
-                                                                                ).toFixed(2)}
+                                                                                    ) * 100,
+                                                                                    { maxDecimals: 2 }
+                                                                                )}
                                                                                 %
                                                                             </td>
                                                                             <td className="px-3 py-2">

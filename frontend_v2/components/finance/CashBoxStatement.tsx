@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { formatMoney } from "../../utils/formatNumber";
 import {
   ArrowLeft,
   ArrowDownLeft,
@@ -233,19 +234,13 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
             <div>
               <span className="text-gray-500">رصيد افتتاحي (GL): </span>
               <span className="font-bold tabular-nums">
-                {(glMeta.opening_balance ?? 0).toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+                {formatMoney(glMeta.opening_balance ?? 0)}
               </span>
             </div>
             <div>
               <span className="text-gray-500">رصيد ختامي (GL): </span>
               <span className="font-bold tabular-nums text-[var(--color-primary)] dark:text-[var(--color-primary)]">
-                {(glMeta.closing_balance ?? 0).toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}
+                {formatMoney(glMeta.closing_balance ?? 0)}
               </span>
             </div>
           </div>
@@ -360,10 +355,7 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
                             : "—"}
                         </td>
                         <td className="px-3 py-2 font-bold tabular-nums dark:text-white text-xs">
-                          {Number(row.balance).toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          })}
+                          {formatMoney(row.balance)}
                           <span className="block font-normal text-[10px] text-gray-400">رصيد GL</span>
                         </td>
                       </tr>

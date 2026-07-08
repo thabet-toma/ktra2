@@ -67,11 +67,8 @@ const TYPE_OPTIONS = [
   { v: "credit", l: "آجل" },
 ];
 
-const fmtNum = (s: string | number | undefined | null) => {
-  const n = Number(s);
-  if (!isFinite(n)) return "—";
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
+import { formatMoney } from "@/utils/formatNumber";
+const fmtNum = (s: string | number | undefined | null) => formatMoney(s, "—");
 
 type SalesInvoicesPageProps = {
   /** M5: فتح الأستاذ العام لحساب العميل (drill-down من محرر الفاتورة). */

@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { accountingApi } from "../../services/accountingApi";
+import { formatMoney, formatNumber } from "../../utils/formatNumber";
 import type {
   AccountingAccount,
   AccountingPartner,
@@ -92,9 +93,7 @@ function refTypeLabel(t: string, description?: string) {
 }
 
 function fmtAmount(v: string | number) {
-  const n = typeof v === "string" ? parseFloat(v) : v;
-  if (!n || isNaN(n)) return "";
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatMoney(v, "");
 }
 
 /* ─────────── component ─────────── */
@@ -225,9 +224,9 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       const remaining = Math.abs(diff);
       if (remaining < 0.005) return;
       if (side === 'debit' && diff < 0) {
-        updateLine(lineIdx, { debit: String(remaining.toFixed(2)) });
+        updateLine(lineIdx, { debit: formatNumber(remaining, { maxDecimals: 2 }) });
       } else if (side === 'credit' && diff > 0) {
-        updateLine(lineIdx, { credit: String(remaining.toFixed(2)) });
+        updateLine(lineIdx, { credit: formatNumber(remaining, { maxDecimals: 2 }) });
       }
     },
   }, { enabled: !showAccountPicker });
@@ -338,7 +337,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         end_date: today.toISOString().split('T')[0],
       });
       const closing = Number((ledger as { closing_balance?: number | string })?.closing_balance ?? 0);
-      const fmt = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const fmt = (v: number) => formatMoney(v);
       const label = `الرصيد: ${fmt(Math.abs(closing))} ${closing >= 0 ? 'مدين' : 'دائن'}`;
       setBalanceTooltip({ lineIdx, balance: label });
       tooltipTimerRef.current = setTimeout(() => setBalanceTooltip(null), 4000);
@@ -386,7 +385,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       (l) => l.accountId && (parseFloat(l.debit) > 0 || parseFloat(l.credit) > 0)
     );
     if (active.length < 2) return "يجب طرفان على الأقل بمبالغ";
-    if (!balanced) return `القيد غير متوازن (فرق ${diff.toFixed(2)})`;
+    if (!balanced) return `القيد غير متوازن (فرق ${formatMoney(diff)})`;
     return null;
   };
 
@@ -774,14 +773,14 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
           <span className="aseel-status-item">الحالة <b>{posted ? 'مرحَّل' : 'مسودة'}</b></span>
           {journalId && <span className="aseel-status-item">رقم القيد <b>{journalId}</b></span>}
           <span className="aseel-status-item">
-            مدين <b className="aseel-num">{totalDebit.toFixed(2)}</b>
+            مدين <b className="aseel-num">{formatMoney(totalDebit)}</b>
           </span>
           <span className="aseel-status-item">
-            دائن <b className="aseel-num">{totalCredit.toFixed(2)}</b>
+            دائن <b className="aseel-num">{formatMoney(totalCredit)}</b>
           </span>
           {!balanced && totalDebit > 0 && (
             <span className="aseel-status-item" style={{ color: 'var(--aseel-err, #c0392b)' }}>
-              فرق <b>{Math.abs(diff).toFixed(2)}</b>
+              فرق <b>{formatMoney(Math.abs(diff))}</b>
             </span>
           )}
           {balanced && totalDebit > 0 && (

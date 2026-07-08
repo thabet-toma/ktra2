@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { accountingApi } from "../../services/accountingApi";
+import { formatMoney } from "../../utils/formatNumber";
 import { RefreshCw, Loader2, ExternalLink } from "lucide-react";
 
 interface JournalListItem {
@@ -131,7 +132,7 @@ export const DocumentPaymentsTab: React.FC<Props> = ({ referenceType, referenceI
                   <td className="px-4 py-3 text-xs text-gray-500">{j.reference_type || "عام / يدوي"}</td>
                   <td className="px-4 py-3 max-w-xs truncate" title={j.description || ""}>{j.description || "—"}</td>
                   <td className="px-4 py-3 font-mono">
-                    {amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {j.currency_code}
+                    {formatMoney(amount)} {j.currency_code}
                   </td>
                   <td className="px-4 py-3 text-center">
                     <span className={`px-2 py-1 rounded-full text-[10px] font-bold ${

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { accountingApi } from "../../services/accountingApi";
+import { formatMoney } from "../../utils/formatNumber";
 import { AseelDocumentShell } from "../aseel";
 import { AlertCircle, CheckCircle, Loader2 } from "lucide-react";
 import OfflineGuard from "../offline/OfflineGuard";
@@ -103,7 +104,7 @@ export const YearEndClosePage: React.FC = () => {
             </div>
             <div>رقم القيد: {result.journal_id}</div>
             {result.profit_or_loss !== undefined && (
-              <div>صافي الربح/الخسارة: {Number(result.profit_or_loss).toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+              <div>صافي الربح/الخسارة: {formatMoney(result.profit_or_loss)}</div>
             )}
             <div>عدد الأسطر: {result.rows_count}</div>
           </div>

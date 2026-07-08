@@ -2,6 +2,7 @@ import React from "react";
 import { Calculator, Ship } from "lucide-react";
 import type { Invoice, InvoiceImportLogistics } from "@/types";
 import { formatInvoiceImportLogisticsLine } from "@/utils/invoiceConversionUtils";
+import { formatNumber, formatMoney } from "@/utils/formatNumber";
 
 type ConversionMetadata = NonNullable<Invoice["conversionMetadata"]>;
 
@@ -217,12 +218,12 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
 
     const fmtIls = (v: number | undefined) =>
         v != null && Number.isFinite(v) && v > 0
-            ? `₪${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+            ? `₪${formatMoney(v)}`
             : "—";
 
     const fmtIlsZero = (v: number | undefined) => {
         if (v == null || !Number.isFinite(v)) return "—";
-        return `₪${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return `₪${formatMoney(v)}`;
     };
 
     const internalShippingMoney = () => {
@@ -316,7 +317,7 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
     const sharePctLabel = (pct: number, suffix: string) =>
         pct > 0 ? (
             <span className="block text-[9px] font-semibold aseel-text-soft dark:aseel-text-soft mt-0.5 tabular-nums">
-                {pct.toFixed(2)}% {suffix}
+                {formatNumber(pct, { maxDecimals: 2 })}% {suffix}
             </span>
         ) : (
             <span className="block text-[9px] aseel-text-soft dark:aseel-text-soft mt-0.5">—</span>
@@ -326,7 +327,7 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
         if (internalPctOfDeal != null && internalPctOfDeal > 0) {
             return (
                 <span className="block text-[9px] font-semibold aseel-text-soft dark:aseel-text-soft mt-0.5 tabular-nums">
-                    {internalPctOfDeal.toFixed(2)}% من إجمالي الصفقة ($)
+                    {formatNumber(internalPctOfDeal, { maxDecimals: 2 })}% من إجمالي الصفقة ($)
                 </span>
             );
         }

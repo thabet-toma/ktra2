@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { AseelSpinner } from "../aseel/AseelStates";
 import { apiGetList, apiPostObject, apiPatchObject } from "../../services/restApi";
+import { formatMoney } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { accountingApi } from "../../services/accountingApi";
 import {
@@ -385,15 +386,15 @@ export const CreditDebitNotesPage: React.FC = () => {
                           </div>
                           <div>
                             <label className="block text-[11px] mb-0.5">المبلغ بدون ضريبة</label>
-                            <input type="text" readOnly value={amountExcl.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono aseel-bg-panel" />
+                            <input type="text" readOnly value={formatMoney(amountExcl)} className="w-full border rounded p-1 text-sm font-mono aseel-bg-panel" />
                           </div>
                           <div>
                             <label className="block text-[11px] mb-0.5">مبلغ الضريبة</label>
-                            <input type="text" readOnly value={taxAmount.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono aseel-bg-panel" />
+                            <input type="text" readOnly value={formatMoney(taxAmount)} className="w-full border rounded p-1 text-sm font-mono aseel-bg-panel" />
                           </div>
                           <div className="col-span-2">
                             <label className="block text-[11px] mb-0.5">مبلغ الإشعار الإجمالي</label>
-                            <input type="text" readOnly value={totalAmount.toFixed(2)} className="w-full border rounded p-1 text-sm font-mono font-bold aseel-bg-panel" />
+                            <input type="text" readOnly value={formatMoney(totalAmount)} className="w-full border rounded p-1 text-sm font-mono font-bold aseel-bg-panel" />
                           </div>
                         </div>
                       </div>
@@ -416,7 +417,7 @@ export const CreditDebitNotesPage: React.FC = () => {
                   content: (
                     <div className="text-xs aseel-text-soft p-3 aseel-bg-panel rounded">
                       معاينة القيد المحاسبي: {formType === "credit" ? "Dr إيراد مرتجعات / Cr ذمم" : "Dr ذمم / Cr إيراد إضافي"} —
-                      المبلغ: {totalAmount.toFixed(2)} (ضمنه ض.ق.م {taxAmount.toFixed(2)}).
+                      المبلغ: {formatMoney(totalAmount)} (ضمنه ض.ق.م {formatMoney(taxAmount)}).
                     </div>
                   )
                 }

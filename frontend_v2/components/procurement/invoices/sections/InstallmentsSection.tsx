@@ -5,6 +5,7 @@ import {
   Calendar, UploadCloud, Loader2, Eye, X
 } from 'lucide-react';
 import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
+import { formatMoney } from '@/utils/formatNumber';
 import type { LocalPayments } from '@/types';
 import {
   clearanceAndLogisticsFeesForGrandTotal,
@@ -234,7 +235,7 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
                   <div>
                     <p className="text-xs font-medium aseel-text-soft dark:aseel-text-soft mb-1">{card.label}</p>
                     <p className={`text-xl font-black ${card.color} dark:text-white`}>
-                      {symbol}{card.value.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      {symbol}{formatMoney(card.value)}
                     </p>
                     {card.label === 'إجمالي الفاتورة' && (
                       <p className="text-xs aseel-text-soft mt-1">

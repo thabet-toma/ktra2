@@ -73,10 +73,9 @@ const emptyForm = () => ({
   assigned_price_tier: "",
 });
 
+import { formatMoney } from "@/utils/formatNumber";
 const fmtMoney = (s: string | null | undefined) =>
-  s != null && s !== ""
-    ? Number(s).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : "—";
+  s != null && s !== "" ? formatMoney(s, "—") : "—";
 
 export const SalesCustomersPage: React.FC = () => {
   const navigate = useNavigate();

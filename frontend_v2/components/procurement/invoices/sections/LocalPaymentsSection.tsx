@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { Invoice, LocalPayments } from "@/types";
+import { formatMoney } from "@/utils/formatNumber";
 import {
     CreditCard,
     DollarSign,
@@ -401,7 +402,7 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
                                 </h4>
                             </div>
                             <div className="text-lg font-bold aseel-text-ink dark:text-white">
-                                {includedInPrice ? 'مشمولة في السعر' : `$${totalLocalPayments.toFixed(2)}`}
+                                {includedInPrice ? 'مشمولة في السعر' : `$${formatMoney(totalLocalPayments)}`}
                             </div>
                         </div>
 
@@ -434,7 +435,7 @@ export const LocalPaymentsSection: React.FC<LocalPaymentsSectionProps> = ({
                                         return (
                                             <div key={payment.key} className="flex justify-between items-center text-sm">
                                                 <span className="aseel-text-soft dark:aseel-text-soft">{payment.label}:</span>
-                                                <span className="font-medium">${value.toFixed(2)}</span>
+                                                <span className="font-medium">${formatMoney(value)}</span>
                                             </div>
                                         );
                                     })}

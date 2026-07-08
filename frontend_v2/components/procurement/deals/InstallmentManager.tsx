@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { DealInstallment } from '@/types';
 import { findPaymentForInstallment } from '@/utils/dealPaymentMatch';
+import { formatNumber } from '@/utils/formatNumber';
 import { Plus, Trash2, Calculator, CheckCircle2, AlertCircle, Lock, DollarSign, Percent, Sparkles } from 'lucide-react';
 
 /** من صفين فما فوق: الصفوف 1…ن−1 يحرّرها المستخدم، الأخير = باقي الإجمالي وباقي 100% */
@@ -493,7 +494,7 @@ export const InstallmentManager: React.FC<InstallmentManagerProps> = ({
                                 )}
                             </div>
                         </div>
-                        <span className="font-mono font-bold sm:shrink-0">{totalPercentage.toFixed(1)}%</span>
+                        <span className="font-mono font-bold sm:shrink-0">{formatNumber(totalPercentage, { maxDecimals: 1 })}%</span>
                     </div>
                 </div>
             )}

@@ -553,6 +553,32 @@ class Command(BaseCommand):
             self.summary['أخطاء مبيعات (عيّنة)'] = ' | '.join(errors[:8])
         self.stdout.write(f'  [sales] مُرحّل {posted} · متخطّى {skipped} · فاشل {failed}')
 
+    def _resolve_supplier(self, r):
+        """يحلّ مورد أمر الشراء بالاسم أولاً — عمود SupplierNo في الملف معطوب
+        (يشير لمورد خاطئ في ~95٪ من الحالات)، بينما SupplierBusinessName موثوق.
+        الأولوية: الاسم (كتالوج) ← إنشاء تلقائي للاسم غير الموجود ← الرقم (فقط إن
+        غاب الاسم) ← المورد الافتراضي.
+        """
+        from partners.models import Partner
+        name = norm_name(r.get('SupplierBusinessName'))
+        if name:
+            p = self.supp_by_name.get(name)
+            if p:
+                return p
+            # اسم مورد غير موجود بالكتالوج ⇒ أنشئه (الاسم موثوق)
+            p = Partner.objects.create(
+                tenant=self.tenant, name=name[:150],
+                partner_type='Supplier', group=self.supp_group)
+            self.supp_by_name[name] = p
+            return p
+        # لا اسم ⇒ آخر ملاذ: الرقم (رغم عدم موثوقيته) ثم الافتراضي
+        sno = clean(r.get('SupplierNo'))
+        if sno and sno.isdigit():
+            p = self.supp_by_num.get(int(sno))
+            if p:
+                return p
+        return self.default_supplier
+
     def _stage_purchases(self):
         from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
         from logistics.services import receive_purchase_invoice
@@ -576,14 +602,7 @@ class Command(BaseCommand):
             if not line_rows:
                 skipped += 1
                 continue
-            sno = clean(r.get('SupplierNo'))
-            supplier = None
-            if sno and sno.isdigit():
-                supplier = self.supp_by_num.get(int(sno))
-            if not supplier:
-                supplier = self.supp_by_name.get(norm_name(r.get('SupplierBusinessName')))
-            if not supplier:
-                supplier = self.default_supplier
+            supplier = self._resolve_supplier(r)
             if not supplier:
                 failed += 1
                 errors.append(f'{po_no}: لا مورد')

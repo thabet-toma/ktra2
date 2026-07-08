@@ -40,11 +40,8 @@ const STATUS_COLORS: Record<LocalShipmentStatus, string> = {
   cancelled:  "var(--aseel-danger, #c00)",
 };
 
-const fmt = (s: string | number) =>
-  Number(s || 0).toLocaleString(undefined, {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
+import { formatMoney } from "../../utils/formatNumber";
+const fmt = (s: string | number) => formatMoney(s);
 
 export const LocalShippingPage: React.FC = () => {
   const navigate = useNavigate();

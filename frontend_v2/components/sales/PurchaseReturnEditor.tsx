@@ -11,6 +11,7 @@
  */
 import React, { useEffect, useState, useCallback } from "react";
 import { apiGetList, apiPostObject } from "../../services/restApi";
+import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import {
   AseelDocumentShell,
@@ -178,7 +179,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
       case "seq": return row._idx + 1;
       case "quantity": return row.quantity;
       case "unit_price": return row.unit_price;
-      case "total": return row.total;
+      case "total": return formatMoney(row.total);
       default: return "";
     }
   };
@@ -192,7 +193,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
         updateLine(row._idx, {
           product_id: e.target.value,
           product_name: p?.name || "",
-          unit_price: row.unit_price || p?.unit_price || "0",
+          unit_price: formatQuantity(row.unit_price || p?.unit_price || "0", "0"),
         });
       }}
     >
@@ -257,7 +258,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
 
           <div className="aseel-total-row aseel-total-row--grand" style={{ marginTop: "8px", padding: "8px 12px" }}>
             <span>إجمالي المرجوع للمورد</span>
-            <span className="aseel-num font-bold">{totalAmount.toFixed(2)}</span>
+            <span className="aseel-num font-bold">{formatMoney(totalAmount)}</span>
           </div>
 
           <div style={{ marginTop: "12px" }}>
@@ -315,7 +316,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
         status={
           <>
             <span className="aseel-status-item">عدد البنود <b>{lines.filter((l) => l.product_id).length}</b></span>
-            <span className="aseel-status-item">الإجمالي <b className="aseel-num">{totalAmount.toFixed(2)}</b></span>
+            <span className="aseel-status-item">الإجمالي <b className="aseel-num">{formatMoney(totalAmount)}</b></span>
             <span className="aseel-status-item" style={{ color: "var(--aseel-warn, #b06800)" }}>
               مسودة — يَنتظر N8-T11
             </span>

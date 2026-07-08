@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { Invoice, User, Supplier } from '../../../types';
 import { formatTaxPercentLabel } from '../../../utils/sqlMoneyRound';
+import { formatMoney } from '../../../utils/formatNumber';
 import { useTenantSettings } from '../../../hooks/useTenantSettings';
 import { Printer, X, MapPin, Phone, Mail, FileText, Building2, Truck, Hash, Calendar, DollarSign, CreditCard, Edit, ExternalLink, Box } from 'lucide-react';
 
@@ -23,7 +24,7 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
 
     const formatCurrency = (amount: number) => {
         const symbol = invoice.currency === 'ILS' ? '₪' : '$';
-        return `${symbol}${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+        return `${symbol}${formatMoney(amount)}`;
     };
 
     const formatDate = (dateString?: string) => {
@@ -72,13 +73,13 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                 {`
                     @media print {
                         @page { size: A4; margin: 10mm; }
-                        body > * { display: none !important; }
-                        #print-portal { display: block !important; }
+                        body * { visibility: hidden; }
+                        #print-portal, #print-portal * { visibility: visible; }
                         #print-portal { 
                             position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0;
                             background: white; 
                         }
-                        .no-print { display: none !important; }
+                        .no-print, .no-print * { display: none !important; visibility: hidden !important; }
                         * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
                     }
                     .dir-ltr { direction: ltr; text-align: left; }

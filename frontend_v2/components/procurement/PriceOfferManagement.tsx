@@ -35,8 +35,8 @@ const fmtDate = (d: string | undefined) => {
   try { return new Date(d).toLocaleDateString("ar"); } catch { return d; }
 };
 
-const fmtAmt = (n: number | undefined) =>
-  (n ?? 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { formatMoney } from "@/utils/formatNumber";
+const fmtAmt = (n: number | undefined) => formatMoney(n);
 
 export const PriceOfferManagement: React.FC = () => {
   const [viewMode, setViewMode] = useState<"list" | "form">("list");

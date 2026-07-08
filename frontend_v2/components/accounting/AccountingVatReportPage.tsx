@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
+import { formatMoney } from "../../utils/formatNumber";
 import type { VatReportResponse, VatReportLine } from "../../types/accounting";
 import {
   AseelDocumentShell,
@@ -41,11 +42,7 @@ export const AccountingVatReportPage: React.FC = () => {
     fetchReport();
   }, [fetchReport]);
 
-  const fmt = (n: number | undefined | null) =>
-    (Number(n) || 0).toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+  const fmt = (n: number | undefined | null) => formatMoney(n);
 
   const inputBalance = data?.input.balance || 0;
   const outputPayable = data?.output.balance_payable || 0;

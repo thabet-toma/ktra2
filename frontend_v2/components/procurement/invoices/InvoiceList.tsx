@@ -49,11 +49,8 @@ const STATUS_OPTIONS = [
   { v: "draft", l: "مسودة" },
 ];
 
-const fmtNum = (s: string | number | undefined | null) => {
-  const n = Number(s);
-  if (!isFinite(n)) return "—";
-  return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
+import { formatMoney } from "@/utils/formatNumber";
+const fmtNum = (s: string | number | undefined | null) => formatMoney(s, "—");
 
 export const InvoiceList: React.FC<InvoiceListProps> = ({
   invoices,

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
+import { formatMoney } from "../../utils/formatNumber";
 import type { TrialBalanceRow } from "../../types/accounting";
 import {
   AseelDocumentShell,
@@ -70,8 +71,7 @@ export const IncomeStatementPage: React.FC = () => {
     fetchData();
   }, [fetchData]);
 
-  const fmt = (n: number) =>
-    n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmt = (n: number) => formatMoney(n);
 
   const totalRevenue = rows.reduce((s, r) => s + r.revenue, 0);
   const totalExpense = rows.reduce((s, r) => s + r.expense, 0);

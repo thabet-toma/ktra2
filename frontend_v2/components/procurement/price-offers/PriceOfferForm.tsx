@@ -56,8 +56,8 @@ const fld = (label: string, node: React.ReactNode, span?: number) => (
   </label>
 );
 
-const fmt = (n: number) =>
-  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { formatMoney } from "@/utils/formatNumber";
+const fmt = (n: number) => formatMoney(n);
 
 export const PriceOfferForm: React.FC<Props> = ({
   offer, items, suppliers, isReadOnly = false, saving = false,

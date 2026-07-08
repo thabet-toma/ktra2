@@ -70,10 +70,10 @@ function fmtTime(raw: string | null | undefined) {
   return m ? m[1] : "—";
 }
 
+import { formatMoney } from "../../utils/formatNumber";
+
 function fmtAmount(v: string | number | null | undefined) {
-  const n = typeof v === "string" ? parseFloat(v) : v;
-  if (n == null || isNaN(Number(n))) return "—";
-  return Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return formatMoney(v, "—");
 }
 
 function journalAmount(j: JournalListItem): number {

@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { accountingApi } from "@/services/accountingApi";
+import { formatMoney } from "@/utils/formatNumber";
 import type {
   PurchaseInvoiceDto,
   PurchaseInvoiceFeeDto,
@@ -323,7 +324,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         credit: 0,
         note:
           capitalizedFees > 0
-            ? `صافي البضاعة + رسوم مرسملة (${capitalizedFees.toFixed(2)})`
+            ? `صافي البضاعة + رسوم مرسملة (${formatMoney(capitalizedFees)})`
             : "صافي البضاعة غير المخصصة",
       });
     }
@@ -549,7 +550,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                 {items.map((item, idx) => (
                   <tr key={item.id ?? `it-${idx}`} className="border-t aseel-border-soft dark:aseel-border-soft">
                     <td className="px-3 py-2">{item.name}</td>
-                    <td className="px-3 py-2">{Number(item.total_price).toFixed(2)}</td>
+                    <td className="px-3 py-2">{formatMoney(item.total_price)}</td>
                     <td className="px-3 py-2">
                       <select
                         value={item.expense_account || ""}
@@ -727,20 +728,20 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                       )}
                     </td>
                     <td className="px-4 py-2 text-right font-mono">
-                      {l.debit > 0 ? l.debit.toFixed(2) : "—"}
+                      {l.debit > 0 ? formatMoney(l.debit) : "—"}
                     </td>
                     <td className="px-4 py-2 text-right font-mono">
-                      {l.credit > 0 ? l.credit.toFixed(2) : "—"}
+                      {l.credit > 0 ? formatMoney(l.credit) : "—"}
                     </td>
                   </tr>
                 ))}
                 <tr className="aseel-bg-panel dark:aseel-bg-panel font-bold">
                   <td className="px-4 py-2 text-right">المجموع</td>
                   <td className="px-4 py-2 text-right font-mono">
-                    {preview.totalDebit.toFixed(2)}
+                    {formatMoney(preview.totalDebit)}
                   </td>
                   <td className="px-4 py-2 text-right font-mono">
-                    {preview.totalCredit.toFixed(2)}
+                    {formatMoney(preview.totalCredit)}
                   </td>
                 </tr>
               </tbody>

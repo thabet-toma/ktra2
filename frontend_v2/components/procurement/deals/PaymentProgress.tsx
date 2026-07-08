@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Deal, DealInstallment, DealPayment, User } from '@/types';
+import { formatNumber } from '@/utils/formatNumber';
 import {
     Lock, Unlock, DollarSign, CheckCircle2, Clock,
     ArrowRight, RefreshCw, Calendar, Download,
@@ -496,7 +497,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                     <div className="flex items-center gap-3">
                         <div className="text-right">
                             <span className="text-xs aseel-text-soft dark:aseel-text-soft block">نسبة الإنجاز</span>
-                            <span className="text-lg font-bold aseel-text-ink dark:text-white">{progressPercentage.toFixed(1)}%</span>
+                            <span className="text-lg font-bold aseel-text-ink dark:text-white">{formatNumber(progressPercentage, { maxDecimals: 1 })}%</span>
                         </div>
                         <div className="w-16 h-16 relative flex items-center justify-center">
                             <svg className="w-full h-full transform -rotate-90">

@@ -54,7 +54,8 @@ const statusColor = (s?: string) => {
 };
 
 const fmtDate = (d?: string | null) => { if (!d) return '—'; const dt = new Date(d); return Number.isNaN(dt.getTime()) ? String(d) : dt.toLocaleDateString('en-GB'); };
-const fmtMoney = (v: any) => { const n = Number(v || 0); return Number.isFinite(n) ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : String(v ?? '—'); };
+import { formatMoney } from "@/utils/formatNumber";
+const fmtMoney = (v: any) => formatMoney(v, String(v ?? '—'));
 
 export function SqlDealsPage() {
     const [rows, setRows] = useState<DealRow[]>([]);

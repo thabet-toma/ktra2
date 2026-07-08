@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { SupplierViewModal } from '@/components/common/SupplierViewModal';
 import { buildShipmentOptionLabelCamel } from '@/utils/shipmentLabel';
+import { formatNumber } from '@/utils/formatNumber';
 
 interface ShipmentListProps {
     shipments: Shipment[];
@@ -315,10 +316,10 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
                                             <div className="flex items-center gap-1" title="الحجم">
                                                 <Box className="w-3 h-3 aseel-text-soft" />
                                                 <span className="font-mono font-bold text-sm aseel-text-ink dark:aseel-text-soft">
-                                                    {(shipment.deals && shipment.deals.length > 0
+                                                    {formatNumber(shipment.deals && shipment.deals.length > 0
                                                         ? shipment.deals.reduce((sum, d) => sum + (Number(d.totalVolume) || 0), 0)
                                                         : Number(shipment.totalVolume) || 0
-                                                    ).toFixed(1)}
+                                                    , { maxDecimals: 1 })}
                                                 </span>
                                                 <span className="text-[10px] aseel-text-soft">م³</span>
                                             </div>

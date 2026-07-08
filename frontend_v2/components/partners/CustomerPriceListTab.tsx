@@ -8,6 +8,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Loader2, Save, Search } from 'lucide-react';
 import { getCustomerPriceList, saveCustomerQuotes, type CustomerPriceRow } from '../../services/salesApi';
+import { formatMoney } from '../../utils/formatNumber';
 
 interface Props {
   customerId: number | string;
@@ -113,7 +114,7 @@ export const CustomerPriceListTab: React.FC<Props> = ({ customerId }) => {
                         onChange={(e) => setEdits((prev) => ({ ...prev, [r.product_id]: e.target.value }))}
                       />
                     ) : (
-                      <span>{Number(r.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                      <span>{formatMoney(r.price)}</span>
                     )}
                   </td>
                   <td>

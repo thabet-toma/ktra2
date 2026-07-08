@@ -4,6 +4,7 @@ import {
   DollarSign, Percent, Tag, Copy, CreditCard, Truck,
 } from 'lucide-react';
 import { SHIPPING_TERMS } from '@/constants/shipping';
+import { formatMoney } from '@/utils/formatNumber';
 
 // ─── 1. مكون الشروط والشحن ───
 interface TermsProps {
@@ -486,8 +487,8 @@ const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
             ) : (
               <span className="font-medium text-gray-900 dark:text-white">
                 {taxInputMode === 'percentage'
-                  ? `${symbol}${taxAmount.toFixed(2)} (${taxRate}%)`
-                  : `${symbol}${taxAmount.toFixed(2)}`
+                  ? `${symbol}${formatMoney(taxAmount)} (${taxRate}%)`
+                  : `${symbol}${formatMoney(taxAmount)}`
                 }
               </span>
             )}
@@ -859,7 +860,7 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
                             className={`cursor-pointer text-sm ${itemDiscount > 0 ? 'text-red-600 font-medium' : 'text-gray-500'
                               }`}
                           >
-                            {itemDiscount > 0 ? `-$${itemDiscount.toFixed(2)}` : 'إضافة'}
+                            {itemDiscount > 0 ? `-$${formatMoney(itemDiscount)}` : 'إضافة'}
                           </div>
                         )}
                       </td>

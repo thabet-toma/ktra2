@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { accountingApi } from "../../services/accountingApi";
+import { formatMoney } from "../../utils/formatNumber";
 import type { AccountingAccount, GeneralLedgerResponse, CurrencyDto } from "../../types/accounting";
 import {
   AseelDocumentShell,
@@ -99,11 +100,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
     }
   }, [accountId, start, end, unposted, currencyId]);
 
-  const fmt = (n: number) =>
-    Number(n).toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+  const fmt = (n: number) => formatMoney(n);
 
   // Use transactions from GeneralLedgerResponse
   const ledgerRows: LedgerRow[] = data?.transactions || [];

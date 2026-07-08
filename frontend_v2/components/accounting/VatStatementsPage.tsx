@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
+import { formatMoney } from "../../utils/formatNumber";
 import type { VatReportResponse, VatReportLine } from "../../types/accounting";
 import {
   AseelDocumentShell,
@@ -58,8 +59,7 @@ export const VatStatementsPage: React.FC = () => {
     if (showNewForm) fetchPreview();
   }, [showNewForm, fetchPreview]);
 
-  const fmt = (n: number | undefined | null) =>
-    (Number(n) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmt = (n: number | undefined | null) => formatMoney(n);
 
   const stmtColumns: DenseColumn<VatStatement>[] = [
     { key: "statement_number", header: "رقم الكشف" },

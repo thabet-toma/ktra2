@@ -1,6 +1,7 @@
 
 import React from 'react';
 import { Product } from '../types';
+import { formatMoney } from '../utils/formatNumber';
 
 interface ProductCardProps {
   product: Product;
@@ -32,7 +33,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onPreview }) 
         </h3>
         <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">{product.store}</p>
         <div className="mt-auto flex justify-between items-center">
-          <p className="text-2xl font-extrabold text-blue-600 dark:text-blue-400">${product.price.toFixed(2)}</p>
+          <p className="text-2xl font-extrabold text-blue-600 dark:text-blue-400">${formatMoney(product.price)}</p>
           <button
             onClick={() => onPreview(product.url)}
             className="bg-blue-50 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300 font-semibold py-2 px-5 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900 transition-colors duration-300"

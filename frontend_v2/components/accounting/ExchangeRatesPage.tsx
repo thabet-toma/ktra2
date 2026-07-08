@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
+import { formatNumber } from "../../utils/formatNumber";
 import type { ExchangeRateDto, CurrencyDto } from "../../types/accounting";
 import {
   AseelDocumentShell,
@@ -117,7 +118,7 @@ export const ExchangeRatesPage: React.FC = () => {
     },
     {
       key: "rate", header: "السعر", numeric: true,
-      render: (r) => Number(r.rate).toFixed(6),
+      render: (r) => formatNumber(r.rate, { maxDecimals: 6 }),
     },
     {
       key: "effective_date", header: "تاريخ السريان",

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { getInvoiceProfits, type InvoiceProfitRow, type InvoiceProfitsResponse } from "../../services/salesApi";
+import { formatMoney } from "../../utils/formatNumber";
 import { AseelDocumentShell, AseelReportTable } from "../aseel";
 import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
 import { Search } from "lucide-react";
@@ -36,11 +37,7 @@ export const InvoiceProfitsPage: React.FC = () => {
     fetchData();
   }, [fetchData]);
 
-  const fmt = (n: string | number | undefined) =>
-    (Number(n) || 0).toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+  const fmt = (n: string | number | undefined) => formatMoney(n);
 
   // فلترة العميل/الرقم محلياً (بحث نصّي) فوق نتيجة المدى الزمني من الخادم.
   const rows = (data?.rows || []).filter((r) => {

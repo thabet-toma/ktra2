@@ -139,7 +139,7 @@ export const StockLevelsPage: React.FC = () => {
     rowsToExport.forEach(p => {
       const name = p.name_ar || p.name_en || p.sku || '—';
       const qty = Number(p.quantity_on_hand);
-      const avgCost = Number(p.avg_cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const avgCost = formatMoney(p.avg_cost);
       const minStock = p.min_stock_level ?? '—';
       const isLow = qty <= (p.min_stock_level || 0);
       

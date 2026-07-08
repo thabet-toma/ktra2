@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useCallback } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import type { LocalPayments, TaxesAndFeesLine } from "@/types";
+import { formatMoney, formatNumber } from "@/utils/formatNumber";
 import {
     effectiveTaxesAndFeesLines,
     hasAfterMainVatPercentageLines,
@@ -152,7 +153,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                             <th className="py-1 px-1 text-center w-[14%]">قيمة / %</th>
                             <th
                                 className="py-1 px-1 text-center w-[20%]"
-                                title={`ض.ق.م الفاتورة ≈ ₪${mainVatIls.toFixed(2)} — أساس «بعد ض.ق.م» = مجموع قبل ض.ق.م + هذا المبلغ`}
+                                title={`ض.ق.م الفاتورة ≈ ₪${formatMoney(mainVatIls)} — أساس «بعد ض.ق.م» = مجموع قبل ض.ق.م + هذا المبلغ`}
                             >
                                 ₪ للفاتورة
                             </th>
@@ -181,7 +182,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                             </td>
                             <td
                                 className="py-0.5 px-1 text-center text-[9px] aseel-text-ink dark:aseel-text-soft"
-                                title={`أساس ض.ق.م: ₪${Math.max(0, basisForInvoiceVat).toFixed(2)} — بضاعة + شحن دولي + عمولات تحويل دفعات + تخليص/ميناء/جمركة + نقل محلي (قبل ض.ق.م الفاتورة)`}
+                                title={`أساس ض.ق.م: ₪${formatMoney(Math.max(0, basisForInvoiceVat))} — بضاعة + شحن دولي + عمولات تحويل دفعات + تخليص/ميناء/جمركة + نقل محلي (قبل ض.ق.م الفاتورة)`}
                             >
                                 {basisForInvoiceVat > taxableBaseIls + 0.005
                                     ? "مجموع قبل ض.ق.م"
@@ -222,18 +223,12 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                 className="py-0.5 px-1 text-center font-black aseel-text-ink dark:aseel-text-soft tabular-nums"
                                 title={
                                     taxType === "percentage"
-                                        ? `محسوبة من الأساس (₪${Math.max(0, basisForInvoiceVat).toFixed(2)} × ${normalizeTaxRatePercent(taxRate)}%)`
+                                        ? `محسوبة من الأساس (₪${formatMoney(Math.max(0, basisForInvoiceVat))} × ${normalizeTaxRatePercent(taxRate)}%)`
                                         : "مبلغ ثابت"
                                 }
                             >
                                 ₪
-                                {(taxType === "percentage" ? mainVatIls : Math.max(0, Number(taxAmount) || 0)).toLocaleString(
-                                    undefined,
-                                    {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 3,
-                                    }
-                                )}
+                                {formatNumber(taxType === "percentage" ? mainVatIls : Math.max(0, Number(taxAmount) || 0), { maxDecimals: 3, group: true })}
                             </td>
                             <td className="py-0.5 px-0 text-center text-[9px] aseel-text-ink dark:aseel-text-soft">
                                 {taxType === "percentage" ? "محسوبة" : "—"}
@@ -248,9 +243,9 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                             const afterVatBasis = Math.max(0, basisForInvoiceVat) + mainVatIls;
                             const basisTitle =
                                 isPct && basis === "after_main_vat"
-                                    ? `نسبة من ₪${afterVatBasis.toFixed(2)} (مجموع قبل ض.ق.م + ض.ق.م)`
+                                    ? `نسبة من ₪${formatMoney(afterVatBasis)} (مجموع قبل ض.ق.م + ض.ق.م)`
                                     : isPct
-                                      ? `نسبة من ₪${Math.max(0, taxableBaseIls).toFixed(2)} (أساس البضاعة)`
+                                      ? `نسبة من ₪${formatMoney(Math.max(0, taxableBaseIls))} (أساس البضاعة)`
                                       : undefined;
                             return (
                                 <tr key={row.id} className="align-middle hover:aseel-bg-panel/60 dark:hover:aseel-bg-panel/40">
@@ -330,10 +325,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                         className="py-0.5 px-1 text-center font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] tabular-nums"
                                         title={basisTitle}
                                     >
-                                        {lineIls.toLocaleString(undefined, {
-                                            minimumFractionDigits: 2,
-                                            maximumFractionDigits: 2,
-                                        })}
+                                        {formatMoney(lineIls)}
                                     </td>
                                     <td className="py-0.5 px-0 text-center">
                                         {!readOnly && (
@@ -441,10 +433,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                     className="py-0.5 px-1 text-center text-[10px] font-semibold tabular-nums text-[var(--color-primary)] dark:text-[var(--color-primary)]"
                                     title="معاينة قبل الإضافة"
                                 >
-                                    {draftPreview.toLocaleString(undefined, {
-                                        minimumFractionDigits: 2,
-                                        maximumFractionDigits: 2,
-                                    })}
+                                    {formatMoney(draftPreview)}
                                 </td>
                                 <td className="py-0.5 px-0.5 text-center">
                                     <button
@@ -476,9 +465,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                             </td>
                             <td className="py-1 px-1 text-center font-black text-[var(--color-primary)] dark:text-[var(--color-primary)] tabular-nums">
                                 ₪
-                                {extrasSum.toLocaleString(undefined, {
-                                    minimumFractionDigits: 2,
-                                })}
+                                {formatMoney(extrasSum)}
                             </td>
                             <td />
                         </tr>

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { formatMoney, formatNumber } from "../../utils/formatNumber";
 import { useNavigate } from "react-router-dom";
 import {
   Banknote,
@@ -159,11 +160,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     loadAll();
   }, [loadAll]);
 
-  const fmt = (n: string | number) =>
-    Number(n).toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+  const fmt = (n: string | number) => formatMoney(n);
 
   const partnerName = (id: number) =>
     partners.find((p) => p.id === id)?.name || `#${id}`;
@@ -497,14 +494,14 @@ const NewPaymentModal: React.FC<{
 
   // N4-T4: تَحديث amount auto عند تَغيير cash/cheques
   useEffect(() => {
-    if (computedTotal > 0) setAmount(String(computedTotal.toFixed(2)));
+    if (computedTotal > 0) setAmount(formatNumber(computedTotal, { maxDecimals: 2 }));
   }, [computedTotal]);
 
   // N4-T4: تَحديث withholdingAmt من النسبة
   useEffect(() => {
     const pct = Number(withholdingPct) || 0;
     const amt = (Number(amount) || 0) * (pct / 100);
-    setWithholdingAmt(String(amt.toFixed(2)));
+    setWithholdingAmt(formatNumber(amt, { maxDecimals: 2 }));
   }, [withholdingPct, amount]);
 
   useEffect(() => {
@@ -634,11 +631,7 @@ const NewPaymentModal: React.FC<{
     }
   };
 
-  const fmt = (n: string | number) =>
-    Number(n).toLocaleString(undefined, {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    });
+  const fmt = (n: string | number) => formatMoney(n);
 
   return (
     <div
@@ -783,7 +776,7 @@ const NewPaymentModal: React.FC<{
                     setWithholdingAmt(e.target.value);
                     const amt = Number(e.target.value) || 0;
                     const t = Number(amount) || 0;
-                    if (t > 0) setWithholdingPct(((amt / t) * 100).toFixed(2));
+                    if (t > 0) setWithholdingPct(formatNumber((amt / t) * 100, { maxDecimals: 2 }));
                   }}
                 />
               </div>

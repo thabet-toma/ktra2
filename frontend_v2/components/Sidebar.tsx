@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
 import { useCompany } from "../contexts/CompanyContext";
+import { useTenantSettings } from "../hooks/useTenantSettings";
 
 
 interface SidebarProps {
@@ -30,6 +31,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) => {
   // صلاحية الاستيراد للشركة النشطة (تتفاعل مع تبديل الشركة) — لا تعتمد على علم ثابت من تسجيل الدخول.
   const { canAccessImport } = useCompany();
+  const { identity } = useTenantSettings();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
   // Phase 5 (Section 9): مجموعات تنقّل رئيسية كبيرة، كلٌّ بأيقونته الخاصة.

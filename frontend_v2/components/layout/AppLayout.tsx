@@ -23,6 +23,7 @@ import {
 import { AseelCalculatorButton } from '../aseel';
 import { GlobalActionBar } from './GlobalActionBar';
 import { NotificationCenter } from '../notifications/NotificationCenter';
+import { WhatsNewButton } from './WhatsNewButton';
 import {
   User as UserIcon,
   Calendar,
@@ -124,6 +125,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </div>
 
           <GlobalSearch userRole={user.role} onNavigate={onNavigate} />
+          {/* ما الجديد — لوحة تشرح آخر التحديثات */}
+          <WhatsNewButton />
           {/* إشعارات الموقع (الجرس) — تذكيرات الزبائن/الشحنات */}
           <NotificationCenter currentUserId={user.id} onNavigate={onNavigate} />
           {/* ثوابت المجموعة — زر مرئي بديل للمفتاح F11 */}

@@ -6,6 +6,7 @@ import {
     sumTaxesAndFeesExtras,
 } from "@/utils/invoiceTaxesAndFees";
 import { formatTaxPercentLabel } from "@/utils/sqlMoneyRound";
+import { formatMoney } from "@/utils/formatNumber";
 
 interface NISFinancialSummaryProps {
     subtotal: number;
@@ -76,7 +77,7 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                     </span>
                     <span className="font-bold tabular-nums">
                         {symbol}
-                        {subtotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        {formatMoney(subtotal)}
                     </span>
                 </div>
 
@@ -87,7 +88,7 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                         </span>
                         <span className="font-bold tabular-nums">
                             -{symbol}
-                            {discountAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            {formatMoney(discountAmount)}
                         </span>
                     </div>
                 )}
@@ -98,7 +99,7 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                     </span>
                     <span className="font-bold tabular-nums">
                         {symbol}
-                        {taxAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        {formatMoney(taxAmount)}
                     </span>
                 </div>
 
@@ -114,9 +115,7 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                         </span>
                         <span className="font-bold tabular-nums shrink-0">
                             {symbol}
-                            {extrasTotal.toLocaleString(undefined, {
-                                minimumFractionDigits: 2,
-                            })}
+                            {formatMoney(extrasTotal)}
                         </span>
                     </div>
                 )}
@@ -128,7 +127,7 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                         </span>
                         <span className="font-bold tabular-nums">
                             {symbol}
-                            {shippingCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            {formatMoney(shippingCost)}
                         </span>
                     </div>
                 )}
@@ -177,7 +176,7 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                             <span className="aseel-text-soft text-[10px] block">الإجمالي</span>
                             <div className="flex items-baseline gap-1 text-white">
                                 <span className="text-2xl font-black tabular-nums">
-                                    {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                    {formatMoney(grandTotal)}
                                 </span>
                                 <span className="text-sm font-bold opacity-80">{symbol}</span>
                             </div>

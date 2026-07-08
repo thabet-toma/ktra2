@@ -27,7 +27,7 @@ import {
   suppliersService,
 } from "../../../services/firestoreService";
 import { purchaseInvoiceApi } from "../../../services/purchaseInvoiceApi";
-import { formatMoney } from "../../../utils/formatNumber";
+import { formatMoney, formatNumber } from "../../../utils/formatNumber";
 import {
   Save,
   X,
@@ -188,7 +188,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   });
 
   useAseelKeymap({
-    F2: () => window.print(),
+    F2: () => setShowPrintView(true),
     F6: () => {
       const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"], [name="supplierName"]');
       el?.focus();
@@ -256,7 +256,7 @@ export const DealForm: React.FC<DealFormProps> = ({
     if (!installmentPlanEnabled) { setInstallmentValidationError(""); return true; }
     if (installments.length === 0) { setInstallmentValidationError("❌ يجب إضافة دفعة واحدة على الأقل"); return false; }
     const totalPercentage = installments.reduce((sum, i) => sum + (i.percentage || 0), 0);
-    if (Math.abs(totalPercentage - 100) > 0.01) { setInstallmentValidationError(`❌ مجموع النسب يجب أن يكون 100%، الحالي: ${totalPercentage.toFixed(2)}%`); return false; }
+    if (Math.abs(totalPercentage - 100) > 0.01) { setInstallmentValidationError(`❌ مجموع النسب يجب أن يكون 100%، الحالي: ${formatNumber(totalPercentage, { maxDecimals: 2 })}%`); return false; }
     const hasZeroPercentage = installments.some(i => (i.percentage || 0) <= 0);
     if (hasZeroPercentage) { setInstallmentValidationError("❌ جميع الدفعات يجب أن يكون لها نسبة أكبر من 0%"); return false; }
     const grandTotal = calculateGrandTotal();
@@ -694,7 +694,7 @@ export const DealForm: React.FC<DealFormProps> = ({
     paymentPercentage: calculateGrandTotal() > 0 ? ((formData.payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0) / calculateGrandTotal()) * 100 : 0
   };
 
-  const fmt = (v: number) => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmt = (v: number) => formatMoney(v);
 
   const fld = (label: string, node: React.ReactNode) => (
     <label className="aseel-field">
@@ -934,7 +934,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   const toolbarActions: AseelToolbarAction[] = [
     { key: "new", label: "إضافة", icon: <Plus />, onClick: handleNewDeal },
     { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: <Save />, onClick: !saving ? () => void handleFinalSave() : undefined, disabled: saving },
-    { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => window.print(), separatorBefore: true },
+    { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => setShowPrintView(true), separatorBefore: true },
     { key: "cancel", label: "إلغاء", icon: <X />, onClick: onCancel, danger: true, separatorBefore: true },
   ];
 

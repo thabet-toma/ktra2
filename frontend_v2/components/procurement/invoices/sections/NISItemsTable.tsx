@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { Package, Tag, Layers, Anchor, Receipt } from "lucide-react";
 import type { Invoice, InvoiceItem, LocalPayments } from "@/types";
 import { sumTaxesAndFeesExtras, transferCommissionsIlsForVat } from "@/utils/invoiceTaxesAndFees";
+import { formatMoney } from "@/utils/formatNumber";
 
 interface NISItemsTableProps {
     items: InvoiceItem[];
@@ -17,7 +18,7 @@ interface NISItemsTableProps {
 }
 
 function fmtIls(v: number) {
-    return `₪${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `₪${formatMoney(v)}`;
 }
 
 function allocationWeights(items: InvoiceItem[]): number[] {
@@ -187,12 +188,10 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                     <td className="px-2 py-2">
                                         <div className="text-xs font-bold aseel-text-ink dark:text-white tabular-nums">
                                             ₪
-                                            {item.unitPrice.toLocaleString(undefined, {
-                                                minimumFractionDigits: 2,
-                                            })}
+                                            {formatMoney(item.unitPrice)}
                                         </div>
                                         <div className="text-[9px] aseel-text-soft tabular-nums">
-                                            ${usdUnitPrice.toFixed(2)}
+                                            ${formatMoney(usdUnitPrice)}
                                         </div>
                                     </td>
                                     {showLanded && (
@@ -203,12 +202,10 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                                 (Number(item.totalPrice) || 0) > 0) ? (
                                                 <span className="text-xs font-bold aseel-text-ink dark:aseel-text-soft tabular-nums">
                                                     ₪
-                                                    {(
+                                                    {formatMoney(
                                                         alloc.preTaxWithTransfer /
                                                         Math.max(Number(item.quantity) || 0, 0.0001)
-                                                    ).toLocaleString(undefined, {
-                                                        minimumFractionDigits: 2,
-                                                    })}
+                                                    )}
                                                 </span>
                                             ) : (
                                                 <span className="aseel-text-soft text-xs">—</span>
@@ -218,12 +215,10 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                     <td className="px-2 py-2">
                                         <div className="text-xs font-bold aseel-text-ink dark:aseel-text-soft tabular-nums">
                                             ₪
-                                            {item.totalPrice.toLocaleString(undefined, {
-                                                minimumFractionDigits: 2,
-                                            })}
+                                            {formatMoney(item.totalPrice)}
                                         </div>
                                         <div className="text-[9px] aseel-text-soft tabular-nums">
-                                            ${usdTotalPrice.toFixed(2)}
+                                            ${formatMoney(usdTotalPrice)}
                                         </div>
                                     </td>
                                     {showLanded && (

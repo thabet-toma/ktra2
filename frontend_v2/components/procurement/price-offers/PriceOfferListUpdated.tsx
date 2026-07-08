@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { PriceOffer, Supplier, PriceOfferStatus } from '../../../types';
+import { formatMoney } from '../../../utils/formatNumber';
 import { StatusBadge } from './StatusBadge';
 import {
     FileText, Search, Plus, Calendar,
@@ -395,7 +396,7 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                                     {offer.grandTotal.toLocaleString()} $
                                                 </div>
                                                 <div className="text-xs aseel-text-soft dark:aseel-text-soft">
-                                                    ضريبة: {offer.taxAmount?.toFixed(2)} $
+                                                    ضريبة: {formatMoney(offer.taxAmount ?? 0)} $
                                                 </div>
                                             </div>
                                         </td>

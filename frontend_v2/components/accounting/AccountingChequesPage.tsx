@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
+import { formatMoney } from "../../utils/formatNumber";
 import type { ChequeDto, AccountingPartner } from "../../types/accounting";
 import {
   AseelDocumentShell,
@@ -183,7 +184,7 @@ export const AccountingChequesPage: React.FC = () => {
     { key: "cheque_number", header: "رقم الشيك", width: "100px", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.cheque_number}</span> },
     { key: "bank_name", header: "البنك", width: "120px", render: (r) => r.bank_name || "—" },
     { key: "branch_name", header: "الفرع", width: "100px", render: (r) => (r as ChequeDto & { branch_name?: string }).branch_name || "—" },
-    { key: "amount", header: "المبلغ", width: "110px", numeric: true, render: (r) => Number(r.amount).toLocaleString("ar-EG", { minimumFractionDigits: 2 }) },
+    { key: "amount", header: "المبلغ", width: "110px", numeric: true, render: (r) => formatMoney(r.amount) },
     { key: "due_date", header: "تاريخ الاستحقاق", width: "110px", render: (r) => r.due_date || "—" },
     { key: "issue_date", header: "تاريخ الإصدار", width: "110px", render: (r) => r.issue_date || "—" },
     { key: "partner", header: "الشريك", width: "140px", render: (r) => getPartnerName(r.partner) },

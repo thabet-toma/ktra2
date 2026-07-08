@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Shipment, Deal } from '../../../types';
 import { dealsService } from '../../../services/dealsService';
 import { effectiveDealTitleForDisplay } from '../../../utils/dealTitleDisplay';
+import { formatNumber } from '../../../utils/formatNumber';
 import {
     Truck, Ship, Plane, Calendar, Package, DollarSign,
     FileText, User, Hash, Box, Scale, Navigation,
@@ -381,7 +382,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                     <div className="flex items-center justify-between">
                                         <span className="aseel-text-soft dark:aseel-text-soft">الحجم الإجمالي:</span>
                                         <span className="font-bold aseel-text-ink dark:text-white">
-                                            {totalVolume.toFixed(1)} م³
+                                            {formatNumber(totalVolume, { maxDecimals: 1 })} م³
                                         </span>
                                     </div>
                                     <div className="flex items-center justify-between">
@@ -662,7 +663,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                                             <div className="font-mono aseel-text-ink dark:aseel-text-soft">{deal.originalOfferNumber}</div>
                                                         </td>
                                                         <td className="px-3 py-2 text-center">
-                                                            <div className="aseel-text-ink dark:aseel-text-soft">{(deal.totalVolume || 0).toFixed(1)} م³</div>
+                                                            <div className="aseel-text-ink dark:aseel-text-soft">{formatNumber(deal.totalVolume || 0, { maxDecimals: 1 })} م³</div>
                                                         </td>
                                                         <td className="px-3 py-2 text-center">
                                                             <div className="aseel-text-ink dark:aseel-text-soft">{(deal.totalWeightKg || 0).toLocaleString()} كجم</div>

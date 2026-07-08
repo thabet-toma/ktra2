@@ -58,8 +58,8 @@ const newChequeLine = (): ChequeLine => ({
   branch: "",
 });
 
-const fmt = (n: string | number) =>
-  Number(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { formatMoney, formatNumber } from "@/utils/formatNumber";
+const fmt = (n: string | number) => formatMoney(n);
 
 export const SupplierPaymentsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -94,7 +94,7 @@ export const SupplierPaymentsPage: React.FC = () => {
 
   useEffect(() => {
     const pct = Number(withholdingPct) || 0;
-    setWithholdingAmt(String((computedTotal * (pct / 100)).toFixed(2)));
+    setWithholdingAmt(formatNumber(computedTotal * (pct / 100), { maxDecimals: 2 }));
   }, [withholdingPct, computedTotal]);
 
   const load = useCallback(async () => {
@@ -387,7 +387,7 @@ export const SupplierPaymentsPage: React.FC = () => {
                   <span className="aseel-field-label">مبلغ خصم المصدر</span>
                   <input type="number" step="0.01" className="aseel-input aseel-num" value={withholdingAmt} onChange={(e) => {
                     setWithholdingAmt(e.target.value);
-                    if (computedTotal > 0) setWithholdingPct(((Number(e.target.value) || 0) / computedTotal * 100).toFixed(2));
+                    if (computedTotal > 0) setWithholdingPct(formatNumber((Number(e.target.value) || 0) / computedTotal * 100, { maxDecimals: 2 }));
                   }} />
                 </label>
                 <label className="aseel-field">

@@ -31,8 +31,8 @@ interface TradeDashboardProps {
 const fmt = (n: number) =>
   n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
-const fmtMoney = (n: number) =>
-  n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { formatMoney } from "@/utils/formatNumber";
+const fmtMoney = (n: number) => formatMoney(n);
 
 const fmtDate = (d: string | null) => {
   if (!d) return "—";
