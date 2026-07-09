@@ -18,6 +18,7 @@ import {
 } from "@/services/clearanceApi";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { formatMoney, formatNumber } from "@/utils/formatNumber";
+import { useToast } from "@/contexts/ToastContext";
 import {
     Search,
     X,
@@ -131,6 +132,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
     currentUser: _currentUser,
     initialShipmentId = null,
 }) => {
+    const toast = useToast();
     const [clearances, setClearances] = useState<ClearanceRow[]>([]);
     const [allDeals, setAllDeals] = useState<Deal[]>([]);
     const [searchTerm, setSearchTerm] = useState("");
@@ -302,16 +304,17 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
     const handleImportClick = async () => {
         if (!resolvedShipment || !selectedClearance) return;
         if (selectedDeals.length === 0) {
-            alert("الرجاء اختيار صفقة واحدة على الأقل");
+            toast("الرجاء اختيار صفقة واحدة على الأقل", "info");
             return;
         }
         if (previewLoading) {
-            alert("انتظر حتى تنتهي معاينة التكلفة من الخادم ثم أعد المحاولة.");
+            toast("انتظر حتى تنتهي معاينة التكلفة من الخادم ثم أعد المحاولة.", "info");
             return;
         }
         if (clearancePreviewBlocksImportForUnpaidFreight(preview)) {
-            alert(
-                "لا يمكن الاستيراد: شحن الشحنة غير مكتمل الدفع بالدولار. سجّل دفعات وكيل الشحن المؤكّدة من شاشة الشحنة ثم أعد المحاولة."
+            toast(
+                "لا يمكن الاستيراد: شحن الشحنة غير مكتمل الدفع بالدولار. سجّل دفعات وكيل الشحن المؤكّدة من شاشة الشحنة ثم أعد المحاولة.",
+                "error"
             );
             return;
         }
@@ -341,7 +344,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
             onClose();
         } catch (e) {
             // console suppressed
-            alert(e instanceof Error ? e.message : "فشل استيراد الفواتير من الخادم");
+            toast(e instanceof Error ? e.message : "فشل استيراد الفواتير من الخادم", "error");
         } finally {
             setImportBusy(false);
         }

@@ -8,6 +8,8 @@ import {
     X, Wallet, Banknote, BookOpen, Trash2,
 } from 'lucide-react';
 import { PaymentRegistration } from '@/components/forms/deal-parts/PaymentRegistration';
+import { useToast } from '@/contexts/ToastContext';
+import { useConfirm } from '@/contexts/ConfirmContext';
 import {
     findPaymentForInstallmentId,
     pickBestDealPayment,
@@ -61,6 +63,8 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
     onOpenAccountingJournal,
     readOnly = false,
 }) => {
+    const toast = useToast();
+    const confirmDialog = useConfirm();
     const [selectedInstallment, setSelectedInstallment] = useState<DealInstallment | null>(null);
     const [showPaymentModal, setShowPaymentModal] = useState(false);
     const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -142,7 +146,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
         const isFullyFinished = !!payment?.confirmedBySupplier;
 
         if (!unlocked) {
-            alert("هذه الدفعة مقفلة، يجب إكمال الدفعة السابقة أولاً");
+            toast("هذه الدفعة مقفلة، يجب إكمال الدفعة السابقة أولاً", "info");
             return;
         }
 
@@ -205,9 +209,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
         if (payment?.id) {
             onConfirmSupplier({ ...data, paymentId: payment.id });
         } else {
-            alert(
-                "❌ لم يُعثر على دفعة تطابق هذا القسط. حدّث الصفحة (F5) ثم جرّب من سطر الدفعة الصحيحة."
-            );
+            toast("لم يُعثر على دفعة تطابق هذا القسط. حدّث الصفحة (F5) ثم جرّب من سطر الدفعة الصحيحة.", "error");
         }
         setShowPaymentModal(false);
         setRefreshKey(prev => prev + 1);
@@ -218,9 +220,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
     const openJournalForPayment = (payment: DealPayment | undefined) => {
         const jid = parseSqlJournalId(payment);
         if (jid == null) {
-            alert(
-                "لا يوجد قيد يومية مرتبط بهذه الدفعة.\n\nيظهر رقم القيد بعد الترحيل المحاسبي للدفعة."
-            );
+            toast("لا يوجد قيد يومية مرتبط بهذه الدفعة — يظهر رقم القيد بعد الترحيل المحاسبي.", "info");
             return;
         }
         const dealRef =
@@ -606,7 +606,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                                 if (raw == null || String(raw).trim() === "") return;
                                                 const n = parseInt(String(raw).trim(), 10);
                                                 if (!Number.isFinite(n) || n <= 0) {
-                                                    alert("رقم غير صالح.");
+                                                    toast("رقم غير صالح.", "error");
                                                     return;
                                                 }
                                                 onPaymentOperation(
@@ -641,16 +641,14 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                                     ? "حذف الدفعة من سجل الشحنة (غير مسموح إن وُجد قيد مرحّل)"
                                                     : "حذف الدفعة من السجل (غير مسموح إن وُجد قيد مرحّل)"
                                             }
-                                            onClick={() => {
-                                                if (
-                                                    !window.confirm(
-                                                        `حذف «الدفعة ${installment.installmentNumber}» بمبلغ $${Number(
-                                                            payment?.amount || 0
-                                                        ).toLocaleString()} من السجل؟`
-                                                    )
-                                                ) {
-                                                    return;
-                                                }
+                                            onClick={async () => {
+                                                const ok = await confirmDialog({
+                                                    title: "حذف الدفعة",
+                                                    message: `حذف «الدفعة ${installment.installmentNumber}» بمبلغ $${formatNumber(
+                                                        Number(payment?.amount || 0), { maxDecimals: 2 }
+                                                    )} من السجل؟`,
+                                                });
+                                                if (!ok) return;
                                                 onPaymentOperation(
                                                     "cancel",
                                                     `دفعة_${installment.installmentNumber}`,

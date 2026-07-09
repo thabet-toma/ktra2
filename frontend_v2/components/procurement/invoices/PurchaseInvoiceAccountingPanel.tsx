@@ -32,6 +32,7 @@ import type {
   ReceiptStatus,
 } from "@/types/purchaseInvoice";
 import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
+import { useConfirm } from "@/contexts/ConfirmContext";
 
 const RECEIPT_BADGE: Record<ReceiptStatus, { label: string; cls: string }> = {
   not_received: { label: "غير مستلمة", cls: "aseel-text-state" },
@@ -68,6 +69,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   onPosted,
   readOnly,
 }) => {
+  const confirmDialog = useConfirm();
   const [loading, setLoading] = useState(true);
   const [invoice, setInvoice] = useState<PurchaseInvoiceDto | null>(null);
   const [accounts, setAccounts] = useState<AccountDto[]>([]);
@@ -226,10 +228,13 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   // ─── التراجع عن الترحيل (حذف القيود) ─────────────────────────────────────
   const unpost = async () => {
     if (!invoice) return;
-    if (!window.confirm(
-      "هذا المستند مرحَّل. سيؤدي التراجع عن الترحيل إلى حذف كل قيود اليومية " +
-      "وحركات الاستلام الخاصة بهذه الفاتورة وإرجاعها مسودة. متابعة؟"
-    )) return;
+    if (!(await confirmDialog({
+      title: "تراجع عن الترحيل",
+      message:
+        "هذا المستند مرحَّل. سيؤدي التراجع عن الترحيل إلى حذف كل قيود اليومية " +
+        "وحركات الاستلام الخاصة بهذه الفاتورة وإرجاعها مسودة. متابعة؟",
+      confirmText: "تراجع عن الترحيل",
+    }))) return;
     setPosting(true);
     setError(null);
     setSuccess(null);

@@ -61,6 +61,8 @@ import { InstallmentManager } from "./InstallmentManager";
 import { PaymentProgress } from "./PaymentProgress";
 import { SupplierViewModal } from "@/components/common/SupplierViewModal";
 import { SupplierModal } from "@/components/common/SupplierModal";
+import { useToast } from "@/contexts/ToastContext";
+import { useConfirm } from "@/contexts/ConfirmContext";
 import { DealPrintView } from "./DealPrintView";
 import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
 import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
@@ -152,6 +154,12 @@ export const DealForm: React.FC<DealFormProps> = ({
   compactMode = false,
   onOpenAccountingJournal,
 }) => {
+  const toast = useToast();
+  const confirm = useConfirm();
+  /** حوار معلومات بزر واحد — بديل alert للرسائل الطويلة (نتائج المحاسبة). */
+  const notify = (title: string, message: string) =>
+    void confirm({ title, message, danger: false, hideCancel: true, confirmText: "حسناً" });
+
   const [formData, setFormData] = useState<Partial<Deal>>(deal || {});
   const [items, setItems] = useState<DealItem[]>(deal?.items || []);
   const [activities, setActivities] = useState<DealActivity[]>([]);
@@ -295,7 +303,7 @@ export const DealForm: React.FC<DealFormProps> = ({
     if (deal?.id) {
       (async () => {
         try { await loadAndSetDealData(deal.id!); await loadActivities(); }
-        catch (error) { console.error("❌ Error loading deal:", error); alert("حدث خطأ في تحميل بيانات الصفقة"); }
+        catch (error) { console.error("❌ Error loading deal:", error); toast("حدث خطأ في تحميل بيانات الصفقة", "error"); }
       })();
     }
   }, [deal?.id]);
@@ -358,7 +366,7 @@ export const DealForm: React.FC<DealFormProps> = ({
     operation: "claim" | "swift" | "add" | "confirm" | "cancel" | "unpost" | "linkJournal",
     paymentType: string, data: any, paymentId?: string
   ) => {
-    if (!formData.id) { alert("يرجى حفظ الصفقة أولاً"); return; }
+    if (!formData.id) { toast("يرجى حفظ الصفقة أولاً", "info"); return; }
     try {
       setLoading(true);
       if (operation !== "unpost" && operation !== "linkJournal") {
@@ -380,14 +388,14 @@ export const DealForm: React.FC<DealFormProps> = ({
         case "add": {
           const addAmt = Number(data?.amount ?? 0);
           const capAdd = maxPaymentPrincipalForDeal(formData);
-          if (addAmt > capAdd + 1e-6) { alert(`لا يُسمح بدفع يتجاوز قيمة الصفقة. الأقصى المتاح: $${capAdd.toLocaleString()}`); setLoading(false); return; }
+          if (addAmt > capAdd + 1e-6) { toast(`لا يُسمح بدفع يتجاوز قيمة الصفقة. الأقصى المتاح: $${formatMoney(capAdd)}`, "error"); setLoading(false); return; }
           await dealsService.addPayment(formData.id, { ...cleanData(data), type: paymentType, id: `payment_${Date.now()}`, paymentDate: new Date().toISOString(), confirmedBySupplier: false }, currentUser.id, currentUser.name, currentUser.role || "user");
           break;
         }
         case "claim": {
           const claimAmt = Number(data?.amount ?? 0);
           const capClaim = maxPaymentPrincipalForDeal(formData);
-          if (claimAmt > capClaim + 1e-6) { alert(`لا يُسمح بدفع يتجاوز قيمة الصفقة. الأقصى المتاح لتسجيل مطالبة: $${capClaim.toLocaleString()}`); setLoading(false); return; }
+          if (claimAmt > capClaim + 1e-6) { toast(`لا يُسمح بدفع يتجاوز قيمة الصفقة. الأقصى المتاح لتسجيل مطالبة: $${formatMoney(capClaim)}`, "error"); setLoading(false); return; }
           await dealsService.addPayment(formData.id, { ...cleanData(data), type: paymentType, id: `payment_${Date.now()}`, paymentDate: new Date().toISOString(), confirmedBySupplier: false }, currentUser.id, currentUser.name, currentUser.role || "user");
           const nextSt = suggestStatusAfterClaim(formData, data.installmentNumber);
           if (nextSt) { try { await dealsService.updateDealStatus(formData.id, nextSt, currentUser.id, currentUser.name, currentUser.role || "user", "رفع مطالبة — جاهز لمسار الدفع"); } catch (e) { console.warn("updateDealStatus after claim:", e); } }
@@ -396,34 +404,34 @@ export const DealForm: React.FC<DealFormProps> = ({
         case "swift": {
           const instNum = data?.installmentNumber != null && Number.isFinite(Number(data.installmentNumber)) ? Number(data.installmentNumber) : undefined;
           const resolved = resolvePaymentForSwiftInstallment(formData.payments, paymentType, instNum, paymentId ?? null);
-          if (resolved.rejectReason) { alert(`❌ ${resolved.rejectReason}`); setLoading(false); return; }
+          if (resolved.rejectReason) { toast(resolved.rejectReason, "error"); setLoading(false); return; }
           let payment = resolved.payment;
           let swiftPaymentId = payment?.id != null ? String(payment.id) : undefined;
           if (!swiftPaymentId) {
             if (!payment) {
               const swiftAmt = Number(data.amount ?? 0);
               const capSwift = maxPaymentPrincipalForDeal(formData);
-              if (swiftAmt > capSwift + 1e-6) { alert(`لا يُسمح بدفع يتجاوز قيمة الصفقة. الأقصى المتاح: $${capSwift.toLocaleString()}`); setLoading(false); return; }
+              if (swiftAmt > capSwift + 1e-6) { toast(`لا يُسمح بدفع يتجاوز قيمة الصفقة. الأقصى المتاح: $${formatMoney(capSwift)}`, "error"); setLoading(false); return; }
               await dealsService.addPayment(formData.id, { type: paymentType, amount: swiftAmt, paymentDate: data.paymentDate || new Date().toISOString(), usdToIls: Number(data.usdToIls ?? 0), transferCost: Number(data.transferCost ?? data.transferFee ?? 0), notes: data.notes || "", installmentId: data.installmentId, installmentNumber: data.installmentNumber, confirmedBySupplier: false, alibabaClaimImage: undefined } as Omit<DealPayment, "id">, currentUser.id, currentUser.name, currentUser.role || "user");
               const fresh = await dealsService.getDeal(formData.id);
               const again = resolvePaymentForSwiftInstallment(fresh.payments, paymentType, instNum, null);
-              if (again.rejectReason) { alert(`❌ ${again.rejectReason}`); setLoading(false); return; }
+              if (again.rejectReason) { toast(again.rejectReason, "error"); setLoading(false); return; }
               payment = again.payment; swiftPaymentId = payment?.id != null ? String(payment.id) : undefined;
             } else { swiftPaymentId = String(payment.id); }
           }
-          if (!swiftPaymentId) { alert("تعذر إنشاء أو العثور على سجل الدفعة"); setLoading(false); return; }
-          if (!data.cashBoxId) { alert("يجب اختيار صندوق مالي لتنفيذ عملية الدفع"); setLoading(false); return; }
-          if (!data.bankSwiftImage) { alert("يجب رفع صورة السليب أولاً"); setLoading(false); return; }
+          if (!swiftPaymentId) { toast("تعذر إنشاء أو العثور على سجل الدفعة", "error"); setLoading(false); return; }
+          if (!data.cashBoxId) { toast("يجب اختيار صندوق مالي لتنفيذ عملية الدفع", "error"); setLoading(false); return; }
+          if (!data.bankSwiftImage) { toast("يجب رفع صورة السليب أولاً", "error"); setLoading(false); return; }
           const swiftPrincipal = Number(data.amount ?? 0);
           const capSwiftEdit = maxPaymentPrincipalForDeal(formData, swiftPaymentId);
-          if (swiftPrincipal > capSwiftEdit + 1e-6) { alert(`لا يُسمح بمبلغ يتجاوز قيمة الصفقة. الأقصى المسموح لهذه العملية: $${capSwiftEdit.toLocaleString()}`); setLoading(false); return; }
+          if (swiftPrincipal > capSwiftEdit + 1e-6) { toast(`لا يُسمح بمبلغ يتجاوز قيمة الصفقة. الأقصى المسموح لهذه العملية: $${formatMoney(capSwiftEdit)}`, "error"); setLoading(false); return; }
           const totalPayment = (data.amount || 0) + (data.transferCost || 0);
-          if (!window.confirm(`هل أنت متأكد من خصم ${totalPayment.toLocaleString()} من الصندوق المحدد؟`)) { setLoading(false); return; }
+          if (!(await confirm({ title: "تنفيذ الدفع", message: `هل أنت متأكد من خصم $${formatMoney(totalPayment)} من الصندوق المحدد؟`, danger: false, confirmText: "تنفيذ الدفع" }))) { setLoading(false); return; }
           try {
             await dealsService.updatePaymentWithSwift(formData.id, swiftPaymentId, cleanData({ ...data, dealNumber: formData.dealNumber }), currentUser.id, currentUser.name, currentUser.role || "user", data.cashBoxId);
             const postTry = await dealsService.tryAutoPostDealPaymentAccounting(formData.id, swiftPaymentId, { cashBoxExternalId: data.cashBoxId ? String(data.cashBoxId).trim() : undefined });
             if (postTry.posted && postTry.journalId != null) swiftAutoPostJournalId = postTry.journalId;
-          } catch (error: any) { if (error.message.includes('الرصيد غير كافي')) { alert(`❌ ${error.message}`); throw error; } throw error; }
+          } catch (error: any) { if (error.message.includes('الرصيد غير كافي')) { toast(error.message, "error"); throw error; } throw error; }
           break;
         }
         case "confirm":
@@ -431,14 +439,14 @@ export const DealForm: React.FC<DealFormProps> = ({
             lastConfirmPaymentId = paymentId;
             const paymentToConfirm = formData.payments?.find(p => p.id === paymentId);
             if (paymentToConfirm) {
-              if (paymentToConfirm.bankSwiftImage && !paymentToConfirm.cashBoxId) { alert("⚠️ هذه الدفعة تحتوي على سليب ولكن لم يتم خصمها من الصندوق بعد"); setLoading(false); return; }
-              if (paymentToConfirm.cashBoxId && !paymentToConfirm.bankSwiftImage) { alert("️ تم خصم المبلغ من الصندوق ولكن لم يتم رفع صورة السليب"); setLoading(false); return; }
+              if (paymentToConfirm.bankSwiftImage && !paymentToConfirm.cashBoxId) { toast("هذه الدفعة تحتوي على سليب ولكن لم يتم خصمها من الصندوق بعد", "info"); setLoading(false); return; }
+              if (paymentToConfirm.cashBoxId && !paymentToConfirm.bankSwiftImage) { toast("تم خصم المبلغ من الصندوق ولكن لم يتم رفع صورة السليب", "info"); setLoading(false); return; }
             }
             confirmAccountingMeta = await dealsService.confirmPayment(formData.id, paymentId, currentUser.id, currentUser.name, currentUser.role || "user", data.supplierConfirmationImage, data.supplierNotes, data.paymentConfirmationDate, data.cashBoxId);
           }
           break;
         case "unpost":
-          if (String(currentUser.role || "").toLowerCase() !== "manager") { alert("هذا الإجراء متاح للمدير فقط من الواجهة."); setLoading(false); return; }
+          if (String(currentUser.role || "").toLowerCase() !== "manager") { toast("هذا الإجراء متاح للمدير فقط من الواجهة.", "error"); setLoading(false); return; }
           if (!paymentId || !formData.id) { setLoading(false); return; }
           unpostAccountingMeta = await dealsService.unpostDealPayment(formData.id, paymentId);
           break;
@@ -448,7 +456,7 @@ export const DealForm: React.FC<DealFormProps> = ({
         case "linkJournal": {
           if (!paymentId) { setLoading(false); return; }
           const jid = Number(data?.journalId);
-          if (!Number.isFinite(jid) || jid <= 0) { alert("رقم القيد غير صالح."); setLoading(false); return; }
+          if (!Number.isFinite(jid) || jid <= 0) { toast("رقم القيد غير صالح.", "error"); setLoading(false); return; }
           await dealsService.linkDealPaymentJournal(String(formData.id), String(paymentId), jid);
           break;
         }
@@ -458,16 +466,16 @@ export const DealForm: React.FC<DealFormProps> = ({
       switch (operation) {
         case "swift":
           if (swiftAutoPostJournalId != null) {
-            alert("✅ تم تنفيذ الدفع ورفع السليب، وتم إنشاء قيد المحاسبة وربطه بالدفعة.");
+            toast("تم تنفيذ الدفع ورفع السليب، وتم إنشاء قيد المحاسبة وربطه بالدفعة.", "success");
             onOpenAccountingJournal?.(swiftAutoPostJournalId, { dealId: formData.id!, dealNumber: formData.dealNumber || "", displayName: [formData.dealNumber, formData.dealDescription || formData.originalOfferNumber || formData.factoryName || ""].filter(Boolean).join(" — ") });
-          } else { alert("✅ تم تنفيذ الدفع ورفع السليب بنجاح"); }
+          } else { toast("تم تنفيذ الدفع ورفع السليب بنجاح", "success"); }
           break;
-        case "claim": alert("✅ تم رفع المطالبة. يمكنك الآن تسجيل الدفع من تبويب «تسجيل الدفع» في أي وقت."); break;
+        case "claim": toast("تم رفع المطالبة. يمكنك الآن تسجيل الدفع من تبويب «تسجيل الدفع» في أي وقت.", "success"); break;
         case "confirm": {
           const pid = lastConfirmPaymentId;
           const row = pid ? loadedAfterPay?.payments?.find((x) => String(x.id) === String(pid)) : undefined;
           const jid = confirmAccountingMeta?.journalId ?? row?.journalId;
-          alert(formatSupplierConfirmAlertText({ posted: Boolean(row?.isPosted), journalId: jid, openManualJournal: confirmAccountingMeta?.openManualJournal, meta: confirmAccountingMeta ?? undefined }));
+          notify("تأكيد المورد", formatSupplierConfirmAlertText({ posted: Boolean(row?.isPosted), journalId: jid, openManualJournal: confirmAccountingMeta?.openManualJournal, meta: confirmAccountingMeta ?? undefined }));
           if (confirmAccountingMeta?.openManualJournal || (confirmAccountingMeta?.journalId != null && Number(confirmAccountingMeta.journalId) > 0)) {
             const j = Number(confirmAccountingMeta.journalId);
             const dealDesc = formData.dealDescription || formData.originalOfferNumber || formData.factoryName || selectedSupplier?.tradeName || "";
@@ -475,18 +483,18 @@ export const DealForm: React.FC<DealFormProps> = ({
           }
           break;
         }
-        case "cancel": alert("✅ تم إلغاء الدفعة من سجل الصفقة"); break;
+        case "cancel": toast("تم إلغاء الدفعة من سجل الصفقة", "success"); break;
         case "unpost": {
           const rj = unpostAccountingMeta?.reversal_journal_id;
           const vj = unpostAccountingMeta?.voided_journal_id;
           const note = unpostAccountingMeta?.accounting_note || "";
-          alert(`تم إلغاء ترحيل الدفعة محاسبياً.\n\n• قيد عكسي مرحّل: ${rj != null ? `#${rj}` : "—"}\n• القيد الأصلي أصبح غير مرحّل: ${vj != null ? `#${vj}` : "—"}\n\nالدفعة أصبحت قابلة للحذف من «حذف من السجل».\n${note ? `\n${note}` : ""}`);
+          notify("إلغاء ترحيل الدفعة", `تم إلغاء ترحيل الدفعة محاسبياً.\n\n• قيد عكسي مرحّل: ${rj != null ? `#${rj}` : "—"}\n• القيد الأصلي أصبح غير مرحّل: ${vj != null ? `#${vj}` : "—"}\n\nالدفعة أصبحت قابلة للحذف من «حذف من السجل».\n${note ? `\n${note}` : ""}`);
           break;
         }
-        case "linkJournal": alert("✅ تم ربط الدفعة بالقيد. سيظهر «فتح في المحاسبة» في سجل المدفوعات بعد التحديث."); break;
-        default: alert("تم حفظ العملية بنجاح");
+        case "linkJournal": toast("تم ربط الدفعة بالقيد. سيظهر «فتح في المحاسبة» في سجل المدفوعات بعد التحديث.", "success"); break;
+        default: toast("تم حفظ العملية بنجاح", "success");
       }
-    } catch (error: any) { console.error("Payment Operation Error:", error); alert(`❌ ${error.message || "حدث خطأ أثناء حفظ العملية"}`); }
+    } catch (error: any) { console.error("Payment Operation Error:", error); toast(error.message || "حدث خطأ أثناء حفظ العملية", "error"); }
     finally { setLoading(false); }
   };
 
@@ -499,7 +507,7 @@ export const DealForm: React.FC<DealFormProps> = ({
       await loadActivities();
       const row = loaded?.payments?.find((x) => String(x.id) === String(confirmationData.paymentId));
       const jid = acc.journalId ?? row?.journalId;
-      alert(formatSupplierConfirmAlertText({ posted: Boolean(row?.isPosted), journalId: jid, openManualJournal: acc.openManualJournal, meta: acc }));
+      notify("تأكيد المورد", formatSupplierConfirmAlertText({ posted: Boolean(row?.isPosted), journalId: jid, openManualJournal: acc.openManualJournal, meta: acc }));
       if (acc.openManualJournal || (acc.journalId != null && Number(acc.journalId) > 0)) {
         const j = Number(acc.journalId);
         const dealDesc = formData.dealDescription || formData.originalOfferNumber || formData.factoryName || selectedSupplier?.tradeName || "";
@@ -514,7 +522,7 @@ export const DealForm: React.FC<DealFormProps> = ({
           if (d.blockers?.length) diag = "\n\n— تشخيص من الخادم —\n" + d.blockers.map((b, i) => `${i + 1}. ${b}`).join("\n");
         }
       } catch { /* ignore */ }
-      alert(`حدث خطأ في تأكيد الدفعة${error?.message ? `:\n${error.message}` : ""}${diag}`);
+      notify("خطأ في تأكيد الدفعة", `حدث خطأ في تأكيد الدفعة${error?.message ? `:\n${error.message}` : ""}${diag}`);
     } finally { setLoading(false); }
   };
 
@@ -524,8 +532,8 @@ export const DealForm: React.FC<DealFormProps> = ({
       setLoading(true);
       await dealsService.updateDealStatus(formData.id, newStatus, currentUser.id, currentUser.name, currentUser.role || "user", notes);
       await loadAndSetDealData(formData.id); await loadActivities();
-      alert(`تم تغيير حالة الصفقة إلى: ${newStatus}`);
-    } catch (error) { console.error("Error changing status:", error); alert("حدث خطأ في تغيير الحالة"); }
+      toast(`تم تغيير حالة الصفقة إلى: ${newStatus}`, "success");
+    } catch (error) { console.error("Error changing status:", error); toast("حدث خطأ في تغيير الحالة", "error"); }
     finally { setLoading(false); }
   };
 
@@ -536,7 +544,7 @@ export const DealForm: React.FC<DealFormProps> = ({
       setLoading(true);
       await dealsService.patchShippingWorkflow(formData.id, code);
       await loadAndSetDealData(formData.id); await loadActivities();
-      alert("تم حفظ مرحلة الشحن والتصنيع");
+      toast("تم حفظ مرحلة الشحن والتصنيع", "success");
     } catch (error: unknown) { setWorkflowError(error instanceof Error ? error.message : "تعذر حفظ مرحلة الشحن"); }
     finally { setLoading(false); }
   };
@@ -553,7 +561,7 @@ export const DealForm: React.FC<DealFormProps> = ({
 
   const handleFinalSave = async () => {
     if (!validateForm()) return;
-    if (installmentPlanEnabled && !validateInstallments()) { alert("يرجى تصحيح أخطاء نظام الدفعات قبل الحفظ"); return; }
+    if (installmentPlanEnabled && !validateInstallments()) { toast("يرجى تصحيح أخطاء نظام الدفعات قبل الحفظ", "error"); return; }
     const invoiceToCheck = formData.supplierInvoiceNumber?.trim() || undefined;
     const linkToCheck = formData.alibabaOrderLink?.trim() || undefined;
     if (invoiceToCheck || linkToCheck) {
@@ -562,8 +570,8 @@ export const DealForm: React.FC<DealFormProps> = ({
         const checkResult = await dealsService.checkDealUniqueness(invoiceToCheck, linkToCheck, formData.id);
         if (!checkResult.isUnique) {
           setSaving(false);
-          if (checkResult.errorField === 'invoice') alert(`⚠️ تنبيه خطير!\n\nرقم الفاتورة: "${invoiceToCheck}"\nمستخدم بالفعل في الصفقة رقم: (${checkResult.existingDealNumber})\n\n⛔ يمنع تكرار رقم الفاتورة في النظام بالكامل.`);
-          else if (checkResult.errorField === 'link') alert(`⚠️ تنبيه خطير!\n\nرابط علي بابا هذا مستخدم بالفعل في الصفقة رقم: (${checkResult.existingDealNumber})\n\n⛔ يمنع تكرار نفس الطلب (الرابط) لصفقتين مختلفتين.`);
+          if (checkResult.errorField === 'invoice') notify("تكرار رقم الفاتورة", `رقم الفاتورة: "${invoiceToCheck}"\nمستخدم بالفعل في الصفقة رقم: (${checkResult.existingDealNumber})\n\nيمنع تكرار رقم الفاتورة في النظام بالكامل.`);
+          else if (checkResult.errorField === 'link') notify("تكرار رابط علي بابا", `رابط علي بابا هذا مستخدم بالفعل في الصفقة رقم: (${checkResult.existingDealNumber})\n\nيمنع تكرار نفس الطلب (الرابط) لصفقتين مختلفتين.`);
           return;
         }
       } catch (error) { console.error("Uniqueness check failed", error); }
@@ -580,9 +588,9 @@ export const DealForm: React.FC<DealFormProps> = ({
         await handleUpdateDeal(dealUpdateWithoutPayments, "تحديث بيانات الصفقة", "تم تحديث بيانات الصفقة (البنود والحقول؛ سجل الدفعات دون تغيير من هذا الزر)");
         const updatedDeal = await dealsService.getDeal(dealId);
         setFormData(updatedDeal); setItems(updatedDeal.items || []); setInstallments(updatedDeal.installments || []); setInstallmentPlanEnabled(updatedDeal.installmentPlanEnabled || false);
-        alert("✅ تم تحديث الصفقة بنجاح!");
+        toast("تم تحديث الصفقة بنجاح!", "success");
       } else {
-        if (!window.confirm("هل أنت متأكد من إنشاء الصفقة الجديدة؟")) { setSaving(false); return; }
+        if (!(await confirm({ title: "إنشاء صفقة", message: "هل أنت متأكد من إنشاء الصفقة الجديدة؟", danger: false, confirmText: "إنشاء" }))) { setSaving(false); return; }
         const createData: any = {
           supplierId: formData.supplierId || "", factoryName: formData.factoryName || "", items, payments: [],
           totalAmount: finalFormData.totalAmount || 0, subtotal: finalFormData.subtotal || 0,
@@ -598,9 +606,9 @@ export const DealForm: React.FC<DealFormProps> = ({
         const createdDeal = await dealsService.getDeal(dealId);
         setFormData(createdDeal); setItems(createdDeal.items || []); setInstallments(createdDeal.installments || []); setInstallmentPlanEnabled(createdDeal.installmentPlanEnabled || false);
         await loadActivities();
-        alert(`✅ تم إنشاء الصفقة بنجاح برقم: ${createdDeal.dealNumber}`);
+        toast(`تم إنشاء الصفقة بنجاح برقم: ${createdDeal.dealNumber}`, "success");
       }
-    } catch (e: any) { console.error("❌ Save Error:", e); alert(`❌ فشل الحفظ: ${e.message}`); }
+    } catch (e: any) { console.error("❌ Save Error:", e); toast(`فشل الحفظ: ${e.message}`, "error"); }
     finally { setSaving(false); }
   };
 
@@ -633,8 +641,8 @@ export const DealForm: React.FC<DealFormProps> = ({
   };
 
   const validateForm = (): boolean => {
-    if (!formData.supplierId) { alert("يرجى اختيار المورد أولاً"); return false; }
-    if (items.length === 0) { alert("يرجى إضافة منتجات على الأقل"); return false; }
+    if (!formData.supplierId) { toast("يرجى اختيار المورد أولاً", "error"); return false; }
+    if (items.length === 0) { toast("يرجى إضافة منتجات على الأقل", "error"); return false; }
     return true;
   };
 
@@ -898,6 +906,12 @@ export const DealForm: React.FC<DealFormProps> = ({
           onOpenAccountingJournal={onOpenAccountingJournal}
         />
       ) : null}
+    </div>
+  );
+
+  /* المراحل والشحن فُصلت عن الدفعات — كانت مكدّسة في تبويب واحد يستهلك الشاشة */
+  const stagesTab = (
+    <div className="aseel-legacy-tab" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       {workflowError && (
         <div style={{ color: 'var(--aseel-err, #c0392b)', fontSize: '12px', padding: '4px 8px', marginBottom: '4px', background: 'var(--aseel-err-bg, #fde8e8)', borderRadius: '4px' }}>
           {workflowError}
@@ -985,7 +999,8 @@ export const DealForm: React.FC<DealFormProps> = ({
         tabs={[
           { key: "basic", label: "البيانات الأساسية", content: basicInfoTab },
           { key: "terms", label: "الشروط والشحن", content: termsAndShippingTab },
-          { key: "payments", label: "الدفعات والمراحل", content: paymentsTab },
+          { key: "payments", label: "الدفعات", content: paymentsTab },
+          { key: "stages", label: "المراحل والشحن", content: stagesTab },
           { key: "notes", label: "الملاحظات", content: notesTab },
           { key: "attachments", label: "المرفقات", content: attachmentsTab },
           { key: "activity", label: "سجل النشاطات", content: activityTab },

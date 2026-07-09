@@ -505,7 +505,21 @@ async function fetchDealsMapped(): Promise<Deal[]> {
 }
 
 export const dealsService = {
-  subscribeToDeals(callback: (deals: Deal[]) => void) {
+  /** جلب قائمة الصفقات مرة واحدة — للتحديث الصريح بعد العمليات. */
+  async listDeals(): Promise<Deal[]> {
+    return fetchDealsMapped();
+  },
+
+  /**
+   * كان polling كل 5 ثوانٍ لكل مشترك (مكلف، وكان يقلب وضع الواجهة — بق «اختفاء
+   * التعديل»). الآن: تحميل عند الاشتراك + تحديث عند عودة التركيز/الظهور للتبويب
+   * (يلتقط تعديلات التبويبات الأخرى بلا مؤقّت). `intervalMs` اختياري لمن يحتاج
+   * تحديثاً دورياً صريحاً.
+   */
+  subscribeToDeals(
+    callback: (deals: Deal[]) => void,
+    opts?: { intervalMs?: number | null; refreshOnFocus?: boolean }
+  ) {
     let alive = true;
     const load = async () => {
       try {
@@ -516,10 +530,22 @@ export const dealsService = {
       }
     };
     load();
-    const timer = setInterval(load, 5000);
+    const timer = opts?.intervalMs ? setInterval(load, opts.intervalMs) : null;
+    const refreshOnFocus = opts?.refreshOnFocus ?? true;
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    if (refreshOnFocus && typeof window !== "undefined") {
+      window.addEventListener("focus", onFocus);
+      document.addEventListener("visibilitychange", onFocus);
+    }
     return () => {
       alive = false;
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
+      if (refreshOnFocus && typeof window !== "undefined") {
+        window.removeEventListener("focus", onFocus);
+        document.removeEventListener("visibilitychange", onFocus);
+      }
     };
   },
 

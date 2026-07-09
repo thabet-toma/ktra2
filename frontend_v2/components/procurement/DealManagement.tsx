@@ -15,6 +15,8 @@ import { PriceOfferSelectionModal } from './price-offers/PriceOfferSelectionModa
 import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
 import { useConfirm } from '../../contexts/ConfirmContext';
+import { useToast } from '../../contexts/ToastContext';
+import { getShippingWorkflowLabel } from '../../utils/shippingWorkflowLabels';
 
 interface DealManagementProps {
     currentUser: User;
@@ -24,38 +26,25 @@ interface DealManagementProps {
     ) => void;
 }
 
+/**
+ * توحيد لغة الحالة (قرار معماري — مراجعة الاستيراد ج3):
+ * SQL لا يخزّن إلا 4 حالات دورة حياة (Open/Shipped/Closed/Cancelled) تُشتق
+ * آلياً من مراحل الشحن؛ قائمة الـ14 حالة القديمة كانت وهمية — لا يمكن أن تعود
+ * من الخادم فكانت خيارات فلترة ميتة. «الحقيقة» التشغيلية = shipping_workflow_status
+ * (عمود «المرحلة»)، ودورة الحياة = هذه الأربع، والدفع بُعد مالي مستقل داخل الصفقة.
+ */
 const STATUS_LABELS: Record<string, string> = {
-    initial:                  'أولية',
-    manufacturing_started:    'بدأ التصنيع',
-    first_payment_pending:    'دفعة أولى',
-    first_payment_done:       'دفعت أولى',
-    first_payment_confirmed:  'أكيد أول',
-    production_completed:     'تم التصنيع',
-    second_payment_pending:   'دفعة ثانية',
-    second_payment_done:      'دفعت ثانية',
-    second_payment_confirmed: 'أكيد ثاني',
-    shipping_preparation:     'تجهيز شحن',
-    shipping_in_progress:     'شحن قيد التنفيذ',
-    shipped:                  'تم الشحن',
-    completed:                'مكتمل',
-    cancelled:                'ملغى',
+    initial:   'مفتوحة',
+    shipped:   'تم الشحن',
+    completed: 'مكتملة',
+    cancelled: 'ملغاة',
 };
 
 const STATUS_COLORS: Record<string, string> = {
-    initial:                  'var(--aseel-ink-soft)',
-    manufacturing_started:    'var(--aseel-accent, #1857a4)',
-    first_payment_pending:    'var(--aseel-warn, #b8800a)',
-    first_payment_done:       'var(--aseel-accent, #1857a4)',
-    first_payment_confirmed:  'var(--aseel-ok, #267346)',
-    production_completed:     'var(--aseel-accent, #1857a4)',
-    second_payment_pending:   'var(--aseel-warn, #b8800a)',
-    second_payment_done:      'var(--aseel-accent, #1857a4)',
-    second_payment_confirmed: 'var(--aseel-ok, #267346)',
-    shipping_preparation:     'var(--aseel-warn, #b8800a)',
-    shipping_in_progress:     'var(--aseel-accent, #1857a4)',
-    shipped:                  'var(--aseel-accent, #1857a4)',
-    completed:                'var(--aseel-ok, #267346)',
-    cancelled:                'var(--aseel-danger, #c00)',
+    initial:   'var(--aseel-ink-soft)',
+    shipped:   'var(--aseel-accent, #1857a4)',
+    completed: 'var(--aseel-ok, #267346)',
+    cancelled: 'var(--aseel-danger, #c00)',
 };
 
 import { formatMoney } from "@/utils/formatNumber";
@@ -74,18 +63,27 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     const location = useLocation();
     const newFormInitRef = useRef(false);
 
+    /**
+     * URL = مصدر الحقيقة الوحيد للوضع:
+     *   /deals            → قائمة
+     *   /deals/new        → صفقة جديدة
+     *   /deals/{id}       → تعديل (النموذج)
+     *   /deals/{id}/view  → تقرير/طباعة
+     */
     const dealsPathMatch = useMemo(() => {
         const path = (location.pathname || '/').replace(/\/$/, '') || '/';
         if (path !== '/deals' && !path.startsWith('/deals/')) return null;
         if (path === '/deals') return { mode: 'list' as const };
-        const m = path.match(/^\/deals\/(.+)$/);
-        const seg = m ? decodeURIComponent(m[1]) : '';
+        const m = path.match(/^\/deals\/([^/]+)(\/view)?$/);
+        if (!m) return { mode: 'list' as const };
+        const seg = decodeURIComponent(m[1]);
         if (seg === 'new') return { mode: 'new' as const };
-        if (!seg) return { mode: 'list' as const };
-        return { mode: 'deal' as const, id: seg };
+        if (m[2]) return { mode: 'view' as const, id: seg };
+        return { mode: 'edit' as const, id: seg };
     }, [location.pathname]);
 
     const confirm = useConfirm();
+    const toast = useToast();
     const [viewMode, setViewMode] = useState<'list' | 'form' | 'view'>('list');
     const [deals, setDeals] = useState<Deal[]>([]);
     const [priceOffers, setPriceOffers] = useState<PriceOffer[]>([]);
@@ -124,36 +122,55 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         return p.get('ref') || '';
     }, [location.search]);
 
+    /**
+     * حارس ضد قلب الوضع: كل تحديث لمصفوفة deals (تحديث عند التركيز، إعادة
+     * تحميل بعد عملية…) يعيد تشغيل هذا الـ effect. بدون الحارس كان الوضع يُفرض
+     * من جديد فيُقلب المستخدم من «تعديل» إلى «عرض» فجأة (البق المبلَّغ).
+     * كل مسار يُعالَج مرة واحدة فقط؛ تغيير المسار وحده يعيد المعالجة.
+     */
+    const handledPathRef = useRef<string | null>(null);
     useEffect(() => {
         if (!dealsPathMatch) return;
+        const pathKey = location.pathname + location.search;
         if (dealsPathMatch.mode === 'list') {
-            newFormInitRef.current = false;
-            setViewMode('list');
-            setCurrentDeal(null);
-            if (dealRefFromQuery && deals.length > 0) {
+            if (dealRefFromQuery) {
+                // رابط قديم ?ref=D-0001 → نحوله لمسار العرض الصريح
+                if (deals.length === 0) return;
                 const target = deals.find(
                     d => String(d.dealNumber).toUpperCase() === dealRefFromQuery.toUpperCase()
                 );
                 if (target) {
-                    setCurrentDeal({ ...target });
-                    setViewMode('view');
+                    navigate(`/deals/${encodeURIComponent(target.id)}/view`, { replace: true });
+                } else if (handledPathRef.current !== pathKey) {
+                    handledPathRef.current = pathKey;
+                    newFormInitRef.current = false;
+                    setViewMode('list');
+                    setCurrentDeal(null);
                 }
+                return;
             }
+            if (handledPathRef.current === pathKey) return;
+            handledPathRef.current = pathKey;
+            newFormInitRef.current = false;
+            setViewMode('list');
+            setCurrentDeal(null);
             return;
         }
-        if (dealsPathMatch.mode === 'deal') {
-            const id = dealsPathMatch.id;
+        if (dealsPathMatch.mode === 'edit' || dealsPathMatch.mode === 'view') {
+            if (handledPathRef.current === pathKey) return;
             if (deals.length === 0) return;
-            const target = deals.find((d) => String(d.id) === String(id));
-            if (target) {
-                setCurrentDeal({ ...target });
-                setViewMode('view');
-            } else {
+            const target = deals.find((d) => String(d.id) === String(dealsPathMatch.id));
+            if (!target) {
                 navigate('/deals', { replace: true });
+                return;
             }
+            handledPathRef.current = pathKey;
+            setCurrentDeal({ ...target });
+            setViewMode(dealsPathMatch.mode === 'view' ? 'view' : 'form');
             return;
         }
         const draft = (location.state as { draftDeal?: Partial<Deal> } | null)?.draftDeal;
+        handledPathRef.current = pathKey;
         if (draft) {
             newFormInitRef.current = true;
             setCurrentDeal(draft);
@@ -188,7 +205,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 navigate('/deals', { replace: true });
             }
         })();
-    }, [dealsPathMatch, deals, location.state, navigate, dealRefFromQuery]);
+    }, [dealsPathMatch, deals, location.state, location.pathname, location.search, navigate, dealRefFromQuery]);
 
     const filteredDeals = useMemo(() => {
         let result = deals;
@@ -275,19 +292,25 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         );
     };
 
+    const reloadDeals = async () => {
+        try { setDeals(await dealsService.listDeals()); } catch { /* تبقى القائمة الحالية */ }
+    };
+
     const handleSave = () => {
         setViewMode('list');
         setCurrentDeal(null);
         navigate('/deals');
+        void reloadDeals();
     };
 
     const handleDelete = async (dealId: string) => {
         if (!(await confirm({ title: 'حذف الصفقة', message: 'حذف الصفقة؟' }))) return;
         try {
             await dealsService.deleteDeal(dealId);
+            setDeals(prev => prev.filter(d => String(d.id) !== String(dealId)));
         } catch (error) {
             // console suppressed
-            alert('فشل حذف الصفقة');
+            toast('فشل حذف الصفقة', 'error');
         }
     };
 
@@ -316,10 +339,20 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         {
             key: 'status',
             header: 'الحالة',
-            width: '140px',
+            width: '90px',
             render: (d) => (
                 <span style={{ color: STATUS_COLORS[d.status] || 'inherit', fontWeight: 500 }}>
                     {STATUS_LABELS[d.status] || d.status}
+                </span>
+            ),
+        },
+        {
+            key: 'stage',
+            header: 'المرحلة',
+            width: '150px',
+            render: (d) => (
+                <span style={{ color: 'var(--aseel-ink-soft)' }} title="مرحلة الشحن والتصنيع (مصدر الحقيقة التشغيلي)">
+                    {d.status === 'cancelled' || !d.shippingWorkflowStatus ? '—' : getShippingWorkflowLabel(d.shippingWorkflowStatus)}
                 </span>
             ),
         },
@@ -433,7 +466,8 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                     navigate('/deals');
                 }}
                 onEdit={() => {
-                    setViewMode('form');
+                    // «تعديل البيانات» → مسار التعديل الصريح؛ الـ effect يفتح النموذج
+                    navigate(`/deals/${encodeURIComponent(String(currentDeal.id))}`);
                 }}
             />
         );
@@ -474,8 +508,8 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 </select>
                 <button
                     className="aseel-toolbtn"
-                    onClick={() => { setSearch(''); setStatusFilter('all'); }}
-                    title="إعادة تعيين الفلاتر"
+                    onClick={() => { setSearch(''); setStatusFilter('all'); void reloadDeals(); }}
+                    title="تحديث القائمة وإعادة تعيين الفلاتر"
                 >
                     <RefreshCw style={{ width: 14, height: 14 }} />
                 </button>

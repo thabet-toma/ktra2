@@ -21,6 +21,8 @@ import {
 import { inventoryApi } from "../../../services/inventoryApi";
 import { Item } from "../../../types";
 import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
+import { useToast } from "../../../contexts/ToastContext";
+import { useConfirm } from "../../../contexts/ConfirmContext";
 import { productToItem } from "../price-offers/ItemSearchModal";
 
 /**
@@ -65,6 +67,8 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
     onShowCard?.(it);
   };
   const [cats, setCats] = useState<Cat[]>([]);
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loadingCats, setLoadingCats] = useState(false);
@@ -164,12 +168,12 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
   };
 
   const deleteCat = async (id: string) => {
-    if (!window.confirm("هل أنت متأكد من حذف هذا الصنف؟")) return;
+    if (!(await confirmDialog({ title: "حذف الصنف", message: "هل أنت متأكد من حذف هذا الصنف؟" }))) return;
     try {
       await inventoryApi.deleteCategory(Number(id));
       await loadCats();
     } catch {
-      alert("لا يمكن حذف الصنف. قد يكون مرتبطاً بمنتجات أو أصناف فرعية.");
+      toast("لا يمكن حذف الصنف. قد يكون مرتبطاً بمنتجات أو أصناف فرعية.", "error");
     }
   };
 

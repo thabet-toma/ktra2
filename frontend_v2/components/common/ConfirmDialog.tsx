@@ -8,13 +8,15 @@ export interface ConfirmDialogProps {
   cancelText?: string;
   /** نمط الخطر (أحمر) — للحذف والإجراءات غير القابلة للتراجع. */
   danger?: boolean;
+  /** حوار معلومات بزر واحد (حسناً) — بديل alert للرسائل الطويلة. */
+  hideCancel?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
 /** حوار تأكيد موحّد (RTL) — بديل window.confirm لكل أزرار الحذف/الإجراءات الحساسة. */
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
-  title, message, confirmText, cancelText, danger = true, onConfirm, onCancel,
+  title, message, confirmText, cancelText, danger = true, hideCancel = false, onConfirm, onCancel,
 }) => {
   const confirmRef = useRef<HTMLButtonElement>(null);
 
@@ -55,13 +57,15 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
         </div>
 
         <div className="flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 text-sm font-semibold rounded-lg border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
-          >
-            {cancelText || 'إلغاء'}
-          </button>
+          {!hideCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="px-4 py-2 text-sm font-semibold rounded-lg border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+            >
+              {cancelText || 'إلغاء'}
+            </button>
+          )}
           <button
             ref={confirmRef}
             type="button"

@@ -452,6 +452,16 @@ def receive_shipment_stock(shipment, movement_date=None):
             )
             created.append(mv)
 
+    # توحيد تكلفة الاستيراد مع نموذج «تكلفة المنتجات» (تذكير task23):
+    # بعد استلام الشحنة يُعاد ضبط avg_cost بالمتوسط المرجّح للمشتريات المرحّلة
+    # (يشمل landed cost لأن product_cost_breakdown يقدّم حقول landed) — القرار
+    # بين الدوري/المتحرك مركزي في apply_purchase_cost_model.
+    seen_products = set()
+    for mv in created:
+        if mv.product_id and mv.product_id not in seen_products:
+            seen_products.add(mv.product_id)
+            apply_purchase_cost_model(mv.product)
+
     return created
 
 

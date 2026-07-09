@@ -16,6 +16,8 @@ import { ClearanceImportModal, ShipmentImportContext } from './invoices/Clearanc
 import { shipmentsService, advanceShipmentRouteAtLeast } from '@/services/shipmentsService';
 import { InvoicePrintView } from './invoices/InvoicePrintView';
 import { openInNewTab } from '@/utils/openInNewTab';
+import { useToast } from '@/contexts/ToastContext';
+import { useConfirm } from '@/contexts/ConfirmContext';
 
 interface PurchaseInvoiceProps {
   currentUser?: User;
@@ -136,6 +138,8 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
   const navigate = useNavigate();
   const location = useLocation();
 
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const [viewMode, setViewMode] = useState<"list" | "form">(initialPurchaseInvoiceViewMode);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [items, setItems] = useState<Item[]>([]);
@@ -265,7 +269,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
       setShowPrintView(true);
     } catch (e) {
       // console suppressed
-      alert('تعذّر تحميل الفاتورة للطباعة.');
+      toast('تعذّر تحميل الفاتورة للطباعة.', 'error');
     }
   };
 
@@ -275,7 +279,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
       await loadInvoices();
     } catch (error) {
       // console suppressed
-      alert("حدث خطأ أثناء محاولة حذف الفاتورة.");
+      toast("حدث خطأ أثناء محاولة حذف الفاتورة.", "error");
     }
   };
 
@@ -286,9 +290,12 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
   // داخل ملف PurchaseInvoice.tsx
 
   const handleConvertToDeal = async (invoice: Invoice) => {
-    const isConfirmed = window.confirm(
-      `هل تريد تحويل الفاتورة رقم (${invoice.invoiceNumber}) إلى صفقة شراء؟\n\nسيتم نقل بيانات المنتجات والمورد فقط (لن يتم نقل الصور أو المرفقات).`
-    );
+    const isConfirmed = await confirmDialog({
+      title: "تحويل إلى صفقة",
+      message: `هل تريد تحويل الفاتورة رقم (${invoice.invoiceNumber}) إلى صفقة شراء؟\n\nسيتم نقل بيانات المنتجات والمورد فقط (لن يتم نقل الصور أو المرفقات).`,
+      danger: false,
+      confirmText: "تحويل",
+    });
     if (!isConfirmed) return;
 
     try {
@@ -367,14 +374,14 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
 
       // 🟢 تم حذف إضافة النشاط الخاص بنقل الملفات
 
-      alert("✅ تم تحويل الفاتورة إلى صفقة بنجاح!");
+      toast("تم تحويل الفاتورة إلى صفقة بنجاح!", "success");
 
     } catch (e: any) {
       // console suppressed
       if (e.message && e.message.includes('exceeds the maximum allowed size')) {
-        alert("❌ لا يزال حجم البيانات كبيراً جداً. يبدو أن الفاتورة تحتوي على عدد كبير جداً من المنتجات أو نصوص طويلة جداً.");
+        toast("لا يزال حجم البيانات كبيراً جداً. يبدو أن الفاتورة تحتوي على عدد كبير جداً من المنتجات أو نصوص طويلة جداً.", "error");
       } else {
-        alert(`حدث خطأ أثناء عملية التحويل: ${e.message}`);
+        toast(`حدث خطأ أثناء عملية التحويل: ${e.message}`, "error");
       }
     }
   };
@@ -416,14 +423,15 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
 
       await loadInvoices();
       const n = meta?.createdCount ?? 0;
-      alert(
+      toast(
         n > 0
-          ? `✅ تم استيراد وتحويل ${n} فاتورة بنجاح!`
-          : "✅ تم تحديث المسارات بعد الاستيراد."
+          ? `تم استيراد وتحويل ${n} فاتورة بنجاح!`
+          : "تم تحديث المسارات بعد الاستيراد.",
+        "success"
       );
     } catch (error) {
       // console suppressed
-      alert("حدث خطأ أثناء استيراد الفواتير");
+      toast("حدث خطأ أثناء استيراد الفواتير", "error");
     } finally {
       setImporting(false);
     }

@@ -247,9 +247,9 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             type="button"
             className="aseel-toolbtn"
             style={{ fontSize: "10px", padding: "2px 6px" }}
-            onClick={(e) => {
+            onClick={async (e) => {
               e.stopPropagation();
-              if (window.confirm(`هل تريد إنشاء صفقة شراء جديدة بناءً على الفاتورة (${r.invoiceNumber})؟`)) {
+              if (await confirm({ title: "تحويل إلى صفقة", message: `هل تريد إنشاء صفقة شراء جديدة بناءً على الفاتورة (${r.invoiceNumber})؟`, danger: false, confirmText: "تحويل" })) {
                 onConvertToDeal(r);
               }
             }}

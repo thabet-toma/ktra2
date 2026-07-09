@@ -1,6 +1,9 @@
 import React, { useMemo } from "react";
 import { Deal, DealPayment } from "@/types";
 import { dealsService } from "@/services/dealsService";
+import { formatMoney } from "@/utils/formatNumber";
+import { useToast } from "@/contexts/ToastContext";
+import { useConfirm } from "@/contexts/ConfirmContext";
 import {
   Clock,
   Trash2,
@@ -8,6 +11,9 @@ import {
   AlertTriangle,
   HelpCircle,
   RotateCcw,
+  Link2,
+  Image as ImageIcon,
+  Receipt,
 } from "lucide-react";
 
 interface DealPaymentListProps {
@@ -46,12 +52,45 @@ function paymentLogicalKey(p: DealPayment): string {
   )}`;
 }
 
+function statusBadge(p: DealPayment): { label: string; cls: string } {
+  if (p.isPosted)
+    return {
+      label: "مرحّل",
+      cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200",
+    };
+  if (p.confirmedBySupplier)
+    return {
+      label: "مؤكدة من المورد",
+      cls: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200",
+    };
+  if (p.bankSwiftImage)
+    return {
+      label: "تم الدفع (سليب)",
+      cls: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200",
+    };
+  return {
+    label: "مطالبة",
+    cls: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200",
+  };
+}
+
+const cellCls = "px-3 py-2 whitespace-nowrap";
+const iconBtnCls =
+  "inline-flex items-center gap-1 rounded border aseel-border-soft aseel-bg-field px-2 py-1 text-xs font-medium aseel-text-ink hover:aseel-bg-panel dark:aseel-bg-panel dark:hover:aseel-bg-grid-head";
+
+/**
+ * سجل مدفوعات الصفقة — جدول كثيف بنمط جداول الفواتير (بدل البطاقات القديمة
+ * التي كانت تستهلك الشاشة). نفس العمليات: فتح/ربط قيد، شرح عدم الترحيل،
+ * إلغاء ترحيل (مدير)، حذف من السجل.
+ */
 export const DealPaymentList: React.FC<DealPaymentListProps> = ({
   deal,
   currentUser,
   onPaymentOperation,
   onOpenAccountingJournal,
 }) => {
+  const toast = useToast();
+  const confirmDialog = useConfirm();
   const showManagerUnpost = isManagerUser(currentUser);
   const payments = deal.payments || [];
 
@@ -64,12 +103,72 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
     return m;
   }, [payments]);
 
-  const totalSum = payments.reduce(
-    (s, p) => s + Number(p.amount ?? 0),
-    0
-  );
+  const totalSum = payments.reduce((s, p) => s + Number(p.amount ?? 0), 0);
   const dealCap = Number(deal.totalAmount ?? 0);
   const overpay = dealCap > 0 && totalSum > dealCap + 0.01;
+
+  const openImage = (url?: string) => {
+    if (url && String(url).trim())
+      window.open(url, "_blank", "width=800,height=600");
+  };
+
+  const explainPosting = async (payment: DealPayment) => {
+    try {
+      const d = await dealsService.getPaymentPostingDiagnostics(
+        String(deal.id),
+        String(payment.id)
+      );
+      const lines =
+        d.blockers?.length > 0
+          ? d.blockers.map((b, i) => `${i + 1}. ${b}`).join("\n\n")
+          : d.can_auto_post
+            ? "الشروط تبدو مستوفاة على الخادم؛ جرّب إعادة تحميل الصفقة. إن استمرت المشكلة راجع سجل الخادم (أخطاء ترحيل الدفعة)."
+            : "لم يُرجع الخادم تفاصيل؛ تحقق من ربط المورد والصندوق في المحاسبة.";
+      void confirmDialog({
+        title: "شرح عدم الترحيل التلقائي",
+        message: `من الخادم:\n\n${lines}`,
+        danger: false, hideCancel: true, confirmText: "حسناً",
+      });
+    } catch {
+      toast("تعذّر جلب التشخيص من الخادم. تحقق من الاتصال ومسار واجهة الـ API.", "error");
+    }
+  };
+
+  const linkManualJournal = (payment: DealPayment) => {
+    const raw = window.prompt(
+      "أدخل رقم قيد اليومية المرحّل (Journal ID) الظاهر في شاشة المحاسبة:",
+      ""
+    );
+    if (raw == null || String(raw).trim() === "") return;
+    const n = parseInt(String(raw).trim(), 10);
+    if (!Number.isFinite(n) || n <= 0) {
+      toast("أدخل رقماً صحيحاً.", "error");
+      return;
+    }
+    onPaymentOperation("linkJournal", payment.type, { journalId: n }, payment.id);
+  };
+
+  const unpostPayment = async (payment: DealPayment) => {
+    const ok = await confirmDialog({
+      title: "إلغاء الترحيل المحاسبي",
+      message:
+        "• يُنشأ قيد عكسي مرحّل (مدين/دائن معكوس) فيُحدَّث ميزان المراجعة والأستاذ العام بشكل صحيح.\n" +
+        "• القيد الأصلي يُبقى في النظام لكن يصبح غير مرحّل للتدقيق.\n" +
+        "• يمكنك بعدها تصحيح النسب/المبالغ وحفظ الصفقة.",
+      confirmText: "إلغاء الترحيل",
+    });
+    if (!ok) return;
+    onPaymentOperation("unpost", payment.type, {}, payment.id);
+  };
+
+  const deletePayment = async (payment: DealPayment) => {
+    const ok = await confirmDialog({
+      title: "حذف الدفعة",
+      message: `حذف الدفعة «${payment.type}» بمبلغ $${formatMoney(Number(payment.amount || 0))} من السجل؟`,
+    });
+    if (!ok) return;
+    onPaymentOperation("cancel", payment.type, {}, payment.id);
+  };
 
   if (payments.length === 0) {
     return (
@@ -88,9 +187,13 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <h4 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
+        <Receipt className="w-4 h-4" />
         سجل المدفوعات
+        <span className="text-xs font-normal aseel-text-soft">
+          ({payments.length} دفعة)
+        </span>
       </h4>
 
       {overpay && (
@@ -104,12 +207,12 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
             <p className="mt-1 opacity-90">
               المجموع المسجّل:{" "}
               <span className="font-mono font-medium">
-                ${totalSum.toLocaleString()}
+                ${formatMoney(totalSum)}
               </span>
               {" — "}
               إجمالي الصفقة:{" "}
               <span className="font-mono font-medium">
-                ${dealCap.toLocaleString()}
+                ${formatMoney(dealCap)}
               </span>
               .
             </p>
@@ -117,238 +220,203 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
         </div>
       )}
 
-      {payments.map((payment) => {
-        const jid =
-          payment.journalId != null && payment.journalId !== ""
-            ? Number(payment.journalId)
-            : NaN;
-        const hasJournalId = Number.isFinite(jid) && jid > 0;
-        const deletable = canDeletePayment(payment);
-        const dupN = duplicateKeyCounts.get(paymentLogicalKey(payment)) ?? 0;
+      <div className="rounded-lg border aseel-border-soft dark:aseel-border-soft overflow-x-auto">
+        <table className="w-full text-sm text-right">
+          <thead className="aseel-bg-panel dark:aseel-bg-panel text-xs aseel-text-soft">
+            <tr className="border-b aseel-border-soft dark:aseel-border-soft">
+              <th className={`${cellCls} font-medium w-16`}>القسط</th>
+              <th className={`${cellCls} font-medium`}>النوع</th>
+              <th className={`${cellCls} font-medium w-24`}>التاريخ</th>
+              <th className={`${cellCls} font-medium w-28`}>المبلغ $</th>
+              <th className={`${cellCls} font-medium w-20`}>الصرف</th>
+              <th className={`${cellCls} font-medium w-24`}>عمولة</th>
+              <th className={`${cellCls} font-medium w-24`}>مرفقات</th>
+              <th className={`${cellCls} font-medium w-32`}>الحالة</th>
+              <th className={`${cellCls} font-medium w-28`}>القيد</th>
+              <th className={`${cellCls} font-medium`}>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+            {payments.map((payment) => {
+              const jid =
+                payment.journalId != null && payment.journalId !== ""
+                  ? Number(payment.journalId)
+                  : NaN;
+              const hasJournalId = Number.isFinite(jid) && jid > 0;
+              const deletable = canDeletePayment(payment);
+              const dupN =
+                duplicateKeyCounts.get(paymentLogicalKey(payment)) ?? 0;
+              const badge = statusBadge(payment);
+              const needsManualPosting =
+                Boolean(deal.id) &&
+                payment.confirmedBySupplier &&
+                !payment.isPosted;
 
-        return (
-          <div
-            key={payment.id}
-            className="border border-gray-200 dark:border-gray-700 rounded-lg p-4"
-          >
-            {dupN > 1 && (
-              <div
-                className="mb-3 text-xs text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 dark:bg-slate-900/50 dark:text-slate-200 dark:border-slate-600"
-                role="status"
-              >
-                يوجد {dupN} سجلات بنفس القسط والمبلغ — راجع التكرار قبل الترحيل.
-              </div>
-            )}
-            <div className="flex justify-between items-start mb-3 gap-2 flex-wrap">
-              <div>
-                <h5 className="font-medium text-gray-900 dark:text-white">
-                  {payment.type}
-                </h5>
-                <p className="text-sm text-gray-500">
-                  {new Date(payment.paymentDate).toLocaleDateString("ar-EG")}
-                </p>
-              </div>
-              <div className="text-left sm:text-right flex flex-col items-stretch sm:items-end gap-2 min-w-[10rem]">
-                <div className="font-bold text-lg text-gray-900 dark:text-white">
-                  ${payment.amount?.toLocaleString()}
-                </div>
-                <div
-                  className={`text-xs px-2 py-1 rounded-full w-fit ${
-                    paymentSettled(payment)
-                      ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200"
-                      : payment.bankSwiftImage
-                        ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-200"
-                        : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200"
-                  }`}
-                >
-                  {payment.isPosted
-                    ? "مرحّل / مدفوع"
-                    : payment.confirmedBySupplier
-                      ? "مؤكدة من المورد"
-                      : payment.bankSwiftImage
-                        ? "تم الدفع"
-                        : "مطالبة"}
-                </div>
-
-                {payment.isPosted && showManagerUnpost && (
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-                    title="يزيل قيد اليومية ويعيد الدفعة لقابلة للتعديل"
-                    onClick={() => {
-                      if (
-                        !window.confirm(
-                          "إلغاء الترحيل المحاسبي لهذه الدفعة؟\n\n" +
-                            "• يُنشأ قيد عكسي مرحّل (مدين/دائن معكوس) فيُحدَّث ميزان المراجعة والأستاذ العام بشكل صحيح.\n" +
-                            "• القيد الأصلي يُبقى في النظام لكن يصبح غير مرحّل للتدقيق.\n" +
-                            "• يمكنك بعدها تصحيح النسب/المبالغ وحفظ الصفقة.\n" +
-                            "• الخادم يقبل مدير التطبيق (دور manager) أو حساب Django Staff.\n\n" +
-                            "متابعة؟"
-                        )
-                      ) {
-                        return;
-                      }
-                      onPaymentOperation("unpost", payment.type, {}, payment.id);
-                    }}
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    إلغاء الترحيل (مدير)
-                  </button>
-                )}
-
-                {deletable && (
-                  <button
-                    type="button"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-900/30"
-                    onClick={() => {
-                      if (
-                        !window.confirm(
-                          `حذف الدفعة «${payment.type}» بمبلغ $${payment.amount?.toLocaleString()} من السجل؟`
-                        )
-                      )
-                        return;
-                      onPaymentOperation(
-                        "cancel",
-                        payment.type,
-                        {},
-                        payment.id
-                      );
-                    }}
-                  >
-                    <Trash2 className="w-4 h-4" />
-                    حذف من السجل
-                  </button>
-                )}
-
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <span className="text-gray-500">الدفعة:</span>
-                <span className="font-medium mr-2">
-                  {payment.installmentNumber
-                    ? `دفعة ${payment.installmentNumber}`
-                    : "عام"}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-500">المورد:</span>
-                <span
-                  className={`font-medium mr-2 ${
-                    paymentSettled(payment)
-                      ? "text-green-600 dark:text-green-400"
-                      : "text-yellow-600 dark:text-yellow-400"
-                  }`}
-                >
-                  {paymentSettled(payment) ? "مكتمل" : "بانتظار"}
-                </span>
-              </div>
-            </div>
-
-            {deal.id &&
-              payment.confirmedBySupplier &&
-              !payment.isPosted && (
-                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs dark:border-slate-600 dark:bg-slate-900/40">
-                  <HelpCircle className="h-3.5 w-3.5 shrink-0 text-slate-500" />
-                  <span className="text-slate-600 dark:text-slate-300">
-                    تأكيد المورد محفوظ — الترحيل يدوي من دفتر اليومية؛ افتح قيداً جديداً أو أكمل القيد الذي بدأته (مدين مورد / دائن صندوق).
-                  </span>
-                  <button
-                    type="button"
-                    className="rounded border border-slate-300 bg-white px-2 py-1 font-medium text-slate-800 hover:bg-slate-100 dark:border-slate-500 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-                    onClick={async () => {
-                      try {
-                        const d = await dealsService.getPaymentPostingDiagnostics(
-                          String(deal.id),
-                          String(payment.id)
-                        );
-                        const lines =
-                          d.blockers?.length > 0
-                            ? d.blockers
-                                .map((b, i) => `${i + 1}. ${b}`)
-                                .join("\n\n")
-                            : d.can_auto_post
-                              ? "الشروط تبدو مستوفاة على الخادم؛ جرّب إعادة تحميل الصفقة. إن استمرت المشكلة راجع سجل الخادم (أخطاء ترحيل الدفعة)."
-                              : "لم يُرجع الخادم تفاصيل؛ تحقق من ربط المورد والصندوق في المحاسبة.";
-                        window.alert(
-                          `شرح عدم الترحيل التلقائي (من الخادم):\n\n${lines}`
-                        );
-                      } catch {
-                        window.alert(
-                          "تعذّر جلب التشخيص من الخادم. تحقق من الاتصال ومسار واجهة الـ API."
-                        );
-                      }
-                    }}
-                  >
-                    شرح عدم الترحيل
-                  </button>
-                  {!hasJournalId && (
-                    <button
-                      type="button"
-                      className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs font-medium text-blue-900 hover:bg-blue-100 dark:border-blue-600 dark:bg-blue-950/40 dark:text-blue-100 dark:hover:bg-blue-900/30"
-                      title="إن أنشأت قيداً يدوياً ولم يُربَط تلقائياً بالدفعة"
-                      onClick={() => {
-                        const raw = window.prompt(
-                          "أدخل رقم قيد اليومية المرحّل (Journal ID) الظاهر في شاشة المحاسبة:",
-                          ""
-                        );
-                        if (raw == null || String(raw).trim() === "") return;
-                        const n = parseInt(String(raw).trim(), 10);
-                        if (!Number.isFinite(n) || n <= 0) {
-                          alert("أدخل رقماً صحيحاً.");
-                          return;
-                        }
-                        onPaymentOperation(
-                          "linkJournal",
-                          payment.type,
-                          { journalId: n },
-                          payment.id
-                        );
-                      }}
-                    >
-                      ربط قيد يدوي
-                    </button>
-                  )}
-                </div>
-              )}
-
-            {payment.isPosted && (
-              <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50/80 px-3 py-2 text-sm dark:border-emerald-800 dark:bg-emerald-950/25">
-                <div className="flex flex-wrap items-center gap-2">
-                  <BookOpen className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
-                  {hasJournalId ? (
-                    <>
-                      <span className="text-emerald-900 dark:text-emerald-100">
-                        قيد محاسبي رقم{" "}
-                        <span className="font-mono font-semibold">{jid}</span>
+              return (
+                <tr key={payment.id} className="align-middle">
+                  <td className={cellCls}>
+                    {payment.installmentNumber
+                      ? `دفعة ${payment.installmentNumber}`
+                      : "عام"}
+                  </td>
+                  <td className={cellCls}>
+                    {payment.type}
+                    {dupN > 1 && (
+                      <span
+                        className="mr-2 inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        title={`يوجد ${dupN} سجلات بنفس القسط والمبلغ — راجع التكرار قبل الترحيل.`}
+                      >
+                        <AlertTriangle className="w-3 h-3" /> مكرر ×{dupN}
                       </span>
-                      {onOpenAccountingJournal && (
+                    )}
+                  </td>
+                  <td className={`${cellCls} font-mono text-xs`}>
+                    {payment.paymentDate
+                      ? new Date(payment.paymentDate).toLocaleDateString("en-GB")
+                      : "—"}
+                  </td>
+                  <td className={`${cellCls} font-mono font-bold`}>
+                    ${formatMoney(Number(payment.amount || 0))}
+                  </td>
+                  <td className={`${cellCls} font-mono text-xs`}>
+                    {Number(payment.usdToIls || 0) > 0
+                      ? formatMoney(Number(payment.usdToIls))
+                      : "—"}
+                  </td>
+                  <td className={`${cellCls} font-mono text-xs`}>
+                    {Number(payment.transferCost || 0) > 0
+                      ? `$${formatMoney(Number(payment.transferCost))}`
+                      : "—"}
+                  </td>
+                  <td className={cellCls}>
+                    <span className="inline-flex gap-1">
+                      {payment.alibabaClaimImage && (
                         <button
                           type="button"
-                          className="rounded-md bg-emerald-700 px-2 py-1 text-xs font-medium text-white hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-500"
-                          onClick={() => onOpenAccountingJournal(jid)}
+                          className={iconBtnCls}
+                          title="صورة المطالبة (Claim)"
+                          onClick={() => openImage(payment.alibabaClaimImage)}
                         >
-                          فتح في المحاسبة
+                          <ImageIcon className="w-3.5 h-3.5" /> مطالبة
                         </button>
                       )}
-                      {!onOpenAccountingJournal && (
-                        <span className="text-xs text-emerald-800/80 dark:text-emerald-300/80">
-                          من القائمة: محاسبة ← قيود اليومية ← ابحث برقم القيد.
-                        </span>
+                      {payment.bankSwiftImage && (
+                        <button
+                          type="button"
+                          className={iconBtnCls}
+                          title="صورة السليب (Swift)"
+                          onClick={() => openImage(payment.bankSwiftImage)}
+                        >
+                          <ImageIcon className="w-3.5 h-3.5" /> سليب
+                        </button>
                       )}
-                    </>
-                  ) : (
-                    <span className="text-amber-900 dark:text-amber-100">
-                      تم الترحيل لكن رقم القيد غير ظاهر في البيانات؛ أعد تحميل الصفقة أو افتح قيود اليومية وابحث بتاريخ الدفعة.
+                      {!payment.alibabaClaimImage && !payment.bankSwiftImage && "—"}
                     </span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        );
-      })}
+                  </td>
+                  <td className={cellCls}>
+                    <span
+                      className={`text-xs px-2 py-1 rounded-full whitespace-nowrap ${badge.cls}`}
+                    >
+                      {badge.label}
+                    </span>
+                  </td>
+                  <td className={cellCls}>
+                    {hasJournalId ? (
+                      onOpenAccountingJournal ? (
+                        <button
+                          type="button"
+                          className={iconBtnCls}
+                          title="فتح القيد في المحاسبة"
+                          onClick={() => onOpenAccountingJournal(jid)}
+                        >
+                          <BookOpen className="w-3.5 h-3.5" />
+                          <span className="font-mono">#{jid}</span>
+                        </button>
+                      ) : (
+                        <span className="font-mono text-xs">#{jid}</span>
+                      )
+                    ) : payment.isPosted ? (
+                      <span
+                        className="text-xs text-amber-700 dark:text-amber-300"
+                        title="تم الترحيل لكن رقم القيد غير ظاهر في البيانات؛ أعد تحميل الصفقة أو ابحث في قيود اليومية بتاريخ الدفعة."
+                      >
+                        مرحّل — بلا رقم
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
+                  <td className={cellCls}>
+                    <span className="inline-flex flex-wrap gap-1">
+                      {needsManualPosting && (
+                        <>
+                          <button
+                            type="button"
+                            className={iconBtnCls}
+                            title="تأكيد المورد محفوظ — الترحيل يدوي من دفتر اليومية (مدين مورد / دائن صندوق). اضغط لشرح سبب عدم الترحيل التلقائي."
+                            onClick={() => void explainPosting(payment)}
+                          >
+                            <HelpCircle className="w-3.5 h-3.5" /> شرح
+                          </button>
+                          {!hasJournalId && (
+                            <button
+                              type="button"
+                              className={iconBtnCls}
+                              title="إن أنشأت قيداً يدوياً ولم يُربَط تلقائياً بالدفعة"
+                              onClick={() => linkManualJournal(payment)}
+                            >
+                              <Link2 className="w-3.5 h-3.5" /> ربط قيد
+                            </button>
+                          )}
+                        </>
+                      )}
+                      {payment.isPosted && showManagerUnpost && (
+                        <button
+                          type="button"
+                          className={iconBtnCls}
+                          title="يزيل قيد اليومية ويعيد الدفعة قابلة للتعديل (مدير)"
+                          onClick={() => unpostPayment(payment)}
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" /> إلغاء الترحيل
+                        </button>
+                      )}
+                      {deletable && (
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-200 dark:hover:bg-red-900/30"
+                          title="حذف الدفعة من السجل"
+                          onClick={() => deletePayment(payment)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" /> حذف
+                        </button>
+                      )}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          <tfoot>
+            <tr className="aseel-bg-panel dark:aseel-bg-panel font-bold border-t aseel-border-soft dark:aseel-border-soft">
+              <td className={cellCls} colSpan={3}>
+                المجموع
+              </td>
+              <td className={`${cellCls} font-mono`}>${formatMoney(totalSum)}</td>
+              <td className={cellCls} colSpan={2}>
+                {dealCap > 0 && (
+                  <span className="text-xs font-normal aseel-text-soft">
+                    المتبقي:{" "}
+                    <span className="font-mono font-bold">
+                      ${formatMoney(Math.max(0, dealCap - totalSum))}
+                    </span>
+                  </span>
+                )}
+              </td>
+              <td className={cellCls} colSpan={4} />
+            </tr>
+          </tfoot>
+        </table>
+      </div>
     </div>
   );
 };

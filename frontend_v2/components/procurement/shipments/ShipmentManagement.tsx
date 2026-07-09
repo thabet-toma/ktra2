@@ -14,6 +14,7 @@ import { AseelDenseTable, type DenseColumn } from '../../aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from '../../aseel/useAseelIndexKeymap';
 import { openInNewTab } from '@/utils/openInNewTab';
 import { useConfirm } from '../../../contexts/ConfirmContext';
+import { useToast } from '../../../contexts/ToastContext';
 
 interface ShipmentManagementProps {
     currentUser: User;
@@ -58,6 +59,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     const navigate = useNavigate();
 
     const confirm = useConfirm();
+    const toast = useToast();
     const [shipments, setShipments] = useState<Shipment[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
     const [loading, setLoading] = useState(true);
@@ -118,7 +120,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
             await shipmentsService.deleteShipment(shipmentId);
         } catch (error) {
             // console suppressed
-            alert('حدث خطأ أثناء حذف الشحنة');
+            toast('حدث خطأ أثناء حذف الشحنة', 'error');
         }
     };
 

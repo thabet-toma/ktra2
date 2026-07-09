@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "../../contexts/ConfirmContext";
+import { useToast } from "../../contexts/ToastContext";
 import { useSearchParams } from "react-router-dom";
 import { Save, Plus, FileText } from "lucide-react";
 import { apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "@/services/restApi";
@@ -108,6 +109,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab") || "deals";
   const confirm = useConfirm();
+  const toast = useToast();
   const [shipment, setShipment] = useState<ShipmentApiRow | null>(null);
   const [shipmentForm, setShipmentForm] = useState<ShipmentApiRow | null>(null);
   const [clearance, setClearance] = useState<ClearanceRow | null>(null);
@@ -365,7 +367,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const handleUnlinkDeal = useCallback(async (dealId: number) => {
     if (!shipment) return;
-    if (!window.confirm("هل تريد فك ربط هذه الصفقة من الشحنة؟")) return;
+    if (!(await confirm({ title: "فك ربط الصفقة", message: "هل تريد فك ربط هذه الصفقة من الشحنة؟", confirmText: "فك الربط" }))) return;
     setSaving(true); setError(null);
     try {
       await apiPostObject(
@@ -516,7 +518,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   /** نقل تكلفة النقل المحلي إلى فاتورة الشراء المحوّلة كرسم (T12-A5 — كان المسار غير مكشوف في أي شاشة) */
   const handleImportLocalToInvoice = useCallback(async (id: number, invoiceId: number) => {
-    if (!window.confirm("نقل تكلفة هذا النقل المحلي إلى فاتورة الشراء كرسم؟ سيُحتسب ضمن تكلفة الفاتورة عند ترحيلها.")) return;
+    if (!(await confirm({ title: "نقل التكلفة للفاتورة", message: "نقل تكلفة هذا النقل المحلي إلى فاتورة الشراء كرسم؟ سيُحتسب ضمن تكلفة الفاتورة عند ترحيلها.", danger: false, confirmText: "نقل" }))) return;
     setSaving(true); setError(null);
     try {
       const res = await importLocalShipmentToInvoice(id, invoiceId);
@@ -527,6 +529,63 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setSaving(false);
     }
   }, []);
+
+  // ── تراجع عن الترحيل (task17 — كانت الـ endpoints جاهزة backend بلا واجهة) ──
+  const handleUnpostShipment = useCallback(async () => {
+    if (!shipment) return;
+    if (!(await confirm({
+      title: "تراجع عن ترحيل الشحنة",
+      message: "سيُحذف قيد الشحنة وتُعكس حركات استلام مخزونها وتعود مسودة.\nيُمنع التراجع إن كانت مبيعات لاحقة استهلكت مخزونها (حارس الاعتمادية).",
+      confirmText: "تراجع عن الترحيل",
+    }))) return;
+    setSaving(true); setError(null);
+    try {
+      await apiPostObject(`logistics/shipments/${shipment.id}/unpost/`, {}, { tenantId: tid() });
+      toast("تم التراجع عن ترحيل الشحنة — حُذف القيد وعُكست حركات المخزون.", "success");
+      await loadAll(shipment.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [shipment, confirm, toast]);
+
+  const handleUnpostClearance = useCallback(async () => {
+    if (!clearance) return;
+    if (!(await confirm({
+      title: "تراجع عن ترحيل دفعات التخليص",
+      message: "سيُحذف قيد كل دفعات التخليص المرحّلة وتعود الدفعات مسودات قابلة للتعديل.",
+      confirmText: "تراجع عن الترحيل",
+    }))) return;
+    setSaving(true); setError(null);
+    try {
+      await apiPostObject(`logistics/clearances/${clearance.id}/unpost/`, {}, { tenantId: tid() });
+      toast("تم التراجع عن ترحيل دفعات التخليص وحذف قيودها.", "success");
+      if (shipment) await loadAll(shipment.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [clearance, shipment, confirm, toast]);
+
+  const handleUnpostLocal = useCallback(async (id: number) => {
+    if (!(await confirm({
+      title: "تراجع عن ترحيل النقل المحلي",
+      message: "سيُحذف قيد المصروف ويعود سجل النقل المحلي مسودة (فيمكن نقله إلى الفاتورة أو تعديله).",
+      confirmText: "تراجع عن الترحيل",
+    }))) return;
+    setSaving(true); setError(null);
+    try {
+      await apiPostObject(`logistics/local-shipments/${id}/unpost/`, {}, { tenantId: tid() });
+      toast("تم التراجع عن ترحيل النقل المحلي وحذف قيده.", "success");
+      await reloadLocal();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [confirm, toast]);
 
   // ── E: Payment helpers ──
   const reloadPayments = useCallback(async () => {
@@ -892,6 +951,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                     {!ls.is_posted && (
                       <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handlePostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }} title="قيد مصروف مستقل (مدين شحن محلي / دائن الناقل أو الصندوق). بعد الترحيل لا يمكن نقله إلى الفاتورة.">ترحيل</button>
                     )}
+                    {ls.is_posted && (
+                      <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handleUnpostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }} title="يحذف قيد المصروف ويعيد السجل مسودة">تراجع عن الترحيل</button>
+                    )}
                   </span>
                 )}
               </td>
@@ -1022,6 +1084,34 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       <div className="aseel-total-row"><span>قيد التحويل (الإرسالية):</span><span><b>{s.transit_journal ? `#${s.transit_journal}` : "—"}</b></span></div>
       <div className="aseel-total-row"><span>قيد التخليص:</span><span><b>{clearance?.journal ? `#${clearance.journal}` : "—"}</b></span></div>
       <div className="aseel-total-row"><span>كشف الضريبة:</span><span><b>{clearance?.vat_statement ?? "—"}</b></span></div>
+      {/* إجراءات التراجع عن الترحيل — نفس نمط فاتورة الشراء (task17) */}
+      <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--aseel-border, #ddd)" }}>
+        <h5 style={{ fontWeight: 600, marginBottom: 4 }}>تراجع عن الترحيل</h5>
+        <p className="aseel-text-soft" style={{ marginBottom: 6 }}>
+          يحذف القيود ويعيد المستند مسودة (لا قيود عكسية). حارس الاعتمادية يمنع التراجع
+          إن كانت مبيعات لاحقة استهلكت المخزون.
+        </p>
+        <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap" }}>
+          <button
+            type="button" className="aseel-toolbtn"
+            onClick={() => void handleUnpostShipment()}
+            disabled={!shipment || saving}
+            title="يحذف قيد الشحنة (LOGISTICS_SHIPMENT) ويعكس حركات استلام المخزون"
+          >
+            تراجع عن ترحيل الشحنة
+          </button>
+          <button
+            type="button" className="aseel-toolbtn"
+            onClick={() => void handleUnpostClearance()}
+            disabled={!clearance || saving || !clearancePayments.some((p) => p.is_posted)}
+            title={clearancePayments.some((p) => p.is_posted)
+              ? "يحذف قيود كل دفعات التخليص المرحّلة ويعيدها مسودات"
+              : "لا توجد دفعات تخليص مرحّلة"}
+          >
+            تراجع عن ترحيل دفعات التخليص
+          </button>
+        </span>
+      </div>
     </div>
   );
 

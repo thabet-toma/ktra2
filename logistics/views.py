@@ -1236,6 +1236,16 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                     user=request.user,
                     document_label=f"شحنة {shipment.shipment_number}",
                 )
+                # توحيد التكلفة (task23): بعد عكس استلام الشحنة يُعاد ضبط
+                # avg_cost من المشتريات المرحّلة المتبقية (النموذج الدوري)؛
+                # شركات المتوسط المتحرك تُتخطّى مركزياً.
+                from inventory.services import apply_purchase_cost_model
+                _seen_products = set()
+                for deal in shipment.deals.all():
+                    for it in deal.items.select_related('product').filter(is_deleted=False):
+                        if it.product_id and it.product_id not in _seen_products:
+                            _seen_products.add(it.product_id)
+                            apply_purchase_cost_model(it.product)
         except Exception as e:
             err = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
             return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
@@ -2501,6 +2511,17 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 self._auto_settle_cash_purchase(
                     invoice, settle_amount=credit_total, request=request,
                 )
+
+                # توحيد التكلفة (تذكير task23): بعد الترحيل تدخل الفاتورة نموذج
+                # «تكلفة المنتجات» (product_cost_breakdown يقدّم landed cost) —
+                # يغطي المحلية (GR/IR) والدولية معاً؛ شركات المتوسط المتحرك
+                # تُتخطّى مركزياً داخل apply_purchase_cost_model.
+                from inventory.services import apply_purchase_cost_model
+                _seen_products = set()
+                for it in invoice.items.select_related('product'):
+                    if it.product_id and not it.expense_account_id and it.product_id not in _seen_products:
+                        _seen_products.add(it.product_id)
+                        apply_purchase_cost_model(it.product)
         except (ValidationError, DjangoValidationError, IntegrityError) as e:
             msg = e.message if hasattr(e, 'message') else str(e)
             return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)

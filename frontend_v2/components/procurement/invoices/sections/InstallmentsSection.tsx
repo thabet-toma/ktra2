@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
 import { formatMoney } from '@/utils/formatNumber';
+import { useToast } from '@/contexts/ToastContext';
 import type { LocalPayments } from '@/types';
 import {
   clearanceAndLogisticsFeesForGrandTotal,
@@ -66,6 +67,7 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
   conversionMetadata = null,
 }) => {
   const symbol = currency === 'ILS' ? '₪' : '$';
+  const toast = useToast();
 
   const [uploadingIndex, setUploadingIndex] = useState<number | null>(null);
 
@@ -159,11 +161,11 @@ export const InstallmentsSection: React.FC<InstallmentsSectionProps> = ({
       if (data.secure_url) {
         onUpdateInstallment(index, 'bankSlipUrl', data.secure_url);
       } else {
-        alert("فشل رفع الصورة");
+        toast("فشل رفع الصورة", "error");
       }
     } catch (error) {
       // console suppressed
-      alert("حدث خطأ أثناء رفع الصورة");
+      toast("حدث خطأ أثناء رفع الصورة", "error");
     } finally {
       setUploadingIndex(null);
     }

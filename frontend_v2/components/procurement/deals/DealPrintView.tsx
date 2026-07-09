@@ -1,5 +1,6 @@
 import React, { useRef } from 'react';
 import { Deal, User, Supplier } from '../../../types';
+import { formatMoney } from '../../../utils/formatNumber';
 import { Printer, X, MapPin, Phone, Mail, FileText, Building2, Truck, Hash, Calendar, DollarSign, CreditCard, Edit, ExternalLink } from 'lucide-react';
 
 interface DealPrintViewProps {
@@ -20,9 +21,8 @@ export const DealPrintView: React.FC<DealPrintViewProps> = ({ deal, currentUser,
     const totalPaid = deal.payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
     const subtotal = deal.subtotal || deal.items.reduce((sum, item) => sum + item.totalPrice, 0);
 
-    const formatCurrency = (amount: number) => {
-        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(amount);
-    };
+    // G1: عرض الأرقام عبر formatMoney — بلا أصفار عشرية زائدة
+    const formatCurrency = (amount: number) => `$${formatMoney(Number(amount) || 0)}`;
 
     const formatDate = (dateString?: string) => {
         if (!dateString) return '-';
