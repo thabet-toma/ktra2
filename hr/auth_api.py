@@ -137,6 +137,36 @@ def _json_body(request):
         return None
 
 
+def _default_tenant_for(user):
+    """شركة المستخدم الافتراضية — لربط أحداث الجلسة (دخول/خروج) بها."""
+    try:
+        from tenants.models import UserCompanyMembership
+
+        m = (
+            UserCompanyMembership.objects.filter(user=user, is_default=True).select_related("tenant").first()
+            or UserCompanyMembership.objects.filter(user=user).select_related("tenant").first()
+        )
+        return m.tenant if m else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _log_session_event(request, user, action):
+    """يسجّل حدث دخول/خروج في سجل النشاط الموحّد (غير حاظر)."""
+    from core.activity import log_activity
+
+    name = (f"{user.first_name} {user.last_name}").strip() or user.username
+    log_activity(
+        action=action,
+        entity_type="session",
+        entity_label=name,
+        description="تسجيل دخول" if action == "login" else "تسجيل خروج",
+        request=request,
+        tenant=_default_tenant_for(user),
+        user=user,
+    )
+
+
 @csrf_exempt
 def login_view(request):
     if request.method != "POST":
@@ -157,6 +187,7 @@ def login_view(request):
         )
     token, _ = Token.objects.get_or_create(user=user)
     _sync_user_mirror(user)
+    _log_session_event(request, user, "login")
     return JsonResponse({"token": token.key, "user": _user_payload(user)})
 
 
@@ -166,7 +197,10 @@ def logout_view(request):
         return JsonResponse({"detail": "Method not allowed"}, status=405)
     auth = request.headers.get("Authorization", "").replace("Token ", "").strip()
     if auth:
-        Token.objects.filter(key=auth).delete()
+        tok = Token.objects.filter(key=auth).select_related("user").first()
+        if tok is not None:
+            _log_session_event(request, tok.user, "logout")
+            tok.delete()
     return JsonResponse({"ok": True})
 
 

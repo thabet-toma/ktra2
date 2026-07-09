@@ -58,6 +58,7 @@ export interface PurchaseInvoiceListDto {
   receipt_status?: ReceiptStatus;
   receipt_status_display?: string;
   is_posted: boolean;
+  is_return?: boolean;
   journal_id_display?: number | null;
   items_count: number;
   created_at: string;

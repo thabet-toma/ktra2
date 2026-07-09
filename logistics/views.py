@@ -34,6 +34,7 @@ from tenants.models import Tenant, Currency
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
 from accounting.cashbox import resolve_default_cash_box_account
 from accounting.services import create_audit_log, validate_fiscal_period, post_journal, get_exchange_rate, unpost_document
+from core.activity import log_activity, log_view
 from core.api_defaults import POSTED_DOC_WARNING
 from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
@@ -89,7 +90,17 @@ class LogisticsDealViewSet(BaseTenantViewSet):
         ref = str(serializer.validated_data.get('ref_number') or '').strip()
         if not ref or LogisticsDeal.all_objects.filter(tenant=tenant, ref_number=ref).exists():
             kwargs['ref_number'] = self._next_deal_ref(tenant)
-        serializer.save(**kwargs)
+        deal = serializer.save(**kwargs)
+        log_activity(
+            action='create', entity_type='deal', entity_id=deal.id,
+            entity_label=deal.ref_number, description='إنشاء صفقة', request=self.request,
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        obj = self.get_object()
+        log_view(entity_type='deal', entity_id=obj.id, entity_label=obj.ref_number, request=request)
+        return response
 
     @action(detail=True, methods=['post'])
     def add_item(self, request, pk=None):
@@ -107,7 +118,11 @@ class LogisticsDealViewSet(BaseTenantViewSet):
         instance = serializer.instance
         if instance is not None and instance.payments.filter(is_posted=True).exists():
             raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
-        serializer.save()
+        deal = serializer.save()
+        log_activity(
+            action='update', entity_type='deal', entity_id=deal.id,
+            entity_label=deal.ref_number, description='تعديل صفقة', request=self.request,
+        )
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -116,7 +131,13 @@ class LogisticsDealViewSet(BaseTenantViewSet):
                 {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return super().destroy(request, *args, **kwargs)
+        deal_id, deal_ref = instance.id, instance.ref_number
+        response = super().destroy(request, *args, **kwargs)
+        log_activity(
+            action='delete', entity_type='deal', entity_id=deal_id,
+            entity_label=deal_ref, description='حذف صفقة', request=request,
+        )
+        return response
 
     @action(detail=True, methods=['post'], url_path='unpost')
     def unpost(self, request, pk=None):
@@ -146,6 +167,10 @@ class LogisticsDealViewSet(BaseTenantViewSet):
                     pay.save(update_fields=['is_posted', 'journal'])
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        log_activity(
+            action='unpost', entity_type='deal', entity_id=deal.id,
+            entity_label=deal.ref_number, description='إلغاء ترحيل دفعات صفقة', request=request,
+        )
         return Response({'message': 'تم التراجع عن الترحيل وحذف القيود.', 'unpost_result': total})
 
     @action(detail=True, methods=['post'])
@@ -1760,6 +1785,10 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         it = params.get('invoice_type')
         if it in (PurchaseInvoice.INVOICE_TYPE_LOCAL, PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL):
             qs = qs.filter(invoice_type=it)
+        # فلتر فاتورة/مرجع: is_return=true|false (غياب الباراميتر ⇒ الكل).
+        ret = params.get('is_return')
+        if ret is not None and str(ret).lower() in ('true', '1', 'false', '0'):
+            qs = qs.filter(is_return=str(ret).lower() in ('true', '1'))
         from core.import_access import user_can_access_import
         if tenant and not user_can_access_import(self.request.user, tenant):
             qs = qs.filter(invoice_type=PurchaseInvoice.INVOICE_TYPE_LOCAL)
@@ -1803,7 +1832,22 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             from rest_framework.exceptions import PermissionDenied
             if not user_can_access_import(self.request.user, tenant):
                 raise PermissionDenied("صلاحية الفاتورة الدولية (الاستيراد) غير متاحة لحسابك.")
-        serializer.save(tenant=tenant, invoice_number=inv_num, invoice_type=invoice_type)
+        invoice = serializer.save(tenant=tenant, invoice_number=inv_num, invoice_type=invoice_type)
+        log_activity(
+            action='create', entity_type='purchase_invoice', entity_id=invoice.id,
+            entity_label=invoice.invoice_number,
+            description='إنشاء ' + ('مرجع شراء' if invoice.is_return else 'فاتورة شراء'),
+            request=self.request,
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        obj = self.get_object()
+        log_view(
+            entity_type='purchase_invoice', entity_id=obj.id,
+            entity_label=obj.invoice_number, request=request,
+        )
+        return response
 
     @action(detail=False, methods=['get'], url_path='resolve-price')
     def resolve_price(self, request):
@@ -1900,6 +1944,64 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             'journal_id': result['journal'].id if result['journal'] else None,
             'movements_created': len(result['movements']),
         }, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['post'], url_path='returns')
+    def create_return(self, request):
+        """مرجع شراء: إنشاء فاتورة إرجاع للمورد وترحيلها (خفض المخزون + قيد عكسي).
+
+        Body: {
+          "original_invoice": int (اختياري),
+          "supplier": int,
+          "return_date": "YYYY-MM-DD",
+          "reason": str,
+          "lines": [ { "product": int, "quantity": number, "unit_price": number }, ... ]
+        }
+        """
+        from .services import create_purchase_return
+
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'لا يوجد شركة (tenant).'}, status=status.HTTP_400_BAD_REQUEST)
+
+        data = request.data or {}
+        supplier_id = data.get('supplier') or data.get('partner')
+        if not supplier_id:
+            return Response({'error': 'المورد مطلوب.'}, status=status.HTTP_400_BAD_REQUEST)
+        partner = Partner.objects.filter(pk=supplier_id, tenant=tenant).first()
+        if not partner:
+            return Response({'error': 'المورد غير موجود.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        original = None
+        oid = data.get('original_invoice')
+        if oid:
+            original = PurchaseInvoice.objects.filter(pk=oid, tenant=tenant).first()
+            if not original:
+                return Response({'error': 'الفاتورة الأصلية غير موجودة.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            ret = create_purchase_return(
+                tenant,
+                original_invoice=original,
+                partner=partner,
+                return_date=data.get('return_date') or None,
+                lines=data.get('lines') or [],
+                notes=data.get('reason') or '',
+                exchange_rate=(original.exchange_rate if original else None),
+                user=request.user,
+            )
+        except DjangoValidationError as ve:
+            msg = ve.message if hasattr(ve, 'message') else (ve.messages[0] if getattr(ve, 'messages', None) else str(ve))
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        except ValidationError as ve:
+            return Response({'error': ve.detail if hasattr(ve, 'detail') else str(ve)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception('purchase return failed')
+            return Response({'error': 'حدث خطأ غير متوقع أثناء إنشاء مرجع الشراء.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        return Response(
+            PurchaseInvoiceSerializer(ret, context={'request': request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=False, methods=['post'], url_path='preview-clearance-import')
     def preview_clearance_import(self, request):
@@ -2060,6 +2162,10 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         invoice.refresh_from_db()
+        log_activity(
+            action='payment', entity_type='purchase_invoice', entity_id=invoice.id,
+            entity_label=invoice.invoice_number, description='سند دفع', request=request,
+        )
         ser = PurchaseInvoiceSerializer(invoice, context={'request': request})
         return Response(ser.data)
 
@@ -2090,6 +2196,27 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 {'error': 'الفاتورة مرحّلة مسبقاً'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+
+        # مرجع الشراء: ترحيله يعكس الشراء (RETURN_OUT + Dr ذمم المورد / Cr مخزون)
+        # عبر مسار مستقل — لا يمرّ بمنطق ترحيل فاتورة الشراء العادي.
+        if getattr(invoice, 'is_return', False):
+            from .services import post_purchase_return
+            try:
+                post_purchase_return(invoice, user=request.user)
+            except DjangoValidationError as ve:
+                msg = ve.message if hasattr(ve, 'message') else (ve.messages[0] if getattr(ve, 'messages', None) else str(ve))
+                return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+            except ValidationError as ve:
+                return Response({'error': ve.detail if hasattr(ve, 'detail') else str(ve)}, status=status.HTTP_400_BAD_REQUEST)
+            invoice.refresh_from_db()
+            log_activity(
+                action='post', entity_type='purchase_invoice', entity_id=invoice.id,
+                entity_label=invoice.invoice_number, description='ترحيل مرجع شراء', request=request,
+            )
+            return Response({
+                'journal_id': invoice.journal_id,
+                'message': 'تم ترحيل مرجع الشراء: خرجت الكمية من المخزن وخُفِّضت ذمم المورد.',
+            })
 
         tenant = invoice.tenant or self._get_tenant()
         partner = invoice.partner
@@ -2381,6 +2508,10 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             logger.exception("purchase invoice post_to_accounting failed pk=%s", invoice.pk)
             return Response({'error': 'حدث خطأ غير متوقع أثناء ترحيل فاتورة الشراء.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+        log_activity(
+            action='post', entity_type='purchase_invoice', entity_id=invoice.id,
+            entity_label=invoice.invoice_number, description='ترحيل فاتورة شراء', request=request,
+        )
         return Response({
             'journal_id': journal.id,
             'receipt_journal_id': receipt['journal_id'] if receipt else None,
@@ -2543,7 +2674,13 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         instance = serializer.instance
         if instance is not None and instance.is_posted:
             raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
-        serializer.save()
+        invoice = serializer.save()
+        log_activity(
+            action='update', entity_type='purchase_invoice', entity_id=invoice.id,
+            entity_label=invoice.invoice_number,
+            description='تعديل ' + ('مرجع شراء' if invoice.is_return else 'فاتورة شراء'),
+            request=self.request,
+        )
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -2552,12 +2689,50 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return super().destroy(request, *args, **kwargs)
+        inv_id, inv_no, is_ret = instance.id, instance.invoice_number, instance.is_return
+        response = super().destroy(request, *args, **kwargs)
+        log_activity(
+            action='delete', entity_type='purchase_invoice', entity_id=inv_id,
+            entity_label=inv_no,
+            description='حذف ' + ('مرجع شراء' if is_ret else 'فاتورة شراء'),
+            request=request,
+        )
+        return response
 
     @action(detail=True, methods=['post'], url_path='unpost')
     def unpost(self, request, pk=None):
         """تراجع عن الترحيل: حذف كل قيود الفاتورة وحركات استلامها وإرجاعها مسودة."""
         invoice = self.get_object()
+
+        # مرجع الشراء: التراجع يحذف قيده العكسي ويعيد الكمية للمخزن (عكس RETURN_OUT).
+        if getattr(invoice, 'is_return', False):
+            if not invoice.is_posted:
+                return Response({'error': 'المرجع غير مرحّل'}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                with transaction.atomic():
+                    result = unpost_document(
+                        tenant_id=invoice.tenant_id,
+                        reference_id=invoice.pk,
+                        journal_reference_types=['PURCHASE_RETURN'],
+                        stock_reference_types=['PURCHASE_RETURN'],
+                        user=request.user,
+                        document_label=f"مرجع شراء {invoice.invoice_number}",
+                        recycle=True,
+                    )
+                    invoice.is_posted = False
+                    invoice.journal = None
+                    invoice.status = 'draft'
+                    invoice.save(update_fields=['is_posted', 'journal', 'status'])
+            except Exception as e:
+                err = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
+                return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
+            log_activity(
+                action='unpost', entity_type='purchase_invoice', entity_id=invoice.id,
+                entity_label=invoice.invoice_number, description='إلغاء ترحيل مرجع شراء',
+                request=request,
+            )
+            return Response({'message': 'تم التراجع عن ترحيل المرجع وإعادة الكمية للمخزن.', 'unpost_result': result})
+
         if not invoice.is_posted and invoice.receipt_status == PurchaseInvoice.RECEIPT_NOT:
             return Response(
                 {'error': 'الفاتورة غير مرحّلة'},
@@ -2593,6 +2768,11 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             err = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
             return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
 
+        log_activity(
+            action='unpost', entity_type='purchase_invoice', entity_id=invoice.id,
+            entity_label=invoice.invoice_number, description='إلغاء ترحيل فاتورة شراء',
+            request=request,
+        )
         return Response({'message': 'تم التراجع عن الترحيل وحذف القيود.', 'unpost_result': result})
 
 

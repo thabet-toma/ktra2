@@ -996,6 +996,18 @@ class PurchaseInvoice(models.Model):
         db_column='JournalID', related_name='purchase_invoices',
     )
 
+    # مرجع الشراء: فاتورة إرجاع بضاعة للمورد. ترحيلها يعكس الشراء الأصلي
+    # (Dr ذمم المورد / Cr مخزون + ض.مدخلات) ويُخرج الكمية من المخزن (RETURN_OUT).
+    is_return = models.BooleanField(
+        default=False, db_column='IsReturn',
+        help_text='مرجع شراء (إرجاع بضاعة للمورد) — يعكس القيد ويُخرج الكمية.',
+    )
+    original_invoice = models.ForeignKey(
+        'self', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='OriginalInvoiceID', related_name='return_invoices',
+        help_text='فاتورة الشراء الأصلية التي يُرجَع منها (للمراجيع).',
+    )
+
     # نوع الدفع: credit → تُقيّد على ذمم المورد (AP)، cash → تُقيّد على صندوق/بنك
     PAYMENT_TYPE_CREDIT = 'credit'
     PAYMENT_TYPE_CASH = 'cash'

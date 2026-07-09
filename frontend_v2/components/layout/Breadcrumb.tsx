@@ -79,6 +79,9 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'import-flow': 'رحلة الاستيراد',
   clearance: 'التخليص الجمركي',
   'group-constants': 'ثوابت المجموعة',
+  'activity-log': 'سجل النشاط',
+  'about-us': 'من نحن',
+  contact: 'تواصل معنا',
 };
 
 interface BreadcrumbItem {

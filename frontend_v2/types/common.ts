@@ -83,6 +83,7 @@ export type AppView =
     | "invoice-profits"
     | "partner-profile"
     | "import-flow"
+    | "activity-log"
     | "about-us"
     | "contact";
 

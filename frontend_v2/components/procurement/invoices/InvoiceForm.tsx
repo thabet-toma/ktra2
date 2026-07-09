@@ -64,6 +64,7 @@ import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection
 import { PurchaseInvoiceAccountingPanel } from "./PurchaseInvoiceAccountingPanel";
 import { InvoicePrintView } from "./InvoicePrintView";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
+import { EntityActivityLog } from "@/components/activity/EntityActivityLog";
 import {
   AseelDocumentShell,
   AseelGrid,
@@ -623,7 +624,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     const pid = Number(productId);
     if (!pid) return 0;
     try {
-      const r = await purchaseInvoiceApi.resolvePrice({ product: pid });
+      // التعبئة دائماً بآخر سعر شراء (بغضّ النظر عن استراتيجية الإعدادات) — القائمة
+      // تعرض «أقل» و«آخر» معاً للاطلاع، لكن الحقل يُعبّأ بالأخير.
+      const r = await purchaseInvoiceApi.resolvePrice({ product: pid, strategy: "LAST_PURCHASE" });
       return r.unit_price != null ? Number(r.unit_price) || 0 : 0;
     } catch (err) {
       console.error("resolvePrice failed", err);
@@ -1672,6 +1675,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                 searchQuery={formData.invoiceNumber}
               />
             ),
+          },
+          {
+            key: "activity_log",
+            label: "سجل النشاط",
+            content: <EntityActivityLog entityType="purchase_invoice" entityId={Number(formData.id)} defaultOpen />,
           },
         ] : []),
       ]}

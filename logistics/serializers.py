@@ -917,7 +917,7 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'subtotal', 'discount_amount', 'tax_rate', 'tax_amount',
             'grand_total', 'status', 'status_display',
             'receipt_status', 'receipt_status_display',
-            'is_posted', 'journal_id_display',
+            'is_posted', 'is_return', 'original_invoice', 'journal_id_display',
             'items_count',
             'created_at', 'updated_at',
         ]
@@ -982,11 +982,11 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'receipt_status', 'receipt_status_display', 'is_local',
             'amount_paid', 'remaining_balance', 'payment_status', 'payment_status_display',
             'supplier_invoice_number', 'factory_name',
-            'is_posted', 'journal', 'journal_id_display',
+            'is_posted', 'is_return', 'original_invoice', 'journal', 'journal_id_display',
             'items', 'fees', 'cheques',
             'created_at', 'updated_at', 'created_by',
         ]
-        read_only_fields = ['id', 'is_posted', 'journal', 'created_at', 'updated_at', 'receipt_status']
+        read_only_fields = ['id', 'is_posted', 'is_return', 'original_invoice', 'journal', 'created_at', 'updated_at', 'receipt_status']
 
     def get_is_local(self, obj):
         """فاتورة محلية = غير مستوردة (بلا صفقة/شحنة/تخليص) — قابلة للاستلام للمخزن."""

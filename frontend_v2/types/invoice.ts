@@ -238,4 +238,6 @@ export interface Invoice {
     clearanceId?: string;
     /** فاتورة شراء SQL مرحّلة إلى المحاسبة — لا يُعاد حساب التكلفة الأرضية تلقائياً */
     isPosted?: boolean;
+    /** مرجع شراء (إرجاع بضاعة للمورد) بدل فاتورة شراء عادية. */
+    isReturn?: boolean;
 }

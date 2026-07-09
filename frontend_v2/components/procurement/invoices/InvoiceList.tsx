@@ -70,6 +70,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   // فلاتر
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  // فلتر النوع: الكل / فواتير الشراء / مراجيع الشراء.
+  const [filterKind, setFilterKind] = useState<"all" | "invoice" | "return">("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -100,6 +102,8 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
     return invoices
       .filter((inv) => {
         if (inv.isHistorical) return false;
+        if (filterKind === "invoice" && inv.isReturn) return false;
+        if (filterKind === "return" && !inv.isReturn) return false;
         if (filterStatus === "posted" && !inv.isPosted) return false;
         if (filterStatus === "draft" && inv.isPosted) return false;
         const d = inv.invoiceDate || (inv.createdAt ? inv.createdAt.slice(0, 10) : "");
@@ -117,7 +121,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         const db = new Date(b.invoiceDate || b.createdAt || "").getTime();
         return db - da;
       });
-  }, [invoices, filterStatus, dateFrom, dateTo, search, suppliers]);
+  }, [invoices, filterStatus, filterKind, dateFrom, dateTo, search, suppliers]);
 
   const columns: DenseColumn<Invoice>[] = [
     {
@@ -133,6 +137,26 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         >
           {r.invoiceNumber || `#${r.id}`}
         </button>
+      ),
+    },
+    {
+      key: "kind",
+      header: "النوع",
+      width: "70px",
+      align: "center",
+      render: (r) => (
+        <span
+          style={{
+            fontSize: "10px",
+            fontWeight: 700,
+            padding: "1px 6px",
+            borderRadius: "4px",
+            color: r.isReturn ? "#b04a00" : "var(--aseel-accent, #2563eb)",
+            background: r.isReturn ? "rgba(176,74,0,0.12)" : "rgba(37,99,235,0.10)",
+          }}
+        >
+          {r.isReturn ? "مرجع" : "فاتورة"}
+        </span>
       ),
     },
     {
@@ -265,6 +289,18 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
+      </label>
+      <label className="aseel-field" style={{ minWidth: "110px" }}>
+        <span className="aseel-field-label">النوع</span>
+        <select
+          className="aseel-input"
+          value={filterKind}
+          onChange={(e) => setFilterKind(e.target.value as "all" | "invoice" | "return")}
+        >
+          <option value="all">الكل</option>
+          <option value="invoice">فواتير الشراء</option>
+          <option value="return">مراجيع الشراء</option>
+        </select>
       </label>
       <label className="aseel-field" style={{ minWidth: "100px" }}>
         <span className="aseel-field-label">الحالة</span>

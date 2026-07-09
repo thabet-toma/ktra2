@@ -22,6 +22,7 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { usePriceVisibility } from "../../contexts/PriceVisibilityContext";
 import { useStaleConfirm } from "../offline/StaleDataConfirm";
 import { DocumentPaymentsTab } from "../shared/DocumentPaymentsTab";
+import { EntityActivityLog } from "../activity/EntityActivityLog";
 import { AseelDatePicker } from "../ui/AseelDatePicker";
 
 import { ProductCardModal } from "../shared/ProductCardModal";
@@ -302,7 +303,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   // M3: selling below available stock is ALLOWED — but we surface a
   // non-blocking warning so the user is aware the stock will go negative.
   const overSellWarnings = useMemo(() => {
-    if (!stockOnPost) return [] as { name: string; qty: number; available: number }[];
+    if (invoiceStatus === "posted" || !stockOnPost) return [] as { name: string; qty: number; available: number }[];
     const out: { name: string; qty: number; available: number }[] = [];
     for (const l of lines) {
       if (l.product === "") continue;
@@ -314,7 +315,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     }
     return out;
     // lines/quantities are strings in state; recompute whenever they change
-  }, [lines, productsById, stockOnPost]);
+  }, [lines, productsById, stockOnPost, invoiceStatus]);
 
   /** نسب الضرائب المسموحة للمبيعات: direction ∈ {sales, both} أو بدون direction (قديم). */
   const salesTaxRates = useMemo(
@@ -1719,6 +1720,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       case "line_discount":
         return row.line_discount;
       case "avail": {
+        if (invoiceStatus === "posted") return "—";
         const pr = row.product ? productsById.get(Number(row.product)) : undefined;
         return pr ? fmt(Number(pr.quantity_on_hand)) : "—";
       }
@@ -1790,6 +1792,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       return {
         id: p.id,
         label: formatProductPrimaryName(p),
+        sub: `المتاح: ${fmt(Number(p.quantity_on_hand || 0))}`,
         price,
         priceLabel,
         prices,
@@ -2733,12 +2736,17 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             key: "financial_movements",
             label: "الحركات المالية المرتبطة",
             content: (
-              <DocumentPaymentsTab 
-                referenceType="SALES_INVOICE" 
-                referenceId={draftId} 
+              <DocumentPaymentsTab
+                referenceType="SALES_INVOICE"
+                referenceId={draftId}
                 searchQuery={invoiceNumber}
               />
             ),
+          }] : []),
+          ...(draftId && Number(draftId) > 0 ? [{
+            key: "activity_log",
+            label: "سجل النشاط",
+            content: <EntityActivityLog entityType="sales_invoice" entityId={draftId} defaultOpen refreshKey={isPosted ? "posted" : "draft"} />,
           }] : []),
         ]}
         totals={

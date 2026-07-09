@@ -703,7 +703,8 @@ def post_sales_invoice(
 
     validate_fiscal_period(invoice.tenant_id, invoice.invoice_date)
 
-    if invoice.invoice_type == SalesInvoice.INVOICE_CREDIT:
+    # المراجيع تُخفّض الذمم لا تزيدها ⇒ لا تُخضَع لفحص حدّ الائتمان.
+    if invoice.invoice_type == SalesInvoice.INVOICE_CREDIT and not is_return:
         if invoice.customer.partner_type != "Customer":
             raise ValidationError("الطرف المحدد ليس عميلاً.")
         limit = invoice.customer.credit_limit

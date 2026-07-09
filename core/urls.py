@@ -16,11 +16,17 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 
 from core import assistant_views, agent_db_view, dashboard_api, health, media_views
+from core.activity_views import ActivityLogViewSet
+
+_activity_router = DefaultRouter()
+_activity_router.register(r'', ActivityLogViewSet, basename='activity')
 
 urlpatterns = [
     path('api/health/', health.health_check),
+    path('api/activity/', include(_activity_router.urls)),
     path('api/client-logs/', health.client_logs),
     path('admin/', admin.site.urls),
     path('api/mapper/', include('bridge.urls')),

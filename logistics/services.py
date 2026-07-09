@@ -382,3 +382,235 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
         journal.id if journal else None,
     )
     return {'movements': movements, 'journal': journal, 'receipt_status': invoice.receipt_status}
+
+
+def create_purchase_return(
+    tenant, *, original_invoice, partner, return_date, lines, notes='',
+    invoice_number=None, currency=None, exchange_rate=None, user=None,
+):
+    """مرجع شراء: إنشاء فاتورة إرجاع للمورد **كمسودة** (بلا ترحيل).
+
+    يُخزَّن المستند فقط (status='draft'، is_posted=False) — لا حركة مخزون ولا قيد.
+    الترحيل خطوة منفصلة عبر `post_purchase_return` (زر «ترحيل» من فواتير الشراء).
+    نسبة الضريبة تُشتق من بنود الفاتورة الأصلية وتُخزَّن على بند المرجع كي يقرأها
+    الترحيل لاحقاً.
+
+    lines: [{'product': int, 'quantity': Decimal, 'unit_price': Decimal}].
+    """
+    import datetime
+    from decimal import Decimal as _D
+    from inventory.models import Product
+    from .models import PurchaseInvoice, PurchaseInvoiceItem
+
+    if return_date is None:
+        return_date = datetime.date.today()
+    if partner is None:
+        raise ValidationError("المورد مطلوب لمرجع الشراء.")
+    if partner.tenant_id != tenant.TenantID:
+        raise ValidationError("المورد لا يتبع نفس الشركة.")
+
+    # نسبة الضريبة لكل صنف من الفاتورة الأصلية (لعكسها بدقة عند الترحيل).
+    vat_by_product: dict[int, _D] = {}
+    if original_invoice is not None:
+        for it in original_invoice.items.all():
+            if it.product_id and getattr(it, 'is_taxable', False):
+                vat_by_product[it.product_id] = _D(str(it.vat_percent or 0))
+
+    clean_lines = []
+    for raw in lines or []:
+        pid = raw.get('product')
+        if not pid:
+            continue
+        try:
+            qty = _D(str(raw.get('quantity', 0)))
+            price = _D(str(raw.get('unit_price', 0)))
+        except Exception:
+            raise ValidationError("كمية أو سعر غير صالح في أحد البنود.")
+        if qty <= 0:
+            continue
+        clean_lines.append({'product': int(pid), 'quantity': qty, 'unit_price': price})
+    if not clean_lines:
+        raise ValidationError("أضِف بنداً واحداً على الأقل بكمية موجبة.")
+
+    products = {
+        p.id: p for p in Product.objects.filter(
+            tenant=tenant, id__in=[l['product'] for l in clean_lines],
+        )
+    }
+    base_factor = _D(str(exchange_rate if exchange_rate is not None else 1))
+
+    with transaction.atomic():
+        if not invoice_number:
+            last = (
+                PurchaseInvoice.objects.filter(tenant=tenant, is_return=True)
+                .order_by('-id').values_list('invoice_number', flat=True).first()
+            )
+            if last and last.startswith('PRET-'):
+                try:
+                    seq = int(last.split('-')[1]) + 1
+                except (ValueError, IndexError):
+                    seq = PurchaseInvoice.objects.filter(tenant=tenant, is_return=True).count() + 1
+            else:
+                seq = PurchaseInvoice.objects.filter(tenant=tenant, is_return=True).count() + 1
+            invoice_number = f"PRET-{seq:04d}"
+
+        if currency is None:
+            currency = getattr(original_invoice, 'currency', None)
+        if currency is None:
+            from tenants.models import Currency
+            currency = Currency.objects.filter(IsBaseCurrency=True).first() \
+                or Currency.objects.order_by('CurrencyID').first()
+        if currency is None:
+            raise ValidationError("لا توجد عملة معرّفة للمرجع.")
+
+        ret = PurchaseInvoice.objects.create(
+            tenant=tenant,
+            invoice_number=invoice_number,
+            invoice_date=return_date,
+            invoice_type=PurchaseInvoice.INVOICE_TYPE_LOCAL,
+            partner=partner,
+            currency=currency,
+            exchange_rate=base_factor,
+            is_return=True,
+            original_invoice=original_invoice,
+            payment_type=PurchaseInvoice.PAYMENT_TYPE_CREDIT,
+            status='draft',
+            is_posted=False,
+            notes=notes or '',
+            created_by=user if user and not getattr(user, 'is_anonymous', False) else None,
+        )
+
+        inv_net = _D('0')
+        inv_vat = _D('0')
+        for l in clean_lines:
+            prod = products.get(l['product'])
+            if prod is None:
+                raise ValidationError(f"الصنف {l['product']} غير موجود أو لا يتبع الشركة.")
+            qty = l['quantity']
+            line_net = (qty * l['unit_price'] * base_factor).quantize(DEC)
+            vat_pct = vat_by_product.get(prod.id, _D('0'))
+            inv_net += line_net
+            inv_vat += (line_net * vat_pct / _D('100')).quantize(DEC)
+
+            PurchaseInvoiceItem.objects.create(
+                invoice=ret, product=prod,
+                name=getattr(prod, 'name_ar', None) or getattr(prod, 'name', '') or str(prod),
+                quantity=qty, unit_price=l['unit_price'],
+                total_price=(qty * l['unit_price']).quantize(DEC),
+                is_taxable=vat_pct > 0,
+                vat_percent=vat_pct,
+            )
+
+        ret.subtotal = inv_net
+        ret.tax_amount = inv_vat
+        ret.grand_total = (inv_net + inv_vat).quantize(DEC)
+        ret.save(update_fields=['subtotal', 'tax_amount', 'grand_total'])
+
+    return ret
+
+
+def post_purchase_return(invoice, *, user=None):
+    """ترحيل مرجع شراء (مسودة): يُخرج الكمية من المخزن (RETURN_OUT) ويُرحّل قيداً
+    عكسياً للشراء (Dr ذمم المورد الإجمالي / Cr مخزون الصافي + Cr ض.مدخلات).
+
+    الأموال: المرجع يُخفّض ذمم المورد؛ إن كانت الفاتورة مدفوعة يصبح المورد مديناً
+    لنا (رصيد سالب) يُحصَّل بسند صرف/قبض مستقل — مطابقةً لتدفّق النظام القائم.
+    """
+    import datetime
+    import logging
+    from decimal import Decimal as _D
+    from inventory.services import record_stock_movement
+    from accounting.services import post_journal, validate_fiscal_period
+
+    logger = logging.getLogger(__name__)
+
+    if not getattr(invoice, 'is_return', False):
+        raise ValidationError("هذه ليست فاتورة مرجع شراء.")
+    if invoice.is_posted:
+        raise ValidationError("المرجع مرحّل مسبقاً.")
+
+    tenant = invoice.tenant
+    partner = invoice.partner
+    return_date = invoice.invoice_date or datetime.date.today()
+    base_factor = _D(str(invoice.exchange_rate or 1))
+
+    with transaction.atomic():
+        validate_fiscal_period(tenant.TenantID, return_date)
+
+        items = list(invoice.items.select_related('product').all())
+        if not items:
+            raise ValidationError("المرجع بلا بنود.")
+
+        inv_net = _D('0')
+        inv_vat = _D('0')
+        movements = []
+        for it in items:
+            qty = _D(str(it.quantity or 0))
+            if qty <= 0:
+                continue
+            line_net = (qty * _D(str(it.unit_price or 0)) * base_factor).quantize(DEC)
+            vat_pct = _D(str(it.vat_percent or 0)) if it.is_taxable else _D('0')
+            inv_net += line_net
+            inv_vat += (line_net * vat_pct / _D('100')).quantize(DEC)
+
+            prod = it.product
+            if prod and not getattr(prod, 'is_service', False):
+                mv = record_stock_movement(
+                    product=prod,
+                    movement_type='RETURN_OUT',
+                    quantity=qty,
+                    unit_cost=_D(str(prod.avg_cost or 0)),
+                    reference_type='PURCHASE_RETURN',
+                    reference_id=invoice.id,
+                    partner=partner,
+                    movement_date=return_date,
+                    notes=f"مرجع شراء {invoice.invoice_number}",
+                    tenant=tenant,
+                )
+                movements.append(mv)
+
+        gross = (inv_net + inv_vat).quantize(DEC)
+        journal = None
+        if gross > 0:
+            ap_account = _resolve_ap_account(partner)
+            inventory_account = _resolve_inventory_account(tenant)
+            lines_payload = [
+                {'account': ap_account.id, 'debit': gross, 'credit': _D('0'),
+                 'partner': partner.id},
+                {'account': inventory_account.id, 'debit': _D('0'), 'credit': inv_net,
+                 'partner': partner.id},
+            ]
+            if inv_vat > 0:
+                vat_acc = _resolve_vat_input_account(tenant)
+                lines_payload.append({
+                    'account': vat_acc.id, 'debit': _D('0'), 'credit': inv_vat,
+                    'partner': partner.id,
+                })
+            journal = post_journal(
+                tenant_id=tenant.TenantID,
+                transaction_date=return_date,
+                reference_type='PURCHASE_RETURN',
+                reference_id=invoice.id,
+                description=f"مرجع شراء {invoice.invoice_number} | {partner.name}"[:500],
+                lines_data=lines_payload,
+                currency=invoice.currency,
+                exchange_rate=base_factor,
+                user=user if user and not getattr(user, 'is_anonymous', False) else None,
+                idempotent=False,
+            )
+
+        invoice.subtotal = inv_net
+        invoice.tax_amount = inv_vat
+        invoice.grand_total = gross
+        invoice.is_posted = True
+        invoice.journal = journal
+        invoice.status = 'completed'
+        invoice.save(update_fields=[
+            'subtotal', 'tax_amount', 'grand_total', 'is_posted', 'journal', 'status',
+        ])
+
+    logger.info(
+        "Purchase return #%s posted: %d movement(s), journal=%s, gross=%s",
+        invoice.id, len(movements), journal.id if journal else None, gross,
+    )
+    return invoice

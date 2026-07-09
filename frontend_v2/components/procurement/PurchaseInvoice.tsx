@@ -46,6 +46,7 @@ function sqlListToInvoice(row: PurchaseInvoiceListDto): Invoice {
     items: [],
     status: row.status as Invoice['status'],
     isPosted: Boolean(row.is_posted),
+    isReturn: Boolean(row.is_return),
     subtotal: row.subtotal,
     discountAmount: row.discount_amount,
     taxRate: row.tax_rate,

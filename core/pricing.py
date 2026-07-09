@@ -216,15 +216,16 @@ def purchase_price_list(*, tenant_id: int, strategy: str | None = None) -> dict[
     """task24: سعر الشراء المقترح لكل المنتجات دفعة واحدة (لعرضه داخل خيارات
     منتقي الأصناف في فاتورة الشراء بلا نقر).
 
-    يُرجع {product_id: {"unit_price", "source_type", "source_label"}}. السعر هو
-    سعر سطر المصدر كما سُجِّل (معاينة أحادية العملة) — تحويل العملة لكل سطر يبقى
-    في `resolve_purchase_price` وحده. السلسلة: تاريخ الشراء المرحَّل (حسب
-    الاستراتيجية) ← متوسط تكلفة المنتج ← لا شيء.
+    يُرجع {product_id: {"unit_price", "source_type", "source_label", "prices"}}.
+    `unit_price` هو **آخر** سعر شراء (وهو ما تُعبَّأ به الخلية)، و`prices` تعرض
+    «آخر شراء» و«أقل شراء» معاً دائماً عند وجود تاريخ (بصرف النظر عن الاستراتيجية).
+    السعر أحادي العملة كما سُجِّل — تحويل العملة لكل سطر يبقى في `resolve_purchase_price`.
+    السلسلة: تاريخ الشراء المرحَّل ← متوسط تكلفة المنتج ← لا شيء. (`strategy` يبقى
+    للتوافق مع نداء الـ endpoint ولا يؤثّر على القيمة الأساسية هنا.)
     """
     from inventory.models import Product
     from logistics.models import PurchaseInvoiceItem
 
-    strategy = strategy if strategy in PriceStrategy.PURCHASE_CHOICES else PriceStrategy.LAST_PURCHASE
     qs = (
         PurchaseInvoiceItem.objects.filter(
             invoice__tenant_id=tenant_id,
@@ -279,9 +280,12 @@ def purchase_price_list(*, tenant_id: int, strategy: str | None = None) -> dict[
         prices = []
         if data["last"]:
             prices.append(data["last"])
-        if data["lowest"] and (not data["last"] or data["lowest"]["document_id"] != data["last"]["document_id"]):
+        # القائمة تعرض «آخر شراء» و«أقل شراء» معاً دائماً عند وجود تاريخ شراء (بصرف
+        # النظر عن الاستراتيجية) ليطّلع المستخدم على الاثنين؛ القيمة الأساسية
+        # (unit_price) هي آخر سعر — وهي ما تُعبَّأ به الخلية عند الاختيار.
+        if data["lowest"] and data["lowest"] is not data["last"]:
             prices.append(data["lowest"])
-            
+
         if prices:
             final_result[pid] = {
                 "unit_price": prices[0]["unit_price"],

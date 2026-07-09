@@ -12,9 +12,11 @@
 import React, { useEffect, useState, useCallback } from "react";
 import {
   listSalesInvoices,
+  createSalesInvoice,
+  getSalesInvoice,
   type SalesInvoiceRow,
 } from "../../services/salesApi";
-import { apiGetList, apiPostObject } from "../../services/restApi";
+import { apiGetList } from "../../services/restApi";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import {
@@ -30,7 +32,21 @@ import {
 import { Plus, Save, X, RefreshCw, AlertTriangle, Search, Trash2 } from "lucide-react";
 
 type Partner = { id: number; name: string };
-type Product = { id: number; name: string; unit_price?: string };
+type Product = {
+  id: number;
+  name?: string;
+  name_ar?: string;
+  name_en?: string;
+  sku?: string;
+  display_name?: string;
+  unit_price?: string;
+};
+
+/** اسم الصنف للعرض — الأصناف تُعاد بحقول name_ar/display_name/sku لا name. */
+const productLabel = (p?: Product): string =>
+  (p &&
+    (p.display_name || p.name_ar || p.name_en || p.name || p.sku)) ||
+  (p ? `#${p.id}` : "");
 
 interface ReturnLine {
   _idx: number;
@@ -122,53 +138,81 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
 
   const totalAmount = lines.reduce((s, l) => s + (Number(l.total) || 0), 0);
 
-  // Copy lines from original invoice
+  // Copy lines from original invoice (البنود المباعة فعلاً)
   const copyFromOriginal = async () => {
     if (originalInvoiceId === "") {
       setErr("اختر الفاتورة الأصلية أولاً");
       return;
     }
     setErr(null);
-    // Note: backend would expose getSalesInvoice(id) returning lines.
-    // For now, this is a placeholder. The form starts empty until N8-T11.
-    setMsg("نسخ البنود من الفاتورة الأصلية يَتطلب backend N8-T11. أَدخل البنود يدوياً.");
+    setMsg(null);
+    try {
+      const inv = await getSalesInvoice(Number(originalInvoiceId));
+      const copied: ReturnLine[] = (inv.lines || []).map((l, idx) => ({
+        _idx: idx,
+        product_id: String(l.product),
+        product_name: l.product_name || "",
+        quantity: formatQuantity(l.quantity, "0"),
+        unit_price: formatQuantity(l.unit_price, "0"),
+        total: (Number(l.quantity) * Number(l.unit_price)).toFixed(2),
+      }));
+      copied.push({ _idx: copied.length, product_id: "", product_name: "", quantity: "1", unit_price: "", total: "0" });
+      setLines(copied.length > 1 ? copied : lines);
+      setMsg("تم نسخ بنود الفاتورة الأصلية — عدّل الكميات المرتجعة.");
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "تعذّر جلب بنود الفاتورة الأصلية.");
+    }
   };
 
+  // تعبئة تلقائية لبنود الفاتورة الأصلية فور اختيارها (ما دامت البنود فارغة).
+  useEffect(() => {
+    const isEmpty = lines.length === 1 && !lines[0].product_id;
+    if (originalInvoiceId !== "" && isEmpty) void copyFromOriginal();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [originalInvoiceId]);
+
   const submit = async () => {
-    if (!originalInvoiceId || !partnerId || lines.length === 0) {
-      setErr("الفاتورة الأصلية + العميل + بند واحد على الأقل");
+    if (!originalInvoiceId || !partnerId) {
+      setErr("اختر الفاتورة الأصلية والعميل.");
+      return;
+    }
+    const payloadLines = lines
+      .filter((l) => l.product_id && Number(l.quantity) > 0)
+      .map((l) => ({
+        product: Number(l.product_id),
+        quantity: l.quantity,
+        unit_price: l.unit_price || "0",
+      }));
+    if (payloadLines.length === 0) {
+      setErr("أضِف بنداً واحداً على الأقل بكمية موجبة.");
       return;
     }
     setSaving(true);
     setErr(null);
     setMsg(null);
-    const tenantId = resolveTenantId();
     try {
-      // N8-T11 backend endpoint (assumed)
-      const payload = {
+      // مرجع البيع = فاتورة بيع من نوع sale_return مربوطة بأصلها. الترحيل يعكس
+      // القيد (دائن ذمم / مدين إيراد) ويُعيد الكمية للمخزون (RETURN_IN).
+      const created = await createSalesInvoice({
         invoice_kind: "sale_return",
-        original_invoice: originalInvoiceId,
-        return_date: returnDate,
+        original_invoice: Number(originalInvoiceId),
         customer: partnerId,
-        reason: reason || null,
-        lines: lines
-          .filter((l) => l.product_id && Number(l.quantity) > 0)
-          .map((l) => ({
-            product: Number(l.product_id),
-            quantity: l.quantity,
-            unit_price: l.unit_price,
-            line_total: l.total,
-          })),
-      };
-      await apiPostObject("sales/returns/", payload, { tenantId });
-      setMsg("✓ تم إنشاء مرجع البيع — في انتظار الترحيل (يَنتظر backend N8-T11)");
-      setLines([{ _idx: 0, product_id: "", product_name: "", quantity: "1", unit_price: "", total: "0" }]);
-    } catch (e: unknown) {
-      setErr(
-        e instanceof Error
-          ? `${e.message} (يَتطلب N8-T11 backend: invoice_kind + reverse-post)`
-          : "فشل الحفظ — يَتطلب N8-T11 backend"
+        invoice_date: returnDate,
+        invoice_type: "credit",
+        stock_on_post: true,
+        notes: reason || "",
+        lines: payloadLines,
+      });
+      const num = created?.invoice_number ? ` رقم ${created.invoice_number}` : "";
+      setMsg(
+        `✓ تم حفظ مرجع البيع${num} كمسودة. افتحه من «فواتير المبيعات» واضغط «ترحيل» ` +
+        "لإعادة الكمية للمخزون وتخفيض ذمم العميل."
       );
+      setLines([{ _idx: 0, product_id: "", product_name: "", quantity: "1", unit_price: "", total: "0" }]);
+      setOriginalInvoiceId("");
+      setReason("");
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "فشل حفظ/ترحيل مرجع البيع.");
     } finally {
       setSaving(false);
     }
@@ -209,14 +253,14 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
           const p = products.find((x) => String(x.id) === e.target.value);
           updateLine(row._idx, {
             product_id: e.target.value,
-            product_name: p?.name || "",
+            product_name: productLabel(p),
             unit_price: formatQuantity(row.unit_price || p?.unit_price || "0", "0"),
           });
         }}
       >
         <option value="">— اختر —</option>
         {products.map((p) => (
-          <option key={p.id} value={p.id}>{p.name}</option>
+          <option key={p.id} value={p.id}>{productLabel(p)}</option>
         ))}
       </select>
     );
@@ -240,7 +284,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
   const actions: AseelToolbarAction[] = [
     {
       key: "save",
-      label: saving ? "..." : "حفظ مرجع البيع (F12)",
+      label: saving ? "..." : "حفظ المرجع كمسودة (F12)",
       icon: <Save />,
       onClick: () => void submit(),
       disabled: saving,
@@ -270,12 +314,6 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
         <div style={{ padding: "8px" }}>
           {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}><AlertTriangle className="w-3 h-3 inline" /> {err}</div>}
           {msg && <div className="aseel-banner" style={{ marginBottom: "8px", color: "var(--aseel-ok, #2d7d46)" }}>{msg}</div>}
-
-          <div className="aseel-banner" style={{ marginBottom: "12px", background: "var(--aseel-surface-2, #f4ede0)", fontSize: "11px", padding: "8px 12px" }}>
-            <AlertTriangle className="w-3 h-3 inline" style={{ marginInlineEnd: "4px", color: "var(--aseel-warn, #b06800)" }} />
-            هذه الصفحة تَتَطلب backend N8-T11 (invoice_kind='sale_return' + reverse-post).
-            UI كاملة وتَرسل payload صحيح، الحفظ يَنتظر backend.
-          </div>
 
           <AseelGrid<ReturnLine>
             columns={gridColumns}
@@ -348,9 +386,6 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
           <>
             <span className="aseel-status-item">عدد البنود <b>{lines.filter((l) => l.product_id).length}</b></span>
             <span className="aseel-status-item">الإجمالي <b className="aseel-num">{formatMoney(totalAmount)}</b></span>
-            <span className="aseel-status-item" style={{ color: "var(--aseel-warn, #b06800)" }}>
-              مسودة — يَنتظر N8-T11
-            </span>
           </>
         }
       />

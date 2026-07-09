@@ -135,22 +135,30 @@ def test_get_or_create_purchase_settings_default(env):
 
 
 def test_price_list_bulk_last_and_lowest(env):
-    # task24: bulk price-list for the dropdown — one product with history, one
-    # with only avg_cost, both returned in a single map.
+    # القائمة المنسدلة تعرض «آخر شراء» و«أقل شراء» معاً دائماً، والقيمة الأساسية
+    # (unit_price = ما تُعبَّأ به الخلية) هي **آخر** سعر بصرف النظر عن الاستراتيجية.
     tenant, ils, _usd, sup, product = env
     _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=100)
     _posted_pi(tenant, sup, ils, product, number="P-2", date="2026-06-15", price=130)
     other = Product.objects.create(
         tenant=tenant, sku="PPR-2", name_ar="صنف٢", quantity_on_hand=0, avg_cost=Decimal("42"))
 
-    last = purchase_price_list(tenant_id=tenant.TenantID, strategy=PriceStrategy.LAST_PURCHASE)
-    assert Decimal(last[product.id]["unit_price"]) == Decimal("130.0000")
-    assert last[product.id]["source_type"] == "PURCHASE_INVOICE"
-    assert Decimal(last[other.id]["unit_price"]) == Decimal("42.0000")
-    assert last[other.id]["source_type"] == "PRODUCT_AVG_COST"
+    result = purchase_price_list(tenant_id=tenant.TenantID)
+    # الأساسي = آخر سعر (يُعبَّأ في الخلية)
+    assert Decimal(result[product.id]["unit_price"]) == Decimal("130.0000")
+    assert result[product.id]["source_type"] == "PURCHASE_INVOICE"
+    # الصنف بلا تاريخ شراء → متوسط التكلفة
+    assert Decimal(result[other.id]["unit_price"]) == Decimal("42.0000")
+    assert result[other.id]["source_type"] == "PRODUCT_AVG_COST"
 
+    # prices تعرض آخر (130) وأقل (100) معاً للاطّلاع
+    prices = {p["source_label"]: Decimal(p["unit_price"]) for p in result[product.id]["prices"]}
+    assert prices.get("آخر شراء") == Decimal("130.0000")
+    assert prices.get("أقل شراء") == Decimal("100.0000")
+
+    # القيمة الأساسية آخر سعر حتى لو طُلبت استراتيجية «الأدنى» (لا تؤثّر على القائمة)
     low = purchase_price_list(tenant_id=tenant.TenantID, strategy=PriceStrategy.LOWEST_PURCHASE)
-    assert Decimal(low[product.id]["unit_price"]) == Decimal("100.0000")
+    assert Decimal(low[product.id]["unit_price"]) == Decimal("130.0000")
 
 
 def test_price_list_ignores_drafts(env):

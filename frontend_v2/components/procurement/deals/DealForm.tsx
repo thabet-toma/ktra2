@@ -54,6 +54,7 @@ import { ImagePreviewModal } from "../price-offers/ImagePreviewModal";
 import { TermsAndShippingSection } from "@/components/forms/shared/TermsAndShippingSection";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
+import { EntityActivityLog } from "@/components/activity/EntityActivityLog";
 import { dealsService } from "../../../services/dealsService";
 import { ActivityLog } from "./ActivityLog";
 import { InstallmentManager } from "./InstallmentManager";
@@ -993,12 +994,17 @@ export const DealForm: React.FC<DealFormProps> = ({
             key: "financial_movements",
             label: "الحركات المالية المرتبطة",
             content: (
-              <DocumentPaymentsTab 
-                referenceType="DEAL" 
-                referenceId={formData.id} 
+              <DocumentPaymentsTab
+                referenceType="DEAL"
+                referenceId={formData.id}
                 searchQuery={formData.dealNumber || ""}
               />
             ),
+          }] : []),
+          ...(formData.id ? [{
+            key: "user_activity_log",
+            label: "سجل نشاط المستخدمين",
+            content: <EntityActivityLog entityType="deal" entityId={formData.id} defaultOpen />,
           }] : []),
         ]}
         totals={

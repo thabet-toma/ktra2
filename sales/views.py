@@ -9,6 +9,7 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
 from accounting.services import unpost_document
+from core.activity import log_activity, log_view
 from core.api_defaults import ApiAuthAndUser, POSTED_DOC_WARNING
 from core.tenant_utils import get_branch, get_tenant
 from .models import (
@@ -125,6 +126,20 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             except Exception as e:  # noqa: BLE001
                 # Store error on invoice for later inspection
                 invoice._auto_post_error = str(e)
+        log_activity(
+            action="create", entity_type="sales_invoice", entity_id=invoice.id,
+            entity_label=invoice.invoice_number, description="إنشاء فاتورة مبيعات",
+            request=self.request,
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        obj = self.get_object()
+        log_view(
+            entity_type="sales_invoice", entity_id=obj.id,
+            entity_label=obj.invoice_number, request=request,
+        )
+        return response
 
     def perform_update(self, serializer):
         instance = serializer.instance
@@ -132,7 +147,12 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             raise DRFValidationError(
                 {"detail": POSTED_DOC_WARNING, "can_unpost": True},
             )
-        serializer.save()
+        invoice = serializer.save()
+        log_activity(
+            action="update", entity_type="sales_invoice", entity_id=invoice.id,
+            entity_label=invoice.invoice_number, description="تعديل فاتورة مبيعات",
+            request=self.request,
+        )
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -141,7 +161,13 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 {"detail": POSTED_DOC_WARNING, "can_unpost": True},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return super().destroy(request, *args, **kwargs)
+        inv_id, inv_no = instance.id, instance.invoice_number
+        response = super().destroy(request, *args, **kwargs)
+        log_activity(
+            action="delete", entity_type="sales_invoice", entity_id=inv_id,
+            entity_label=inv_no, description="حذف فاتورة مبيعات", request=request,
+        )
+        return response
 
     @action(detail=True, methods=["post"], url_path="unpost")
     def unpost_invoice(self, request, pk=None):
@@ -175,6 +201,11 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         invoice.refresh_from_db()
+        log_activity(
+            action="unpost", entity_type="sales_invoice", entity_id=invoice.id,
+            entity_label=invoice.invoice_number, description="إلغاء ترحيل فاتورة مبيعات",
+            request=request,
+        )
         ser = SalesInvoiceSerializer(invoice, context={"request": request})
         return Response({**ser.data, "unpost_result": result})
 
@@ -242,6 +273,11 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 )
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        log_activity(
+            action="duplicate", entity_type="sales_invoice", entity_id=inv.id,
+            entity_label=inv.invoice_number, description=f"نسخ من فاتورة {src.invoice_number}",
+            request=request,
+        )
         ser = SalesInvoiceSerializer(inv, context={"request": request})
         return Response(ser.data, status=status.HTTP_201_CREATED)
 
@@ -253,6 +289,11 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         invoice.refresh_from_db()
+        log_activity(
+            action="post", entity_type="sales_invoice", entity_id=invoice.id,
+            entity_label=invoice.invoice_number, description="ترحيل فاتورة مبيعات",
+            request=request,
+        )
         ser = SalesInvoiceSerializer(invoice, context={"request": request})
         return Response(ser.data)
 
@@ -299,6 +340,12 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         invoice.refresh_from_db()
+        log_activity(
+            action="payment", entity_type="sales_invoice", entity_id=invoice.id,
+            entity_label=invoice.invoice_number,
+            description="سند قبض" + (" + ترحيل" if want_post else ""),
+            request=request,
+        )
         ser = SalesInvoiceSerializer(invoice, context={"request": request})
         return Response(ser.data)
 
@@ -485,6 +532,11 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
             errors = validate_payment(ctx)
             if errors:
                 raise DRFValidationError({"payment": errors})
+        log_activity(
+            action="payment", entity_type="customer_payment", entity_id=payment.id,
+            entity_label=getattr(payment, "payment_number", "") or str(payment.id),
+            description="سند قبض عميل", request=self.request,
+        )
 
     @action(detail=True, methods=["post"], url_path="post")
     def post_payment(self, request, pk=None):
@@ -493,6 +545,11 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
             post_customer_payment(payment, user=request.user)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        log_activity(
+            action="post", entity_type="customer_payment", entity_id=payment.id,
+            entity_label=getattr(payment, "payment_number", "") or str(payment.id),
+            description="ترحيل سند قبض عميل", request=request,
+        )
         return Response(CustomerPaymentSerializer(payment).data)
 
     @action(detail=False, methods=["post"], url_path="suggest-fifo-allocations")

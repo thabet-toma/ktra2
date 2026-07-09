@@ -40,6 +40,7 @@ import { Dashboard } from "./components/Dashboard";
 import { TradeDashboard } from "./components/dashboard/TradeDashboard";
 import { TaskManagement } from "./components/TaskManagement";
 import { UserManagement } from "./components/UserManagement";
+import { ActivityLogPage } from "./components/ActivityLogPage";
 import { Reports } from "./components/Reports";
 import { EmployeeNotes } from "./components/EmployeeNotes";
 import { SettingsPage } from "./components/SettingsPage";
@@ -1271,6 +1272,11 @@ const App: React.FC = () => {
             onDeleteUser={handleDeleteUser}
           />
         );
+
+      case "activity-log":
+        if (currentUser!.role !== "manager")
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        return <ActivityLogPage />;
 
       case "reports":
         if (currentUser!.role !== "manager")

@@ -40,9 +40,13 @@ def _as_product(value):
     return Product.objects.filter(pk=value).first()
 
 
-def _validate_stock_lines(tenant, lines_data, stock_on_post: bool) -> None:
-    """يمنع بيع كمية أكبر من الرصيد عند تفعيل خصم المخزون عند الترحيل."""
-    if not stock_on_post or not lines_data:
+def _validate_stock_lines(tenant, lines_data, stock_on_post: bool, *, is_return: bool = False) -> None:
+    """يمنع بيع كمية أكبر من الرصيد عند تفعيل خصم المخزون عند الترحيل.
+
+    للمراجيع (`is_return`) البضاعة تدخل للمخزون (مرجع بيع) — لا فحص توفّر، بل
+    يُكتفى بالتحقق من الكمية الموجبة ووجود الصنف (يتم أدناه في create/update).
+    """
+    if not stock_on_post or not lines_data or is_return:
         return
     # M3: resolve the global negative-stock policy once (not per line — avoids N+1).
     # Default to allowing negative stock when no settings row exists yet.
@@ -149,6 +153,18 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
     lines = SalesInvoiceLineSerializer(many=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     invoice_number = serializers.CharField(required=False, allow_blank=True)
+    # N8-T11: نوع الفاتورة (بيع/مرجع بيع…) + الفاتورة الأصلية للمرجع. مكشوفان
+    # للكتابة كي تُنشئ شاشة «مرجع البيع» فاتورة من نوع sale_return مربوطة بأصلها.
+    invoice_kind = serializers.ChoiceField(
+        choices=SalesInvoice.INVOICE_KIND_CHOICES,
+        default=SalesInvoice.INVOICE_KIND_SALE, required=False,
+    )
+    original_invoice = serializers.PrimaryKeyRelatedField(
+        queryset=SalesInvoice.objects.all(), required=False, allow_null=True,
+    )
+    original_invoice_number = serializers.CharField(
+        source="original_invoice.invoice_number", read_only=True, allow_null=True,
+    )
     customer = serializers.PrimaryKeyRelatedField(
         queryset=Partner.objects.all(), required=False, allow_null=True
     )
@@ -164,6 +180,9 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "invoice_number",
+            "invoice_kind",
+            "original_invoice",
+            "original_invoice_number",
             "customer",
             "customer_name",
             "invoice_date",
@@ -212,6 +231,7 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
             "created_at",
             "journal",
             "customer_name",
+            "original_invoice_number",
             "cheques",  # mutated only via /payment-voucher endpoint
         ]
 
@@ -262,7 +282,14 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"lines": f"الصنف {prod.sku} لا يتبع نفس الشركة."}
                 )
-        _validate_stock_lines(tenant, lines_data, validated_data.get("stock_on_post", True))
+        _is_return = validated_data.get("invoice_kind") in (
+            SalesInvoice.INVOICE_KIND_SALE_RETURN,
+            SalesInvoice.INVOICE_KIND_PURCHASE_RETURN,
+        )
+        _validate_stock_lines(
+            tenant, lines_data, validated_data.get("stock_on_post", True),
+            is_return=_is_return,
+        )
         from django.db import IntegrityError
         try:
             with transaction.atomic():
@@ -336,7 +363,11 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
                         {"lines": f"الصنف {prod.sku} لا يتبع نفس الشركة."}
                     )
             stock_flag = validated_data.get("stock_on_post", instance.stock_on_post)
-            _validate_stock_lines(tenant, lines_data, stock_flag)
+            _upd_is_return = instance.invoice_kind in (
+                SalesInvoice.INVOICE_KIND_SALE_RETURN,
+                SalesInvoice.INVOICE_KIND_PURCHASE_RETURN,
+            )
+            _validate_stock_lines(tenant, lines_data, stock_flag, is_return=_upd_is_return)
             kept: set[int] = set()
             for row in lines_data:
                 raw = dict(row)

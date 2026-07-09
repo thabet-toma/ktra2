@@ -28,6 +28,82 @@ python manage.py check                                 # 0 مشاكل
 
 ---
 
+## [FEAT — سجل نشاط المستخدمين (Activity Log) عبر الموقع, 2026-07-09]
+المطلوب: تتبّع «مَن فعل ماذا» على فواتير البيع/الشراء والصفقات، مع سجل لكل مستند + صفحة
+عامّة للمدير تُظهر نشاط كل المستخدمين من الدخول حتى الخروج، وفلترة حسب المستخدم/النوع/التاريخ.
+الحل (طبقة Shared/Core واحدة، غير حاظرة):
+- **النموذج:** `core.ActivityLog` (جدول `activity_logs`, migration `core/0001_initial`) — tenant/user/
+  action(create|update|delete|post|unpost|duplicate|payment|view|login|logout)/`is_view`/entity_type/
+  entity_id/entity_label/description/metadata(JSON)/ip/timestamp. أول migration للـ app `core`
+  (نموذجه السابق `SystemAttachment` يبقى managed=False). `is_view` يفصل أحداث «العرض» عن التعديلات.
+- **الخدمة:** `core/activity.py::log_activity/log_view` — تحلّ request/tenant/user/ip تلقائياً،
+  والإدراج داخل `transaction.atomic()` (savepoint) داخل `try/except` فلا يكسر معاملة المتصل ولا يرمي.
+- **الربط:** `sales/views.py` (SalesInvoice: create/update/delete/post/unpost/duplicate/payment/view +
+  CustomerPayment)، `logistics/views.py` (PurchaseInvoice + LogisticsDeal: نفس المجموعة + view)،
+  و`hr/auth_api.py` (login/logout → entity_type=`session`). الربط عبر استدعاءات `log_activity`
+  صريحة في نقاط دورة الحياة (لأن الـ viewsets تُعيد تعريف perform_create/update/destroy بمنطق خاص).
+- **API:** `GET /api/activity/` (`core/activity_views.py`, ReadOnly + pagination). فلاتر: user/action/
+  entity_type/entity_id/date(افتراضي اليوم)/date_from/date_to/search/include_views. الاستعلام العام
+  (بلا entity_id) للمدير فقط (`core.user_roles.user_is_admin`)؛ سجل مستند واحد متاح لأي عضو.
+  `GET /api/activity/users/` قائمة المستخدمين ذوي النشاط (للفلتر).
+- **الواجهة:** `types/activity.ts`, `services/activityService.ts`, مكوّن مشترك
+  `components/activity/EntityActivityLog.tsx` (+`activityMeta.tsx`) مركَّب كتبويب «سجل النشاط» في
+  محرّري فاتورة البيع/الشراء (`SalesInvoiceEditor`, `invoices/InvoiceForm`) وتبويب «سجل نشاط
+  المستخدمين» في `deals/DealForm` (المكوّن القديم `ActivityLog` بقي دون حذف). الصفحة العامة
+  `components/ActivityLogPage.tsx` (AppView `activity-log`, في `Sidebar` تحت إدارة الموظفين — manager فقط،
+  و`App.tsx` route) بفلاتر + Drill-down لكل مستخدم (يشمل العرض، يبدأ باليوم مع تحكّم بالتاريخ).
+- **الاختبارات:** `core/tests/test_activity_log.py` (10 اختبارات: إنشاء/ابتلاع الفشل/صلاحية المدير/
+  استبعاد العرض من العام/سجل المستند/الافتراضي اليوم/login+logout). No-regression: sales+logistics خضراء
+  (فشل `test_price_list_bulk_last_and_lowest` **سابق ومستقل** — منطق `purchase_price_list` لم يُمَس).
+
+---
+
+## [FEAT — تفعيل مرتجع البيع ومرتجع الشراء (كانا شكليّين), 2026-07-09]
+بلاغ المالك: مرتجع الشراء/البيع «شكليّان» — عند اختيار المورد لا يحدث شيء، وبانر أصفر
+«يتطلب backend». المطلوب: مرتجع احترافي يشيل الكمية، يعمل قيوداً أصولية، ويُرجع الأموال.
+التشخيص (السبب الجذري): الشاشتان تُرسلان إلى نقاط نهاية **غير موجودة** (`sales/returns/`،
+`purchase/returns/`)، وشاشة الشراء تُحمّل من مسار خاطئ (`purchase/invoices/` بدل
+`logistics/purchase-invoices/`) ⇒ القائمة فارغة والحفظ يفشل. اكتشاف: خدمة `post_sales_invoice`
+تدعم **مرجع البيع** أصلاً وبشكل صحيح عبر `invoice_kind='sale_return'` (تعكس القيد + `RETURN_IN`)،
+لكن `SalesInvoiceSerializer` لا يكشف الحقلين ولا يوجد route. أما مرجع الشراء فيعيش في `logistics`
+بحسابات مختلفة (AP/مخزون/ض.مدخلات) — مسار الـ SalesInvoice خاطئ له.
+الحل الجراحي:
+- **مرجع البيع (إعادة استخدام `SalesInvoice`+`post_sales_invoice`):** كشف `invoice_kind`/
+  `original_invoice`(+`original_invoice_number`) في `SalesInvoiceSerializer`؛ تخطّي فحص توفّر
+  المخزون للمراجيع (`_validate_stock_lines(is_return=)` — البضاعة تدخل)؛ وتخطّي فحص حدّ الائتمان
+  للمراجيع في `post_sales_invoice` (`and not is_return`). الواجهة تُنشئ فاتورة sale_return ثم
+  تُرحّلها (`createSalesInvoice`+`postSalesInvoice`) وتنسخ البنود من الأصلية (`getSalesInvoice`).
+- **مرجع الشراء (أصلي في `logistics`):** حقلا `PurchaseInvoice.is_return`+`original_invoice`
+  (migration `0048_purchaseinvoice_return`)؛ خدمة **`create_purchase_return`**: حركة `RETURN_OUT`
+  تُخرج الكمية بمتوسط التكلفة + قيد يعكس الشراء (Dr ذمم المورد الإجمالي / Cr مخزون الصافي +
+  Cr ض.مدخلات، ونسبة الضريبة تُشتق من بنود الفاتورة الأصلية) بمرجع `PURCHASE_RETURN`؛ endpoint
+  **`POST logistics/purchase-invoices/returns/`** (`create_return`، detail=False). `is_return`/
+  `original_invoice` مكشوفة بالـ serializers للفلترة/العرض. الواجهة تُحمّل الأصليات من المسار
+  الصحيح (مرحّلة وليست مرجعاً)، وتنسخ البنود (`purchaseInvoiceApi.get`)، وتُرسل للـendpoint.
+- **الأموال حسب الأصول:** المرجع يُخفّض ذمم العميل (بيع) / ذمم المورد (شراء)؛ الردّ النقدي الفعلي
+  يبقى سنداً مستقلاً (نمط الأنظمة الاحترافية). أُزيلت البانرات الصفراء و«يَنتظر N8-T11».
+تحقّق: **backend: sales+logistics 155 ناجح** (+4 جديد: مرجع بيع يُعيد الكمية+يُدين الإيراد/يُدائن
+الذمم؛ مرجع شراء يُنقص المخزون+Dr AP/Cr مخزون+رفض بند صفري) · الفشل الوحيد
+`test_price_list_bulk_last_and_lowest` **سابق ومستقلّ** · `makemigrations --check` بلا تغييرات ·
+`manage.py check` 0 · `tsc` نظيف لملفَّيّ (خطآ DepartmentCard/Breadcrumb سابقان). (خلف الدخول +
+خادم بعيد — لا تحقّق بصري، مطابقةً للنهج المعتمد.)
+
+**تحديث (بلاغ المالك — فصل الحفظ عن الترحيل + تمييز/فلترة):**
+- **الحفظ والترحيل منفصلان (خطوتان):** `create_purchase_return` صار يُنشئ المرجع **مسودة**
+  فقط (`status='draft'`, `is_posted=False`) بلا حركة/قيد؛ والترحيل خطوة مستقلة عبر خدمة
+  جديدة **`post_purchase_return`** (RETURN_OUT + القيد العكسي). زر «post-to-accounting» و
+  «unpost» في `PurchaseInvoiceViewSet` يوجّهان المرجع لهذين المسارين (حارس `is_return`).
+  نسبة الضريبة تُخزَّن على بند المرجع عند الحفظ ليقرأها الترحيل. **مرجع البيع** كذلك يُحفظ
+  مسودةً فقط (الواجهة لم تعد تُرحّل تلقائياً) ويُرحَّل من «فواتير المبيعات».
+- **تمييز عربي + فلتر:** `PurchaseInvoiceViewSet.get_queryset` يدعم `?is_return=true|false`؛
+  و`is_return`/`original_invoice` مكشوفة بالـ serializers. في `InvoiceList` عمود «النوع»
+  (شارة **مرجع**/**فاتورة**) + فلتر «الكل/فواتير الشراء/مراجيع الشراء» (`Invoice.isReturn`
+  عبر `sqlListToInvoice`). الترحيل من داخل المستند المفتوح (لا زر ترحيل في القائمة).
+- **إصلاح ظهور الأصناف:** الأصناف تُعاد بحقول `name_ar`/`display_name`/`sku` لا `name` —
+  أُضيفت `productLabel` في المحرّرين + تعبئة تلقائية لبنود الفاتورة الأصلية عند اختيارها.
+- تحقّق: **18 اختباراً ناجح** (منها مرجع الشراء «مسودة ثم ترحيل»: لا مخزون/قيد عند الحفظ،
+  وخفض المخزون +Dr AP/Cr مخزون عند الترحيل) · `check` 0 · `tsc` نظيف لملفّاتي.
+
 ## [AUDIT — تكرار بطاقات الأقسام + تحكّم بحجم/نوع الخط في الإعدادات, 2026-07-04]
 بلاغ المالك: (1) في صفحة «تواصل معنا» كلّما عدّل قسماً (مثلاً غيّر اسم «المشتريات») تُنسخ
 القائمة كاملةً وتُلحق ⇒ صارت عدّة بطاقات مشتريات مكرّرة (مرفق صورة). (2) يريد في الإعدادات

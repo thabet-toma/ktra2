@@ -64,6 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
   const userManagementLinks = [
     { view: "users" as AppView, label: "قائمة المستخدمين", icon: <UsersIcon className="h-5 w-5" />, roles: ['manager'] },
+    { view: "activity-log" as AppView, label: "سجل النشاط", icon: <History className="h-5 w-5" />, roles: ['manager'] },
     { view: "attendance" as AppView, label: "الحضور والغياب", icon: <AttendanceIcon className="h-5 w-5" />, roles: ['manager', 'employee', 'procurement'] },
     { view: "employee-notes" as AppView, label: "ملاحظات الموظفين", icon: <NoteIcon className="h-5 w-5" />, roles: ['manager'] },
     { view: "points-management" as AppView, label: "إدارة النقاط", icon: <PointsIcon className="h-5 w-5" />, roles: ['manager'] },
