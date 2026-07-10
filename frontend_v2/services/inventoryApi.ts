@@ -1,4 +1,5 @@
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
+import { toPagedList } from "./restApi";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const INV = `${API_BASE}/inventory`;
@@ -229,6 +230,15 @@ export const inventoryApi = {
       ? `?${new URLSearchParams(params)}`
       : "";
     return fetch(`${INV}/stock-movements/${q}`, { headers: headers() }).then(asList);
+  },
+
+  /** حركة المخزون مُرقَّمة — مرِّر page/page_size ضمن params (صيانة الأداء 2026-07). */
+  getStockMovementsPaged: async (params: Record<string, string>) => {
+    const res = await fetch(`${INV}/stock-movements/?${new URLSearchParams(params)}`, {
+      headers: headers(),
+    });
+    await handle(res, "getStockMovementsPaged");
+    return toPagedList(await res.json());
   },
 
   createStockMovement: async (body: Record<string, unknown>) => {

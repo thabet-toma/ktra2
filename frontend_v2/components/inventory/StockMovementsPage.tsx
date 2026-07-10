@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { StockMovementDto, SqlProduct } from "../../types/inventory";
@@ -51,28 +51,63 @@ export const StockMovementsPage: React.FC = () => {
   // تقسيم المخزن: محلي (فاتورة شراء) / دولي (مسار الاستيراد)
   const [filterOrigin, setFilterOrigin] = useState("");
 
+  // صيانة الأداء 2026-07: سجل الحركات جدول متنامٍ بلا حد — ترقيم دفعات 100
+  // بدل جلبه كاملاً بكل تحميل. الفلاتر تبقى على الخادم.
+  const PAGE_SIZE = 100;
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasNext, setHasNext] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const pageRef = useRef(1);
+
+  const buildParams = useCallback((page: number): Record<string, string> => {
+    const params: Record<string, string> = {
+      page: String(page),
+      page_size: String(PAGE_SIZE),
+    };
+    if (filterProduct) params.product = filterProduct;
+    if (filterType) params.movement_type = filterType;
+    if (filterOrigin) params.origin = filterOrigin;
+    if (filterDateFrom) params.date_from = filterDateFrom;
+    if (filterDateTo) params.date_to = filterDateTo;
+    return params;
+  }, [filterProduct, filterType, filterOrigin, filterDateFrom, filterDateTo]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
-      const params: Record<string, string> = {};
-      if (filterProduct) params.product = filterProduct;
-      if (filterType) params.movement_type = filterType;
-      if (filterOrigin) params.origin = filterOrigin;
-      if (filterDateFrom) params.date_from = filterDateFrom;
-      if (filterDateTo) params.date_to = filterDateTo;
+      pageRef.current = 1;
       const [mvs, prods] = await Promise.all([
-        inventoryApi.getStockMovements(Object.keys(params).length ? params : undefined),
+        inventoryApi.getStockMovementsPaged(buildParams(1)),
         inventoryApi.getProducts(),
       ]);
-      setMovements(mvs as StockMovementDto[]);
+      setMovements(mvs.results as StockMovementDto[]);
+      setTotalCount(mvs.count);
+      setHasNext(mvs.hasNext);
       setProducts(prods as SqlProduct[]);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "خطأ");
     } finally {
       setLoading(false);
     }
-  }, [filterProduct, filterType, filterOrigin, filterDateFrom, filterDateTo]);
+  }, [buildParams]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const next = pageRef.current + 1;
+      const mvs = await inventoryApi.getStockMovementsPaged(buildParams(next));
+      pageRef.current = next;
+      setMovements((prev) => [...prev, ...(mvs.results as StockMovementDto[])]);
+      setTotalCount(mvs.count);
+      setHasNext(mvs.hasNext);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "خطأ");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [buildParams, loadingMore]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -209,6 +244,21 @@ export const StockMovementsPage: React.FC = () => {
         loading={loading}
         emptyHint="لا توجد حركات في النطاق المحدد"
       />
+
+      {hasNext && (
+        <div style={{ display: "flex", justifyContent: "center", padding: "8px" }}>
+          <button
+            type="button"
+            className="aseel-toolbtn"
+            disabled={loadingMore}
+            onClick={() => void loadMore()}
+          >
+            {loadingMore
+              ? "جاري التحميل…"
+              : `تحميل المزيد (${movements.length} من ${totalCount})`}
+          </button>
+        </div>
+      )}
 
       {/* نموذج إضافة حركة يدوية */}
       {showForm && (

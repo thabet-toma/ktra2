@@ -5,7 +5,6 @@ from django.db import IntegrityError, transaction
 from django.db.models import F
 from rest_framework import filters, serializers, viewsets, status
 from rest_framework.decorators import action
-from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from .models import (
     ProductCategory, Product, UnitOfMeasure, StockMovement, Warehouse,
@@ -22,21 +21,9 @@ from .services import (
 )
 from tenants.models import Tenant
 from core.tenant_utils import get_tenant
-
-
-class OptionalPageNumberPagination(PageNumberPagination):
-    """
-    task14 M2 (DEF-A5): ترقيم صفحات opt-in — يُفعَّل فقط بوجود ?page=
-    حتى لا تنكسر الشاشات القائمة التي تتوقع مصفوفة خام بلا غلاف.
-    """
-    page_size = 50
-    page_size_query_param = 'page_size'
-    max_page_size = 200
-
-    def paginate_queryset(self, queryset, request, view=None):
-        if 'page' not in request.query_params:
-            return None
-        return super().paginate_queryset(queryset, request, view)
+# صيانة الأداء 2026-07: الكلاس انتقل إلى core/pagination.py ليصبح الافتراضي
+# العام في REST_FRAMEWORK — يبقى الاستيراد هنا لأي مرجع قائم.
+from core.pagination import OptionalPageNumberPagination
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = ProductCategory.objects.all().order_by('name')

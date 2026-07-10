@@ -28,6 +28,115 @@ python manage.py check                                 # 0 مشاكل
 
 ---
 
+## [FIX — صيانة الأداء والموثوقية الشاملة, 2026-07-10]
+بلاغ المالك: الموقع بطيء عموماً + مشاكل كاش متكررة + «فقد الاتصال» رغم وجود إنترنت +
+طلب واحد قد يستغرق ساعة من قاعدة البيانات. تدقيق كامل (باك-إند + واجهة) بأدلة كود مباشرة،
+ثم 10 معالم منفَّذة ومُتحقَّقة. **قيود المالك:** استضافة Shared LiteSpeed بلا root (لا Redis) ·
+Zero-downtime إلزامي لكل هجرة.
+
+### الأسباب الجذرية المؤكَّدة (بالكود لا بالتخمين)
+- **«التعليق ساعة»:** `DATABASES` بلا `CONN_MAX_AGE` (اتصال TCP جديد كل طلب) وبلا أي
+  timeout على عميل MySQL ⇒ اتصال معطوب/قفل بطيء يعلّق الـ worker بلا حد.
+- **البطء العام:** ترقيم DRF معطّل كلياً (`DEFAULT_PAGINATION_CLASS: None`) ⇒ دفتر اليومية
+  (4254 قيداً في الجرابعه) يُبثّ كاملاً بكل فتح (قيس حياً: **4.8 ثانية / 1.7MB**) + N+1 في
+  `JournalHeaderListSerializer` (tenant.CompanyName/currency.Code لكل صف بلا select_related)
+  + صفر `CACHES` (الداشبورد ~30 استعلاماً تجميعياً بكل تحميل) + حزمة JS واحدة **3.2MB**.
+- **«فقد الاتصال» الوهمي:** حالة الاتصال العالق (SW/QUIC بملف تعريف كروم — مشخّصة في
+  AUDIT 2026-07-02) كان علاجها زر «إصلاح الاتصال» **اليدوي** فقط الذي لا يلاحظه المستخدم.
+- **اكتشافان أثناء التحقق:** (1) منطق كاش `/api/` في `sw.ts` كان **كوداً ميتاً** — حارس
+  same-origin (سطر 50) يستثنيه لأن الـ API نطاق فرعي مختلف؛ (2) فهرس خارجي قديم
+  `idx_journal_headers_date (TenantID,TransactionDate)` موجود على MySQL خارج الهجرات —
+  لهذا بدت الموديلات بلا فهارس؛ فهارسنا تغطي reference/is_posted غير المغطاة.
+
+### المنفَّذ (باك-إند)
+- **M1 موثوقية الاتصال** (`core/settings.py`): `CONN_MAX_AGE=60` + `CONN_HEALTH_CHECKS=True`
+  + `connect/read/write_timeout` (10/30/30 ث) ⇒ الفشل خلال ثوانٍ بدل التعليق.
+- **M2 كاش الخادم**: `FileBasedCache` في `BASE_DIR/django_cache` (مشتركة بين عمليات WSGI،
+  بلا root، ضربة كاش = صفر MySQL) + كاش الداشبورد بمفتاح tenant صريح
+  (`dashboard:v1:{pk}`, TTL=60ث — **لا** `@cache_page` المفهرس بالـ URL = خطر تسريب بين
+  الشركات). قيس حياً: 0.21 ← **0.014 ث**. اختبارات: `DummyCache` في `test_settings`.
+- **M3 N+1 القيود** (`accounting/views.py`): `select_related("tenant","currency")`.
+- **M4 فهارس القيود** (هجرة `accounting/0026_journal_indexes`): `idx_jh_tenant_date_id` /
+  `idx_jh_tenant_ref` / `idx_jh_tenant_posted` / `idx_jl_tenant_account`. الناتج
+  `CREATE INDEX` خالص (`sqlmigrate` مُتحقَّق) = InnoDB online DDL بلا قفل (zero-downtime).
+- **M5 ترقيم opt-in**: `OptionalPageNumberPagination` انتقل من inventory إلى
+  `core/pagination.py` وأصبح `DEFAULT_PAGINATION_CLASS` (page_size=50, max=200) — يُفعَّل
+  **فقط** بوجود `?page=` فلا ينكسر أي استهلاك قائم. `JournalViewSet.list()` اليدوي (pay_map)
+  أعيد ليحترم `paginate_queryset` وبنى pay_map من صفوف الصفحة فقط. +3 اختبارات عقد
+  (`accounting/tests/test_journal_pagination.py`).
+
+### المنفَّذ (واجهة)
+- **M6 تفعيل `?page=`**: طبقة مشتركة `apiGetPagedList`/`toPagedList` في `restApi.ts`
+  (تتحمّل الشكلين: مصفوفة خام أو غلاف DRF — آمنة أثناء تفاوت النشر؛ كاش أوفلاين للصفحة 1
+  فقط) + `getJournalsPaged`/`getStockMovementsPaged`. شاشتا **دفتر اليومية** و**حركة المخزون**
+  (فلاترهما خادمية بالفعل) تجلبان دفعات 100 + زر «تحميل المزيد (N من M)». قيس حياً:
+  **0.10-0.15 ث / 20KB** بدل 4.8 ث / 1.7MB.
+- **M7 حذف كود SW الميت** (`sw.ts`): أزيل فرعا `/api/` (staleWhileRevalidate/networkFirst)
+  + `MASTER_DATA_CACHE`/`API_CACHE` (إزالتهما من `CURRENT_CACHES` تجعل activate يمسح أي
+  نسخة قديمة عالقة عند المستخدمين) + توثيق سبب حارس same-origin.
+- **M8 سقف عمر كاش Dexie** (`restApi.ts`): `readListCache` يرفض ما تجاوز **7 أيام**
+  (كان يقدّم بيانات بأي عمر كأنها حديثة عند فشل الشبكة).
+- **M9 إصلاح اتصال تلقائي** (`hooks/useAutoConnectionRecovery.ts` + سطران في App.tsx):
+  `browserOnline=true` مع فشل نبض `/api/health/` لمدة 45ث (نبضتان) ⇒ `recoverConnection()`
+  تلقائياً. حارس `sessionStorage` = مرة لكل نوبة (ينجو من reload، يُعاد تسليحه عند عودة
+  الاتصال) ⇒ لا حلقة تحميل. الزر اليدوي في OfflineBanner باقٍ كاحتياط.
+- **M10 تقسيم الحزمة** (`App.tsx`): ~71 صفحة تحوّلت `React.lazy` بنمط adapter (بلا لمس أي
+  ملف مكوّن) + `<Suspense>` واحد حول `renderMainContent()`. الحزمة الرئيسية
+  **3.2MB ← 1.11MB** (gzip 267KB) + 129 chunk عند الطلب — كلها تُسبَق كاشياً في SW
+  (precache) فالأوفلاين سليم.
+
+### تحقّق
+`manage.py test --settings=core.test_settings` = **198 ناجحاً** (كانت 195) ·
+`makemigrations --check` = No changes · `manage.py check` = 0 · `tsc` = خطأ DepartmentCard
+السابق فقط · `vite build` ناجح · **قياسات حية على نسخة بيانات الإنتاج** (tenant 3):
+قيود مرقّمة 0.099ث (بعد الفهارس) مقابل 4.8ث كاملة · داشبورد warm ‏0.014ث · EXPLAIN
+يستخدم فهرس (range) لا Full Scan.
+
+### النشر (يدوي — بالترتيب)
+1. باك-إند: `git pull` → `python manage.py sqlmigrate accounting 0026` (تأكيد ADD INDEX فقط)
+   → `python manage.py migrate` (ساعة هدوء استحساناً — غير حاجب أصلاً) → فحص كاش:
+   `python manage.py shell -c "from django.core.cache import cache; cache.set('x','ok',10); print(cache.get('x'))"`
+   → **إعادة تشغيل عملية Python من لوحة الاستضافة** (إلزامي لـ CONN_MAX_AGE/CACHES/الترقيم).
+2. مرة واحدة قبل/بعد النشر: `SHOW VARIABLES LIKE 'max_connections'` + `SHOW STATUS LIKE
+   'Threads_connected'` للاطمئنان أن CONN_MAX_AGE=60 ضمن سقف الاستضافة المشتركة.
+3. واجهة: `npm ci && npm run build` في frontend_v2 → رفع `dist/` — بصمة SW تُبطل الكاش تلقائياً.
+4. تراجع: M4 = `migrate accounting 0025` (فهارس بلا بيانات) · البقية revert diff + restart.
+
+### [تشخيص 2026-07-10 — «الصفحة تفتح لكن الدخول يفشل» على شبكات معينة]
+بلاغ: الواجهة تفتح لكن تسجيل الدخول يرجع «تعذر الاتصال بالخادم» على بعض الشبكات دون غيرها.
+**التشخيص بالأدلة:** (1) الصفحة «تفتح» لأنها PWA — الشل يُقدَّم من precache الـ SW حتى بلا
+شبكة فعلية للـ API؛ الفشل يظهر فقط عند أول نداء API حقيقي (الدخول). (2) DNS سليم (نفس الـ IP
+من resolver المحلي و8.8.8.8، لا AAAA). (3) **السبب:** LiteSpeed يعلن
+`Alt-Svc: h3=":443"; ma=2592000` على النطاقين ⇒ كروم يحفظ «كلّم هذا المضيف عبر QUIC/UDP-443»
+لمدة **30 يوماً**؛ على الشبكات التي تحجب/تشوّه UDP-443 (شائع لدى مزودات محلية) يبقى كروم
+يحاول QUIC المحفوظ لنطاق الـ API فيفشل النداء كخطأ شبكة — بينما يعمل على شبكات تمرر UDP
+وفي الخفي (كاش Alt-Svc فارغ). نفس جذر AUDIT 2026-07-02، الآن مؤكَّد بترويسات حية.
+**العلاج (على الخادم — ليس في الريبو):**
+1. أعلى `.htaccess` في **كلا** الجذرين (الواجهة والـ API): `Header always unset Alt-Svc`
+   ثم تحقق `curl -sI https://api.smart.ktragroup.com/api/health/ | grep -i alt-svc` — إن
+   اختفت الترويسة انتهت المشكلة لكل زائر جديد (كاش القدامى ينتهي خلال ≤30 يوماً أو بمسح بيانات المتصفح).
+2. إن أعاد LiteSpeed إلحاقها بعد الـ .htaccess: تذكرة للاستضافة «عطّلوا QUIC/HTTP-3
+   (إعلان Alt-Svc) للنطاقين» — إعداد vhost متاح لمدير LSWS.
+3. **الحل البنيوي** (يقتل هذه الفئة كلها + يلغي CORS): نقل الـ API لنفس الأصل
+   `smart.ktragroup.com/api` عبر cPanel «Setup Python App» + تغيير `VITE_API_URL` — عندها
+   الـ API يركب نفس اتصال الصفحة: إن فتحت الصفحة عمل الـ API حتماً.
+- **مؤقتاً للمستخدم المتضرر:** كروم → `chrome://flags/#enable-quic` → Disabled، أو مسح
+  بيانات التصفح للموقع، أو متصفح آخر.
+
+### [ORPHANS & PENDING — صيانة الأداء]
+- **ترقيم فواتير المبيعات/الشركاء/الصفقات/فواتير الشراء** — مؤجَّل عمداً: بحث فواتير
+  المبيعات client-side بينما الخادم يدعم status/customer فقط ⇒ ترقيم أعمى = فاتورة قديمة
+  تختفي من البحث (ارتداد مالي). المسار الصحيح: إضافة `search`/`date_from`/`date_to` لـ
+  `SalesInvoiceViewSet` (بنمط JournalViewSet) ثم التحويل لـ `apiGetPagedList` (البنية جاهزة).
+  الصفقات وفواتير الشراء عبر طبقات mapper (dealsService/purchaseInvoiceApi) — عقودها تُلمس بحذر.
+- **N+1 ثانوي في `build_journal_reference_summary`** لأنواع SALES_INVOICE/CUSTOMER_PAYMENT/
+  CLEARANCE (استعلام لكل صف) — محدود الآن بحجم الصفحة (100)؛ تحسين لاحق بنفس نمط pay_map.
+- **`LogisticsPaymentViewSet.get_queryset()`** بلا select_related — جولة لاحقة.
+- **كاش شجرة الحسابات** — مؤجَّل: يتطلب مفتاح tenant+صلاحية 53* + invalidation؛ يُنفَّذ فقط
+  إن ثبت أن كاش الداشبورد غير كافٍ.
+- بند «حلقات .save() في logistics» من التدقيق الأولي **أُسقط بعد التحقق** — عمليات مفردة
+  على مستند واحد، لا مشكلة فعلية.
+
 ## [FIX — مراجعة مسار الاستيراد ج1: أوضاع الصفقة + سجل مدفوعات بنمط الفواتير, 2026-07-09]
 بلاغ المالك: «حطيت تعديل صفقة أجاني وضع الطباعة، حطيت تعديل البيانات أجا وضع التعديل واختفى» +
 طلب جعل دفعات الصفقات بنمط الفواتير. التشخيص (السببان الجذريان):

@@ -114,6 +114,30 @@ function toList<T = any>(payload: any): T[] {
   return [];
 }
 
+// ── ترقيم الصفحات (صيانة الأداء 2026-07) ────────────────────────────────────
+// الباك-إند يرقّم فقط عند تمرير ?page= (OptionalPageNumberPagination) فيرجع
+// {results,count,next}. هذا الشكل الموحّد يتعامل مع الحالتين: مصفوفة خام
+// (خادم قديم/بلا ترقيم) أو غلاف DRF — فلا تنكسر الشاشة أثناء تفاوت النشر.
+export interface PagedList<T = any> {
+  results: T[];
+  count: number;
+  hasNext: boolean;
+}
+
+export function toPagedList<T = any>(payload: any): PagedList<T> {
+  if (Array.isArray(payload)) {
+    return { results: payload as T[], count: payload.length, hasNext: false };
+  }
+  if (payload && Array.isArray(payload.results)) {
+    return {
+      results: payload.results as T[],
+      count: Number(payload.count ?? payload.results.length) || payload.results.length,
+      hasNext: payload.next != null,
+    };
+  }
+  return { results: [], count: 0, hasNext: false };
+}
+
 // ── كاش القراءة أوفلاين (قراءة فقط) ─────────────────────────────────────────
 // مفتاح الكاش = URL كامل + المستأجر + الفرع النشط، فلا تتداخل الشركات/الفروع.
 function listCacheKey(url: string, tenantId?: number): string {
@@ -131,10 +155,18 @@ async function writeListCache(key: string, list: unknown[]): Promise<void> {
   } catch { /* IndexedDB غير متاح — تجاهل */ }
 }
 
+// سقف عمر كاش الأوفلاين: أقدم من 7 أيام يُرفض بدل تقديمه كأنه حديث —
+// فتظهر حالة «غير متصل» الطبيعية بدل بيانات مالية قديمة جداً بصمت.
+const MAX_LIST_CACHE_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
 async function readListCache<T>(key: string): Promise<T[] | null> {
   try {
     const row = await db.api_list_cache.get(key);
-    if (row) return JSON.parse(row.data) as T[];
+    if (row) {
+      const age = Date.now() - new Date(row.updated_at).getTime();
+      if (!Number.isFinite(age) || age > MAX_LIST_CACHE_AGE_MS) return null;
+      return JSON.parse(row.data) as T[];
+    }
   } catch { /* تجاهل */ }
   return null;
 }
@@ -209,6 +241,49 @@ export async function apiGetList<T = any>(
       if (cached) {
         clientLogger.warn("api.offline_cache_hit", { path });
         return cached;
+      }
+    }
+    throw e;
+  }
+}
+
+/**
+ * جلب قائمة مُرقَّمة — مرِّر page (وpage_size اختياري) في query.
+ * كاش الأوفلاين: الصفحة الأولى فقط (أحدث الصفوف) تُحفَظ وتُسترجَع عند فشل الشبكة.
+ */
+export async function apiGetPagedList<T = any>(
+  path: string,
+  opts?: { tenantId?: number; query?: Record<string, string | number | boolean | undefined> }
+): Promise<PagedList<T>> {
+  const q = new URLSearchParams();
+  const query = opts?.query || {};
+  Object.entries(query).forEach(([k, v]) => {
+    if (v === undefined) return;
+    q.set(k, String(v));
+  });
+  const isFirstPage = String(query.page ?? "1") === "1";
+
+  const url = `${API_BASE}/${path.replace(/^\/+/, "")}${q.toString() ? `?${q}` : ""}`;
+  const cacheKey = listCacheKey(url, opts?.tenantId);
+  try {
+    const res = await apiFetch(url, {
+      headers: getHeaders(
+        opts?.tenantId ? { "X-Tenant-Id": String(opts.tenantId) } : undefined,
+        false
+      ),
+    });
+    if (!res.ok) {
+      await handleResponseError(res, path);
+    }
+    const paged = toPagedList<T>(await res.json());
+    if (isFirstPage) void writeListCache(cacheKey, paged.results);
+    return paged;
+  } catch (e) {
+    if (e instanceof NetworkError && isFirstPage) {
+      const cached = await readListCache<T>(cacheKey);
+      if (cached) {
+        clientLogger.warn("api.offline_cache_hit", { path });
+        return { results: cached, count: cached.length, hasNext: false };
       }
     }
     throw e;

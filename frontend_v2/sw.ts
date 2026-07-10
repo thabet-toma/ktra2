@@ -14,9 +14,10 @@ function _hash(str: string): string {
 }
 const BUILD_VERSION = _hash(manifestEntries.map((e) => e.revision || e.url).join('|') || 'dev');
 const STATIC_CACHE = `ktra-static-${BUILD_VERSION}`;
-const MASTER_DATA_CACHE = 'ktra-master-data';
-const API_CACHE = 'ktra-api';
-const CURRENT_CACHES = new Set([STATIC_CACHE, MASTER_DATA_CACHE, API_CACHE]);
+// صيانة 2026-07: أُزيلت MASTER_DATA_CACHE/API_CACHE — كانتا كوداً ميتاً (انظر
+// حارس same-origin أدناه)، وإزالتهما من هذه المجموعة تجعل activate يمسح أي
+// نسخة قديمة منهما عالقة في متصفحات المستخدمين.
+const CURRENT_CACHES = new Set([STATIC_CACHE]);
 
 self.addEventListener('install', (event) => {
   if (manifestEntries.length) {
@@ -45,8 +46,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== 'GET') return;
-  // لا تتدخّل في طلبات أصل آخر (مثل API على :8000 أو CDN) — اترك المتصفح يديرها
-  // مباشرة كي لا يُقدَّم رد قديم من الكاش بدل الخادم.
+  // لا تتدخّل في طلبات أصل آخر — اترك المتصفح يديرها مباشرة كي لا يُقدَّم رد قديم
+  // من الكاش بدل الخادم. ملاحظة مهمة: في الإنتاج الـ API على نطاق فرعي مختلف
+  // (api.smart.ktragroup.com مقابل smart.ktragroup.com) وفي التطوير على بورت آخر
+  // (:8000) — أي أن **كل** نداءات /api/ عابرة للأصل وتتجاوز هذا الـ SW بالكامل.
+  // لذلك حُذف أي منطق كاش لمسارات /api/ من هذا الملف (كان كوداً ميتاً لا يُنفَّذ).
   if (url.origin !== self.location.origin) return;
 
   // التنقّل (طلب صفحة) → الشبكة أولاً ليصل index.html الأحدث بمراجع الـ chunks
@@ -62,16 +66,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname.match(/\/api\/(items|partners|accounts|currencies|categories)\/?(\?.*)?$/)) {
-    event.respondWith(staleWhileRevalidate(event.request, MASTER_DATA_CACHE, 24 * 3600));
-    return;
-  }
-
-  if (url.pathname.startsWith('/api/')) {
-    event.respondWith(networkFirst(event.request, API_CACHE, 8));
-    return;
-  }
-
   event.respondWith(networkFirst(event.request, STATIC_CACHE, 8));
 });
 
@@ -84,31 +78,6 @@ async function cacheFirst(request: Request, cacheName: string): Promise<Response
     cache.put(request, response.clone());
     return response;
   } catch {
-    const fallback = await caches.match('/offline.html');
-    if (fallback) return fallback;
-    return new Response('Offline', { status: 503 });
-  }
-}
-
-async function staleWhileRevalidate(request: Request, cacheName: string, maxAgeSeconds: number): Promise<Response> {
-  const cache = await caches.open(cacheName);
-  const cached = await cache.match(request);
-
-  if (cached) {
-    const date = cached.headers.get('date');
-    const age = date ? (Date.now() - new Date(date).getTime()) / 1000 : Infinity;
-    if (age < maxAgeSeconds) {
-      fetchAndCache(request, cache);
-      return cached;
-    }
-  }
-
-  try {
-    const response = await fetch(request);
-    cache.put(request, response.clone());
-    return response;
-  } catch {
-    if (cached) return cached;
     const fallback = await caches.match('/offline.html');
     if (fallback) return fallback;
     return new Response('Offline', { status: 503 });
@@ -131,13 +100,6 @@ async function networkFirst(request: Request, cacheName: string, timeoutSeconds:
     if (fallback) return fallback;
     return new Response('Offline', { status: 503 });
   }
-}
-
-async function fetchAndCache(request: Request, cache: Cache): Promise<void> {
-  try {
-    const response = await fetch(request);
-    cache.put(request, response.clone());
-  } catch {}
 }
 
 self.addEventListener('sync', (event) => {

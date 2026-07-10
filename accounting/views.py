@@ -178,7 +178,9 @@ class JournalViewSet(viewsets.ModelViewSet):
         tenant = get_tenant(self.request)
         # task11 M7: كان tenant=None → all() — قيود كل الشركات تتسرب
         qs = JournalHeader.objects.none() if tenant is None else JournalHeader.objects.filter(tenant=tenant)
-        qs = qs.order_by("-transaction_date", "-id")
+        # صيانة الأداء 2026-07: الـ serializer يقرأ tenant.CompanyName وcurrency.Code
+        # لكل صف ⇒ بدون select_related كل قيد = استعلامان إضافيان (N+1).
+        qs = qs.select_related("tenant", "currency").order_by("-transaction_date", "-id")
         params = getattr(self.request, "query_params", {})
         rt = (params.get("reference_type") or "").strip()
         if rt:
@@ -214,12 +216,16 @@ class JournalViewSet(viewsets.ModelViewSet):
         return qs
 
     def list(self, request, *args, **kwargs):
+        # صيانة الأداء 2026-07: كان الـ list اليدوي (لأجل pay_map) يتجاوز ترقيم DRF
+        # كلياً فيبثّ كل القيود دفعة واحدة. الآن يحترم ?page= — وpay_map يُبنى من
+        # صفوف الصفحة الحالية فقط (لا استعلام values_list إضافياً على الجدول كاملاً).
         queryset = self.filter_queryset(self.get_queryset())
-        pay_ids = list(
-            queryset.filter(reference_type="LOGISTICS_PAYMENT")
-            .exclude(reference_id__isnull=True)
-            .values_list("reference_id", flat=True)
-        )
+        page = self.paginate_queryset(queryset)
+        target = page if page is not None else queryset
+        pay_ids = [
+            j.reference_id for j in target
+            if j.reference_type == "LOGISTICS_PAYMENT" and j.reference_id
+        ]
         pay_map = {}
         if pay_ids:
             from logistics.models import LogisticsPayment
@@ -229,10 +235,12 @@ class JournalViewSet(viewsets.ModelViewSet):
             ):
                 pay_map[p.id] = p
         serializer = self.get_serializer(
-            queryset,
+            target,
             many=True,
             context={**self.get_serializer_context(), "logistics_payments": pay_map},
         )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='post')

@@ -106,26 +106,59 @@ export const AccountingJournalListPage: React.FC<Props> = ({
   const searchRef = useRef(search);
   searchRef.current = search;
 
+  // صيانة الأداء 2026-07: كانت الشاشة تجلب دفتر اليومية كاملاً (آلاف القيود)
+  // بكل تحميل. الآن ترقيم دفعات 100 + «تحميل المزيد» — الفلاتر تبقى على الخادم.
+  const PAGE_SIZE = 100;
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasNext, setHasNext] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const pageRef = useRef(1);
+
+  const buildParams = useCallback((page: number): Record<string, string> => {
+    const params: Record<string, string> = {
+      page: String(page),
+      page_size: String(PAGE_SIZE),
+    };
+    if (dateFrom.trim()) params.date_from = dateFrom.trim();
+    if (dateTo.trim()) params.date_to = dateTo.trim();
+    if (refType.trim()) params.reference_type = refType.trim();
+    const sq = searchRef.current.trim();
+    if (sq) params.search = sq;
+    return params;
+  }, [dateFrom, dateTo, refType]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
-      const params: Record<string, string> = {};
-      if (dateFrom.trim()) params.date_from = dateFrom.trim();
-      if (dateTo.trim()) params.date_to = dateTo.trim();
-      if (refType.trim()) params.reference_type = refType.trim();
-      const sq = searchRef.current.trim();
-      if (sq) params.search = sq;
-      const data = (await accountingApi.getJournals(
-        Object.keys(params).length ? params : undefined
-      )) as JournalListItem[];
-      setRows(data);
+      pageRef.current = 1;
+      const data = await accountingApi.getJournalsPaged(buildParams(1));
+      setRows(data.results as JournalListItem[]);
+      setTotalCount(data.count);
+      setHasNext(data.hasNext);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, refType]);
+  }, [buildParams]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const next = pageRef.current + 1;
+      const data = await accountingApi.getJournalsPaged(buildParams(next));
+      pageRef.current = next;
+      setRows((prev) => [...prev, ...(data.results as JournalListItem[])]);
+      setTotalCount(data.count);
+      setHasNext(data.hasNext);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "فشل التحميل");
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [buildParams, loadingMore]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -358,6 +391,20 @@ export const AccountingJournalListPage: React.FC<Props> = ({
               onRowDoubleClick={(r) => onOpen(r.id, r.deal_ref_number, r.reference_summary)}
             />
           </div>
+          {hasNext && (
+            <div style={{ display: "flex", justifyContent: "center", padding: "8px" }}>
+              <button
+                type="button"
+                className="aseel-toolbtn"
+                disabled={loadingMore}
+                onClick={() => void loadMore()}
+              >
+                {loadingMore
+                  ? "جاري التحميل…"
+                  : `تحميل المزيد (${rows.length} من ${totalCount})`}
+              </button>
+            </div>
+          )}
         </div>
       ),
     },
@@ -367,14 +414,14 @@ export const AccountingJournalListPage: React.FC<Props> = ({
     <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title="دفتر اليومية"
-        state={loading ? "جاري التحميل…" : `${rows.length} قيد`}
+        state={loading ? "جاري التحميل…" : `${totalCount || rows.length} قيد`}
         actions={toolbarActions}
         header={<></>}
         tabs={tabs}
         status={
           <>
             <span className="aseel-status-item">
-              الإجمالي <b>{rows.length}</b>
+              الإجمالي <b>{totalCount || rows.length}</b>
             </span>
             <span className="aseel-status-item">
               مرحَّل <b>{rows.filter((r) => r.is_posted).length}</b>

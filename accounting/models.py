@@ -93,6 +93,16 @@ class JournalHeader(models.Model):
         # غير ممكن هنا — MySQL لا يدعم الفهارس الجزئية (partial unique) فيُتجاهَل
         # بصمت، كما أن المجال نفسه غير فريد فعلياً (69 صفقة لكلٍّ قيدان مشروعان
         # بنوع LOGISTICS_DEAL). idempotency مفروض تطبيقياً في C1-13/C1-17/C1-04.
+        # صيانة الأداء 2026-07: حقول الفلترة/الترتيب غير المفهرسة (الـ FKs مفهرسة
+        # تلقائياً) — فهارس مركّبة تبدأ بـ tenant لأن كل الاستعلامات tenant-scoped.
+        indexes = [
+            models.Index(fields=['tenant', 'transaction_date', 'id'],
+                         name='idx_jh_tenant_date_id'),
+            models.Index(fields=['tenant', 'reference_type', 'reference_id'],
+                         name='idx_jh_tenant_ref'),
+            models.Index(fields=['tenant', 'is_posted'],
+                         name='idx_jh_tenant_posted'),
+        ]
 
     def __str__(self):
         return f"Journal {self.id} - {self.transaction_date}"
@@ -138,6 +148,11 @@ class JournalLine(models.Model):
     class Meta:
         db_table = 'journal_lines'
         managed = True
+        # صيانة الأداء 2026-07: كشوف الحساب/الميزان تفلتر (tenant, account) معاً.
+        indexes = [
+            models.Index(fields=['tenant', 'account'],
+                         name='idx_jl_tenant_account'),
+        ]
         constraints = [
             models.CheckConstraint(
                 condition=models.Q(debit__gte=0),

@@ -19,6 +19,13 @@ DATABASES = {
     }
 }
 
+# كاش معطَّل في الاختبارات: FileBasedCache يكتب على القرص ويبقى بين تشغيلات
+# الاختبار، وTTL الداشبورد (60ث) قد يُرجِع بيانات قديمة بين اختبارات نفس المستأجر.
+# DummyCache = لا تخزين إطلاقاً ⇒ سلوك مطابق لما قبل إضافة الكاش.
+CACHES = {
+    "default": {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}
+}
+
 
 class _DisableMigrations:
     """تُرجِع None لكل تطبيق ⇒ Django يعدّه بلا هجرات فيبني جداوله من النماذج (syncdb)."""

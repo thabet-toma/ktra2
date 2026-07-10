@@ -4,6 +4,7 @@ Trade Dashboard API — single endpoint returning all business KPIs.
 import datetime
 from decimal import Decimal
 
+from django.core.cache import cache
 from django.db.models import Sum, Count, Q, F
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -25,11 +26,23 @@ def _f(val):
     return round(float(val), 2)
 
 
+# كاش الداشبورد: ~30 استعلاماً تجميعياً بكل تحميل. المفتاح بالمستأجر صراحةً
+# (لا @cache_page المُفهرَس بالـ URL — يفتح تسرّباً بين الشركات على نفس المسار).
+# TTL قصير: لوحة KPI لا سجل مالي رسمي، فتأخّر 60 ثانية مقبول بلا آلية invalidation.
+DASHBOARD_CACHE_TTL = 60
+
+
 @api_view(['GET'])
 def trade_dashboard(request):
     # task13 M1: every queryset below MUST be tenant-scoped. A missing tenant
     # returns the all-zero payload instead of leaking cross-company aggregates.
     tenant = _get_tenant(request)
+
+    cache_key = f"dashboard:v1:{tenant.pk if tenant else 'none'}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return Response(cached)
+
     today = datetime.date.today()
     month_start = today.replace(day=1)
 
@@ -193,7 +206,7 @@ def trade_dashboard(request):
             'link': 'deals-management',
         })
 
-    return Response({
+    payload = {
         'deals': {
             'total': total_deals,
             'open': open_deals,
@@ -239,4 +252,6 @@ def trade_dashboard(request):
             'journals_this_month': journals_this_month,
         },
         'alerts': alerts,
-    })
+    }
+    cache.set(cache_key, payload, timeout=DASHBOARD_CACHE_TTL)
+    return Response(payload)

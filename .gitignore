@@ -36,6 +36,9 @@ Thumbs.db
 *.log
 .cache/
 
+# Django FileBasedCache (server-side cache — generated at runtime)
+django_cache/
+
 # Local archives (do not push)
 *.zip
 *.rar

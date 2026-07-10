@@ -124,12 +124,21 @@ DATABASES = {
         "ENGINE": "django.db.backends.mysql",
         "NAME": "smartktra_smart-ktra",
         "USER": "smartktra_smartktra",
-        "PASSWORD": "smart@102030", 
+        "PASSWORD": "smart@102030",
         "HOST": "localhost",
         "PORT": "3306",
+        # صيانة الأداء 2026-07: كان CONN_MAX_AGE الافتراضي 0 ⇒ اتصال TCP+مصادقة جديد
+        # لكل طلب، وبلا أي مهلة على العميل ⇒ اتصال معطوب/قفل بطيء يعلّق الـ worker
+        # بلا حد (بلاغ «الطلب يستغرق ساعة»). الآن: إعادة استخدام الاتصال 60 ثانية مع
+        # فحص صحته قبل كل إعادة استخدام، ومهل صريحة تُفشِل الطلب خلال ثوانٍ بدل التعليق.
+        "CONN_MAX_AGE": 60,
+        "CONN_HEALTH_CHECKS": True,
         "OPTIONS": {
             "charset": "utf8mb4",
             "init_command": "SET foreign_key_checks = 0; SET sql_mode='STRICT_TRANS_TABLES', innodb_strict_mode=1;",
+            "connect_timeout": 10,
+            "read_timeout": 30,
+            "write_timeout": 30,
         },
     }
 }
@@ -264,12 +273,26 @@ OPENCLAW_WS_MESSAGES_URL = (os.environ.get("OPENCLAW_WS_MESSAGES_URL") or "").st
 _oc_ws = (os.environ.get("OPENCLAW_USE_WEBSOCKET", "0") or "0").strip().lower()
 OPENCLAW_USE_WEBSOCKET = _oc_ws in ("1", "true", "yes", "on")
 
+# ── كاش الخادم (صيانة الأداء 2026-07) ──────────────────────────────────────
+# استضافة مشتركة بلا root ⇒ لا Redis/Memcached. FileBasedCache مشتركة بين كل
+# عمليات WSGI (نفس القرص) وضربة الكاش = صفر استعلامات MySQL — بعكس LocMemCache
+# (معزولة لكل عملية) وDatabaseCache (تعود لنفس MySQL المشتبه ببطئه).
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.filebased.FileBasedCache",
+        "LOCATION": BASE_DIR / "django_cache",
+        "TIMEOUT": 300,
+    }
+}
+
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 REST_FRAMEWORK = {
-    "DEFAULT_PAGINATION_CLASS": None,
-    "PAGE_SIZE": None,
+    # صيانة الأداء 2026-07: ترقيم opt-in — يُفعَّل فقط عند تمرير ?page= من الواجهة،
+    # فكل الاستهلاكات القائمة (قوائم منسدلة/autocomplete بلا ?page=) تبقى كما هي.
+    "DEFAULT_PAGINATION_CLASS": "core.pagination.OptionalPageNumberPagination",
+    "PAGE_SIZE": 50,
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.TokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",

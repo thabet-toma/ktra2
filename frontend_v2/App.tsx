@@ -25,6 +25,7 @@ import { Header } from "./components/Header";
 import { Sidebar } from "./components/Sidebar";
 import { NoSqlMigrationBanner } from "./components/NoSqlMigrationBanner";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
+import { useAutoConnectionRecovery } from "./hooks/useAutoConnectionRecovery";
 import OfflineBanner from "./components/offline/OfflineBanner";
 import UpdatePrompt from "./components/offline/UpdatePrompt";
 import PendingMutationsPanel from "./components/offline/PendingMutationsPanel";
@@ -36,29 +37,6 @@ import { IdleTimeoutGuard } from "./components/IdleTimeoutGuard";
 import SyncConflictModal from "./components/offline/SyncConflictModal";
 import { useBroadcastSync } from "./hooks/useBroadcastSync";
 import { cleanOldCache } from "./services/offline/cacheCleaner";
-import { Dashboard } from "./components/Dashboard";
-import { TradeDashboard } from "./components/dashboard/TradeDashboard";
-import { TaskManagement } from "./components/TaskManagement";
-import { UserManagement } from "./components/UserManagement";
-import { ActivityLogPage } from "./components/ActivityLogPage";
-import { Reports } from "./components/Reports";
-import { EmployeeNotes } from "./components/EmployeeNotes";
-import { SettingsPage } from "./components/SettingsPage";
-import { PointsHistoryPage } from "./components/PointsHistoryPage";
-import { EmployeePointsManagement } from "./components/EmployeePointsManagement";
-import { PriceOfferManagement } from './components/procurement/PriceOfferManagement';
-import { DealManagement } from "./components/procurement/DealManagement";
-import { ItemsManagement } from "./components/items/ItemsManagement";
-import { SupplierManagement } from "./components/suppliers/SupplierManagement";
-import { ShipmentManagement } from "./components/procurement/shipments/ShipmentManagement";
-import { AseelKitStory } from "./components/aseel/AseelKitStory";
-import { SalesInvoiceAseelStory } from "./components/sales/SalesInvoiceAseelStory";
-import { SalesQuotationsPage } from "./components/sales/SalesQuotationsPage";
-import { CreditDebitNotesPage } from "./components/sales/CreditDebitNotesPage";
-import { SalesReturnEditor } from "./components/sales/SalesReturnEditor";
-import { PurchaseReturnEditor } from "./components/sales/PurchaseReturnEditor";
-import { SupplierPaymentsPage } from "./components/sales/SupplierPaymentsPage";
-import { ImportDocumentScreen } from "./components/import-flow";
 import { TaskList } from "./components/TaskList";
 import { RejectReasonModal } from "./components/modals/RejectReasonModal";
 import {
@@ -79,59 +57,92 @@ import {
 import { fetchUserProfile, logoutUser } from "./services/authService";
 import { useAuth } from "./contexts/AuthContext";
 import { activeTasksService } from "./services/activeTasksService";
-import { EmployeeAttendance } from "./components/EmployeeAttendance";
-import { AttendanceManagement } from "./components/AttendanceManagement";
-import { PurchaseInvoice } from "./components/procurement/PurchaseInvoice";
 import { autoDisableScheduler } from "./services/autoDisableScheduler";
-import AboutUs from "./components/AboutUs";
-import Contact from "./components/pages/Contact";
 import { PublicNavbar } from "./components/layout/PublicNavbar";
-import PublicGallery from "./components/PublicGallery";
 import { TaskDetailsModal } from "./components/TaskDetailsModal";
-import { OldPurchaseInvoice } from "./components/OldPurchaseInvoice";
-import { CashBoxList } from "./components/finance/CashBoxList";
-import { CashBoxStatement } from "./components/finance/CashBoxStatement";
-import { StorePage } from "./components/store/StorePage";
-import { AccountingCoaPage } from "./components/accounting/AccountingCoaPage";
-import { AccountingJournalListPage } from "./components/accounting/AccountingJournalListPage";
-import { AccountingJournalEntryPage } from "./components/accounting/AccountingJournalEntryPage";
-import { AccountingChequesPage } from "./components/accounting/AccountingChequesPage";
-import { AccountingGeneralLedgerPage } from "./components/accounting/AccountingGeneralLedgerPage";
-import { AccountingTrialBalancePage } from "./components/accounting/AccountingTrialBalancePage";
-import { AccountingVatReportPage } from "./components/accounting/AccountingVatReportPage";
-import { AccountingLandedCostPage } from "./components/accounting/AccountingLandedCostPage";
-import { FiscalPeriodsPage } from "./components/accounting/FiscalPeriodsPage";
-import { ExchangeRatesPage } from "./components/accounting/ExchangeRatesPage";
-import { BalanceSheetPage } from "./components/accounting/BalanceSheetPage";
-import { IncomeStatementPage } from "./components/accounting/IncomeStatementPage";
-import { InvoiceProfitsPage } from "./components/accounting/InvoiceProfitsPage";
-import { VatStatementsPage } from "./components/accounting/VatStatementsPage";
-import { YearEndClosePage } from "./components/accounting/YearEndClosePage";
-import { SqlProductsPage } from "./components/sql/SqlProductsPage";
-import { SqlPartnersPage } from "./components/sql/SqlPartnersPage";
-import { SqlDealsPage } from "./components/sql/SqlDealsPage";
-import { SqlShipmentsPage } from "./components/sql/SqlShipmentsPage";
-import { SmartAssistantPage } from "./components/SmartAssistantPage";
-import { CustomsClearanceManagement } from "./components/procurement/clearance/CustomsClearanceManagement";
-import { StockMovementsPage } from "./components/inventory/StockMovementsPage";
-import { WarehousesManager } from "./components/inventory/WarehousesManager";
-import { StockLevelsPage } from "./components/inventory/StockLevelsPage";
-import { WarehouseTransferPage } from "./components/inventory/WarehouseTransferPage";
-import { StocktakePage } from "./components/inventory/StocktakePage";
-import { InventoryValuationPage } from "./components/inventory/InventoryValuationPage";
-import { ProductCostPage } from "./components/inventory/ProductCostPage";
-import { PropertyRentalPage } from "./components/realestate/PropertyRentalPage";
-import { PartnerProfilePage } from "./components/partners/PartnerProfilePage";
-import { ProductProfilePage } from "./components/items/ProductProfilePage";
-import { GroupProfilePage } from "./components/items/GroupProfilePage";
-import { SalesInvoicesPage } from "./components/sales/SalesInvoicesPage";
-import { SalesCustomersPage } from "./components/sales/SalesCustomersPage";
-import SalesCustomerPaymentsPage from "./components/sales/SalesCustomerPaymentsPage";
-import SalesSettingsPage from "./components/sales/SalesSettingsPage";
-import PurchaseSettingsPage from "./components/procurement/PurchaseSettingsPage";
-import LocalShippingPage from "./components/logistics/LocalShippingPage";
 import { GroupConstantsPage } from './components/settings/GroupConstantsPage';
 import { useLocation, useNavigate } from "react-router-dom";
+
+// ── تقسيم الحزمة حسب الشاشة (صيانة الأداء 2026-07) ─────────────────────────
+// كانت كل الصفحات (~85 مكوّناً) مستورَدة ثابتاً ⇒ حزمة واحدة 3.2MB تحجب أول
+// رسم. الآن كل صفحة chunk مستقل يُحمَّل عند فتحها فقط (renderMainContent محاط
+// بـ <Suspense>). نمط الـ adapter (.then م → default) لأن الصفحات named exports —
+// بلا لمس أي ملف مكوّن. الشل الدائم (الدخول/التخطيط/شريط الاتصال…) يبقى ثابتاً.
+const lazyPage = <T extends React.ComponentType<any>>(
+  loader: () => Promise<{ default: T }>
+) => React.lazy(loader);
+
+const Dashboard = lazyPage(() => import("./components/Dashboard").then((m) => ({ default: m.Dashboard })));
+const TradeDashboard = lazyPage(() => import("./components/dashboard/TradeDashboard").then((m) => ({ default: m.TradeDashboard })));
+const TaskManagement = lazyPage(() => import("./components/TaskManagement").then((m) => ({ default: m.TaskManagement })));
+const UserManagement = lazyPage(() => import("./components/UserManagement").then((m) => ({ default: m.UserManagement })));
+const ActivityLogPage = lazyPage(() => import("./components/ActivityLogPage").then((m) => ({ default: m.ActivityLogPage })));
+const Reports = lazyPage(() => import("./components/Reports").then((m) => ({ default: m.Reports })));
+const EmployeeNotes = lazyPage(() => import("./components/EmployeeNotes").then((m) => ({ default: m.EmployeeNotes })));
+const SettingsPage = lazyPage(() => import("./components/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const PointsHistoryPage = lazyPage(() => import("./components/PointsHistoryPage").then((m) => ({ default: m.PointsHistoryPage })));
+const EmployeePointsManagement = lazyPage(() => import("./components/EmployeePointsManagement").then((m) => ({ default: m.EmployeePointsManagement })));
+const PriceOfferManagement = lazyPage(() => import("./components/procurement/PriceOfferManagement").then((m) => ({ default: m.PriceOfferManagement })));
+const DealManagement = lazyPage(() => import("./components/procurement/DealManagement").then((m) => ({ default: m.DealManagement })));
+const ItemsManagement = lazyPage(() => import("./components/items/ItemsManagement").then((m) => ({ default: m.ItemsManagement })));
+const SupplierManagement = lazyPage(() => import("./components/suppliers/SupplierManagement").then((m) => ({ default: m.SupplierManagement })));
+const ShipmentManagement = lazyPage(() => import("./components/procurement/shipments/ShipmentManagement").then((m) => ({ default: m.ShipmentManagement })));
+const AseelKitStory = lazyPage(() => import("./components/aseel/AseelKitStory").then((m) => ({ default: m.AseelKitStory })));
+const SalesInvoiceAseelStory = lazyPage(() => import("./components/sales/SalesInvoiceAseelStory").then((m) => ({ default: m.SalesInvoiceAseelStory })));
+const SalesQuotationsPage = lazyPage(() => import("./components/sales/SalesQuotationsPage").then((m) => ({ default: m.SalesQuotationsPage })));
+const CreditDebitNotesPage = lazyPage(() => import("./components/sales/CreditDebitNotesPage").then((m) => ({ default: m.CreditDebitNotesPage })));
+const SalesReturnEditor = lazyPage(() => import("./components/sales/SalesReturnEditor").then((m) => ({ default: m.SalesReturnEditor })));
+const PurchaseReturnEditor = lazyPage(() => import("./components/sales/PurchaseReturnEditor").then((m) => ({ default: m.PurchaseReturnEditor })));
+const SupplierPaymentsPage = lazyPage(() => import("./components/sales/SupplierPaymentsPage").then((m) => ({ default: m.SupplierPaymentsPage })));
+const ImportDocumentScreen = lazyPage(() => import("./components/import-flow").then((m) => ({ default: m.ImportDocumentScreen })));
+const EmployeeAttendance = lazyPage(() => import("./components/EmployeeAttendance").then((m) => ({ default: m.EmployeeAttendance })));
+const AttendanceManagement = lazyPage(() => import("./components/AttendanceManagement").then((m) => ({ default: m.AttendanceManagement })));
+const PurchaseInvoice = lazyPage(() => import("./components/procurement/PurchaseInvoice").then((m) => ({ default: m.PurchaseInvoice })));
+const AboutUs = lazyPage(() => import("./components/AboutUs"));
+const Contact = lazyPage(() => import("./components/pages/Contact"));
+const PublicGallery = lazyPage(() => import("./components/PublicGallery"));
+const OldPurchaseInvoice = lazyPage(() => import("./components/OldPurchaseInvoice").then((m) => ({ default: m.OldPurchaseInvoice })));
+const CashBoxList = lazyPage(() => import("./components/finance/CashBoxList").then((m) => ({ default: m.CashBoxList })));
+const CashBoxStatement = lazyPage(() => import("./components/finance/CashBoxStatement").then((m) => ({ default: m.CashBoxStatement })));
+const StorePage = lazyPage(() => import("./components/store/StorePage").then((m) => ({ default: m.StorePage })));
+const AccountingCoaPage = lazyPage(() => import("./components/accounting/AccountingCoaPage").then((m) => ({ default: m.AccountingCoaPage })));
+const AccountingJournalListPage = lazyPage(() => import("./components/accounting/AccountingJournalListPage").then((m) => ({ default: m.AccountingJournalListPage })));
+const AccountingJournalEntryPage = lazyPage(() => import("./components/accounting/AccountingJournalEntryPage").then((m) => ({ default: m.AccountingJournalEntryPage })));
+const AccountingChequesPage = lazyPage(() => import("./components/accounting/AccountingChequesPage").then((m) => ({ default: m.AccountingChequesPage })));
+const AccountingGeneralLedgerPage = lazyPage(() => import("./components/accounting/AccountingGeneralLedgerPage").then((m) => ({ default: m.AccountingGeneralLedgerPage })));
+const AccountingTrialBalancePage = lazyPage(() => import("./components/accounting/AccountingTrialBalancePage").then((m) => ({ default: m.AccountingTrialBalancePage })));
+const AccountingVatReportPage = lazyPage(() => import("./components/accounting/AccountingVatReportPage").then((m) => ({ default: m.AccountingVatReportPage })));
+const AccountingLandedCostPage = lazyPage(() => import("./components/accounting/AccountingLandedCostPage").then((m) => ({ default: m.AccountingLandedCostPage })));
+const FiscalPeriodsPage = lazyPage(() => import("./components/accounting/FiscalPeriodsPage").then((m) => ({ default: m.FiscalPeriodsPage })));
+const ExchangeRatesPage = lazyPage(() => import("./components/accounting/ExchangeRatesPage").then((m) => ({ default: m.ExchangeRatesPage })));
+const BalanceSheetPage = lazyPage(() => import("./components/accounting/BalanceSheetPage").then((m) => ({ default: m.BalanceSheetPage })));
+const IncomeStatementPage = lazyPage(() => import("./components/accounting/IncomeStatementPage").then((m) => ({ default: m.IncomeStatementPage })));
+const InvoiceProfitsPage = lazyPage(() => import("./components/accounting/InvoiceProfitsPage").then((m) => ({ default: m.InvoiceProfitsPage })));
+const VatStatementsPage = lazyPage(() => import("./components/accounting/VatStatementsPage").then((m) => ({ default: m.VatStatementsPage })));
+const YearEndClosePage = lazyPage(() => import("./components/accounting/YearEndClosePage").then((m) => ({ default: m.YearEndClosePage })));
+const SqlProductsPage = lazyPage(() => import("./components/sql/SqlProductsPage").then((m) => ({ default: m.SqlProductsPage })));
+const SqlPartnersPage = lazyPage(() => import("./components/sql/SqlPartnersPage").then((m) => ({ default: m.SqlPartnersPage })));
+const SqlDealsPage = lazyPage(() => import("./components/sql/SqlDealsPage").then((m) => ({ default: m.SqlDealsPage })));
+const SqlShipmentsPage = lazyPage(() => import("./components/sql/SqlShipmentsPage").then((m) => ({ default: m.SqlShipmentsPage })));
+const SmartAssistantPage = lazyPage(() => import("./components/SmartAssistantPage").then((m) => ({ default: m.SmartAssistantPage })));
+const CustomsClearanceManagement = lazyPage(() => import("./components/procurement/clearance/CustomsClearanceManagement").then((m) => ({ default: m.CustomsClearanceManagement })));
+const StockMovementsPage = lazyPage(() => import("./components/inventory/StockMovementsPage").then((m) => ({ default: m.StockMovementsPage })));
+const WarehousesManager = lazyPage(() => import("./components/inventory/WarehousesManager").then((m) => ({ default: m.WarehousesManager })));
+const StockLevelsPage = lazyPage(() => import("./components/inventory/StockLevelsPage").then((m) => ({ default: m.StockLevelsPage })));
+const WarehouseTransferPage = lazyPage(() => import("./components/inventory/WarehouseTransferPage").then((m) => ({ default: m.WarehouseTransferPage })));
+const StocktakePage = lazyPage(() => import("./components/inventory/StocktakePage").then((m) => ({ default: m.StocktakePage })));
+const InventoryValuationPage = lazyPage(() => import("./components/inventory/InventoryValuationPage").then((m) => ({ default: m.InventoryValuationPage })));
+const ProductCostPage = lazyPage(() => import("./components/inventory/ProductCostPage").then((m) => ({ default: m.ProductCostPage })));
+const PropertyRentalPage = lazyPage(() => import("./components/realestate/PropertyRentalPage").then((m) => ({ default: m.PropertyRentalPage })));
+const PartnerProfilePage = lazyPage(() => import("./components/partners/PartnerProfilePage").then((m) => ({ default: m.PartnerProfilePage })));
+const ProductProfilePage = lazyPage(() => import("./components/items/ProductProfilePage").then((m) => ({ default: m.ProductProfilePage })));
+const GroupProfilePage = lazyPage(() => import("./components/items/GroupProfilePage").then((m) => ({ default: m.GroupProfilePage })));
+const SalesInvoicesPage = lazyPage(() => import("./components/sales/SalesInvoicesPage").then((m) => ({ default: m.SalesInvoicesPage })));
+const SalesCustomersPage = lazyPage(() => import("./components/sales/SalesCustomersPage").then((m) => ({ default: m.SalesCustomersPage })));
+const SalesCustomerPaymentsPage = lazyPage(() => import("./components/sales/SalesCustomerPaymentsPage"));
+const SalesSettingsPage = lazyPage(() => import("./components/sales/SalesSettingsPage"));
+const PurchaseSettingsPage = lazyPage(() => import("./components/procurement/PurchaseSettingsPage"));
+const LocalShippingPage = lazyPage(() => import("./components/logistics/LocalShippingPage"));
 
 type SourcingView = "search" | "loading" | "results";
 type AuthView = "landing" | "login" | "signup";
@@ -308,6 +319,8 @@ const App: React.FC = () => {
   const [rejectingTask, setRejectingTask] = useState<Task | null>(null);
   const [theme, setTheme] = useState<Theme>("light");
   const onlineStatus = useOnlineStatus();
+  // إصلاح تلقائي للاتصال العالق (إنترنت موجود لكن نبض الخادم يفشل) — مرة لكل نوبة.
+  useAutoConnectionRecovery(onlineStatus);
   const [statusMsg, setStatusMsg] = useState<{ message: string; type: 'info' | 'warn' | 'error' } | null>(null);
   // P3-4 wiring: keep one conflict modal at app root and route 409s from
   // processMutationQueue through it.
@@ -1909,7 +1922,10 @@ const App: React.FC = () => {
         <OfflineBanner status={onlineStatus} onRetry={() => window.location.reload()} />
         <NoSqlMigrationBanner isManager={currentUser?.role === "manager"} />
         <main className="p-3 sm:p-4 lg:p-6">
-          {renderMainContent()}
+          {/* الصفحات chunks كسولة — سبينر ريثما يصل chunk الشاشة المطلوبة */}
+          <React.Suspense fallback={<div className="flex justify-center py-16"><LoadingSpinner /></div>}>
+            {renderMainContent()}
+          </React.Suspense>
         </main>
       </AppLayout>
 

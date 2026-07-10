@@ -2,6 +2,7 @@
  * محاسبة SQL عبر Django REST — نفس مسارات frontend v1 (MUI).
  */
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
+import { toPagedList } from "./restApi";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const ACC = `${API_BASE}/accounting`;
@@ -91,6 +92,15 @@ export const accountingApi = {
         ? `?${new URLSearchParams(params)}`
         : "";
     return fetch(`${ACC}/journals/${q}`, { headers: headers() }).then(asList);
+  },
+
+  /** قائمة القيود مُرقَّمة — مرِّر page/page_size ضمن params (صيانة الأداء 2026-07). */
+  getJournalsPaged: async (params: Record<string, string>) => {
+    const res = await fetch(`${ACC}/journals/?${new URLSearchParams(params)}`, {
+      headers: headers(),
+    });
+    await handle(res, "getJournalsPaged");
+    return toPagedList(await res.json());
   },
 
   getJournal: async (id: number) => {
