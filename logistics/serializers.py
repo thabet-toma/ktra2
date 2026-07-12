@@ -27,10 +27,13 @@ def _deal_title_for_list_preview(deal):
             line = line.strip()
             if line and _has_arabic(line):
                 return line[:72]
-    if d and not _english_payment_boilerplate(d):
-        return d[:72]
     ref = (getattr(deal, "ref_number", None) or "").strip()
     offer = (getattr(deal, "original_offer_number", None) or "").strip()
+    # بيانات قديمة خزّنت الاسم العربي في «رقم العرض» — يتقدم على الوصف الإنجليزي
+    if offer and _has_arabic(offer) and not re.match(r"^d-\d+$", offer, re.I):
+        return offer[:72]
+    if d and not _english_payment_boilerplate(d):
+        return d[:72]
     if offer and offer.lower() != ref.lower():
         if not re.match(r"^d-\d+$", offer, re.I):
             return offer[:72]
@@ -366,6 +369,9 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
     )
     quote_images = serializers.SerializerMethodField()
     quote_pdfs = serializers.SerializerMethodField()
+    # ج7: الصفقة تعرف شحنتها — لعرض خريطة مسار الشحنة ورابط «رحلة الاستيراد»
+    # داخل شاشة الصفقة (خريطة موحّدة صفقة→فاتورة).
+    linked_shipment = serializers.SerializerMethodField()
 
     class Meta:
         model = LogisticsDeal
@@ -373,6 +379,24 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'tenant', 'created_by', 'is_posted', 'journal', 'total_amount']
         # الترقيم خادمي عند الغياب/التكرار (T12-B4) — perform_create يولّد D-####
         extra_kwargs = {'ref_number': {'required': False, 'allow_blank': True}}
+
+    def get_linked_shipment(self, obj):
+        try:
+            # prefetch-aware: يستهلك prefetch الـviewset إن وُجد بدل استعلام لكل صف
+            links = list(obj.logisticsshipmentdeal_set.all())
+            if not links:
+                return None
+            link = max(links, key=lambda l: l.id)
+            sh = link.shipment
+            if not sh:
+                return None
+            return {
+                'id': sh.id,
+                'shipment_number': sh.shipment_number or '',
+                'shipment_name': sh.shipment_name or '',
+            }
+        except Exception:
+            return None
 
     def get_quote_images(self, obj):
         try:
@@ -571,10 +595,21 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
 class LogisticsShipmentDealAllocationSerializer(serializers.ModelSerializer):
     """أوزان تكلفة الشحن الدولي المحفوظة لكل صفقة على الشحنة."""
 
+    deal_ref = serializers.CharField(source="deal.ref_number", read_only=True)
+    deal_title = serializers.SerializerMethodField()
+
     class Meta:
         model = LogisticsShipmentDeal
-        fields = ["id", "deal", "allocated_shipping_cost", "extra_costs"]
+        fields = ["id", "deal", "deal_ref", "deal_title", "allocated_shipping_cost", "extra_costs"]
         read_only_fields = ["id", "deal"]
+
+    def get_deal_title(self, obj):
+        """عنوان عربي للعرض (نفس منطق اسم الفاتورة) — كانت شاشة الاستيراد تعرض «—»."""
+        try:
+            from logistics.landed_cost import invoice_title_from_deal
+            return invoice_title_from_deal(obj.deal, max_len=120)
+        except Exception:
+            return None
 
 
 class LogisticsShipmentSerializer(serializers.ModelSerializer):

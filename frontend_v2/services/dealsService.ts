@@ -47,8 +47,10 @@ function pickFirst(...values: any[]): string {
 function mapStatusFromSql(status?: string): DealStatus {
   const s = String(status || "").toLowerCase();
   if (s.includes("cancel")) return "cancelled";
-  if (s.includes("ship")) return "shipped";
-  if (s.includes("close") || s.includes("clear")) return "completed";
+  // ج7: «Cleared» (بانتظار التخليص) مرحلة في مسار حي وليست نهاية —
+  // كانت تُحسب completed فتقفل النموذج وتخفي الخريطة.
+  if (s.includes("ship") || s.includes("clear")) return "shipped";
+  if (s.includes("close")) return "completed";
   return "initial";
 }
 
@@ -344,6 +346,13 @@ function mapDealFromSql(d: SqlDeal): Deal {
       legalName: pickFirst(d?.partner_legal_name, d?.partner?.legal_name)?.trim() || undefined,
     },
     shippingWorkflowStatus: d?.shipping_workflow_status || null,
+    linkedShipment: d?.linked_shipment
+      ? {
+          id: Number(d.linked_shipment.id),
+          shipmentNumber: String(d.linked_shipment.shipment_number || ""),
+          shipmentName: String(d.linked_shipment.shipment_name || ""),
+        }
+      : null,
   };
 }
 

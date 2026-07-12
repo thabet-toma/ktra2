@@ -968,6 +968,24 @@ class PurchaseInvoice(models.Model):
         db_column='ConvertedBy_UserID', related_name='converted_purchase_invoices',
     )
 
+    # معاملات الاستيراد من التخليص — أعمدة منمّطة تحلّ محل JSON المحذوف في P-D-8
+    # (هجرة 0035)؛ يقرؤها compute_live_purchase_invoice_read_payload لإعادة بناء
+    # الـpayload الحي بنفس الأسعار التي اختارها المستخدم عند الاستيراد.
+    import_deal_remaining_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, null=True, blank=True,
+        db_column='ImportDealRemainingRate',
+        help_text='سعر صرف المتبقي (الصفقة) المختار عند الاستيراد من التخليص',
+    )
+    import_shipment_remaining_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, null=True, blank=True,
+        db_column='ImportShipmentRemainingRate',
+        help_text='سعر صرف المتبقي (الشحن) المختار عند الاستيراد من التخليص',
+    )
+    import_use_cost_lines = models.BooleanField(
+        null=True, blank=True, db_column='ImportUseCostLines',
+        help_text='أساس حوض التخليص عند الاستيراد: بنود التكلفة (True) أو الدفعات',
+    )
+
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', db_column='Status')
 
     # حالة الاستلام للمخزن — بُعد مستقل عن الحالة المالية (status أعلاه)

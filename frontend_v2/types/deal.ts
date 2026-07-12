@@ -154,6 +154,8 @@ export interface Deal {
     status: DealStatus;
     /** مرحلة الشحن (يدوي/تلقائي) — مصدر الحقيقة في قاعدة البيانات */
     shippingWorkflowStatus?: ShippingWorkflowStatus | null;
+    /** الشحنة المرتبطة (إن وُجدت) — لعرض خريطة المسار ورابط رحلة الاستيراد */
+    linkedShipment?: { id: number; shipmentNumber: string; shipmentName: string } | null;
     installments: DealInstallment[];
     installmentPlanEnabled: boolean;
     currentInstallmentNumber?: number;

@@ -2,7 +2,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Shipment, Deal } from '../../../types';
 import { dealsService } from '../../../services/dealsService';
-import { effectiveDealTitleForDisplay } from '../../../utils/dealTitleDisplay';
+import { shipmentsService } from '../../../services/shipmentsService';
+import { effectiveDealTitleForDisplay, offerNumberForDisplay } from '../../../utils/dealTitleDisplay';
 import { formatNumber } from '../../../utils/formatNumber';
 import {
     Truck, Ship, Plane, Calendar, Package, DollarSign,
@@ -31,7 +32,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
     /** صفوف الصفقات مع دمج أحدث بيانات من SQL (نفس شاشة الصفقة) */
     const resolvedShipmentDeals = useMemo(() => {
         const rows = shipment.deals || [];
-        return rows.map((row) => {
+        const merged = rows.map((row) => {
             const live = liveDeals.find((d) => String(d.id) === String(row.dealId));
             if (!live) return row;
             const notesMerged = (live.internalNotes || row.notes || "").trim();
@@ -54,7 +55,18 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                 }),
             };
         });
-    }, [shipment.deals, liveDeals]);
+        // توزيعات قديمة غير محسوبة في القاعدة (كلها 0) → توزيع حسب الحجم/الوزن
+        // بنفس منطق إنشاء الشحنة، حتى لا يظهر «التكلفة الموزعة $0» رغم وجود تكلفة.
+        const totalCostUsd = Number(shipment.totalShippingCostUsd) || 0;
+        const allZero = merged.every((d) => !(Number(d.distributedCost) > 0));
+        if (allZero && totalCostUsd > 0 && merged.length > 0) {
+            return shipmentsService.calculateDistribution(merged, totalCostUsd, {
+                pricingMethod: shipment.pricingMethod,
+                unitType: shipment.unitType,
+            });
+        }
+        return merged;
+    }, [shipment.deals, liveDeals, shipment.totalShippingCostUsd, shipment.pricingMethod, shipment.unitType]);
 
     // --- Helpers ---
     const formatDate = (dateString?: string) => {
@@ -193,6 +205,14 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
+                        <button
+                            onClick={() => window.open(`/import-flow/${encodeURIComponent(String(shipment.id))}`, '_blank', 'noopener,noreferrer')}
+                            className="flex items-center gap-2 px-4 py-2 aseel-btn-primary transition-colors"
+                            title="مساحة التحرير الكاملة: الصفقات، دفع الشحن، التخليص، النقل المحلي، الفواتير"
+                        >
+                            <Truck className="w-4 h-4" />
+                            رحلة الاستيراد
+                        </button>
                         <button
                             onClick={handlePrint}
                             disabled={isPrinting}
@@ -660,7 +680,13 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                                                             </div>
                                                         </td>
                                                         <td className="px-3 py-2">
-                                                            <div className="font-mono aseel-text-ink dark:aseel-text-soft">{deal.originalOfferNumber}</div>
+                                                            <div className="font-mono aseel-text-ink dark:aseel-text-soft">
+                                                                {(() => {
+                                                                    const o = offerNumberForDisplay(deal.originalOfferNumber, deal.dealNumber);
+                                                                    // لا نكرر الاسم إن كان «رقم العرض» هو نفسه العنوان المعروض
+                                                                    return o && o !== deal.displayTitle ? o : '—';
+                                                                })()}
+                                                            </div>
                                                         </td>
                                                         <td className="px-3 py-2 text-center">
                                                             <div className="aseel-text-ink dark:aseel-text-soft">{formatNumber(deal.totalVolume || 0, { maxDecimals: 1 })} م³</div>

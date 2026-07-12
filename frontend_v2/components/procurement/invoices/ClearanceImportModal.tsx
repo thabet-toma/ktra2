@@ -798,6 +798,8 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                 description:
                                                     deal?.dealDescription || sd.dealDescriptionRaw,
                                                 notes: notesLong || undefined,
+                                                original_offer_number:
+                                                    deal?.originalOfferNumber || sd.originalOfferNumber,
                                                 ref_number: sd.dealNumber,
                                             });
                                             const hasSqlDescription = hasDedicatedShortDescription({
@@ -991,7 +993,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                 </div>
                             )
                         ) : (
-                            <div className="flex-1 flex flex-col items-center justify-center p-20 text-center space-y-6">
+                            <div className="flex-1 flex flex-col items-center justify-center p-6 sm:p-12 text-center space-y-6">
                                 <div className="w-24 h-24 bg-[var(--color-surface-2)] dark:bg-[var(--color-surface-2)]/20 rounded-full flex items-center justify-center">
                                     <ScrollText className="w-10 h-10 text-[var(--color-primary)]" />
                                 </div>

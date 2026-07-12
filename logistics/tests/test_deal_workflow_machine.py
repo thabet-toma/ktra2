@@ -114,6 +114,63 @@ class DealCancelPersistsTest(_Base):
         self.assertEqual(deal.status, 'Cancelled')
 
 
+class StageChangeWithPostedPaymentTest(_Base):
+    """ج7: الدفع بُعد مالي مستقل — دفعة مرحّلة لا تقفل مرحلة الشحن ولا الإلغاء.
+
+    الحارس (POSTED_DOC_WARNING) يبقى على التعديلات المالية/البيانية فقط.
+    """
+
+    def _mk_posted_payment(self, deal):
+        from logistics.models import LogisticsPayment
+        return LogisticsPayment.objects.create(
+            deal=deal, payment_number=1, title='دفعة أولى',
+            amount=Decimal('500'), is_posted=True,
+        )
+
+    def test_stage_change_allowed_with_posted_payment(self):
+        deal = self._mk_deal('D-0501')
+        self._mk_posted_payment(deal)
+        resp = self.client.patch(
+            f'/api/logistics/deals/{deal.id}/',
+            {'shipping_workflow_status': 'sw_wait_agent_ship'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        deal.refresh_from_db()
+        self.assertEqual(deal.shipping_workflow_status, 'sw_wait_agent_ship')
+
+    def test_cancel_allowed_with_posted_payment(self):
+        deal = self._mk_deal('D-0502')
+        self._mk_posted_payment(deal)
+        resp = self.client.patch(
+            f'/api/logistics/deals/{deal.id}/',
+            {'status': 'Cancelled'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        deal.refresh_from_db()
+        self.assertEqual(deal.status, 'Cancelled')
+
+    def test_financial_edit_still_blocked_with_posted_payment(self):
+        deal = self._mk_deal('D-0503')
+        self._mk_posted_payment(deal)
+        resp = self.client.patch(
+            f'/api/logistics/deals/{deal.id}/',
+            {'total_amount': '9999'},
+            format='json',
+        )
+        self.assertEqual(resp.status_code, 400, resp.content)
+        deal.refresh_from_db()
+        self.assertEqual(Decimal(deal.total_amount), Decimal('1000'))
+
+    def test_delete_still_blocked_with_posted_payment(self):
+        deal = self._mk_deal('D-0504')
+        self._mk_posted_payment(deal)
+        resp = self.client.delete(f'/api/logistics/deals/{deal.id}/')
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertTrue(LogisticsDeal.objects.filter(pk=deal.pk).exists())
+
+
 class ReleasedOnInvoiceTest(_Base):
     def test_purchase_invoice_releases_deal(self):
         deal = self._mk_deal('D-0301', shipping_workflow_status='sw_wait_clearance')

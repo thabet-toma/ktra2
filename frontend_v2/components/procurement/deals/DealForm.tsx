@@ -160,8 +160,17 @@ export const DealForm: React.FC<DealFormProps> = ({
   const notify = (title: string, message: string) =>
     void confirm({ title, message, danger: false, hideCancel: true, confirmText: "حسناً" });
 
+  /* نمط الفواتير: الصفقة الجديدة تبدأ بصف بنود جاهز للكتابة فوراً —
+     الصفوف الفارغة تُصفّى عند الحفظ. */
+  const makeEmptyItem = (): DealItem => ({
+    id: crypto.randomUUID(), itemId: "", name: "", categoryId: "", categoryName: "",
+    specifications: "", imageUrls: [], quantity: 1, unitPrice: 0, totalPrice: 0,
+  });
+
   const [formData, setFormData] = useState<Partial<Deal>>(deal || {});
-  const [items, setItems] = useState<DealItem[]>(deal?.items || []);
+  const [items, setItems] = useState<DealItem[]>(
+    deal?.items?.length ? deal.items : deal?.id ? [] : [makeEmptyItem()]
+  );
   const [activities, setActivities] = useState<DealActivity[]>([]);
   const [installments, setInstallments] = useState<DealInstallment[]>(deal?.installments || []);
   const [installmentPlanEnabled, setInstallmentPlanEnabled] = useState(deal?.installmentPlanEnabled || false);
@@ -222,7 +231,7 @@ export const DealForm: React.FC<DealFormProps> = ({
 
   const handleNewDeal = () => {
     setFormData({});
-    setItems([]);
+    setItems([makeEmptyItem()]);
     setInstallments([]);
     setInstallmentPlanEnabled(false);
   };
@@ -260,6 +269,13 @@ export const DealForm: React.FC<DealFormProps> = ({
   const [showPrintView, setShowPrintView] = useState(false);
   const [viewSupplierId, setViewSupplierId] = useState<string | null>(null);
   const selectedSupplier = suppliers.find(s => s.id === formData.supplierId);
+
+  /* ج7: «تم الشحن» و«بانتظار التخليص» مراحل في مسار حي — لا تقفل النموذج.
+     القفل فقط عند الإلغاء أو التحويل لفاتورة (sw_released) أو الإغلاق القديم. */
+  const isDealLocked =
+    formData.status === 'cancelled' ||
+    formData.shippingWorkflowStatus === 'sw_released' ||
+    (formData.status === 'completed' && !formData.shippingWorkflowStatus);
 
   const validateInstallments = (): boolean => {
     if (!installmentPlanEnabled) { setInstallmentValidationError(""); return true; }
@@ -578,7 +594,7 @@ export const DealForm: React.FC<DealFormProps> = ({
     }
     setSaving(true);
     try {
-      const finalFormData: Partial<Deal> = { ...formData, items, subtotal: formData.subtotal, taxAmount: formData.taxAmount, totalAmount: formData.totalAmount, updatedAt: new Date().toISOString(), updatedBy: currentUser.id };
+      const finalFormData: Partial<Deal> = { ...formData, items: nonEmptyItems(), subtotal: formData.subtotal, taxAmount: formData.taxAmount, totalAmount: formData.totalAmount, updatedAt: new Date().toISOString(), updatedBy: currentUser.id };
       if (installmentPlanEnabled) { finalFormData.installments = installments; finalFormData.installmentPlanEnabled = true; }
       else { finalFormData.installments = []; finalFormData.installmentPlanEnabled = false; }
       const isExistingDeal = deal?.id || formData.id;
@@ -592,7 +608,7 @@ export const DealForm: React.FC<DealFormProps> = ({
       } else {
         if (!(await confirm({ title: "إنشاء صفقة", message: "هل أنت متأكد من إنشاء الصفقة الجديدة؟", danger: false, confirmText: "إنشاء" }))) { setSaving(false); return; }
         const createData: any = {
-          supplierId: formData.supplierId || "", factoryName: formData.factoryName || "", items, payments: [],
+          supplierId: formData.supplierId || "", factoryName: formData.factoryName || "", items: nonEmptyItems(), payments: [],
           totalAmount: finalFormData.totalAmount || 0, subtotal: finalFormData.subtotal || 0,
           shippingCost: finalFormData.shippingCost || 0, shippingIncluded: finalFormData.shippingIncluded || false,
           discountAmount: finalFormData.discountAmount || 0, taxRate: finalFormData.taxRate || 0,
@@ -640,9 +656,12 @@ export const DealForm: React.FC<DealFormProps> = ({
     return taxableBase + taxAmount;
   };
 
+  /** الصفوف ذات المحتوى فقط — الصف الفارغ الجاهز لا يُحفظ ولا يُحتسب */
+  const nonEmptyItems = () => items.filter((i) => i.itemId || (i.name || "").trim());
+
   const validateForm = (): boolean => {
     if (!formData.supplierId) { toast("يرجى اختيار المورد أولاً", "error"); return false; }
-    if (items.length === 0) { toast("يرجى إضافة منتجات على الأقل", "error"); return false; }
+    if (nonEmptyItems().length === 0) { toast("يرجى إضافة منتجات على الأقل", "error"); return false; }
     return true;
   };
 
@@ -755,13 +774,13 @@ export const DealForm: React.FC<DealFormProps> = ({
   const removeRow = (key: string) => { recalculateTotals(items.filter((i) => i.id !== key)); };
 
   const renderItemIdCell = (row: DealItem) => (
-    <button type="button" className="aseel-cell-picker" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} data-aseel-key="1" onClick={() => setShowItemSearch(true)} title="فهرس الأصناف الكامل (+)">
+    <button type="button" className="aseel-cell-picker" disabled={isDealLocked} data-aseel-key="1" onClick={() => setShowItemSearch(true)} title="فهرس الأصناف الكامل (+)">
       {row.itemId ? `#${row.itemId}` : "…"}
     </button>
   );
 
   const renderDeleteCell = (row: DealItem) =>
-    formData.status === 'shipped' || formData.status === 'cancelled' ? null : (
+    isDealLocked ? null : (
       <button type="button" className="aseel-iconbtn aseel-iconbtn--danger" onClick={() => removeRow(row.id)} title="حذف السطر"><Trash2 className="h-3 w-3" /></button>
     );
 
@@ -816,7 +835,7 @@ export const DealForm: React.FC<DealFormProps> = ({
     <AseelAutocomplete
       value={row.name || ""}
       options={itemOptions}
-      disabled={formData.status === 'shipped' || formData.status === 'cancelled'}
+      disabled={isDealLocked}
       placeholder="اكتب اسم الصنف…"
       onPick={(id) => {
         const it = allDbItems.find((x) => String(x.id) === String(id));
@@ -832,13 +851,13 @@ export const DealForm: React.FC<DealFormProps> = ({
 
   /* ───────────── تبويبات ───────────── */
   const notesTab = (
-    <textarea className="aseel-input" rows={3} style={{ width: "100%" }} disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.notes || formData.internalNotes || ""} onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))} />
+    <textarea className="aseel-input" rows={3} style={{ width: "100%" }} disabled={isDealLocked} value={formData.notes || formData.internalNotes || ""} onChange={(e) => setFormData(prev => ({ ...prev, notes: e.target.value }))} />
   );
 
   const otherTab = (
     <div className="aseel-other">
       <label className="aseel-field aseel-field--inline">
-        <input type="checkbox" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} checked={formData.shippingIncluded || false} onChange={(e) => setFormData(prev => ({ ...prev, shippingIncluded: e.target.checked }))} />
+        <input type="checkbox" disabled={isDealLocked} checked={formData.shippingIncluded || false} onChange={(e) => setFormData(prev => ({ ...prev, shippingIncluded: e.target.checked }))} />
         <span className="aseel-field-label" style={{ flex: "unset" }}>الأسعار تشمل الشحن</span>
       </label>
       <p className="aseel-hint">حالة الصفقة: {getOperationalStatusText(getOperationalStatus(formData.status as DealStatus))} — الدفع: {getPaymentStatusText(getPaymentStatusFromPayments(formData as Deal))}</p>
@@ -854,7 +873,7 @@ export const DealForm: React.FC<DealFormProps> = ({
         isDeal={true}
         dealsService={dealsService}
         items={items}
-        readOnly={formData.status === 'shipped' || formData.status === 'cancelled'}
+        readOnly={isDealLocked}
       />
     </div>
   );
@@ -864,7 +883,7 @@ export const DealForm: React.FC<DealFormProps> = ({
       <TermsAndShippingSection
         data={formData}
         setData={setFormData}
-        readOnly={formData.status === 'shipped' || formData.status === 'cancelled'}
+        readOnly={isDealLocked}
       />
     </div>
   );
@@ -882,7 +901,7 @@ export const DealForm: React.FC<DealFormProps> = ({
         installmentPlanEnabled={installmentPlanEnabled}
         onTogglePlan={toggleInstallmentPlan}
         deal={formData}
-        readOnly={formData.status === 'shipped' || formData.status === 'cancelled'}
+        readOnly={isDealLocked}
       />
       <PaymentProgress
         installments={
@@ -895,7 +914,7 @@ export const DealForm: React.FC<DealFormProps> = ({
         onPaymentOperation={handlePaymentOperation}
         onConfirmSupplier={handlePaymentConfirmation}
         onOpenAccountingJournal={onOpenAccountingJournal}
-        readOnly={formData.status === "shipped" || formData.status === "cancelled"}
+        readOnly={isDealLocked}
       />
       {formData.id ? (
         <DealPaymentList
@@ -963,35 +982,35 @@ export const DealForm: React.FC<DealFormProps> = ({
         header={
           <>
             {fld("رقم الصفقة", <input className="aseel-input" readOnly value={formData.dealNumber ? (formData.id ? formData.dealNumber : `${formData.dealNumber} (جديدة)`) : "— جديدة —"} />)}
-            {fld("التاريخ", <input className="aseel-input" type="date" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.dealDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, dealDate: e.target.value }))} />)}
-            {fld("الساعة", <input className="aseel-input" type="time" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).transactionTime || ""} onChange={(e) => setFormData(prev => ({ ...prev, transactionTime: e.target.value }) as any)} />)}
-            {fld("تاريخ ثاني", <input className="aseel-input" type="date" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).secondDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, secondDate: e.target.value }) as any)} />)}
-            {fld("تاريخ الاستحقاق", <input className="aseel-input" type="date" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.dueDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, dueDate: e.target.value }))} />)}
+            {fld("التاريخ", <input className="aseel-input" type="date" disabled={isDealLocked} value={formData.dealDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, dealDate: e.target.value }))} />)}
+            {fld("الساعة", <input className="aseel-input" type="time" disabled={isDealLocked} value={(formData as any).transactionTime || ""} onChange={(e) => setFormData(prev => ({ ...prev, transactionTime: e.target.value }) as any)} />)}
+            {fld("تاريخ ثاني", <input className="aseel-input" type="date" disabled={isDealLocked} value={(formData as any).secondDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, secondDate: e.target.value }) as any)} />)}
+            {fld("تاريخ الاستحقاق", <input className="aseel-input" type="date" disabled={isDealLocked} value={formData.dueDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, dueDate: e.target.value }))} />)}
             {fld("المورد", <div className="aseel-pickfield">
-              <input className="aseel-input aseel-input--hl" data-aseel-field="supplier" data-aseel-key="1" readOnly disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={selectedSupplier?.tradeName || selectedSupplier?.alias || formData.supplierName || formData.factoryName || (formData.supplierId ? `#${formData.supplierId}` : "")} title={formData.supplierId ? `معرف المورد: ${formData.supplierId}` : undefined} placeholder="+ للفهرس" onClick={() => { if (formData.status !== 'shipped' && formData.status !== 'cancelled') setShowSupplierPicker(true); }} />
-              <button type="button" className="aseel-ellipsis" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} onClick={() => setShowSupplierPicker(true)} title="فهرس الموردين (+)">…</button>
+              <input className="aseel-input aseel-input--hl" data-aseel-field="supplier" data-aseel-key="1" readOnly disabled={isDealLocked} value={selectedSupplier?.tradeName || selectedSupplier?.alias || formData.supplierName || formData.factoryName || (formData.supplierId ? `#${formData.supplierId}` : "")} title={formData.supplierId ? `معرف المورد: ${formData.supplierId}` : undefined} placeholder="+ للفهرس" onClick={() => { if (!isDealLocked) setShowSupplierPicker(true); }} />
+              <button type="button" className="aseel-ellipsis" disabled={isDealLocked} onClick={() => setShowSupplierPicker(true)} title="فهرس الموردين (+)">…</button>
             </div>)}
             {fld("الاسم", <input className="aseel-input" readOnly value={selectedSupplier?.tradeName || formData.factoryName || ""} />)}
             {fld("رقم العرض", <input className="aseel-input" readOnly value={formData.originalOfferNumber || ""} />)}
-            {fld("مشتغل مرخص", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.licensedDealerNo || ""} onChange={(e) => setFormData(prev => ({ ...prev, licensedDealerNo: e.target.value }))} placeholder="رقم المشتغل المرخص" />)}
-            {fld("وصف الصفقة", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.dealDescription || ""} onChange={(e) => setFormData(prev => ({ ...prev, dealDescription: e.target.value }))} placeholder="وصف مختصر" />)}
-            {fld("رابط علي بابا", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.alibabaOrderLink || ""} onChange={(e) => setFormData(prev => ({ ...prev, alibabaOrderLink: e.target.value }))} placeholder="https://…" />)}
-            {fld("طريقة الشحن", <select className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.shippingMethod || ""} onChange={(e) => setFormData(prev => ({ ...prev, shippingMethod: e.target.value }))}>
+            {fld("مشتغل مرخص", <input className="aseel-input" disabled={isDealLocked} value={formData.licensedDealerNo || ""} onChange={(e) => setFormData(prev => ({ ...prev, licensedDealerNo: e.target.value }))} placeholder="رقم المشتغل المرخص" />)}
+            {fld("وصف الصفقة", <input className="aseel-input" disabled={isDealLocked} value={formData.dealDescription || ""} onChange={(e) => setFormData(prev => ({ ...prev, dealDescription: e.target.value }))} placeholder="وصف مختصر" />)}
+            {fld("رابط علي بابا", <input className="aseel-input" disabled={isDealLocked} value={formData.alibabaOrderLink || ""} onChange={(e) => setFormData(prev => ({ ...prev, alibabaOrderLink: e.target.value }))} placeholder="https://…" />)}
+            {fld("طريقة الشحن", <select className="aseel-input" disabled={isDealLocked} value={formData.shippingMethod || ""} onChange={(e) => setFormData(prev => ({ ...prev, shippingMethod: e.target.value }))}>
               <option value="">— اختر —</option>
               <option value="sea">بحري</option>
               <option value="air">جوي</option>
               <option value="land">بري</option>
               <option value="express">إكسبرس</option>
             </select>)}
-            {fld("طريقة الدفع", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).paymentMethod || ""} onChange={(e) => setFormData(prev => ({ ...prev, paymentMethod: e.target.value }) as any)} placeholder="T/T / L/C / …" />)}
-            {fld("مدة الإنتاج", <input className="aseel-input" type="number" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).productionDays ?? ""} onChange={(e) => setFormData(prev => ({ ...prev, productionDays: e.target.value === "" ? null : Number(e.target.value) }) as any)} placeholder="أيام" />)}
-            {fld("مدة التوصيل", <input className="aseel-input" type="number" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).deliveryDays ?? ""} onChange={(e) => setFormData(prev => ({ ...prev, deliveryDays: e.target.value === "" ? null : Number(e.target.value) }) as any)} placeholder="أيام" />)}
-            {fld("الضمان", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).warrantyDuration || ""} onChange={(e) => setFormData(prev => ({ ...prev, warrantyDuration: e.target.value }) as any)} placeholder="مدة الضمان" />)}
-            {fld("الشهادات", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).certificates || ""} onChange={(e) => setFormData(prev => ({ ...prev, certificates: e.target.value }) as any)} placeholder="CE / FCC / ISO …" />)}
-            {fld("رابط الفاتورة", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={(formData as any).invoiceLink || ""} onChange={(e) => setFormData(prev => ({ ...prev, invoiceLink: e.target.value }) as any)} placeholder="الفاتورة الأصلية" />)}
-            {fld("رقم المستند", <input className="aseel-input" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} value={formData.supplierInvoiceNumber || ""} onChange={(e) => setFormData(prev => ({ ...prev, supplierInvoiceNumber: e.target.value }))} placeholder="رقم فاتورة المورد" />)}
+            {fld("طريقة الدفع", <input className="aseel-input" disabled={isDealLocked} value={(formData as any).paymentMethod || ""} onChange={(e) => setFormData(prev => ({ ...prev, paymentMethod: e.target.value }) as any)} placeholder="T/T / L/C / …" />)}
+            {fld("مدة الإنتاج", <input className="aseel-input" type="number" disabled={isDealLocked} value={(formData as any).productionDays ?? ""} onChange={(e) => setFormData(prev => ({ ...prev, productionDays: e.target.value === "" ? null : Number(e.target.value) }) as any)} placeholder="أيام" />)}
+            {fld("مدة التوصيل", <input className="aseel-input" type="number" disabled={isDealLocked} value={(formData as any).deliveryDays ?? ""} onChange={(e) => setFormData(prev => ({ ...prev, deliveryDays: e.target.value === "" ? null : Number(e.target.value) }) as any)} placeholder="أيام" />)}
+            {fld("الضمان", <input className="aseel-input" disabled={isDealLocked} value={(formData as any).warrantyDuration || ""} onChange={(e) => setFormData(prev => ({ ...prev, warrantyDuration: e.target.value }) as any)} placeholder="مدة الضمان" />)}
+            {fld("الشهادات", <input className="aseel-input" disabled={isDealLocked} value={(formData as any).certificates || ""} onChange={(e) => setFormData(prev => ({ ...prev, certificates: e.target.value }) as any)} placeholder="CE / FCC / ISO …" />)}
+            {fld("رابط الفاتورة", <input className="aseel-input" disabled={isDealLocked} value={(formData as any).invoiceLink || ""} onChange={(e) => setFormData(prev => ({ ...prev, invoiceLink: e.target.value }) as any)} placeholder="الفاتورة الأصلية" />)}
+            {fld("رقم المستند", <input className="aseel-input" disabled={isDealLocked} value={formData.supplierInvoiceNumber || ""} onChange={(e) => setFormData(prev => ({ ...prev, supplierInvoiceNumber: e.target.value }))} placeholder="رقم فاتورة المورد" />)}
             <label className="aseel-field aseel-field--inline">
-              <input type="checkbox" disabled={formData.status === 'shipped' || formData.status === 'cancelled'} checked={formData.shippingIncluded || false} onChange={(e) => setFormData(prev => ({ ...prev, shippingIncluded: e.target.checked }))} />
+              <input type="checkbox" disabled={isDealLocked} checked={formData.shippingIncluded || false} onChange={(e) => setFormData(prev => ({ ...prev, shippingIncluded: e.target.checked }))} />
               <span className="aseel-field-label" style={{ flex: "unset" }}>الأسعار تشمل الشحن</span>
             </label>
           </>
@@ -1040,7 +1059,7 @@ export const DealForm: React.FC<DealFormProps> = ({
             <span className="aseel-status-item">الدفع <b>{getPaymentStatusText(getPaymentStatusFromPayments(formData as Deal))}</b></span>
             {formData.dealNumber && <span className="aseel-status-item">رقم الصفقة <b>{formData.dealNumber}</b></span>}
             <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
-            <span className="aseel-status-item">{formData.status === 'shipped' || formData.status === 'cancelled' ? "للقراءة فقط" : "قابل للتعديل ✓"}</span>
+            <span className="aseel-status-item">{isDealLocked ? "للقراءة فقط" : "قابل للتعديل ✓"}</span>
           </>
         }
       >
@@ -1049,11 +1068,11 @@ export const DealForm: React.FC<DealFormProps> = ({
           rows={items}
           getCell={itemGetCell}
           getRowKey={(r) => r.id}
-          onChange={formData.status === 'shipped' || formData.status === 'cancelled' ? undefined : itemOnChange}
-          onAddRow={formData.status === 'shipped' || formData.status === 'cancelled' ? undefined : addRow}
+          onChange={isDealLocked ? undefined : itemOnChange}
+          onAddRow={isDealLocked ? undefined : addRow}
           emptyHint="لا توجد بنود — أضف صنفاً (+ فهرس الأصناف)"
         />
-        {formData.status !== 'shipped' && formData.status !== 'cancelled' && (
+        {!isDealLocked && (
           <button type="button" className="aseel-addrow" onClick={addRow}><Plus className="h-3 w-3" /> إضافة سطر</button>
         )}
       </AseelDocumentShell>

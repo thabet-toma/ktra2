@@ -33,6 +33,8 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [selected, setSelected] = useState<ClearanceRow | null>(null);
+  // «إضافة تخليص» = اختيار شحنة بلا تخليص ثم فتح رحلتها — لا شاشة شحنة جديدة فارغة
+  const [shipmentPickerOpen, setShipmentPickerOpen] = useState(false);
 
   const navigate = useNavigate();
 
@@ -62,6 +64,12 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
 
   const shipmentById = useMemo(() => { const m = new Map<number, ShipmentPick>(); shipments.forEach((s) => m.set(s.id, s)); return m; }, [shipments]);
 
+  /** التخليص واحد لكل شحنة — المرشّحات للإضافة هي الشحنات التي بلا تخليص بعد */
+  const shipmentsWithoutClearance = useMemo(() => {
+    const has = new Set(clearances.map((c) => Number(c.shipment)));
+    return shipments.filter((s) => !has.has(s.id));
+  }, [shipments, clearances]);
+
   const clearanceShipmentTitle = useCallback((c: ClearanceRow) => {
     if ((c.shipment_name || "").trim() || (c.shipment_number || "").trim()) return formatClearanceShipmentLine(c);
     const s = shipmentById.get(Number(c.shipment));
@@ -72,7 +80,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
   const nav = useRecordNavigation<ClearanceRow>({
     items: clearances, getId: (c) => c.id || 0, currentId: selected?.id || null,
     onSelect: async (id) => {
-      if (id === null) { navigate("/import-flow/new?tab=clearance"); }
+      if (id === null) { setShipmentPickerOpen(true); }
       else {
         const row = clearances.find((c) => c.id === id);
         if (row) setSelected(row);
@@ -83,8 +91,8 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
   useAseelKeymap({
     F5: () => reload(),
     F6: () => { const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]'); el?.focus(); },
-    Escape: () => setSelected(null),
-    CtrlIns: () => navigate("/import-flow/new?tab=clearance"),
+    Escape: () => { setShipmentPickerOpen(false); setSelected(null); },
+    CtrlIns: () => setShipmentPickerOpen(true),
   });
 
   if (currentUser.role !== "manager" && currentUser.role !== "procurement") {
@@ -101,8 +109,8 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
   ];
 
   const toolbarActions = [
-    { key: "new", label: "إضافة", icon: <Plus />, onClick: () => navigate("/import-flow/new?tab=clearance") },
-    { key: "import-flow", label: "رحلة الاستيراد", icon: <Truck />, onClick: () => { if (selected) navigate(`/import-flow/${selected.shipment}`); }, disabled: !selected, separatorBefore: true },
+    { key: "new", label: "إضافة تخليص لشحنة", icon: <Plus />, onClick: () => setShipmentPickerOpen(true) },
+    { key: "import-flow", label: "رحلة الاستيراد", icon: <Truck />, onClick: () => { if (selected) navigate(`/import-flow/${selected.shipment}?tab=clearance`); }, disabled: !selected, separatorBefore: true },
     { key: "reload", label: "تحديث (F5)", icon: <RefreshCw />, onClick: () => reload(), separatorBefore: true },
     { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => window.print(), separatorBefore: true },
   ];
@@ -123,7 +131,10 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
               <span><b>الإجمالي:</b> {sumLines(selected.cost_lines || []).toLocaleString()}</span>
             </div>
           ) : (
-            <p className="aseel-text-soft text-sm" style={{ padding: 8 }}>اختر سجلاً من القائمة</p>
+            <p className="aseel-text-soft text-sm" style={{ padding: 8 }}>
+              التخليص يُنشأ ويُحرَّر من داخل «رحلة الاستيراد» لشحنته — نقرة تختار السجل،
+              ونقرة مزدوجة (أو زر «رحلة الاستيراد») تفتح التحرير هناك.
+            </p>
           )
         }
         status={
@@ -143,10 +154,38 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
           columns={listColumns}
           rows={clearances}
           getRowKey={(r) => r.id}
-          onRowClick={(row) => navigate(`/import-flow/${row.shipment}?tab=clearance`)}
+          onRowClick={(row) => setSelected(row)}
+          onRowDoubleClick={(row) => navigate(`/import-flow/${row.shipment}?tab=clearance`)}
           selectedKey={selected?.id ?? null}
           onSelect={(key) => { if (key != null) { const row = clearances.find((c) => c.id === key); if (row) setSelected(row); } }}
         />
+
+        {shipmentPickerOpen && (
+          <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.3)" }} onClick={() => setShipmentPickerOpen(false)}>
+            <div style={{ background: "var(--aseel-bg, #fff)", borderRadius: 8, padding: 16, maxWidth: 520, width: "90%", maxHeight: "70vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+              <h4 style={{ fontWeight: 600, marginBottom: 4 }}>اختر الشحنة لإنشاء تخليصها</h4>
+              <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm)", marginBottom: 8 }}>
+                لكل شحنة تخليص واحد — تُعرض الشحنات التي بلا تخليص بعد، ويُفتح تبويب
+                «التخليص» في رحلة الاستيراد مباشرة.
+              </p>
+              {shipmentsWithoutClearance.length === 0 && (
+                <p className="aseel-text-soft" style={{ padding: 8 }}>
+                  كل الشحنات لديها تخليص بالفعل — أنشئ شحنة جديدة من صفحة «الشحنات» أولاً.
+                </p>
+              )}
+              {shipmentsWithoutClearance.map((s) => (
+                <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--aseel-border, #eee)", cursor: "pointer" }}
+                  onClick={() => { setShipmentPickerOpen(false); navigate(`/import-flow/${s.id}?tab=clearance`); }}>
+                  <span>{buildShipmentOptionLabel(s)}</span>
+                  <span className="aseel-toolbtn">فتح الرحلة</span>
+                </div>
+              ))}
+              <div style={{ marginTop: 8, textAlign: "center" }}>
+                <button type="button" className="aseel-toolbtn" onClick={() => setShipmentPickerOpen(false)}>إلغاء</button>
+              </div>
+            </div>
+          </div>
+        )}
       </AseelDocumentShell>
     </div>
   );

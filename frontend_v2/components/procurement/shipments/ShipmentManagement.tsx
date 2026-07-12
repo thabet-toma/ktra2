@@ -86,6 +86,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
             const term = search.toLowerCase();
             result = result.filter(s =>
                 s.shipmentNumber?.toLowerCase().includes(term) ||
+                s.shipmentName?.toLowerCase().includes(term) ||
                 s.shippingAgentName?.toLowerCase().includes(term) ||
                 s.agentShipmentNumber?.toLowerCase().includes(term)
             );
@@ -139,6 +140,16 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                             ({s.deals?.length} صفقة)
                         </span>
                     )}
+                </span>
+            ),
+        },
+        {
+            key: 'shipmentName',
+            header: 'اسم الشحنة',
+            sortable: true,
+            render: (s) => (
+                <span title={s.shipmentName || undefined}>
+                    {(s.shipmentName || '').trim() || '—'}
                 </span>
             ),
         },
@@ -210,8 +221,8 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                     <button
                         className="aseel-toolbtn"
                         style={{ padding: '2px 4px' }}
-                        onClick={(e) => { e.stopPropagation(); openInNewTab(`/import-flow/${s.id}`); }}
-                        title="تعديل"
+                        onClick={(e) => { e.stopPropagation(); handleEdit(s); }}
+                        title="تعديل (رحلة الاستيراد)"
                     >
                         <Edit style={{ width: 13, height: 13 }} />
                     </button>
@@ -255,7 +266,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                     ref={searchInputRef}
                     className="aseel-input"
                     style={{ width: 190 }}
-                    placeholder="بحث برقم الشحنة، الوكيل… (F6)"
+                    placeholder="بحث بالاسم، رقم الشحنة، الوكيل… (F6)"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                 />
@@ -290,11 +301,17 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                 <button
                     className="aseel-toolbtn"
                     onClick={handleCreateNew}
-                    title="شحنة جديدة (Ctrl+Ins)"
+                    title="تفتح «رحلة الاستيراد» لشحنة جديدة: بيانات ← صفقات ← دفع شحن ← تخليص ← فواتير (Ctrl+Ins)"
                 >
                     <Plus style={{ width: 14, height: 14 }} /> شحنة جديدة
                 </button>
             </div>
+
+            {/* عقد موحّد مع صفحات التخليص والنقل المحلي: التحرير داخل رحلة الاستيراد */}
+            <p style={{ fontSize: 'var(--aseel-fs-sm, 12px)', color: 'var(--aseel-ink-soft)', margin: 0 }}>
+                نقرة مزدوجة تفتح <b>ملخص الشحنة</b> · زر التعديل ✎ يفتح <b>«رحلة الاستيراد»</b>
+                (الصفقات، دفع الشحن، التخليص، النقل المحلي، الفواتير).
+            </p>
 
             {/* جدول الشحنات */}
             <AseelDenseTable<Shipment>
@@ -303,7 +320,8 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                 getRowKey={(s) => s.id}
                 loading={loading}
                 emptyHint="لا توجد شحنات — اضغط «شحنة جديدة»"
-                onRowDoubleClick={(s) => handleEdit(s)}
+                // فتح الشحنة = ملخصها الواضح؛ «رحلة الاستيراد» من زر التعديل فقط
+                onRowDoubleClick={(s) => setViewingShipment(s)}
                 footer={
                     filteredShipments.length > 0 ? (
                         <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>

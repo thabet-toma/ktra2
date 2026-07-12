@@ -25,6 +25,9 @@ import {
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { useAseelIndexKeymap } from "../aseel/useAseelIndexKeymap";
 import { openInNewTab } from "@/utils/openInNewTab";
+import { apiGetList } from "@/services/restApi";
+import { resolveTenantId } from "@/utils/tenantContext";
+import { buildShipmentOptionLabel, type ShipmentLabelInput } from "@/utils/shipmentLabel";
 
 const STATUS_LABEL: Record<LocalShipmentStatus, string> = {
   pending:    "قيد الانتظار",
@@ -53,6 +56,26 @@ export const LocalShippingPage: React.FC = () => {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<LocalShipmentStatus | "all">("all");
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // «نقل محلي جديد» = اختيار شحنة الاستيراد أولاً ثم فتح تبويب النقل المحلي في رحلتها
+  const [shipmentPickerOpen, setShipmentPickerOpen] = useState(false);
+  const [shipmentOptions, setShipmentOptions] = useState<ShipmentLabelInput[]>([]);
+
+  const openShipmentPicker = useCallback(async () => {
+    setShipmentPickerOpen(true);
+    if (shipmentOptions.length > 0) return;
+    try {
+      const rowsApi = await apiGetList<any>("logistics/shipments/", { tenantId: resolveTenantId() });
+      setShipmentOptions(rowsApi.map((r: any) => ({
+        id: Number(r.id),
+        shipment_number: r.shipment_number || `S-${r.id}`,
+        shipment_name: (r.shipment_name && String(r.shipment_name).trim()) || "",
+        agent_shipment_number: (r.agent_shipment_number && String(r.agent_shipment_number).trim()) || "",
+        israeli_side_name: (r.israeli_side_name && String(r.israeli_side_name).trim()) || "",
+      })));
+    } catch {
+      setErr("تعذّر تحميل قائمة الشحنات");
+    }
+  }, [shipmentOptions.length]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,7 +124,7 @@ export const LocalShippingPage: React.FC = () => {
   }, [rows, search, statusFilter]);
 
   const handlePost = async (id: number) => {
-    if (!window.confirm("ترحيل القيد المحاسبي؟")) return;
+    if (!(await confirm({ title: "ترحيل النقل المحلي", message: "ترحيل القيد المحاسبي؟", confirmText: "ترحيل" }))) return;
     setErr(null); setMsg(null);
     try {
       await postLocalShipment(id);
@@ -113,7 +136,7 @@ export const LocalShippingPage: React.FC = () => {
   };
 
   const handleUnpost = async (id: number) => {
-    if (!window.confirm("إلغاء الترحيل؟")) return;
+    if (!(await confirm({ title: "إلغاء ترحيل النقل المحلي", message: "سيُحذف قيد المصروف ويعود السجل مسودة.", confirmText: "إلغاء الترحيل" }))) return;
     setErr(null);
     try {
       await unpostLocalShipment(id);
@@ -125,7 +148,7 @@ export const LocalShippingPage: React.FC = () => {
   };
 
   const handleDelete = async (r: LocalShipmentRow) => {
-    if (r.is_posted) { alert("ألغِ الترحيل أولاً."); return; }
+    if (r.is_posted) { setErr("السجل مرحّل — ألغِ الترحيل أولاً."); return; }
     if (!(await confirm({ title: "حذف الشحنة", message: `حذف الشحنة ${r.shipment_number}؟` }))) return;
     setErr(null);
     try {
@@ -232,13 +255,13 @@ export const LocalShippingPage: React.FC = () => {
       align: "center",
       render: (r) => (
         <span style={{ display: "inline-flex", gap: 2, flexWrap: "wrap", justifyContent: "center" }}>
-          {!r.is_posted && !r.purchase_invoice && (
+          {!r.is_posted && !r.purchase_invoice && r.shipment != null && (
             <>
               <button
                 className="aseel-toolbtn"
                 style={{ padding: "2px 4px" }}
                 onClick={() => openInNewTab(`/import-flow/${r.shipment}?tab=local`)}
-                title="تعديل"
+                title="التعديل — يفتح رحلة الاستيراد (تبويب النقل المحلي)"
               >
                 <Pencil style={{ width: 13, height: 13 }} />
               </button>
@@ -262,12 +285,12 @@ export const LocalShippingPage: React.FC = () => {
               <RotateCcw style={{ width: 13, height: 13 }} />
             </button>
           )}
-          {!r.is_posted && !r.purchase_invoice && (
+          {!r.is_posted && !r.purchase_invoice && r.shipment != null && (
             <button
               className="aseel-toolbtn"
               style={{ padding: "2px 4px" }}
               onClick={() => openInNewTab(`/import-flow/${r.shipment}?tab=local`)}
-              title="نقل إلى فاتورة مشتريات"
+              title="نقل التكلفة إلى فاتورة المشتريات — من رحلة الاستيراد"
             >
               <LinkIcon style={{ width: 13, height: 13 }} />
             </button>
@@ -289,10 +312,10 @@ export const LocalShippingPage: React.FC = () => {
 
   useAseelIndexKeymap(
     {
-      CtrlIns: () => openInNewTab("/import-flow/new?tab=local"),
+      CtrlIns: () => void openShipmentPicker(),
       F6: () => searchInputRef.current?.focus(),
       F5: () => void load(),
-      Escape: () => { setSearch(""); setStatusFilter("all"); },
+      Escape: () => { setShipmentPickerOpen(false); setSearch(""); setStatusFilter("all"); },
     },
   );
 
@@ -337,12 +360,18 @@ export const LocalShippingPage: React.FC = () => {
         </button>
         <button
           className="aseel-toolbtn"
-          onClick={() => openInNewTab("/import-flow/new?tab=local")}
-          title="شحنة محلية جديدة (Ctrl+Ins)"
+          onClick={() => void openShipmentPicker()}
+          title="اختر شحنة الاستيراد ثم يُفتح تبويب «النقل المحلي» في رحلتها (Ctrl+Ins)"
         >
-          <Plus style={{ width: 14, height: 14 }} /> شحنة محلية جديدة
+          <Plus style={{ width: 14, height: 14 }} /> نقل محلي جديد
         </button>
       </div>
+
+      {/* موضع التسجيل الموحّد: رحلة الاستيراد — هذه القائمة للمتابعة والترحيل */}
+      <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", margin: 0 }}>
+        النقل المحلي يُسجَّل ويُعدَّل داخل «رحلة الاستيراد» لشحنته (تبويب النقل المحلي) —
+        نقرة مزدوجة على أي سجل تفتحها. هذه القائمة للمتابعة والترحيل والحذف.
+      </p>
 
       {/* رسائل النجاح/الخطأ */}
       {err && (
@@ -362,8 +391,11 @@ export const LocalShippingPage: React.FC = () => {
         rows={filteredRows}
         getRowKey={(r) => r.id}
         loading={loading}
-        emptyHint="لا توجد شحنات محلية بعد — اضغط «شحنة محلية جديدة»"
-        onRowClick={(row) => openInNewTab(`/import-flow/${row.shipment}?tab=local`)}
+        emptyHint="لا توجد سجلات نقل محلي بعد — اضغط «نقل محلي جديد»"
+        onRowDoubleClick={(row) => {
+          if (row.shipment != null) openInNewTab(`/import-flow/${row.shipment}?tab=local`);
+          else setErr("هذا السجل غير مرتبط بشحنة استيراد — لا رحلة لفتحها.");
+        }}
         footer={
           filteredRows.length > 0 ? (
             <span style={{ fontFamily: "monospace", fontSize: "var(--aseel-fs-sm)" }}>
@@ -372,6 +404,30 @@ export const LocalShippingPage: React.FC = () => {
           ) : undefined
         }
       />
+
+      {shipmentPickerOpen && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.3)" }} onClick={() => setShipmentPickerOpen(false)}>
+          <div style={{ background: "var(--aseel-bg, #fff)", borderRadius: 8, padding: 16, maxWidth: 520, width: "90%", maxHeight: "70vh", overflowY: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <h4 style={{ fontWeight: 600, marginBottom: 4 }}>اختر شحنة الاستيراد</h4>
+            <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm)", marginBottom: 8 }}>
+              يُفتح تبويب «النقل المحلي» في رحلة استيراد الشحنة المختارة لإضافة السجل هناك.
+            </p>
+            {shipmentOptions.length === 0 && (
+              <p className="aseel-text-soft" style={{ padding: 8 }}>جاري تحميل الشحنات…</p>
+            )}
+            {shipmentOptions.map((s) => (
+              <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid var(--aseel-border, #eee)", cursor: "pointer" }}
+                onClick={() => { setShipmentPickerOpen(false); openInNewTab(`/import-flow/${s.id}?tab=local`); }}>
+                <span>{buildShipmentOptionLabel(s)}</span>
+                <span className="aseel-toolbtn">فتح الرحلة</span>
+              </div>
+            ))}
+            <div style={{ marginTop: 8, textAlign: "center" }}>
+              <button type="button" className="aseel-toolbtn" onClick={() => setShipmentPickerOpen(false)}>إلغاء</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

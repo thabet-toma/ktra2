@@ -69,6 +69,9 @@ def invoice_title_from_deal(deal: LogisticsDeal, max_len: int = 255) -> str:
     from_notes = _first_arabic_line_from_notes(notes)
     if from_notes:
         return from_notes[:max_len]
+    # بيانات قديمة خزّنت الاسم العربي في «رقم العرض» — يتقدم على الوصف الإنجليزي
+    if offer and _has_arabic(offer) and not re.match(r'^d-\d+$', offer, re.I):
+        return offer[:max_len]
     if desc and not _is_english_payment_or_legal_boilerplate(desc):
         return desc[:max_len]
     if (
@@ -644,34 +647,6 @@ def build_local_payments_json(deal_clear_ils: Decimal) -> Dict[str, Any]:
     }
 
 
-def merge_local_payments_keep_user_fee_lines(
-    fresh: Dict[str, Any],
-    previous: Any,
-) -> Dict[str, Any]:
-    """
-    عند إعادة حساب التكلفة من الشحنة/التخليص: نحدّث حقول التخليص المحسوبة ونُبقي
-    بنود «الضرائب والرسوم» التي أضافها المستخدم (كترا، إلخ) كي لا تُمسح من JSON.
-    """
-    out = dict(fresh) if isinstance(fresh, dict) else {}
-    if not isinstance(previous, dict):
-        return out
-    lines = previous.get('taxesAndFeesLines')
-    if isinstance(lines, list) and len(lines) > 0:
-        out['taxesAndFeesLines'] = lines
-        # تجنّب ازدواجية مع النظام الجديد للبنود
-        if 'extraTaxesFees' in out:
-            out['extraTaxesFees'] = 0
-        return out
-    ext = previous.get('extraTaxesFees')
-    if ext is not None:
-        try:
-            if float(ext) > 0:
-                out['extraTaxesFees'] = ext
-        except (TypeError, ValueError):
-            pass
-    return out
-
-
 def compute_tax_and_grand(
     *,
     subtotal: Decimal,
@@ -994,8 +969,12 @@ def import_invoices_from_clearance(
                 shipping_cost=payload['shipping_cost'],
                 shipping_included=payload['shipping_included'],
                 grand_total=payload['grand_total'],
-                local_payments_json=payload.get('local_payments_json'),
-                conversion_metadata_json=payload.get('conversion_metadata_json'),
+                # حقول JSON حُذفت في 0035 (P-D-8) — معاملات الاستيراد بأعمدة منمّطة،
+                # والفاتورة المنشأة من تخليص دولية دائماً (لا default='local')
+                invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL,
+                import_deal_remaining_rate=deal_remaining_rate,
+                import_shipment_remaining_rate=shipment_remaining_rate,
+                import_use_cost_lines=use_cost_lines,
                 status=payload.get('status') or 'incomplete',
                 notes=payload.get('notes'),
                 supplier_invoice_number=payload.get('supplier_invoice_number'),
@@ -1068,11 +1047,6 @@ def recalculate_landed_for_shipment(
                 use_cost_lines=use_cost_lines,
                 ils_currency=inv.currency or get_ils_currency(),
             )
-            merged_lp = merge_local_payments_keep_user_fee_lines(
-                payload.get('local_payments_json') or {},
-                inv.local_payments_json,
-            )
-            payload['local_payments_json'] = merged_lp
             inv.subtotal = payload['subtotal']
             inv.discount_amount = payload['discount_amount']
             inv.tax_amount = payload['tax_amount']
@@ -1080,8 +1054,9 @@ def recalculate_landed_for_shipment(
             inv.shipping_included = payload['shipping_included']
             inv.grand_total = payload['grand_total']
             inv.invoice_name = payload.get('invoice_name')
-            inv.local_payments_json = merged_lp
-            inv.conversion_metadata_json = payload.get('conversion_metadata_json')
+            inv.import_deal_remaining_rate = deal_remaining_rate
+            inv.import_shipment_remaining_rate = shipment_remaining_rate
+            inv.import_use_cost_lines = use_cost_lines
             inv.clearance_id = clr.id
             inv.save()
             inv.items.all().delete()
@@ -1168,17 +1143,10 @@ def compute_live_purchase_invoice_read_payload(inv: PurchaseInvoice) -> Optional
         return None
     if not inv.deal_id or not inv.shipment_id:
         return None
-    meta = inv.conversion_metadata_json if isinstance(inv.conversion_metadata_json, dict) else {}
-    try:
-        dr = Decimal(str(meta.get('remaining_balance_rate_deal', meta.get('remainingBalanceRate', '3.6'))))
-    except Exception:
-        dr = Decimal('3.6')
-    try:
-        sr = Decimal(str(meta.get('remaining_balance_rate_shipment', meta.get('remainingBalanceRate', '3.6'))))
-    except Exception:
-        sr = Decimal('3.6')
-    basis = str(meta.get('clearance_cost_basis', meta.get('clearanceCostBasis', ''))).lower()
-    use_cl = basis == 'cost_lines'
+    # معاملات الاستيراد من الأعمدة المنمّطة (بديل conversion_metadata_json المحذوف في P-D-8)
+    dr = _d(inv.import_deal_remaining_rate, '3.6') if inv.import_deal_remaining_rate else Decimal('3.6')
+    sr = _d(inv.import_shipment_remaining_rate, '3.6') if inv.import_shipment_remaining_rate else Decimal('3.6')
+    use_cl = bool(inv.import_use_cost_lines)
 
     ils = inv.currency or get_ils_currency()
     if not ils:

@@ -65,6 +65,10 @@ class LogisticsDealViewSet(BaseTenantViewSet):
                     queryset=LogisticsDealItem.objects.select_related('product', 'deal'),
                 ),
                 'payments',
+                Prefetch(
+                    'logisticsshipmentdeal_set',
+                    queryset=LogisticsShipmentDeal.objects.select_related('shipment'),
+                ),
             )
         )
 
@@ -114,9 +118,19 @@ class LogisticsDealViewSet(BaseTenantViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    # ج7: الدفع بُعد مالي مستقل عن مسار الشحن — تغيير المرحلة/الحالة وحده لا
+    # يمس القيود فلا يحجبه ترحيل الدفعات؛ الحارس يبقى على التعديلات المالية.
+    STAGE_ONLY_FIELDS = frozenset({'shipping_workflow_status', 'status'})
+
     def perform_update(self, serializer):
         instance = serializer.instance
-        if instance is not None and instance.payments.filter(is_posted=True).exists():
+        incoming = set(getattr(self.request, 'data', {}) or {})
+        stage_only = bool(incoming) and incoming <= self.STAGE_ONLY_FIELDS
+        if (
+            instance is not None
+            and not stage_only
+            and instance.payments.filter(is_posted=True).exists()
+        ):
             raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
         deal = serializer.save()
         log_activity(

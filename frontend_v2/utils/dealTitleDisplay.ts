@@ -16,8 +16,28 @@ export type DealTitleSqlInput = {
 export function isEnglishPaymentOrLegalBoilerplate(s: string): boolean {
     const t = String(s || "").trim();
     if (!t || AR_RE.test(t)) return false;
+    // نص إنجليزي أطول من 80 حرفاً ليس اسم صفقة أبداً — فقرات شروط/شهادات موردين
+    if (t.length > 80) return true;
     const lower = t.toLowerCase();
     if (/\bterms\s+of\s+payment\b/.test(lower)) return true;
+    // «Trade terms: FOB…» / «Payment terms:30%…» — شروط تجارية وليست اسم صفقة
+    if (/\b(?:trade|payment|price|delivery)\s+terms\b/.test(lower)) return true;
+    // «30% of the payment is made in advance…» — نسب دفعات
+    if (
+        t.includes("%") &&
+        /\b(?:advance|deposit|balance|payment)\b/.test(lower) &&
+        t.length > 25
+    ) {
+        return true;
+    }
+    // «Delivery will be within two weeks / 3 workdays…» — مدد تسليم
+    if (
+        /\bdeliver/.test(lower) &&
+        /\b(?:days?|weeks?|workdays?)\b/.test(lower) &&
+        t.length > 25
+    ) {
+        return true;
+    }
     if (/\bbank\s+charges?\b/.test(lower) && t.length > 20) return true;
     if (
         /\b(?:\d{1,2}\s*%|percent)\s*(?:deposit|advance|down)\b/.test(lower) &&
@@ -96,15 +116,20 @@ export function effectiveDealTitleForDisplay(row: DealTitleSqlInput): string {
             }
         }
     }
+    const ref = String(row.ref_number || "").trim();
+    const offer = String(row.original_offer_number || "").trim();
+    // بيانات قديمة خزّنت الاسم العربي في حقل «رقم العرض» — يتقدم على الوصف الإنجليزي
+    if (offer && AR_RE.test(offer) && !/^d-\d+$/i.test(offer)) {
+        return truncateTitle(offer, 220);
+    }
     if (desc && !isEnglishPaymentOrLegalBoilerplate(desc)) {
         return truncateTitle(desc, 220);
     }
-    const ref = String(row.ref_number || "").trim();
-    const offer = String(row.original_offer_number || "").trim();
     if (
         offer &&
         offer.toLowerCase() !== ref.toLowerCase() &&
-        !/^d-\d+$/i.test(offer)
+        !/^d-\d+$/i.test(offer) &&
+        !isEnglishPaymentOrLegalBoilerplate(offer)
     ) {
         return truncateTitle(offer, 220);
     }
@@ -116,6 +141,21 @@ export function hasDedicatedShortDescription(row: DealTitleSqlInput): boolean {
     if (!desc) return false;
     if (AR_RE.test(desc)) return true;
     return !isEnglishPaymentOrLegalBoilerplate(desc);
+}
+
+/**
+ * رقم عرض صالح للعرض في عمود «رقم العرض»: قصير، ليس شروطاً إنجليزية،
+ * ولا يكرر رقم الصفقة. البيانات القديمة خزّنت أوصافاً/شروطاً في هذا الحقل.
+ */
+export function offerNumberForDisplay(
+    offerRaw?: string | null,
+    refNumber?: string | null
+): string {
+    const offer = String(offerRaw || "").trim();
+    if (!offer || offer.length > 40) return "";
+    if (isEnglishPaymentOrLegalBoilerplate(offer)) return "";
+    if (refNumber && offer.toLowerCase() === String(refNumber).trim().toLowerCase()) return "";
+    return offer;
 }
 
 /** أول سطر في الملاحظات يحتوي عربية — بدون الرجوع لرقم الصفقة */

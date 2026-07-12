@@ -28,8 +28,28 @@ def is_english_payment_or_legal_boilerplate(s: str) -> bool:
     t = (s or '').strip()
     if not t or has_arabic(t):
         return False
+    # نص إنجليزي أطول من 80 حرفاً ليس اسم صفقة أبداً — فقرات شروط/شهادات موردين
+    if len(t) > 80:
+        return True
     low = t.lower()
     if re.search(r'\bterms\s+of\s+payment\b', low):
+        return True
+    # «Trade terms: FOB…» / «Payment terms:30%…» — شروط تجارية وليست اسم صفقة
+    if re.search(r'\b(?:trade|payment|price|delivery)\s+terms\b', low):
+        return True
+    # «30% of the payment is made in advance…» — نسب دفعات
+    if (
+        '%' in t
+        and re.search(r'\b(?:advance|deposit|balance|payment)\b', low)
+        and len(t) > 25
+    ):
+        return True
+    # «Delivery will be within two weeks / 3 workdays…» — مدد تسليم
+    if (
+        re.search(r'\bdeliver', low)
+        and re.search(r'\b(?:days?|weeks?|workdays?)\b', low)
+        and len(t) > 25
+    ):
         return True
     if re.search(r'\bplace\s+of\s+origin\b', low) and len(t) > 40:
         return True
