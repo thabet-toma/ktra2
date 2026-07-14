@@ -57,5 +57,8 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     clearanceId: dto.clearance != null ? String(dto.clearance) : undefined,
     supplierSnapshot: { tradeName: dto.partner_name || "" },
     isPosted: Boolean(dto.is_posted),
+    // W7c: مرفقات الفاتورة (صور + PDF) — يستهلكها AttachmentsSection المشترك.
+    quoteImages: dto.quote_images || [],
+    quotePdfs: dto.quote_pdfs || [],
   } as Invoice;
 }

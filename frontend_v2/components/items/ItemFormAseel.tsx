@@ -105,6 +105,9 @@ const ITEM_TYPES = [
 export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, products, onSaved, onCancel }) => {
   const [form, setForm] = useState<FormState>(blankForm());
   const [currentId, setCurrentId] = useState<number | null>(productId);
+  // W10: صنف موجود (تعديل) — اسمه يُحرَّر مباشرةً بحقل نصّي بدل منتقي «اختر/أضف»
+  // الذي كان يحبس الاسم في قائمة منسدلة (نقر «+» يمسح القيمة) فيبدو «غير قابل للتعديل».
+  const isExistingProduct = productId != null;
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -293,10 +296,13 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
         onChange={(e) => patch("item_type", e.target.value)}>
         {ITEM_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
       </select>)}
-      {fld("اسم المنتج (اختر موجوداً لبراند آخر، أو اكتب جديداً)",
-        <ValuePicker value={form.name_ar} onChange={(v) => patch("name_ar", v)}
-          fetchOptions={inventoryApi.getProductNames}
-          emptyLabel="— اختر منتجاً —" addPlaceholder="مثال: 195/65/15" addTitle="منتج جديد" />, 2)}
+      {fld(isExistingProduct ? "اسم المنتج" : "اسم المنتج (اختر موجوداً لبراند آخر، أو اكتب جديداً)",
+        isExistingProduct
+          ? <input className="aseel-input" value={form.name_ar}
+              onChange={(e) => patch("name_ar", e.target.value)} placeholder="اسم المنتج" />
+          : <ValuePicker value={form.name_ar} onChange={(v) => patch("name_ar", v)}
+              fetchOptions={inventoryApi.getProductNames}
+              emptyLabel="— اختر منتجاً —" addPlaceholder="مثال: 195/65/15" addTitle="منتج جديد" />, 2)}
       {fld("اسم الصنف (إنجليزي)", <input className="aseel-input" value={form.name_en}
         onChange={(e) => patch("name_en", e.target.value)} />)}
       {fld("البراند (يظهر بين قوسين)",

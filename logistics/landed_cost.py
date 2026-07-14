@@ -28,6 +28,8 @@ from logistics.text_utils import (
     has_arabic as _has_arabic,
     is_english_payment_or_legal_boilerplate as _is_english_payment_or_legal_boilerplate,
 )
+# M2: the one allocation engine (pure Decimal, no ORM) — freight/customs/reconcile.
+from logistics.domain import allocation
 
 
 Q2 = Decimal('0.01')
@@ -178,6 +180,19 @@ def shipment_freight_ils(shipment: LogisticsShipment, remaining_rate: Decimal) -
     return total_ils, paid_usd, paid_ils, unpaid
 
 
+def clearance_cost_line_dicts(clearance) -> List[dict]:
+    """M4: the {label, amount} list built directly from LogisticsClearanceLine rows,
+    replacing the removed `LogisticsClearance.cost_lines` model shim (D2). amount =
+    debit − credit (same convention the old JSON used, where a credit was negative).
+    Single source for every landed-cost pool sum and the clearance read payload."""
+    out: List[dict] = []
+    for line in clearance.lines.all():
+        amount = _d(getattr(line, 'debit', 0)) - _d(getattr(line, 'credit', 0))
+        out.append({'label': str(getattr(line, 'description', None) or '').strip(),
+                    'amount': amount})
+    return out
+
+
 def _clearance_cost_line_label(row: dict) -> str:
     return str(row.get('label') or '').strip()
 
@@ -191,7 +206,7 @@ def _excluded_from_clearance_pool_label(label: str) -> bool:
 def sum_cost_lines_all_ils(clearance: LogisticsClearance) -> Decimal:
     """كل بنود التخليص بالشيكل (للمقارنة والعرض)."""
     s = Decimal('0')
-    for row in clearance.cost_lines or []:
+    for row in clearance_cost_line_dicts(clearance):
         if not isinstance(row, dict):
             continue
         try:
@@ -202,13 +217,16 @@ def sum_cost_lines_all_ils(clearance: LogisticsClearance) -> Decimal:
 
 
 def clearance_local_transport_superseded_by_localshipment(clearance) -> bool:
-    """Return True when a posted LocalShipment linked to this clearance
+    """Return True when a LocalShipment linked to this clearance
     has capitalize_to_inventory=True — meaning local-transport cost is
     already being capitalized via its own journal entry, so the matching
     cost_lines rows must NOT be counted again in the landed-cost pool."""
     from logistics.models import LocalShipment
+    from django.db.models import Q
+    # is_posted=True: التكلفة تُرسمل عبر قيد الشحنة المحلية فقط بعد الترحيل؛ شحنة محلية
+    # غير مرحّلة لم تُرسمل شيئاً بعد فلا تُلغي احتساب cost_lines (وإلا نقص تكلفة الوصول).
     return LocalShipment.objects.filter(
-        clearance=clearance,
+        Q(clearance=clearance) | Q(shipment=getattr(clearance, 'shipment_id', None)),
         capitalize_to_inventory=True,
         is_posted=True,
     ).exists()
@@ -220,14 +238,22 @@ def sum_local_shipping_from_clearance_cost_lines_ils(
 ) -> Decimal:
     """مجموع أسطر «شحن محلي» داخل cost_lines (قبل ضرب نسبة الصفقة).
 
-    When _check_superseded is True and a posted LocalShipment with
-    capitalize_to_inventory=True exists for this clearance, returns 0
+    When _check_superseded is True and a LocalShipment with
+    capitalize_to_inventory=True exists for this clearance or its shipment, returns its sum
     to avoid double-counting the same transport cost in the landed pool.
     """
     if _check_superseded and clearance_local_transport_superseded_by_localshipment(clearance):
-        return Decimal('0')
+        from logistics.models import LocalShipment
+        from django.db.models import Q
+        lss = LocalShipment.objects.filter(
+            Q(clearance=clearance) | Q(shipment=getattr(clearance, 'shipment_id', None)),
+            capitalize_to_inventory=True,
+            is_posted=True,
+        )
+        total_ls = sum((_d(ls.amount) for ls in lss), Decimal('0'))
+        return total_ls.quantize(Q2, rounding=ROUND_HALF_UP)
     s = Decimal('0')
-    for row in clearance.cost_lines or []:
+    for row in clearance_cost_line_dicts(clearance):
         if not isinstance(row, dict):
             continue
         if _clearance_cost_line_label(row) not in LOCAL_SHIPPING_CLEARANCE_LINE_LABELS:
@@ -242,7 +268,7 @@ def sum_local_shipping_from_clearance_cost_lines_ils(
 def sum_carrier_clearance_cost_line_ils(clearance: LogisticsClearance) -> Decimal:
     """سطر «دفعة الشحن (الناقل)» في التخليص — شحن جانب التخليص وليس ضمن حصة الجمارك."""
     s = Decimal('0')
-    for row in clearance.cost_lines or []:
+    for row in clearance_cost_line_dicts(clearance):
         if not isinstance(row, dict):
             continue
         if _clearance_cost_line_label(row) != SHIPPING_COST_LINE_LABEL:
@@ -265,7 +291,7 @@ def sum_clearance_logistics_for_landed_share_ils(clearance: LogisticsClearance) 
 def sum_cost_lines_ils(clearance: LogisticsClearance) -> Decimal:
     """حوض «تكلفة التخليص» للتوزيع: كل البنود ما عدا شحن الناقل والشحن المحلي المسجّل كبنود."""
     s = Decimal('0')
-    for row in clearance.cost_lines or []:
+    for row in clearance_cost_line_dicts(clearance):
         if not isinstance(row, dict):
             continue
         lb = _clearance_cost_line_label(row)
@@ -398,15 +424,9 @@ def deal_share_on_shipment(deal: LogisticsDeal, shipment: LogisticsShipment) -> 
 
 
 def _deal_measure_for_volume_share(deal: LogisticsDeal, shipment: LogisticsShipment) -> Decimal:
-    """مطابق لتوزيع allocated_shipping على الشحنة: CBM أو وزن حسب pricing_method + unit_type."""
-    method = (getattr(shipment, 'pricing_method', None) or 'total').lower()
-    utype = (getattr(shipment, 'unit_type', None) or 'cbm').lower()
-    if method == 'unit' and utype == 'weight':
-        wkg = getattr(deal, 'total_weight_kg', None)
-        if wkg is not None:
-            return _d(wkg)
-        return _d(getattr(deal, 'total_weight', None), '0')
-    return _d(getattr(deal, 'total_cbm', None), '0')
+    """M2: freight measure = the deal's quantity in the shipment's chargeable unit
+    (explicit `chargeable_unit`, legacy pricing_method×unit_type as fallback)."""
+    return allocation.deal_unit_measure(deal, allocation.resolve_chargeable_unit(shipment))
 
 
 def deal_volume_share_on_shipment(deal: LogisticsDeal, shipment: LogisticsShipment) -> Decimal:
@@ -433,20 +453,10 @@ def deal_volume_share_on_shipment(deal: LogisticsDeal, shipment: LogisticsShipme
 
 
 def distribute_by_weights(total: Decimal, weights: List[Decimal]) -> List[Decimal]:
-    n = len(weights)
-    if n == 0:
-        return []
-    wsum = sum(weights, Decimal('0'))
-    if wsum <= 0:
-        share = (total / Decimal(n)).quantize(Q2, rounding=ROUND_HALF_UP)
-        parts = [share] * n
-    else:
-        raw = [(total * w / wsum) for w in weights]
-        parts = [quantize_money(x) for x in raw]
-    drift = (total - sum(parts, Decimal('0'))).quantize(Q2, rounding=ROUND_HALF_UP)
-    if parts and drift != 0:
-        parts[-1] = (parts[-1] + drift).quantize(Q2, rounding=ROUND_HALF_UP)
-    return parts
+    """M2: single reconciliation path. Delegates to the engine's largest-remainder
+    apportionment (fairer penny placement than the old dump-drift-on-last, same
+    Σ==total invariant). Kept as a thin wrapper so existing call-sites are unchanged."""
+    return allocation.reconcile(total, list(weights))
 
 
 @dataclass
@@ -800,37 +810,40 @@ def build_purchase_invoice_row(
         'deal_transfer_commissions_from_shipment_share_ils': deal_share_ship_xfer_ils,
     }
     items_payload = []
+    # 1. Base Merchandise Lines (Use landed prices directly so ERP inventory gets the full cost)
     for ln in lines:
         items_payload.append({
             'product': ln.product_id,
             'name': ln.name,
             'quantity': ln.quantity,
-            'unit_price': ln.unit_price_merch_ils,
-            'total_price': ln.total_price_merch_ils,
+            'unit_price': ln.landed_unit_price_ils,
+            'total_price': ln.landed_line_total_ils,
             'notes': None,
             'hs_code': ln.hs_code,
             'landed_unit_price_ils': ln.landed_unit_price_ils,
             'landed_line_total_ils': ln.landed_line_total_ils,
         })
 
-    subtotal = sum((it['total_price'] for it in items_payload), Decimal('0')).quantize(Q2, rounding=ROUND_HALF_UP)
-    discount = _d(deal.discount_amount)
-    ship_alloc = extra_meta['deal_ship_allocated_ils']
-    internal_full = extra_meta['internal_shipping_ils']
-    deal_local_clr = extra_meta.get('local_shipping_from_clearance_ils', Decimal('0'))
-    if not deal.is_shipping_included:
-        ship_cost_line = (internal_full + ship_alloc + deal_local_clr).quantize(Q2, rounding=ROUND_HALF_UP)
-    else:
-        ship_cost_line = (ship_alloc + deal_local_clr).quantize(Q2, rounding=ROUND_HALF_UP)
+    # Read calculated costs for local payments (if needed)
     deal_clear = extra_meta['deal_clearance_allocated_ils']
-    local_json = build_local_payments_json(deal_clear)
-    local_sum = _d(local_json['customsClearanceFees'])
+    deal_local_clr = extra_meta.get('local_shipping_from_clearance_ils', Decimal('0'))
+    
+    # 2. New Subtotal includes ALL lines (which already have landed costs)
+    subtotal = sum((it['total_price'] for it in items_payload), Decimal('0')).quantize(Q2, rounding=ROUND_HALF_UP)
+    
+    discount = _d(deal.discount_amount)
+    
+    # 3. Zero out header fields since they are fully embedded in the line items now
+    ship_cost_line = Decimal('0')
+    
+    local_json = build_local_payments_json(Decimal('0'))
+    local_sum = Decimal('0')
 
     tax_amt, grand = compute_tax_and_grand(
         subtotal=subtotal,
         discount=discount,
         shipping_cost_ils=ship_cost_line,
-        shipping_included=bool(deal.is_shipping_included),
+        shipping_included=True,  # Set to True so it doesn't double-add in the compute function
         tax_rate=_d(deal.tax_rate),
         tax_type=str(deal.tax_type or 'percentage'),
         tax_amount_fixed=_d(deal.tax_amount),
@@ -938,6 +951,14 @@ def import_invoices_from_clearance(
             if not LogisticsShipmentDeal.objects.filter(shipment=shipment, deal_id=did).exists():
                 continue
             deal = LogisticsDeal.objects.get(pk=did, tenant=tenant)
+            
+            _, _, _, deal_unpaid_usd = deal_total_ils(deal, deal_remaining_rate)
+            if deal_unpaid_usd > Decimal('0.02'):
+                raise ValueError(
+                    f'لا يمكن استيراد الفاتورة: الصفقة #{deal.ref_number} غير مكتملة الدفع بالدولار ولا يوجد لها تكلفة فعلية نهائية بالشيكل. '
+                    'سجّل الدفعات المؤكّدة حتى يصبح المدفوع مساوياً لإجمالي قيمة الصفقة، ثم أعد المحاولة.'
+                )
+
             payload = build_purchase_invoice_row(
                 deal=deal,
                 shipment=shipment,
@@ -1105,16 +1126,8 @@ def redistribute_shipment_deal_allocations(shipment: LogisticsShipment) -> int:
     if not links:
         return 0
     total_cost = _d(shipment.total_shipping_cost_usd)
-    method = (shipment.pricing_method or 'total').lower()
-    utype = (shipment.unit_type or 'cbm').lower()
-
-    def weight_for_deal(d: LogisticsDeal) -> Decimal:
-        if method == 'unit' and utype == 'weight':
-            w = _d(d.total_weight_kg) if d.total_weight_kg is not None else _d(d.total_weight)
-            return w
-        return _d(d.total_cbm)
-
-    weights = [weight_for_deal(l.deal) for l in links]
+    unit = allocation.resolve_chargeable_unit(shipment)
+    weights = [allocation.deal_unit_measure(l.deal, unit) for l in links]
     wsum = sum(weights, Decimal('0'))
     n = len(links)
     if wsum <= 0:
@@ -1184,3 +1197,102 @@ def _json_friendly_value(x: Any) -> Any:
     if isinstance(x, list):
         return [_json_friendly_value(v) for v in x]
     return x
+
+
+def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:
+    """M5: full backward trace for an International (landed-cost) invoice —
+    Invoice line → Deal → Shipment(freight) → Clearance(customs) → Transport.
+
+    Every cost on every line is traceable to its source: merchandise from the deal,
+    freight from the shipment (chargeable unit + rate + this deal's allocated share),
+    customs from the clearance pool × the deal's value share, inland from the linked
+    Transport rows. Per line we expose merch vs logistics (freight+customs+transport
+    combined) since that is what is persisted on the invoice item.
+    """
+    deal = invoice.deal
+    shipment = invoice.shipment
+    clearance = invoice.clearance
+    if clearance is None and shipment is not None:
+        clearance = LogisticsClearance.objects.filter(shipment=shipment).first()
+
+    sr = _d(invoice.import_shipment_remaining_rate, '3.6') if invoice.import_shipment_remaining_rate else Decimal('3.6')
+    use_cl = bool(invoice.import_use_cost_lines)
+
+    # Deal's share of shipment freight (persisted allocation, USD) + its customs share.
+    deal_freight_alloc = None
+    deal_customs_alloc = None
+    if deal and shipment:
+        link = LogisticsShipmentDeal.objects.filter(shipment=shipment, deal=deal).first()
+        if link:
+            deal_freight_alloc = _d(link.allocated_shipping_cost)
+        if clearance:
+            pool, _src = clearance_pool_ils(clearance, use_cl, sr)
+            share_value = deal_share_on_shipment(deal, shipment)
+            deal_customs_alloc = (pool * share_value).quantize(Q2, rounding=ROUND_HALF_UP)
+
+    # Linked inland transport (Transport rows).
+    from logistics.models import LocalShipment
+    transport_q = LocalShipment.objects.none()
+    if clearance:
+        transport_q = LocalShipment.objects.filter(clearance=clearance)
+    elif shipment:
+        transport_q = LocalShipment.objects.filter(shipment=shipment)
+    transport = [
+        {
+            'id': ls.id,
+            'shipment_number': ls.shipment_number,
+            'carrier': ls.carrier.name if ls.carrier_id else None,
+            'amount': float(_d(ls.amount)),
+            'capitalize_to_inventory': bool(ls.capitalize_to_inventory),
+            'is_posted': bool(ls.is_posted),
+        }
+        for ls in transport_q
+    ]
+
+    lines = []
+    for it in invoice.items.all():
+        merch = _d(it.total_price)
+        landed = _d(it.landed_line_total_ils) if it.landed_line_total_ils is not None else merch
+        lines.append({
+            'name': it.name,
+            'product_id': it.product_id,
+            'quantity': float(_d(it.quantity)),
+            'merch_ils': float(merch),
+            'logistics_ils': float((landed - merch).quantize(Q2, rounding=ROUND_HALF_UP)),
+            'landed_unit_ils': float(_d(it.landed_unit_price_ils)) if it.landed_unit_price_ils is not None else None,
+            'landed_total_ils': float(landed),
+        })
+
+    return {
+        'invoice': {
+            'id': invoice.id,
+            'invoice_number': invoice.invoice_number,
+            'invoice_name': invoice.invoice_name,
+            'invoice_type': invoice.invoice_type,
+            'grand_total': float(_d(invoice.grand_total)),
+            'is_posted': bool(invoice.is_posted),
+        },
+        'deal': None if not deal else {
+            'id': deal.id,
+            'ref_number': deal.ref_number,
+            'partner_name': deal.partner.name if deal.partner_id else None,
+            'total_amount_usd': float(_d(deal.total_amount)),
+            'stage': getattr(deal, 'stage', None),
+        },
+        'shipment': None if not shipment else {
+            'id': shipment.id,
+            'shipment_number': shipment.shipment_number,
+            'chargeable_unit': shipment.chargeable_unit,
+            'freight_rate': float(_d(shipment.freight_rate)) if shipment.freight_rate is not None else None,
+            'total_freight_usd': float(_d(shipment.total_shipping_cost_usd)),
+            'deal_allocated_freight_usd': float(deal_freight_alloc) if deal_freight_alloc is not None else None,
+        },
+        'clearance': None if not clearance else {
+            'id': clearance.id,
+            'declaration_number': clearance.declaration_number,
+            'pool_total_ils': float(sum_cost_lines_all_ils(clearance)),
+            'deal_allocated_customs_ils': float(deal_customs_alloc) if deal_customs_alloc is not None else None,
+        },
+        'transport': transport,
+        'lines': lines,
+    }

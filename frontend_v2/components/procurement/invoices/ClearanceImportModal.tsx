@@ -548,46 +548,6 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                     اختر الصفقات أدناه لإنشاء فواتير بالشيكل
                                                 </p>
                                             </div>
-                                            <div className="flex gap-4">
-                                                <div className="text-left">
-                                                    <label className="block text-[10px] font-bold aseel-text-soft uppercase tracking-widest mb-1">
-                                                        سعر صرف المتبقي (الصفقات)
-                                                    </label>
-                                                    <div className="relative">
-                                                        <TrendingUp className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--color-primary)]" />
-                                                        <input
-                                                            type="number"
-                                                            step="0.001"
-                                                            className="aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl pr-10 pl-4 py-2 w-32 font-bold text-[var(--color-primary)] outline-none focus:ring-2 focus:ring-[var(--color-primary)]"
-                                                            value={dealRemainingRate}
-                                                            onChange={(e) =>
-                                                                setDealRemainingRate(
-                                                                    parseFloat(e.target.value)
-                                                                )
-                                                            }
-                                                        />
-                                                    </div>
-                                                </div>
-                                                <div className="text-left">
-                                                    <label className="block text-[10px] font-bold aseel-text-soft uppercase tracking-widest mb-1">
-                                                        سعر صرف المتبقي (الشحن)
-                                                    </label>
-                                                    <div className="relative">
-                                                        <TrendingUp className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 aseel-text-soft" />
-                                                        <input
-                                                            type="number"
-                                                            step="0.001"
-                                                            className="aseel-bg-field dark:aseel-bg-panel border aseel-border-soft dark:aseel-border-soft rounded-xl pr-10 pl-4 py-2 w-32 font-bold aseel-text-accent outline-none focus:ring-2 focus:ring-blue-500"
-                                                            value={shipmentRemainingRate}
-                                                            onChange={(e) =>
-                                                                setShipmentRemainingRate(
-                                                                    parseFloat(e.target.value)
-                                                                )
-                                                            }
-                                                        />
-                                                    </div>
-                                                </div>
-                                            </div>
                                         </div>
                                     </div>
 

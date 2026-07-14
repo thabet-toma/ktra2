@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { Invoice, User, Supplier } from '../../../types';
 import { formatTaxPercentLabel } from '../../../utils/sqlMoneyRound';
-import { formatMoney } from '../../../utils/formatNumber';
+import { formatMoney, formatQuantity } from '../../../utils/formatNumber';
 import { useTenantSettings } from '../../../hooks/useTenantSettings';
 import { Printer, X, MapPin, Phone, Mail, FileText, Building2, Truck, Hash, Calendar, DollarSign, CreditCard, Edit, ExternalLink, Box } from 'lucide-react';
 
@@ -278,6 +278,10 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                             <div className="flex justify-between pt-2 font-black text-lg aseel-bg-panel -mx-3 px-3 border-t aseel-border-soft">
                                 <span>الإجمالي:</span>
                                 <span className="font-mono" dir="ltr">{formatCurrency(totals.grandTotal)}</span>
+                            </div>
+                            <div className="flex justify-between pt-1.5">
+                                <span className="aseel-text-soft">إجمالي الكمية:</span>
+                                <span className="font-mono font-bold" dir="ltr">{formatQuantity((invoice.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0))}</span>
                             </div>
                         </div>
                     </div>

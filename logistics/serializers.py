@@ -67,9 +67,9 @@ def _quantize_decimal_10_3(value) -> Decimal:
 
 
 def _apply_lines_subtotal_and_grand_total(instance, lines_subtotal):
-    """
-    يطابق frontend DealForm.recalculateTotals: مجمّع البنود → خصم → شحن (إن لم يُضمّن) → ضريبة → total_amount.
-    بدون هذا، كان total_amount يُستبدل بمجموع البنود فقط فيُرفض الحفظ إن وُجدت دفعات مبنية على الإجمالي الكامل.
+    """يطابق DealForm.recalculateTotals (ج8): إجمالي الصفقة الدولية =
+    بضاعة − خصم + شحن داخل الصين. **بلا ضريبة** — الضريبة تُدفع بالتخليص ولا
+    تدخل إجمالي الصفقة ولا سقف دفعات المورد (قرار المالك Q2).
     """
     instance.subtotal = _to_decimal(lines_subtotal)
     discount = _to_decimal(getattr(instance, "discount_amount", None))
@@ -81,27 +81,8 @@ def _apply_lines_subtotal_and_grand_total(instance, lines_subtotal):
     after_discount = instance.subtotal - discount
     if after_discount < 0:
         after_discount = Decimal("0")
-    taxable_base = after_discount + shipping
-    tax_type = str(getattr(instance, "tax_type", None) or "percentage").lower()
-    if tax_type == "amount":
-        tax_amt = _to_decimal(getattr(instance, "tax_amount", None))
-    else:
-        rate = _to_decimal(getattr(instance, "tax_rate", None))
-        tax_amt = (taxable_base * rate / Decimal("100")).quantize(Decimal("0.01"))
-        instance.tax_amount = tax_amt
-    instance.total_amount = (taxable_base + tax_amt).quantize(Decimal("0.01"))
-
-
-def _payments_total_exceeds_deal(payments_data, deal_total) -> bool:
-    if not payments_data:
-        return False
-    try:
-        total = _to_decimal(deal_total)
-        s = sum((_to_decimal(p.get("amount") or 0) for p in payments_data), Decimal("0"))
-    except (TypeError, ValueError):
-        return True
-    eps = Decimal("0.01")
-    return s > total + eps
+    instance.tax_amount = Decimal("0")
+    instance.total_amount = (after_discount + shipping).quantize(Decimal("0.01"))
 
 
 def _coerce_logistics_payment_pk(pay_id_raw):
@@ -112,55 +93,6 @@ def _coerce_logistics_payment_pk(pay_id_raw):
         return int(pay_id_raw)
     except (TypeError, ValueError):
         return None
-
-
-def _payment_amounts_unchanged_for_deal(deal_instance, payments_data) -> bool:
-    """
-    نفس الدفعات (لم يُعدّل المستخدم المبالغ) — يُسمح بالحفظ رغم أن إجمالي الصفقة أصبح أقل من مجموع الدفعات
-    (تعديل لوجستي فقط، أو بيانات قديمة). يدعم: معرّفات SQL، أو طلب بلا id رقمي (واجهة مؤقتة) عبر مقارنة مجموعة المبالغ.
-    """
-    if not payments_data:
-        try:
-            return not deal_instance.payments.exists()
-        except Exception:
-            return False
-    try:
-        existing_list = list(deal_instance.payments.all())
-    except Exception:
-        return False
-    if len(existing_list) != len(payments_data):
-        return False
-
-    def amount_key(x):
-        try:
-            return round(float(x or 0) * 100)
-        except (TypeError, ValueError):
-            return 0
-
-    existing_by_id = {p.id: float(p.amount or 0) for p in existing_list}
-    all_ids_valid = True
-    for row in payments_data:
-        pid = _coerce_logistics_payment_pk(row.get("id"))
-        if pid is None:
-            all_ids_valid = False
-            break
-        if pid not in existing_by_id:
-            all_ids_valid = False
-            break
-        try:
-            new_amt = float(row.get("amount") or 0)
-        except (TypeError, ValueError):
-            return False
-        if abs(existing_by_id[pid] - new_amt) > 0.05:
-            return False
-    if all_ids_valid:
-        return True
-
-    from collections import Counter
-
-    c_exist = Counter(amount_key(p.amount) for p in existing_list)
-    c_pay = Counter(amount_key(row.get("amount")) for row in payments_data)
-    return c_exist == c_pay
 
 
 def _payments_total_exceeds_shipment(payments_data, shipment_cost) -> bool:
@@ -303,7 +235,6 @@ from .models import (
     LogisticsShipment,
     LogisticsClearance,
     LogisticsClearanceLine,
-    LogisticsExpense,
     LogisticsShipmentDeal,
     LogisticsPayment,
     LogisticsClearancePayment,
@@ -362,7 +293,10 @@ class LogisticsDealItemSerializer(serializers.ModelSerializer):
 
 class LogisticsDealSerializer(serializers.ModelSerializer):
     items = LogisticsDealItemSerializer(many=True)
-    payments = LogisticsPaymentSerializer(many=True, required=False)
+    # ج8: الدفعات مورد مستقل (deals/{id}/payments/) — القراءة فقط هنا.
+    # الكتابة المتداخلة كانت جذر «هذا المستند مرحَّل»: أي PATCH كامل للصفقة
+    # يصطدم بحارس الترحيل بعد أول دفعة مرحّلة.
+    payments = LogisticsPaymentSerializer(many=True, read_only=True)
     partner_name = serializers.CharField(source='partner.name', read_only=True)
     partner_legal_name = serializers.CharField(
         source='partner.legal_name', read_only=True, allow_null=True, default=None
@@ -450,7 +384,6 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
-        payments_data = validated_data.pop('payments', [])
         deal = LogisticsDeal.objects.create(**validated_data)
 
         lines_subtotal = Decimal("0")
@@ -462,25 +395,11 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
 
         _apply_lines_subtotal_and_grand_total(deal, lines_subtotal)
         deal.save()
-
-        if _payments_total_exceeds_deal(payments_data, float(deal.total_amount or 0)):
-            raise serializers.ValidationError(
-                {
-                    "payments": "مجموع الدفعات يتجاوز قيمة الصفقة (مجموع البنود). احذف دفعة زائدة أو خفّض المبالغ."
-                }
-            )
-
-        for payment_data in payments_data:
-            LogisticsPayment.objects.create(
-                deal=deal, shipment=None, **payment_data
-            )
-
         return deal
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
-        payments_data = validated_data.pop('payments', None)
-        
+
         # Update Deal fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
@@ -510,85 +429,6 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
 
             _apply_lines_subtotal_and_grand_total(instance, lines_subtotal)
             instance.save()
-            
-        if payments_data is not None:
-            deal_total = float(instance.total_amount or 0)
-            if _payments_total_exceeds_deal(payments_data, deal_total):
-                if not _payment_amounts_unchanged_for_deal(instance, payments_data):
-                    raise serializers.ValidationError(
-                        {
-                            "payments": "مجموع الدفعات يتجاوز قيمة الصفقة. احذف دفعة زائدة أو خفّض المبالغ."
-                        }
-                    )
-
-            keep_payments = []
-            matched_pks = set()
-
-            for payment_data in payments_data:
-                pay_pk = _coerce_logistics_payment_pk(payment_data.get("id"))
-                pay_instance = None
-
-                # 1) مطابقة بمعرّف SQL صريح
-                if pay_pk is not None:
-                    pay_instance = LogisticsPayment.objects.filter(
-                        id=pay_pk, deal=instance
-                    ).first()
-
-                # 2) مطابقة بـ payment_number فقط (بغض النظر عن is_posted أو amount)
-                if pay_instance is None:
-                    pn = payment_data.get("payment_number")
-                    try:
-                        pn_int = int(pn) if pn is not None else None
-                    except (TypeError, ValueError):
-                        pn_int = None
-                    if pn_int is not None:
-                        candidates = (
-                            LogisticsPayment.objects.filter(
-                                deal=instance, payment_number=pn_int
-                            )
-                            .exclude(pk__in=matched_pks)
-                            .order_by("id")
-                        )
-                        pay_instance = candidates.first()
-
-                if pay_instance:
-                    matched_pks.add(pay_instance.pk)
-                    for attr, value in payment_data.items():
-                        if attr in ("id", "deal", "shipment"):
-                            continue
-                        if not pay_instance.is_posted or attr == "notes":
-                            setattr(pay_instance, attr, value)
-                    pay_instance.deal = instance
-                    pay_instance.shipment = None
-                    pay_instance.save()
-                    keep_payments.append(pay_instance.id)
-                else:
-                    create_data = {
-                        k: v
-                        for k, v in payment_data.items()
-                        if k not in ("id", "deal", "shipment")
-                    }
-                    pn_c = create_data.get("payment_number")
-                    if pn_c is not None:
-                        if LogisticsPayment.objects.filter(
-                            deal=instance, payment_number=pn_c
-                        ).exists():
-                            raise serializers.ValidationError(
-                                {
-                                    "payments": (
-                                        f"يوجد بالفعل دفعة بنفس رقم القسط ({pn_c}). "
-                                        "حدّث الصفحة (F5) وتجنّب حفظاً مكرراً."
-                                    )
-                                }
-                            )
-                    new_pay = LogisticsPayment.objects.create(
-                        deal=instance, shipment=None, **create_data
-                    )
-                    keep_payments.append(new_pay.id)
-
-            instance.payments.filter(is_posted=False).exclude(
-                id__in=keep_payments
-            ).delete()
 
         return instance
 
@@ -597,11 +437,23 @@ class LogisticsShipmentDealAllocationSerializer(serializers.ModelSerializer):
 
     deal_ref = serializers.CharField(source="deal.ref_number", read_only=True)
     deal_title = serializers.SerializerMethodField()
+    # M2/UX: expose each deal's CBM/KG so the import wizard can show the measure per
+    # deal and warn when it's missing (a 0 measure means freight can't be allocated).
+    deal_total_cbm = serializers.DecimalField(
+        source="deal.total_cbm", max_digits=10, decimal_places=3, read_only=True)
+    deal_total_weight_kg = serializers.SerializerMethodField()
 
     class Meta:
         model = LogisticsShipmentDeal
-        fields = ["id", "deal", "deal_ref", "deal_title", "allocated_shipping_cost", "extra_costs"]
+        fields = ["id", "deal", "deal_ref", "deal_title", "deal_total_cbm",
+                  "deal_total_weight_kg", "allocated_shipping_cost", "extra_costs"]
         read_only_fields = ["id", "deal"]
+
+    def get_deal_total_weight_kg(self, obj):
+        w = obj.deal.total_weight_kg
+        if w is None:
+            w = obj.deal.total_weight
+        return str(w) if w is not None else "0"
 
     def get_deal_title(self, obj):
         """عنوان عربي للعرض (نفس منطق اسم الفاتورة) — كانت شاشة الاستيراد تعرض «—»."""
@@ -702,15 +554,29 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
     deals_preview = serializers.SerializerMethodField()
     local_shipments = serializers.SerializerMethodField()
     lines = LogisticsClearanceLineSerializer(many=True, read_only=True)
-    # cost_lines: legacy JSON-shape kept for backwards-compat (write+read).
-    # On read it pulls from the @property on the model (which derives from
-    # `lines` rows). On write it triggers `_sync_lines_from_cost_lines`.
-    cost_lines = serializers.JSONField(required=False)
+    # cost_lines: legacy JSON write shape (frontend still posts it). WRITE-ONLY now —
+    # the model `cost_lines` shim (D2) was removed; the read shape is rebuilt from the
+    # serialized `lines` in to_representation, so nothing reads a model property.
+    cost_lines = serializers.JSONField(required=False, write_only=True)
 
     class Meta:
         model = LogisticsClearance
         fields = "__all__"
         read_only_fields = ["id", "tenant"]
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Rebuild the legacy {label, amount} list from the line rows (amount =
+        # debit − credit) so existing frontend read paths keep working post-D2.
+        rows = data.get("lines") or []
+        data["cost_lines"] = [
+            {
+                "label": (r.get("description") or ""),
+                "amount": float((r.get("debit") or 0)) - float((r.get("credit") or 0)),
+            }
+            for r in rows
+        ]
+        return data
 
     def get_local_shipments(self, obj):
         try:
@@ -842,16 +708,6 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
             self._sync_lines_from_cost_lines(instance, cost_lines)
         return instance
 
-class LogisticsExpenseSerializer(serializers.ModelSerializer):
-    expense_account_name = serializers.CharField(source='expense_account.name', read_only=True)
-    payable_account_name = serializers.CharField(source='payable_account.name', read_only=True)
-
-    class Meta:
-        model = LogisticsExpense
-        fields = '__all__'
-        read_only_fields = ['id', 'tenant', 'is_posted', 'journal']
-
-
 class LogisticsClearancePaymentSerializer(serializers.ModelSerializer):
     broker_name = serializers.CharField(source="customs_broker.name", read_only=True)
     journal_id_display = serializers.IntegerField(source="journal.id", read_only=True)
@@ -961,6 +817,57 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
         return obj.items.count()
 
 
+def read_document_images(tenant_id, related_table, related_id):
+    """W7c: روابط الصور المرفقة (غير PDF) من SystemAttachment لأي مستند. مصدر قراءة
+    مشترك (DRY) لعرض المرفقات — يُستخدم لفاتورة الشراء (مرآة منطق صفقة get_quote_images)."""
+    try:
+        from core.models import SystemAttachment
+
+        rows = SystemAttachment.objects.filter(
+            tenant_id=tenant_id, related_table=related_table, related_id=related_id,
+        ).order_by('id')
+        out = []
+        for a in rows:
+            ft = (a.file_type or '').lower()
+            path = (a.file_path or '').lower()
+            if 'pdf' in ft or path.endswith('.pdf'):
+                continue
+            if a.file_path:
+                out.append(a.file_path)
+        return out
+    except Exception:
+        return []
+
+
+def read_document_pdfs(tenant_id, related_table, related_id):
+    """W7c: ملفات PDF المرفقة ({name,url,size,type}) من SystemAttachment لأي مستند."""
+    try:
+        from core.models import SystemAttachment
+
+        rows = SystemAttachment.objects.filter(
+            tenant_id=tenant_id, related_table=related_table, related_id=related_id,
+        ).order_by('id')
+        out = []
+        for a in rows:
+            ft = (a.file_type or '').lower()
+            path = (a.file_path or '').lower()
+            is_pdf = 'pdf' in ft or path.endswith('.pdf')
+            if not is_pdf or not a.file_path:
+                continue
+            name = (a.file_type or 'quote.pdf')
+            if 'quote pdf' in name.lower():
+                name = name.split(':', 1)[-1].strip() or 'quote.pdf'
+            out.append({
+                'name': name[:255],
+                'url': a.file_path,
+                'size': 0,
+                'type': 'application/pdf',
+            })
+        return out
+    except Exception:
+        return []
+
+
 class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     items = PurchaseInvoiceItemSerializer(many=True, required=False)
     fees = PurchaseInvoiceFeeSerializer(many=True, required=False)
@@ -984,6 +891,10 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     )
     # P-H-1: exposed for payment-voucher endpoint (read-only)
     cheques = serializers.SerializerMethodField()
+    # W7c: مرفقات الفاتورة/المرجع (صور + PDF) من SystemAttachment — قراءة فقط،
+    # الحفظ في PurchaseInvoiceViewSet._sync_attachments (نمط الموردين/المنتجات).
+    quote_images = serializers.SerializerMethodField()
+    quote_pdfs = serializers.SerializerMethodField()
     invoice_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     from tenants.models import Currency
     currency = serializers.SlugRelatedField(
@@ -1019,6 +930,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'supplier_invoice_number', 'factory_name',
             'is_posted', 'is_return', 'original_invoice', 'journal', 'journal_id_display',
             'items', 'fees', 'cheques',
+            'quote_images', 'quote_pdfs',
             'created_at', 'updated_at', 'created_by',
         ]
         read_only_fields = ['id', 'is_posted', 'is_return', 'original_invoice', 'journal', 'created_at', 'updated_at', 'receipt_status']
@@ -1026,6 +938,12 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     def get_is_local(self, obj):
         """فاتورة محلية = غير مستوردة (بلا صفقة/شحنة/تخليص) — قابلة للاستلام للمخزن."""
         return not (obj.deal_id or obj.shipment_id or obj.clearance_id)
+
+    def get_quote_images(self, obj):
+        return read_document_images(obj.tenant_id, 'purchase_invoices', obj.id)
+
+    def get_quote_pdfs(self, obj):
+        return read_document_pdfs(obj.tenant_id, 'purchase_invoices', obj.id)
 
     def _computed_amount_paid(self, obj) -> Decimal:
         """المدفوع = نقدي مرفق + دفعات صريحة؛ والفاتورة النقدية المرحَّلة مدفوعة بالكامل."""

@@ -11,6 +11,7 @@ import { Plus, Eye, Edit, Trash2, RefreshCw } from 'lucide-react';
 import { LoadingSpinner } from '../../LoadingSpinner';
 import { ShipmentDetailView } from './ShipmentDetailView';
 import { AseelDenseTable, type DenseColumn } from '../../aseel/AseelDenseTable';
+import { CreateShipmentFromDealsModal } from '../../import-flow/CreateShipmentFromDealsModal';
 import { useAseelIndexKeymap } from '../../aseel/useAseelIndexKeymap';
 import { openInNewTab } from '@/utils/openInNewTab';
 import { useConfirm } from '../../../contexts/ConfirmContext';
@@ -67,6 +68,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     const [typeFilter, setTypeFilter] = useState<'all' | 'sea' | 'air'>('all');
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [viewingShipment, setViewingShipment] = useState<Shipment | null>(null);
+    const [isCreateFromDealsOpen, setIsCreateFromDealsOpen] = useState(false);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
@@ -107,8 +109,10 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
         totalCost: shipments.reduce((sum, s) => sum + (s.totalShippingCostUsd || 0), 0),
     }), [shipments]);
 
+    // «شحنة جديدة» تفتح فاتح اختيار الصفقات الجاهزة (المسار الصحيح: اختر صفقات →
+    // أنشئ شحنة)، بدل الشحنة الفارغة القديمة. «إنشاء بلا صفقات» يبقى متاحاً من الفاتح.
     const handleCreateNew = () => {
-        openInNewTab('/import-flow/new');
+        setIsCreateFromDealsOpen(true);
     };
 
     const handleEdit = (shipment: Shipment) => {
@@ -337,6 +341,21 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                     onClose={() => setViewingShipment(null)}
                 />
             )}
+
+            {/* «شحنة جديدة» = اختَر صفقات جاهزة → أنشئ شحنة (المسار الصحيح). زر
+                «إنشاء شحنة فارغة» داخل الفاتح يبقي مسار الترويسة-أولاً متاحاً. */}
+            <CreateShipmentFromDealsModal
+                isOpen={isCreateFromDealsOpen}
+                onClose={() => setIsCreateFromDealsOpen(false)}
+                onCreated={(shipmentId) => {
+                    setIsCreateFromDealsOpen(false);
+                    openInNewTab(`/import-flow/${encodeURIComponent(String(shipmentId))}`);
+                }}
+                onCreateEmpty={() => {
+                    setIsCreateFromDealsOpen(false);
+                    openInNewTab('/import-flow/new');
+                }}
+            />
         </div>
     );
 };

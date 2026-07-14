@@ -11,7 +11,6 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import (
     LogisticsDeal,
     LogisticsPayment,
-    LogisticsExpense,
     LogisticsShipment,
     LogisticsShipmentDeal,
     LogisticsClearance,
@@ -105,62 +104,6 @@ def log_payment_save(sender, instance, created, **kwargs):
         instance.is_posted,
     )
 
-@receiver(post_save, sender=LogisticsExpense)
-def automate_expense_accounting(sender, instance, created, **kwargs):
-    """
-    Automate accounting for LogisticsExpense.
-    Debit: Expense Account | Credit: Liability Account
-    يعمل فقط عند الإنشاء لأول مرة (created=True) لمنع قيود مكررة عند التعديل.
-    """
-    if not created:
-        return
-    if not instance.is_posted and instance.expense_account and instance.payable_account:
-        try:
-            from decimal import Decimal
-            from tenants.models import Currency
-            from accounting.services import get_exchange_rate, post_journal
-
-            expense_currency = getattr(instance, 'currency', None)
-            base_currency = Currency.objects.filter(IsBaseCurrency=True).first()
-            is_foreign = (
-                expense_currency and base_currency
-                and expense_currency.pk != base_currency.pk
-            )
-
-            if is_foreign:
-                rate = get_exchange_rate(
-                    tenant_id=instance.tenant_id,
-                    from_currency_id=expense_currency.pk,
-                    to_currency_id=base_currency.pk,
-                    effective_date=instance.invoice_date or datetime.date.today(),
-                )
-            else:
-                rate = Decimal('1')
-
-            txn_amount = Decimal(str(instance.amount or 0))
-            td = instance.invoice_date or datetime.date.today()
-
-            lines_data = [
-                {"account": instance.expense_account_id, "debit": txn_amount, "credit": Decimal("0"), "description": f"مصروف لوجستي: {instance.description}"},
-                {"account": instance.payable_account_id, "debit": Decimal("0"), "credit": txn_amount, "description": f"مصروف لوجستي: {instance.description}"},
-            ]
-
-            journal = post_journal(
-                tenant_id=instance.tenant_id,
-                transaction_date=td,
-                reference_type='LOGISTICS_EXPENSE',
-                reference_id=instance.id,
-                description=f"مصروف لوجستي (Auto): {instance.description} ({instance.related_type} #{instance.related_id})",
-                lines_data=lines_data,
-                currency=expense_currency,
-                exchange_rate=rate,
-            )
-
-            LogisticsExpense.objects.filter(id=instance.id).update(is_posted=True, journal=journal)
-        except (ValidationError, DjangoValidationError, IntegrityError) as e:
-            logger.error("Error automating LogisticsExpense %s: %s", instance.id, e)
-
-
 def _quantize_shipment_measure_10_3(val) -> Decimal:
     """مطابقة Decimal(10,3) على الشحنة — بدون float يفسد الدقة أو يتجاوز max_digits."""
     try:
@@ -219,35 +162,47 @@ def resync_shipment_totals_on_deal_save(sender, instance, **kwargs):
         _resync_shipment_totals_from_deals(sid)
 
 
+# ── M3: terminal stages the automated advances must not regress ──
+_STAGE_TERMINAL = frozenset({
+    LogisticsDeal.STAGE_INVOICED,
+    LogisticsDeal.STAGE_CLOSED,
+    LogisticsDeal.STAGE_CANCELLED,
+})
+
+
+def _advance_deals_through_service(deals, target):
+    """M3: route automated stage advances through the ONE guarded service instead
+    of bulk .update() (which bypassed the FSM guard — RC-7). Skips deals already at
+    a terminal stage so a later clearance/invoice can't drag a released deal back."""
+    from logistics.domain.stages import advance_deal_stage, derive_stage
+    for deal in deals:
+        if derive_stage(deal) in _STAGE_TERMINAL:
+            continue
+        advance_deal_stage(deal, target, force=True)
+
+
 @receiver(post_save, sender=LogisticsShipmentDeal)
 def sync_deal_workflow_on_shipment_link(sender, instance, created, **kwargs):
-    """ربط الصفقة بشحنة → بانتظار وصول الشحنة."""
+    """ربط الصفقة بشحنة → ضمن شحنة (in_shipment) عبر خدمة المراحل المحروسة."""
     _resync_shipment_totals_from_deals(instance.shipment_id)
     if not created:
         return
-    deal = instance.deal
-    if deal.shipping_workflow_status == "sw_released":
-        return
-    LogisticsDeal.objects.filter(pk=deal.pk).exclude(
-        shipping_workflow_status="sw_released"
-    ).update(shipping_workflow_status="sw_wait_arrival")
+    _advance_deals_through_service([instance.deal], LogisticsDeal.STAGE_IN_SHIPMENT)
 
 
 @receiver(post_save, sender=LogisticsClearance)
 def sync_deal_workflow_on_clearance(sender, instance, created, **kwargs):
-    """عند إنشاء سجل تخليص جديد لشحنة → تقديم حالة الصفقات والشحنة إلى مرحلة التخليص."""
+    """إنشاء تخليص لشحنة → تقديم صفقاتها إلى مرحلة التخليص + وسم الشحنة."""
     if not created:
         return
     try:
         shipment = instance.shipment
     except Exception:
         return
-    deal_ids = list(shipment.deals.values_list("pk", flat=True))
-    if not deal_ids:
+    deals = list(shipment.deals.all())
+    if not deals:
         return
-    LogisticsDeal.objects.filter(pk__in=deal_ids).exclude(
-        shipping_workflow_status="sw_released"
-    ).update(shipping_workflow_status="sw_wait_clearance")
+    _advance_deals_through_service(deals, LogisticsDeal.STAGE_AT_CLEARANCE)
     LogisticsShipment.objects.filter(pk=shipment.pk).update(
         shipment_route_status="israel_customs_clearance",
         status="Clearing",
@@ -269,11 +224,14 @@ def release_deal_on_purchase_invoice(sender, instance, created, **kwargs):
     """
     if not created or not instance.deal_id:
         return
-    changed = LogisticsDeal.objects.filter(pk=instance.deal_id).exclude(
-        shipping_workflow_status="sw_released"
-    ).update(shipping_workflow_status="sw_released")
-    if changed:
-        recalculate_deal_payment_status(instance.deal_id)
+    deal = LogisticsDeal.objects.filter(pk=instance.deal_id).first()
+    if not deal:
+        return
+    from logistics.domain.stages import advance_deal_stage, derive_stage
+    if derive_stage(deal) in (LogisticsDeal.STAGE_CLOSED, LogisticsDeal.STAGE_CANCELLED):
+        return
+    # INVOICED is the release stage; advance_deal_stage also resyncs payment_status.
+    advance_deal_stage(deal, LogisticsDeal.STAGE_INVOICED, force=True)
 
 
 @receiver(post_save, sender=LogisticsShipment)

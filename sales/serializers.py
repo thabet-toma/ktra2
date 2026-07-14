@@ -19,10 +19,19 @@ from .models import (
     SalesSettings,
 )
 from .services import (
+    guard_loss_invoice,
     next_credit_debit_note_number,
     next_invoice_number,
     recalculate_invoice_amounts,
 )
+
+
+def _run_loss_guard(invoice, lines):
+    """W1: يشغّل حارس الخسارة على مستوى السطر عند الحفظ (لا الترحيل فقط). يفترض أن
+    `lines` جُلبت بـ select_related('product') وأن `recalculate_invoice_amounts`
+    مُلئت مسبقاً. لا يفعل شيئاً إن كان الإعداد مطفأً أو الفاتورة مرجعاً."""
+    products_by_id = {l.product_id: l.product for l in lines}
+    guard_loss_invoice(invoice, lines, products_by_id)
 
 
 def _as_product(value):
@@ -298,12 +307,13 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
                     rw = dict(row)
                     rw.pop("id", None)
                     SalesInvoiceLine.objects.create(tenant=tenant, invoice=inv, **rw)
-                lines = list(inv.lines.select_related("tax_rate", "tax_rate__tax_account"))
+                lines = list(inv.lines.select_related("tax_rate", "tax_rate__tax_account", "product"))
                 recalculate_invoice_amounts(inv, lines)
                 SalesInvoiceLine.objects.bulk_update(
                     lines,
                     ["line_total_excl_tax", "line_tax_amount"],
                 )
+                _run_loss_guard(inv, lines)
                 inv.save(
                     update_fields=[
                         "subtotal_excl_tax",
@@ -323,12 +333,13 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
                         rw = dict(row)
                         rw.pop("id", None)
                         SalesInvoiceLine.objects.create(tenant=tenant, invoice=inv, **rw)
-                    lines = list(inv.lines.select_related("tax_rate", "tax_rate__tax_account"))
+                    lines = list(inv.lines.select_related("tax_rate", "tax_rate__tax_account", "product"))
                     recalculate_invoice_amounts(inv, lines)
                     SalesInvoiceLine.objects.bulk_update(
                         lines,
                         ["line_total_excl_tax", "line_tax_amount"],
                     )
+                    _run_loss_guard(inv, lines)
                     inv.save(
                         update_fields=[
                             "subtotal_excl_tax",
@@ -344,65 +355,69 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
         if instance.status != SalesInvoice.STATUS_DRAFT:
             raise serializers.ValidationError("لا يمكن تعديل فاتورة مرحّلة أو ملغاة.")
         lines_data = validated_data.pop("lines", None)
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
-        tenant = instance.tenant
-        if lines_data is not None:
-            if not lines_data:
-                raise serializers.ValidationError({"lines": "يجب إضافة بند واحد على الأقل."})
-            for row in lines_data:
-                raw = dict(row)
-                prod = _as_product(raw.get("product"))
-                if prod is None:
-                    raise serializers.ValidationError(
-                        {"lines": f"صنف غير موجود: {raw.get('product')}"}
-                    )
-                if prod.tenant_id != tenant.TenantID:
-                    raise serializers.ValidationError(
-                        {"lines": f"الصنف {prod.sku} لا يتبع نفس الشركة."}
-                    )
-            stock_flag = validated_data.get("stock_on_post", instance.stock_on_post)
-            _upd_is_return = instance.invoice_kind in (
-                SalesInvoice.INVOICE_KIND_SALE_RETURN,
-                SalesInvoice.INVOICE_KIND_PURCHASE_RETURN,
-            )
-            _validate_stock_lines(tenant, lines_data, stock_flag, is_return=_upd_is_return)
-            kept: set[int] = set()
-            for row in lines_data:
-                raw = dict(row)
-                lid = raw.pop("id", None)
-                if lid is not None and str(lid).strip() == "":
-                    lid = None
-                if lid:
-                    line = SalesInvoiceLine.objects.filter(pk=lid, invoice=instance).first()
-                    if not line:
+        # W1: التعديل ذرّي — حارس الخسارة على مستوى السطر يرفع ValidationError داخل
+        # المعاملة فيتراجع كل الحفظ (لا تُحفظ مسودة بخسارة).
+        with transaction.atomic():
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+            instance.save()
+            tenant = instance.tenant
+            if lines_data is not None:
+                if not lines_data:
+                    raise serializers.ValidationError({"lines": "يجب إضافة بند واحد على الأقل."})
+                for row in lines_data:
+                    raw = dict(row)
+                    prod = _as_product(raw.get("product"))
+                    if prod is None:
                         raise serializers.ValidationError(
-                            {"lines": f"سطر غير موجود أو لا يتبع الفاتورة: {lid}"}
+                            {"lines": f"صنف غير موجود: {raw.get('product')}"}
                         )
-                    for key, val in raw.items():
-                        setattr(line, key, val)
-                    line.save()
-                    kept.add(line.id)
-                else:
-                    line = SalesInvoiceLine.objects.create(
-                        tenant=tenant, invoice=instance, **raw
-                    )
-                    kept.add(line.id)
-            SalesInvoiceLine.objects.filter(invoice=instance).exclude(pk__in=kept).delete()
-        lines = list(instance.lines.select_related("tax_rate", "tax_rate__tax_account"))
-        recalculate_invoice_amounts(instance, lines)
-        SalesInvoiceLine.objects.bulk_update(
-            lines,
-            ["line_total_excl_tax", "line_tax_amount"],
-        )
-        instance.save(
-            update_fields=[
-                "subtotal_excl_tax",
-                "tax_amount",
-                "grand_total",
-            ]
-        )
+                    if prod.tenant_id != tenant.TenantID:
+                        raise serializers.ValidationError(
+                            {"lines": f"الصنف {prod.sku} لا يتبع نفس الشركة."}
+                        )
+                stock_flag = validated_data.get("stock_on_post", instance.stock_on_post)
+                _upd_is_return = instance.invoice_kind in (
+                    SalesInvoice.INVOICE_KIND_SALE_RETURN,
+                    SalesInvoice.INVOICE_KIND_PURCHASE_RETURN,
+                )
+                _validate_stock_lines(tenant, lines_data, stock_flag, is_return=_upd_is_return)
+                kept: set[int] = set()
+                for row in lines_data:
+                    raw = dict(row)
+                    lid = raw.pop("id", None)
+                    if lid is not None and str(lid).strip() == "":
+                        lid = None
+                    if lid:
+                        line = SalesInvoiceLine.objects.filter(pk=lid, invoice=instance).first()
+                        if not line:
+                            raise serializers.ValidationError(
+                                {"lines": f"سطر غير موجود أو لا يتبع الفاتورة: {lid}"}
+                            )
+                        for key, val in raw.items():
+                            setattr(line, key, val)
+                        line.save()
+                        kept.add(line.id)
+                    else:
+                        line = SalesInvoiceLine.objects.create(
+                            tenant=tenant, invoice=instance, **raw
+                        )
+                        kept.add(line.id)
+                SalesInvoiceLine.objects.filter(invoice=instance).exclude(pk__in=kept).delete()
+            lines = list(instance.lines.select_related("tax_rate", "tax_rate__tax_account", "product"))
+            recalculate_invoice_amounts(instance, lines)
+            SalesInvoiceLine.objects.bulk_update(
+                lines,
+                ["line_total_excl_tax", "line_tax_amount"],
+            )
+            _run_loss_guard(instance, lines)
+            instance.save(
+                update_fields=[
+                    "subtotal_excl_tax",
+                    "tax_amount",
+                    "grand_total",
+                ]
+            )
         return instance
 
 

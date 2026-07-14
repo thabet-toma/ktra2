@@ -9,9 +9,10 @@ import { priceOffersService, suppliersService } from '../../services/firestoreSe
 import { dealsService } from '../../services/dealsService';
 import { DealForm } from './deals/DealForm';
 import { DealPrintView } from './deals/DealPrintView';
-import { Plus, FileInput, Printer, Edit2, Trash2, RefreshCw } from 'lucide-react';
+import { Plus, FileInput, Printer, Edit2, Trash2, RefreshCw, Ship } from 'lucide-react';
 import { LoadingSpinner } from '../LoadingSpinner';
 import { PriceOfferSelectionModal } from './price-offers/PriceOfferSelectionModal';
+import { CreateShipmentFromDealsModal } from '../import-flow/CreateShipmentFromDealsModal';
 import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
 import { useConfirm } from '../../contexts/ConfirmContext';
@@ -94,6 +95,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
+    const [isShipmentModalOpen, setIsShipmentModalOpen] = useState(false);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
@@ -524,6 +526,13 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 </button>
                 <button
                     className="aseel-toolbtn"
+                    onClick={() => setIsShipmentModalOpen(true)}
+                    title="إنشاء شحنة من صفقات جاهزة للشحن (اختيار متعدد)"
+                >
+                    <Ship style={{ width: 14, height: 14 }} /> شحنة من الصفقات
+                </button>
+                <button
+                    className="aseel-toolbtn"
                     onClick={handleCreateNew}
                     title="صفقة جديدة (Ctrl+Ins)"
                 >
@@ -548,6 +557,21 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                         </span>
                     ) : undefined
                 }
+            />
+
+            {/* M1 — إنشاء شحنة من صفقات جاهزة (اختيار متعدد) */}
+            <CreateShipmentFromDealsModal
+                isOpen={isShipmentModalOpen}
+                onClose={() => setIsShipmentModalOpen(false)}
+                onCreated={(shipmentId) => {
+                    setIsShipmentModalOpen(false);
+                    // افتح رحلة الاستيراد للشحنة الجديدة في تبويب جديد (يحفظ سياق القائمة)
+                    window.open(
+                        `${window.location.origin}/import-flow/${encodeURIComponent(String(shipmentId))}`,
+                        '_blank',
+                        'noopener,noreferrer',
+                    );
+                }}
             />
 
             {/* Modal اختيار العرض */}

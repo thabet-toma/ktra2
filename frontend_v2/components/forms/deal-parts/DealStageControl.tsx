@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Factory,
   CheckCircle,
@@ -8,6 +9,7 @@ import {
   Anchor,
   Ship,
   ExternalLink,
+  ArrowLeft,
   DollarSign,
 } from "lucide-react";
 import type { ShippingWorkflowStatus } from "@/types/deal";
@@ -79,6 +81,7 @@ export const DealStageControl: React.FC<StageProps> = ({
   onShippingWorkflowChange,
 }) => {
   const confirm = useConfirm();
+  const navigate = useNavigate();
   const [wfLoading, setWfLoading] = useState(false);
 
   const wf = (data.shippingWorkflowStatus || null) as ShippingWorkflowStatus | null;
@@ -88,6 +91,34 @@ export const DealStageControl: React.FC<StageProps> = ({
   const inAutoPhase = currentIdx >= WF_ORDER.sw_wait_arrival;
   const pay = paymentSummary(data);
   const shipment = data.linkedShipment || null;
+
+  /* ج8 (M5): «الخطوة التالية» — زر واحد يقود الرحلة من الصفقة للأمام دون أن
+     يبحث المستخدم عن الشاشة. بلا شحنة: يفتح رحلة استيراد جديدة مع فاتح ضمّ
+     الصفقة جاهزاً. مع شحنة: يقفز لتبويب الإجراء التالي (تخليص/الحسابات). */
+  const nextStep: { label: string; hint: string; go: () => void } | null =
+    isReleased || isCancelled || !data.id
+      ? null
+      : shipment
+        ? {
+            label: `متابعة رحلة الاستيراد — ${shipment.shipmentName || shipment.shipmentNumber || `#${shipment.id}`}`,
+            hint:
+              currentIdx >= WF_ORDER.sw_wait_clearance
+                ? "أكمل التخليص ثم حوّل إلى فاتورة شراء دولية."
+                : "تابع الشحن الدولي والتخليص حتى تحويلها إلى فاتورة.",
+            go: () => {
+              const tab =
+                currentIdx >= WF_ORDER.sw_wait_clearance ? "clearance" : "deals";
+              navigate(`/import-flow/${shipment.id}?tab=${tab}`);
+            },
+          }
+        : {
+            label: "ابدأ الشحن الدولي — اضمم الصفقة إلى شحنة",
+            hint: "تُفتح رحلة استيراد جديدة وفاتح ضمّ الصفقات جاهز — اختر هذه الصفقة.",
+            go: () =>
+              navigate(
+                `/import-flow/new?tab=deals&join_deal=${encodeURIComponent(String(data.id))}`
+              ),
+          };
 
   const handleCancelDeal = async () => {
     const ok = await confirm({
@@ -147,6 +178,24 @@ export const DealStageControl: React.FC<StageProps> = ({
       <p className="text-xs text-gray-500 dark:text-gray-400 -mt-3">
         حالة الدفع مستقلة عن مرحلة الشحن — الدفعات لا تمنع تقدّم المراحل، والمراحل لا تمنع الدفع.
       </p>
+
+      {/* ج8 (M5): الخطوة التالية — CTA الرحلة الواحدة */}
+      {nextStep && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border-2 border-blue-300 dark:border-blue-700 bg-blue-50/70 dark:bg-blue-900/20 px-4 py-3">
+          <div className="text-sm text-blue-900 dark:text-blue-100">
+            <span className="font-bold block">الخطوة التالية</span>
+            <span className="text-xs opacity-90">{nextStep.hint}</span>
+          </div>
+          <button
+            type="button"
+            onClick={nextStep.go}
+            className="shrink-0 inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold shadow-sm shadow-blue-500/30"
+          >
+            {nextStep.label}
+            <ArrowLeft className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* خريطة المسار الموحّدة صفقة → فاتورة */}
       <div className="border-t border-gray-200 dark:border-gray-700 pt-5">

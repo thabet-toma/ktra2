@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { useTenantSettings } from '../../hooks/useTenantSettings';
 import { Printer, X, FileText, Building2 } from 'lucide-react';
-import { formatMoney } from '../../utils/formatNumber';
+import { formatMoney, formatQuantity } from '../../utils/formatNumber';
 import type { PartnerRow, ProductRow, DraftLine } from './SalesInvoiceEditor';
 
 export interface SalesPrintData {
@@ -189,6 +189,10 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                             <div className="flex justify-between pt-2 font-black text-lg aseel-bg-panel -mx-3 px-3 border-t aseel-border-soft text-white">
                                 <span>الإجمالي:</span>
                                 <span className="font-mono" dir="ltr">{formatMoney(data.totals.grandTotal)} {curr}</span>
+                            </div>
+                            <div className="flex justify-between pt-1.5">
+                                <span className="aseel-text-soft">إجمالي الكمية:</span>
+                                <span className="font-mono font-bold" dir="ltr">{formatQuantity(data.lines.reduce((s, l) => l.product === "" ? s : s + (Number(l.quantity) || 0), 0))}</span>
                             </div>
                         </div>
                     </div>

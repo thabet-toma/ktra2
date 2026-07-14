@@ -10,10 +10,6 @@ import {
   legacyDescriptionFromMisfiledOfferNumber,
 } from "../utils/dealTitleDisplay";
 import { pickBestDealPayment } from "../utils/dealPaymentMatch";
-import {
-  assertDealPaymentsNotOverTotal,
-  dedupeDealPaymentsForPatch,
-} from "../utils/dealPaymentLimits";
 import { apiDelete, apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "./restApi";
 
 export type PaymentPostingDiagnostics = {
@@ -356,6 +352,63 @@ function mapDealFromSql(d: SqlDeal): Deal {
   };
 }
 
+/**
+ * ج8: تحويل دفعة واحدة إلى payload الخادم — يُستخدم من endpoints الدفعة المستقلة
+ * (POST/PATCH deals/{id}/payments/) وكذلك عرض الصفقة القديم. مصدر واحد للحقيقة
+ * لمخطّط الدفعة (بدل تكراره في كل مسار كتابة).
+ */
+function mapSinglePaymentToSqlPayload(
+  p: Partial<DealPayment> & Record<string, any>,
+  idx = 0
+): Record<string, any> {
+  const swift =
+    p.bankSwiftImage && String(p.bankSwiftImage).trim()
+      ? String(p.bankSwiftImage).trim().slice(0, 500)
+      : undefined;
+  const claimDoc =
+    p.alibabaClaimImage && String(p.alibabaClaimImage).trim()
+      ? String(p.alibabaClaimImage).trim().slice(0, 500)
+      : undefined;
+  const confDateRaw = p.confirmedAt || p.paymentConfirmationDate;
+  const confirmation_date = confDateRaw
+    ? String(confDateRaw).slice(0, 10)
+    : null;
+  const payNo =
+    Number(p.installmentNumber) > 0 ? Number(p.installmentNumber) : idx + 1;
+  return {
+    id: p.id && /^\d+$/.test(String(p.id)) ? Number(p.id) : undefined,
+    payment_number: payNo,
+    title: p.type || (p as any).title || `Payment ${idx + 1}`,
+    amount: Number(p.amount || 0),
+    transfer_date: p.paymentDate ? String(p.paymentDate).slice(0, 10) : null,
+    due_date: p.paymentDate ? String(p.paymentDate).slice(0, 10) : null,
+    // Paid يفعّل ترحيل التلقائي — يجب أن يصل لـ SQL مع السليب والصندوق
+    status: p.confirmedBySupplier
+      ? "Confirmed"
+      : swift
+        ? "Paid"
+        : "Pending",
+    notes: p.notes || "",
+    cash_box_external_id: p.cashBoxId || (p as any).cash_box_external_id || undefined,
+    ...(swift ? { bank_swift_image: swift } : {}),
+    ...(claimDoc ? { claim_doc: claimDoc } : {}),
+    confirmed_by_supplier: Boolean(p.confirmedBySupplier),
+    usd_to_ils: Number(p.usdToIls ?? (p as any).usd_to_ils ?? 3.5),
+    transfer_cost: Number(p.transferCost ?? (p as any).transfer_cost ?? 0),
+    ...(p.supplierConfirmationImage && String(p.supplierConfirmationImage).trim()
+      ? {
+          supplier_confirmation_image: String(p.supplierConfirmationImage)
+            .trim()
+            .slice(0, 500),
+        }
+      : {}),
+    ...(p.supplierNotes ? { supplier_notes: String(p.supplierNotes) } : {}),
+    ...(confirmation_date && confirmation_date.length >= 8
+      ? { confirmation_date }
+      : {}),
+  };
+}
+
 function mapDealToSqlPayload(deal: Partial<Deal>): Record<string, any> {
   const items = (deal.items || []).map((i: any) => ({
     id: i.id && /^\d+$/.test(String(i.id)) ? Number(i.id) : undefined,
@@ -364,55 +417,6 @@ function mapDealToSqlPayload(deal: Partial<Deal>): Record<string, any> {
     unit_price: Number(i.unitPrice || 0),
     notes: i.notes || i.specifications || "",
   }));
-
-  const payments = (deal.payments || []).map((p: any, idx: number) => {
-    const swift =
-      p.bankSwiftImage && String(p.bankSwiftImage).trim()
-        ? String(p.bankSwiftImage).trim().slice(0, 500)
-        : undefined;
-    const claimDoc =
-      p.alibabaClaimImage && String(p.alibabaClaimImage).trim()
-        ? String(p.alibabaClaimImage).trim().slice(0, 500)
-        : undefined;
-    const confDateRaw = p.confirmedAt || p.paymentConfirmationDate;
-    const confirmation_date = confDateRaw
-      ? String(confDateRaw).slice(0, 10)
-      : null;
-    const payNo =
-      Number(p.installmentNumber) > 0 ? Number(p.installmentNumber) : idx + 1;
-        return {
-      id: p.id && /^\d+$/.test(String(p.id)) ? Number(p.id) : undefined,
-      payment_number: payNo,
-      title: p.type || p.title || `Payment ${idx + 1}`,
-      amount: Number(p.amount || 0),
-      transfer_date: p.paymentDate ? String(p.paymentDate).slice(0, 10) : null,
-      due_date: p.paymentDate ? String(p.paymentDate).slice(0, 10) : null,
-      // Paid يفعّل ترحيل التلقائي — يجب أن يصل لـ SQL مع السليب والصندوق
-      status: p.confirmedBySupplier
-        ? "Confirmed"
-        : swift
-          ? "Paid"
-          : "Pending",
-      notes: p.notes || "",
-      cash_box_external_id: p.cashBoxId || p.cash_box_external_id || undefined,
-      ...(swift ? { bank_swift_image: swift } : {}),
-      ...(claimDoc ? { claim_doc: claimDoc } : {}),
-      confirmed_by_supplier: Boolean(p.confirmedBySupplier),
-      usd_to_ils: Number(p.usdToIls ?? p.usd_to_ils ?? 3.5),
-      transfer_cost: Number(p.transferCost ?? p.transfer_cost ?? 0),
-      ...(p.supplierConfirmationImage && String(p.supplierConfirmationImage).trim()
-        ? {
-            supplier_confirmation_image: String(p.supplierConfirmationImage)
-              .trim()
-              .slice(0, 500),
-          }
-        : {}),
-      ...(p.supplierNotes ? { supplier_notes: String(p.supplierNotes) } : {}),
-      ...(confirmation_date && confirmation_date.length >= 8
-        ? { confirmation_date }
-        : {}),
-        };
-      });
 
   const supplierRaw = (deal.supplierId || "").toString();
   const partner = /^\d+$/.test(supplierRaw) ? Number(supplierRaw) : undefined;
@@ -426,7 +430,8 @@ function mapDealToSqlPayload(deal: Partial<Deal>): Record<string, any> {
     notes: deal.internalNotes || "",
     currency: 1,
     items,
-    payments,
+    // ج8: الدفعات مورد مستقل (deals/{id}/payments/) — لا تُرسَل داخل payload الصفقة
+    // (الخادم يتجاهلها read_only، والواجهة تكتبها عبر endpoints الدفعة المخصّصة).
     subtotal: Number(deal.subtotal || 0),
     total_amount: Number(deal.totalAmount || 0),
     remaining_amount: Number(deal.remainingAmount || 0),
@@ -460,53 +465,9 @@ function isNumericSqlPaymentId(id: string | number | undefined): boolean {
   return /^\d+$/.test(String(id));
 }
 
-/** مطابقة معرفات الدفعة بين الواجهة والخادم (رقم JSON مقابل نص، إلخ) */
-function sameDealPaymentId(a: unknown, b: unknown): boolean {
-  return String(a ?? "") === String(b ?? "");
-}
-
-/**
- * بعد PATCH قد يُنشأ صف دفعة بمعرّف SQL جديد (كان الواجهة تستخدم tmp-…).
- * نحل المعرّف الصحيح لـ post_payment وواجهة التشخيص.
- */
-function resolvePaymentIdForApi(
-  requestedId: string,
-  beforeRow: DealPayment | undefined,
-  refreshedPayments: DealPayment[] | undefined
-): string {
-  const list = refreshedPayments || [];
-  const direct = list.find((x) => String(x.id) === String(requestedId));
-  if (direct && isNumericSqlPaymentId(direct.id)) {
-    return String(direct.id);
-  }
-  if (isNumericSqlPaymentId(requestedId)) {
-    return String(requestedId);
-  }
-  if (beforeRow) {
-    const amt = Number(beforeRow.amount || 0);
-    const inst = beforeRow.installmentNumber;
-    const typ = String(beforeRow.type || "").trim();
-    const candidates = list.filter((p) => {
-      const sameAmt = Math.abs(Number(p.amount || 0) - amt) < 0.02;
-      const sameInst =
-        inst == null ||
-        p.installmentNumber === inst ||
-        Number(p.installmentNumber) === Number(inst);
-      const sameType = !typ || String(p.type || "").trim() === typ;
-      return sameAmt && sameInst && sameType;
-    });
-    const confirmed = candidates.find((p) => p.confirmedBySupplier);
-    const pick = confirmed || candidates[0];
-    if (pick && isNumericSqlPaymentId(pick.id)) {
-      return String(pick.id);
-    }
-  }
-  const numericRows = list.filter((p) => isNumericSqlPaymentId(p.id));
-  if (numericRows.length === 1) {
-    return String(numericRows[0].id);
-  }
-  return requestedId;
-}
+// ج8: sameDealPaymentId + resolvePaymentIdForApi حُذفتا — كانتا تعوّضان عن
+// معرّفات tmp- الناتجة عن الكتابة المتداخلة؛ بعد فصل الدفعات صار المعرّف حقيقياً
+// دائماً من endpoint الإنشاء، فلا حاجة لأي مطابقة تخمينية.
 
 async function fetchDealsMapped(): Promise<Deal[]> {
   const rows = await apiGetList<SqlDeal>("logistics/deals/", { tenantId: getTenantId() });
@@ -582,12 +543,7 @@ export const dealsService = {
       ...dealData,
       dealNumber: dealData.dealNumber || (await this.getNextDealNumber()),
     };
-    if (Array.isArray((toCreate as Partial<Deal>).payments)) {
-      (toCreate as Partial<Deal>).payments = dedupeDealPaymentsForPatch(
-        (toCreate as Partial<Deal>).payments || []
-      );
-    }
-    assertDealPaymentsNotOverTotal(toCreate as Partial<Deal>);
+    // ج8: الدفعات لا تُنشأ مع الصفقة — تُضاف لاحقاً عبر addPayment (endpoint مستقل).
     const payload = mapDealToSqlPayload(toCreate);
     if (!payload.partner) {
       throw new Error("المورد غير مرتبط بمعرف SQL صحيح");
@@ -609,31 +565,12 @@ export const dealsService = {
     _action?: string,
     _details?: string
   ): Promise<void> {
+    // ج8: ندمج مع الحالي (mapDealToSqlPayload يُصدر كل الحقول بقيم افتراضية،
+    // فالجزئي يدوس الإجمالي/الحالة). الدفعات مورد مستقل — لا تُرسَل هنا إطلاقاً.
     const current = await this.getDeal(dealId);
     const merged = { ...current, ...updates };
     const payload = mapDealToSqlPayload(merged);
     delete payload.payments;
-    await apiPatchObject(`logistics/deals/${dealId}/`, payload, { tenantId: getTenantId() });
-  },
-
-  /**
-   * تحديث صفقة **مع** الدفعات — يُستخدم حصرياً من مسارات الدفع الصريحة
-   * (addPayment, updatePaymentWithSwift, confirmPayment).
-   */
-  async _updateDealWithPayments(
-    dealId: string,
-    updates: Partial<Deal>
-  ): Promise<void> {
-    const current = await this.getDeal(dealId);
-    const merged = { ...current, ...updates };
-    const previousPaymentsDeduped = dedupeDealPaymentsForPatch(
-      current.payments || []
-    );
-    if (Array.isArray(merged.payments)) {
-      merged.payments = dedupeDealPaymentsForPatch(merged.payments);
-    }
-    assertDealPaymentsNotOverTotal(merged, previousPaymentsDeduped);
-    const payload = mapDealToSqlPayload(merged);
     await apiPatchObject(`logistics/deals/${dealId}/`, payload, { tenantId: getTenantId() });
   },
 
@@ -667,11 +604,16 @@ export const dealsService = {
     _userName?: string,
     _userRole?: string
   ): Promise<string> {
-    const deal = await this.getDeal(dealId);
-    const base = dedupeDealPaymentsForPatch(deal.payments || []);
-    const newPayment: DealPayment = { ...payment, id: `tmp-${Date.now()}` };
-    await this._updateDealWithPayments(dealId, { payments: [...base, newPayment] });
-    return newPayment.id;
+    // ج8: إنشاء مباشر عبر endpoint الدفعة — يعيد المعرّف الحقيقي فوراً (لا tmp-id،
+    // لا PATCH كامل، لا حاجة لإعادة حلّ المعرّف لاحقاً).
+    const body = mapSinglePaymentToSqlPayload(payment as Partial<DealPayment>);
+    delete body.id;
+    const created = await apiPostObject<any>(
+      `logistics/deals/${dealId}/payments/`,
+      body,
+      { tenantId: getTenantId() }
+    );
+    return String(created.id);
   },
 
   async updatePaymentWithSwift(
@@ -683,12 +625,14 @@ export const dealsService = {
     _userRole?: string,
     _cashBoxId?: string
   ): Promise<void> {
-    const deal = await this.getDeal(dealId);
-    const cleaned = dedupeDealPaymentsForPatch(deal.payments || []);
-    const payments = cleaned.map((p) =>
-      sameDealPaymentId(p.id, paymentId) ? { ...p, ...updates } : p
+    // ج8: PATCH مباشر لصف الدفعة الواحد — لا جلب الصفقة ولا إعادة إرسال المصفوفة.
+    const body = mapSinglePaymentToSqlPayload(updates, 0);
+    delete body.id;
+    await apiPatchObject(
+      `logistics/deals/${dealId}/payments/${encodeURIComponent(String(paymentId))}/`,
+      body,
+      { tenantId: getTenantId() }
     );
-    await this._updateDealWithPayments(dealId, { payments });
   },
 
   async getPaymentPostingDiagnostics(
@@ -808,35 +752,31 @@ export const dealsService = {
     /** فتح قيد يومية جديد في المحاسبة — الترحيل يدوي من هناك */
     openManualJournal?: boolean;
   }> {
-    const deal = await this.getDeal(dealId);
-    const cleaned = dedupeDealPaymentsForPatch(deal.payments || []);
+    // ج8: PATCH مباشر لصف الدفعة (حقول توثيقية — مسموحة حتى بعد الترحيل)، ثم
+    // ترحيل تلقائي بالمعرّف الحقيقي الذي يملكه المتصل أصلاً (لا tmp-id resolve).
     const when = paymentConfirmationDate || new Date().toISOString();
-    const payments = cleaned.map((p) =>
-      sameDealPaymentId(p.id, paymentId)
-        ? {
-            ...p,
-            confirmedBySupplier: true,
-            supplierConfirmationImage,
-            supplierNotes,
-            paymentConfirmationDate: when,
-            confirmedAt: when,
-          }
-        : p
-    );
-    await this._updateDealWithPayments(dealId, { payments });
+    const patchBody: Record<string, any> = {
+      confirmed_by_supplier: true,
+      status: "Confirmed",
+      confirmation_date: String(when).slice(0, 10),
+    };
+    if (supplierConfirmationImage && String(supplierConfirmationImage).trim()) {
+      patchBody.supplier_confirmation_image = String(supplierConfirmationImage)
+        .trim()
+        .slice(0, 500);
+    }
+    if (supplierNotes) patchBody.supplier_notes = String(supplierNotes);
 
-    const row = payments.find((p) => sameDealPaymentId(p.id, paymentId));
-    const refreshed = await this.getDeal(dealId);
-    const effectivePaymentId = resolvePaymentIdForApi(
-      paymentId,
-      row,
-      refreshed.payments
+    await apiPatchObject(
+      `logistics/deals/${dealId}/payments/${encodeURIComponent(String(paymentId))}/`,
+      patchBody,
+      { tenantId: getTenantId() }
     );
 
     const manualHint =
       "يمكنك فتح قيد يومية جديد يدوياً من المحاسبة إن احتجت، أو استخدم «ربط قيد يدوي» في سجل المدفوعات.";
 
-    if (!isNumericSqlPaymentId(effectivePaymentId)) {
+    if (!isNumericSqlPaymentId(paymentId)) {
       return {
         message:
           "تم حفظ تأكيد المورد.\n\n" +
@@ -846,12 +786,13 @@ export const dealsService = {
       };
     }
 
+    const refreshed = await this.getDeal(dealId);
     const effRow = refreshed.payments?.find(
-      (p) => String(p.id) === String(effectivePaymentId)
+      (p) => String(p.id) === String(paymentId)
     );
     const postTry = await this.tryAutoPostDealPaymentAccounting(
       dealId,
-      String(effectivePaymentId),
+      String(paymentId),
       {
         cashBoxExternalId: effRow?.cashBoxId
           ? String(effRow.cashBoxId).trim()
@@ -893,40 +834,24 @@ export const dealsService = {
     if (!pid) {
       throw new Error("معرّف الدفعة مفقود.");
     }
-
-    const fresh = await this.getDeal(dealId);
-    const row = fresh.payments?.find((p) => String(p.id) === pid);
-
-    if (row?.isPosted) {
-      throw new Error(
-        "لا يمكن حذف دفعة مرحّلة محاسبياً. استخدم «إلغاء الترحيل (مدير)» أولاً ثم احذف من السجل."
+    // ج8: الحذف حصراً عبر remove_payment (يحرس المرحّلة خادمياً). المعرّف صار
+    // دائماً حقيقياً بعد فصل الدفعات — لا حاجة لمسار PATCH-الكامل الاحتياطي.
+    if (!/^\d+$/.test(pid)) {
+      return; // صف محلي لم يُحفظ بعد — لا شيء للحذف على الخادم
+    }
+    try {
+      await apiPostObject(
+        `logistics/deals/${dealId}/remove_payment/${encodeURIComponent(pid)}/`,
+        {},
+        { tenantId: getTenantId() }
       );
-    }
-
-    if (/^\d+$/.test(pid)) {
-      try {
-        await apiPostObject(
-          `logistics/deals/${dealId}/remove_payment/${encodeURIComponent(pid)}/`,
-          {},
-          { tenantId: getTenantId() }
-        );
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/غير موجود|not found|404/i.test(msg) || /API error:\s*404/i.test(msg)) {
         return;
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        if (/غير موجود|not found|404/i.test(msg) || /API error:\s*404/i.test(msg)) {
-          return;
-        }
-        throw e;
       }
+      throw e;
     }
-
-    if (!row) {
-      return;
-    }
-
-    const cleaned = dedupeDealPaymentsForPatch(fresh.payments || []);
-    const payments = cleaned.filter((p) => !sameDealPaymentId(p.id, paymentId));
-    await this._updateDealWithPayments(dealId, { payments });
   },
 
   async checkDealUniqueness(invoiceNumber?: string, alibabaLink?: string, currentDealId?: string) {

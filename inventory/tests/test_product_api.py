@@ -204,3 +204,15 @@ class ProductApiTest(APITestCase):
                 f"{PRODUCTS_URL}{pid}/datasheets/999/", HTTP_X_TENANT_ID=self._tenant_id,
             )
             assert res.status_code == 404
+
+    # ── W10: اسم الصنف قابل للتعديل بعد الإنشاء (حارس أن name_ar ليس read_only) ──
+    def test_patch_updates_name_ar(self):
+        self._auth()
+        pid = self._post({"name_ar": "الاسم القديم"}).json()["id"]
+        res = self.client.patch(
+            f"{PRODUCTS_URL}{pid}/", {"name_ar": "الاسم الجديد"},
+            format="json", HTTP_X_TENANT_ID=self._tenant_id,
+        )
+        assert res.status_code in (200, 202), res.content[:300]
+        p = Product.objects.get(pk=pid)
+        assert p.name_ar == "الاسم الجديد"

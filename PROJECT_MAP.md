@@ -28,6 +28,237 @@ python manage.py check                                 # 0 مشاكل
 
 ---
 
+## [EPIC — Staff Work Order (W1–W11) — الخطة معتمدة من المالك, 2026-07-13]
+أمر عمل من 11 بنداً (إعدادات/تهيئة/إدارة منصّة/مراجيع/UX مخزون/تقارير/إصلاح خطأ/أداء).
+معالم M1–M8 ببوابة موافقة بعد كل معلم. قرارات المالك المعتمدة:
+- **W1 (Q1):** الحارس على مستوى **السطر** + **عند الحفظ**، لكن يُضاف **مفتاح إعدادات**
+  يسمح بحفظ فاتورة بخسارة (تجاوز الحارس). — يُنفَّذ في M2.
+- **W7b (Q2 — أُعيد توصيفه):** الشكوى الحقيقية = **تعذّر تعديل المورد من صفحة الموردين**
+  (لا علاقة بمورد المرجع). أُصلح في M1 (انظر أدناه). مورد المرجع يبقى موروثاً للقراءة (M3).
+- **W8 (Q3):** نافذة المعدّل: شهري = 90ي÷3، أسبوعي = 28ي÷4، المرتجعات مخصومة. — M5.
+- **W3 (Q4):** مدير المنصّة = **علم منصّة صريح** (لا `is_superuser` وحده). — M8.
+- **W2 (Q5):** مستخدمو KTRA الحاليون يبقون كما هم؛ التغيير للتسجيل الجديد فقط. — M8.
+
+### [DONE — M1: أخطاء ومكاسب سريعة (W10 · W4 · W7c · تعديل المورد), 2026-07-13]
+كلها جراحية، بلا هجرات (لا تغيير موديل). الأسباب الجذرية مؤكَّدة من الكود:
+- **W10 (اسم الصنف غير قابل للتعديل) — جذر واجهي:** حقل الاسم في `ItemFormAseel` كان
+  **منتقياً `<select>` (ValuePicker)** لا يُكتب فيه، وزر «+» يمسح القيمة ⇒ يبدو «غير قابل
+  للتعديل». الآن: صنف موجود (`productId != null`) ⇒ **حقل نصّي مباشر**؛ الجديد يبقى منتقياً
+  (اختر موجوداً/أضف). الخادم كان سليماً (`name_ar` ليس read_only). حارس خادمي جديد
+  `ProductApiTest.test_patch_updates_name_ar` (PATCH يحدّث الاسم) يمنع انحدار read_only مستقبلاً.
+- **W4 (إجمالي الكمية):** صف «إجمالي الكمية» (مجموع كميات البنود، عبر `formatQuantity` G1)
+  بجانب الإجماليات المالية في محرّري البيع (`SalesInvoiceEditor`) والشراء (`InvoiceForm`،
+  كِلا كتلتي الإجمالي المحلي/الدولي) وطباعتَيهما (`SalesInvoicePrintView`, `InvoicePrintView`).
+- **W7c (صورة المرفق لا تظهر على فاتورة/مرجع الشراء) — جذر مزدوج (حفظ + قراءة مفقودان):**
+  `AttachmentsSection` المشترك يرفع الصور إلى Cloudinary ويكتبها في `formData.quote_images`،
+  لكن فاتورة الشراء **لم يكن لها أي مسار حفظ خادمي** (لا SystemAttachment) **ولا عرض** في
+  السيريالايزر (المكوّن بُني للصفقات/العروض وأُعيد استخدامه بلا ربط خلفي). الحل مرآةً لنمط
+  الموردين/المنتجات: (أ) `PurchaseInvoiceViewSet._sync_attachments` يكتب الروابط في
+  `SystemAttachment(related_table='purchase_invoices')` idempotent (إضافة فقط) في
+  perform_create/update، غير حاجب؛ (ب) `read_document_images/_pdfs` (مشتركان في
+  `logistics/serializers.py`) + حقلا `quote_images`/`quote_pdfs` على `PurchaseInvoiceSerializer`؛
+  (ج) الواجهة: `purchaseInvoiceApi` DTO يرسل `quote_images/quote_pdfs`،
+  `mapPurchaseInvoiceDtoToInvoice` يعيدها إلى `quoteImages/quotePdfs`. اختبار جديد
+  `test_purchase_invoice_attachments.py` (4، بتمويه SystemAttachment managed=False).
+- **تعديل المورد (W7b معاد التوصيف) — جذر واجهي:** `SupplierManagement` كان يفتح
+  `SupplierModal` **للإضافة فقط** (`showAddModal`) ولا يمرّر `editingSupplier` أبداً؛
+  الاسم/النقر المزدوج يفتحان بطاقة العرض (`/partners/{id}`) ⇒ لا مسار تعديل إطلاقاً. الآن:
+  عمود «تعديل» (قلم) يجلب المورد (`suppliersService.getSupplierById`) ويفتح المودال في وضع
+  التعديل (المودال يدعم `editingSupplier`/`updateSupplierInDb` أصلاً).
+- **تحقّق:** الحزمة الخلفية **270 اختباراً** (+5 جديدة تمرّ: 4 مرفقات + 1 اسم الصنف) ·
+  `makemigrations --check` = No changes · `check` = 0 · `tsc` = خطأ DepartmentCard السابق فقط ·
+  `vite build` ناجح. **تنبيه (خارج M1):** 5 أخطاء **سابقة** في
+  `test_landed_cost.T1_01_DoubleLocalTransportCapitalizationTest` — من عمل إعادة بناء
+  الاستيراد غير المُلتزَم (`landed_cost.py` +220 سطر uncommitted؛
+  `clearance_local_transport_superseded_by_localshipment` يقرأ `clearance.shipment_id` على
+  `SimpleNamespace` بلا الحقل). داخل عمل النقل الداخلي المحجوب بموافقة المالك — **لم تُلمَس**.
+
+### [DONE — M2: W1 حارس فاتورة الخسارة على مستوى السطر + عند الحفظ, 2026-07-13]
+جراحي، بلا هجرة (لا حقل جديد — يعيد استخدام `SalesSettings.block_loss_invoices`).
+- **من إجمالي الفاتورة → السطر:** حُذف `invoice_gross_profit`+`_guard_loss_invoice`
+  (فحص إجمالي) وحلّ محلّهما `_loss_lines`+`guard_loss_invoice` (`sales/services.py`): يُرفض
+  إن كان **أي سطر** صافي إيراده < تكلفته حتى لو كانت الفاتورة رابحة إجمالاً.
+- **صافي إيراد السطر = `line.line_total_excl_tax`** (بعد خصم السطر + توزيع خصم الفاتورة
+  والنسبة، وتعديل شامل الضريبة) — نفس أساس `invoice_profits` وقيد COGS. التكلفة = كمية ×
+  `avg_cost` (WAC، مصدر حقيقة واحد). الرسالة عربية تسمّي الأسطر المخالفة.
+- **عند الحفظ لا الترحيل فقط:** `guard_loss_invoice` يُستدعى في `SalesInvoiceSerializer`
+  `create` (كلا مساري atomic) و`update` (لُفّ بـ `transaction.atomic()` فيتراجع الحفظ عند
+  الرفض — «لا تُحفظ مسودة بخسارة») بعد `recalculate_invoice_amounts`، + يبقى في
+  `post_sales_invoice`. `select_related('product')` أُضيف لمسارات الحفظ (لا N+1 للتكلفة).
+- **مفتاح «السماح بحفظ فاتورة بخسارة» (Q1):** هو `block_loss_invoices` نفسه — الخيار في
+  `SalesSettingsPage` أصلاً «السماح بالحفظ (افتراضي)» ↔ «منع الحفظ والترحيل»؛ التسمية صارت
+  دقيقة الآن (المنع يشمل الحفظ فعلاً). لا إعداد/هجرة جديدة.
+- **المراجيع مُعفاة** (invoice_kind ≠ sale). مرآة الواجهة `SalesInvoiceEditor.lossBlockMessage`
+  صارت على مستوى السطر (`totals.perLine[i].lineNetAdjusted` مقابل كمية×avg_cost) وتسمّي الأسطر.
+- **تحقّق:** `test_block_loss_invoice.py` **6** (3 قائمة post-time + 3 جديدة: رفض فاتورة رابحة
+  بها سطر خاسر عند الحفظ+المفتاح مفعّل مع تأكيد التراجع · حفظها عند الإطفاء · المرجع مُعفى) ·
+  الحزمة الكاملة 270 (unittest) خضراء · `makemigrations --check` = No changes · `check` 0 ·
+  `tsc` = خطأ DepartmentCard السابق فقط · `vite build` ناجح.
+
+## [FIX — Clearance Tab Layout & Agent Selection, 2026-07-13]
+- **UI Alignment Fix**: Wrapped the clearance form's input groups in a container with `className="aseel-headband"`. This allows individual inputs wrapped with `className="aseel-field"` (via the `fld` helper) to flex and align correctly per the new design system, preventing layout overflow.
+- **State Binding Correction**: Modified the `customs_broker` state binding in the `select` element to correctly handle literal `"null"` strings, preventing the dropdown from rendering a broken `null#` option. The `onChange` handler was also updated to reject `"null"` as a valid broker ID. The read-only field also now correctly falls back to `"—"` when `customs_broker` evaluates to the string `"null"`.
+- **UX & Auto-Save Fix**: Converted the `readOnly` Customs Broker field in the Shipment Header to a functional dropdown matching the one in the Clearance tab. Both dropdowns (Header and Tab 4) now immediately dispatch `handleSaveClearance()` onChange to auto-save the broker selection. This prevents a critical bug where users could select a broker locally, switch to the Payments tab, and fail to record a payment ("لم يتم تحديد المخلص الجمركي") because they forgot to manually click "تخزين التخليص" to commit the selection.
+- **Local Transport Creation Fix**: Fixed a bug where creating a Local Transport entry failed silently or threw an opaque "This field is required" error because the frontend's API payload (`createLocalShipment` / `updateLocalShipment`) failed to include the `currency` and `exchange_rate` fields, which are strictly required by the Django model `LocalShipment.currency`. Added `currency: localForm.currency || 1` and `exchange_rate` to the payload explicitly.
+- **Strict Invoice Conversion (No Unpaid USD)**: Removed the "Remaining Exchange Rate" inputs from the `ClearanceImportModal`. Modified the backend (`landed_cost.py`) to explicitly block generating an international invoice if a Deal has any remaining unpaid USD amount. This enforces the business rule that all foreign currency amounts must be definitively settled and paid (yielding an exact ILS cost) before allowing conversion to an invoice.
+
+## [IN PROGRESS — إعادة بناء مسار الاستيراد الشاملة (Deal→Shipment→Clearance→Transport→Invoice), 2026-07-13]
+
+
+**المالك وافق على الخطة كاملةً + إزالة العناصر الأربعة D1–D4. التنفيذ بالمعالم M0–M7،
+هجرة إضافية أولاً (لا حذف قبل إثبات backfill).** المرجع: بروتوكول التخطيط الكامل في الجلسة.
+
+### [TECH_STACK] (مُتحقَّق من الشِل 2026-07-13)
+Backend: Python 3.13.5 · Django 6.0.3 · DRF 3.16.1 · mysqlclient 2.2.7 (MySQL إنتاج / SQLite اختبار)
+Frontend: React 19.2 · TypeScript 5.8 · Vite 6.2 · Tailwind 4.3 · react-router-dom 7.10
+سياسة: إعادة البناء **لا تضيف أي اعتمادية جديدة** (بروتوكول 3 — جراحي). لا APIs مهجورة.
+
+### [SYSTEM_FLOW]
+Deal(s) → Shipment(create-from-deals) → Clearance → [Transport] → ImportInvoice (تكلفة وصول ₪)
+- التكاليف: شحن(ShipmentDeal، وحدة=CBM|KG) · جمارك(ClearanceLine، بالقيمة) · نقل داخلي(Transport، بالوحدة)
+- الحالة: `Deal.stage` (آلة مراحل واحدة، خدمة محروسة) — status/order_status/payment_status ستصبح محسوبة (M3)
+- المخرج: تكلفة وصول ₪ لكل بند + تتبّع خلفي كامل، يُرحَّل عبر دورة PurchaseInvoice القائمة
+- قرارات المالك: فاتورة/صفقة (Q1) · جمارك بالقيمة (Q2) · إبقاء العملات/الصرف المحقَّق (Q3) · هجرة backfill (Q4)
+
+### [ARCHITECTURE]
+`logistics/domain/allocation.py` — محرّك التوزيع الوحيد (Decimal، largest-remainder، يطابق الإجمالي للقرش)
+`logistics/domain/stages.py` — انتقالات المراحل المحروسة (بلا تجاوز bulk .update)
+`logistics/domain/shipment_builder.py` — create_shipment_from_deals()
+`logistics/domain/invoice_gen.py` — بناء/تحديث ImportInvoice من المحرّك (يعيد تصدير landed_cost مؤقتاً؛ يُوحَّد في M5)
+`services.py` — استلام/مرجع/AP (بلا تغيير، متعامد)
+
+### حالة المعالم
+- **M0 ✅** أعمدة إضافية: `Shipment.chargeable_unit`+`freight_rate`، `Deal.stage` (هجرة 0050) + backfill (0051).
+- **M1 ✅** `create_shipment_from_deals` + `POST /shipments/create-from-deals/` + `GET /deals/ready-to-ship/`
+  + `CreateShipmentFromDealsModal` بزر «شحنة من الصفقات». يصلح RC-1. `test_shipment_from_deals.py` (12).
+- **M2 ✅** محرّك التوزيع الموحّد `domain/allocation.py` (largest-remainder، يطابق للقرش). `chargeable_unit` صريح
+  بديل pricing_method×unit_type. `distribute_by_weights` يفوّض للمحرّك. `PATCH /shipments/{id}/freight/`
+  (إعادة حساب نظيفة عند تبديل الوحدة) + مبدّل CBM/KG في رحلة الاستيراد. `test_freight_allocation.py` (8).
+- **M3 ✅** `Deal.stage` قانوني؛ الأعمدة القديمة (status/order_status/payment_status/shipping_workflow_status)
+  كاش مشتق بكاتب واحد. كل الانتقالات الآلية عبر `advance_deal_stage` المحروسة (لا تجاوز bulk .update — RC-7).
+  `_reconcile_stage_and_workflow` يبقي الحقلين متسقين من أي مدخل. `test_stage_machine.py` (11). الأعمدة تبقى
+  (dashboard_api يفلتر عليها في DB — إسقاطها غير آمن، تحليل P-F-4 مؤكَّد). 252/252 اختبار المشروع كامل.
+- **M4 ✅ (جزئي)** حُذف shim `cost_lines` (D2): الخاصية أُزيلت من الموديل؛ `clearance_cost_line_dicts` تقرأ
+  `lines` مباشرة؛ السيريالايزر يبني cost_lines في to_representation؛ views/report محدّثة. سلوك محفوظ (invariants خضراء).
+  `test_cost_source_m4.py` (3). **مؤجَّل بعلم:** توحيد مصدر النقل الداخلي (Transport فقط + إزالة حارس supersede/
+  وسم الملاحظات) يغيّر أرقام تكلفة الوصول — يحتاج تحقّق المالك للأرقام قبل التبديل (لا نغيّر حسابات مالية بصمت).
+- **M5 ✅** فاتورة لكل صفقة (قائم) + `GET /purchase-invoices/{id}/trace/` تتبّع خلفي كامل
+  (بند→صفقة→شحنة(شحن)→تخليص(جمارك)→نقل) عبر `build_import_trace`. `test_import_trace.py` (2, E2E).
+- **M6/M7 ✅ (إزالات آمنة نُفِّذت بتوجيه المالك)** — قرار المالك: نفِّذ الآمن الآن، أبقِ transit_journal، هجرات تُطبَّق بعد فحص المالك:
+  - **D3 ✅** `LogisticsExpense` أُزيل بالكامل (models/serializers/signals/urls/views/purge_deals) — هجرة **0052** (DeleteModel).
+    **يطبّقها المالك بعد تأكيد صفر صفوف إنتاج.** لا تبعية واجهة/اختبار. 260/260 اختبار المشروع أخضر.
+  - **D1 ✅ (الآمن فقط)** أُزيل `supplier_address` + `journal_no_display` (صفر مراجع خارج تعريف الموديل) — هجرة **0053**.
+    `transit_journal` **مُبقى** (حامل حمل: حارس الشحنة المرحّلة). باقي حقول Aseel (shipment_type/vat_statement/subtotal/
+    vat_total/grand_total/second_date/transaction_time/editable/book_number) مربوطة برحلة الاستيراد → تحتاج تنسيق واجهة (مؤجَّلة).
+  - **D4 ✅ (المقدّمة مُحقَّقة سلفاً)** تغذية قائمة الشحنات **REST أصلاً** (`shipmentsService.subscribeToShipments`→`apiGetList("logistics/shipments/")`).
+    لا Firestore في تغذية الشحنات (استعمال firestoreService الوحيد في الشاشة = قائمة الموردين المنفصلة). لا هجرة مطلوبة.
+  - **النقل الداخلي كمصدر وحيد ✅ (تنفيذ + مصالحة، بانتظار موافقة الأرقام)** — `domain/inland.py`:
+    `transport_pool_ils` + توزيع بحصة الوحدة (CBM/KG) بدل حصة القيمة. أمر `reconcile_inland_landed_cost`
+    (`--shipment-id`/`--tenant-id` حقيقي للقراءة فقط + `--sample` تجريبي يُرجَع). المسار الحيّ **لم يتغيّر** (مقارنة فقط)
+    حتى يوافق المالك على الفروقات. `test_inland_reconcile.py` (3): عيّنة 1000₪ تُعاد توزيعها A(قيمة) 800→200 · B(حجم) 200→800.
+
+### [ORPHANS & PENDING] — إعادة بناء الاستيراد
+- **D1** ✅ الحقول الآمنة أُزيلت (0053)؛ باقي حقول Aseel مؤجَّلة لتنسيق واجهة؛ transit_journal مُبقى عمداً
+- **D2** ✅ أُزيل (M4)
+- **D3** ✅ أُزيل (0052) — **المالك يطبّق الهجرة بعد فحص صفر صفوف الإنتاج**
+- **D4** ✅ لا عمل مطلوب (التغذية REST سلفاً)
+- **النقل الداخلي مصدر وحيد** — مُنفَّذ كمقارنة؛ قلب المسار الحيّ محجوب بموافقة المالك على مصالحة الأرقام (`reconcile_inland_landed_cost`)
+- تسجيل غير حاجب (بروتوكول 4): QueueHandler/QueueListener — يُضاف
+- التحقق البصري متعذّر (شاشات خلف الدخول) — الاعتماد على TDD + build
+
+---
+
+## [DONE — مراجعة الاستيراد ج8: إعادة بناء احترافية لمسار صفقة→فاتورة دولية, 2026-07-12 ✅]
+**المالك وافق (Q2+Q3 نعم؛ Q1: لا يوجد «شحن تقديري» — بل «شحن داخل الصين» جزء من
+الصفقة يُدفع للمورد، والشحن الدولي في الشحنة). نُفِّذت M1–M5 كاملةً.**
+
+- **M1 (خادم — الدفعة مورد مستقل):** `POST /deals/{id}/payments/` (معرّف حقيقي فوراً)
+  + `PATCH /deals/{id}/payments/{pid}/` (توثيقي دائماً؛ المبلغ/الصرف مقفلان بعد
+  الترحيل). `payments` صارت `read_only` في `LogisticsDealSerializer` (حُذف منطق
+  الكتابة المتداخلة + `_payments_total_exceeds_deal`/`_payment_amounts_unchanged_for_deal`).
+  `perform_update` لم يعد يحجب أي PATCH بـ POSTED_DOC_WARNING — الحماية الوحيدة:
+  أرضية الإجمالي (≥ مجموع المرحّل). TDD: `test_deal_payment_endpoints.py` (12
+  اختبار يغطّي شكوى المالك حرفياً) + عُدّل `StageChangeWithPostedPaymentTest`.
+- **M2 (واجهة — جراحة dealsService):** addPayment/updatePaymentWithSwift/
+  confirmPayment/cancelPayment تخاطب الـendpoints مباشرة عبر
+  `mapSinglePaymentToSqlPayload`. حُذف `_updateDealWithPayments` +
+  `resolvePaymentIdForApi` + `sameDealPaymentId` + tmp-ids + dedupe/assert imports.
+- **M3 (تبويب دفعات واحد):** `paymentsTab` صار سطحاً متدرّجاً — PaymentProgress
+  (مسار القسط) أساسي، وInstallmentManager + DealPaymentList داخل `<details>` قابلة
+  للطي (الخطة مفتوحة قبل بدء الدفع، السجل عند وجود دفعات).
+- **M4 (بنود/إجماليات):** إجمالي الصفقة = بضاعة − خصم + شحن داخل الصين، **بلا ضريبة**
+  (تُدفع بالتخليص) — عُدّل `recalculateTotals`/`calculateGrandTotal` (حُذف
+  `calculateTaxAmount`) و`_apply_lines_subtotal_and_grand_total` (خادم). أُعيدت
+  تسمية «تكلفة الشحن»→«شحن داخل الصين» + «الأسعار تشمل الشحن داخل الصين».
+- **M5 (رحلة واحدة):** زر «الخطوة التالية» في `DealStageControl` (adaptive):
+  بلا شحنة → `/import-flow/new?tab=deals&join_deal={id}`؛ مع شحنة → قفزة لتبويب
+  التخليص/الصفقات. `ImportDocumentScreen` يقرأ `join_deal` فيفتح فاتح ضمّ الصفقات
+  تلقائياً (بلا ربط صامت).
+- **تحقق:** الحزمة الخلفية الكاملة **223/223** · `makemigrations --check` = No changes ·
+  `check` 0 · tsc خطأ واحد فقط (يتيم Department.tsx سابق — مُبلَّغ كمهمة منفصلة) ·
+  `vite build` ناجح. التحقق البصري متعذّر (الشاشات خلف الدخول بلا اعتمادات اختبار)،
+  لكن TDD يعيد إنتاج سيناريو الفشل الحرفي على مستوى الـAPI.
+
+## [SUPERSEDED PLAN — مراجعة الاستيراد ج8 (الخطة الأصلية قبل التنفيذ)]
+
+**شكوى المالك (المحاولة الرابعة تفشل):** «دفعت الدفعة الأولى وجيت أأكدها → "هذا المستند
+مرحَّل"، وما عاد أقدر أساوي شي بالصفقة» + «البنود مش مناسبة لصفقة — الشحن يُحسب آخر شي
+لحال ورسوم الصفقة كذلك» + يريد رحلة واحدة واضحة بنمط فواتير البيع/الشراء.
+
+### أوديت — الأسباب الجذرية المؤكدة من الكود
+1. **(القاتل) كل عمليات الدفع تمر عبر PATCH كامل للصفقة (إرث Firebase):**
+   `dealsService.addPayment/updatePaymentWithSwift/confirmPayment` كلها =
+   GET صفقة → دمج مصفوفة `payments` client-side → `_updateDealWithPayments` → PATCH
+   كامل (`dealsService.ts:623-692,794-883`). والحارس `perform_update`
+   (`logistics/views.py:125-134`) يحجب أي PATCH غير stage-only عند وجود **أي** دفعة
+   مرحّلة → بعد ترحيل الدفعة الأولى: تأكيد المورد يفشل بـ«هذا المستند مرحَّل»، إضافة
+   الدفعة الثانية تفشل، تعديل الملاحظات يفشل، والحفظ الآلي قبل كل عملية دفع
+   (`DealForm.tsx:388-397`) يفشل بصمت (catch→console). ج7 (STAGE_ONLY_FIELDS) أعفى
+   المراحل فقط — لم يعالج الجذر لأن الدفع ليس endpoint مستقلاً للإنشاء/التحديث.
+2. **حالة الدفع تُشتق بثلاثة منطق مختلفة:** `getPaymentStatusFromPayments`
+   (DealForm) × `countsAsPaidForProgress` (PaymentProgress) × الخادم
+   (`recalculate_deal_payment_status`) — تناقضات عرض حتمية.
+3. **أربع واجهات دفع فوق نفس البيانات:** InstallmentManager (503س) + PaymentProgress
+   (728س) + DealPaymentList + PaymentRegistration داخل تبويب واحد — تشتيت، وأزرار
+   تظهر/تختفي بشروط متقاطعة.
+4. **إجمالي الصفقة يخلط بضاعة + شحن تقديري + ضريبة** (`_recalc_deal_totals`،
+   `calculateGrandTotal`) وهو نفسه سقف الدفعات للمورد (`posting_cap_check`) — بينما
+   الشحن يُدفع للوكيل لاحقاً (دفعات الشحنة) والرسوم/الضريبة بالتخليص = ازدواج تكلفة
+   محتمل وتضخيم سقف الدفع للمورد. `fees_percentage` عمود شبه ميت.
+5. **hacks هشّة تعويضية للنمط المتداخل:** tmp-ids `payment_${Date.now()}` +
+   `resolvePaymentIdForApi` + `dedupeDealPaymentsForPatch` + مطابقة Counter للمبالغ
+   في `_payment_amounts_unchanged_for_deal` — كلها تسقط تلقائياً بعد الفصل.
+
+### الخطة (جراحية — نفس الميزات، بلا زحف نطاق، بلا تبعيات جديدة)
+- **M1 خادم — الدفعة مورد REST مستقل:** ‏`POST /deals/{id}/payments/` (إنشاء بمعرف
+  حقيقي فوراً) + `PATCH /deals/{id}/payments/{pid}/` (حقول توثيقية دائماً — سليب/تأكيد
+  مورد/ملاحظات؛ المالية فقط لغير المرحّلة). `payments` في DealSerializer تصبح
+  **قراءة فقط**. حارس `perform_update` يُستبدل: الصفقة ليست مستنداً مرحّلاً —
+  الرسالة تختفي نهائياً من الصفقات؛ الحماية المالية = سقف
+  (total_amount ≥ مجموع المرحّل) + قفل مبلغ الدفعة المرحّلة نفسها.
+  TDD: تأكيد-بعد-ترحيل، دفعة-ثانية-بعد-ترحيل، تعديل-وصفي-بعد-ترحيل،
+  تخفيض-الإجمالي-دون-المرحّل يُرفض.
+- **M2 واجهة — جراحة dealsService:** العمليات الأربع تستدعي endpoints مباشرة؛ حذف
+  `_updateDealWithPayments` والحفظ-الآلي-قبل-العملية وtmp-id hacks.
+- **M3 واجهة — تبويب دفعات واحد:** دمج المكونات الأربعة في مكوّن واحد: جدول أقساط
+  (الخطة) وتحت كل قسط مساره الوحيد: مطالبة → تنفيذ دفع (صندوق+سليب) → تأكيد مورد →
+  قيد (رقم القيد ظاهر). حالة الدفع من الخادم حصراً.
+- **M4 بنود/إجماليات (بعد رد المالك):** الصفقة = بضاعة فقط (بنود + خصم = المستحق
+  للمورد وسقف دفعاته)؛ الشحن التقديري معلوماتي خارج الإجمالي (إلا «الأسعار تشمل
+  الشحن»)؛ الضريبة تُخفى للصفقة الدولية (تُدفع بالتخليص).
+- **M5 رحلة واحدة:** زر «الخطوة التالية» في خريطة مسار ج7 لكل مرحلة (إنشاء/فتح شحنة ←
+  تخليص ← تحويل لفاتورة دولية) — الشاشات موجودة، الربط فقط. تحقق نهائي: e2e يدوي
+  صفقة→دفعات→شحنة→تخليص→فاتورة دولية دون أي «مستند مرحّل».
+- **Logging:** يبقى `log_activity`/EntityActivityLog + logger «logistics.payments»
+  لمسارات الترحيل/الرفض — لا بنية جديدة.
+- **إصدارات (2026-07-12):** Django 6.0.1 مثبتة (سلسلتها الحالية 6.0.7 — ترقية patch
+  اختيارية آمنة)، DRF 3.16.1 مدعومة (3.17.1 متاحة — ليست شرطاً)، React 19.2/Vite 6.2/
+  TS 5.8/Tailwind 4.3 حديثة. **صفر تبعيات جديدة.**
+
+### أسئلة معلّقة للمالك (يُرد عليها مع الموافقة)
+Q1: تأكيد أن الشحن التقديري يخرج من «مبلغ الصفقة» وسقف دفعات المورد؟ ‏Q2: إخفاء حقول
+الضريبة في الصفقة الدولية؟ ‏Q3: اعتماد مبدأ «الصفقة لا تُرحّل — الدفعات فقط» نهائياً؟
+
 ## [FIX — مراجعة الاستيراد ج7: فصل الدفع عن المراحل + إصلاح قفل «تم الشحن» + شحنة جديدة + وكيل/مخلص, 2026-07-11]
 شكوى المالك (فشل تجربة صفقة→فاتورة دولية للمرة الثالثة): اختيار «تم الشحن للوكيل» يخفي
 الخريطة والإلغاء ويقفل كل شيء · دفعة مرحّلة تمنع تغيير وضع الشحن («شو دخل الدفع بوضع

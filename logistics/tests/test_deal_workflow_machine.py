@@ -115,9 +115,8 @@ class DealCancelPersistsTest(_Base):
 
 
 class StageChangeWithPostedPaymentTest(_Base):
-    """ج7: الدفع بُعد مالي مستقل — دفعة مرحّلة لا تقفل مرحلة الشحن ولا الإلغاء.
-
-    الحارس (POSTED_DOC_WARNING) يبقى على التعديلات المالية/البيانية فقط.
+    """ج8: الصفقة لا تُرحَّل — الدفعات فقط. دفعة مرحّلة لا تقفل شيئاً في الصفقة
+    سوى أرضية الإجمالي (لا يهبط تحت مجموع المرحّل) وحذف الصفقة نفسها.
     """
 
     def _mk_posted_payment(self, deal):
@@ -151,17 +150,18 @@ class StageChangeWithPostedPaymentTest(_Base):
         deal.refresh_from_db()
         self.assertEqual(deal.status, 'Cancelled')
 
-    def test_financial_edit_still_blocked_with_posted_payment(self):
+    def test_descriptive_edit_allowed_with_posted_payment(self):
+        """ج8: كان أي PATCH غير مرحلي يُرفض بـ«هذا المستند مرحَّل» — صار مسموحاً."""
         deal = self._mk_deal('D-0503')
         self._mk_posted_payment(deal)
         resp = self.client.patch(
             f'/api/logistics/deals/{deal.id}/',
-            {'total_amount': '9999'},
+            {'notes': 'ملاحظة بعد ترحيل الدفعة'},
             format='json',
         )
-        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.status_code, 200, resp.content)
         deal.refresh_from_db()
-        self.assertEqual(Decimal(deal.total_amount), Decimal('1000'))
+        self.assertEqual(deal.notes, 'ملاحظة بعد ترحيل الدفعة')
 
     def test_delete_still_blocked_with_posted_payment(self):
         deal = self._mk_deal('D-0504')

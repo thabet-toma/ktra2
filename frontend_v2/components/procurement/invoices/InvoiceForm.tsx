@@ -42,7 +42,7 @@ import {
   invoiceVatBaseIls,
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
-import { formatMoney } from "@/utils/formatNumber";
+import { formatMoney, formatQuantity } from "@/utils/formatNumber";
 import { inventoryApi } from "@/services/inventoryApi";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { ItemSearchModal, productToItem } from "../price-offers/ItemSearchModal";
@@ -483,6 +483,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         notes: payload.notes || null,
         supplier_invoice_number: payload.supplierInvoiceNumber || null,
         factory_name: payload.factoryName || null,
+        // W7c: مرفقات الفاتورة/المرجع — يُخزّنها الخادم في SystemAttachment.
+        quote_images: payload.quoteImages || payload.quote_images || [],
+        quote_pdfs: payload.quotePdfs || payload.quote_pdfs || [],
         items: (payload.items || [])
           .filter((item: any) => item.itemId && item.itemId !== "")
           .map((item: any) => ({
@@ -970,6 +973,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   // G1: عرض موحّد بلا أصفار عشرية زائدة (مع فاصل آلاف للمبالغ).
   const fmt = (v: number) => formatMoney(v);
+  // W4: إجمالي الكميات (مجموع كميات البنود) يُعرض بجانب الإجماليات المالية.
+  const totalQty = (formData.items || []).reduce(
+    (s: number, it: any) => s + (Number(it.quantity) || 0), 0,
+  );
 
   const fld = (label: string, node: React.ReactNode) => (
     <label className="aseel-field">
@@ -1464,6 +1471,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       disabled: !canPost || posting,
       separatorBefore: true,
     },
+    ...(!readOnly && formData.shipment && formData.id && formData.currency === "ILS" ? [{
+      key: "recalculate",
+      label: recalcBusy ? "..." : "إعادة حساب التكلفة",
+      icon: recalcBusy ? <Loader2 className="animate-spin" /> : <RefreshCw />,
+      onClick: formData.isPosted ? undefined : () => void handleRecalculateLanded(),
+      disabled: recalcBusy || formData.isPosted,
+      separatorBefore: true,
+    } as AseelToolbarAction] : []),
     {
       key: "unpost",
       label: posting ? "...تراجع" : "تراجع عن الترحيل",
@@ -1684,30 +1699,82 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         ] : []),
       ]}
       totals={
-        <>
-          <div className="aseel-total-row">
-            <span>مجموع البنود (قبل الخصم)</span>
-            <span className="aseel-total-value">{fmt(ilsMerchandiseBase - (formData.shippingIncluded ? 0 : formData.shippingCost || 0))}</span>
-          </div>
-          {(formData.discountAmount || 0) > 0 && (
+        formData.conversionMetadata?.line_meta ? (
+          <>
             <div className="aseel-total-row">
-              <span>الخصم</span>
-              <span className="aseel-total-value">{fmt(formData.discountAmount || 0)}</span>
+              <span>سعر الأساس (المنتجات)</span>
+              <span className="aseel-total-value">{fmt(formData.conversionMetadata.deal_total_ils || 0)}</span>
             </div>
-          )}
-          <div className="aseel-total-row">
-            <span>المجموع قبل الضريبة</span>
-            <span className="aseel-total-value">{fmt(formData.subtotal || 0)}</span>
-          </div>
-          <div className="aseel-total-row">
-            <span>الضريبة المضافة</span>
-            <span className="aseel-total-value">{fmt(formData.taxAmount || 0)}</span>
-          </div>
-          <div className="aseel-total-row aseel-total-row--grand">
-            <span>مبلغ الفاتورة الإجمالي</span>
-            <span className="aseel-total-value">{fmt(formData.grandTotal || 0)}</span>
-          </div>
-        </>
+            <div className="aseel-total-row">
+              <span>الشحن داخل المنشأ</span>
+              <span className="aseel-total-value">{fmt(formData.conversionMetadata.line_meta.internal_shipping_ils || 0)}</span>
+            </div>
+            <div className="aseel-total-row">
+              <span>تكلفة الشحن الدولي</span>
+              <span className="aseel-total-value">{fmt(formData.conversionMetadata.line_meta.deal_ship_allocated_ils || 0)}</span>
+            </div>
+            <div className="aseel-total-row">
+              <span>تكلفة التخليص</span>
+              <span className="aseel-total-value">{fmt(formData.conversionMetadata.line_meta.deal_clearance_allocated_ils || 0)}</span>
+            </div>
+            <div className="aseel-total-row">
+              <span>تكلفة النقل</span>
+              <span className="aseel-total-value">{fmt(formData.conversionMetadata.deal_local_shipping_from_clearance_ils || 0)}</span>
+            </div>
+            <div className="border-t border-gray-400 my-1 w-full" style={{ borderStyle: "dashed", borderColor: "rgba(0,0,0,0.15)" }} />
+            {(formData.discountAmount || 0) > 0 && (
+              <div className="aseel-total-row">
+                <span>الخصم</span>
+                <span className="aseel-total-value">{fmt(formData.discountAmount || 0)}</span>
+              </div>
+            )}
+            <div className="aseel-total-row">
+              <span>المجموع قبل الضريبة</span>
+              <span className="aseel-total-value">{fmt(formData.subtotal || 0)}</span>
+            </div>
+            <div className="aseel-total-row">
+              <span>الضريبة المضافة</span>
+              <span className="aseel-total-value">{fmt(formData.taxAmount || 0)}</span>
+            </div>
+            <div className="aseel-total-row aseel-total-row--grand">
+              <span>مبلغ الفاتورة الإجمالي</span>
+              <span className="aseel-total-value">{fmt(formData.grandTotal || 0)}</span>
+            </div>
+            <div className="aseel-total-row">
+              <span>إجمالي الكمية</span>
+              <span className="aseel-total-value">{formatQuantity(totalQty)}</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="aseel-total-row">
+              <span>مجموع البنود (قبل الخصم)</span>
+              <span className="aseel-total-value">{fmt(ilsMerchandiseBase - (formData.shippingIncluded ? 0 : formData.shippingCost || 0))}</span>
+            </div>
+            {(formData.discountAmount || 0) > 0 && (
+              <div className="aseel-total-row">
+                <span>الخصم</span>
+                <span className="aseel-total-value">{fmt(formData.discountAmount || 0)}</span>
+              </div>
+            )}
+            <div className="aseel-total-row">
+              <span>المجموع قبل الضريبة</span>
+              <span className="aseel-total-value">{fmt(formData.subtotal || 0)}</span>
+            </div>
+            <div className="aseel-total-row">
+              <span>الضريبة المضافة</span>
+              <span className="aseel-total-value">{fmt(formData.taxAmount || 0)}</span>
+            </div>
+            <div className="aseel-total-row aseel-total-row--grand">
+              <span>مبلغ الفاتورة الإجمالي</span>
+              <span className="aseel-total-value">{fmt(formData.grandTotal || 0)}</span>
+            </div>
+            <div className="aseel-total-row">
+              <span>إجمالي الكمية</span>
+              <span className="aseel-total-value">{formatQuantity(totalQty)}</span>
+            </div>
+          </>
+        )
       }
       status={
         <>

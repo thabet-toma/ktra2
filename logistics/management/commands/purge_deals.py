@@ -64,7 +64,6 @@ def _null_all_journal_fks(journal_ids: set[int]) -> None:
         LogisticsDeal,
         LogisticsPayment,
         LogisticsClearancePayment,
-        LogisticsExpense,
         PurchaseInvoice,
     )
 
@@ -74,7 +73,6 @@ def _null_all_journal_fks(journal_ids: set[int]) -> None:
     LogisticsDeal.all_objects.filter(journal_id__in=journal_ids).update(journal_id=None)
     PurchaseInvoice.objects.filter(journal_id__in=journal_ids).update(journal_id=None)
     LogisticsClearancePayment.objects.filter(journal_id__in=journal_ids).update(journal_id=None)
-    LogisticsExpense.objects.filter(journal_id__in=journal_ids).update(journal_id=None)
 
 
 def _delete_journal_headers(journal_ids: set[int]) -> int:
@@ -116,7 +114,6 @@ class Command(BaseCommand):
             LogisticsShipment,
             LogisticsClearance,
             LogisticsClearancePayment,
-            LogisticsExpense,
             PurchaseInvoice,
             PurchaseInvoiceItem,
         )
@@ -176,7 +173,6 @@ class Command(BaseCommand):
             LogisticsDealItem,
             LogisticsPayment,
             LogisticsShipmentDeal,
-            LogisticsExpense,
             PurchaseInvoice,
             PurchaseInvoiceItem,
         )
@@ -199,17 +195,10 @@ class Command(BaseCommand):
                 jids.add(jid)
         jids |= _collect_journal_ids_for_invoice_ids(invoice_ids)
 
-        ex_q = LogisticsExpense.objects.filter(related_type="Deal", related_id=deal.id)
-        for jid in ex_q.exclude(journal_id__isnull=True).values_list("journal_id", flat=True):
-            if jid:
-                jids.add(jid)
-
         _null_all_journal_fks(jids)
         n = _delete_journal_headers(jids)
         if n:
             self.stdout.write(f"  Deleted {n} journal header(s), lines removed.")
-
-        ex_q.delete()
 
         PurchaseInvoiceItem.objects.filter(invoice_id__in=invoice_ids).delete()
         inv_q.delete()
@@ -229,7 +218,6 @@ class Command(BaseCommand):
             LogisticsPayment,
             LogisticsClearance,
             LogisticsClearancePayment,
-            LogisticsExpense,
             PurchaseInvoice,
             PurchaseInvoiceItem,
         )
@@ -258,13 +246,7 @@ class Command(BaseCommand):
                 jids.add(jid)
         jids |= _collect_journal_ids_for_invoice_ids(inv_ids)
 
-        ex_ship = LogisticsExpense.objects.filter(related_type="Shipment", related_id=shipment_id)
-        for jid in ex_ship.exclude(journal_id__isnull=True).values_list("journal_id", flat=True):
-            if jid:
-                jids.add(jid)
-
         clr = LogisticsClearance.objects.filter(shipment_id=shipment_id).first()
-        ex_clr = LogisticsExpense.objects.none()
         if clr:
             jids |= set(
                 JournalHeader.objects.filter(
@@ -272,24 +254,10 @@ class Command(BaseCommand):
                     reference_id=clr.id,
                 ).values_list("pk", flat=True)
             )
-            ex_clr = LogisticsExpense.objects.filter(related_type="Clearance", related_id=clr.id)
-            clr_expense_ids = list(ex_clr.values_list("id", flat=True))
-            for jid in ex_clr.exclude(journal_id__isnull=True).values_list("journal_id", flat=True):
-                if jid:
-                    jids.add(jid)
-            if clr_expense_ids:
-                jids |= set(
-                    JournalHeader.objects.filter(
-                        reference_type="LOGISTICS_EXPENSE",
-                        reference_id__in=clr_expense_ids,
-                    ).values_list("pk", flat=True)
-                )
 
         _null_all_journal_fks(jids)
         _delete_journal_headers(jids)
 
-        ex_clr.delete()
-        ex_ship.delete()
         PurchaseInvoiceItem.objects.filter(invoice_id__in=inv_ids).delete()
         inv_ship.delete()
 

@@ -4,8 +4,10 @@
  */
 import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
+import { suppliersService } from "../../services/firestoreService";
+import type { Supplier } from "../../types";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
-import { RefreshCw, Search, Plus } from "lucide-react";
+import { RefreshCw, Search, Plus, Pencil } from "lucide-react";
 import { SupplierModal } from "../common/SupplierModal";
 import { useNavigate } from "react-router-dom";
 
@@ -37,6 +39,19 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<number | null>(initialPartnerId ?? null);
   const [showAddModal, setShowAddModal] = useState(false);
+  // تعديل بيانات المورد من نفس الشاشة (كان لا يوجد أي مسار تعديل — الاسم/النقر المزدوج
+  // يفتحان بطاقة العرض فقط، والمودال كان يُفتح للإضافة حصراً).
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+
+  const openEdit = useCallback(async (p: Partner) => {
+    try {
+      const s = await suppliersService.getSupplierById(String(p.id));
+      if (s) setEditingSupplier(s);
+      else setErr("تعذّر تحميل بيانات المورد للتعديل");
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "تعذّر تحميل بيانات المورد للتعديل");
+    }
+  }, []);
 
   useEffect(() => {
     if (initialPartnerId != null) {
@@ -91,6 +106,17 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
     { key: "email", header: "البريد الإلكتروني", render: (p) => <>{p.email || "—"}</> },
     { key: "limit", header: "حد الائتمان", width: "110px", align: "center", numeric: true,
       render: (p) => <>{p.credit_limit ?? "—"}</> },
+    { key: "edit", header: "تعديل", width: "60px", align: "center",
+      render: (p) => (
+        <button
+          type="button"
+          className="aseel-toolbtn"
+          title="تعديل بيانات المورد"
+          onClick={(e) => { e.stopPropagation(); void openEdit(p); }}
+        >
+          <Pencil className="h-4 w-4" />
+        </button>
+      ) },
   ];
 
   return (
@@ -135,6 +161,18 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
           onClose={() => setShowAddModal(false)}
           onSaveSuccess={() => {
             setShowAddModal(false);
+            load();
+          }}
+        />
+      )}
+
+      {editingSupplier && (
+        <SupplierModal
+          isOpen={!!editingSupplier}
+          editingSupplier={editingSupplier}
+          onClose={() => setEditingSupplier(null)}
+          onSaveSuccess={() => {
+            setEditingSupplier(null);
             load();
           }}
         />

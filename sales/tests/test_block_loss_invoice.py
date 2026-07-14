@@ -1,6 +1,7 @@
-"""إعداد «منع فاتورة الخسارة» — عند تفعيل `SalesSettings.block_loss_invoices`، يُرفض
-ترحيل فاتورة بيع ربحها الإجمالي سالب (سعر البيع < متوسط التكلفة). معطّلاً افتراضياً
-فلا يؤثر على السلوك القائم.
+"""إعداد «منع فاتورة الخسارة» (W1) — عند تفعيل `SalesSettings.block_loss_invoices`،
+يُرفض **حفظ أو ترحيل** فاتورة بيع فيها **أي سطر** يُباع بخسارة (صافي البيع < متوسط
+التكلفة)، حتى لو كان إجمالي الفاتورة رابحاً. المفتاح OFF = السماح بالحفظ بخسارة.
+المراجيع مُعفاة. معطّلاً افتراضياً فلا يؤثر على السلوك القائم.
 """
 from decimal import Decimal
 
@@ -13,6 +14,7 @@ from accounting.services import create_fiscal_year
 from inventory.models import Product
 from partners.models import Partner
 from sales.models import SalesInvoice, SalesInvoiceLine, SalesSettings
+from sales.serializers import SalesInvoiceSerializer
 from sales.services import post_sales_invoice
 from tenants.models import Currency
 from tenants.services import create_company
@@ -80,3 +82,64 @@ def test_loss_invoice_allowed_when_setting_off(env):
     post_sales_invoice(inv)
     inv.refresh_from_db()
     assert inv.status == SalesInvoice.STATUS_POSTED
+
+
+# ── W1: الحارس على مستوى السطر + عند الحفظ (لا الترحيل فقط) ──
+
+def _save_via_serializer(tenant, customer, product, *, lines, number,
+                         kind=SalesInvoice.INVOICE_KIND_SALE):
+    """يحفظ فاتورة عبر السيريالايزر (مسار الحفظ الفعلي: create)."""
+    data = {
+        "invoice_number": number,
+        "customer": customer.id,
+        "currency": tenant._test_currency.pk,
+        "invoice_date": "2026-06-15",
+        "invoice_type": SalesInvoice.INVOICE_CREDIT,
+        "stock_on_post": False,
+        "invoice_kind": kind,
+        "lines": lines,
+    }
+    ser = SalesInvoiceSerializer(data=data)
+    ser.is_valid(raise_exception=True)
+    return ser.save(tenant=tenant)
+
+
+def _mixed_lines(product):
+    """فاتورة رابحة إجمالاً لكن فيها سطر خاسر: 150 (ربح) + 80 (خسارة)، التكلفة 100."""
+    return [
+        {"product": product.id, "quantity": "1", "unit_price": "150"},
+        {"product": product.id, "quantity": "1", "unit_price": "80"},
+    ]
+
+
+def test_profitable_invoice_with_loss_line_rejected_on_save_when_on(env):
+    """(أ) فاتورة رابحة إجمالاً بها سطر واحد بخسارة تُرفض **عند الحفظ** والمفتاح مفعّل."""
+    tenant, customer, product = env
+    _settings(tenant, block=True)
+    with pytest.raises(ValidationError):
+        _save_via_serializer(tenant, customer, product,
+                             lines=_mixed_lines(product), number="MIX-ON-1")
+    # المعاملة تراجعت — لم تُحفظ الفاتورة.
+    assert not SalesInvoice.objects.filter(tenant=tenant, invoice_number="MIX-ON-1").exists()
+
+
+def test_profitable_invoice_with_loss_line_saved_when_off(env):
+    """(ب) نفس الفاتورة تُحفظ حين المفتاح مطفأ (السماح بالخسارة)."""
+    tenant, customer, product = env
+    _settings(tenant, block=False)
+    inv = _save_via_serializer(tenant, customer, product,
+                               lines=_mixed_lines(product), number="MIX-OFF-1")
+    assert SalesInvoice.objects.filter(pk=inv.pk).exists()
+
+
+def test_return_with_loss_line_saved_when_on(env):
+    """(ج) المرجع (sale_return) لا يخضع للحارس حتى مع سطر «خسارة» والمفتاح مفعّل."""
+    tenant, customer, product = env
+    _settings(tenant, block=True)
+    inv = _save_via_serializer(
+        tenant, customer, product,
+        kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        lines=[{"product": product.id, "quantity": "1", "unit_price": "80"}],
+        number="RET-ON-1",
+    )
+    assert SalesInvoice.objects.filter(pk=inv.pk).exists()

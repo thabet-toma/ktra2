@@ -350,38 +350,40 @@ def _build_cogs_journal_line_dicts(
     return rows
 
 
-def invoice_gross_profit(
+def _loss_lines(
     invoice: SalesInvoice,
     lines: list[SalesInvoiceLine],
     products_by_id: dict[int, Product],
-) -> Decimal:
-    """الربح الإجمالي التقديري = الإيراد الصافي (بلا ضريبة، بعد خصم الفاتورة) − التكلفة
-    (كمية × متوسط التكلفة، بنفس أساس قيد COGS). سالب ⇒ خسارة.
+) -> list[tuple]:
+    """W1: الأسطر المُباعة بخسارة — صافي إيراد السطر أقل من تكلفته.
 
-    مصدر حقيقة واحد لفحص «منع فاتورة الخسارة» في الحفظ (خادمياً عند الترحيل) —
-    يُطابق منطق `invoice_profits` (الإيراد) و`_build_cogs_journal_line_dicts` (التكلفة).
+    «صافي إيراد السطر» = `line.line_total_excl_tax` (بعد خصم السطر + توزيع خصم الفاتورة
+    والنسبة، وتعديل السعر شامل الضريبة) — نفس أساس `invoice_profits` وقيد COGS. التكلفة =
+    الكمية × متوسط التكلفة (WAC، مصدر حقيقة واحد). يفترض استدعاء
+    `recalculate_invoice_amounts` مسبقاً (يملأ `line_total_excl_tax`). يعيد
+    قائمة (line, product, revenue, cost) لكل سطر خاسر.
     """
-    revenue = (
-        Decimal(str(invoice.subtotal_excl_tax or 0))
-        - Decimal(str(invoice.invoice_discount or 0))
-    ).quantize(DEC)
-    cost = Decimal("0")
+    offenders: list[tuple] = []
     for line in lines:
         p = products_by_id.get(line.product_id)
         if p is None or getattr(p, "is_service", False):
             continue
-        cost += (Decimal(str(line.quantity)) * Decimal(str(p.avg_cost or 0))).quantize(DEC)
-    return (revenue - cost).quantize(DEC)
+        cost = (Decimal(str(line.quantity)) * Decimal(str(p.avg_cost or 0))).quantize(DEC)
+        revenue = Decimal(str(line.line_total_excl_tax or 0)).quantize(DEC)
+        if (revenue - cost) < 0:
+            offenders.append((line, p, revenue, cost))
+    return offenders
 
 
-def _guard_loss_invoice(
+def guard_loss_invoice(
     invoice: SalesInvoice,
     lines: list[SalesInvoiceLine],
     products_by_id: dict[int, Product],
 ) -> None:
-    """يمنع ترحيل فاتورة بيع بخسارة إذا فعّل الإعداد `block_loss_invoices`.
-
-    يقتصر على فواتير البيع (لا المراجيع). يُسجَّل تحذير ويُرفع ValidationError واضح.
+    """W1: يمنع حفظ/ترحيل فاتورة بيع فيها **أي سطر** يُباع بخسارة (صافي البيع أقل من
+    متوسط التكلفة) عند تفعيل `SalesSettings.block_loss_invoices` — حتى لو كان إجمالي
+    الفاتورة رابحاً. المراجيع مُعفاة. المفتاح OFF = السماح بحفظ فاتورة بخسارة (تجاوز
+    الحارس). يسمّي الأسطر المخالفة بالعربية (اسم الصنف + التكلفة مقابل صافي البيع).
     """
     kind = invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE
     if kind != SalesInvoice.INVOICE_KIND_SALE:
@@ -389,16 +391,21 @@ def _guard_loss_invoice(
     ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
     if not (ss and ss.block_loss_invoices):
         return
-    profit = invoice_gross_profit(invoice, lines, products_by_id)
-    if profit < 0:
-        logger.warning(
-            "Blocked loss invoice %s (gross profit %s) — block_loss_invoices on.",
-            invoice.invoice_number, profit,
-        )
-        raise ValidationError(
-            f"لا يُسمح بحفظ فاتورة بخسارة (الربح الإجمالي {profit}). "
-            "سعر البيع أقل من التكلفة — عدّل الأسعار أو عطّل المنع من إعدادات المبيعات."
-        )
+    offenders = _loss_lines(invoice, lines, products_by_id)
+    if not offenders:
+        return
+    detail = "؛ ".join(
+        f"«{p.name_ar or p.name_en or p.sku}» (التكلفة {cost} أعلى من صافي البيع {revenue})"
+        for (_line, p, revenue, cost) in offenders
+    )
+    logger.warning(
+        "Blocked loss invoice %s — %d loss line(s): %s",
+        invoice.invoice_number, len(offenders), detail,
+    )
+    raise ValidationError(
+        f"لا يُسمح بحفظ فاتورة تحتوي بنداً يُباع بخسارة: {detail}. "
+        "عدّل الأسعار أو فعّل «السماح بحفظ فاتورة بخسارة» من إعدادات المبيعات."
+    )
 
 
 def _partner_open_balance_excluding_invoice(partner: Partner, exclude_invoice_id: int | None) -> Decimal:
@@ -735,8 +742,8 @@ def post_sales_invoice(
         for line in lines:
             line.product = products_by_id[line.product_id]
 
-        # منع فاتورة الخسارة (إعداد اختياري) — بعد قفل الأصناف وتحديث الإجماليات.
-        _guard_loss_invoice(invoice, lines, products_by_id)
+        # منع فاتورة الخسارة (إعداد اختياري، على مستوى السطر) — بعد قفل الأصناف والإجماليات.
+        guard_loss_invoice(invoice, lines, products_by_id)
 
         journal_lines: list[dict] = []
 

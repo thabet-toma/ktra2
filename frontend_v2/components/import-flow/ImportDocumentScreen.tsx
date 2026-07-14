@@ -76,6 +76,8 @@ interface ShipmentApiRow {
   total_shipping_cost_usd?: number;
   total_volume?: number;
   total_weight_kg?: number;
+  chargeable_unit?: "cbm" | "kg" | null;
+  freight_rate?: number | null;
   subtotal?: number;
   vat_total?: number;
   grand_total?: number;
@@ -87,7 +89,7 @@ interface ShipmentApiRow {
   notes?: string;
   deals_count?: number;
   deals_preview?: string | null;
-  shipment_deal_allocations?: Array<{ id: number; deal: number; deal_name?: string; deal_ref?: string; deal_title?: string; allocated_shipping_cost?: number }>;
+  shipment_deal_allocations?: Array<{ id: number; deal: number; deal_name?: string; deal_ref?: string; deal_title?: string; allocated_shipping_cost?: number; deal_total_cbm?: number | string; deal_total_weight_kg?: number | string }>;
   payments?: AgentPaymentApiRow[];
 }
 
@@ -156,6 +158,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   // Deals tab state
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
   const [availableDeals, setAvailableDeals] = useState<DealRow[]>([]);
+  // M2: freight chargeable-unit basis (CBM/KG) + rate — switching recomputes cleanly.
+  const [freightUnit, setFreightUnit] = useState<"cbm" | "kg">("cbm");
+  const [freightRate, setFreightRate] = useState("");
   // Local tab state (D)
   const [editingLocalId, setEditingLocalId] = useState<number | null>(null);
   const [localForm, setLocalForm] = useState<Partial<LocalShipmentRow> | null>(null);
@@ -419,6 +424,17 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     [shipment],
   );
 
+  // Deals missing their measure in the chosen unit → freight can't be allocated.
+  const missingMeasureRefs = useMemo(() => {
+    const num = (v: number | string | undefined) => {
+      const n = typeof v === "string" ? parseFloat(v) : v ?? 0;
+      return Number.isFinite(n as number) ? (n as number) : 0;
+    };
+    return shipmentDeals
+      .filter((d) => num(freightUnit === "kg" ? d.deal_total_weight_kg : d.deal_total_cbm) <= 0)
+      .map((d) => d.deal_ref || `#${d.deal}`);
+  }, [shipmentDeals, freightUnit]);
+
   const openLinkPicker = useCallback(async () => {
     if (!shipment) return;
     setLinkPickerOpen(true);
@@ -459,6 +475,23 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     }
   }, [shipment]);
 
+  // ج8 (M5): قدوم من زر «الخطوة التالية» في الصفقة (?join_deal=ID) — بمجرد
+  // وجود شحنة محفوظة، افتح فاتح ضمّ الصفقات على تبويب الصفقات تلقائياً (بلا
+  // ربط صامت — المستخدم يؤكد اختيار الصفقة). يُنفَّذ مرة واحدة لكل قدوم.
+  const joinDealParam = searchParams.get("join_deal");
+  const joinHandledRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!joinDealParam || joinHandledRef.current) return;
+    if (!shipment?.id) return;
+    const alreadyLinked = shipmentDeals.some(
+      (d) => String(d.deal) === String(joinDealParam),
+    );
+    joinHandledRef.current = true;
+    if (alreadyLinked) return;
+    setActiveTab("deals");
+    void openLinkPicker();
+  }, [joinDealParam, shipment, shipmentDeals, openLinkPicker]);
+
   const handleUnlinkDeal = useCallback(async (dealId: number) => {
     if (!shipment) return;
     if (!(await confirm({ title: "فك ربط الصفقة", message: "هل تريد فك ربط هذه الصفقة من الشحنة؟", confirmText: "فك الربط" }))) return;
@@ -493,6 +526,67 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setSaving(false);
     }
   }, [shipment]);
+
+  // M2: keep the freight basis controls in sync with the loaded shipment.
+  React.useEffect(() => {
+    const cu = (shipment?.chargeable_unit as "cbm" | "kg" | undefined) || "cbm";
+    setFreightUnit(cu === "kg" ? "kg" : "cbm");
+    setFreightRate(shipment?.freight_rate != null ? String(shipment.freight_rate) : "");
+  }, [shipment?.id, shipment?.chargeable_unit, shipment?.freight_rate]);
+
+  const handleSetFreight = useCallback(async (unit: "cbm" | "kg", rate: string) => {
+    if (!shipment) return;
+    setSaving(true); setError(null);
+    try {
+      const patched = await apiPatchObject<ShipmentApiRow>(
+        `logistics/shipments/${shipment.id}/freight/`,
+        { chargeable_unit: unit, freight_rate: rate ? Number(rate) : 0 },
+        { tenantId: tid() },
+      );
+      setShipment(patched);
+      setShipmentForm({ ...patched });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [shipment]);
+
+  // Edit a deal's CBM/KG inline from the shipment — no need to leave for the deal
+  // screen. Saves to the deal, then (once every deal has the chosen measure and a
+  // rate is set) recomputes the freight total + shares automatically.
+  const handleUpdateDealMeasure = useCallback(
+    async (dealId: number, patch: { total_cbm?: number; total_weight_kg?: number }) => {
+      if (!shipment) return;
+      setSaving(true); setError(null);
+      try {
+        await apiPatchObject(`logistics/deals/${dealId}/`, patch, { tenantId: tid() });
+        let refreshed = await apiGetObject<ShipmentApiRow>(
+          `logistics/shipments/${shipment.id}/`, { tenantId: tid() });
+        const allocs = refreshed.shipment_deal_allocations || [];
+        const num = (v: number | string | undefined) => {
+          const n = typeof v === "string" ? parseFloat(v) : v ?? 0;
+          return Number.isFinite(n as number) ? (n as number) : 0;
+        };
+        const stillMissing = allocs.some(
+          (d) => num(freightUnit === "kg" ? d.deal_total_weight_kg : d.deal_total_cbm) <= 0);
+        // كل الصفقات صار إلها قياس + في سعر شحن → أعِد حساب الإجمالي والحصص تلقائياً.
+        if (!stillMissing && Number(freightRate) > 0) {
+          refreshed = await apiPatchObject<ShipmentApiRow>(
+            `logistics/shipments/${shipment.id}/freight/`,
+            { chargeable_unit: freightUnit, freight_rate: Number(freightRate) },
+            { tenantId: tid() });
+        }
+        setShipment(refreshed);
+        setShipmentForm({ ...refreshed });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [shipment, freightUnit, freightRate],
+  );
 
   const handleUpdateAllocation = useCallback(async (dealId: number, newAlloc: number) => {
     if (!shipment) return;
@@ -576,7 +670,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const handleNewLocal = useCallback(() => {
     setEditingLocalId(0);
-    setLocalForm({ id: 0, shipment: (shipment || shipmentForm)?.id ?? null, carrier: 0, amount: "0", currency: 0, exchange_rate: "1", status: "pending", payment_type: "credit", capitalize_to_inventory: false, is_posted: false, purchase_invoice: null, shipment_number: "" } as Partial<LocalShipmentRow>);
+    setLocalForm({ id: 0, shipment: (shipment || shipmentForm)?.id ?? null, carrier: 0, amount: "0", currency: 0, exchange_rate: "1", status: "pending", payment_type: "credit", capitalize_to_inventory: true, is_posted: false, purchase_invoice: null, shipment_number: "" } as Partial<LocalShipmentRow>);
     void ensureCarriers();
   }, [shipment, shipmentForm, ensureCarriers]);
 
@@ -604,6 +698,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           vehicle_number: localForm.vehicle_number, origin: localForm.origin,
           destination: localForm.destination, pickup_date: localForm.pickup_date,
           delivery_date: localForm.delivery_date, amount: localForm.amount || "0",
+          currency: localForm.currency || 1, exchange_rate: localForm.exchange_rate || "1",
           payment_type: (localForm.payment_type as "credit" | "cash") || "credit",
           status: localForm.status as LocalShipmentRow["status"],
           notes: localForm.notes,
@@ -617,6 +712,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           origin: localForm.origin, destination: localForm.destination,
           pickup_date: localForm.pickup_date, delivery_date: localForm.delivery_date,
           amount: localForm.amount || "0",
+          currency: localForm.currency || 1, exchange_rate: localForm.exchange_rate || "1",
           payment_type: (localForm.payment_type as "credit" | "cash") || "credit",
           status: localForm.status as LocalShipmentRow["status"],
           notes: localForm.notes,
@@ -985,7 +1081,36 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       {fld("رقم الحركة", <input className="aseel-input" value={shipmentForm.agent_shipment_number || ""} onChange={sfText("agent_shipment_number")} />)}
       {fld("رقم الفاتورة", <input className="aseel-input" readOnly value={shipmentForm.invoice_number || "—"} />)}
       {fld("الحجم / الوزن", <input className="aseel-input" readOnly value={`${fmt(shipmentForm.total_volume)} / ${fmt(shipmentForm.total_weight_kg)}`} />)}
-      {fld("المخلِّص", <input className="aseel-input" readOnly value={clearance ? (clearance.broker_name || `#${clearance.customs_broker}`) : "—"} />)}
+      {fld("المخلِّص", <span style={{ display: "flex", gap: 2 }}>
+        <select
+          className="aseel-input"
+          value={clearanceForm?.customs_broker ?? ""}
+          onChange={(e) => {
+            const val = e.target.value;
+            const v = val && val !== "null" ? Number(val) : null;
+            const p = carriers.find((c) => c.id === v);
+            if (clearanceForm) {
+              const updated = { ...clearanceForm, customs_broker: v, broker_name: p?.name || "" } as ClearanceRow;
+              setClearanceForm(updated);
+              void handleSaveClearance(updated);
+            }
+          }}
+          disabled={!clearanceForm}
+          title={!clearanceForm ? "يجب إنشاء بيان تخليص أولاً (من تبويب التخليص الجمركي)" : ""}
+        >
+          <option value="">{clearanceForm ? "— بلا مخلِّص —" : "أضف بيان تخليص أولاً"}</option>
+          {carriers.filter((c) => c.partner_type === "CustomsBroker").map((c) => (
+            <option key={c.id} value={c.id}>{c.name}</option>
+          ))}
+          {clearanceForm?.customs_broker != null && String(clearanceForm.customs_broker) !== "null" &&
+            !carriers.some((c) => String(c.id) === String(clearanceForm.customs_broker)) && (
+              <option value={clearanceForm.customs_broker}>
+                {clearanceForm.broker_name || `#${clearanceForm.customs_broker}`}
+              </option>
+            )}
+        </select>
+        <button type="button" className="aseel-ellipsis" title="إضافة مخلِّص جمركي جديد" disabled={!clearanceForm} onClick={() => { setQuickAddType("CustomsBroker"); setQuickAddName(""); }}>+</button>
+      </span>)}
       {fld("رقم البيان", <input className="aseel-input" readOnly value={clearance?.declaration_number || "—"} />)}
       {fld("تاريخ التخليص", <input className="aseel-input" type="date" readOnly value={clearance?.clearance_date ? String(clearance.clearance_date).slice(0, 10) : ""} />)}
       {fld("فاتورة المقاصة", <input className="aseel-input" readOnly value={clearance?.settlement_invoice_number || "—"} />)}
@@ -1005,8 +1130,42 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       </div>
       <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", margin: "0 0 4px" }}>
         كل صف = صفقة شراء مضمومة لهذه الشحنة. «حصة الشحن» = نصيب الصفقة من تكلفة الشحن
-        الدولي (يتوزع حسب الحجم/الوزن تلقائياً — عدّله يدوياً أو اضغط «إعادة توزيع الحصص»).
+        الدولي (يتوزع حسب الوحدة المختارة تلقائياً — عدّله يدوياً أو اضغط «إعادة توزيع الحصص»).
       </p>
+      {/* M2: أساس تسعير الشحن — CBM أو KG (اختيار يدوي)؛ التبديل يعيد الحساب كاملاً بلا بقايا */}
+      {shipment && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "4px 6px", marginBottom: 4, background: "var(--aseel-bg-strip, #f5f5f5)", borderRadius: 6, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+          <b>أساس الشحن:</b>
+          <span style={{ display: "inline-flex", border: "1px solid var(--aseel-border)", borderRadius: 6, overflow: "hidden" }}>
+            {(["cbm", "kg"] as const).map((u) => (
+              <button key={u} type="button" className="aseel-toolbtn"
+                onClick={() => { setFreightUnit(u); void handleSetFreight(u, freightRate); }}
+                disabled={saving}
+                style={{ borderRadius: 0, padding: "2px 12px", background: freightUnit === u ? "var(--aseel-accent, #1857a4)" : "transparent", color: freightUnit === u ? "#fff" : "var(--aseel-ink)" }}>
+                {u.toUpperCase()}
+              </button>
+            ))}
+          </span>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            سعر/{freightUnit.toUpperCase()}:
+            <input className="aseel-input" type="number" step="0.0001" min="0" style={{ width: 90 }}
+              value={freightRate} onChange={(e) => setFreightRate(e.target.value)}
+              onBlur={() => void handleSetFreight(freightUnit, freightRate)} disabled={saving} />
+          </label>
+          <span className="aseel-text-soft">
+            الإجمالي = السعر × مجموع {freightUnit.toUpperCase()} ={" "}
+            <b>{fmt(shipmentForm?.total_shipping_cost_usd)}</b> USD
+          </span>
+        </div>
+      )}
+      {/* تحذير واضح: صفقات بلا حجم/وزن → الشحن ما بيتوزّع حتى تُعبّأ */}
+      {shipment && missingMeasureRefs.length > 0 && (
+        <div style={{ padding: "6px 10px", marginBottom: 4, borderRadius: 6, fontSize: "var(--aseel-fs-sm, 12px)", background: "var(--aseel-warn-bg, #fdf3e3)", color: "var(--aseel-warn, #8a5a00)", border: "1px solid var(--aseel-warn, #d9a441)" }}>
+          ⚠ صفقات بلا {freightUnit === "kg" ? "وزن (KG)" : "حجم (CBM)"}: <b>{missingMeasureRefs.join("، ")}</b>.
+          {" "}عبّئ القيمة مباشرة في عمود {freightUnit === "kg" ? "KG" : "CBM"} بالجدول أدناه — يُحفظ في الصفقة
+          ويُعاد توزيع الشحن تلقائياً بمجرّد اكتمال كل الصفقات.
+        </div>
+      )}
       {linkPickerOpen && (
         <div style={{ position: "fixed", inset: 0, zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.3)" }}>
           <div style={{ background: "#fff", borderRadius: 8, padding: 16, maxWidth: 500, width: "90%", maxHeight: "70vh", overflowY: "auto" }}>
@@ -1054,14 +1213,55 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
           <th style={{ padding: "2px 4px", textAlign: "start" }}>رقم الصفقة</th>
           <th style={{ padding: "2px 4px", textAlign: "start" }}>الاسم</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 70 }}>CBM</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 70 }}>KG</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 110 }}>حصة الشحن (USD)</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 60 }}>إلغاء</th>
         </tr></thead>
         <tbody>
-          {shipmentDeals.map((d) => (
+          {shipmentDeals.map((d) => {
+            const cbm = Number(d.deal_total_cbm ?? 0);
+            const kg = Number(d.deal_total_weight_kg ?? 0);
+            const activeVal = freightUnit === "kg" ? kg : cbm;
+            const missing = activeVal <= 0;
+            return (
             <tr key={d.id}>
               <td style={{ padding: "2px 4px", fontFamily: "monospace" }}>{d.deal_ref || `#${d.deal}`}</td>
               <td style={{ padding: "2px 4px" }}>{d.deal_title || d.deal_name || "—"}</td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>
+                <input
+                  className="aseel-input"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  key={`cbm-${d.deal}-${cbm}`}
+                  defaultValue={cbm}
+                  disabled={saving}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v) && v !== cbm) void handleUpdateDealMeasure(d.deal, { total_cbm: v });
+                  }}
+                  title="حجم الصفقة (CBM) — عبّئه من هنا مباشرة"
+                  style={{ width: 62, textAlign: "center", fontWeight: freightUnit === "cbm" ? 700 : 400, ...(freightUnit === "cbm" && missing ? { borderColor: "var(--aseel-danger, #c0392b)", color: "var(--aseel-danger, #c0392b)" } : {}) }}
+                />
+              </td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>
+                <input
+                  className="aseel-input"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                  key={`kg-${d.deal}-${kg}`}
+                  defaultValue={kg}
+                  disabled={saving}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v) && v !== kg) void handleUpdateDealMeasure(d.deal, { total_weight_kg: v });
+                  }}
+                  title="وزن الصفقة (KG) — عبّئه من هنا مباشرة"
+                  style={{ width: 62, textAlign: "center", fontWeight: freightUnit === "kg" ? 700 : 400, ...(freightUnit === "kg" && missing ? { borderColor: "var(--aseel-danger, #c0392b)", color: "var(--aseel-danger, #c0392b)" } : {}) }}
+                />
+              </td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>
                 <input
                   className="aseel-input"
@@ -1094,9 +1294,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 </button>
               </td>
             </tr>
-          ))}
+            );
+          })}
           {shipmentDeals.length === 0 && (
-            <tr><td colSpan={4} style={{ padding: "8px 4px", textAlign: "center", color: "#999" }}>لا توجد صفقات مرتبطة</td></tr>
+            <tr><td colSpan={6} style={{ padding: "8px 4px", textAlign: "center", color: "#999" }}>لا توجد صفقات مرتبطة</td></tr>
           )}
         </tbody>
       </table>
@@ -1115,7 +1316,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const clearanceContent = clearanceForm ? (
     <div style={{ padding: "4px 8px" }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "2px 8px", marginBottom: 8 }}>
+      <div className="aseel-headband" style={{ marginBottom: 8 }}>
         {fld("رقم البيان", <input className="aseel-input" value={clearanceForm.declaration_number || ""} onChange={cfText("declaration_number")} />)}
         {fld("تاريخ التخليص", <input className="aseel-input" type="date" value={clearanceForm.clearance_date ? String(clearanceForm.clearance_date).slice(0, 10) : ""} onChange={cfText("clearance_date")} />)}
         {fld("الوقت", <input className="aseel-input" type="time" value={clearanceForm.transaction_time ? String(clearanceForm.transaction_time).slice(0, 5) : ""} onChange={cfText("transaction_time")} />)}
@@ -1127,17 +1328,20 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             className="aseel-input"
             value={clearanceForm.customs_broker ?? ""}
             onChange={(e) => {
-              const v = e.target.value ? Number(e.target.value) : null;
+              const val = e.target.value;
+              const v = val && val !== "null" ? Number(val) : null;
               const p = carriers.find((c) => c.id === v);
-              setCF({ customs_broker: v, broker_name: p?.name || "" } as Partial<ClearanceRow>);
+              const updated = { ...clearanceForm, customs_broker: v, broker_name: p?.name || "" } as ClearanceRow;
+              setCF(updated);
+              void handleSaveClearance(updated);
             }}
           >
             <option value="">— بلا مخلِّص —</option>
             {carriers.filter((c) => c.partner_type === "CustomsBroker").map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
-            {clearanceForm.customs_broker &&
-              !carriers.some((c) => c.id === clearanceForm.customs_broker) && (
+            {clearanceForm.customs_broker != null && String(clearanceForm.customs_broker) !== "null" &&
+              !carriers.some((c) => String(c.id) === String(clearanceForm.customs_broker)) && (
                 <option value={clearanceForm.customs_broker}>
                   {clearanceForm.broker_name || `#${clearanceForm.customs_broker}`}
                 </option>
@@ -1197,6 +1401,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                   <option value="permits">تصاريح</option>
                   <option value="broker_commission">عمولة المخلص</option>
                   <option value="customs_system">نظام الجمارك</option>
+                  <option value="شحن محلي">شحن محلي</option>
                   <option value="other">أخرى</option>
                 </select>
               </td>
@@ -1294,21 +1499,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.status || "—"}</td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.is_posted ? "✓" : "—"}</td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>
-                {ls.purchase_invoice ? (
-                  <span className="aseel-text-soft" style={{ fontSize: "11px" }} title="نُقلت التكلفة إلى الفاتورة كرسم">في الفاتورة {ls.purchase_invoice_number || `#${ls.purchase_invoice}`}</span>
-                ) : (
-                  <span style={{ display: "inline-flex", gap: 4 }}>
-                    {!ls.is_posted && convertedPiId && (
-                      <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handleImportLocalToInvoice(ls.id, convertedPiId); }} disabled={saving} style={{ fontSize: "11px" }} title="نقل التكلفة إلى فاتورة الشراء كرسم — بدون قيد مستقل">إلى الفاتورة</button>
-                    )}
-                    {!ls.is_posted && (
-                      <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handlePostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }} title="قيد مصروف مستقل (مدين شحن محلي / دائن الناقل أو الصندوق). بعد الترحيل لا يمكن نقله إلى الفاتورة.">ترحيل</button>
-                    )}
-                    {ls.is_posted && (
-                      <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handleUnpostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }} title="يحذف قيد المصروف ويعيد السجل مسودة">تراجع عن الترحيل</button>
-                    )}
-                  </span>
-                )}
+                <span style={{ display: "inline-flex", gap: 4 }}>
+                  {!ls.is_posted && (
+                    <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handlePostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px", backgroundColor: "var(--aseel-primary)", color: "white", padding: "2px 6px" }} title="قيد مصروف مستقل (مدين شحن محلي / دائن الناقل أو الصندوق).">تسجيل واعتماد النقل</button>
+                  )}
+                  {ls.is_posted && (
+                    <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handleUnpostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }} title="يحذف قيد المصروف ويعيد السجل مسودة">تراجع عن الترحيل</button>
+                  )}
+                </span>
               </td>
             </tr>
           ))}
@@ -1317,11 +1515,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           )}
         </tbody>
       </table>
-      {localShipments.some((l) => !l.is_posted && !l.purchase_invoice) && (
+      {localShipments.some((l) => !l.is_posted) && (
         <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", padding: "4px 0" }}>
-          {convertedPiId
-            ? "«إلى الفاتورة» يضيف التكلفة كرسم على فاتورة الشراء (يُرسمل مع التكلفة عند ترحيل الفاتورة). «ترحيل» ينشئ قيد مصروف مستقلاً — ولا يمكن بعده النقل إلى الفاتورة."
-            : "لمّا تُنشأ فاتورة الشراء (زر «تحويل إلى فاتورة شراء») يظهر هنا خيار نقل تكلفة النقل المحلي إليها كرسم بدل قيد مصروف مستقل."}
+          زر «تسجيل واعتماد النقل» ينشئ قيد مصروف مستقلاً بالشحن المحلي.
         </p>
       )}
       {localForm && (

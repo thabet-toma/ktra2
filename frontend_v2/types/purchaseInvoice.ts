@@ -115,4 +115,7 @@ export interface PurchaseInvoiceDto {
   created_at?: string;
   updated_at?: string;
   created_by?: number | null;
+  // W7c: مرفقات الفاتورة/المرجع (صور + PDF) — قراءة من الخادم، تُرسل عند الحفظ.
+  quote_images?: string[];
+  quote_pdfs?: { name: string; url: string; size: number; type: string }[];
 }

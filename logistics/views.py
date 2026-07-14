@@ -8,10 +8,10 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, IntegrityError
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Sum
 from .models import (
     LogisticsDeal, LogisticsDealItem, LogisticsShipment,
-    LogisticsClearance, LogisticsExpense, LogisticsShipmentDeal,
+    LogisticsClearance, LogisticsShipmentDeal,
     LogisticsPayment, LogisticsClearancePayment,
     PurchaseInvoice, PurchaseInvoiceItem, PurchaseInvoiceFee,
     LocalShipment,
@@ -20,7 +20,7 @@ from sales.models import SupplierPayment
 from .serializers import (
     LogisticsDealSerializer, LogisticsDealItemSerializer,
     LogisticsShipmentSerializer, LogisticsClearanceSerializer,
-    LogisticsExpenseSerializer, LogisticsPaymentSerializer,
+    LogisticsPaymentSerializer,
     LogisticsClearancePaymentSerializer,
     PurchaseInvoiceSerializer, PurchaseInvoiceListSerializer,
     LocalShipmentSerializer, SupplierPaymentSerializer,
@@ -44,7 +44,11 @@ from .landed_cost import (
     preview_landed_import,
     recalculate_landed_for_shipment,
     redistribute_shipment_deal_allocations,
+    clearance_cost_line_dicts,
+    build_import_trace,
 )
+from .domain.shipment_builder import create_shipment_from_deals
+from .domain.stages import derive_stage
 from .services import attach_pi_payment_voucher
 
 logger = logging.getLogger(__name__)
@@ -106,6 +110,46 @@ class LogisticsDealViewSet(BaseTenantViewSet):
         log_view(entity_type='deal', entity_id=obj.id, entity_label=obj.ref_number, request=request)
         return response
 
+    @action(detail=False, methods=['get'], url_path='ready-to-ship')
+    def ready_to_ship(self, request):
+        """M1: the candidate list for the «Create Shipment» multi-select panel.
+
+        Only deals that reached «تم الشحن للوكيل» (stage READY_TO_SHIP) and are not
+        already on a shipment. Deals still in manufacturing (DRAFT) are excluded —
+        goods must be at the agent before they can be consolidated into a shipment.
+        Returns a light payload with the CBM/KG measures the builder needs.
+        """
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'لا يوجد مستأجر'}, status=status.HTTP_400_BAD_REQUEST)
+        linked = set(
+            LogisticsShipmentDeal.objects.filter(deal__tenant=tenant)
+            .values_list('deal_id', flat=True)
+        )
+        rows = []
+        for d in self.get_queryset().select_related('partner'):
+            if d.id in linked:
+                continue
+            if derive_stage(d) != LogisticsDeal.STAGE_READY_TO_SHIP:
+                continue
+            rows.append({
+                'id': d.id,
+                'ref_number': d.ref_number,
+                'short_name': d.short_name or '',
+                'description': d.description or '',
+                'partner_id': d.partner_id,
+                'partner_name': d.partner.name if d.partner_id else '',
+                'stage': derive_stage(d),
+                'shipping_workflow_status': d.shipping_workflow_status,
+                'total_amount': d.total_amount,
+                'currency_id': d.currency_id,
+                'total_cbm': d.total_cbm,
+                'total_weight_kg': d.total_weight_kg if d.total_weight_kg is not None else d.total_weight,
+            })
+        # Newest deal first (all rows are at the same READY_TO_SHIP stage).
+        rows.sort(key=lambda r: -r['id'])
+        return Response(rows)
+
     @action(detail=True, methods=['post'])
     def add_item(self, request, pk=None):
         deal = self.get_object()
@@ -118,21 +162,157 @@ class LogisticsDealViewSet(BaseTenantViewSet):
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    # ج7: الدفع بُعد مالي مستقل عن مسار الشحن — تغيير المرحلة/الحالة وحده لا
-    # يمس القيود فلا يحجبه ترحيل الدفعات؛ الحارس يبقى على التعديلات المالية.
-    STAGE_ONLY_FIELDS = frozenset({'shipping_workflow_status', 'status'})
+    # ── ج8: الدفعة مورد REST مستقل (بدل الكتابة المتداخلة عبر PATCH الصفقة) ──
+    # الحقول المقفلة بعد الترحيل: المبلغ وبيانات الصرف مرتبطة بالقيد المحاسبي.
+    # التوثيق (سليب/تأكيد المورد/ملاحظات/مرفقات/الحالة) يبقى حراً دائماً.
+    PAYMENT_FIELDS_LOCKED_WHEN_POSTED = frozenset({
+        'amount', 'amount_local', 'usd_to_ils', 'transfer_cost',
+        'percentage', 'payment_number', 'bank_account',
+    })
+    _PAYMENT_PROTECTED_KEYS = ('id', 'deal', 'shipment', 'is_posted', 'journal')
+
+    def _deal_payments_cap_error(self, deal, new_amount, exclude_payment_pk=None):
+        """سقف الدفعات: مجموع كل صفوف الدفع ≤ إجمالي الصفقة (نفس عقد النمط المتداخل السابق)."""
+        qs = deal.payments.all()
+        if exclude_payment_pk is not None:
+            qs = qs.exclude(pk=exclude_payment_pk)
+        existing = qs.aggregate(t=Sum('amount'))['t'] or Decimal('0')
+        cap = Decimal(deal.total_amount or 0)
+        eps = Decimal('0.01')
+        if existing + Decimal(new_amount or 0) > cap + eps:
+            return (
+                f'مجموع الدفعات ({existing + Decimal(new_amount or 0)}) يتجاوز إجمالي '
+                f'الصفقة ({cap}). خفّض المبلغ أو راجع بنود الصفقة.'
+            )
+        return None
+
+    @action(detail=True, methods=['post'], url_path='payments')
+    def create_payment(self, request, pk=None):
+        """إنشاء دفعة صفقة مباشرة — تعيد المعرّف الحقيقي فوراً (لا tmp-id)."""
+        deal = self.get_object()
+        data = {
+            k: v for k, v in request.data.items()
+            if k not in self._PAYMENT_PROTECTED_KEYS
+        }
+        serializer = LogisticsPaymentSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+
+        cap_err = self._deal_payments_cap_error(
+            deal, serializer.validated_data.get('amount') or Decimal('0')
+        )
+        if cap_err:
+            return Response({'error': cap_err}, status=status.HTTP_400_BAD_REQUEST)
+
+        pn = serializer.validated_data.get('payment_number')
+        if pn is not None and deal.payments.filter(payment_number=pn).exists():
+            return Response(
+                {
+                    'error': (
+                        f'يوجد بالفعل دفعة بنفس رقم القسط ({pn}). '
+                        'حدّث الصفحة (F5) وتجنّب حفظاً مكرراً.'
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payment = serializer.save(deal=deal, shipment=None)
+        log_activity(
+            action='create', entity_type='deal', entity_id=deal.id,
+            entity_label=deal.ref_number,
+            description=f'إضافة دفعة #{payment.payment_number} ({payment.amount})',
+            request=request,
+        )
+        return Response(
+            LogisticsPaymentSerializer(payment).data, status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=True, methods=['patch'], url_path=r'payments/(?P<payment_id>[^/.]+)')
+    def update_payment(self, request, pk=None, payment_id=None):
+        """تحديث دفعة صفقة. المرحّلة: حقولها التوثيقية فقط (تأكيد مورد/سليب/ملاحظات)."""
+        deal = self.get_object()
+        try:
+            pid = int(str(payment_id).strip())
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'معرّف الدفعة غير صالح'}, status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            payment = LogisticsPayment.objects.get(pk=pid, deal=deal)
+        except LogisticsPayment.DoesNotExist:
+            return Response({'error': 'الدفعة غير موجودة'}, status=status.HTTP_404_NOT_FOUND)
+
+        data = {
+            k: v for k, v in request.data.items()
+            if k not in self._PAYMENT_PROTECTED_KEYS
+        }
+        serializer = LogisticsPaymentSerializer(payment, data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        if payment.is_posted:
+            def _changed(field):
+                new_v = serializer.validated_data[field]
+                old_v = getattr(payment, field)
+                if isinstance(old_v, Decimal) or isinstance(new_v, Decimal):
+                    try:
+                        return Decimal(str(old_v or 0)) != Decimal(str(new_v or 0))
+                    except Exception:
+                        return True
+                return old_v != new_v
+
+            blocked = [
+                f for f in self.PAYMENT_FIELDS_LOCKED_WHEN_POSTED
+                if f in serializer.validated_data and _changed(f)
+            ]
+            if blocked:
+                return Response(
+                    {
+                        'error': (
+                            'الدفعة مرحّلة محاسبياً — المبلغ وبيانات الصرف مقفلة '
+                            f'({", ".join(sorted(blocked))}). ألغِ الترحيل أولاً ثم عدّل.'
+                        ),
+                        'can_unpost': True,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        new_amount = serializer.validated_data.get('amount')
+        if new_amount is not None:
+            cap_err = self._deal_payments_cap_error(
+                deal, new_amount, exclude_payment_pk=payment.pk
+            )
+            if cap_err:
+                return Response({'error': cap_err}, status=status.HTTP_400_BAD_REQUEST)
+
+        payment = serializer.save(deal=deal, shipment=None)
+        log_activity(
+            action='update', entity_type='deal', entity_id=deal.id,
+            entity_label=deal.ref_number,
+            description=f'تحديث دفعة #{payment.payment_number}',
+            request=request,
+        )
+        return Response(LogisticsPaymentSerializer(payment).data)
 
     def perform_update(self, serializer):
-        instance = serializer.instance
-        incoming = set(getattr(self.request, 'data', {}) or {})
-        stage_only = bool(incoming) and incoming <= self.STAGE_ONLY_FIELDS
-        if (
-            instance is not None
-            and not stage_only
-            and instance.payments.filter(is_posted=True).exists()
-        ):
-            raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
-        deal = serializer.save()
+        # ج8: الصفقة ليست مستنداً مرحَّلاً — الدفعات وحدها تُرحَّل (قرار المالك Q3).
+        # لا حجب شامل بعد ترحيل دفعة (كان جذر «هذا المستند مرحَّل» الذي جمّد
+        # الصفقة كلياً). الحماية المالية الوحيدة: لا يهبط إجمالي الصفقة تحت
+        # مجموع الدفعات المرحّلة، وإلا انفكّ الربط بين القيود والمستند.
+        with transaction.atomic():
+            deal = serializer.save()
+            posted = (
+                deal.payments.filter(is_posted=True).aggregate(t=Sum('amount'))['t']
+                or Decimal('0')
+            )
+            total = Decimal(deal.total_amount or 0)
+            if posted > 0 and total + Decimal('0.01') < posted:
+                raise ValidationError({
+                    'detail': (
+                        f'لا يمكن الحفظ: إجمالي الصفقة ({total}) أصبح أقل من مجموع '
+                        f'الدفعات المرحّلة محاسبياً ({posted}). عدّل البنود أو ألغِ '
+                        'ترحيل دفعة أولاً.'
+                    ),
+                    'can_unpost': True,
+                })
         log_activity(
             action='update', entity_type='deal', entity_id=deal.id,
             entity_label=deal.ref_number, description='تعديل صفقة', request=self.request,
@@ -766,6 +946,108 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 queryset=LogisticsShipmentDeal.objects.select_related("deal"),
             ),
         )
+
+    @action(detail=False, methods=['post'], url_path='create-from-deals')
+    def create_from_deals(self, request):
+        """M1: create one shipment from many Ready-to-Ship deals (fixes RC-1).
+
+        Body: {deal_ids: [int], chargeable_unit: 'cbm'|'kg', freight_rate: number,
+               header: {shipment_name, shipping_agent_id, shipping_type, ...}}
+        Atomically links the deals, aggregates CBM+KG, computes total freight =
+        rate × Σ(unit), allocates it pro-rata (penny-reconciled), and advances each
+        deal to IN_SHIPMENT through the guarded stage machine.
+        """
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'لا يوجد مستأجر'}, status=status.HTTP_400_BAD_REQUEST)
+        deal_ids = request.data.get('deal_ids') or []
+        chargeable_unit = str(request.data.get('chargeable_unit') or '').strip().lower()
+        rate = request.data.get('freight_rate', request.data.get('rate', 0))
+        header = request.data.get('header') or {}
+        try:
+            shipment = create_shipment_from_deals(
+                tenant=tenant,
+                deal_ids=deal_ids,
+                chargeable_unit=chargeable_unit,
+                freight_rate=rate,
+                header=header,
+                user=request.user if request.user.is_authenticated else None,
+            )
+        except (ValidationError, DjangoValidationError) as e:
+            msg = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception('create_from_deals failed')
+            return Response(
+                {'error': 'حدث خطأ غير متوقع أثناء إنشاء الشحنة من الصفقات.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        log_activity(
+            action='create', entity_type='shipment', entity_id=shipment.id,
+            entity_label=shipment.shipment_number,
+            description=f'إنشاء شحنة من {len(deal_ids)} صفقة', request=request,
+        )
+        ser = self.get_serializer(shipment)
+        return Response(ser.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['patch'], url_path='freight')
+    def set_freight(self, request, pk=None):
+        """M2: set the freight chargeable unit + rate, recompute cleanly.
+
+        Body: {chargeable_unit: 'cbm'|'kg', freight_rate: number}. Switching the
+        unit recomputes total freight = rate × Σ(unit) and re-runs the pro-rata
+        allocation to every deal — no stale figure survives downstream (unposted
+        invoices recompute live on read; posted invoices are frozen).
+        """
+        shipment = self.get_object()
+        if getattr(shipment, 'transit_journal_id', None):
+            return Response(
+                {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        from logistics.domain import allocation as _alloc
+        unit = str(request.data.get('chargeable_unit') or shipment.chargeable_unit or '').strip().lower()
+        if unit not in (LogisticsShipment.CHARGEABLE_CBM, LogisticsShipment.CHARGEABLE_KG):
+            return Response({'error': "وحدة تسعير الشحن يجب أن تكون 'cbm' أو 'kg'."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        raw_rate = request.data.get('freight_rate', request.data.get('rate', shipment.freight_rate or 0))
+        try:
+            rate = Decimal(str(raw_rate))
+        except Exception:
+            return Response({'error': 'سعر شحن غير صالح.'}, status=status.HTTP_400_BAD_REQUEST)
+        if rate < 0:
+            return Response({'error': 'سعر الشحن لا يمكن أن يكون سالباً.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        links = list(
+            LogisticsShipmentDeal.objects.filter(shipment=shipment).select_related('deal')
+        )
+        # Same guard as create: a freight rate on a deal missing its CBM/KG allocates wrong.
+        if rate > 0:
+            from .domain.shipment_builder import assert_deals_have_measure
+            try:
+                assert_deals_have_measure([l.deal for l in links], unit)
+            except DjangoValidationError as e:
+                msg = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
+                return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        total_units = sum((_alloc.deal_unit_measure(l.deal, unit) for l in links), Decimal('0'))
+        total_freight = _alloc.freight_total(rate, total_units)
+
+        shipment.chargeable_unit = unit
+        shipment.freight_rate = rate
+        shipment.price_per_unit = rate
+        shipment.pricing_method = 'unit'
+        shipment.unit_type = 'weight' if unit == LogisticsShipment.CHARGEABLE_KG else 'cbm'
+        shipment.total_shipping_cost_usd = total_freight
+        shipment.save(update_fields=[
+            'chargeable_unit', 'freight_rate', 'price_per_unit',
+            'pricing_method', 'unit_type', 'total_shipping_cost_usd',
+        ])
+        try:
+            redistribute_shipment_deal_allocations(shipment)
+        except Exception:
+            logger.exception('redistribute after set_freight failed (shipment=%s)', shipment.pk)
+        return Response(self.get_serializer(shipment).data)
 
     @action(detail=True, methods=['post'], url_path='recalculate-distribution')
     def recalculate_distribution(self, request, pk=None):
@@ -1435,7 +1717,7 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
             payment_date = datetime.date.today()
         notes = str(request.data.get("notes") or "").strip()
 
-        cost_lines = clearance.cost_lines or []
+        cost_lines = clearance_cost_line_dicts(clearance)
         clearance_budget = sum(
             Decimal(str(row.get("amount", 0) or 0))
             for row in cost_lines
@@ -1696,73 +1978,6 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
         })
 
 
-class LogisticsExpenseViewSet(BaseTenantViewSet):
-    queryset = LogisticsExpense.objects.all().order_by('-invoice_date')
-    serializer_class = LogisticsExpenseSerializer
-
-    @action(detail=True, methods=['post'])
-    def post_to_accounting(self, request, pk=None):
-        """
-        ترحيل مصروف لوجستي إلى المحاسبة.
-        القيد: مدين حساب المصروف | دائن حساب الالتزام
-        """
-        from accounting.models import JournalHeader, JournalLine
-        import datetime
-
-        expense = self.get_object()
-        if expense.is_posted:
-            return Response({'error': 'هذا المصروف مرحل بالفعل'}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not expense.expense_account or not expense.payable_account:
-            return Response(
-                {'error': 'يجب تحديد حساب المصروف وحساب الالتزام'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-            with transaction.atomic():
-                # إنشاء رأس القيد (صحيح: transaction_date لا date)
-                journal = JournalHeader.objects.create(
-                    tenant=expense.tenant,
-                    transaction_date=expense.invoice_date or datetime.date.today(),
-                    description=f"مصروف لوجستي: {expense.description} ({expense.related_type} #{expense.related_id})",
-                    reference_type='LOGISTICS_EXPENSE',
-                    reference_id=expense.id,
-                    is_posted=True
-                )
-
-                # سطر مدين: حساب المصروف
-                JournalLine.objects.create(
-                    tenant=expense.tenant,
-                    journal=journal,
-                    account=expense.expense_account,
-                    debit=expense.amount,
-                    credit=0
-                )
-
-                # سطر دائن: حساب الالتزام/المستحق
-                JournalLine.objects.create(
-                    tenant=expense.tenant,
-                    journal=journal,
-                    account=expense.payable_account,
-                    debit=0,
-                    credit=expense.amount
-                )
-
-                # تحديث المصروف
-                expense.is_posted = True
-                expense.journal = journal
-                expense.save()
-
-            return Response({
-                'status': 'تم الترحيل بنجاح',
-                'journal_id': journal.id
-            }, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-
 class PurchaseInvoiceViewSet(BaseTenantViewSet):
     serializer_class = PurchaseInvoiceSerializer
 
@@ -1838,6 +2053,34 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         count = PurchaseInvoice.objects.filter(tenant=tenant).count()
         return f"INV-{count + 1:04d}"
 
+    def _sync_attachments(self, invoice):
+        """W7c: يحفظ روابط الصور/PDF المرفوعة (quote_images/quote_pdfs) في
+        SystemAttachment (idempotent بالرابط، related_table='purchase_invoices') —
+        مرآة نمط الموردين/المنتجات. إضافة فقط (لا حذف)؛ غير حاجب — لا يكسر الحفظ."""
+        try:
+            from core.models import SystemAttachment
+            data = self.request.data
+            tenant = invoice.tenant
+
+            def _save(url, file_type):
+                if not (url and isinstance(url, str) and url.startswith('http')):
+                    return
+                if not SystemAttachment.objects.filter(
+                    tenant=tenant, related_table='purchase_invoices',
+                    related_id=invoice.id, file_path=url,
+                ).exists():
+                    SystemAttachment.objects.create(
+                        tenant=tenant, related_table='purchase_invoices',
+                        related_id=invoice.id, file_type=file_type, file_path=url,
+                    )
+
+            for u in (data.get('quote_images') or []):
+                _save(u, 'Image')
+            for p in (data.get('quote_pdfs') or []):
+                _save(p.get('url') if isinstance(p, dict) else p, 'PDF')
+        except Exception:
+            logger.exception('purchase-invoice attachment sync failed for invoice=%s', getattr(invoice, 'id', None))
+
     def perform_create(self, serializer):
         tenant = self._get_tenant()
         inv_num = self.request.data.get('invoice_number') or self._next_invoice_number(tenant)
@@ -1857,6 +2100,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             if not user_can_access_import(self.request.user, tenant):
                 raise PermissionDenied("صلاحية الفاتورة الدولية (الاستيراد) غير متاحة لحسابك.")
         invoice = serializer.save(tenant=tenant, invoice_number=inv_num, invoice_type=invoice_type)
+        self._sync_attachments(invoice)
         log_activity(
             action='create', entity_type='purchase_invoice', entity_id=invoice.id,
             entity_label=invoice.invoice_number,
@@ -2120,6 +2364,22 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
 
         ser = PurchaseInvoiceSerializer(created, many=True)
         return Response({'preview': preview, 'created': ser.data}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='trace')
+    def trace(self, request, pk=None):
+        """M5: full backward cost trace for an import invoice —
+        Invoice line → Deal → Shipment(freight) → Clearance(customs) → Transport.
+        Every cost on every line is traceable to its source (target §4.6)."""
+        invoice = self.get_object()
+        try:
+            data = build_import_trace(invoice)
+        except Exception:
+            logger.exception('build_import_trace failed pk=%s', pk)
+            return Response(
+                {'error': 'تعذّر بناء تتبّع التكلفة لهذه الفاتورة.'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        return Response(data)
 
     @action(detail=False, methods=['post'], url_path='recalculate-landed-cost')
     def recalculate_landed_cost(self, request):
@@ -2710,6 +2970,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         if instance is not None and instance.is_posted:
             raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
         invoice = serializer.save()
+        self._sync_attachments(invoice)
         log_activity(
             action='update', entity_type='purchase_invoice', entity_id=invoice.id,
             entity_label=invoice.invoice_number,
@@ -3353,8 +3614,8 @@ def _build_landed_cost_summary(shipment, *, detailed=False):
         cl = None
     if cl:
         cost_lines = []
-        if isinstance(cl.cost_lines, list):
-            for ln in cl.cost_lines:
+        if True:
+            for ln in clearance_cost_line_dicts(cl):
                 if not isinstance(ln, dict):
                     continue
                 try:

@@ -1025,20 +1025,29 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     return null;
   };
 
-  // منع فاتورة الخسارة (إعداد اختياري) — يُطابق الحارس الخادمي في post_sales_invoice.
-  // يُرجع رسالة الخطأ إن كان البيع بخسارة والمنع مُفعّل، وإلا null.
+  // منع فاتورة الخسارة (إعداد اختياري) — يُطابق الحارس الخادمي guard_loss_invoice:
+  // على مستوى **السطر** (صافي إيراد السطر بعد الخصومات < كمية×متوسط التكلفة)، حتى لو
+  // كان إجمالي الفاتورة رابحاً. يسمّي الأسطر المخالفة. المفتاح OFF = السماح بالحفظ.
   const lossBlockMessage = (): string | null => {
-    if (
-      salesSettings?.block_loss_invoices &&
-      journalPreview.cogs > 0 &&
-      journalPreview.grossProfit < 0
-    ) {
-      return (
-        `لا يُسمح بحفظ فاتورة بخسارة (الربح الإجمالي ${fmt(journalPreview.grossProfit)}). ` +
-        "سعر البيع أقل من التكلفة — عدّل الأسعار أو عطّل المنع من إعدادات المبيعات."
-      );
+    if (!salesSettings?.block_loss_invoices) return null;
+    const offenders: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const l = lines[i];
+      if (l.product === "") continue;
+      const p = productsById.get(Number(l.product));
+      if (!p) continue;
+      const cost = Number(p.avg_cost || 0) * Number(l.quantity || 0);
+      const revenue = totals.perLine[i]?.lineNetAdjusted ?? 0;
+      if (revenue - cost < 0) {
+        const name = p.name_ar || p.name_en || p.sku || `#${l.product}`;
+        offenders.push(`«${name}» (التكلفة ${fmt(cost)} أعلى من صافي البيع ${fmt(revenue)})`);
+      }
     }
-    return null;
+    if (offenders.length === 0) return null;
+    return (
+      `لا يُسمح بحفظ فاتورة تحتوي بنداً يُباع بخسارة: ${offenders.join("؛ ")}. ` +
+      "عدّل الأسعار أو فعّل «السماح بحفظ فاتورة بخسارة» من إعدادات المبيعات."
+    );
   };
 
   const handleSaveDraft = async () => {
@@ -1693,6 +1702,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       ),
     0
   );
+  // W4: إجمالي الكميات (مجموع كميات البنود) بجانب الإجماليات المالية.
+  const totalQty = lines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
 
   /* ───────────── أعمدة جدول البنود (AseelGrid) ───────────── */
   const gridColumns: AseelGridColumn<DraftLine>[] = [
@@ -2851,7 +2862,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               <span>مبلغ الفاتورة الإجمالي</span>
               <span className="aseel-total-value">{fmt(totals.grandTotal)}</span>
             </div>
-            
+            <div className="aseel-total-row">
+              <span>إجمالي الكمية</span>
+              <span className="aseel-total-value">{formatQuantity(totalQty)}</span>
+            </div>
+
             {/* F2: المدفوع نقداً وشيكات مباشرة تحت الإجمالي */}
             <div className="aseel-total-row">
               <span>مدفوع نقداً</span>

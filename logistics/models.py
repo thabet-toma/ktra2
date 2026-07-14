@@ -117,6 +117,36 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
         db_column='shipping_workflow_status',
     )
 
+    # ── Import redesign (M0): single canonical pipeline stage ──
+    # One source of truth for "where is this deal in Deal→Shipment→Clearance→
+    # Transport→Invoice". Additive for now (backfilled from shipping_workflow_status
+    # in M0 data migration); status/order_status become computed read-only props in
+    # M3. Transitions go through logistics.domain.stages.advance_deal_stage() which
+    # both validates AND writes — no bulk .update() bypass (fixes RC-2/RC-7).
+    STAGE_DRAFT = 'draft'
+    STAGE_READY_TO_SHIP = 'ready_to_ship'
+    STAGE_IN_SHIPMENT = 'in_shipment'
+    STAGE_AT_CLEARANCE = 'at_clearance'
+    STAGE_IN_TRANSPORT = 'in_transport'
+    STAGE_INVOICED = 'invoiced'
+    STAGE_CLOSED = 'closed'
+    STAGE_CANCELLED = 'cancelled'
+    STAGE_CHOICES = [
+        (STAGE_DRAFT, 'مسودة'),
+        (STAGE_READY_TO_SHIP, 'جاهزة للشحن'),
+        (STAGE_IN_SHIPMENT, 'ضمن شحنة'),
+        (STAGE_AT_CLEARANCE, 'في التخليص'),
+        (STAGE_IN_TRANSPORT, 'نقل محلي'),
+        (STAGE_INVOICED, 'محوّلة إلى فاتورة'),
+        (STAGE_CLOSED, 'مغلقة'),
+        (STAGE_CANCELLED, 'ملغاة'),
+    ]
+    stage = models.CharField(
+        max_length=20, choices=STAGE_CHOICES, null=True, blank=True,
+        db_column='Stage',
+        help_text='المرحلة القانونية الموحّدة لمسار الاستيراد (M0). تُدار عبر خدمة الانتقالات.',
+    )
+
     class Meta:
         db_table = 'logistics_deals'
         managed = True
@@ -172,6 +202,7 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
 
     def save(self, *args, **kwargs):
         self._assert_valid_workflow_transition()
+        self._reconcile_stage_and_workflow()
         self._sync_legacy_status_fields()
         super().save(*args, **kwargs)
 
@@ -211,6 +242,55 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
         'sw_wait_clearance': 'Clearance',
         'sw_released': 'Delivered',
     }
+    # M3: canonical `stage` derived from the legacy workflow on any save() path, so a
+    # manual UI PATCH of shipping_workflow_status keeps `stage` correct. Automated
+    # transitions use logistics.domain.stages.advance_deal_stage (which writes both).
+    # Kept in sync with logistics.domain.stages.STAGE_FROM_WORKFLOW.
+    _STAGE_FROM_WORKFLOW = {
+        None: 'draft',
+        'sw_mfg_start': 'draft',
+        'sw_wait_agent_ship': 'draft',
+        'sw_wait_intl_ship': 'ready_to_ship',
+        'sw_wait_arrival': 'in_shipment',
+        'sw_wait_clearance': 'at_clearance',
+        'sw_released': 'invoiced',
+    }
+    _WORKFLOW_FROM_STAGE = {
+        'draft': 'sw_mfg_start',
+        'ready_to_ship': 'sw_wait_intl_ship',
+        'in_shipment': 'sw_wait_arrival',
+        'at_clearance': 'sw_wait_clearance',
+        'in_transport': 'sw_wait_clearance',
+        'invoiced': 'sw_released',
+        'closed': 'sw_released',
+        'cancelled': None,
+    }
+
+    def _reconcile_stage_and_workflow(self):
+        """M3: `stage` and legacy `shipping_workflow_status` are one concept in two
+        columns during the additive window. Detect which the caller changed and
+        derive the other, so neither entry point clobbers the other:
+          - manual UI PATCH writes shipping_workflow_status → _sync derives stage;
+          - new code / fixtures write stage → derive the workflow here.
+        """
+        if not self.pk:
+            # New row: an explicit stage with no workflow derives its workflow so the
+            # two never disagree (a stage-only fixture would otherwise be reset to draft).
+            if self.stage and not self.shipping_workflow_status:
+                wf = self._WORKFLOW_FROM_STAGE.get(self.stage)
+                if wf is not None:
+                    self.shipping_workflow_status = wf
+            return
+        try:
+            old = LogisticsDeal.objects.only('stage', 'shipping_workflow_status').get(pk=self.pk)
+        except LogisticsDeal.DoesNotExist:
+            return
+        sw_changed = old.shipping_workflow_status != self.shipping_workflow_status
+        stage_changed = old.stage != self.stage
+        if stage_changed and not sw_changed:
+            wf = self._WORKFLOW_FROM_STAGE.get(self.stage)
+            if wf is not None:
+                self.shipping_workflow_status = wf
 
     def _sync_legacy_status_fields(self):
         """Force status/order_status/payment_status to reflect canonical state.
@@ -225,6 +305,14 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
             derived_order = self._ORDER_STATUS_FROM_WORKFLOW.get(sw)
             if derived_order is not None:
                 self.order_status = derived_order
+            # Keep canonical stage aligned unless it already sits at a further
+            # terminal stage the workflow map can't express (invoiced/closed set
+            # explicitly by the stage service take precedence over the sw mapping).
+            derived_stage = self._STAGE_FROM_WORKFLOW.get(sw)
+            if derived_stage is not None and self.stage not in ('invoiced', 'closed'):
+                self.stage = derived_stage
+        else:
+            self.stage = 'cancelled'
         # payment_status from remaining_amount (no payment posting required —
         # `recalculate_deal_payment_status` keeps remaining_amount fresh).
         rem = self.remaining_amount if self.remaining_amount is not None else 0
@@ -373,6 +461,28 @@ class LogisticsShipment(SoftDeleteMixin, models.Model):
     shipment_name = models.CharField(max_length=255, null=True, blank=True, db_column='shipment_name')
     pricing_method = models.CharField(max_length=50, choices=[('total', 'total'), ('unit', 'unit')], null=True, blank=True, db_column='pricing_method')
     unit_type = models.CharField(max_length=50, choices=[('cbm', 'cbm'), ('weight', 'weight'), ('container', 'container')], null=True, blank=True, db_column='unit_type')
+
+    # ── Import redesign (M0): explicit, manually-chosen freight chargeable unit ──
+    # Replaces the implicit pricing_method×unit_type triad (RC-5). The forwarder
+    # quotes a rate per CBM *or* per KG — the user picks; the system never infers
+    # a "greater-of volumetric vs actual" rule. `container` folds into CBM on
+    # backfill. Freight total = rate × Σ(chosen unit), allocated pro-rata.
+    CHARGEABLE_CBM = 'cbm'
+    CHARGEABLE_KG = 'kg'
+    CHARGEABLE_UNIT_CHOICES = [
+        (CHARGEABLE_CBM, 'متر مكعب (CBM)'),
+        (CHARGEABLE_KG, 'كيلوجرام (KG)'),
+    ]
+    chargeable_unit = models.CharField(
+        max_length=8, choices=CHARGEABLE_UNIT_CHOICES, null=True, blank=True,
+        db_column='ChargeableUnit',
+        help_text='وحدة تسعير الشحن المختارة يدوياً: CBM أو KG (أساس توزيع الشحن على الصفقات)',
+    )
+    freight_rate = models.DecimalField(
+        max_digits=18, decimal_places=4, null=True, blank=True,
+        db_column='FreightRate',
+        help_text='سعر الشحن لكل وحدة (CBM أو KG). الإجمالي = السعر × مجموع الوحدة المختارة',
+    )
     price_per_unit = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='price_per_unit')
     total_shipping_cost_usd = models.DecimalField(max_digits=18, decimal_places=2, default=0.00, db_column='total_shipping_cost_usd')
     total_volume = models.DecimalField(max_digits=10, decimal_places=3, default=0.000, db_column='total_volume')
@@ -423,17 +533,18 @@ class LogisticsShipment(SoftDeleteMixin, models.Model):
         default=SHIPMENT_TYPE_INVOICE, db_column='ShipmentType',
         help_text='نوع الإرسالية (فاتورة → قابلة للتحويل لفاتورة شراء، أو نقل فقط)',
     )
-    supplier_address = models.CharField(
-        max_length=500, blank=True, default='', db_column='SupplierAddress',
-        help_text='عنوان المورد/المستورد (نصّي حر، لا يتعارض مع شريك)',
-    )
+    # D1 (import redesign M6): supplier_address + journal_no_display removed — Aseel
+    # header fields with zero code/frontend dependency. transit_journal is KEPT: it is
+    # load-bearing (posted-shipment guard in set_freight/remove_deal). Other Aseel
+    # fields (shipment_type, vat_statement, subtotal/vat_total/grand_total, second_date,
+    # transaction_time, editable, book_number) remain — they are wired into the import
+    # wizard and need a coordinated frontend pass before removal.
 
     # P-F-2: Aseel header enrichment fields
     transaction_time = models.TimeField(null=True, blank=True, db_column='TransactionTime', help_text='ساعة الإرسالية')
     transit_journal = models.ForeignKey(JournalHeader, on_delete=models.SET_NULL, null=True, blank=True, db_column='TransitJournalID', related_name='transit_shipments', help_text='رقم القيد الناشئ من ترحيل الإرسالية')
     editable = models.BooleanField(default=True, db_column='Editable', help_text='قابل للتعديل')
     vat_statement = models.ForeignKey('sales.VatStatement', on_delete=models.SET_NULL, null=True, blank=True, db_column='VatStatementID', related_name='shipments', help_text='كشف الضريبة')
-    journal_no_display = models.CharField(max_length=50, blank=True, default='', db_column='JournalNoDisplay', help_text='رقم القيد للعرض (read-only computed)')
     subtotal = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='Subtotal', help_text='المجموع بدون شحن')
     vat_total = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='VATTotal', help_text='مجموع الضريبة')
     grand_total = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='GrandTotal', help_text='إجمالي الإرسالية')
@@ -573,20 +684,9 @@ class LogisticsClearance(models.Model):
         db_table = 'logistics_clearance'
         managed = True
 
-    @property
-    def cost_lines(self):
-        """Backwards-compat shim: legacy callsites (landed_cost, views) read
-        cost_lines as a list of {label, amount}. After P-D-1..P-D-4 the data
-        lives in `LogisticsClearanceLine` rows; expose the same shape here so
-        existing logic keeps working unchanged. Amount = debit - credit
-        (matches the old JSON where -100 meant credit)."""
-        try:
-            return [
-                {"label": line.description, "amount": float((line.debit or 0) - (line.credit or 0))}
-                for line in self.lines.all()
-            ]
-        except Exception:
-            return []
+    # M4/D2: the `cost_lines` @property shim was removed. Its {label, amount} shape
+    # is now built where needed — logistics.landed_cost.clearance_cost_line_dicts()
+    # for pool math, and LogisticsClearanceSerializer.to_representation for the API.
 
 
 class LogisticsClearancePayment(models.Model):
@@ -675,37 +775,9 @@ class LogisticsClearanceLine(models.Model):
         ordering = ['seq']
 
 
-class LogisticsExpense(models.Model):
-    RELATED_TYPE_CHOICES = [
-        ('Deal', 'Deal'),
-        ('Shipment', 'Shipment'),
-        ('Clearance', 'Clearance'),
-    ]
-
-    id = models.AutoField(primary_key=True, db_column='ExpenseID')
-    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
-    related_type = models.CharField(max_length=20, choices=RELATED_TYPE_CHOICES, db_column='RelatedType')
-    related_id = models.IntegerField(db_column='RelatedID')
-    
-    # Financial Integration
-    expense_account = models.ForeignKey(Account, on_delete=models.PROTECT, db_column='ExpenseAccountID', related_name='logistics_expenses')
-    payable_account = models.ForeignKey(Account, on_delete=models.PROTECT, db_column='PayableAccountID', related_name='logistics_payables')
-    
-    description = models.CharField(max_length=255, db_column='Description')
-    amount = models.DecimalField(max_digits=18, decimal_places=2, db_column='Amount')
-    currency = models.ForeignKey(Currency, on_delete=models.PROTECT, db_column='CurrencyID')
-    invoice_number = models.CharField(max_length=100, null=True, blank=True, db_column='InvoiceNumber')
-    invoice_date = models.DateField(null=True, blank=True, db_column='InvoiceDate')
-    
-    is_posted = models.BooleanField(default=False, db_column='IsPosted')
-    journal = models.ForeignKey(JournalHeader, on_delete=models.SET_NULL, null=True, blank=True, db_column='JournalID')
-
-    class Meta:
-        db_table = 'logistics_expenses'
-        managed = True
-        indexes = [
-            models.Index(fields=['related_type', 'related_id']),
-        ]
+# D3 (import redesign M6): LogisticsExpense removed — a generic Deal/Shipment/
+# Clearance expense escape-hatch superseded by typed clearance lines + purchase
+# invoice fees. Table dropped in migration 0052 (owner confirms zero prod rows first).
 
 
 class LocalShipment(models.Model):

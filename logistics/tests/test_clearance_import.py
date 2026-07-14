@@ -52,6 +52,10 @@ class ClearanceImportTest(APITestCase):
         LogisticsPayment.objects.create(
             shipment=cls.shipment, amount=Decimal("1326.84"),
             usd_to_ils=Decimal("3.6"), status="Confirmed")
+        # دفعة صفقة تغطي قيمة الصفقة (شرط الاستيراد)
+        LogisticsPayment.objects.create(
+            deal=cls.deal, amount=Decimal("1997"),
+            usd_to_ils=Decimal("3.7"), status="Confirmed")
         cls.clearance = LogisticsClearance.objects.create(
             tenant=cls.tenant, shipment=cls.shipment, declaration_number="CL-1")
 

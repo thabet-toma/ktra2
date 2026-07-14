@@ -346,13 +346,11 @@ export const DealForm: React.FC<DealFormProps> = ({
     const itemsSubtotal = newItems.reduce((sum, item) => sum + (item.totalPrice || 0), 0);
     const validShipping = currentData.shippingIncluded ? 0 : currentData.shippingCost || 0;
     const afterDiscount = Math.max(0, itemsSubtotal - (currentData.discountAmount || 0));
-    const taxableBase = afterDiscount + validShipping;
-    let taxAmount = 0;
-    if (currentData.taxType === 'amount') { taxAmount = currentData.taxAmount || 0; }
-    else { taxAmount = taxableBase * ((currentData.taxRate || 0) / 100); }
-    const grandTotal = taxableBase + taxAmount;
+    // ج8: الصفقة الدولية بلا ضريبة — الضريبة تُدفع بالتخليص. الإجمالي (سقف دفعات
+    // المورد) = بضاعة − خصم + شحن داخل الصين.
+    const grandTotal = afterDiscount + validShipping;
     setItems(newItems);
-    setFormData((prev) => ({ ...prev, ...updatedFields, items: newItems, subtotal: itemsSubtotal, taxAmount, totalAmount: grandTotal }));
+    setFormData((prev) => ({ ...prev, ...updatedFields, items: newItems, subtotal: itemsSubtotal, taxAmount: 0, totalAmount: grandTotal }));
   };
 
   const handleAddItemFromModal = (item: Item, lastPrice?: number) => {
@@ -638,22 +636,12 @@ export const DealForm: React.FC<DealFormProps> = ({
     } catch (error) { console.error(" خطأ في تحميل بيانات الصفقة:", error); throw error; }
   };
 
-  const calculateTaxAmount = (): number => {
-    const subtotal = calculateSubtotal();
-    const netAfterDiscount = Math.max(0, subtotal - (formData.discountAmount || 0));
-    if (formData.taxType === 'amount') return formData.taxAmount || 0;
-    return netAfterDiscount * ((formData.taxRate || 0) / 100);
-  };
-
+  // ج8: الصفقة الدولية بلا ضريبة (تُدفع بالتخليص). الإجمالي = بضاعة − خصم + شحن داخل الصين.
   const calculateGrandTotal = (): number => {
     const subtotal = calculateSubtotal();
     const netAfterDiscount = Math.max(0, subtotal - (formData.discountAmount || 0));
     const shipping = formData.shippingIncluded ? 0 : (formData.shippingCost || 0);
-    const taxableBase = netAfterDiscount + shipping;
-    let taxAmount = 0;
-    if (formData.taxType === 'amount') { taxAmount = formData.taxAmount || 0; }
-    else { taxAmount = taxableBase * ((formData.taxRate || 0) / 100); }
-    return taxableBase + taxAmount;
+    return netAfterDiscount + shipping;
   };
 
   /** الصفوف ذات المحتوى فقط — الصف الفارغ الجاهز لا يُحفظ ولا يُحتسب */
@@ -858,7 +846,7 @@ export const DealForm: React.FC<DealFormProps> = ({
     <div className="aseel-other">
       <label className="aseel-field aseel-field--inline">
         <input type="checkbox" disabled={isDealLocked} checked={formData.shippingIncluded || false} onChange={(e) => setFormData(prev => ({ ...prev, shippingIncluded: e.target.checked }))} />
-        <span className="aseel-field-label" style={{ flex: "unset" }}>الأسعار تشمل الشحن</span>
+        <span className="aseel-field-label" style={{ flex: "unset" }}>الأسعار تشمل الشحن داخل الصين</span>
       </label>
       <p className="aseel-hint">حالة الصفقة: {getOperationalStatusText(getOperationalStatus(formData.status as DealStatus))} — الدفع: {getPaymentStatusText(getPaymentStatusFromPayments(formData as Deal))}</p>
     </div>
@@ -888,21 +876,35 @@ export const DealForm: React.FC<DealFormProps> = ({
     </div>
   );
 
+  /* ج8: تبويب دفعات واحد متدرّج — بدل تكديس ثلاثة أسطح متساوية (خطة/تقدّم/سجل)
+     كانت تستهلك الشاشة وتكرّر الملخّص. السطح الأساسي = مسار الأقساط (claim→دفع
+     →تأكيد→قيد)؛ إعداد الخطة والسجل المحاسبي المفصّل داخل أقسام قابلة للطي. */
+  const paymentsStarted = (formData.payments?.length || 0) > 0;
   const paymentsTab = (
-    <div className="aseel-legacy-tab" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <InstallmentManager
-        installments={installments}
-        grandTotal={calculateGrandTotal()}
-        onUpdateInstallments={(newInstallments) => {
-          setInstallments(newInstallments);
-          setFormData(prev => ({ ...prev, installments: newInstallments }));
-        }}
-        validationError={installmentValidationError}
-        installmentPlanEnabled={installmentPlanEnabled}
-        onTogglePlan={toggleInstallmentPlan}
-        deal={formData}
-        readOnly={isDealLocked}
-      />
+    <div className="aseel-legacy-tab" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <details open={!paymentsStarted}>
+        <summary
+          style={{ cursor: "pointer", fontWeight: 700, padding: "6px 2px", userSelect: "none" }}
+        >
+          إعداد خطة الأقساط {paymentsStarted ? "(بدأ الدفع — للاطلاع)" : ""}
+        </summary>
+        <div style={{ marginTop: 8 }}>
+          <InstallmentManager
+            installments={installments}
+            grandTotal={calculateGrandTotal()}
+            onUpdateInstallments={(newInstallments) => {
+              setInstallments(newInstallments);
+              setFormData(prev => ({ ...prev, installments: newInstallments }));
+            }}
+            validationError={installmentValidationError}
+            installmentPlanEnabled={installmentPlanEnabled}
+            onTogglePlan={toggleInstallmentPlan}
+            deal={formData}
+            readOnly={isDealLocked}
+          />
+        </div>
+      </details>
+
       <PaymentProgress
         installments={
           formData.installments && formData.installments.length > 0
@@ -916,14 +918,24 @@ export const DealForm: React.FC<DealFormProps> = ({
         onOpenAccountingJournal={onOpenAccountingJournal}
         readOnly={isDealLocked}
       />
-      {formData.id ? (
-        <DealPaymentList
-          deal={formData}
-          currentUser={currentUser}
-          onPaymentOperation={handlePaymentOperation}
-          onConfirmSupplier={handlePaymentConfirmation}
-          onOpenAccountingJournal={onOpenAccountingJournal}
-        />
+
+      {formData.id && paymentsStarted ? (
+        <details>
+          <summary
+            style={{ cursor: "pointer", fontWeight: 700, padding: "6px 2px", userSelect: "none" }}
+          >
+            السجل المحاسبي المفصّل (قيود، إلغاء ترحيل، حذف)
+          </summary>
+          <div style={{ marginTop: 8 }}>
+            <DealPaymentList
+              deal={formData}
+              currentUser={currentUser}
+              onPaymentOperation={handlePaymentOperation}
+              onConfirmSupplier={handlePaymentConfirmation}
+              onOpenAccountingJournal={onOpenAccountingJournal}
+            />
+          </div>
+        </details>
       ) : null}
     </div>
   );
@@ -1011,7 +1023,7 @@ export const DealForm: React.FC<DealFormProps> = ({
             {fld("رقم المستند", <input className="aseel-input" disabled={isDealLocked} value={formData.supplierInvoiceNumber || ""} onChange={(e) => setFormData(prev => ({ ...prev, supplierInvoiceNumber: e.target.value }))} placeholder="رقم فاتورة المورد" />)}
             <label className="aseel-field aseel-field--inline">
               <input type="checkbox" disabled={isDealLocked} checked={formData.shippingIncluded || false} onChange={(e) => setFormData(prev => ({ ...prev, shippingIncluded: e.target.checked }))} />
-              <span className="aseel-field-label" style={{ flex: "unset" }}>الأسعار تشمل الشحن</span>
+              <span className="aseel-field-label" style={{ flex: "unset" }}>الأسعار تشمل الشحن داخل الصين</span>
             </label>
           </>
         }
@@ -1043,11 +1055,14 @@ export const DealForm: React.FC<DealFormProps> = ({
         ]}
         totals={
           <>
+            {/* ج8: الصفقة دولية = بضاعة المورد + شحن داخل الصين − خصم. الضريبة
+                تُدفع بالتخليص (لا تدخل إجمالي الصفقة ولا سقف دفعات المورد). */}
             <div className="aseel-total-row"><span>مجموع البنود (قبل الخصم)</span><span className="aseel-total-value">{fmt(calculateSubtotal())}</span></div>
             {(formData.discountAmount || 0) > 0 && <div className="aseel-total-row"><span>الخصم</span><span className="aseel-total-value">{fmt(formData.discountAmount || 0)}</span></div>}
-            <div className="aseel-total-row"><span>المجموع قبل الضريبة</span><span className="aseel-total-value">{fmt(Math.max(0, calculateSubtotal() - (formData.discountAmount || 0)) + (formData.shippingIncluded ? 0 : (formData.shippingCost || 0)))}</span></div>
-            <div className="aseel-total-row"><span>الضريبة</span><span className="aseel-total-value">{fmt(calculateTaxAmount())}</span></div>
-            <div className="aseel-total-row aseel-total-row--grand"><span>مبلغ الصفقة الإجمالي</span><span className="aseel-total-value">{fmt(calculateGrandTotal())}</span></div>
+            {!formData.shippingIncluded && (formData.shippingCost || 0) > 0 && (
+              <div className="aseel-total-row"><span>شحن داخل الصين</span><span className="aseel-total-value">{fmt(formData.shippingCost || 0)}</span></div>
+            )}
+            <div className="aseel-total-row aseel-total-row--grand"><span>مبلغ الصفقة الإجمالي (للمورد)</span><span className="aseel-total-value">{fmt(calculateGrandTotal())}</span></div>
             <div className="aseel-total-row"><span>المدفوع</span><span className="aseel-total-value">{fmt(dealStats.paidAmount)}</span></div>
             <div className="aseel-total-row"><span>المتبقي</span><span className="aseel-total-value">{fmt(dealStats.remainingAmount)}</span></div>
           </>

@@ -216,8 +216,20 @@ class T1_01_DoubleLocalTransportCapitalizationTest(SimpleTestCase):
     must NOT double-count the same transport cost in the landed pool."""
 
     def _mock_clearance(self, cost_lines):
+        """M4: the sums now read `clearance.lines.all()` (not the removed cost_lines
+        shim), so build mock line rows with debit/credit from the legacy amounts."""
         from types import SimpleNamespace
-        return SimpleNamespace(cost_lines=cost_lines)
+        from decimal import Decimal as _D
+        lines = []
+        for row in cost_lines:
+            amt = _D(str(row.get('amount') or 0))
+            lines.append(SimpleNamespace(
+                description=row.get('label') or '',
+                debit=amt if amt > 0 else _D('0'),
+                credit=(-amt) if amt < 0 else _D('0'),
+                line_type='other',
+            ))
+        return SimpleNamespace(lines=SimpleNamespace(all=lambda: lines))
 
     def test_not_superseded_counts_cost_lines(self):
         """لا LocalShipment مُرسمِل مرحّل → cost_lines تُحسب كما هي."""
@@ -253,16 +265,20 @@ class T1_01_DoubleLocalTransportCapitalizationTest(SimpleTestCase):
 
     def test_helper_filters_on_posted_and_capitalized(self):
         """جوهر الحارس: الاستعلام يقيّد فعلاً بـ is_posted=True
-        و capitalize_to_inventory=True (وإلا لا يمنع الازدواج فعلياً)."""
+        و capitalize_to_inventory=True (وإلا لا يمنع الازدواج فعلياً). الحارس صار
+        يطابق أيضاً على شحنة التخليص (Q(clearance) | Q(shipment)) — التخليص يُمرَّر
+        ضمن Q موضعي لا kwarg، والقيدان الماليان يبقيان kwargs."""
         from types import SimpleNamespace
-        mock_clearance = SimpleNamespace(id=5)
+        from django.db.models import Q
+        mock_clearance = SimpleNamespace(id=5, shipment_id=7)
         with patch('logistics.models.LocalShipment.objects') as mock_qs:
             mock_qs.filter.return_value.exists.return_value = True
             clearance_local_transport_superseded_by_localshipment(mock_clearance)
-        _, kwargs = mock_qs.filter.call_args
-        self.assertEqual(kwargs.get('clearance'), mock_clearance)
+        args, kwargs = mock_qs.filter.call_args
         self.assertIs(kwargs.get('is_posted'), True)
         self.assertIs(kwargs.get('capitalize_to_inventory'), True)
+        # التخليص/الشحنة يُمرَّران عبر Q موضعي (شرط OR).
+        self.assertTrue(any(isinstance(a, Q) for a in args))
 
     def test_helper_superseded_true(self):
         """helper يسترجع True عند وجود LocalShipment مرحّل ومُرسمِل."""

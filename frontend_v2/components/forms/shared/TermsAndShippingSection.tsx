@@ -131,8 +131,8 @@ export const TermsAndShippingSection: React.FC<TermsProps> = ({
           {/* Shipping Cost */}
           <div className="bg-gray-50 dark:bg-gray-900/50 p-2 rounded border border-gray-200 dark:border-gray-700">
             <div className="flex justify-between items-center mb-1.5">
-              <label className="text-[10px] font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1">
-                <Truck className="w-3 h-3" /> تكلفة الشحن
+              <label className="text-[10px] font-medium text-gray-700 dark:text-gray-300 flex items-center gap-1" title="الشحن داخل الصين المدفوع للمورد ضمن الصفقة. الشحن الدولي يُدار في الشحنة، لا هنا.">
+                <Truck className="w-3 h-3" /> شحن داخل الصين
               </label>
               <label className="flex items-center gap-1 cursor-pointer">
                 <input
