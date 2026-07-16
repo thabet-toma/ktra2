@@ -13,6 +13,14 @@ const NETWORK_HINT =
   "(مثلاً: python manage.py runserver 0.0.0.0:8000) وتأكد أن VITE_API_URL يطابق العنوان " +
   `(الحالي: ${String(API_BASE).replace(/\/+$/, "")})`;
 
+export interface ClearanceImportOptionDeal {
+  deal_id: number;
+  deal_ref: string;
+  is_converted: boolean;
+  invoice_id: number | null;
+  invoice_number: string | null;
+}
+
 async function safeFetch(
   input: string,
   init?: RequestInit
@@ -253,13 +261,7 @@ export const purchaseInvoiceApi = {
   getClearanceImportOptions: async (clearanceId: number): Promise<{
     clearance_id: number;
     shipment_id: number;
-    deals: Array<{
-      deal_id: number;
-      deal_ref: string;
-      is_converted: boolean;
-      invoice_id: number | null;
-      invoice_number: string | null;
-    }>;
+    deals: ClearanceImportOptionDeal[];
   }> => {
     const query = new URLSearchParams({ clearance_id: String(clearanceId) });
     const res = await safeFetch(`${BASE}/clearance-import-options/?${query}`, {
@@ -293,7 +295,18 @@ export const purchaseInvoiceApi = {
     deal_remaining_rate?: number;
     shipment_remaining_rate?: number;
     use_cost_lines?: boolean;
-  }): Promise<{ updated: number; skipped?: number; message?: string }> => {
+    auto_repost?: boolean;
+  }): Promise<{
+    updated: number;
+    skipped?: number;
+    message?: string;
+    reconciliation?: {
+      previously_posted: number;
+      reposted: number;
+      left_draft: number;
+      warnings: string[];
+    };
+  }> => {
     const res = await safeFetch(`${BASE}/recalculate-landed-cost/`, {
       method: "POST",
       headers: headers(),

@@ -12,9 +12,13 @@ from django.contrib.auth.models import User
 from django.test import SimpleTestCase
 from rest_framework.test import APITestCase
 
+from accounting.models import Account, JournalHeader
+from accounting.services import create_fiscal_year
+from inventory.models import Product
 from logistics.models import (
     LogisticsClearance,
     LogisticsDeal,
+    LogisticsDealItem,
     LogisticsPayment,
     LogisticsShipment,
     LogisticsShipmentDeal,
@@ -24,7 +28,6 @@ from logistics.models import (
 from partners.models import Partner
 from tenants.models import Currency
 from tenants.services import create_company
-from accounting.services import create_fiscal_year
 
 
 class ClearanceImportTest(APITestCase):
@@ -124,6 +127,60 @@ class ClearanceImportTest(APITestCase):
         inv = PurchaseInvoice.objects.get(tenant=self.tenant, deal=self.deal)
         self.assertEqual(inv.import_deal_remaining_rate, Decimal("3.8"))
 
+    def test_auto_recalculate_reposts_only_previously_posted_invoice(self):
+        ap = Account.objects.filter(tenant=self.tenant, code="2101").first()
+        if ap is None:
+            ap = Account.objects.create(
+                tenant=self.tenant, code="2101", name="ذمم الموردين",
+                account_type="Liability", is_active=True,
+            )
+        self.partner.linked_account = ap
+        self.partner.save(update_fields=["linked_account"])
+        product = Product.objects.create(
+            tenant=self.tenant, sku="IMP-RECALC-1", name_ar="صنف إعادة الاحتساب",
+            quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
+        )
+        LogisticsDealItem.objects.create(
+            deal=self.deal, product=product, quantity=Decimal("1"),
+            unit_price=Decimal("1997"),
+        )
+
+        imported = self._import()
+        self.assertEqual(imported.status_code, 201, imported.content)
+        invoice = PurchaseInvoice.objects.get(tenant=self.tenant, deal=self.deal)
+        posted = self.client.post(
+            f"/api/logistics/purchase-invoices/{invoice.id}/post-to-accounting/",
+            {}, format="json", **self._auth(),
+        )
+        self.assertEqual(posted.status_code, 201, posted.content)
+        invoice.refresh_from_db()
+        old_subtotal = invoice.subtotal
+        self.assertTrue(invoice.is_posted)
+
+        LocalShipment.objects.create(
+            tenant=self.tenant, shipment=self.shipment, clearance=self.clearance,
+            carrier=self.partner, amount=Decimal("450"), currency=self.ils,
+            exchange_rate=Decimal("1"), status="delivered",
+            capitalize_to_inventory=True,
+        )
+        recalc = self.client.post(
+            "/api/logistics/purchase-invoices/recalculate-landed-cost/",
+            {"shipment_id": self.shipment.id, "auto_repost": True},
+            format="json", **self._auth(),
+        )
+        self.assertEqual(recalc.status_code, 200, recalc.content)
+        self.assertEqual(recalc.json()["reconciliation"]["reposted"], 1)
+        invoice.refresh_from_db()
+        self.assertTrue(invoice.is_posted)
+        self.assertGreater(invoice.subtotal, old_subtotal)
+        self.assertEqual(
+            JournalHeader.objects.filter(
+                tenant=self.tenant, reference_type="PURCHASE_INVOICE",
+                reference_id=invoice.id, is_posted=True,
+            ).count(),
+            1,
+        )
+
     def test_import_does_not_require_clearance_or_local_transport_payment(self):
         LocalShipment.objects.create(
             tenant=self.tenant, shipment=self.shipment, clearance=self.clearance,
@@ -171,6 +228,34 @@ class ClearanceImportTest(APITestCase):
             Decimal(str(metadata["deal_local_transport_ils"])), Decimal("2000.0"),
         )
         self.assertEqual(invoice.payments.count(), 0)
+
+    def test_live_detail_reconciles_tax_and_payable_after_landed_cost_changes(self):
+        LogisticsDeal.objects.filter(pk=self.deal.pk).update(
+            tax_type="percentage", tax_rate=Decimal("16"), discount_amount=Decimal("0"),
+        )
+        self.deal.refresh_from_db()
+        imported = self._import()
+        self.assertEqual(imported.status_code, 201, imported.content)
+        invoice = PurchaseInvoice.objects.get(tenant=self.tenant, deal=self.deal)
+
+        LocalShipment.objects.create(
+            tenant=self.tenant, shipment=self.shipment, clearance=self.clearance,
+            carrier=self.partner, amount=Decimal("450"), currency=self.ils,
+            exchange_rate=Decimal("1"), status="delivered",
+            capitalize_to_inventory=True,
+        )
+
+        detail = self.client.get(
+            f"/api/logistics/purchase-invoices/{invoice.id}/", **self._auth(),
+        )
+        self.assertEqual(detail.status_code, 200, detail.content)
+        body = detail.json()
+        subtotal = Decimal(str(body["subtotal"]))
+        expected_tax = (subtotal * Decimal("0.16")).quantize(Decimal("0.01"))
+        expected_grand = (subtotal + expected_tax).quantize(Decimal("0.01"))
+        self.assertEqual(Decimal(str(body["tax_amount"])), expected_tax)
+        self.assertEqual(Decimal(str(body["grand_total"])), expected_grand)
+        self.assertEqual(Decimal(str(body["payable_total"])), expected_grand)
 
     def test_partial_import_keeps_remaining_deal_available_and_rejects_duplicate(self):
         second = self._second_deal()

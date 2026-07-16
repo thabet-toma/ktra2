@@ -136,6 +136,8 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
     const grandTotal = deal.totalAmount || 0;
     /** إجمالي المعروض = مجموع payments (مثل البطاقات الخضراء/الصفراء)، لا يعتمد على ربط القسط فقط */
     const totalPaid = paidAmountFromPayments;
+    const supplierAdvance = Math.max(0, Number(deal.supplierAdvance) || totalPaid - grandTotal);
+    const amountOutstanding = Math.max(0, Number(deal.amountOutstanding) || grandTotal - totalPaid);
     const progressPercentage =
         grandTotal > 0 ? (totalPaid / grandTotal) * 100 : 0;
     const progressRingPercent = Math.min(100, progressPercentage);
@@ -488,8 +490,10 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 <span>المدفوع:</span>
                                 <span className="aseel-text-accent dark:aseel-text-soft font-bold">${totalPaid.toLocaleString()}</span>
                                 <span className="aseel-text-soft">|</span>
-                                <span>المتبقي:</span>
-                                <span className="aseel-text-soft font-bold">${(grandTotal - totalPaid).toLocaleString()}</span>
+                                <span>{supplierAdvance > 0 ? "رصيد لصالحك عند المورد:" : "المتبقي:"}</span>
+                                <span className="aseel-text-soft font-bold">
+                                    ${supplierAdvance > 0 ? supplierAdvance.toLocaleString() : amountOutstanding.toLocaleString()}
+                                </span>
                             </div>
                         </div>
                     </div>

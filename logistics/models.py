@@ -1299,6 +1299,18 @@ class PurchaseInvoiceFee(models.Model):
     """
 
     id = models.AutoField(primary_key=True, db_column='FeeID')
+    CALCULATION_AMOUNT = 'amount'
+    CALCULATION_PERCENTAGE = 'percentage'
+    CALCULATION_TYPE_CHOICES = [
+        (CALCULATION_AMOUNT, 'مبلغ'),
+        (CALCULATION_PERCENTAGE, 'نسبة'),
+    ]
+    BASIS_GOODS = 'goods'
+    BASIS_AFTER_MAIN_VAT = 'after_main_vat'
+    PERCENTAGE_BASIS_CHOICES = [
+        (BASIS_GOODS, 'البضاعة'),
+        (BASIS_AFTER_MAIN_VAT, 'بعد ضريبة القيمة المضافة'),
+    ]
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     invoice = models.ForeignKey(
         PurchaseInvoice, on_delete=models.CASCADE,
@@ -1317,6 +1329,18 @@ class PurchaseInvoiceFee(models.Model):
     amount = models.DecimalField(
         max_digits=18, decimal_places=2, default=0, db_column='Amount',
     )
+    calculation_type = models.CharField(
+        max_length=20, choices=CALCULATION_TYPE_CHOICES,
+        default=CALCULATION_AMOUNT, db_column='CalculationType',
+    )
+    calculation_value = models.DecimalField(
+        max_digits=18, decimal_places=4, default=0, db_column='CalculationValue',
+        help_text='القيمة المدخلة: مبلغ بالشيكل أو نسبة مئوية حسب calculation_type',
+    )
+    percentage_basis = models.CharField(
+        max_length=20, choices=PERCENTAGE_BASIS_CHOICES,
+        default=BASIS_GOODS, db_column='PercentageBasis',
+    )
     capitalize_to_inventory = models.BooleanField(
         default=False, db_column='CapitalizeToInventory',
         help_text='إذا True يُرسمل على المخزون (landed cost) بدل تسجيله كمصروف في الفترة',
@@ -1330,6 +1354,15 @@ class PurchaseInvoiceFee(models.Model):
     class Meta:
         db_table = 'purchase_invoice_fees'
         managed = True
+
+    def save(self, *args, **kwargs):
+        if (
+            self.calculation_type == self.CALCULATION_AMOUNT
+            and not self.calculation_value
+            and self.amount
+        ):
+            self.calculation_value = self.amount
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.description}: {self.amount}"

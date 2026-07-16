@@ -137,7 +137,7 @@ def build_fx_payment_lines(*, fifo_link, foreign_amount, local_amount, debit_acc
         {"account": debit_account_id, "debit": local_amount, "credit": Decimal("0"),
          "partner": partner_id, "description": description},
         {"account": box_account_id, "debit": Decimal("0"), "credit": fifo_cost,
-         "partner": partner_id, "description": description},
+         "description": description},
     ]
     if diff > 0:
         lines.append({"account": get_realized_fx_account(tenant).id, "debit": Decimal("0"),

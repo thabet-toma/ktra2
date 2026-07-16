@@ -23,6 +23,7 @@ import {
   Undo2,
   AlertCircle,
   CheckCircle2,
+  ExternalLink,
   Info,
 } from "lucide-react";
 import { ProductCardModal } from "../../shared/ProductCardModal";
@@ -39,8 +40,12 @@ import { mapPurchaseInvoiceDtoToInvoice } from "@/utils/mapPurchaseInvoiceDto";
 import { dealsService } from "@/services/dealsService";
 import { shipmentsService } from "@/services/shipmentsService";
 import {
+  allocateInvoiceFinalCosts,
   invoiceGrandTotalIls,
   invoiceVatBaseIls,
+  purchaseInvoiceFeeAmount,
+  sumTaxesAndFeesExtras,
+  transferCommissionsIlsForVat,
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { formatMoney, formatQuantity } from "@/utils/formatNumber";
@@ -76,7 +81,10 @@ import {
   type AseelGridColumn,
   type AseelToolbarAction,
 } from "../../aseel";
-import { formatInvoiceImportLogisticsLine } from "@/utils/invoiceConversionUtils";
+import {
+  formatInvoiceImportLogisticsLine,
+  getPurchaseInvoiceCostLabels,
+} from "@/utils/invoiceConversionUtils";
 import { useToast } from "@/contexts/ToastContext";
 import { useConfirm } from "@/contexts/ConfirmContext";
 import { getPurchaseInvoiceFeeEditorState } from "./purchaseInvoiceFeeEditorState";
@@ -354,6 +362,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         nextData.localPayments
       )
     );
+    const fees = (nextData.fees || []).map((fee) => ({
+      ...fee,
+      amount: purchaseInvoiceFeeAmount(fee, merchandiseBase, vatBase, mainVatRounded),
+    }));
 
     setFormData((prev) => ({
       ...prev,
@@ -361,6 +373,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       subtotal: roundSqlMoney2(itemsSubtotal),
       taxAmount: mainVatRounded,
       grandTotal: roundSqlMoney2(grandTotal),
+      fees,
     }));
   };
 
@@ -503,11 +516,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         fees: (payload.fees || []).map((fee: any) => ({
           description: String(fee.description || '').trim(),
           amount: roundSqlMoney2(fee.amount ?? 0),
+          calculation_type: fee.calculationType || 'amount',
+          calculation_value: roundSqlMoney4(fee.calculationValue ?? fee.amount ?? 0),
+          percentage_basis: fee.percentageBasis || 'goods',
           expense_account: Number(fee.expenseAccountId),
           capitalize_to_inventory: Boolean(fee.capitalizeToInventory),
           is_taxable: Boolean(fee.isTaxable),
         })),
-        local_payments_json: payload.localPayments || null,
         conversion_metadata_json: payload.conversionMetadata || null,
         currency: payload.currency || 'ILS',
         status: payload.status || 'draft',
@@ -539,22 +554,33 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       };
 
       let savedSqlId: string;
+      let savedInvoice;
       if (isNew) {
         if (dealData?.id) {
           sqlBody.deal = Number(dealData.id) || null;
         }
-        const created = await purchaseInvoiceApi.create(sqlBody as any);
-        savedSqlId = String(created.id);
-        setFormData((prev) => ({ ...prev, id: savedSqlId }));
+        savedInvoice = await purchaseInvoiceApi.create(sqlBody as any);
+        savedSqlId = String(savedInvoice.id);
       } else {
         if (formData.isHistorical) {
           toast("لا يمكن تعديل الفواتير المؤرشفة", "error");
           setSaving(false);
           return;
         }
-        await purchaseInvoiceApi.update(Number(formData.id), sqlBody as any);
+        savedInvoice = await purchaseInvoiceApi.update(Number(formData.id), sqlBody as any);
         savedSqlId = String(formData.id);
       }
+
+      const expectedFeesCount = (sqlBody.fees || []).length;
+      if ((savedInvoice.fees || []).length !== expectedFeesCount) {
+        throw new Error("لم يؤكد الخادم حفظ جميع بنود الضرائب والرسوم. لم يتم إغلاق وضع التحرير.");
+      }
+      const savedMapped = mapPurchaseInvoiceDtoToInvoice(savedInvoice);
+      setFormData((prev) => ({ ...prev, ...savedMapped }));
+      console.info("[PurchaseInvoiceFees] Saved and verified", {
+        invoiceId: savedSqlId,
+        feesCount: expectedFeesCount,
+      });
 
       const dealIdForWorkflow = formData.dealId || dealData?.id || payload.dealId;
       if (dealIdForWorkflow) {
@@ -799,11 +825,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             updated.localPayments
           )
         );
+        const fees = (updated.fees || []).map((fee) => ({
+          ...fee,
+          amount: purchaseInvoiceFeeAmount(fee, merchandiseBase, vatBase, mainVatRounded),
+        }));
         return {
           ...updated,
           subtotal: roundSqlMoney2(itemsSubtotal),
           taxAmount: mainVatRounded,
           grandTotal: roundSqlMoney2(grandTotal),
+          fees,
         };
       });
       markDirty();
@@ -1019,6 +1050,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const selectedSupplier = formData.supplierId
     ? suppliers.find((s) => s.id === formData.supplierId)
     : undefined;
+  const shipmentLinkId = formData.importLogistics?.shipmentId || formData.shipment;
+  const shipmentDisplayNumber = formData.importLogistics?.shipmentNumber || `#${shipmentLinkId || ""}`;
+  const isShipmentLinkedImport = Boolean(shipmentLinkId);
+  const costLabels = getPurchaseInvoiceCostLabels(isShipmentLinkedImport);
 
   /* ───────────── تنبيه أثر السعر على متوسط تكلفة المنتج ───────────── */
   // عند إدخال سعر سيغيّر متوسط تكلفة المنتج (المرجّح بالكمية)، نعرض تنبيهاً فورياً
@@ -1058,6 +1093,37 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   /* ───────────── أعمدة جدول البنود (AseelGrid) ───────────── */
+  const finalCostFeesTotal = (formData.fees || []).reduce(
+    (sum, fee) => sum + (Number(fee.amount) || 0), 0,
+  );
+  const finalItemCosts = useMemo(() => {
+    const localExtras = sumTaxesAndFeesExtras(
+      formData.localPayments,
+      ilsMerchandiseBase,
+      {
+        mainVatIls: Math.max(0, Number(formData.taxAmount) || 0),
+        invoiceVatBaseIls: ilsVatBase,
+      },
+    );
+    return allocateInvoiceFinalCosts(formData.items || [], {
+      transferTotalIls: transferCommissionsIlsForVat(
+        formData.conversionMetadata as Record<string, unknown> | null,
+      ),
+      taxAndFeesTotalIls:
+        Math.max(0, Number(formData.taxAmount) || 0) +
+        localExtras +
+        finalCostFeesTotal,
+    });
+  }, [
+    formData.items,
+    formData.taxAmount,
+    formData.localPayments,
+    formData.conversionMetadata,
+    ilsMerchandiseBase,
+    ilsVatBase,
+    finalCostFeesTotal,
+  ]);
+
   const itemColumns: AseelGridColumn<InvoiceItem>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
     { key: "itemId", header: "رقم الصنف", width: "100px" },
@@ -1096,8 +1162,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       )
     },
     { key: "quantity", header: "الكمية", width: "80px", align: "center", type: "number" },
-    { key: "unitPrice", header: "سعر الوحدة", width: "100px", align: "center", type: "number" },
-    { key: "totalPrice", header: "الإجمالي", width: "100px", align: "center", readOnly: true },
+    { key: "unitPrice", header: isShipmentLinkedImport ? "قبل ض.ق.م والرسوم/وحدة" : costLabels.unitPrice, width: isShipmentLinkedImport ? "160px" : "100px", align: "center", type: "number" },
+    { key: "totalPrice", header: isShipmentLinkedImport ? "قبل ض.ق.م والرسوم/سطر" : costLabels.lineTotal, width: isShipmentLinkedImport ? "160px" : "100px", align: "center", readOnly: true },
+    ...(isShipmentLinkedImport ? [{ key: "finalUnitCost", header: "التكلفة النهائية/وحدة", width: "160px", align: "center" as const, readOnly: true }] : []),
     { key: "del", header: "", width: "36px", align: "center" },
   ];
 
@@ -1111,6 +1178,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       case "quantity": return row.quantity || 0;
       case "unitPrice": return row.unitPrice || 0;
       case "totalPrice": return row.totalPrice || 0;
+      case "finalUnitCost": return finalItemCosts[idx]?.finalUnit || 0;
       default: return "";
     }
   };
@@ -1287,7 +1355,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   itemColumns[1].render = renderItemIdCell;
   itemColumns[2].render = renderItemNameCell;
-  itemColumns[7].render = renderDeleteCell;
+  const finalUnitColumn = itemColumns.find((column) => column.key === "finalUnitCost");
+  if (finalUnitColumn) {
+    finalUnitColumn.render = (row) => {
+      const index = (formData.items || []).indexOf(row);
+      return formatMoney(finalItemCosts[index]?.finalUnit || 0, { maxDecimals: 4 });
+    };
+  }
+  const deleteColumn = itemColumns.find((column) => column.key === "del");
+  if (deleteColumn) deleteColumn.render = renderDeleteCell;
 
   /* ───────────── تبويبات ───────────── */
   const notesTab = (
@@ -1354,6 +1430,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     </div>
   );
 
+  const feesTotal = (formData.fees || []).reduce(
+    (sum, fee) => sum + (Number(fee.amount) || 0), 0,
+  );
+  const payableTotal = (Number(formData.grandTotal) || 0) + feesTotal;
+  const defaultInlineFeeAccount =
+    feeAccounts.find((account) => account.code === "5307") ||
+    feeAccounts.find((account) => account.account_type === "Expense") ||
+    feeAccounts[0] || null;
+
   const itemsTab = (
     <div className="aseel-legacy-tab">
       {formData.currency === "ILS" ? (
@@ -1375,16 +1460,23 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             taxableBaseIls={ilsMerchandiseBase}
             invoiceVatBaseIls={ilsVatBase}
             conversionMetadata={formData.conversionMetadata}
+            additionalFeesTotal={feesTotal}
+            isShipmentLinkedImport={isShipmentLinkedImport}
           />
           <NISInvoiceTaxStrip
             taxType={formData.taxType || "percentage"}
             taxRate={formData.taxRate || 0}
             taxAmount={formData.taxAmount || 0}
-            localPayments={formData.localPayments || {}}
             taxableBaseIls={ilsMerchandiseBase}
             vatBaseIls={ilsVatBase}
+            fees={formData.fees || []}
+            defaultFeeAccount={defaultInlineFeeAccount}
             readOnly={effectiveReadOnly}
             onFinancial={handleUpdateFinancial}
+            onFeesChange={(fees) => {
+              setFormData((prev) => ({ ...prev, fees }));
+              markDirty();
+            }}
           />
           <NISFinancialSummary
             subtotal={formData.subtotal || 0}
@@ -1397,6 +1489,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             taxableBaseIls={ilsMerchandiseBase}
             invoiceVatBaseIls={ilsVatBase}
             hideShippingRow
+            fees={formData.fees || []}
           />
         </>
       ) : (
@@ -1447,10 +1540,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     </div>
   );
 
-  const feesTotal = (formData.fees || []).reduce(
-    (sum, fee) => sum + (Number(fee.amount) || 0), 0,
-  );
-  const payableTotal = (Number(formData.grandTotal) || 0) + feesTotal;
   const feeEditorState = getPurchaseInvoiceFeeEditorState({
     readOnly,
     viewMode,
@@ -1485,6 +1574,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         id,
         description: kind === "tax" ? "ضريبة إضافية" : "رسوم إضافية",
         amount: 0,
+        calculationType: "amount",
+        calculationValue: 0,
+        percentageBasis: "goods",
         expenseAccountId: preferred?.id || null,
         expenseAccountCode: preferred?.code,
         expenseAccountName: preferred?.name,
@@ -1544,7 +1636,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               <tr key={fee.id || index}>
                 <td className="p-1"><input className="aseel-input w-full" disabled={effectiveReadOnly} value={fee.description} placeholder="مثال: رسوم فحص أو ضريبة إضافية" onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, description: e.target.value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1"><select className="aseel-input w-full" disabled={effectiveReadOnly} value={fee.expenseAccountId || ""} onChange={(e) => { const account = feeAccounts.find((row) => row.id === Number(e.target.value)); const fees = [...(formData.fees || [])]; fees[index] = { ...fee, expenseAccountId: account?.id || null, expenseAccountCode: account?.code, expenseAccountName: account?.name }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }}><option value="">— اختر الحساب —</option>{feeAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} — {account.name}</option>)}</select></td>
-                <td className="p-1"><input className="aseel-input w-full text-center" data-fee-amount={fee.id} type="number" min="0" step="0.01" disabled={effectiveReadOnly} value={fee.amount} onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, amount: Number(e.target.value) || 0 }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
+                <td className="p-1"><input className="aseel-input w-full text-center" data-fee-amount={fee.id} type="number" min="0" step="0.01" disabled={effectiveReadOnly || fee.calculationType === "percentage"} value={fee.calculationType === "percentage" ? fee.amount : (fee.calculationValue ?? fee.amount)} onChange={(e) => { const value = Number(e.target.value) || 0; const fees = [...(formData.fees || [])]; fees[index] = { ...fee, amount: value, calculationValue: value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly} checked={fee.capitalizeToInventory} onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, capitalizeToInventory: e.target.checked }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1 text-center">{!effectiveReadOnly && <button type="button" className="aseel-toolbtn" onClick={() => { setFormData((prev) => ({ ...prev, fees: (prev.fees || []).filter((_, i) => i !== index) })); markDirty(); }}><Trash2 size={14} /></button>}</td>
               </tr>
@@ -1553,6 +1645,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           </tbody>
         </table>
       </div>
+      {!viewMode && !effectiveReadOnly && (
+        <div className="mt-3 flex justify-end">
+          <button type="button" className="aseel-toolbtn" disabled={saving} onClick={() => void handleSave()}>
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            حفظ الفاتورة والرسوم
+          </button>
+        </div>
+      )}
     </div>
   );
 
@@ -1573,7 +1673,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         onUpdateInstallment={(i, f, v) => { handleUpdateInstallment(i, f, v); markDirty(); }}
         readOnly={formData.isHistorical || false}
         currency={formData.currency}
-        grandTotalFromForm={formData.currency === "ILS" ? formData.grandTotal : undefined}
+        grandTotalFromForm={formData.currency === "ILS" ? payableTotal : undefined}
         mainVatForExtras={formData.taxAmount || 0}
         conversionMetadata={formData.conversionMetadata}
       />
@@ -1794,13 +1894,22 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               value={formData.dealNumber}
             />
           )}
-          {formData.importLogistics && fld(
-            "رقم الشحنة",
-            <input
-              className="aseel-input"
-              readOnly
-              value={formData.importLogistics.shipmentNumber || ""}
-            />
+          {shipmentLinkId && fld(
+            "الشحنة المرتبطة",
+            <div className="flex items-center">
+              <button
+                type="button"
+                data-testid="open-linked-shipment"
+                className="inline-flex h-8 w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-3 text-xs font-bold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
+                aria-label={`فتح رحلة الشحنة ${shipmentDisplayNumber}`}
+                title={`فتح رحلة الشحنة ${shipmentDisplayNumber}`}
+                onClick={() => openInNewTab(`/import-flow/${encodeURIComponent(shipmentLinkId)}`)}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                <span>فتح رحلة الشحنة</span>
+                <b dir="ltr">{shipmentDisplayNumber}</b>
+              </button>
+            </div>
           )}
           {formData.importLogistics && fld(
             "رقم التخليص",
@@ -1828,7 +1937,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       tabs={[
         { key: "basic", label: "بيانات الفاتورة", content: basicInfoTab },
         { key: "items", label: "البنود والمنتجات", content: itemsTab },
-        { key: "fees", label: `الضرائب والرسوم${feesTotal > 0 ? ` (${formatMoney(feesTotal)})` : ""}`, content: feesTab },
+        { key: "fees", label: `حسابات الرسوم${feesTotal > 0 ? ` (${formatMoney(feesTotal)})` : ""}`, content: feesTab },
         { key: "installments", label: "أقساط الدفع", content: installmentsTab },
         { key: "dealinfo", label: "معلومات الصفقة", content: dealInfoTab },
         { key: "notes", label: "الملاحظات", content: notesTab },
@@ -1872,7 +1981,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         formData.conversionMetadata?.line_meta ? (
           <>
             <div className="aseel-total-row">
-              <span>سعر الأساس (المنتجات)</span>
+              <span>{costLabels.merchandiseBase}</span>
               <span className="aseel-total-value">{fmt(formData.conversionMetadata.deal_total_ils || 0)}</span>
             </div>
             <div className="aseel-total-row">
@@ -1906,9 +2015,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               <span>الضريبة المضافة</span>
               <span className="aseel-total-value">{fmt(formData.taxAmount || 0)}</span>
             </div>
+            {(formData.fees || []).map((fee, index) => (
+              <div className="aseel-total-row" key={fee.id || index}>
+                <span>{fee.description || "رسم إضافي"}</span>
+                <span className="aseel-total-value">{fmt(fee.amount || 0)}</span>
+              </div>
+            ))}
             <div className="aseel-total-row aseel-total-row--grand">
-              <span>مبلغ الفاتورة الإجمالي</span>
-              <span className="aseel-total-value">{fmt(formData.grandTotal || 0)}</span>
+              <span>إجمالي المستحق بعد الضريبة والرسوم</span>
+              <span className="aseel-total-value">{fmt(payableTotal)}</span>
             </div>
             <div className="aseel-total-row">
               <span>إجمالي الكمية</span>
@@ -1935,9 +2050,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               <span>الضريبة المضافة</span>
               <span className="aseel-total-value">{fmt(formData.taxAmount || 0)}</span>
             </div>
+            {(formData.fees || []).map((fee, index) => (
+              <div className="aseel-total-row" key={fee.id || index}>
+                <span>{fee.description || "رسم إضافي"}</span>
+                <span className="aseel-total-value">{fmt(fee.amount || 0)}</span>
+              </div>
+            ))}
             <div className="aseel-total-row aseel-total-row--grand">
-              <span>مبلغ الفاتورة الإجمالي</span>
-              <span className="aseel-total-value">{fmt(formData.grandTotal || 0)}</span>
+              <span>إجمالي المستحق بعد الضريبة والرسوم</span>
+              <span className="aseel-total-value">{fmt(payableTotal)}</span>
             </div>
             <div className="aseel-total-row">
               <span>إجمالي الكمية</span>
@@ -1962,6 +2083,19 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       {accBanner}
       {/* الشجرة انتقلت إلى الشريط الجانبي (aside) ليرتفع لأعلى المستند. */}
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          {isShipmentLinkedImport && (
+            <div
+              data-testid="import-inclusive-cost-note"
+              className="mb-2 flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs leading-5 text-blue-950"
+            >
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+              <span>
+                <b>تكلفة البند شاملة لتكاليف الاستيراد الموزعة:</b>{" "}
+                البضاعة والشحن والجمارك والتخليص والنقل. لا تشمل ض.ق.م والرسوم الإضافية؛
+                التكلفة النهائية بعدها تظهر في العمود الأخير وفي تبويب «البنود والمنتجات».
+              </span>
+            </div>
+          )}
           <AseelGrid<InvoiceItem>
             columns={itemColumns}
             rows={formData.items || []}

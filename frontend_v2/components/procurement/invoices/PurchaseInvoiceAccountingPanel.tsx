@@ -154,6 +154,9 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
       {
         description: "",
         amount: 0,
+        calculation_type: "amount",
+        calculation_value: 0,
+        percentage_basis: "goods",
         expense_account: firstExp?.id || 0,
         capitalize_to_inventory: false,
         is_taxable: false,
@@ -185,6 +188,9 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           ...(f.id ? { id: f.id } : {}),
           description: f.description || "رسم",
           amount: Number(f.amount) || 0,
+          calculation_type: f.calculation_type || "amount",
+          calculation_value: Number(f.calculation_value ?? f.amount) || 0,
+          percentage_basis: f.percentage_basis || "goods",
           expense_account: f.expense_account,
           capitalize_to_inventory: !!f.capitalize_to_inventory,
           is_taxable: !!f.is_taxable,
@@ -659,11 +665,14 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                         type="number"
                         step="0.01"
                         min={0}
-                        value={fee.amount}
+                        value={fee.calculation_type === "percentage" ? fee.amount : (fee.calculation_value ?? fee.amount)}
                         onChange={(e) =>
-                          updateFee(idx, { amount: Number(e.target.value) || 0 })
+                          updateFee(idx, {
+                            amount: Number(e.target.value) || 0,
+                            calculation_value: Number(e.target.value) || 0,
+                          })
                         }
-                        disabled={disableEdit}
+                        disabled={disableEdit || fee.calculation_type === "percentage"}
                         className="w-full h-9 px-2 border aseel-border-soft dark:aseel-border-soft rounded aseel-bg-field dark:aseel-bg-panel text-right"
                       />
                     </td>

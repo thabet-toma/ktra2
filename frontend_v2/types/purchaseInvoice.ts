@@ -26,6 +26,9 @@ export interface PurchaseInvoiceFeeDto {
   id?: number;
   description: string;
   amount: number;
+  calculation_type?: "amount" | "percentage";
+  calculation_value?: number;
+  percentage_basis?: "goods" | "after_main_vat";
   expense_account: number;
   expense_account_code?: string | null;
   expense_account_name?: string | null;

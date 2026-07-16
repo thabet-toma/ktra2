@@ -274,7 +274,6 @@ export const DealForm: React.FC<DealFormProps> = ({
      القفل فقط عند الإلغاء أو التحويل لفاتورة (sw_released) أو الإغلاق القديم. */
   const isDealLocked =
     formData.status === 'cancelled' ||
-    formData.shippingWorkflowStatus === 'sw_released' ||
     (formData.status === 'completed' && !formData.shippingWorkflowStatus);
 
   const validateInstallments = (): boolean => {
@@ -590,7 +589,16 @@ export const DealForm: React.FC<DealFormProps> = ({
       if (isExistingDeal) {
         const dealId = deal?.id || formData.id!;
         const { payments: _paymentsOmitted, ...dealUpdateWithoutPayments } = finalFormData;
-        await handleUpdateDeal(dealUpdateWithoutPayments, "تحديث بيانات الصفقة", "تم تحديث بيانات الصفقة (البنود والحقول؛ سجل الدفعات دون تغيير من هذا الزر)");
+        const savedDeal = await handleUpdateDeal(dealUpdateWithoutPayments, "تحديث بيانات الصفقة", "تم تحديث بيانات الصفقة (البنود والحقول؛ سجل الدفعات دون تغيير من هذا الزر)");
+        if (savedDeal?.linkedShipment?.id) {
+          const reconciliation = await purchaseInvoiceApi.recalculateLandedCost({
+            shipment_id: savedDeal.linkedShipment.id,
+            auto_repost: true,
+          });
+          if (reconciliation.reconciliation?.left_draft) {
+            toast(reconciliation.reconciliation.warnings.join(" · "), "info");
+          }
+        }
         const updatedDeal = await dealsService.getDeal(dealId);
         setFormData(updatedDeal); setItems(updatedDeal.items || []); setInstallments(updatedDeal.installments || []); setInstallmentPlanEnabled(updatedDeal.installmentPlanEnabled || false);
         toast("تم تحديث الصفقة بنجاح!", "success");
@@ -697,7 +705,8 @@ export const DealForm: React.FC<DealFormProps> = ({
     totalAmount: calculateGrandTotal(),
     itemsCount: items.length,
     paidAmount: formData.payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0,
-    remainingAmount: calculateGrandTotal() - (formData.payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0),
+    remainingAmount: Math.max(0, calculateGrandTotal() - (formData.payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0)),
+    supplierAdvance: Math.max(0, (formData.payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0) - calculateGrandTotal()),
     paymentPercentage: calculateGrandTotal() > 0 ? ((formData.payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0) / calculateGrandTotal()) * 100 : 0
   };
 
@@ -1055,7 +1064,10 @@ export const DealForm: React.FC<DealFormProps> = ({
             )}
             <div className="aseel-total-row aseel-total-row--grand"><span>مبلغ الصفقة الإجمالي (للمورد)</span><span className="aseel-total-value">{fmt(calculateGrandTotal())}</span></div>
             <div className="aseel-total-row"><span>المدفوع</span><span className="aseel-total-value">{fmt(dealStats.paidAmount)}</span></div>
-            <div className="aseel-total-row"><span>المتبقي</span><span className="aseel-total-value">{fmt(dealStats.remainingAmount)}</span></div>
+            <div className="aseel-total-row">
+              <span>{dealStats.supplierAdvance > 0 ? "رصيد لصالحك عند المورد" : "المتبقي"}</span>
+              <span className="aseel-total-value">{fmt(dealStats.supplierAdvance > 0 ? dealStats.supplierAdvance : dealStats.remainingAmount)}</span>
+            </div>
           </>
         }
         status={

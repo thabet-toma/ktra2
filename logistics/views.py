@@ -338,26 +338,17 @@ class LogisticsDealViewSet(BaseTenantViewSet):
         return Response(LogisticsPaymentSerializer(payment).data)
 
     def perform_update(self, serializer):
-        # ج8: الصفقة ليست مستنداً مرحَّلاً — الدفعات وحدها تُرحَّل (قرار المالك Q3).
-        # لا حجب شامل بعد ترحيل دفعة (كان جذر «هذا المستند مرحَّل» الذي جمّد
-        # الصفقة كلياً). الحماية المالية الوحيدة: لا يهبط إجمالي الصفقة تحت
-        # مجموع الدفعات المرحّلة، وإلا انفكّ الربط بين القيود والمستند.
+        # الصفقة ليست مستنداً مرحَّلاً؛ الدفعات الفعلية تبقى كما هي عند تعديل البنود.
+        # إذا أصبح المدفوع أكبر من الإجمالي فالفرق رصيد للشركة عند المورد.
         with transaction.atomic():
             deal = serializer.save()
-            posted = (
-                deal.payments.filter(is_posted=True).aggregate(t=Sum('amount'))['t']
-                or Decimal('0')
-            )
-            total = Decimal(deal.total_amount or 0)
-            if posted > 0 and total + Decimal('0.01') < posted:
-                raise ValidationError({
-                    'detail': (
-                        f'لا يمكن الحفظ: إجمالي الصفقة ({total}) أصبح أقل من مجموع '
-                        f'الدفعات المرحّلة محاسبياً ({posted}). عدّل البنود أو ألغِ '
-                        'ترحيل دفعة أولاً.'
-                    ),
-                    'can_unpost': True,
-                })
+            from .signals import recalculate_deal_payment_status
+            recalculate_deal_payment_status(deal.pk)
+            deal.refresh_from_db(fields=['remaining_amount', 'payment_status'])
+            posted = deal.payments.filter(is_posted=True).aggregate(t=Sum('amount'))['t'] or Decimal('0')
+            advance = max(Decimal('0'), Decimal(str(posted)) - Decimal(str(deal.total_amount or 0)))
+            if advance > 0:
+                logger.info('deal supplier advance recalculated deal=%s amount=%s', deal.pk, advance)
         log_activity(
             action='update', entity_type='deal', entity_id=deal.id,
             entity_label=deal.ref_number, description='تعديل صفقة', request=self.request,
@@ -626,7 +617,7 @@ class LogisticsDealViewSet(BaseTenantViewSet):
                 else:
                     lines_data = [
                         {"account": deal_locked.partner.linked_account_id, "debit": local_amount, "credit": Decimal("0"), "partner": deal_locked.partner_id, "description": _desc},
-                        {"account": bank_account.id, "debit": Decimal("0"), "credit": local_amount, "partner": deal_locked.partner_id, "description": _desc},
+                        {"account": bank_account.id, "debit": Decimal("0"), "credit": local_amount, "description": _desc},
                     ]
                     journal_currency, journal_rate = deal_currency, rate
 
@@ -1630,7 +1621,9 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
     def perform_update(self, serializer):
         instance = serializer.instance
         if instance is not None and self._shipment_is_posted(instance):
-            raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
+            changed_fields = set(serializer.validated_data.keys())
+            if changed_fields - {'agent_payments'}:
+                raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
         serializer.save()
 
     def destroy(self, request, *args, **kwargs):
@@ -2700,7 +2693,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
 
     @action(detail=False, methods=['post'], url_path='recalculate-landed-cost')
     def recalculate_landed_cost(self, request):
-        """إعادة حساب تكلفة الرسوم للفواتير غير المرحّلة المرتبطة بشحنة."""
+        """إعادة حساب تكلفة الاستيراد مع حفظ حالة المسودة وإعادة ترحيل المرحّل."""
         tenant = self._get_tenant()
         if not tenant:
             return Response({'error': 'لا يوجد مستأجر'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2718,21 +2711,86 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         except (TypeError, ValueError):
             return Response({'error': 'shipment_id مطلوب'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            dr = Decimal(str(request.data.get('deal_remaining_rate', '3.6')))
-            sr = Decimal(str(request.data.get('shipment_remaining_rate', '3.6')))
+            dr = (
+                Decimal(str(request.data.get('deal_remaining_rate')))
+                if request.data.get('deal_remaining_rate') is not None else None
+            )
+            sr = (
+                Decimal(str(request.data.get('shipment_remaining_rate')))
+                if request.data.get('shipment_remaining_rate') is not None else None
+            )
         except Exception:
             return Response({'error': 'سعر صرف غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
-        use_cl = bool(request.data.get('use_cost_lines', False))
-        try:
-            result = recalculate_landed_for_shipment(
+        use_cl = (
+            bool(request.data.get('use_cost_lines'))
+            if 'use_cost_lines' in request.data else None
+        )
+        auto_repost = request.data.get('auto_repost') in (True, 1, '1', 'true', 'True')
+        posted_ids = list(
+            PurchaseInvoice.objects.filter(
                 tenant=tenant,
                 shipment_id=sid,
-                deal_remaining_rate=dr,
-                shipment_remaining_rate=sr,
-                use_cost_lines=use_cl,
-            )
+                invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL,
+                is_return=False,
+                is_posted=True,
+            ).values_list('pk', flat=True)
+        ) if auto_repost else []
+
+        def call_detail_action(action_name, invoice_id):
+            old_kwargs = getattr(self, 'kwargs', {}).copy()
+            self.kwargs = {**old_kwargs, 'pk': str(invoice_id)}
+            try:
+                return getattr(self, action_name)(request, pk=str(invoice_id))
+            finally:
+                self.kwargs = old_kwargs
+
+        try:
+            with transaction.atomic():
+                for invoice_id in posted_ids:
+                    unpost_response = call_detail_action('unpost', invoice_id)
+                    if unpost_response.status_code >= 400:
+                        detail = unpost_response.data.get('error') or unpost_response.data.get('detail')
+                        raise ValidationError(detail or f'تعذّر إلغاء ترحيل الفاتورة #{invoice_id}')
+                result = recalculate_landed_for_shipment(
+                    tenant=tenant,
+                    shipment_id=sid,
+                    deal_remaining_rate=dr,
+                    shipment_remaining_rate=sr,
+                    use_cost_lines=use_cl,
+                )
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+        reconciliation = {
+            'previously_posted': len(posted_ids),
+            'reposted': 0,
+            'left_draft': 0,
+            'warnings': [],
+        }
+        for invoice_id in posted_ids:
+            invoice = PurchaseInvoice.objects.filter(pk=invoice_id, tenant=tenant).first()
+            if not invoice:
+                continue
+            if invoice.payment_type == PurchaseInvoice.PAYMENT_TYPE_CASH:
+                reconciliation['left_draft'] += 1
+                reconciliation['warnings'].append(
+                    f'الفاتورة {invoice.invoice_number} بقيت مسودة لتجنب تكرار تسوية دفع نقدي تلقائية.'
+                )
+                continue
+            post_response = call_detail_action('post_to_accounting', invoice_id)
+            if post_response.status_code < 400:
+                reconciliation['reposted'] += 1
+            else:
+                reconciliation['left_draft'] += 1
+                detail = post_response.data.get('error') or post_response.data.get('detail')
+                reconciliation['warnings'].append(
+                    f'الفاتورة {invoice.invoice_number} حُدّثت وبقيت مسودة: {detail or "تعذّر إعادة الترحيل"}'
+                )
+        result['reconciliation'] = reconciliation
+        logger.info(
+            'shipment invoice reconciliation shipment=%s updated=%s reposted=%s left_draft=%s',
+            sid, result.get('updated'), reconciliation['reposted'], reconciliation['left_draft'],
+        )
         return Response(result)
 
     @action(detail=True, methods=['post'], url_path='payment-voucher')
@@ -3853,6 +3911,9 @@ class LocalShipmentViewSet(BaseTenantViewSet):
                         f"{shipment.carrier.name}"
                     )[:255],
                     amount=shipment.amount,
+                    calculation_type=PurchaseInvoiceFee.CALCULATION_AMOUNT,
+                    calculation_value=shipment.amount,
+                    percentage_basis=PurchaseInvoiceFee.BASIS_GOODS,
                     capitalize_to_inventory=shipment.capitalize_to_inventory,
                     is_taxable=False,
                 )

@@ -163,6 +163,9 @@ export interface Deal {
     items: DealItem[];
     totalAmount: number;
     remainingAmount: number;
+    postedPaidAmount?: number;
+    amountOutstanding?: number;
+    supplierAdvance?: number;
     subtotal: number;
     shippingCost: number;
     shippingIncluded: boolean;

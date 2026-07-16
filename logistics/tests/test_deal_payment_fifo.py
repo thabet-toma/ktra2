@@ -91,6 +91,8 @@ class DealPaymentFifoTest(APITestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         jh = JournalHeader.objects.get(reference_type="LOGISTICS_PAYMENT", reference_id=pay.id)
         self.assertTrue(jh.lines.filter(account=self.box.account, credit=D("3500.00")).exists())
+        self.assertIsNone(jh.lines.get(account=self.box.account).partner_id)
+        self.assertEqual(jh.lines.get(account=self.partner.linked_account).partner_id, self.partner.id)
         self.assertEqual(jh.lines.count(), 2)
 
 
@@ -135,6 +137,77 @@ class AgentPaymentFifoTest(APITestCase):
         self.assertTrue(jh.lines.filter(account=self.agent.linked_account, debit=D("3500.00")).exists())
         self.assertTrue(jh.lines.filter(account=self.box.account, credit=D("3000.00")).exists())
         self.assertTrue(jh.lines.filter(account=fx, credit=D("500.00")).exists())
+
+    def test_posted_shipment_accepts_new_payment_for_increased_freight(self):
+        self.shipment.total_shipping_cost_usd = D("540")
+        self.shipment.save(update_fields=["total_shipping_cost_usd"])
+        old_payment = LogisticsPayment.objects.create(
+            shipment=self.shipment,
+            title="دفعة شحن 1",
+            payment_number=1,
+            amount=D("270"),
+            status="Confirmed",
+            confirmed_by_supplier=True,
+            is_posted=True,
+            usd_to_ils=D("3.24"),
+            transfer_date="2026-07-14",
+        )
+        JournalHeader.objects.create(
+            tenant=self.tenant,
+            transaction_date="2026-07-14",
+            reference_type="LOGISTICS_SHIPMENT",
+            reference_id=self.shipment.pk,
+            description="قيد تكلفة شحن سابق",
+            is_posted=True,
+        )
+
+        response = self.client.patch(
+            f"/api/logistics/shipments/{self.shipment.pk}/",
+            {
+                "payments": [
+                    {
+                        "id": old_payment.pk,
+                        "payment_number": 1,
+                        "title": "دفعة شحن 1",
+                        "amount": "270",
+                        "status": "Confirmed",
+                        "confirmed_by_supplier": True,
+                        "usd_to_ils": "3.24",
+                        "transfer_date": "2026-07-14",
+                    },
+                    {
+                        "payment_number": 2,
+                        "title": "دفعة شحن 2",
+                        "amount": "270",
+                        "status": "Confirmed",
+                        "confirmed_by_supplier": True,
+                        "usd_to_ils": "3.6",
+                        "transfer_date": "2026-07-16",
+                    },
+                ],
+            },
+            format="json",
+            **self._auth(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self.shipment.agent_payments.count(), 2)
+        old_payment.refresh_from_db()
+        self.assertTrue(old_payment.is_posted)
+        self.assertTrue(
+            self.shipment.agent_payments.filter(
+                payment_number=2,
+                amount=D("270"),
+                is_posted=False,
+            ).exists()
+        )
+        blocked = self.client.patch(
+            f"/api/logistics/shipments/{self.shipment.pk}/",
+            {"shipment_name": "تعديل غير مالي"},
+            format="json",
+            **self._auth(),
+        )
+        self.assertEqual(blocked.status_code, 400)
 
 
 class ClearancePaymentFifoTest(APITestCase):

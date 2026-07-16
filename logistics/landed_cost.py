@@ -1061,9 +1061,9 @@ def recalculate_landed_for_shipment(
     *,
     tenant,
     shipment_id: int,
-    deal_remaining_rate: Decimal,
-    shipment_remaining_rate: Decimal,
-    use_cost_lines: bool,
+    deal_remaining_rate: Optional[Decimal] = None,
+    shipment_remaining_rate: Optional[Decimal] = None,
+    use_cost_lines: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """تحديث فواتير الشراء المرتبطة بالشحنة (غير المرحّلة فقط)."""
     qs = PurchaseInvoice.objects.filter(
@@ -1082,6 +1082,11 @@ def recalculate_landed_for_shipment(
     skipped = 0
     skipped_posted = 0
     with transaction.atomic():
+        shipment_for_distribution = LogisticsShipment.objects.filter(
+            pk=shipment_id, tenant=tenant,
+        ).first()
+        if shipment_for_distribution:
+            redistribute_shipment_deal_allocations(shipment_for_distribution)
         for inv in qs:
             if inv.is_posted:
                 skipped_posted += 1
@@ -1098,27 +1103,64 @@ def recalculate_landed_for_shipment(
                     continue
             deal = inv.deal
             shipment = inv.shipment
+            inv_deal_rate = (
+                deal_remaining_rate
+                if deal_remaining_rate is not None
+                else _d(inv.import_deal_remaining_rate, '3.6')
+            )
+            inv_shipment_rate = (
+                shipment_remaining_rate
+                if shipment_remaining_rate is not None
+                else _d(inv.import_shipment_remaining_rate, '3.6')
+            )
+            inv_use_cost_lines = (
+                bool(use_cost_lines)
+                if use_cost_lines is not None
+                else bool(inv.import_use_cost_lines)
+            )
             payload = build_purchase_invoice_row(
                 deal=deal,
                 shipment=shipment,
                 clearance=clr,
-                deal_remaining_rate=deal_remaining_rate,
-                shipment_remaining_rate=shipment_remaining_rate,
-                use_cost_lines=use_cost_lines,
+                deal_remaining_rate=inv_deal_rate,
+                shipment_remaining_rate=inv_shipment_rate,
+                use_cost_lines=inv_use_cost_lines,
                 ils_currency=inv.currency or get_ils_currency(),
             )
             inv.subtotal = payload['subtotal']
-            inv.discount_amount = payload['discount_amount']
-            inv.tax_amount = payload['tax_amount']
             inv.shipping_cost = payload['shipping_cost']
             inv.shipping_included = payload['shipping_included']
-            inv.grand_total = payload['grand_total']
+            taxable = max(
+                Decimal('0'),
+                Decimal(str(inv.subtotal or 0))
+                - Decimal(str(inv.discount_amount or 0))
+                + Decimal(str(inv.shipping_cost or 0)),
+            )
+            if inv.tax_type == 'percentage':
+                inv.tax_amount = (
+                    taxable * Decimal(str(inv.tax_rate or 0)) / Decimal('100')
+                ).quantize(Q2, rounding=ROUND_HALF_UP)
+            inv.grand_total = (
+                taxable + Decimal(str(inv.tax_amount or 0))
+            ).quantize(Q2, rounding=ROUND_HALF_UP)
             inv.invoice_name = payload.get('invoice_name')
-            inv.import_deal_remaining_rate = deal_remaining_rate
-            inv.import_shipment_remaining_rate = shipment_remaining_rate
-            inv.import_use_cost_lines = use_cost_lines
+            inv.import_deal_remaining_rate = inv_deal_rate
+            inv.import_shipment_remaining_rate = inv_shipment_rate
+            inv.import_use_cost_lines = inv_use_cost_lines
             inv.clearance_id = clr.id
             inv.save()
+            for fee in inv.fees.all():
+                if fee.calculation_type != fee.CALCULATION_PERCENTAGE:
+                    continue
+                basis = (
+                    Decimal(str(inv.grand_total or 0))
+                    if fee.percentage_basis == fee.BASIS_AFTER_MAIN_VAT
+                    else taxable
+                )
+                fee.amount = (
+                    basis * Decimal(str(fee.calculation_value or 0)) / Decimal('100')
+                ).quantize(Q2, rounding=ROUND_HALF_UP)
+                fee.save(update_fields=['amount'])
             inv.items.all().delete()
             for row in payload['items']:
                 PurchaseInvoiceItem.objects.create(

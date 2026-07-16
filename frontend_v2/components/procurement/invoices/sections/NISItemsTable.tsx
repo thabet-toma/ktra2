@@ -1,7 +1,11 @@
 import React, { useMemo } from "react";
 import { Package, Tag, Layers, Anchor, Receipt } from "lucide-react";
 import type { Invoice, InvoiceItem, LocalPayments } from "@/types";
-import { sumTaxesAndFeesExtras, transferCommissionsIlsForVat } from "@/utils/invoiceTaxesAndFees";
+import {
+    allocateInvoiceFinalCosts,
+    sumTaxesAndFeesExtras,
+    transferCommissionsIlsForVat,
+} from "@/utils/invoiceTaxesAndFees";
 import { formatMoney } from "@/utils/formatNumber";
 
 interface NISItemsTableProps {
@@ -15,22 +19,14 @@ interface NISItemsTableProps {
     invoiceVatBaseIls?: number;
     /** لتوزيع عمولات التحويل على أسطر الجدول (نفس أوزان الضريبة والرسوم) */
     conversionMetadata?: Invoice["conversionMetadata"] | null;
+    /** رسوم PurchaseInvoiceFee المحفوظة — تدخل في التكلفة النهائية المعروضة. */
+    additionalFeesTotal?: number;
+    /** الفاتورة مرتبطة بشحنة، فتكون أسعار البنود تكاليف استيراد موزعة لا أسعار شراء خام. */
+    isShipmentLinkedImport?: boolean;
 }
 
 function fmtIls(v: number) {
     return `₪${formatMoney(v)}`;
-}
-
-function allocationWeights(items: InvoiceItem[]): number[] {
-    const ws = items.map((it) => {
-        const L = Number(it.landedLineTotalIls);
-        if (Number.isFinite(L) && L > 0) return L;
-        const t = Number(it.totalPrice);
-        return Number.isFinite(t) && t > 0 ? t : 0;
-    });
-    const W = ws.reduce((a, b) => a + b, 0);
-    if (W <= 0) return items.map(() => (items.length > 0 ? 1 / items.length : 0));
-    return ws.map((w) => w / W);
 }
 
 export const NISItemsTable: React.FC<NISItemsTableProps> = ({
@@ -41,6 +37,8 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
     taxableBaseIls = 0,
     invoiceVatBaseIls,
     conversionMetadata,
+    additionalFeesTotal = 0,
+    isShipmentLinkedImport = false,
 }) => {
     const showLanded = items.some(
         (it) =>
@@ -57,30 +55,28 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                 ? Math.max(0, invoiceVatBaseIls)
                 : undefined,
     });
-    const taxFeesPool = (Number(invoiceTaxAmount) || 0) + extrasPool;
+    const taxFeesPool =
+        (Number(invoiceTaxAmount) || 0) +
+        extrasPool +
+        Math.max(0, Number(additionalFeesTotal) || 0);
     const transferPoolIls = useMemo(
         () => transferCommissionsIlsForVat(conversionMetadata as Record<string, unknown> | null),
         [conversionMetadata]
     );
     const showAllocColumns = items.length > 0;
 
-    const shares = useMemo(() => allocationWeights(items), [items]);
-
     const perRowAlloc = useMemo(() => {
-        return items.map((it, idx) => {
-            const s = shares[idx] ?? 0;
-            const taxFeesAlloc = taxFeesPool * s;
-            const transferAlloc = transferPoolIls * s;
-            const landedBase =
-                (Number(it.landedLineTotalIls) > 0 ? Number(it.landedLineTotalIls) : 0) ||
-                (Number(it.totalPrice) > 0 ? Number(it.totalPrice) : 0);
-            const preTaxWithTransfer = landedBase + transferAlloc;
-            const afterLine = preTaxWithTransfer + taxFeesAlloc;
-            const qty = Math.max(Number(it.quantity) || 0, 0.0001);
-            const afterUnit = afterLine / qty;
-            return { taxFeesAlloc, transferAlloc, preTaxWithTransfer, afterLine, afterUnit };
-        });
-    }, [items, shares, taxFeesPool, transferPoolIls]);
+        return allocateInvoiceFinalCosts(items, {
+            transferTotalIls: transferPoolIls,
+            taxAndFeesTotalIls: taxFeesPool,
+        }).map((row) => ({
+            taxFeesAlloc: row.taxAndFeesAllocation,
+            transferAlloc: row.transferAllocation,
+            preTaxWithTransfer: row.preTaxLine,
+            afterLine: row.finalLine,
+            afterUnit: row.finalUnit,
+        }));
+    }, [items, taxFeesPool, transferPoolIls]);
 
     const sumMerchIls = items.reduce((s, it) => s + (Number(it.totalPrice) || 0), 0);
     const sumLandedWithTransferIls = perRowAlloc.reduce((s, r) => s + r.preTaxWithTransfer, 0);
@@ -107,22 +103,22 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                 كمية
                             </th>
                             <th className="px-2 py-2 text-xs font-bold aseel-text-ink dark:aseel-text-soft">
-                                وحدة أساس ₪
+                                {isShipmentLinkedImport ? "تكلفة الاستيراد/وحدة ₪" : "وحدة أساس ₪"}
                             </th>
                             {showLanded && (
                                 <th className="px-2 py-2 text-xs font-bold aseel-text-ink dark:aseel-text-soft aseel-bg-panel/80 dark:aseel-bg-panel/20">
                                     <span className="inline-flex items-center gap-1">
                                         <Anchor className="w-3.5 h-3.5" />
-                                        وحدة نهائية ₪
+                                        {isShipmentLinkedImport ? "قبل ض.ق.م/وحدة ₪" : "وحدة نهائية ₪"}
                                     </span>
                                 </th>
                             )}
                             <th className="px-2 py-2 text-xs font-bold aseel-text-ink dark:aseel-text-soft">
-                                إجمالي أساس ₪
+                                {isShipmentLinkedImport ? "إجمالي تكلفة الاستيراد ₪" : "إجمالي أساس ₪"}
                             </th>
                             {showLanded && (
                                 <th className="px-2 py-2 text-xs font-bold aseel-text-ink dark:aseel-text-soft aseel-bg-panel/80 dark:aseel-bg-panel/20">
-                                    إجمالي نهائي ₪
+                                    {isShipmentLinkedImport ? "الإجمالي قبل ض.ق.م ₪" : "إجمالي نهائي ₪"}
                                 </th>
                             )}
                             {showAllocColumns ? (

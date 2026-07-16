@@ -1,4 +1,4 @@
-import type { LocalPayments, TaxesAndFeesLine } from "@/types";
+import type { LocalPayments, PurchaseInvoiceFeeLine, TaxesAndFeesLine } from "@/types";
 
 type ConvMeta = Record<string, unknown> | null | undefined;
 
@@ -8,12 +8,83 @@ function num(v: unknown, fallback = 0): number {
     return Number.isFinite(n) ? n : fallback;
 }
 
+export type InvoiceFinalCostItem = {
+    quantity?: number | string | null;
+    totalPrice?: number | string | null;
+    landedLineTotalIls?: number | string | null;
+};
+
+export type InvoiceFinalCostAllocation = {
+    share: number;
+    landedBase: number;
+    transferAllocation: number;
+    taxAndFeesAllocation: number;
+    preTaxLine: number;
+    finalLine: number;
+    finalUnit: number;
+};
+
+export function allocateInvoiceFinalCosts(
+    items: InvoiceFinalCostItem[],
+    pools: { transferTotalIls?: number; taxAndFeesTotalIls?: number },
+): InvoiceFinalCostAllocation[] {
+    const weights = items.map((item) => {
+        const landed = num(item.landedLineTotalIls);
+        if (landed > 0) return landed;
+        return Math.max(0, num(item.totalPrice));
+    });
+    const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+    const transferTotal = Math.max(0, num(pools.transferTotalIls));
+    const taxAndFeesTotal = Math.max(0, num(pools.taxAndFeesTotalIls));
+    return items.map((item, index) => {
+        const share = totalWeight > 0
+            ? weights[index] / totalWeight
+            : items.length > 0 ? 1 / items.length : 0;
+        const landedBase = weights[index];
+        const transferAllocation = transferTotal * share;
+        const taxAndFeesAllocation = taxAndFeesTotal * share;
+        const preTaxLine = landedBase + transferAllocation;
+        const finalLine = preTaxLine + taxAndFeesAllocation;
+        const quantity = Math.max(num(item.quantity), 0.0001);
+        return {
+            share,
+            landedBase,
+            transferAllocation,
+            taxAndFeesAllocation,
+            preTaxLine,
+            finalLine,
+            finalUnit: finalLine / quantity,
+        };
+    });
+}
+
 function lineMetaFrom(meta: ConvMeta): Record<string, unknown> {
     if (!meta || typeof meta !== "object") return {};
     const r = meta as Record<string, unknown>;
     const lm = r.line_meta;
     if (lm && typeof lm === "object" && !Array.isArray(lm)) return lm as Record<string, unknown>;
     return {};
+}
+
+function hasEmbeddedLandedAllocations(meta: ConvMeta): boolean {
+    if (!meta || typeof meta !== "object") return false;
+    const r = meta as Record<string, unknown>;
+    return (r.allocation_method ?? r.allocationMethod) === "server_pro_rata";
+}
+
+export function purchaseInvoiceFeeAmount(
+    fee: Pick<PurchaseInvoiceFeeLine, "amount" | "calculationType" | "calculationValue" | "percentageBasis">,
+    goodsBaseIls: number,
+    invoiceVatBaseIls: number,
+    mainVatIls: number
+): number {
+    const calculationType = fee.calculationType || "amount";
+    const value = Math.max(0, Number(fee.calculationValue ?? fee.amount) || 0);
+    if (calculationType !== "percentage") return Math.round(value * 100) / 100;
+    const basis = fee.percentageBasis === "after_main_vat"
+        ? Math.max(0, invoiceVatBaseIls) + Math.max(0, mainVatIls)
+        : Math.max(0, goodsBaseIls);
+    return Math.round(((basis * value) / 100) * 100) / 100;
 }
 
 /** مخلص + جمارك + ميناء + جمركة ضرائب (بدون شحن محلي منفصل — يُدار مع metadata) */
@@ -81,6 +152,12 @@ export function invoiceVatBaseIls(
     meta: ConvMeta,
     lp: LocalPayments | null | undefined
 ): number {
+    if (hasEmbeddedLandedAllocations(meta)) {
+        return (
+            Math.max(0, merchandiseBase) +
+            transferCommissionsIlsForVat(meta)
+        );
+    }
     return (
         Math.max(0, merchandiseBase) +
         internationalFreightIlsForVat(meta) +

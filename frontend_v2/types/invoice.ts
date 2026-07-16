@@ -21,6 +21,9 @@ export interface PurchaseInvoiceFeeLine {
     id?: string;
     description: string;
     amount: number;
+    calculationType?: "amount" | "percentage";
+    calculationValue?: number;
+    percentageBasis?: "goods" | "after_main_vat";
     expenseAccountId: number | null;
     expenseAccountCode?: string;
     expenseAccountName?: string;

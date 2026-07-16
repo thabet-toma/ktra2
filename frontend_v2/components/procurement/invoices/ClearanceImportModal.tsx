@@ -16,7 +16,10 @@ import {
     formatClearanceShipmentLine,
     type ClearanceRow,
 } from "@/services/clearanceApi";
-import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
+import {
+    purchaseInvoiceApi,
+    type ClearanceImportOptionDeal,
+} from "@/services/purchaseInvoiceApi";
 import { formatMoney, formatNumber } from "@/utils/formatNumber";
 import { useToast } from "@/contexts/ToastContext";
 import {
@@ -33,6 +36,7 @@ import {
     ExternalLink,
 } from "lucide-react";
 import { openInNewTab } from "@/utils/openInNewTab";
+import { mergeClearanceImportDeals } from "@/utils/invoiceConversionUtils";
 
 /** يمنع الاستيراد إذا أرجع الخادم تفصيلاً بالدولار وما زال هناك شحن غير مدفوع ومؤكّد. */
 function clearancePreviewBlocksImportForUnpaidFreight(
@@ -152,6 +156,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
         invoiceId: number | null;
         invoiceNumber: string | null;
     }>>({});
+    const [importOptionDeals, setImportOptionDeals] = useState<ClearanceImportOptionDeal[]>([]);
     const [importOptionsLoading, setImportOptionsLoading] = useState(false);
     const [importOptionsError, setImportOptionsError] = useState<string | null>(null);
 
@@ -223,6 +228,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
     useEffect(() => {
         if (!isOpen || !selectedClearance) {
             setDealImportStates({});
+            setImportOptionDeals([]);
             setImportOptionsError(null);
             return;
         }
@@ -240,12 +246,14 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                         invoiceNumber: row.invoice_number,
                     };
                 });
+                setImportOptionDeals(result.deals);
                 setDealImportStates(next);
                 setSelectedDeals((current) => current.filter((id) => !next[id]?.isConverted));
             })
             .catch(() => {
                 if (!cancelled) {
                     setDealImportStates({});
+                    setImportOptionDeals([]);
                     setImportOptionsError("تعذّر التحقق من الصفقات المحوّلة. أعد المحاولة قبل إنشاء الفواتير.");
                 }
             })
@@ -349,9 +357,13 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
         );
     };
 
-    const remainingDealIds = resolvedShipment?.deals
+    const visibleDeals = mergeClearanceImportDeals(
+        resolvedShipment?.deals || [],
+        importOptionDeals
+    );
+    const remainingDealIds = visibleDeals
         .filter((deal) => !dealImportStates[deal.dealId]?.isConverted)
-        .map((deal) => deal.dealId) || [];
+        .map((deal) => deal.dealId);
 
     const handleImportClick = async () => {
         if (!resolvedShipment || !selectedClearance) return;
@@ -794,7 +806,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border aseel-border-soft px-3 py-2">
                                             <span className="text-xs aseel-text-soft">
                                                 المتبقية للتحويل: <b className="aseel-text-ink">{remainingDealIds.length}</b>
-                                                {" · "}المحوّلة: <b className="aseel-text-ink">{resolvedShipment.deals.length - remainingDealIds.length}</b>
+                                                {" · "}المحوّلة: <b className="aseel-text-ink">{visibleDeals.length - remainingDealIds.length}</b>
                                             </span>
                                             {remainingDealIds.length > 0 ? (
                                                 <button
@@ -820,7 +832,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                 اختر صفقة من القائمة أدناه، ثم «استيراد الفواتير».
                                             </p>
                                         ) : null}
-                                        {resolvedShipment.deals.map((sd) => {
+                                        {visibleDeals.map((sd) => {
                                             const deal = allDeals.find(
                                                 (d) => String(d.id) === String(sd.dealId)
                                             );

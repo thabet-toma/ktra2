@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useSearchParams } from "react-router-dom";
-import { Save, Plus, FileText } from "lucide-react";
+import { Save, Plus, FileText, Pencil } from "lucide-react";
 import { apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
 import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, unpostClearanceAccrual } from "@/services/clearanceApi";
@@ -17,6 +17,8 @@ import OfflineGuard from "@/components/offline/OfflineGuard";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import { formatMoney } from "@/utils/formatNumber";
 import { getImportJourneyGuidance, type ImportJourneyAction } from "./importJourneyGuidance";
+import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
+import { openInNewTab } from "@/utils/openInNewTab";
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => formatMoney(v, "—");
 
@@ -253,12 +255,39 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     void loadAll(shipmentId);
   }, [shipmentId, loadAll]);
 
+  useEffect(() => {
+    const refreshAfterDealEdit = () => {
+      if (shipmentId && shipmentId !== "new") void loadAll(shipmentId);
+    };
+    window.addEventListener("focus", refreshAfterDealEdit);
+    return () => window.removeEventListener("focus", refreshAfterDealEdit);
+  }, [shipmentId, loadAll]);
+
   // ── Shipment form helpers ──
   const setSF = useCallback(
     (patch: Partial<ShipmentApiRow>) =>
       setShipmentForm((prev) => (prev ? { ...prev, ...patch } : prev)),
     [],
   );
+
+  const reconcileShipmentInvoices = useCallback(async (id: number) => {
+    const result = await purchaseInvoiceApi.recalculateLandedCost({
+      shipment_id: id,
+      auto_repost: true,
+    });
+    const reconciliation = result.reconciliation;
+    if (reconciliation?.left_draft) {
+      toast(reconciliation.warnings.join(" · "), "info");
+    } else if (result.updated) {
+      toast(
+        reconciliation?.reposted
+          ? `تم تحديث ${result.updated} فاتورة وإعادة ترحيل ${reconciliation.reposted}.`
+          : `تم تحديث ${result.updated} فاتورة مرتبطة وبقيت المسودات مسودات.`,
+        "success",
+      );
+    }
+    return result;
+  }, [toast]);
 
   const handleSaveShipment = useCallback(async () => {
     if (!shipmentForm) return;
@@ -272,6 +301,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         );
         setShipment(patched);
         setShipmentForm({ ...patched });
+        await reconcileShipmentInvoices(patched.id);
       } else {
         const created = await apiPostObject<ShipmentApiRow>(
           "logistics/shipments/",
@@ -291,7 +321,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     } finally {
       setSaving(false);
     }
-  }, [shipmentForm, toast, loadAll]);
+  }, [shipmentForm, toast, loadAll, reconcileShipmentInvoices]);
 
   const isShipmentDirty = useMemo(() => {
     if (!shipmentForm) return false;
@@ -381,6 +411,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       });
       setClearance(patched);
       setClearanceForm({ ...patched });
+      if (patched.shipment) await reconcileShipmentInvoices(Number(patched.shipment));
       return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -388,7 +419,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     } finally {
       setSaving(false);
     }
-  }, [clearanceForm]);
+  }, [clearanceForm, reconcileShipmentInvoices]);
 
   /** «تسجيل سريع»: إجمالي تخليص واحد بدون بنود — يُخزَّن كبند وحيد ويُحفظ فوراً */
   const applyQuickClearanceTotal = useCallback(async () => {
@@ -482,13 +513,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       const refreshed = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${shipment.id}/`, { tenantId: tid() });
       setShipment(refreshed);
       setShipmentForm({ ...refreshed });
+      await reconcileShipmentInvoices(refreshed.id);
       setLinkPickerOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [shipment]);
+  }, [shipment, reconcileShipmentInvoices]);
 
   // ج8 (M5): قدوم من زر «الخطوة التالية» في الصفقة (?join_deal=ID) — بمجرد
   // وجود شحنة محفوظة، افتح فاتح ضمّ الصفقات على تبويب الصفقات تلقائياً (بلا
@@ -560,12 +592,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       );
       setShipment(patched);
       setShipmentForm({ ...patched });
+      await reconcileShipmentInvoices(patched.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [shipment]);
+  }, [shipment, reconcileShipmentInvoices]);
 
   // Edit a deal's CBM/KG inline from the shipment — no need to leave for the deal
   // screen. Saves to the deal, then (once every deal has the chosen measure and a
@@ -594,13 +627,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         }
         setShipment(refreshed);
         setShipmentForm({ ...refreshed });
+        await reconcileShipmentInvoices(refreshed.id);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
         setSaving(false);
       }
     },
-    [shipment, freightUnit, freightRate],
+    [shipment, freightUnit, freightRate, reconcileShipmentInvoices],
   );
 
   const handleUpdateAllocation = useCallback(async (dealId: number, newAlloc: number) => {
@@ -615,12 +649,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       );
       setShipment(patched);
       setShipmentForm({ ...patched });
+      await reconcileShipmentInvoices(patched.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [shipment]);
+  }, [shipment, reconcileShipmentInvoices]);
 
   // ── D: Local shipment helpers ──
   const reloadLocal = useCallback(async () => {
@@ -739,12 +774,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         setEditingLocalId(null); setLocalForm(null);
       }
       void reloadLocal();
+      await reconcileShipmentInvoices(shipment.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [localForm, editingLocalId, shipment, reloadLocal]);
+  }, [localForm, editingLocalId, shipment, reloadLocal, reconcileShipmentInvoices]);
 
   const handleDeleteLocal = useCallback(async (id: number) => {
     if (!(await confirm({ title: "حذف النقل المحلي", message: "هل تريد حذف سجل النقل المحلي؟" }))) return;
@@ -753,12 +789,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       await deleteLocalShipment(id);
       setLocalShipments((prev) => prev.filter((l) => l.id !== id));
       if (editingLocalId === id) { setEditingLocalId(null); setLocalForm(null); }
+      if (shipment) await reconcileShipmentInvoices(shipment.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [editingLocalId]);
+  }, [editingLocalId, shipment, reconcileShipmentInvoices]);
 
   const handlePostLocal = useCallback(async (id: number) => {
     setSaving(true); setError(null);
@@ -1014,6 +1051,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       );
       setShipment(patched);
       setShipmentForm({ ...patched });
+      await reconcileShipmentInvoices(patched.id);
       setShowAgentPayForm(false);
       setAgentPayAmount("");
       setAgentPayNotes("");
@@ -1028,7 +1066,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     } finally {
       setSaving(false);
     }
-  }, [shipment, agentPayAmount, agentPayRate, agentPayDate, agentPayConfirmed, agentPayNotes, toast]);
+  }, [shipment, agentPayAmount, agentPayRate, agentPayDate, agentPayConfirmed, agentPayNotes, toast, reconcileShipmentInvoices]);
 
   // ── F: Convert to purchase invoice ──
   const [convertedInvoices, setConvertedInvoices] = useState<Array<{
@@ -1395,6 +1433,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           <th style={{ padding: "2px 4px", textAlign: "start" }}>الاسم</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 70 }}>CBM</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 70 }}>KG</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 90 }}>الصفقة</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 110 }}>حصة الشحن (USD)</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 60 }}>إلغاء</th>
         </tr></thead>
@@ -1443,6 +1482,17 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 />
               </td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>
+                <button
+                  type="button"
+                  className="aseel-toolbtn"
+                  onClick={() => openInNewTab(`/deals/${d.deal}`)}
+                  disabled={saving}
+                  title="فتح الصفقة وتعديل منتجاتها وقيمها"
+                >
+                  <Pencil size={13} /> تعديل
+                </button>
+              </td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>
                 <input
                   className="aseel-input"
                   type="number"
@@ -1477,7 +1527,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             );
           })}
           {shipmentDeals.length === 0 && (
-            <tr><td colSpan={6} style={{ padding: "8px 4px", textAlign: "center", color: "#999" }}>لا توجد صفقات مرتبطة</td></tr>
+            <tr><td colSpan={7} style={{ padding: "8px 4px", textAlign: "center", color: "#999" }}>لا توجد صفقات مرتبطة</td></tr>
           )}
         </tbody>
       </table>
@@ -1817,7 +1867,19 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>
           دفعات وكيل الشحن — الشحن الدولي بالدولار ({agentPayments.length})
         </h4>
-        <button type="button" className="aseel-toolbtn" onClick={() => setShowAgentPayForm(!showAgentPayForm)} disabled={!shipment || saving}>
+        <button
+          type="button"
+          className="aseel-toolbtn"
+          onClick={() => {
+            const opening = !showAgentPayForm;
+            setShowAgentPayForm(opening);
+            if (opening) {
+              const remaining = Math.max(0, freightTotalUsd - freightPaidUsd);
+              setAgentPayAmount(remaining > 0 ? String(Math.round(remaining * 100) / 100) : "");
+            }
+          }}
+          disabled={!shipment || saving}
+        >
           <Plus size={14} /> دفعة شحن دولي
         </button>
       </div>

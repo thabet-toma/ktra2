@@ -6,11 +6,47 @@ import {
     InvoiceImportLogistics,
     DealPayment,
     ShipmentPayment,
+    ShipmentDealInfo,
 } from "../types";
 import {
     invoiceGrandTotalIls,
     invoiceVatBaseIls,
 } from "./invoiceTaxesAndFees";
+
+export function getPurchaseInvoiceCostLabels(isShipmentLinkedImport: boolean) {
+    return isShipmentLinkedImport
+        ? {
+            unitPrice: "تكلفة الوحدة الشاملة للاستيراد",
+            lineTotal: "إجمالي السطر الشامل للاستيراد",
+            merchandiseBase: "قيمة البضاعة قبل تكاليف الاستيراد",
+        }
+        : {
+            unitPrice: "سعر الوحدة",
+            lineTotal: "الإجمالي",
+            merchandiseBase: "سعر الأساس (المنتجات)",
+        };
+}
+
+export function mergeClearanceImportDeals(
+    shipmentDeals: ShipmentDealInfo[],
+    optionDeals: Array<{ deal_id: number; deal_ref: string }>
+): ShipmentDealInfo[] {
+    const merged = new Map(shipmentDeals.map((deal) => [String(deal.dealId), deal]));
+    optionDeals.forEach((row) => {
+        const dealId = String(row.deal_id);
+        if (merged.has(dealId)) return;
+        merged.set(dealId, {
+            dealId,
+            dealNumber: row.deal_ref,
+            originalOfferNumber: "",
+            totalAmount: 0,
+            totalVolume: 0,
+            totalWeightKg: 0,
+            distributedCost: 0,
+        });
+    });
+    return Array.from(merged.values());
+}
 
 /** سطر عرض موحّد: شحنة + تخليص (للقائمة ونموذج الفاتورة) */
 export function formatInvoiceImportLogisticsLine(il: InvoiceImportLogistics): string {

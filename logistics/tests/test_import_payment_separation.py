@@ -224,6 +224,81 @@ class ImportPaymentSeparationTest(APITestCase):
         self.assertEqual(D(body["payable_total"]), D("1100.00"))
         self.assertEqual(D(body["remaining_balance"]), D("1100.00"))
 
+        updated = self.client.patch(
+            f"/api/logistics/purchase-invoices/{body['id']}/",
+            {"fees": [{
+                "description": "رسوم فحص معدّلة", "amount": "125",
+                "expense_account": self.clearance_expense.pk,
+                "capitalize_to_inventory": True, "is_taxable": False,
+            }]},
+            format="json", **self._auth(),
+        )
+        self.assertEqual(updated.status_code, 200, updated.content)
+        detail = self.client.get(
+            f"/api/logistics/purchase-invoices/{body['id']}/", **self._auth(),
+        )
+        self.assertEqual(detail.status_code, 200, detail.content)
+        saved_fee = detail.json()["fees"][0]
+        self.assertEqual(saved_fee["description"], "رسوم فحص معدّلة")
+        self.assertEqual(D(saved_fee["amount"]), D("125.00"))
+        self.assertTrue(saved_fee["capitalize_to_inventory"])
+        self.assertEqual(D(detail.json()["fees_total"]), D("125.00"))
+        self.assertEqual(D(detail.json()["payable_total"]), D("1125.00"))
+
+    def test_percentage_fee_persists_basis_and_calculates_amount_on_server(self):
+        created = self.client.post(
+            "/api/logistics/purchase-invoices/",
+            {
+                "invoice_type": "international",
+                "invoice_date": "2026-07-05",
+                "partner": self.broker.pk,
+                "currency": "ILS",
+                "subtotal": "1000",
+                "tax_rate": "16",
+                "tax_amount": "160",
+                "grand_total": "1160",
+                "status": "draft",
+                "items": [{
+                    "name": "بضاعة مستوردة", "quantity": "1",
+                    "unit_price": "1000", "total_price": "1000",
+                }],
+                "fees": [{
+                    "description": "رسم كترا", "amount": "999",
+                    "calculation_type": "percentage",
+                    "calculation_value": "10",
+                    "percentage_basis": "after_main_vat",
+                    "expense_account": self.clearance_expense.pk,
+                    "capitalize_to_inventory": False, "is_taxable": False,
+                }],
+            },
+            format="json", **self._auth(),
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        fee = created.json()["fees"][0]
+        self.assertEqual(fee["calculation_type"], "percentage")
+        self.assertEqual(D(fee["calculation_value"]), D("10.00"))
+        self.assertEqual(fee["percentage_basis"], "after_main_vat")
+        self.assertEqual(D(fee["amount"]), D("116.00"))
+        self.assertEqual(D(created.json()["payable_total"]), D("1276.00"))
+
+        updated = self.client.patch(
+            f"/api/logistics/purchase-invoices/{created.json()['id']}/",
+            {
+                "subtotal": "2000", "tax_amount": "320", "grand_total": "2320",
+                "fees": [{
+                    "description": "رسم كترا", "amount": "999",
+                    "calculation_type": "percentage", "calculation_value": "10",
+                    "percentage_basis": "after_main_vat",
+                    "expense_account": self.clearance_expense.pk,
+                    "capitalize_to_inventory": False, "is_taxable": False,
+                }],
+            },
+            format="json", **self._auth(),
+        )
+        self.assertEqual(updated.status_code, 200, updated.content)
+        self.assertEqual(D(updated.json()["fees"][0]["amount"]), D("232.00"))
+        self.assertEqual(D(updated.json()["payable_total"]), D("2552.00"))
+
     def test_additional_fee_posts_balanced_on_top_of_invoice_total(self):
         invoice = PurchaseInvoice.objects.create(
             tenant=self.tenant, invoice_number="IMP-FEE-1",

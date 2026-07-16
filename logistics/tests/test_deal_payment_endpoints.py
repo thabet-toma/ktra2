@@ -183,8 +183,8 @@ class DealNotPostedDocTest(_Base):
         deal.refresh_from_db()
         self.assertEqual(deal.description, 'وصف جديد')
 
-    def test_total_floor_guard_blocks_items_below_posted(self):
-        """تخفيض بنود الصفقة تحت مجموع المرحّل يُرفض ويرتد الحفظ كاملاً."""
+    def test_items_can_drop_below_posted_and_expose_supplier_advance(self):
+        """الدفعة الفعلية لا تُحذف: الفرق بعد تخفيض الصفقة يصبح رصيداً لنا عند المورد."""
         deal = self._mk_deal('D-0822', total='0')
         patch_items = lambda qty: self.client.patch(
             f'/api/logistics/deals/{deal.id}/',
@@ -198,11 +198,14 @@ class DealNotPostedDocTest(_Base):
 
         self._mk_payment(deal, number=1, amount='800', posted=True)
         resp = patch_items('5')  # total = 500 < 800 المرحّل
-        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.status_code, 200, resp.content)
         deal.refresh_from_db()
-        self.assertEqual(Decimal(deal.total_amount), Decimal('1000.00'))
+        self.assertEqual(Decimal(deal.total_amount), Decimal('500.00'))
         self.assertEqual(deal.items.count(), 1)
-        self.assertEqual(Decimal(deal.items.first().quantity), Decimal('10'))
+        self.assertEqual(Decimal(deal.items.first().quantity), Decimal('5'))
+        self.assertEqual(Decimal(resp.json()['posted_paid_amount']), Decimal('800.00'))
+        self.assertEqual(Decimal(resp.json()['supplier_advance']), Decimal('300.00'))
+        self.assertEqual(Decimal(resp.json()['amount_outstanding']), Decimal('0.00'))
 
     def test_nested_payments_in_deal_patch_ignored(self):
         """الدفعات قراءة فقط في serializer الصفقة — إرسالها لا يعدّل ولا يحذف."""

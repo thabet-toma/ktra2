@@ -46,7 +46,7 @@ def recalculate_deal_payment_status(deal_or_pk):
 
     try:
         deal = LogisticsDeal.objects.only(
-            "total_amount", "payment_status", "status", "order_status",
+            "total_amount", "remaining_amount", "payment_status", "status", "order_status",
             "shipping_workflow_status",
         ).get(pk=pk)
     except LogisticsDeal.DoesNotExist:
@@ -61,10 +61,17 @@ def recalculate_deal_payment_status(deal_or_pk):
         new_ps = "Unpaid"
 
     sw = deal.shipping_workflow_status
-    new_status = LogisticsDeal._STATUS_FROM_WORKFLOW.get(sw, deal.status)
+    new_status = (
+        'Cancelled'
+        if deal.status == 'Cancelled'
+        else LogisticsDeal._STATUS_FROM_WORKFLOW.get(sw, deal.status)
+    )
     new_order = LogisticsDeal._ORDER_STATUS_FROM_WORKFLOW.get(sw, deal.order_status)
 
     updates = {}
+    new_remaining = max(Decimal('0'), Decimal(str(cap)) - Decimal(str(posted_total)))
+    if deal.remaining_amount != new_remaining:
+        updates["remaining_amount"] = new_remaining
     if deal.payment_status != new_ps:
         updates["payment_status"] = new_ps
     if deal.status != new_status:

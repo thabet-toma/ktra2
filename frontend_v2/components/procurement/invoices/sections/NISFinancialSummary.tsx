@@ -1,6 +1,6 @@
 import React from "react";
 import { Calculator, Wallet, CreditCard, Ship, TrendingDown, Percent } from "lucide-react";
-import type { LocalPayments } from "@/types";
+import type { LocalPayments, PurchaseInvoiceFeeLine } from "@/types";
 import {
     hasAfterMainVatPercentageLines,
     sumTaxesAndFeesExtras,
@@ -22,6 +22,7 @@ interface NISFinancialSummaryProps {
     invoiceVatBaseIls?: number;
     /** إخفاء سطر شحن الفاتورة (فواتير شيكل) */
     hideShippingRow?: boolean;
+    fees?: PurchaseInvoiceFeeLine[];
 }
 
 export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
@@ -35,6 +36,7 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
     taxableBaseIls = 0,
     invoiceVatBaseIls,
     hideShippingRow,
+    fees = [],
 }) => {
     const symbol = "₪";
     const lp = localPayments || {};
@@ -59,6 +61,8 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
         (lp.customsDuties || 0) +
         (lp.portFees || 0) +
         (lp.palestinianTaxCustoms || 0);
+    const feesTotal = fees.reduce((sum, fee) => sum + (Number(fee.amount) || 0), 0);
+    const payableTotal = grandTotal + feesTotal;
 
     return (
         <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl border aseel-border-soft dark:aseel-border-soft shadow-sm overflow-hidden">
@@ -102,6 +106,15 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                         {formatMoney(taxAmount)}
                     </span>
                 </div>
+
+                {fees.map((fee, index) => (
+                    <div key={fee.id || index} className="flex justify-between text-xs gap-2">
+                        <span className="aseel-text-soft">{fee.description || "رسم إضافي"}</span>
+                        <span className="font-bold tabular-nums shrink-0">
+                            {symbol}{formatMoney(fee.amount)}
+                        </span>
+                    </div>
+                ))}
 
                 {extrasTotal > 0 && (
                     <div className="flex justify-between text-xs gap-2">
@@ -173,10 +186,10 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                 <div className="aseel-bg-panel p-3 rounded-lg">
                     <div className="flex justify-between items-center">
                         <div>
-                            <span className="aseel-text-soft text-[10px] block">الإجمالي</span>
+                            <span className="aseel-text-soft text-[10px] block">إجمالي المستحق بعد الضريبة والرسوم</span>
                             <div className="flex items-baseline gap-1 text-white">
                                 <span className="text-2xl font-black tabular-nums">
-                                    {formatMoney(grandTotal)}
+                                    {formatMoney(payableTotal)}
                                 </span>
                                 <span className="text-sm font-bold opacity-80">{symbol}</span>
                             </div>

@@ -1,6 +1,8 @@
+import logging
 import re
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
+from django.db.models import Sum
 from rest_framework import serializers
 
 from sales.models import SupplierPayment
@@ -222,6 +224,10 @@ def _sync_shipment_agent_payments(shipment, payments_data):
             new_pay = LogisticsPayment.objects.create(
                 shipment=shipment, deal=None, **create_data
             )
+            logger.info(
+                'shipment agent payment created shipment=%s payment=%s amount=%s',
+                shipment.pk, new_pay.pk, new_pay.amount,
+            )
             keep_payments.append(new_pay.id)
 
     shipment.agent_payments.filter(is_posted=False).exclude(
@@ -245,8 +251,11 @@ from .models import (
     LocalShipment,
     LocalShipmentPayment,
 )
+
 from partners.serializers import PartnerSerializer
 from inventory.models import Product
+
+logger = logging.getLogger(__name__)
 
 class LogisticsPaymentSerializer(serializers.ModelSerializer):
     journal_id_display = serializers.IntegerField(source='journal.id', read_only=True)
@@ -307,6 +316,9 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
     # ج7: الصفقة تعرف شحنتها — لعرض خريطة مسار الشحنة ورابط «رحلة الاستيراد»
     # داخل شاشة الصفقة (خريطة موحّدة صفقة→فاتورة).
     linked_shipment = serializers.SerializerMethodField()
+    posted_paid_amount = serializers.SerializerMethodField()
+    amount_outstanding = serializers.SerializerMethodField()
+    supplier_advance = serializers.SerializerMethodField()
 
     class Meta:
         model = LogisticsDeal
@@ -332,6 +344,22 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
             }
         except Exception:
             return None
+
+    @staticmethod
+    def _posted_paid_total(obj):
+        return (
+            obj.payments.filter(is_posted=True).aggregate(total=Sum('amount'))['total']
+            or Decimal('0')
+        ).quantize(Decimal('0.01'))
+
+    def get_posted_paid_amount(self, obj):
+        return str(self._posted_paid_total(obj))
+
+    def get_amount_outstanding(self, obj):
+        return str(max(Decimal('0'), Decimal(str(obj.total_amount or 0)) - self._posted_paid_total(obj)))
+
+    def get_supplier_advance(self, obj):
+        return str(max(Decimal('0'), self._posted_paid_total(obj) - Decimal(str(obj.total_amount or 0))))
 
     def get_quote_images(self, obj):
         try:
@@ -470,7 +498,6 @@ class LogisticsDealListSerializer(serializers.ModelSerializer):
             'shipment_name': shipment.shipment_name or '',
         }
 
-
 class LogisticsDealShipmentSummarySerializer(serializers.ModelSerializer):
     """The fields a shipment detail needs about a linked deal, without its document."""
 
@@ -515,7 +542,6 @@ class LogisticsShipmentDealAllocationSerializer(serializers.ModelSerializer):
             return invoice_title_from_deal(obj.deal, max_len=120)
         except Exception:
             return None
-
 
 class LogisticsShipmentSerializer(serializers.ModelSerializer):
     agent_name = serializers.CharField(source='shipping_agent.name', read_only=True)
@@ -576,6 +602,18 @@ class LogisticsShipmentSerializer(serializers.ModelSerializer):
             self._apply_deal_allocations(instance, deal_alloc)
         return instance
 
+    def update(self, instance, validated_data):
+        payments_data = validated_data.pop(
+            "agent_payments", validated_data.pop("payments", None)
+        )
+        deal_alloc = validated_data.pop("deal_allocations", None)
+        instance = super().update(instance, validated_data)
+        if payments_data is not None:
+            _sync_shipment_agent_payments(instance, payments_data)
+        if deal_alloc is not None:
+            self._apply_deal_allocations(instance, deal_alloc)
+        return instance
+
 
 class LogisticsShipmentListSerializer(serializers.ModelSerializer):
     """Collection contract: shipment header plus scalar summaries only."""
@@ -593,18 +631,6 @@ class LogisticsShipmentListSerializer(serializers.ModelSerializer):
             'agent_name', 'deals_count', 'payments_count', 'payments_total',
         ]
         read_only_fields = fields
-
-    def update(self, instance, validated_data):
-        payments_data = validated_data.pop(
-            "agent_payments", validated_data.pop("payments", None)
-        )
-        deal_alloc = validated_data.pop("deal_allocations", None)
-        instance = super().update(instance, validated_data)
-        if payments_data is not None:
-            _sync_shipment_agent_payments(instance, payments_data)
-        if deal_alloc is not None:
-            self._apply_deal_allocations(instance, deal_alloc)
-        return instance
 
 class LogisticsClearanceLineSerializer(serializers.ModelSerializer):
     class Meta:
@@ -878,6 +904,7 @@ class PurchaseInvoiceFeeSerializer(serializers.ModelSerializer):
         model = PurchaseInvoiceFee
         fields = [
             'id', 'description', 'amount',
+            'calculation_type', 'calculation_value', 'percentage_basis',
             'expense_account', 'expense_account_code', 'expense_account_name', 'expense_account_type',
             'capitalize_to_inventory', 'is_taxable',
         ]
@@ -886,6 +913,11 @@ class PurchaseInvoiceFeeSerializer(serializers.ModelSerializer):
     def validate_amount(self, value):
         if value is None or value < 0:
             raise serializers.ValidationError('مبلغ الرسم يجب أن يكون ≥ 0.')
+        return value
+
+    def validate_calculation_value(self, value):
+        if value is None or value < 0:
+            raise serializers.ValidationError('قيمة الرسم أو النسبة يجب أن تكون ≥ 0.')
         return value
 
     def validate_expense_account(self, value):
@@ -1167,11 +1199,53 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         conv = live.get('conversion_metadata_json')
         if isinstance(conv, dict):
             data['conversion_metadata_json'] = _json_friendly_value(conv)
-        # لا نستبدل خصم/ضريبة/إجمالي الفاتورة من «live» — live يبنيها من صفقة الشحن (deal.tax_*)
-        # وقد تختلف عن ض.ق.م الفاتورة المحفوظة؛ الاستبدال كان يصفّر الضريبة بعد التحديث رغم بقاء tax_rate.
         for k in ('subtotal', 'shipping_cost'):
             if k in live and live[k] is not None:
                 data[k] = _json_friendly_value(live[k])
+        try:
+            live_subtotal = Decimal(str(data.get('subtotal') or 0))
+            live_shipping = Decimal(str(data.get('shipping_cost') or 0))
+            transfer_commissions = Decimal('0')
+            if isinstance(conv, dict):
+                line_meta = conv.get('line_meta') if isinstance(conv.get('line_meta'), dict) else {}
+                transfer_commissions = Decimal(str(
+                    conv.get('deal_transfer_commissions_ils')
+                    or line_meta.get('deal_transfer_commissions_ils')
+                    or 0
+                ))
+            vat_base = max(
+                Decimal('0'),
+                live_subtotal - Decimal(str(instance.discount_amount or 0))
+                + live_shipping + transfer_commissions,
+            )
+            if instance.tax_type == 'amount':
+                live_tax = Decimal(str(instance.tax_amount or 0))
+            else:
+                live_tax = (vat_base * Decimal(str(instance.tax_rate or 0)) / Decimal('100')).quantize(
+                    Decimal('0.01')
+                )
+            live_grand = (vat_base + live_tax).quantize(Decimal('0.01'))
+            live_payable = (live_grand + self._fees_total(instance)).quantize(Decimal('0.01'))
+            paid = min(Decimal(str(data.get('amount_paid') or 0)), live_payable)
+            remaining = (live_payable - paid).quantize(Decimal('0.01'))
+            payment_status = (
+                'paid' if live_payable > 0 and paid >= live_payable - Decimal('0.01')
+                else 'partially_paid' if paid > 0
+                else 'unpaid'
+            )
+            data['tax_amount'] = _json_friendly_value(live_tax)
+            data['grand_total'] = _json_friendly_value(live_grand)
+            data['payable_total'] = str(live_payable)
+            data['amount_paid'] = str(paid.quantize(Decimal('0.01')))
+            data['remaining_balance'] = str(remaining)
+            data['payment_status'] = payment_status
+            data['payment_status_display'] = {
+                'paid': 'مدفوعة',
+                'partially_paid': 'مدفوعة جزئياً',
+                'unpaid': 'غير مدفوعة',
+            }[payment_status]
+        except (ArithmeticError, TypeError, ValueError):
+            logger.exception('Failed to reconcile live purchase invoice totals invoice=%s', instance.pk)
         live_lp = live.get('local_payments_json')
         stored_lp = data.get('local_payments_json')
         if isinstance(live_lp, dict):
@@ -1202,6 +1276,41 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
                 it['landed_line_total_ils'] = _json_friendly_value(row['landed_line_total_ils'])
         return data
 
+    @staticmethod
+    def _normalize_fee_amount(invoice, fee_data):
+        calculation_type = fee_data.get(
+            'calculation_type', PurchaseInvoiceFee.CALCULATION_AMOUNT,
+        )
+        if 'calculation_value' in fee_data:
+            calculation_value = Decimal(str(fee_data.get('calculation_value') or 0))
+        else:
+            calculation_value = Decimal(str(fee_data.get('amount') or 0))
+        percentage_basis = fee_data.get(
+            'percentage_basis', PurchaseInvoiceFee.BASIS_GOODS,
+        )
+        if calculation_type == PurchaseInvoiceFee.CALCULATION_PERCENTAGE:
+            if percentage_basis == PurchaseInvoiceFee.BASIS_AFTER_MAIN_VAT:
+                basis = Decimal(str(invoice.grand_total or 0))
+            else:
+                basis = max(
+                    Decimal('0'),
+                    Decimal(str(invoice.subtotal or 0))
+                    - Decimal(str(invoice.discount_amount or 0))
+                    + Decimal(str(invoice.shipping_cost or 0)),
+                )
+            amount = (basis * calculation_value / Decimal('100')).quantize(
+                Decimal('0.01'), rounding=ROUND_HALF_UP,
+            )
+        else:
+            calculation_type = PurchaseInvoiceFee.CALCULATION_AMOUNT
+            percentage_basis = PurchaseInvoiceFee.BASIS_GOODS
+            amount = calculation_value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        fee_data['calculation_type'] = calculation_type
+        fee_data['calculation_value'] = calculation_value
+        fee_data['percentage_basis'] = percentage_basis
+        fee_data['amount'] = amount
+        return fee_data
+
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
         fees_data = validated_data.pop('fees', [])
@@ -1209,9 +1318,12 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         for item_data in items_data:
             PurchaseInvoiceItem.objects.create(invoice=invoice, **item_data)
         for fee_data in fees_data:
+            fee_data = self._normalize_fee_amount(invoice, fee_data)
             PurchaseInvoiceFee.objects.create(
                 invoice=invoice, tenant=invoice.tenant, **fee_data,
             )
+        if fees_data:
+            logger.info('purchase invoice fees created invoice=%s count=%s', invoice.pk, len(fees_data))
         return invoice
 
     def update(self, instance, validated_data):
@@ -1229,9 +1341,11 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         if fees_data is not None:
             instance.fees.all().delete()
             for fee_data in fees_data:
+                fee_data = self._normalize_fee_amount(instance, fee_data)
                 PurchaseInvoiceFee.objects.create(
                     invoice=instance, tenant=instance.tenant, **fee_data,
                 )
+            logger.info('purchase invoice fees replaced invoice=%s count=%s', instance.pk, len(fees_data))
 
         return instance
 

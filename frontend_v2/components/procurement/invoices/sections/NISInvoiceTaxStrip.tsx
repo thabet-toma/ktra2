@@ -1,39 +1,40 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
-import type { LocalPayments, TaxesAndFeesLine } from "@/types";
+import type { PurchaseInvoiceFeeLine } from "@/types";
 import { formatMoney, formatNumber } from "@/utils/formatNumber";
-import {
-    effectiveTaxesAndFeesLines,
-    hasAfterMainVatPercentageLines,
-    lineTaxFeeIls,
-    sumTaxesAndFeesExtras,
-} from "@/utils/invoiceTaxesAndFees";
+import { purchaseInvoiceFeeAmount } from "@/utils/invoiceTaxesAndFees";
 import { normalizeTaxRatePercent, roundSqlMoney2 } from "@/utils/sqlMoneyRound";
+
+interface FeeAccountOption {
+    id: number;
+    code?: string;
+    name?: string;
+}
 
 interface NISInvoiceTaxStripProps {
     taxType?: "percentage" | "amount";
     taxRate: number;
     taxAmount: number;
-    localPayments: LocalPayments;
-    /** أساس نسب بنود الرسوم الإضافية (البضاعة + شحن الفاتورة) */
     taxableBaseIls: number;
-    /** أساس احتساب ض.ق.م الفاتورة (يشمل التخليص/الميناء… إن وُجدت) — إن لم يُمرَّر يُساوي taxableBaseIls */
     vatBaseIls?: number;
+    fees: PurchaseInvoiceFeeLine[];
+    defaultFeeAccount?: FeeAccountOption | null;
     readOnly?: boolean;
     onFinancial: (field: string, value: unknown) => void;
+    onFeesChange: (fees: PurchaseInvoiceFeeLine[]) => void;
 }
 
 type Draft = {
     label: string;
-    entryType: "amount" | "percentage";
-    amount: number;
+    calculationType: "amount" | "percentage";
+    calculationValue: number;
     percentageBasis: "goods" | "after_main_vat";
 };
 
 const emptyDraft = (): Draft => ({
     label: "",
-    entryType: "amount",
-    amount: 0,
+    calculationType: "amount",
+    calculationValue: 0,
     percentageBasis: "goods",
 });
 
@@ -44,15 +45,15 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
     taxType = "percentage",
     taxRate,
     taxAmount,
-    localPayments,
     taxableBaseIls,
     vatBaseIls,
+    fees,
+    defaultFeeAccount,
     readOnly,
     onFinancial,
+    onFeesChange,
 }) => {
     const basisForInvoiceVat = vatBaseIls ?? taxableBaseIls;
-    const lp = localPayments || {};
-    const lines = useMemo(() => effectiveTaxesAndFeesLines(lp), [lp]);
     const [draft, setDraft] = useState<Draft>(() => emptyDraft());
 
     const mainVatIls = useMemo(() => {
@@ -62,84 +63,58 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
         );
     }, [taxType, taxAmount, basisForInvoiceVat, taxRate]);
 
-    const extrasCtx = useMemo(
-        () => ({
-            mainVatIls,
-            invoiceVatBaseIls: Math.max(0, basisForInvoiceVat),
-        }),
-        [mainVatIls, basisForInvoiceVat]
-    );
+    const withResolvedAmount = (fee: PurchaseInvoiceFeeLine): PurchaseInvoiceFeeLine => ({
+        ...fee,
+        amount: purchaseInvoiceFeeAmount(
+            fee,
+            taxableBaseIls,
+            basisForInvoiceVat,
+            mainVatIls
+        ),
+    });
 
-    const pushLocalPayments = useCallback(
-        (nextLines: TaxesAndFeesLine[]) => {
-            onFinancial("localPayments", {
-                ...lp,
-                taxesAndFeesLines: nextLines,
-                extraTaxesFees: 0,
-            });
-        },
-        [lp, onFinancial]
-    );
-
-    const updateLine = (id: string, patch: Partial<TaxesAndFeesLine>) => {
-        const next = lines.map((row) => (row.id === id ? { ...row, ...patch } : row));
-        pushLocalPayments(next);
+    const updateFee = (index: number, patch: Partial<PurchaseInvoiceFeeLine>) => {
+        onFeesChange(fees.map((fee, i) => (
+            i === index ? withResolvedAmount({ ...fee, ...patch }) : fee
+        )));
     };
 
-    const removeLine = (id: string) => {
-        pushLocalPayments(lines.filter((r) => r.id !== id));
+    const removeFee = (index: number) => {
+        onFeesChange(fees.filter((_, i) => i !== index));
     };
+
+    const draftFee = withResolvedAmount({
+        description: draft.label,
+        amount: 0,
+        calculationType: draft.calculationType,
+        calculationValue: draft.calculationValue,
+        percentageBasis: draft.percentageBasis,
+        expenseAccountId: defaultFeeAccount?.id || null,
+        expenseAccountCode: defaultFeeAccount?.code,
+        expenseAccountName: defaultFeeAccount?.name,
+        capitalizeToInventory: false,
+        isTaxable: false,
+    });
 
     const commitDraft = () => {
-        const amt = Number(draft.amount) || 0;
-        const lab = draft.label.trim();
-        if (amt <= 0) return;
-        const newL: TaxesAndFeesLine = {
-            id: crypto.randomUUID(),
-            label: lab,
-            amount: amt,
-            entryType: draft.entryType,
-            percentageBasis:
-                draft.entryType === "percentage" ? draft.percentageBasis : undefined,
-        };
-        pushLocalPayments([...lines, newL]);
+        if (!defaultFeeAccount || draft.calculationValue <= 0) return;
+        onFeesChange([
+            ...fees,
+            { ...draftFee, id: crypto.randomUUID(), description: draft.label.trim() || "رسم إضافي" },
+        ]);
         setDraft(emptyDraft());
     };
 
-    const draftPreview = useMemo(
-        () =>
-            lineTaxFeeIls(
-                {
-                    id: "_draft",
-                    label: draft.label,
-                    amount: draft.amount,
-                    entryType: draft.entryType,
-                    percentageBasis:
-                        draft.entryType === "percentage" ? draft.percentageBasis : undefined,
-                },
-                taxableBaseIls,
-                extrasCtx
-            ),
-        [draft.label, draft.amount, draft.entryType, draft.percentageBasis, taxableBaseIls, extrasCtx]
-    );
-
-    const canCommitDraft = (Number(draft.amount) || 0) > 0;
-
-    const extrasSum = useMemo(
-        () => sumTaxesAndFeesExtras(lp, taxableBaseIls, extrasCtx),
-        [lp, taxableBaseIls, extrasCtx]
-    );
+    const feesTotal = fees.reduce((sum, fee) => sum + (Number(fee.amount) || 0), 0);
 
     return (
         <div className="rounded-lg border aseel-border-soft dark:aseel-border-soft aseel-bg-field dark:aseel-bg-panel overflow-hidden text-[11px]">
             <div className="px-2 py-1 border-b aseel-border-soft dark:aseel-border-soft aseel-bg-panel/90 dark:aseel-bg-panel/90">
                 <h3 className="text-right font-bold aseel-text-ink dark:aseel-text-soft text-xs">
-                    بنود الضرائب والرسوم والقيمة المضافة
+                    ضريبة القيمة المضافة والرسوم
                 </h3>
                 <p className="text-right text-[9px] aseel-text-soft dark:aseel-text-soft mt-0.5">
-                    الصف البنفسجي للإدخال المؤقت فقط — لن يُحفظ مع «حفظ الفاتورة» إلا بعد الضغط على «إضافة
-                    للقائمة» (يُضاف السطر فوق ثم يُخزَّن مع الحفظ). لسطر نسبة: أساس «بعد ض.ق.م» = (مجموع قبل
-                    ض.ق.م الفاتورة) + مبلغ ض.ق.م الفاتورة.
+                    أضف الرسم هنا كمبلغ أو نسبة، واختر إن كانت النسبة على البضاعة أو بعد ضريبة القيمة المضافة. يُحفظ السطر مع الفاتورة.
                 </p>
             </div>
 
@@ -149,19 +124,13 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                         <tr className="text-[9px] font-bold aseel-text-soft dark:aseel-text-soft border-b aseel-border-soft dark:aseel-border-soft">
                             <th className="py-1 px-1 text-right w-[28%]">الاسم</th>
                             <th className="py-1 px-1 text-center w-[12%]">النوع</th>
-                            <th className="py-1 px-1 text-center w-[18%]">أساس %</th>
+                            <th className="py-1 px-1 text-center w-[18%]">أساس النسبة</th>
                             <th className="py-1 px-1 text-center w-[14%]">قيمة / %</th>
-                            <th
-                                className="py-1 px-1 text-center w-[20%]"
-                                title={`ض.ق.م الفاتورة ≈ ₪${formatMoney(mainVatIls)} — أساس «بعد ض.ق.م» = مجموع قبل ض.ق.م + هذا المبلغ`}
-                            >
-                                ₪ للفاتورة
-                            </th>
+                            <th className="py-1 px-1 text-center w-[20%]">₪ للفاتورة</th>
                             <th className="w-10 py-1 px-0 text-center"> </th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                        {/* صف ض.ق.م — ثابت، بنفس أعمدة الجدول */}
                         <tr className="align-middle aseel-bg-panel/50 dark:aseel-bg-panel/25">
                             <td className="py-0.5 px-1 font-bold aseel-text-ink dark:aseel-text-soft">
                                 بند القيمة المضافة
@@ -170,113 +139,59 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                 <select
                                     value={taxType}
                                     disabled={readOnly}
-                                    onChange={(e) =>
-                                        onFinancial("taxType", e.target.value as "percentage" | "amount")
-                                    }
+                                    onChange={(e) => onFinancial("taxType", e.target.value)}
                                     className={cellIn + " text-center text-[10px]"}
-                                    title="نوع ض.ق.م"
                                 >
                                     <option value="percentage">%</option>
                                     <option value="amount">₪</option>
                                 </select>
                             </td>
-                            <td
-                                className="py-0.5 px-1 text-center text-[9px] aseel-text-ink dark:aseel-text-soft"
-                                title={`أساس ض.ق.م: ₪${formatMoney(Math.max(0, basisForInvoiceVat))} — بضاعة + شحن دولي + عمولات تحويل دفعات + تخليص/ميناء/جمركة + نقل محلي (قبل ض.ق.م الفاتورة)`}
-                            >
-                                {basisForInvoiceVat > taxableBaseIls + 0.005
-                                    ? "مجموع قبل ض.ق.م"
-                                    : "أساس البضاعة"}
+                            <td className="py-0.5 px-1 text-center text-[9px] aseel-text-ink dark:aseel-text-soft">
+                                أساس الفاتورة
                             </td>
                             <td className="py-0.5 px-1">
-                                {taxType === "percentage" ? (
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        disabled={readOnly}
-                                        value={
-                                            taxRate ? normalizeTaxRatePercent(taxRate) : ""
-                                        }
-                                        onChange={(e) =>
-                                            onFinancial("taxRate", parseFloat(e.target.value) || 0)
-                                        }
-                                        className={cellIn + " text-center font-semibold tabular-nums"}
-                                        title="نسبة ض.ق.م"
-                                    />
-                                ) : (
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        disabled={readOnly}
-                                        value={taxAmount || ""}
-                                        onChange={(e) =>
-                                            onFinancial("taxAmount", parseFloat(e.target.value) || 0)
-                                        }
-                                        className={cellIn + " text-center font-semibold tabular-nums"}
-                                        title="مبلغ ض.ق.م"
-                                    />
-                                )}
+                                <input
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    disabled={readOnly}
+                                    value={taxType === "percentage" ? taxRate || "" : taxAmount || ""}
+                                    onChange={(e) => onFinancial(
+                                        taxType === "percentage" ? "taxRate" : "taxAmount",
+                                        parseFloat(e.target.value) || 0
+                                    )}
+                                    className={cellIn + " text-center font-semibold tabular-nums"}
+                                />
                             </td>
-                            <td
-                                className="py-0.5 px-1 text-center font-black aseel-text-ink dark:aseel-text-soft tabular-nums"
-                                title={
-                                    taxType === "percentage"
-                                        ? `محسوبة من الأساس (₪${formatMoney(Math.max(0, basisForInvoiceVat))} × ${normalizeTaxRatePercent(taxRate)}%)`
-                                        : "مبلغ ثابت"
-                                }
-                            >
-                                ₪
-                                {formatNumber(taxType === "percentage" ? mainVatIls : Math.max(0, Number(taxAmount) || 0), { maxDecimals: 3, group: true })}
+                            <td className="py-0.5 px-1 text-center font-black aseel-text-ink dark:aseel-text-soft tabular-nums">
+                                ₪{formatNumber(mainVatIls, { maxDecimals: 3, group: true })}
                             </td>
                             <td className="py-0.5 px-0 text-center text-[9px] aseel-text-ink dark:aseel-text-soft">
                                 {taxType === "percentage" ? "محسوبة" : "—"}
                             </td>
                         </tr>
 
-                        {/* أسطر الرسوم المحفوظة */}
-                        {lines.map((row) => {
-                            const isPct = row.entryType === "percentage";
-                            const basis = row.percentageBasis === "after_main_vat" ? "after_main_vat" : "goods";
-                            const lineIls = lineTaxFeeIls(row, taxableBaseIls, extrasCtx);
-                            const afterVatBasis = Math.max(0, basisForInvoiceVat) + mainVatIls;
-                            const basisTitle =
-                                isPct && basis === "after_main_vat"
-                                    ? `نسبة من ₪${formatMoney(afterVatBasis)} (مجموع قبل ض.ق.م + ض.ق.م)`
-                                    : isPct
-                                      ? `نسبة من ₪${formatMoney(Math.max(0, taxableBaseIls))} (أساس البضاعة)`
-                                      : undefined;
+                        {fees.map((fee, index) => {
+                            const calculationType = fee.calculationType || "amount";
+                            const isPercentage = calculationType === "percentage";
                             return (
-                                <tr key={row.id} className="align-middle hover:aseel-bg-panel/60 dark:hover:aseel-bg-panel/40">
+                                <tr key={fee.id || index} className="align-middle hover:aseel-bg-panel/60 dark:hover:aseel-bg-panel/40">
                                     <td className="py-0.5 px-1">
                                         <input
                                             type="text"
                                             disabled={readOnly}
-                                            value={row.label}
-                                            onChange={(e) =>
-                                                updateLine(row.id, { label: e.target.value })
-                                            }
-                                            placeholder="اسم البند"
+                                            value={fee.description}
+                                            onChange={(e) => updateFee(index, { description: e.target.value })}
                                             className={cellIn}
                                         />
                                     </td>
                                     <td className="py-0.5 px-1">
                                         <select
-                                            value={isPct ? "percentage" : "amount"}
+                                            value={calculationType}
                                             disabled={readOnly}
-                                            onChange={(e) =>
-                                                updateLine(row.id, {
-                                                    entryType:
-                                                        e.target.value === "percentage"
-                                                            ? "percentage"
-                                                            : "amount",
-                                                    percentageBasis:
-                                                        e.target.value === "percentage"
-                                                            ? row.percentageBasis || "goods"
-                                                            : undefined,
-                                                })
-                                            }
+                                            onChange={(e) => updateFee(index, {
+                                                calculationType: e.target.value === "percentage" ? "percentage" : "amount",
+                                            })}
                                             className={cellIn + " text-center"}
                                         >
                                             <option value="amount">₪</option>
@@ -284,27 +199,19 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                         </select>
                                     </td>
                                     <td className="py-0.5 px-1">
-                                        {isPct ? (
+                                        {isPercentage ? (
                                             <select
-                                                value={basis}
+                                                value={fee.percentageBasis || "goods"}
                                                 disabled={readOnly}
-                                                onChange={(e) =>
-                                                    updateLine(row.id, {
-                                                        percentageBasis:
-                                                            e.target.value === "after_main_vat"
-                                                                ? "after_main_vat"
-                                                                : "goods",
-                                                    })
-                                                }
+                                                onChange={(e) => updateFee(index, {
+                                                    percentageBasis: e.target.value === "after_main_vat" ? "after_main_vat" : "goods",
+                                                })}
                                                 className={cellIn + " text-center text-[10px]"}
-                                                title="أساس احتساب النسبة"
                                             >
-                                                <option value="goods">البضاعة</option>
-                                                <option value="after_main_vat">بعد ض.ق.م</option>
+                                                <option value="goods">على البضاعة</option>
+                                                <option value="after_main_vat">بعد الضريبة</option>
                                             </select>
-                                        ) : (
-                                            <span className="text-center aseel-text-soft block py-0.5">—</span>
-                                        )}
+                                        ) : <span className="aseel-text-soft text-center block">—</span>}
                                     </td>
                                     <td className="py-0.5 px-1">
                                         <input
@@ -312,29 +219,19 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                             step="0.01"
                                             min="0"
                                             disabled={readOnly}
-                                            value={row.amount || ""}
-                                            onChange={(e) =>
-                                                updateLine(row.id, {
-                                                    amount: parseFloat(e.target.value) || 0,
-                                                })
-                                            }
+                                            value={(fee.calculationValue ?? fee.amount) || ""}
+                                            onChange={(e) => updateFee(index, {
+                                                calculationValue: parseFloat(e.target.value) || 0,
+                                            })}
                                             className={cellIn + " text-center font-semibold tabular-nums"}
                                         />
                                     </td>
-                                    <td
-                                        className="py-0.5 px-1 text-center font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] tabular-nums"
-                                        title={basisTitle}
-                                    >
-                                        {formatMoney(lineIls)}
+                                    <td className="py-0.5 px-1 text-center font-bold text-[var(--color-primary)] tabular-nums">
+                                        ₪{formatMoney(fee.amount)}
                                     </td>
                                     <td className="py-0.5 px-0 text-center">
                                         {!readOnly && (
-                                            <button
-                                                type="button"
-                                                title="حذف من القائمة"
-                                                onClick={() => removeLine(row.id)}
-                                                className="p-0.5 aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded"
-                                            >
+                                            <button type="button" title="حذف" onClick={() => removeFee(index)} className="p-0.5 aseel-text-soft rounded">
                                                 <Trash2 className="w-3.5 h-3.5" />
                                             </button>
                                         )}
@@ -343,130 +240,43 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                             );
                         })}
 
-                        {/* صف إدخال جديد — يُضاف للقائمة بزر واحد */}
                         {!readOnly && (
-                            <tr className="align-middle bg-[var(--color-surface-2)]/40 dark:bg-[var(--color-surface-2)]/20 border-t border-dashed border-[var(--color-border)] dark:border-[var(--color-border)]">
+                            <tr className="align-middle bg-[var(--color-surface-2)]/40 border-t border-dashed border-[var(--color-border)]">
                                 <td className="py-0.5 px-1">
-                                    <input
-                                        type="text"
-                                        value={draft.label}
-                                        onChange={(e) =>
-                                            setDraft((d) => ({ ...d, label: e.target.value }))
-                                        }
-                                        onKeyDown={(e) => {
-                                            if (e.key === "Enter") {
-                                                e.preventDefault();
-                                                commitDraft();
-                                            }
-                                        }}
-                                        placeholder="اسم الرسم / الضريبة"
-                                        className={cellIn + " border-[var(--color-border)] dark:border-[var(--color-border)]"}
-                                    />
+                                    <input type="text" value={draft.label} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))} placeholder="اسم الرسم / الضريبة" className={cellIn} />
                                 </td>
                                 <td className="py-0.5 px-1">
-                                    <select
-                                        value={draft.entryType}
-                                        onChange={(e) =>
-                                            setDraft((d) => ({
-                                                ...d,
-                                                entryType:
-                                                    e.target.value === "percentage"
-                                                        ? "percentage"
-                                                        : "amount",
-                                                percentageBasis:
-                                                    e.target.value === "percentage"
-                                                        ? d.percentageBasis
-                                                        : "goods",
-                                            }))
-                                        }
-                                        className={cellIn + " text-center border-[var(--color-border)] dark:border-[var(--color-border)]"}
-                                    >
+                                    <select value={draft.calculationType} onChange={(e) => setDraft((d) => ({ ...d, calculationType: e.target.value === "percentage" ? "percentage" : "amount" }))} className={cellIn + " text-center"}>
                                         <option value="amount">₪</option>
                                         <option value="percentage">%</option>
                                     </select>
                                 </td>
                                 <td className="py-0.5 px-1">
-                                    {draft.entryType === "percentage" ? (
-                                        <select
-                                            value={draft.percentageBasis}
-                                            onChange={(e) =>
-                                                setDraft((d) => ({
-                                                    ...d,
-                                                    percentageBasis:
-                                                        e.target.value === "after_main_vat"
-                                                            ? "after_main_vat"
-                                                            : "goods",
-                                                }))
-                                            }
-                                            className={cellIn + " text-center text-[10px] border-[var(--color-border)] dark:border-[var(--color-border)]"}
-                                        >
-                                            <option value="goods">البضاعة</option>
-                                            <option value="after_main_vat">بعد ض.ق.م</option>
+                                    {draft.calculationType === "percentage" ? (
+                                        <select value={draft.percentageBasis} onChange={(e) => setDraft((d) => ({ ...d, percentageBasis: e.target.value === "after_main_vat" ? "after_main_vat" : "goods" }))} className={cellIn + " text-center text-[10px]"}>
+                                            <option value="goods">على البضاعة</option>
+                                            <option value="after_main_vat">بعد الضريبة</option>
                                         </select>
-                                    ) : (
-                                        <span className="aseel-text-soft text-center block py-0.5">—</span>
-                                    )}
+                                    ) : <span className="aseel-text-soft text-center block">—</span>}
                                 </td>
                                 <td className="py-0.5 px-1">
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        value={draft.amount || ""}
-                                        onChange={(e) =>
-                                            setDraft((d) => ({
-                                                ...d,
-                                                amount: parseFloat(e.target.value) || 0,
-                                            }))
-                                        }
-                                        onKeyDown={(e) => {
-                                            if (e.key === "Enter") {
-                                                e.preventDefault();
-                                                commitDraft();
-                                            }
-                                        }}
-                                        placeholder="0"
-                                        className={cellIn + " text-center tabular-nums border-[var(--color-border)] dark:border-[var(--color-border)]"}
-                                    />
+                                    <input type="number" step="0.01" min="0" value={draft.calculationValue || ""} onChange={(e) => setDraft((d) => ({ ...d, calculationValue: parseFloat(e.target.value) || 0 }))} className={cellIn + " text-center tabular-nums"} />
                                 </td>
-                                <td
-                                    className="py-0.5 px-1 text-center text-[10px] font-semibold tabular-nums text-[var(--color-primary)] dark:text-[var(--color-primary)]"
-                                    title="معاينة قبل الإضافة"
-                                >
-                                    {formatMoney(draftPreview)}
+                                <td className="py-0.5 px-1 text-center font-semibold text-[var(--color-primary)] tabular-nums">
+                                    ₪{formatMoney(draftFee.amount)}
                                 </td>
                                 <td className="py-0.5 px-0.5 text-center">
-                                    <button
-                                        type="button"
-                                        disabled={!canCommitDraft}
-                                        onClick={commitDraft}
-                                        className="inline-flex items-center gap-0.5 rounded border border-[var(--color-border)] dark:border-[var(--color-border)] bg-[var(--color-primary)] dark:bg-[var(--color-surface-2)] px-1.5 py-0.5 text-[9px] font-bold text-white shadow-sm disabled:opacity-40 disabled:pointer-events-none hover:bg-[var(--color-primary-hover)] dark:hover:bg-[var(--color-primary-hover)]"
-                                        title="يضيف السطر أعلاه ويفرغ الخانات"
-                                    >
-                                        <Plus className="w-3 h-3 shrink-0" />
-                                        إضافة للقائمة
+                                    <button type="button" disabled={!defaultFeeAccount || draft.calculationValue <= 0} onClick={commitDraft} className="inline-flex items-center gap-0.5 rounded bg-[var(--color-primary)] px-1.5 py-0.5 text-[9px] font-bold text-white disabled:opacity-40" title={defaultFeeAccount ? "إضافة الرسم" : "لا يوجد حساب رسوم متاح"}>
+                                        <Plus className="w-3 h-3" /> إضافة
                                     </button>
                                 </td>
                             </tr>
                         )}
                     </tbody>
                     <tfoot>
-                        <tr className="border-t aseel-border-soft dark:aseel-border-soft aseel-bg-panel/70 dark:aseel-bg-panel/60">
-                            <td
-                                colSpan={4}
-                                className="py-1 px-1 text-[10px] font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] text-right"
-                            >
-                                مجموع الرسوم والضرائب الإضافية (بدون ض.ق.م)
-                                {hasAfterMainVatPercentageLines(lp) ? (
-                                    <span className="block font-normal text-[var(--color-primary)]/90 dark:text-[var(--color-primary)]/90 mt-0.5">
-                                        يشمل سطراً بنسبة من (مجموع قبل ض.ق.م + ض.ق.م الفاتورة).
-                                    </span>
-                                ) : null}
-                            </td>
-                            <td className="py-1 px-1 text-center font-black text-[var(--color-primary)] dark:text-[var(--color-primary)] tabular-nums">
-                                ₪
-                                {formatMoney(extrasSum)}
-                            </td>
+                        <tr className="border-t aseel-border-soft aseel-bg-panel/70">
+                            <td colSpan={4} className="py-1 px-1 text-[10px] font-bold text-right">مجموع الرسوم الإضافية</td>
+                            <td className="py-1 px-1 text-center font-black tabular-nums">₪{formatMoney(feesTotal)}</td>
                             <td />
                         </tr>
                     </tfoot>
