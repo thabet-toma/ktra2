@@ -18,6 +18,7 @@ import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { useToast } from '../../contexts/ToastContext';
 import { getShippingWorkflowLabel } from '../../utils/shippingWorkflowLabels';
+import { AseelErrorState } from '../aseel';
 
 interface DealManagementProps {
     currentUser: User;
@@ -92,6 +93,11 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     const [currentDeal, setCurrentDeal] = useState<Partial<Deal> | null>(null);
     const [dealToPrint, setDealToPrint] = useState<Deal | null>(null);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [reloadKey, setReloadKey] = useState(0);
+    const [totalCount, setTotalCount] = useState(0);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [hasNextPage, setHasNextPage] = useState(false);
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
@@ -106,17 +112,44 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     }, [location.pathname, navigate]);
 
     useEffect(() => {
-        const unsubDeals = dealsService.subscribeToDeals((fetchedDeals) => {
-            setDeals(fetchedDeals);
+        if (dealsPathMatch?.mode !== 'list') {
             setLoading(false);
-        });
+            return;
+        }
+        let cancelled = false;
+        setLoading(true);
+        const timer = window.setTimeout(() => {
+            void dealsService.listDealsPage({
+                page: 1,
+                pageSize: 50,
+                search,
+                status: statusFilter,
+            }).then((result) => {
+                if (cancelled) return;
+                setDeals(result.deals);
+                setTotalCount(result.count);
+                setHasNextPage(result.hasNext);
+                setCurrentPage(1);
+                setLoadError(null);
+            }).catch((error) => {
+                if (!cancelled) {
+                    setLoadError(error instanceof Error ? error.message : 'تعذّر تحميل الصفقات.');
+                }
+            }).finally(() => {
+                if (!cancelled) setLoading(false);
+            });
+        }, 250);
+        return () => { cancelled = true; window.clearTimeout(timer); };
+    }, [dealsPathMatch?.mode, reloadKey, search, statusFilter]);
+
+    useEffect(() => {
         const unsubOffers = priceOffersService.subscribeToPriceOffers((offers) => {
             setPriceOffers(offers.filter(o =>
                 o.status === 'approved_for_shipping' || o.status === 'under_discussion'
             ));
         });
         const unsubSuppliers = suppliersService.subscribeToSuppliers(setSuppliers);
-        return () => { unsubDeals(); unsubOffers(); unsubSuppliers(); };
+        return () => { unsubOffers(); unsubSuppliers(); };
     }, []);
 
     const dealRefFromQuery = useMemo(() => {
@@ -137,13 +170,12 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         if (dealsPathMatch.mode === 'list') {
             if (dealRefFromQuery) {
                 // رابط قديم ?ref=D-0001 → نحوله لمسار العرض الصريح
-                if (deals.length === 0) return;
                 const target = deals.find(
                     d => String(d.dealNumber).toUpperCase() === dealRefFromQuery.toUpperCase()
                 );
                 if (target) {
                     navigate(`/deals/${encodeURIComponent(target.id)}/view`, { replace: true });
-                } else if (handledPathRef.current !== pathKey) {
+                } else if (handledPathRef.current !== pathKey && !loading) {
                     handledPathRef.current = pathKey;
                     newFormInitRef.current = false;
                     setViewMode('list');
@@ -160,15 +192,17 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         }
         if (dealsPathMatch.mode === 'edit' || dealsPathMatch.mode === 'view') {
             if (handledPathRef.current === pathKey) return;
-            if (deals.length === 0) return;
-            const target = deals.find((d) => String(d.id) === String(dealsPathMatch.id));
-            if (!target) {
-                navigate('/deals', { replace: true });
-                return;
-            }
             handledPathRef.current = pathKey;
-            setCurrentDeal({ ...target });
-            setViewMode(dealsPathMatch.mode === 'view' ? 'view' : 'form');
+            setLoading(true);
+            void dealsService.getDeal(String(dealsPathMatch.id)).then((target) => {
+                setCurrentDeal({ ...target });
+                setViewMode(dealsPathMatch.mode === 'view' ? 'view' : 'form');
+                setLoadError(null);
+            }).catch((error) => {
+                setLoadError(error instanceof Error ? error.message : 'تعذّر فتح الصفقة.');
+                handledPathRef.current = null;
+                navigate('/deals', { replace: true });
+            }).finally(() => setLoading(false));
             return;
         }
         const draft = (location.state as { draftDeal?: Partial<Deal> } | null)?.draftDeal;
@@ -207,38 +241,18 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 navigate('/deals', { replace: true });
             }
         })();
-    }, [dealsPathMatch, deals, location.state, location.pathname, location.search, navigate, dealRefFromQuery]);
+    }, [dealsPathMatch, deals, loading, location.state, location.pathname, location.search, navigate, dealRefFromQuery]);
 
     const filteredDeals = useMemo(() => {
-        let result = deals;
-        if (search.trim()) {
-            const term = search.toLowerCase();
-            result = result.filter(deal =>
-                deal.dealNumber?.toLowerCase().includes(term) ||
-                deal.dealDescription?.toLowerCase().includes(term) ||
-                deal.factoryName?.toLowerCase().includes(term) ||
-                deal.originalOfferNumber?.toLowerCase().includes(term) ||
-                deal.supplierSnapshot?.tradeName?.toLowerCase().includes(term) ||
-                deal.supplierSnapshot?.alias?.toLowerCase().includes(term) ||
-                suppliers.find(s => s.id === deal.supplierId)?.name?.toLowerCase().includes(term) ||
-                deal.items?.some(item =>
-                    item.name?.toLowerCase().includes(term) ||
-                    item.categoryName?.toLowerCase().includes(term)
-                )
-            );
-        }
-        if (statusFilter !== 'all') {
-            result = result.filter(deal => deal.status === statusFilter);
-        }
-        return result;
-    }, [deals, search, statusFilter, suppliers]);
+        return deals;
+    }, [deals]);
 
     const stats = useMemo(() => ({
-        total: deals.length,
+        total: totalCount,
         active: deals.filter(d => !['completed', 'cancelled'].includes(d.status)).length,
         completed: deals.filter(d => d.status === 'completed').length,
         totalValue: deals.reduce((s, d) => s + (d.totalAmount || 0), 0),
-    }), [deals]);
+    }), [deals, totalCount]);
 
     const handleCreateNew = () => {
         newFormInitRef.current = false;
@@ -295,7 +309,26 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     };
 
     const reloadDeals = async () => {
-        try { setDeals(await dealsService.listDeals()); } catch { /* تبقى القائمة الحالية */ }
+        setReloadKey((key) => key + 1);
+    };
+
+    const loadMoreDeals = async () => {
+        if (!hasNextPage || loading) return;
+        setLoading(true);
+        try {
+            const nextPage = currentPage + 1;
+            const result = await dealsService.listDealsPage({
+                page: nextPage, pageSize: 50, search, status: statusFilter,
+            });
+            setDeals((rows) => [...rows, ...result.deals]);
+            setCurrentPage(nextPage);
+            setHasNextPage(result.hasNext);
+            setTotalCount(result.count);
+        } catch (error) {
+            setLoadError(error instanceof Error ? error.message : 'تعذّر تحميل المزيد.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     const handleSave = () => {
@@ -436,6 +469,12 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     );
 
     if (loading) return <LoadingSpinner />;
+    if (loadError && deals.length === 0) {
+        return <AseelErrorState message={loadError} onRetry={() => {
+            setLoading(true);
+            setReloadKey((key) => key + 1);
+        }} />;
+    }
 
     // وضع النموذج
     if (viewMode === 'form' && currentDeal) {
@@ -558,6 +597,11 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                     ) : undefined
                 }
             />
+            {hasNextPage && (
+                <button className="aseel-toolbtn" onClick={() => void loadMoreDeals()}>
+                    تحميل المزيد ({deals.length} من {totalCount})
+                </button>
+            )}
 
             {/* M1 — إنشاء شحنة من صفقات جاهزة (اختيار متعدد) */}
             <CreateShipmentFromDealsModal

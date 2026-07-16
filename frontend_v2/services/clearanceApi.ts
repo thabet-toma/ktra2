@@ -33,6 +33,9 @@ export type ClearanceRow = {
   grand_total?: number | null;
   journal?: number | null;
   editable?: boolean;
+  amount_paid?: string;
+  remaining_balance?: string;
+  payment_status?: "paid" | "partially_paid" | "unpaid";
   cost_lines?: ClearanceCostLine[];
   /** البنود المهيكلة (P-D-1: LogisticsClearanceLine) */
   lines?: ClearanceLine[];
@@ -80,9 +83,12 @@ export type ClearancePaymentRow = {
   created_at?: string;
 };
 
-export async function listClearances(): Promise<ClearanceRow[]> {
+export async function listClearances(
+  query?: Record<string, string | number | boolean | undefined>,
+): Promise<ClearanceRow[]> {
   return apiGetList<ClearanceRow>("logistics/clearances/", {
     tenantId: tid(),
+    query,
   });
 }
 
@@ -156,5 +162,25 @@ export async function payClearanceFromCashBox(
     `logistics/clearances/${clearanceId}/pay_from_cashbox/`,
     payload as any,
     { tenantId: tid() }
+  );
+}
+
+export async function postClearanceAccrual(
+  clearanceId: number,
+): Promise<{ journal_id: number; total: string; message: string }> {
+  return apiPostObject(
+    `logistics/clearances/${clearanceId}/post-to-accounting/`,
+    {},
+    { tenantId: tid() },
+  );
+}
+
+export async function unpostClearanceAccrual(
+  clearanceId: number,
+): Promise<{ message: string }> {
+  return apiPostObject(
+    `logistics/clearances/${clearanceId}/unpost-accrual/`,
+    {},
+    { tenantId: tid() },
   );
 }

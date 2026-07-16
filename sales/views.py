@@ -57,32 +57,62 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
 
     queryset = SalesInvoice.objects.all().select_related(
         "customer", "currency", "journal", "tenant"
-    ).prefetch_related("lines")
+    )
 
     def get_serializer_class(self):
-        if self.action == "list":
+        if self.action in {"list", "lookup"}:
             return SalesInvoiceListSerializer
         return SalesInvoiceSerializer
 
     def get_queryset(self):
         qs = super().get_queryset()
         tenant = get_tenant(self.request)
-        if tenant:
-            qs = qs.filter(tenant_id=tenant.TenantID)
-            # task11 M4: الفرع النشط يرى فواتيره فقط (الرئيسي يشمل القديمة بلا فرع)
-            branch = get_branch(self.request, tenant)
-            if branch is not None:
-                if branch.is_main:
-                    qs = qs.filter(models.Q(branch=branch) | models.Q(branch__isnull=True))
-                else:
-                    qs = qs.filter(branch=branch)
+        if not tenant:
+            return qs.none()
+        qs = qs.filter(tenant_id=tenant.TenantID)
+        # task11 M4: الفرع النشط يرى فواتيره فقط (الرئيسي يشمل القديمة بلا فرع)
+        branch = get_branch(self.request, tenant)
+        if branch is not None:
+            if branch.is_main:
+                qs = qs.filter(models.Q(branch=branch) | models.Q(branch__isnull=True))
+            else:
+                qs = qs.filter(branch=branch)
         status_param = self.request.query_params.get("status")
         if status_param:
             qs = qs.filter(status=status_param)
         cid = self.request.query_params.get("customer")
         if cid:
             qs = qs.filter(customer_id=cid)
+        invoice_type = self.request.query_params.get("invoice_type")
+        if invoice_type:
+            qs = qs.filter(invoice_type=invoice_type)
+        date_from = self.request.query_params.get("date_from")
+        if date_from:
+            qs = qs.filter(invoice_date__gte=date_from)
+        date_to = self.request.query_params.get("date_to")
+        if date_to:
+            qs = qs.filter(invoice_date__lte=date_to)
+        search = self.request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(
+                models.Q(invoice_number__icontains=search)
+                | models.Q(customer__name__icontains=search)
+                | models.Q(customer__legal_name__icontains=search)
+            )
+        if self.action not in {"list", "lookup"}:
+            qs = qs.prefetch_related("lines__product")
         return qs.order_by("-invoice_date", "-id")
+
+    @action(detail=False, methods=["get"], url_path="lookup")
+    def lookup(self, request):
+        """Bounded raw-array invoice choices for editors without page controls."""
+        try:
+            limit = int(request.query_params.get("limit", 200))
+        except (TypeError, ValueError):
+            limit = 200
+        limit = min(max(limit, 1), 500)
+        rows = self.get_queryset()[:limit]
+        return Response(self.get_serializer(rows, many=True).data)
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -509,8 +539,9 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         tenant = get_tenant(self.request)
-        if tenant:
-            qs = qs.filter(tenant_id=tenant.TenantID)
+        if not tenant:
+            return qs.none()
+        qs = qs.filter(tenant_id=tenant.TenantID)
         return qs.order_by("-payment_date", "-id")
 
     def perform_create(self, serializer):
@@ -718,14 +749,43 @@ class SalesQuotationViewSet(viewsets.ModelViewSet):
 
     queryset = SalesQuotation.objects.all().select_related(
         "customer", "currency", "tenant",
-    ).prefetch_related("lines")
+    )
     serializer_class = SalesQuotationSerializer
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return SalesQuotationListSerializer
+        return SalesQuotationSerializer
 
     def get_queryset(self):
         qs = super().get_queryset()
         tenant = get_tenant(self.request)
-        if tenant:
-            qs = qs.filter(tenant_id=tenant.TenantID)
+        if not tenant:
+            return qs.none()
+        qs = qs.filter(tenant_id=tenant.TenantID)
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            qs = qs.filter(status=status_param)
+        customer = self.request.query_params.get("customer")
+        if customer:
+            qs = qs.filter(customer_id=customer)
+        date_from = self.request.query_params.get("date_from")
+        if date_from:
+            qs = qs.filter(quotation_date__gte=date_from)
+        date_to = self.request.query_params.get("date_to")
+        if date_to:
+            qs = qs.filter(quotation_date__lte=date_to)
+        search = self.request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(
+                models.Q(quotation_number__icontains=search)
+                | models.Q(customer__name__icontains=search)
+                | models.Q(customer__legal_name__icontains=search)
+            )
+        # قائمة العروض تستخدم serializer خفيفاً ولا تحتاج البنود. التفاصيل فقط
+        # تجلب المنتج مع السطر كي يبقى product_name بلا N+1.
+        if self.action != "list":
+            qs = qs.prefetch_related("lines__product")
         return qs.order_by("-quotation_date", "-id")
 
     def perform_create(self, serializer):

@@ -107,18 +107,15 @@ export const Header: React.FC<HeaderProps> = ({
 
   // التحقق من النشاط كل دقيقة وتحديث الوقت المتبقي
   useEffect(() => {
-    if (!user) return;
-
     const checkActivity = () => {
-      activityService.checkActivityStatus(user.id);
-      updateTimeRemaining();
+      void activityService.checkActivityStatus(user.id);
     };
 
     checkActivity();
     const interval = setInterval(checkActivity, 60000);
 
     return () => clearInterval(interval);
-  }, [user, activityStatus]);
+  }, [user.id]);
 
   // تحديث الوقت المتبقي باستمرار
   useEffect(() => {

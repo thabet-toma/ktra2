@@ -242,7 +242,8 @@ from .models import (
     PurchaseInvoiceItem,
     PurchaseInvoiceFee,
     PurchaseSettings,
-    LocalShipment
+    LocalShipment,
+    LocalShipmentPayment,
 )
 from partners.serializers import PartnerSerializer
 from inventory.models import Product
@@ -432,6 +433,58 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
 
         return instance
 
+
+class LogisticsDealListSerializer(serializers.ModelSerializer):
+    """Light contract for collection screens; nested document rows stay on retrieve."""
+
+    partner_name = serializers.CharField(source='partner.name', read_only=True)
+    partner_legal_name = serializers.CharField(
+        source='partner.legal_name', read_only=True, allow_null=True, default=None
+    )
+    linked_shipment = serializers.SerializerMethodField()
+
+    class Meta:
+        model = LogisticsDeal
+        fields = [
+            'id', 'ref_number', 'partner', 'partner_name', 'partner_legal_name',
+            'order_date', 'total_amount', 'currency', 'status', 'description',
+            'short_name', 'pi_number', 'factory_name', 'original_offer_number',
+            'supplier_invoice_number', 'installment_plan_enabled',
+            'current_installment_number', 'remaining_amount', 'subtotal',
+            'shipping_cost_estimate', 'discount_amount', 'is_shipping_included',
+            'tax_rate', 'tax_amount', 'tax_type', 'shipping_method', 'payment_method',
+            'production_days', 'delivery_days', 'total_cbm', 'total_weight',
+            'total_weight_kg', 'certificates', 'shipping_workflow_status',
+            'created_by', 'created_at', 'linked_shipment',
+        ]
+        read_only_fields = fields
+
+    def get_linked_shipment(self, obj):
+        links = list(obj.logisticsshipmentdeal_set.all())
+        if not links:
+            return None
+        shipment = max(links, key=lambda link: link.id).shipment
+        return {
+            'id': shipment.id,
+            'shipment_number': shipment.shipment_number or '',
+            'shipment_name': shipment.shipment_name or '',
+        }
+
+
+class LogisticsDealShipmentSummarySerializer(serializers.ModelSerializer):
+    """The fields a shipment detail needs about a linked deal, without its document."""
+
+    partner_name = serializers.CharField(source='partner.name', read_only=True)
+
+    class Meta:
+        model = LogisticsDeal
+        fields = [
+            'id', 'ref_number', 'original_offer_number', 'total_amount', 'total_cbm',
+            'total_weight', 'total_weight_kg', 'description', 'notes', 'factory_name',
+            'partner_name',
+        ]
+        read_only_fields = fields
+
 class LogisticsShipmentDealAllocationSerializer(serializers.ModelSerializer):
     """أوزان تكلفة الشحن الدولي المحفوظة لكل صفقة على الشحنة."""
 
@@ -466,7 +519,7 @@ class LogisticsShipmentDealAllocationSerializer(serializers.ModelSerializer):
 
 class LogisticsShipmentSerializer(serializers.ModelSerializer):
     agent_name = serializers.CharField(source='shipping_agent.name', read_only=True)
-    deals = LogisticsDealSerializer(many=True, read_only=True)
+    deals = LogisticsDealShipmentSummarySerializer(many=True, read_only=True)
     shipment_deal_allocations = LogisticsShipmentDealAllocationSerializer(
         source="logisticsshipmentdeal_set", many=True, read_only=True
     )
@@ -523,6 +576,24 @@ class LogisticsShipmentSerializer(serializers.ModelSerializer):
             self._apply_deal_allocations(instance, deal_alloc)
         return instance
 
+
+class LogisticsShipmentListSerializer(serializers.ModelSerializer):
+    """Collection contract: shipment header plus scalar summaries only."""
+
+    agent_name = serializers.CharField(source='shipping_agent.name', read_only=True)
+    deals_count = serializers.IntegerField(read_only=True)
+    payments_count = serializers.IntegerField(read_only=True)
+    payments_total = serializers.DecimalField(
+        max_digits=18, decimal_places=2, read_only=True
+    )
+
+    class Meta:
+        model = LogisticsShipment
+        fields = [field.name for field in LogisticsShipment._meta.concrete_fields] + [
+            'agent_name', 'deals_count', 'payments_count', 'payments_total',
+        ]
+        read_only_fields = fields
+
     def update(self, instance, validated_data):
         payments_data = validated_data.pop(
             "agent_payments", validated_data.pop("payments", None)
@@ -558,6 +629,9 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
     # the model `cost_lines` shim (D2) was removed; the read shape is rebuilt from the
     # serialized `lines` in to_representation, so nothing reads a model property.
     cost_lines = serializers.JSONField(required=False, write_only=True)
+    amount_paid = serializers.SerializerMethodField()
+    remaining_balance = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
 
     class Meta:
         model = LogisticsClearance
@@ -577,6 +651,43 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
             for r in rows
         ]
         return data
+
+    @staticmethod
+    def _cost_total(instance):
+        return sum(
+            (
+                max(Decimal('0'), Decimal(str(line.debit or 0)) - Decimal(str(line.credit or 0)))
+                for line in instance.lines.all()
+                if line.description != 'دفعة الشحن (الناقل)'
+            ),
+            Decimal('0'),
+        ).quantize(Decimal('0.01'))
+
+    @staticmethod
+    def _paid_total(instance):
+        return sum(
+            (
+                Decimal(str(payment.amount or 0))
+                for payment in instance.payments.all()
+                if payment.is_posted and payment.payment_purpose != 'shipping'
+            ),
+            Decimal('0'),
+        ).quantize(Decimal('0.01'))
+
+    def get_amount_paid(self, instance):
+        return str(self._paid_total(instance))
+
+    def get_remaining_balance(self, instance):
+        return str(max(Decimal('0'), self._cost_total(instance) - self._paid_total(instance)))
+
+    def get_payment_status(self, instance):
+        total = self._cost_total(instance)
+        paid = self._paid_total(instance)
+        if total > 0 and paid >= total - Decimal('0.01'):
+            return 'paid'
+        if paid > 0:
+            return 'partially_paid'
+        return 'unpaid'
 
     def get_local_shipments(self, obj):
         try:
@@ -791,10 +902,12 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source='partner.name', read_only=True)
     deal_ref = serializers.CharField(source='deal.ref_number', read_only=True, default=None)
     currency_code = serializers.CharField(source='currency.Code', read_only=True, default=None)
-    items_count = serializers.SerializerMethodField()
+    items_count = serializers.IntegerField(read_only=True)
     journal_id_display = serializers.IntegerField(source='journal.id', read_only=True, default=None)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     receipt_status_display = serializers.CharField(source='get_receipt_status_display', read_only=True)
+    shipment_number = serializers.CharField(source='shipment.shipment_number', read_only=True, default=None)
+    shipment_name = serializers.CharField(source='shipment.shipment_name', read_only=True, default=None)
 
     class Meta:
         model = PurchaseInvoice
@@ -803,7 +916,7 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'invoice_type',
             'partner', 'partner_name',
             'deal', 'deal_ref',
-            'shipment', 'clearance',
+            'shipment', 'shipment_number', 'shipment_name', 'clearance',
             'currency', 'currency_code', 'exchange_rate',
             'subtotal', 'discount_amount', 'tax_rate', 'tax_amount',
             'grand_total', 'status', 'status_display',
@@ -812,10 +925,6 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'items_count',
             'created_at', 'updated_at',
         ]
-
-    def get_items_count(self, obj):
-        return obj.items.count()
-
 
 def read_document_images(tenant_id, related_table, related_id):
     """W7c: روابط الصور المرفقة (غير PDF) من SystemAttachment لأي مستند. مصدر قراءة
@@ -878,11 +987,17 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     receipt_status_display = serializers.CharField(source='get_receipt_status_display', read_only=True)
     is_local = serializers.SerializerMethodField()
+    # W7a: رقم الفاتورة الأصلية — لعرض رابط «الفاتورة الأصلية #» في مستند المرجع.
+    original_invoice_number = serializers.CharField(
+        source='original_invoice.invoice_number', read_only=True, default=None,
+    )
     # task16 C10: المبلغ المدفوع + المتبقي + حالة الدفع (مدفوعة/جزئياً/غير مدفوعة)
     amount_paid = serializers.SerializerMethodField()
     remaining_balance = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
     payment_status_display = serializers.SerializerMethodField()
+    fees_total = serializers.SerializerMethodField()
+    payable_total = serializers.SerializerMethodField()
     cash_or_bank_account_name = serializers.CharField(
         source='cash_or_bank_account.name', read_only=True, default=None,
     )
@@ -896,6 +1011,8 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     quote_images = serializers.SerializerMethodField()
     quote_pdfs = serializers.SerializerMethodField()
     invoice_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    shipment_number = serializers.CharField(source='shipment.shipment_number', read_only=True, default=None)
+    shipment_name = serializers.CharField(source='shipment.shipment_name', read_only=True, default=None)
     from tenants.models import Currency
     currency = serializers.SlugRelatedField(
         slug_field='Code',
@@ -910,7 +1027,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'invoice_type',
             'partner', 'partner_name',
             'deal', 'deal_ref',
-            'shipment',
+            'shipment', 'shipment_number', 'shipment_name',
             'clearance',
             'currency', 'currency_code', 'exchange_rate',
             'subtotal', 'discount_amount',
@@ -927,8 +1044,10 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'status', 'status_display', 'notes',
             'receipt_status', 'receipt_status_display', 'is_local',
             'amount_paid', 'remaining_balance', 'payment_status', 'payment_status_display',
+            'fees_total', 'payable_total',
             'supplier_invoice_number', 'factory_name',
-            'is_posted', 'is_return', 'original_invoice', 'journal', 'journal_id_display',
+            'is_posted', 'is_return', 'original_invoice', 'original_invoice_number',
+            'journal', 'journal_id_display',
             'items', 'fees', 'cheques',
             'quote_images', 'quote_pdfs',
             'created_at', 'updated_at', 'created_by',
@@ -947,7 +1066,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
 
     def _computed_amount_paid(self, obj) -> Decimal:
         """المدفوع = نقدي مرفق + دفعات صريحة؛ والفاتورة النقدية المرحَّلة مدفوعة بالكامل."""
-        grand = Decimal(str(obj.grand_total or 0))
+        payable = self._payable_total(obj)
         paid = Decimal(str(obj.attached_cash_amount or 0))
         try:
             paid += sum((Decimal(str(p.amount or 0)) for p in obj.payments.all()), Decimal('0'))
@@ -955,20 +1074,35 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             pass
         if obj.payment_type == 'cash' and obj.is_posted:
             # تسوية الشراء النقدي (Section B) تُفرّغ ذمم المورد بالكامل
-            paid = max(paid, grand)
-        if grand and paid > grand:
-            paid = grand
+            paid = max(paid, payable)
+        if payable and paid > payable:
+            paid = payable
         return paid.quantize(Decimal('0.01'))
+
+    @staticmethod
+    def _fees_total(obj) -> Decimal:
+        return sum(
+            (Decimal(str(f.amount or 0)) for f in obj.fees.all()),
+            Decimal('0'),
+        ).quantize(Decimal('0.01'))
+
+    def _payable_total(self, obj) -> Decimal:
+        return (Decimal(str(obj.grand_total or 0)) + self._fees_total(obj)).quantize(Decimal('0.01'))
+
+    def get_fees_total(self, obj):
+        return str(self._fees_total(obj))
+
+    def get_payable_total(self, obj):
+        return str(self._payable_total(obj))
 
     def get_amount_paid(self, obj):
         return str(self._computed_amount_paid(obj))
 
     def get_remaining_balance(self, obj):
-        grand = Decimal(str(obj.grand_total or 0))
-        return str((grand - self._computed_amount_paid(obj)).quantize(Decimal('0.01')))
+        return str((self._payable_total(obj) - self._computed_amount_paid(obj)).quantize(Decimal('0.01')))
 
     def get_payment_status(self, obj):
-        grand = Decimal(str(obj.grand_total or 0))
+        grand = self._payable_total(obj)
         paid = self._computed_amount_paid(obj)
         if grand <= 0:
             return 'unpaid'
@@ -1124,6 +1258,10 @@ class LocalShipmentSerializer(serializers.ModelSerializer):
     purchase_invoice_number = serializers.CharField(
         source='purchase_invoice.invoice_number', read_only=True, allow_null=True,
     )
+    amount_paid = serializers.SerializerMethodField()
+    remaining_balance = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
+    payments = serializers.SerializerMethodField()
 
     class Meta:
         model = LocalShipment
@@ -1146,6 +1284,7 @@ class LocalShipmentSerializer(serializers.ModelSerializer):
             'notes',
             'is_posted', 'journal',
             'purchase_invoice', 'purchase_invoice_number',
+            'amount_paid', 'remaining_balance', 'payment_status', 'payments',
             'created_at', 'updated_at',
         ]
         read_only_fields = [
@@ -1155,16 +1294,6 @@ class LocalShipmentSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         instance = getattr(self, 'instance', None)
-        payment_type = attrs.get(
-            'payment_type', getattr(instance, 'payment_type', 'credit'),
-        )
-        cash_acc = attrs.get(
-            'cash_or_bank_account', getattr(instance, 'cash_or_bank_account', None),
-        )
-        if payment_type == 'cash' and not cash_acc:
-            raise serializers.ValidationError({
-                'cash_or_bank_account': 'الصندوق/البنك مطلوب في الدفع النقدي.',
-            })
         amount = attrs.get('amount', getattr(instance, 'amount', 0))
         try:
             if Decimal(str(amount or 0)) <= 0:
@@ -1174,6 +1303,44 @@ class LocalShipmentSerializer(serializers.ModelSerializer):
         except (InvalidOperation, TypeError):
             raise serializers.ValidationError({'amount': 'قيمة غير صالحة.'})
         return attrs
+
+    @staticmethod
+    def _paid_total(obj):
+        return sum(
+            (Decimal(str(p.amount or 0)) for p in obj.payments.all() if p.is_posted),
+            Decimal('0'),
+        ).quantize(Decimal('0.01'))
+
+    def get_amount_paid(self, obj):
+        return str(self._paid_total(obj))
+
+    def get_remaining_balance(self, obj):
+        return str(max(Decimal('0'), Decimal(str(obj.amount or 0)) - self._paid_total(obj)))
+
+    def get_payment_status(self, obj):
+        amount = Decimal(str(obj.amount or 0))
+        paid = self._paid_total(obj)
+        if amount > 0 and paid >= amount - Decimal('0.01'):
+            return 'paid'
+        if paid > 0:
+            return 'partially_paid'
+        return 'unpaid'
+
+    def get_payments(self, obj):
+        return LocalShipmentPaymentSerializer(obj.payments.all(), many=True).data
+
+
+class LocalShipmentPaymentSerializer(serializers.ModelSerializer):
+    journal_id_display = serializers.IntegerField(source='journal.id', read_only=True)
+    currency_code = serializers.CharField(source='currency.Code', read_only=True)
+
+    class Meta:
+        model = LocalShipmentPayment
+        fields = '__all__'
+        read_only_fields = [
+            'id', 'tenant', 'local_shipment', 'is_posted', 'journal',
+            'created_at', 'created_by',
+        ]
 
 
 # ── P-H-3: SupplierPayment ──────────────────────────────────────────

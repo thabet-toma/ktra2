@@ -5,6 +5,7 @@ import {
   apiDelete,
   apiGetList,
   apiGetObject,
+  apiGetPagedList,
   apiPatchObject,
   apiPostObject,
 } from "./restApi";
@@ -190,12 +191,15 @@ function mapShipmentFromSql(s: any): Shipment {
       journalId: Number.isFinite(jid) && jid > 0 ? jid : undefined,
     };
   });
-  const paid = payments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0);
+  const paid = payments.length
+    ? payments.reduce((sum: number, p: any) => sum + Number(p.amount || 0), 0)
+    : Number(s.payments_total || 0);
+  const paymentCount = payments.length || Number(s.payments_count || 0);
   const total = Number(s.total_shipping_cost_usd || 0);
   let status: Shipment["status"] = "draft";
   if (paid >= total && total > 0) status = "paid";
   else if (paid > 0) status = "partially_paid";
-  else if (payments.length) status = "payment_pending";
+  else if (paymentCount) status = "payment_pending";
 
   const shippingTypeSql = s.shipping_type === "air" ? "air" : "sea";
   const coarseNorm = String(s.status || "Pending")
@@ -208,6 +212,11 @@ function mapShipmentFromSql(s: any): Shipment {
   const effectiveRouteStatus =
     routeSaved ||
     defaultRouteFromSqlShipmentStatus(coarseNorm, shippingTypeSql);
+  if (coarseNorm === "in-transit" || coarseNorm === "arrived" || coarseNorm === "clearing") {
+    status = "shipped";
+  } else if (coarseNorm === "cleared") {
+    status = "delivered";
+  }
 
   return {
     id: String(s.id),
@@ -239,6 +248,7 @@ function mapShipmentFromSql(s: any): Shipment {
       },
     },
     deals,
+    dealsCount: Number(s.deals_count ?? deals.length),
     totalShippingCostUsd: total,
     totalVolume: derivedVolume,
     totalWeightKg: derivedWeightKg,
@@ -368,25 +378,73 @@ function toSqlShipmentPayload(form: any) {
 }
 
 export const shipmentsService = {
-  subscribeToShipments(callback: (shipments: Shipment[]) => void) {
+  /** قائمة الشاشة الرئيسية: headers فقط وبحث/فلاتر على كامل الجدول قبل pagination. */
+  async listShipmentsPage(opts?: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    status?: string;
+    shippingType?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<{ shipments: Shipment[]; count: number; hasNext: boolean }> {
+    const paged = await apiGetPagedList<any>("logistics/shipments/", {
+      tenantId: getTenantId(),
+      query: {
+        page: opts?.page ?? 1,
+        page_size: opts?.pageSize ?? 50,
+        search: opts?.search?.trim() || undefined,
+        status: opts?.status && opts.status !== "all" ? opts.status : undefined,
+        shipping_type:
+          opts?.shippingType && opts.shippingType !== "all"
+            ? opts.shippingType
+            : undefined,
+        date_from: opts?.dateFrom || undefined,
+        date_to: opts?.dateTo || undefined,
+      },
+    });
+    return {
+      shipments: paged.results.map(mapShipmentFromSql),
+      count: paged.count,
+      hasNext: paged.hasNext,
+    };
+  },
+
+  subscribeToShipments(
+    callback: (shipments: Shipment[]) => void,
+    opts?: {
+      onError?: (error: unknown) => void;
+      intervalMs?: number | null;
+      refreshOnFocus?: boolean;
+    },
+  ) {
     let alive = true;
     const load = async () => {
       try {
         const rows = await apiGetList<any>("logistics/shipments/", { tenantId: getTenantId() });
         if (alive) callback(rows.map(mapShipmentFromSql));
       } catch (err) {
-        // Silent fallback would mask "0 شحنة" when the API actually errored.
-        // Log loudly so the user/devtools sees that data wasn't loaded vs.
-        // legitimately empty — diagnostic seen in the screenshot the owner sent.
-        // console suppressed
-        if (alive) callback([]);
+        // لا تحوّل فشل API إلى «قائمة فارغة»؛ احتفظ بآخر لقطة وأبلغ الواجهة.
+        if (alive) opts?.onError?.(err);
       }
     };
     load();
-    const timer = setInterval(load, 5000);
+    const timer = opts?.intervalMs ? setInterval(load, opts.intervalMs) : null;
+    const refreshOnFocus = opts?.refreshOnFocus ?? true;
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    if (refreshOnFocus && typeof window !== "undefined") {
+      window.addEventListener("focus", onFocus);
+      document.addEventListener("visibilitychange", onFocus);
+    }
     return () => {
       alive = false;
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
+      if (refreshOnFocus && typeof window !== "undefined") {
+        window.removeEventListener("focus", onFocus);
+        document.removeEventListener("visibilitychange", onFocus);
+      }
     };
   },
 
@@ -670,10 +728,9 @@ export const shipmentsService = {
     if (!sid) return;
     const rows = await apiGetList<any>("logistics/shipments/", {
       tenantId: getTenantId(),
+      query: { deal_id: sid },
     });
     for (const r of rows) {
-      const ids = (r.deals || []).map((d: any) => String(d.id));
-      if (!ids.includes(sid)) continue;
       const stype = r.shipping_type === "air" ? "air" : "sea";
       await apiPatchObject(
         `logistics/shipments/${r.id}/`,

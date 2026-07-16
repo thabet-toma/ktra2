@@ -17,6 +17,21 @@ export type LocalShipmentStatus =
 
 export type LocalShipmentPaymentType = "credit" | "cash";
 
+export type LocalShipmentPaymentRow = {
+  id: number;
+  local_shipment: number;
+  amount: string;
+  currency: number;
+  currency_code?: string;
+  exchange_rate: string;
+  payment_date: string;
+  cash_box_external_id: string;
+  notes?: string;
+  is_posted: boolean;
+  journal?: number | null;
+  journal_id_display?: number | null;
+};
+
 export type LocalShipmentRow = {
   id: number;
   shipment_number: string;
@@ -48,6 +63,10 @@ export type LocalShipmentRow = {
   journal?: number | null;
   purchase_invoice: number | null;
   purchase_invoice_number?: string | null;
+  amount_paid?: string;
+  remaining_balance?: string;
+  payment_status?: "paid" | "partially_paid" | "unpaid";
+  payments?: LocalShipmentPaymentRow[];
   created_at?: string;
   updated_at?: string;
 };
@@ -119,6 +138,22 @@ export async function postLocalShipment(
   return apiPostObject<LocalShipmentRow>(
     `logistics/local-shipments/${id}/post-to-accounting/`,
     {},
+    { tenantId: tid() },
+  );
+}
+
+export async function payLocalShipmentFromCashBox(
+  id: number,
+  payload: {
+    amount: number;
+    cash_box_external_id: string;
+    payment_date?: string;
+    notes?: string;
+  },
+): Promise<{ status: string; journal_id: number; payment: LocalShipmentPaymentRow }> {
+  return apiPostObject(
+    `logistics/local-shipments/${id}/pay_from_cashbox/`,
+    payload,
     { tenantId: tid() },
   );
 }

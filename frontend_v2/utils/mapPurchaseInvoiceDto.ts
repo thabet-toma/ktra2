@@ -42,6 +42,19 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     shippingCost: dto.shipping_cost || 0,
     shippingIncluded: dto.shipping_included || false,
     grandTotal: dto.grand_total,
+    invoiceType: dto.invoice_type || (dto.clearance || dto.shipment ? "international" : "local"),
+    fees: (dto.fees || []).map((fee) => ({
+      id: fee.id != null ? String(fee.id) : undefined,
+      description: fee.description,
+      amount: Number(fee.amount || 0),
+      expenseAccountId: Number(fee.expense_account) || null,
+      expenseAccountCode: fee.expense_account_code || undefined,
+      expenseAccountName: fee.expense_account_name || undefined,
+      capitalizeToInventory: Boolean(fee.capitalize_to_inventory),
+      isTaxable: Boolean(fee.is_taxable),
+    })),
+    feesTotal: Number(dto.fees_total || 0),
+    payableTotal: Number(dto.payable_total || dto.grand_total || 0),
     localPayments: (dto.local_payments_json as Invoice["localPayments"]) || undefined,
     conversionMetadata:
       (dto.conversion_metadata_json as Invoice["conversionMetadata"]) || undefined,
@@ -55,8 +68,18 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     dealNumber: dto.deal_ref || undefined,
     shipment: dto.shipment ? String(dto.shipment) : undefined,
     clearanceId: dto.clearance != null ? String(dto.clearance) : undefined,
+    importLogistics: dto.shipment && dto.clearance != null ? {
+      shipmentId: String(dto.shipment),
+      shipmentNumber: dto.shipment_number || undefined,
+      shipmentName: dto.shipment_name || undefined,
+      clearanceId: dto.clearance,
+    } : undefined,
     supplierSnapshot: { tradeName: dto.partner_name || "" },
     isPosted: Boolean(dto.is_posted),
+    // W7a: هوية مستند المرجع (شارة + رابط الفاتورة الأصلية + لغة معكوسة).
+    isReturn: Boolean(dto.is_return),
+    originalInvoiceId: dto.original_invoice != null ? String(dto.original_invoice) : undefined,
+    originalInvoiceNumber: dto.original_invoice_number || undefined,
     // W7c: مرفقات الفاتورة (صور + PDF) — يستهلكها AttachmentsSection المشترك.
     quoteImages: dto.quote_images || [],
     quotePdfs: dto.quote_pdfs || [],

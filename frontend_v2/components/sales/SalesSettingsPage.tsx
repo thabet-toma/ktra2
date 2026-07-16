@@ -89,7 +89,7 @@ export const SalesSettingsPage: React.FC = () => {
         getSalesSettings(),
         apiGetList<AccountOpt>("accounting/accounts/", { tenantId }),
         apiGetList<CurrOpt>("accounting/currencies/", { tenantId }),
-        apiGetList<PartnerRow>("partners/", { tenantId }),
+        apiGetList<PartnerRow>("partners/lookup/?limit=500", { tenantId }),
         apiGetList<TaxRateRow>("accounting/tax-rates/", { tenantId }),
       ]);
 

@@ -1,6 +1,3 @@
-# Vendored tooling (Ruflo local clone — 600MB+, not part of the app)
-.clone/
-
 # Python
 venv/
 .venv/

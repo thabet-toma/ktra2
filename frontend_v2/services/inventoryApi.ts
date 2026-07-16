@@ -1,5 +1,8 @@
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
-import { toPagedList } from "./restApi";
+import { apiFetch, toPagedList } from "./restApi";
+
+// أبقِ عقد الخدمة كما هو، مع مهلة/إلغاء موحّدين لكل طلباتها.
+const fetch = apiFetch;
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const INV = `${API_BASE}/inventory`;

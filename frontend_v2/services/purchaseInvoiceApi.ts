@@ -3,6 +3,7 @@ import type {
   PurchaseInvoiceListDto,
 } from "../types/purchaseInvoice";
 import { resolveTenantId } from "../utils/tenantContext";
+import { apiFetch } from "./restApi";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const BASE = `${API_BASE}/logistics/purchase-invoices`;
@@ -13,11 +14,11 @@ const NETWORK_HINT =
   `(الحالي: ${String(API_BASE).replace(/\/+$/, "")})`;
 
 async function safeFetch(
-  input: RequestInfo | URL,
+  input: string,
   init?: RequestInit
 ): Promise<Response> {
   try {
-    return await fetch(input, init);
+    return await apiFetch(input, init);
   } catch (e) {
     const name = e instanceof Error ? e.name : "";
     if (name === "TypeError" || String(e).toLowerCase().includes("fetch")) {
@@ -72,6 +73,24 @@ async function asList(res: Response): Promise<PurchaseInvoiceListDto[]> {
   return Array.isArray(data) ? data : (data.results ?? []);
 }
 
+async function asPage(res: Response): Promise<{
+  results: PurchaseInvoiceListDto[];
+  count: number;
+  hasNext: boolean;
+}> {
+  await handle(res, "purchaseInvoice");
+  const data = await res.json();
+  if (Array.isArray(data)) {
+    return { results: data, count: data.length, hasNext: false };
+  }
+  const results = Array.isArray(data?.results) ? data.results : [];
+  return {
+    results,
+    count: Number(data?.count ?? results.length) || results.length,
+    hasNext: data?.next != null,
+  };
+}
+
 export const purchaseInvoiceApi = {
   list: (params?: Record<string, string>) => {
     const q =
@@ -81,9 +100,39 @@ export const purchaseInvoiceApi = {
     return safeFetch(`${BASE}/${q}`, { headers: headers() }).then(asList);
   },
 
+  listPage: (params: Record<string, string | number | undefined>) => {
+    const query = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    });
+    return safeFetch(`${BASE}/?${query}`, { headers: headers() }).then(asPage);
+  },
+
   get: async (id: number): Promise<PurchaseInvoiceDto> => {
     const res = await safeFetch(`${BASE}/${id}/`, { headers: headers() });
     await handle(res, "getInvoice");
+    return res.json();
+  },
+
+  // W6: بنود الفاتورة الأصلية القابلة للإرجاع (المفوتر/المرتجع/المتبقّي) لمنتقي المرجع.
+  getReturnableLines: async (
+    id: number
+  ): Promise<{
+    original_invoice: number;
+    invoice_number: string;
+    partner: number | null;
+    partner_name: string | null;
+    lines: {
+      product: number;
+      name: string;
+      unit_price: string;
+      invoiced_qty: string;
+      returned_qty: string;
+      remaining_qty: string;
+    }[];
+  }> => {
+    const res = await safeFetch(`${BASE}/${id}/returnable-lines/`, { headers: headers() });
+    await handle(res, "getReturnableLines");
     return res.json();
   },
 
@@ -113,7 +162,7 @@ export const purchaseInvoiceApi = {
   },
 
   delete: async (id: number): Promise<void> => {
-    const res = await fetch(`${BASE}/${id}/`, {
+    const res = await safeFetch(`${BASE}/${id}/`, {
       method: "DELETE",
       headers: headers(),
     });
@@ -198,6 +247,25 @@ export const purchaseInvoiceApi = {
       body: JSON.stringify(body),
     });
     await handle(res, "importFromClearance");
+    return res.json();
+  },
+
+  getClearanceImportOptions: async (clearanceId: number): Promise<{
+    clearance_id: number;
+    shipment_id: number;
+    deals: Array<{
+      deal_id: number;
+      deal_ref: string;
+      is_converted: boolean;
+      invoice_id: number | null;
+      invoice_number: string | null;
+    }>;
+  }> => {
+    const query = new URLSearchParams({ clearance_id: String(clearanceId) });
+    const res = await safeFetch(`${BASE}/clearance-import-options/?${query}`, {
+      headers: headers(),
+    });
+    await handle(res, "getClearanceImportOptions");
     return res.json();
   },
 

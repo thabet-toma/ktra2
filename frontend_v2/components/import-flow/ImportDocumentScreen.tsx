@@ -5,10 +5,10 @@ import { useSearchParams } from "react-router-dom";
 import { Save, Plus, FileText } from "lucide-react";
 import { apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
-import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox } from "@/services/clearanceApi";
+import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, unpostClearanceAccrual } from "@/services/clearanceApi";
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
-import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, importLocalShipmentToInvoice } from "@/services/localShippingApi";
+import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, payLocalShipmentFromCashBox, importLocalShipmentToInvoice } from "@/services/localShippingApi";
 import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab } from "@/components/aseel";
 import { effectiveDealTitleForDisplay } from "@/utils/dealTitleDisplay";
 import { getShippingWorkflowLabel } from "@/utils/shippingWorkflowLabels";
@@ -16,6 +16,7 @@ import { CompactTimeline } from "./CompactTimeline";
 import OfflineGuard from "@/components/offline/OfflineGuard";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import { formatMoney } from "@/utils/formatNumber";
+import { getImportJourneyGuidance, type ImportJourneyAction } from "./importJourneyGuidance";
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => formatMoney(v, "—");
 
@@ -142,7 +143,10 @@ const isLocalShippingClearanceLabel = (s: string | null | undefined) =>
 export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScreenProps) {
   // ── All hooks MUST be declared before any early return (React rules-of-hooks). ──
   const [searchParams] = useSearchParams();
-  const initialTab = searchParams.get("tab") || "deals";
+  const requestedTab = searchParams.get("tab") || "deals";
+  const initialTab = ["accounts", "financial_movements", "clearance_financial_movements"].includes(requestedTab)
+    ? "financial"
+    : requestedTab === "attachments" ? "notes" : requestedTab;
   const confirm = useConfirm();
   const toast = useToast();
   const [shipment, setShipment] = useState<ShipmentApiRow | null>(null);
@@ -164,16 +168,23 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   // Local tab state (D)
   const [editingLocalId, setEditingLocalId] = useState<number | null>(null);
   const [localForm, setLocalForm] = useState<Partial<LocalShipmentRow> | null>(null);
+  const [payingLocalId, setPayingLocalId] = useState<number | null>(null);
+  const [localPayAmount, setLocalPayAmount] = useState("");
+  const [localPayDate, setLocalPayDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [localPayNotes, setLocalPayNotes] = useState("");
+  const [showAdvancedLocal, setShowAdvancedLocal] = useState(false);
   // Payments tab state (E)
   const [showPaymentForm, setShowPaymentForm] = useState(false);
   const [payAmount, setPayAmount] = useState("");
-  const [payPurpose, setPayPurpose] = useState("clearance_fee");
   const [payDate, setPayDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [payNotes, setPayNotes] = useState("");
   const [cashBoxes, setCashBoxes] = useState<CashBoxLedgerLink[]>([]);
   const [payCashBoxId, setPayCashBoxId] = useState("");
   // «تسجيل سريع» لتكلفة التخليص: إجمالي واحد بدون بنود مفصّلة
   const [quickClearanceTotal, setQuickClearanceTotal] = useState("");
+  const [showAdvancedShipment, setShowAdvancedShipment] = useState(false);
+  const [showAdvancedClearance, setShowAdvancedClearance] = useState(false);
+  const [showClearanceBreakdown, setShowClearanceBreakdown] = useState(false);
   // دفعات وكيل الشحن الدولي (USD) — شرط الاستيراد لفاتورة دولية
   const [showAgentPayForm, setShowAgentPayForm] = useState(false);
   const [agentPayAmount, setAgentPayAmount] = useState("");
@@ -195,12 +206,16 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       const s = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${id}/`, { tenantId: tid() });
       setShipment(s);
       setShipmentForm({ ...s });
-      const cls = await listClearances();
+      // القائمتان مستقلتان ومفلترتان خادمياً بالشحنة؛ زمنهما = الأبطأ منهما
+      // بدلاً من مجموعهما، ولا ننزل مستندات شحنات أخرى.
+      const [cls, locs] = await Promise.all([
+        listClearances({ shipment: s.id }),
+        listLocalShipments({ shipment: s.id }),
+      ]);
       const matched = cls.find((c) => c.shipment === s.id) || null;
       setClearance(matched);
       setClearanceForm(matched ? { ...matched } : null);
-      const locs = await listLocalShipments();
-      setLocalShipments(locs.filter((l) => l.shipment === s.id));
+      setLocalShipments(locs);
       if (matched) {
         const pays = await listClearancePayments(matched.id);
         setClearancePayments(pays);
@@ -621,7 +636,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     if (carriers.length > 0) return;
     try {
       const rows = await apiGetList<{ id: number; name: string; partner_type?: string }>(
-        "partners/", { tenantId: tid() },
+        "partners/lookup/?limit=500", { tenantId: tid() },
       );
       const rank = (t?: string) =>
         t === "LocalTransporter" ? 0 : t === "FreightForwarder" ? 1 : t === "Supplier" ? 2 : 3;
@@ -665,18 +680,21 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const handleEditLocal = useCallback((ls: LocalShipmentRow) => {
     setEditingLocalId(ls.id);
     setLocalForm({ ...ls });
+    setShowAdvancedLocal(Boolean(ls.driver_name || ls.vehicle_number || ls.origin || ls.pickup_date || ls.notes));
     void ensureCarriers();
   }, [ensureCarriers]);
 
   const handleNewLocal = useCallback(() => {
     setEditingLocalId(0);
     setLocalForm({ id: 0, shipment: (shipment || shipmentForm)?.id ?? null, carrier: 0, amount: "0", currency: 0, exchange_rate: "1", status: "pending", payment_type: "credit", capitalize_to_inventory: true, is_posted: false, purchase_invoice: null, shipment_number: "" } as Partial<LocalShipmentRow>);
+    setShowAdvancedLocal(false);
     void ensureCarriers();
   }, [shipment, shipmentForm, ensureCarriers]);
 
   const handleCancelLocal = useCallback(() => {
     setEditingLocalId(null);
     setLocalForm(null);
+    setShowAdvancedLocal(false);
   }, []);
 
   const setLF = useCallback((patch: Partial<LocalShipmentRow>) =>
@@ -747,12 +765,42 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     try {
       const updated = await postLocalShipment(id);
       setLocalShipments((prev) => prev.map((l) => l.id === id ? updated : l));
+      toast("تم إثبات استحقاق النقل على ذمم الناقل. الدفع منفصل ويمكن تسجيله من نفس السطر.", "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
+  }, [toast]);
+
+  const openLocalPayment = useCallback((row: LocalShipmentRow) => {
+    setPayingLocalId(row.id);
+    setLocalPayAmount(String(row.remaining_balance ?? Math.max(0, Number(row.amount) - Number(row.amount_paid || 0))));
+    setLocalPayDate(new Date().toISOString().slice(0, 10));
+    setLocalPayNotes("");
   }, []);
+
+  const handlePayLocal = useCallback(async () => {
+    if (!payingLocalId || !payCashBoxId || Number(localPayAmount) <= 0) return;
+    setSaving(true); setError(null);
+    try {
+      await payLocalShipmentFromCashBox(payingLocalId, {
+        amount: Number(localPayAmount),
+        cash_box_external_id: payCashBoxId,
+        payment_date: localPayDate || undefined,
+        notes: localPayNotes || undefined,
+      });
+      setPayingLocalId(null);
+      setLocalPayAmount("");
+      setLocalPayNotes("");
+      await reloadLocal();
+      toast("تم تسجيل دفعة الناقل وبقيت داخل رحلة الاستيراد.", "success");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [payingLocalId, payCashBoxId, localPayAmount, localPayDate, localPayNotes, reloadLocal, toast]);
 
   /** نقل تكلفة النقل المحلي إلى فاتورة الشراء المحوّلة كرسم (T12-A5 — كان المسار غير مكشوف في أي شاشة) */
   const handleImportLocalToInvoice = useCallback(async (id: number, invoiceId: number) => {
@@ -854,22 +902,69 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       await payClearanceFromCashBox(clearance.id, {
         amount: Number(payAmount),
         cash_box_external_id: payCashBoxId,
-        payment_kind: payPurpose === "shipping" ? "shipping" : "clearance",
+        payment_kind: "clearance",
         payment_date: payDate || undefined,
         notes: payNotes || undefined,
       });
       setShowPaymentForm(false);
       setPayAmount("");
-      setPayPurpose("clearance_fee");
       setPayDate(new Date().toISOString().slice(0, 10));
       setPayNotes("");
-      void reloadPayments();
+      await reloadPayments();
+      toast("تم تسجيل دفعة المخلّص. بقيت في رحلة الاستيراد ولم تُفتح شاشة القيود.", "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [clearance, payAmount, payPurpose, payDate, payNotes, payCashBoxId, reloadPayments]);
+  }, [clearance, payAmount, payDate, payNotes, payCashBoxId, reloadPayments, toast]);
+
+  const openClearancePayment = useCallback(() => {
+    const total = (clearanceForm?.lines || []).reduce(
+      (sum, line) => sum + Math.max(0, (Number(line.debit) || 0) - (Number(line.credit) || 0)),
+      0,
+    );
+    const paid = clearancePayments
+      .filter((payment) => payment.payment_purpose !== "shipping" && payment.is_posted)
+      .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+    setPayAmount(String(Math.max(0, total - paid)));
+    setShowPaymentForm(true);
+    setActiveTab("payments");
+  }, [clearanceForm, clearancePayments]);
+
+  const handlePostClearance = useCallback(async () => {
+    if (!clearanceForm?.id) return;
+    if (!(await handleSaveClearance())) return;
+    setSaving(true); setError(null);
+    try {
+      const result = await postClearanceAccrual(clearanceForm.id);
+      toast(result.message, "success");
+      if (shipment) await loadAll(shipment.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [clearanceForm, handleSaveClearance, shipment, loadAll, toast]);
+
+  const handleUnpostClearanceAccrual = useCallback(async () => {
+    if (!clearance?.id) return;
+    if (!(await confirm({
+      title: "تراجع عن استحقاق التخليص",
+      message: "سيُحذف قيد استحقاق التخليص فقط. دفعات المخلّص تبقى بقيودها المستقلة.",
+      confirmText: "تراجع",
+    }))) return;
+    setSaving(true); setError(null);
+    try {
+      const result = await unpostClearanceAccrual(clearance.id);
+      toast(result.message, "success");
+      if (shipment) await loadAll(shipment.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [clearance, shipment, loadAll, confirm, toast]);
 
   // ── دفعات وكيل الشحن (LogisticsPayment على الشحنة، بدون صفقة) ──
   // كانت بلا أي واجهة رغم أن استيراد الفاتورة الدولية مشروط باكتمالها بالدولار.
@@ -936,21 +1031,37 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   }, [shipment, agentPayAmount, agentPayRate, agentPayDate, agentPayConfirmed, agentPayNotes, toast]);
 
   // ── F: Convert to purchase invoice ──
-  const [convertedPiId, setConvertedPiId] = useState<number | null>(null);
+  const [convertedInvoices, setConvertedInvoices] = useState<Array<{
+    id: number;
+    invoice_number: string;
+    deal?: number | null;
+    shipment?: number;
+  }>>([]);
   const checkConvertedInvoice = useCallback(async () => {
     if (!shipment || !shipment.id) return;
     try {
       // الخادم يفلتر بـ shipment (أُضيف في task12) — أي فاتورة راجعة تخص هذه الشحنة
-      const invoices = await apiGetList<{ id: number; invoice_number: string; shipment?: number }>(
+      const invoices = await apiGetList<{ id: number; invoice_number: string; deal?: number | null; shipment?: number }>(
         "logistics/purchase-invoices/",
         { tenantId: tid(), query: { shipment: shipment.id } },
       );
-      const converted = invoices.find((inv) => Number(inv.shipment) === Number(shipment.id)) || invoices[0];
-      if (converted && converted.id) setConvertedPiId(converted.id);
+      setConvertedInvoices(invoices.filter((inv) => Number(inv.shipment) === Number(shipment.id)));
     } catch { /* ignore */ }
   }, [shipment]);
 
   useEffect(() => { void checkConvertedInvoice(); }, [checkConvertedInvoice]);
+  useEffect(() => {
+    window.addEventListener("focus", checkConvertedInvoice);
+    return () => window.removeEventListener("focus", checkConvertedInvoice);
+  }, [checkConvertedInvoice]);
+
+  const convertedPiId = convertedInvoices[0]?.id || null;
+  const convertedDealIds = useMemo(
+    () => new Set(convertedInvoices.map((invoice) => Number(invoice.deal)).filter((id) => Number.isFinite(id) && id > 0)),
+    [convertedInvoices],
+  );
+  const remainingDealsCount = shipmentDeals.filter((deal) => !convertedDealIds.has(Number(deal.deal))).length;
+  const allDealsConverted = shipmentDeals.length > 0 && remainingDealsCount === 0;
 
   // ── Derived values ──
   const timelineSteps = useMemo(
@@ -963,7 +1074,18 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     return <div className="p-8 text-center aseel-text-soft">جاري تحميل الشحنة…</div>;
   }
   if (error && !shipmentForm) {
-    return <div className="p-8 text-center" style={{ color: "var(--aseel-danger, #c0392b)" }}>{error}</div>;
+    return (
+      <div className="p-8 text-center text-red-700">
+        <p>{error}</p>
+        <button
+          type="button"
+          className="mt-3 rounded border border-red-300 px-4 py-2 hover:bg-red-50"
+          onClick={() => { if (shipmentId) void loadAll(shipmentId); }}
+        >
+          إعادة المحاولة
+        </button>
+      </div>
+    );
   }
   if (!shipmentId) {
     return (
@@ -998,6 +1120,52 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const paidClearance = clearancePayments
     .filter((p) => p.payment_purpose !== "shipping" && p.is_posted)
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const clearanceCostTotal = (clearanceForm?.lines || []).reduce(
+    (sum, line) => sum + Math.max(0, (Number(line.debit) || 0) - (Number(line.credit) || 0)),
+    0,
+  );
+  const clearanceRemaining = Math.max(0, clearanceCostTotal - paidClearance);
+  const guidance = getImportJourneyGuidance({
+    shipmentSaved: Boolean(s.id),
+    invoiceEligible: s.shipment_type !== "transport",
+    dealsCount: shipmentDeals.length,
+    freightTotalUsd,
+    freightFullyPaid,
+    clearanceExists: Boolean(clearance),
+    clearanceCostTotal,
+    convertedInvoiceId: convertedPiId,
+    remainingDealsCount,
+  });
+  const executeGuidanceAction = (action: ImportJourneyAction) => {
+    if (action === "save_shipment") void handleSaveShipment();
+    if (action === "link_deals") {
+      setActiveTab("deals");
+      void openLinkPicker();
+    }
+    if (action === "set_freight") setActiveTab("deals");
+    if (action === "pay_freight") {
+      setActiveTab("payments");
+      setShowAgentPayForm(true);
+    }
+    if (action === "create_clearance") {
+      setActiveTab("clearance");
+      void handleCreateClearance();
+    }
+    if (action === "enter_clearance_costs") {
+      setActiveTab("clearance");
+      setShowClearanceBreakdown(false);
+    }
+    if (action === "manage_local_transport") {
+      setActiveTab("local");
+      if (localShipments.length === 0) handleNewLocal();
+    }
+    if (action === "create_invoice" && shipment?.id) {
+      window.open(`/international-invoices?import_shipment=${shipment.id}`, "_blank");
+    }
+    if (action === "view_invoice" && convertedPiId) {
+      window.open(`/purchase-invoices/${convertedPiId}`, "_blank");
+    }
+  };
   const shipmentPaid =
     s.grand_total != null && s.remaining_amount != null
       ? Number(s.grand_total) - Number(s.remaining_amount)
@@ -1012,11 +1180,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       <div className="aseel-total-row"><span>المدفوع</span><span className="aseel-total-value">{shipmentPaid != null ? fmt(shipmentPaid) : "—"}</span></div>
       <div className="aseel-total-row"><span>المتبقي</span><span className="aseel-total-value">{fmt(s.remaining_amount)}</span></div>
       <hr style={{ margin: "4px 0", border: "none", borderTop: "1px solid var(--aseel-border, #ddd)" }} />
-      <div className="aseel-total-row"><span>{clearance ? `تخليص #${clearance.id}` : "تخليص"}</span><span className="aseel-total-value">{clearance ? fmt(clearance.grand_total) : "—"}</span></div>
+      <div className="aseel-total-row"><span>{clearance ? `تكلفة التخليص #${clearance.id}` : "تكلفة التخليص"}</span><span className="aseel-total-value">{clearance ? fmt(clearanceCostTotal) : "—"}</span></div>
       {clearance && <div className="aseel-total-row"><span>مدفوع تخليص</span><span className="aseel-total-value">{fmt(paidClearance)}</span></div>}
+      {clearance && <div className="aseel-total-row"><span>متبقي تخليص</span><span className="aseel-total-value">{fmt(clearanceRemaining)}</span></div>}
       {clearance && <div className="aseel-total-row"><span>مدفوع شحن</span><span className="aseel-total-value">{fmt(paidShipping)}</span></div>}
       {localShipments.map((ls) => (
-        <div className="aseel-total-row" key={ls.id}><span>نقل محلي #{ls.shipment_number}</span><span className="aseel-total-value">{fmt(ls.amount)}</span></div>
+        <div className="aseel-total-row" key={ls.id}><span>نقل محلي #{ls.shipment_number} · متبقي</span><span className="aseel-total-value">{fmt(ls.remaining_balance ?? ls.amount)}</span></div>
       ))}
     </>
   );
@@ -1034,11 +1203,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const sfText = (key: keyof ShipmentApiRow) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setSF({ [key]: e.target.value });
 
   const headerBand = (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: "2px 8px", padding: "4px 0" }}>
+    <div className="grid w-full grid-cols-1 gap-x-2 gap-y-1 py-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
       {fld("رقم الشحنة", <input className="aseel-input" readOnly value={shipmentForm.shipment_number || (shipmentForm.id ? `#${shipmentForm.id}` : "— جديدة —")} />)}
       {fld("تاريخ", <input className="aseel-input" type="date" value={shipmentForm.shipment_date ? String(shipmentForm.shipment_date).slice(0, 10) : ""} onChange={sfText("shipment_date")} />)}
-      {fld("الساعة", <input className="aseel-input" type="time" value={shipmentForm.transaction_time ? String(shipmentForm.transaction_time).slice(0, 5) : ""} onChange={sfText("transaction_time")} />)}
-      {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={shipmentForm.second_date ? String(shipmentForm.second_date).slice(0, 10) : ""} onChange={sfText("second_date")} />)}
+      {showAdvancedShipment && <>
+        {fld("الساعة", <input className="aseel-input" type="time" value={shipmentForm.transaction_time ? String(shipmentForm.transaction_time).slice(0, 5) : ""} onChange={sfText("transaction_time")} />)}
+        {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={shipmentForm.second_date ? String(shipmentForm.second_date).slice(0, 10) : ""} onChange={sfText("second_date")} />)}
+      </>}
       {fld("وكيل الشحن", <span style={{ display: "flex", gap: 2 }}>
         <select
           className="aseel-input"
@@ -1062,11 +1233,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </select>
         <button type="button" className="aseel-ellipsis" title="إضافة وكيل شحن جديد" onClick={() => { setQuickAddType("FreightForwarder"); setQuickAddName(""); }}>+</button>
       </span>)}
-      {fld("اسم الوكيل", <input className="aseel-input" readOnly value={shipmentForm.agent_name || "—"} />)}
-      {fld("نوع الشحنة", <select className="aseel-input" value={shipmentForm.shipment_type || "invoice"} onChange={sfText("shipment_type")}>
-        <option value="invoice">فاتورة (تتحول لفاتورة شراء)</option>
-        <option value="transport">نقل فقط</option>
-      </select>)}
+      {showAdvancedShipment && <>
+        {fld("اسم الوكيل", <input className="aseel-input" readOnly value={shipmentForm.agent_name || "—"} />)}
+        {fld("نوع الشحنة", <select className="aseel-input" value={shipmentForm.shipment_type || "invoice"} onChange={sfText("shipment_type")}>
+          <option value="invoice">فاتورة (تتحول لفاتورة شراء)</option>
+          <option value="transport">نقل فقط</option>
+        </select>)}
+      </>}
       {fld("نوع الشحن", <select className="aseel-input" value={shipmentForm.shipping_type || ""} onChange={sfText("shipping_type")}>
         <option value="">—</option>
         <option value="sea">بحري</option>
@@ -1077,11 +1250,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       {fld("رقم الحاوية", <input className="aseel-input" value={shipmentForm.container_number || ""} onChange={sfText("container_number")} />)}
       {fld("المغادرة", <input className="aseel-input" type="date" value={shipmentForm.departure_date ? String(shipmentForm.departure_date).slice(0, 10) : ""} onChange={sfText("departure_date")} />)}
       {fld("الوصول", <input className="aseel-input" type="date" value={shipmentForm.arrival_date ? String(shipmentForm.arrival_date).slice(0, 10) : ""} onChange={sfText("arrival_date")} />)}
-      {fld("السفينة / الرحلة", <input className="aseel-input" value={shipmentForm.ship_name || shipmentForm.flight_number || ""} onChange={(e) => setSF({ ship_name: e.target.value, flight_number: e.target.value })} />)}
-      {fld("رقم الحركة", <input className="aseel-input" value={shipmentForm.agent_shipment_number || ""} onChange={sfText("agent_shipment_number")} />)}
-      {fld("رقم الفاتورة", <input className="aseel-input" readOnly value={shipmentForm.invoice_number || "—"} />)}
-      {fld("الحجم / الوزن", <input className="aseel-input" readOnly value={`${fmt(shipmentForm.total_volume)} / ${fmt(shipmentForm.total_weight_kg)}`} />)}
-      {fld("المخلِّص", <span style={{ display: "flex", gap: 2 }}>
+      {showAdvancedShipment && <>
+        {fld("السفينة / الرحلة", <input className="aseel-input" value={shipmentForm.ship_name || shipmentForm.flight_number || ""} onChange={(e) => setSF({ ship_name: e.target.value, flight_number: e.target.value })} />)}
+        {fld("رقم الحركة", <input className="aseel-input" value={shipmentForm.agent_shipment_number || ""} onChange={sfText("agent_shipment_number")} />)}
+        {fld("رقم الفاتورة", <input className="aseel-input" readOnly value={shipmentForm.invoice_number || "—"} />)}
+        {fld("الحجم / الوزن", <input className="aseel-input" readOnly value={`${fmt(shipmentForm.total_volume)} / ${fmt(shipmentForm.total_weight_kg)}`} />)}
+        {fld("المخلِّص", <span style={{ display: "flex", gap: 2 }}>
         <select
           className="aseel-input"
           value={clearanceForm?.customs_broker ?? ""}
@@ -1110,12 +1284,18 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             )}
         </select>
         <button type="button" className="aseel-ellipsis" title="إضافة مخلِّص جمركي جديد" disabled={!clearanceForm} onClick={() => { setQuickAddType("CustomsBroker"); setQuickAddName(""); }}>+</button>
-      </span>)}
-      {fld("رقم البيان", <input className="aseel-input" readOnly value={clearance?.declaration_number || "—"} />)}
-      {fld("تاريخ التخليص", <input className="aseel-input" type="date" readOnly value={clearance?.clearance_date ? String(clearance.clearance_date).slice(0, 10) : ""} />)}
-      {fld("فاتورة المقاصة", <input className="aseel-input" readOnly value={clearance?.settlement_invoice_number || "—"} />)}
-      {fld("كشف الضريبة", <input className="aseel-input" readOnly value={clearance?.vat_statement != null ? String(clearance.vat_statement) : "—"} />)}
-      {fld("محرَّر", <input className="aseel-input" readOnly value={shipmentForm.editable ? "نعم" : "لا"} />)}
+        </span>)}
+        {fld("رقم البيان", <input className="aseel-input" readOnly value={clearance?.declaration_number || "—"} />)}
+        {fld("تاريخ التخليص", <input className="aseel-input" type="date" readOnly value={clearance?.clearance_date ? String(clearance.clearance_date).slice(0, 10) : ""} />)}
+        {fld("فاتورة المقاصة", <input className="aseel-input" readOnly value={clearance?.settlement_invoice_number || "—"} />)}
+        {fld("كشف الضريبة", <input className="aseel-input" readOnly value={clearance?.vat_statement != null ? String(clearance.vat_statement) : "—"} />)}
+        {fld("محرَّر", <input className="aseel-input" readOnly value={shipmentForm.editable ? "نعم" : "لا"} />)}
+      </>}
+      <div className="col-span-full flex justify-end">
+        <button type="button" className="aseel-toolbtn" onClick={() => setShowAdvancedShipment((value) => !value)}>
+          {showAdvancedShipment ? "إخفاء تفاصيل الشحنة" : "إظهار تفاصيل الشحنة المتقدمة"}
+        </button>
+      </div>
     </div>
   );
 
@@ -1316,13 +1496,30 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const clearanceContent = clearanceForm ? (
     <div style={{ padding: "4px 8px" }}>
-      <div className="aseel-headband" style={{ marginBottom: 8 }}>
+      <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-3">
+        <div><span className="block text-xs text-slate-500">إجمالي الاستحقاق</span><b>{fmt(clearanceCostTotal)} ₪</b></div>
+        <div><span className="block text-xs text-slate-500">المدفوع للمخلّص</span><b className="text-emerald-700">{fmt(paidClearance)} ₪</b></div>
+        <div><span className="block text-xs text-slate-500">المتبقي</span><b className="text-amber-700">{fmt(clearanceRemaining)} ₪</b></div>
+      </div>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        {!clearanceForm.journal ? (
+          <button type="button" className="aseel-toolbtn" onClick={() => void handlePostClearance()} disabled={saving || clearanceCostTotal <= 0}>
+            إثبات استحقاق التخليص
+          </button>
+        ) : (
+          <>
+            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">الاستحقاق مرحّل · قيد #{clearanceForm.journal}</span>
+            <button type="button" className="aseel-toolbtn" onClick={() => void handleUnpostClearanceAccrual()} disabled={saving}>تراجع عن الاستحقاق</button>
+          </>
+        )}
+        <button type="button" className="aseel-toolbtn" onClick={openClearancePayment} disabled={saving || !clearanceForm.customs_broker || clearanceRemaining <= 0}>
+          تسجيل دفعة للمخلّص
+        </button>
+        <span className="text-xs text-slate-500">الإفراج وإثبات الاستحقاق لا يتطلبان دفع المبلغ كاملاً.</span>
+      </div>
+      <div className="aseel-headband" style={{ marginBottom: 4 }}>
         {fld("رقم البيان", <input className="aseel-input" value={clearanceForm.declaration_number || ""} onChange={cfText("declaration_number")} />)}
         {fld("تاريخ التخليص", <input className="aseel-input" type="date" value={clearanceForm.clearance_date ? String(clearanceForm.clearance_date).slice(0, 10) : ""} onChange={cfText("clearance_date")} />)}
-        {fld("الوقت", <input className="aseel-input" type="time" value={clearanceForm.transaction_time ? String(clearanceForm.transaction_time).slice(0, 5) : ""} onChange={cfText("transaction_time")} />)}
-        {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={clearanceForm.second_date ? String(clearanceForm.second_date).slice(0, 10) : ""} onChange={cfText("second_date")} />)}
-        {fld("مشتغل مرخص", <input className="aseel-input" value={clearanceForm.licensed_dealer_no || ""} onChange={cfText("licensed_dealer_no")} />)}
-        {fld("رقم فاتورة المقاصة", <input className="aseel-input" value={clearanceForm.settlement_invoice_number || ""} onChange={cfText("settlement_invoice_number")} />)}
         {fld("المخلِّص", <span style={{ display: "flex", gap: 2 }}>
           <select
             className="aseel-input"
@@ -1349,11 +1546,22 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           </select>
           <button type="button" className="aseel-ellipsis" title="إضافة مخلِّص جمركي جديد" onClick={() => { setQuickAddType("CustomsBroker"); setQuickAddName(""); }}>+</button>
         </span>)}
-        {fld("العملة", <input className="aseel-input" value={clearanceForm.currency != null ? String(clearanceForm.currency) : ""} onChange={(e) => setCF({ currency: e.target.value ? Number(e.target.value) : null })} />)}
-        {fld("سعر العملة", <input className="aseel-input" type="number" step="0.000001" value={clearanceForm.exchange_rate != null ? String(clearanceForm.exchange_rate) : ""} onChange={(e) => setCF({ exchange_rate: e.target.value ? Number(e.target.value) : null })} />)}
-        {fld("مجموع بدون ضريبة", <input className="aseel-input" type="number" step="0.01" value={clearanceForm.subtotal_no_vat != null ? String(clearanceForm.subtotal_no_vat) : ""} onChange={(e) => setCF({ subtotal_no_vat: e.target.value ? Number(e.target.value) : null })} />)}
-        {fld("مجموع الضريبة", <input className="aseel-input" type="number" step="0.01" value={clearanceForm.vat_total != null ? String(clearanceForm.vat_total) : ""} onChange={(e) => setCF({ vat_total: e.target.value ? Number(e.target.value) : null })} />)}
-        {fld("الإجمالي", <input className="aseel-input" type="number" step="0.01" value={clearanceForm.grand_total != null ? String(clearanceForm.grand_total) : ""} onChange={(e) => setCF({ grand_total: e.target.value ? Number(e.target.value) : null })} />)}
+        {showAdvancedClearance && <>
+          {fld("الوقت", <input className="aseel-input" type="time" value={clearanceForm.transaction_time ? String(clearanceForm.transaction_time).slice(0, 5) : ""} onChange={cfText("transaction_time")} />)}
+          {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={clearanceForm.second_date ? String(clearanceForm.second_date).slice(0, 10) : ""} onChange={cfText("second_date")} />)}
+          {fld("مشتغل مرخص", <input className="aseel-input" value={clearanceForm.licensed_dealer_no || ""} onChange={cfText("licensed_dealer_no")} />)}
+          {fld("رقم فاتورة المقاصة", <input className="aseel-input" value={clearanceForm.settlement_invoice_number || ""} onChange={cfText("settlement_invoice_number")} />)}
+          {fld("العملة", <input className="aseel-input" value={clearanceForm.currency != null ? String(clearanceForm.currency) : ""} onChange={(e) => setCF({ currency: e.target.value ? Number(e.target.value) : null })} />)}
+          {fld("سعر العملة", <input className="aseel-input" type="number" step="0.000001" value={clearanceForm.exchange_rate != null ? String(clearanceForm.exchange_rate) : ""} onChange={(e) => setCF({ exchange_rate: e.target.value ? Number(e.target.value) : null })} />)}
+          {fld("مجموع بدون ضريبة", <input className="aseel-input" type="number" step="0.01" value={clearanceForm.subtotal_no_vat != null ? String(clearanceForm.subtotal_no_vat) : ""} onChange={(e) => setCF({ subtotal_no_vat: e.target.value ? Number(e.target.value) : null })} />)}
+          {fld("مجموع الضريبة", <input className="aseel-input" type="number" step="0.01" value={clearanceForm.vat_total != null ? String(clearanceForm.vat_total) : ""} onChange={(e) => setCF({ vat_total: e.target.value ? Number(e.target.value) : null })} />)}
+          {fld("الإجمالي", <input className="aseel-input" type="number" step="0.01" value={clearanceForm.grand_total != null ? String(clearanceForm.grand_total) : ""} onChange={(e) => setCF({ grand_total: e.target.value ? Number(e.target.value) : null })} />)}
+        </>}
+      </div>
+      <div className="mb-2 flex justify-end">
+        <button type="button" className="aseel-toolbtn" onClick={() => setShowAdvancedClearance((value) => !value)}>
+          {showAdvancedClearance ? "إخفاء تفاصيل البيان" : "إظهار تفاصيل البيان المتقدمة"}
+        </button>
       </div>
       {/* تسجيل سريع: إجمالي واحد بدون بنود مفصّلة — يُخزَّن كبند وحيد كي يدخل في
           توزيع التكلفة (حقل «الإجمالي» أعلاه للعرض ولا يُوزَّع على الفواتير) */}
@@ -1383,6 +1591,17 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       </div>
       {/* بنود التكلفة ببساطة: بند + مبلغ. مدين/دائن شأن القيد المحاسبي الداخلي لا المستخدم
           (شكوى المالك: «شو هاد دائن ومدين — كان بنود») — المبلغ يُخزَّن debit والخادم يحوّله. */}
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+        <span>
+          {clearanceForm.lines?.length
+            ? `${clearanceForm.lines.length} بند تفصيلي · المجموع ${fmt(clearanceCostTotal)} ₪`
+            : "لا توجد بنود تفصيلية — استخدم الإجمالي السريع أو أضف بنوداً"}
+        </span>
+        <button type="button" className="aseel-toolbtn" onClick={() => setShowClearanceBreakdown((value) => !value)}>
+          {showClearanceBreakdown ? "إخفاء تفصيل الرسوم" : "تفصيل الرسوم والبنود"}
+        </button>
+      </div>
+      {showClearanceBreakdown && <>
       <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)", tableLayout: "fixed" }}>
         <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
           <th style={{ padding: "2px 4px", textAlign: "start", width: 130 }}>النوع</th>
@@ -1459,8 +1678,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           محلي مرحّل ومُرسمَل للمخزون تُستبعد هذه البنود تلقائياً من تكلفة الاستيراد لمنع الازدواج.
         </p>
       )}
+      </>}
       <div style={{ display: "flex", gap: 8, padding: "4px 0" }}>
-        <button type="button" className="aseel-toolbtn" onClick={addClearanceLine}>+ إضافة بند</button>
+        {showClearanceBreakdown && <button type="button" className="aseel-toolbtn" onClick={addClearanceLine}>+ إضافة بند</button>}
         <button type="button" className="aseel-toolbtn" onClick={() => void handleSaveClearance()} disabled={saving}>تخزين التخليص</button>
       </div>
     </div>
@@ -1481,9 +1701,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         <thead><tr style={{ background: "var(--aseel-bg-strip, #f5f5f5)", fontWeight: 600 }}>
           <th style={{ padding: "2px 4px", textAlign: "start" }}>رقم</th>
           <th style={{ padding: "2px 4px", textAlign: "start" }}>الناقل</th>
-          <th style={{ padding: "2px 4px", textAlign: "center" }}>السائق</th>
-          <th style={{ padding: "2px 4px", textAlign: "center" }}>المركبة</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>المبلغ</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>المدفوع</th>
+          <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>المتبقي</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 60 }}>الحالة</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 50 }}>مرحَّلة</th>
           <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}></th>
@@ -1493,15 +1713,18 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             <tr key={ls.id} onClick={() => handleEditLocal(ls)} style={{ cursor: "pointer" }}>
               <td style={{ padding: "2px 4px" }}>{ls.shipment_number}</td>
               <td style={{ padding: "2px 4px" }}>{ls.carrier_name || "—"}</td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.driver_name || "—"}</td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.vehicle_number || "—"}</td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(ls.amount)}</td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(ls.amount_paid || 0)}</td>
+              <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(ls.remaining_balance ?? ls.amount)}</td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.status || "—"}</td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>{ls.is_posted ? "✓" : "—"}</td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>
                 <span style={{ display: "inline-flex", gap: 4 }}>
                   {!ls.is_posted && (
-                    <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handlePostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px", backgroundColor: "var(--aseel-primary)", color: "white", padding: "2px 6px" }} title="قيد مصروف مستقل (مدين شحن محلي / دائن الناقل أو الصندوق).">تسجيل واعتماد النقل</button>
+                    <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handlePostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px", backgroundColor: "var(--aseel-primary)", color: "white", padding: "2px 6px" }} title="مدين تكلفة نقل محلي / دائن ذمم الناقل.">إثبات الاستحقاق</button>
+                  )}
+                  {Number(ls.remaining_balance ?? ls.amount) > 0 && (
+                    <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); openLocalPayment(ls); }} disabled={saving} style={{ fontSize: "11px" }}>تسجيل دفعة</button>
                   )}
                   {ls.is_posted && (
                     <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handleUnpostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }} title="يحذف قيد المصروف ويعيد السجل مسودة">تراجع عن الترحيل</button>
@@ -1517,15 +1740,30 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       </table>
       {localShipments.some((l) => !l.is_posted) && (
         <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", padding: "4px 0" }}>
-          زر «تسجيل واعتماد النقل» ينشئ قيد مصروف مستقلاً بالشحن المحلي.
+          «إثبات الاستحقاق» يدائن الناقل، و«تسجيل دفعة» يخصم من ذممه ويخرج المبلغ من الصندوق بقيد منفصل.
         </p>
+      )}
+      {payingLocalId && (
+        <div className="my-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <h5 className="mb-2 text-sm font-semibold">تسجيل دفعة للناقل · نقل #{payingLocalId}</h5>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
+            {fld("المبلغ", <input className="aseel-input" type="number" step="0.01" value={localPayAmount} onChange={(e) => setLocalPayAmount(e.target.value)} />)}
+            {fld("الصندوق", <select className="aseel-input" value={payCashBoxId} onChange={(e) => setPayCashBoxId(e.target.value)}><option value="">— اختر —</option>{cashBoxes.map((box) => <option key={box.external_id} value={box.external_id}>{box.name} ({box.currency_code})</option>)}</select>)}
+            {fld("التاريخ", <input className="aseel-input" type="date" value={localPayDate} onChange={(e) => setLocalPayDate(e.target.value)} />)}
+            {fld("ملاحظات", <input className="aseel-input" value={localPayNotes} onChange={(e) => setLocalPayNotes(e.target.value)} />)}
+          </div>
+          <div className="mt-2 flex gap-2">
+            <button type="button" className="aseel-toolbtn" onClick={() => void handlePayLocal()} disabled={saving || !payCashBoxId || Number(localPayAmount) <= 0}>تأكيد الدفعة</button>
+            <button type="button" className="aseel-toolbtn" onClick={() => setPayingLocalId(null)}>إلغاء</button>
+          </div>
+        </div>
       )}
       {localForm && (
         <div style={{ marginTop: 8, border: "1px solid var(--aseel-border, #ddd)", padding: 8, borderRadius: 4 }}>
           <h5 style={{ fontWeight: 600, marginBottom: 4, fontSize: "var(--aseel-fs-sm, 12px)" }}>
             {editingLocalId && editingLocalId > 0 ? `تعديل النقل المحلي #${editingLocalId}` : "إضافة نقل محلي جديد"}
           </h5>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "2px 8px", marginBottom: 4 }}>
+          <div className="mb-1 grid grid-cols-1 gap-x-2 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
             {fld("الناقل", carriers.length > 0 ? (
               <select className="aseel-input" value={localForm.carrier ? String(localForm.carrier) : ""} onChange={(e) => setLF({ carrier: Number(e.target.value) || 0 })}>
                 <option value="">— اختر الناقل —</option>
@@ -1538,25 +1776,26 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             ) : (
               <input className="aseel-input" type="number" placeholder="رقم الناقل (لم تُحمَّل قائمة الشركاء)" value={localForm.carrier ?? ""} onChange={(e) => setLF({ carrier: Number(e.target.value) })} />
             ))}
-            {fld("السائق", <input className="aseel-input" value={localForm.driver_name || ""} onChange={(e) => setLF({ driver_name: e.target.value })} />)}
-            {fld("المركبة", <input className="aseel-input" value={localForm.vehicle_number || ""} onChange={(e) => setLF({ vehicle_number: e.target.value })} />)}
-            {fld("من", <input className="aseel-input" value={localForm.origin || ""} onChange={(e) => setLF({ origin: e.target.value })} />)}
             {fld("إلى", <input className="aseel-input" value={localForm.destination || ""} onChange={(e) => setLF({ destination: e.target.value })} />)}
-            {fld("تاريخ التحميل", <input className="aseel-input" type="date" value={localForm.pickup_date ? String(localForm.pickup_date).slice(0, 10) : ""} onChange={(e) => setLF({ pickup_date: e.target.value })} />)}
             {fld("تاريخ التسليم", <input className="aseel-input" type="date" value={localForm.delivery_date ? String(localForm.delivery_date).slice(0, 10) : ""} onChange={(e) => setLF({ delivery_date: e.target.value })} />)}
             {fld("المبلغ", <input className="aseel-input" type="number" step="0.01" value={localForm.amount ? String(localForm.amount) : "0"} onChange={(e) => setLF({ amount: e.target.value })} />)}
-            {fld("طريقة الدفع", <select className="aseel-input" value={localForm.payment_type || "credit"} onChange={(e) => setLF({ payment_type: e.target.value as "credit" | "cash" })}>
-              <option value="credit">آجل</option>
-              <option value="cash">نقدي</option>
-            </select>)}
-            {fld("الحالة", <select className="aseel-input" value={localForm.status || "pending"} onChange={(e) => setLF({ status: e.target.value as LocalShipmentRow["status"] })}>
-              <option value="pending">قيد الانتظار</option>
-              <option value="in_transit">قيد النقل</option>
-              <option value="delivered">تم التسليم</option>
-              <option value="cancelled">ملغي</option>
-            </select>)}
-            {fld("ملاحظات", <input className="aseel-input" value={localForm.notes || ""} onChange={(e) => setLF({ notes: e.target.value })} />)}
+            {showAdvancedLocal && <>
+              {fld("السائق", <input className="aseel-input" value={localForm.driver_name || ""} onChange={(e) => setLF({ driver_name: e.target.value })} />)}
+              {fld("المركبة", <input className="aseel-input" value={localForm.vehicle_number || ""} onChange={(e) => setLF({ vehicle_number: e.target.value })} />)}
+              {fld("من", <input className="aseel-input" value={localForm.origin || ""} onChange={(e) => setLF({ origin: e.target.value })} />)}
+              {fld("تاريخ التحميل", <input className="aseel-input" type="date" value={localForm.pickup_date ? String(localForm.pickup_date).slice(0, 10) : ""} onChange={(e) => setLF({ pickup_date: e.target.value })} />)}
+              {fld("الحالة", <select className="aseel-input" value={localForm.status || "pending"} onChange={(e) => setLF({ status: e.target.value as LocalShipmentRow["status"] })}>
+                <option value="pending">قيد الانتظار</option>
+                <option value="in_transit">قيد النقل</option>
+                <option value="delivered">تم التسليم</option>
+                <option value="cancelled">ملغي</option>
+              </select>)}
+              {fld("ملاحظات", <input className="aseel-input" value={localForm.notes || ""} onChange={(e) => setLF({ notes: e.target.value })} />)}
+            </>}
           </div>
+          <button type="button" className="aseel-toolbtn" onClick={() => setShowAdvancedLocal((value) => !value)}>
+            {showAdvancedLocal ? "إخفاء تفاصيل النقل" : "إضافة تفاصيل السائق والمركبة"}
+          </button>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
             <button type="button" className="aseel-toolbtn" onClick={() => void handleSaveLocal()} disabled={saving}>
               {editingLocalId && editingLocalId > 0 ? "تحديث" : "إضافة"}
@@ -1651,28 +1890,42 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </table>
       )}
 
+      {localShipments.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border aseel-border-soft bg-[var(--color-surface-2)] px-3 py-2 text-xs">
+          <div className="flex flex-wrap gap-4">
+            <span>استحقاق النقل المحلي: <b>{fmt(localShipments.reduce((sum, row) => sum + Number(row.amount || 0), 0))} ₪</b></span>
+            <span>المدفوع للناقل: <b className="text-emerald-700">{fmt(localShipments.reduce((sum, row) => sum + Number(row.amount_paid || 0), 0))} ₪</b></span>
+            <span>المتبقي للناقل: <b className="text-amber-700">{fmt(localShipments.reduce((sum, row) => sum + Number(row.remaining_balance ?? row.amount ?? 0), 0))} ₪</b></span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="aseel-text-soft">التكلفة تدخل حصص الفواتير، أمّا الدفع للناقل فيبقى مستقلاً.</span>
+            <button type="button" className="aseel-toolbtn" onClick={() => setActiveTab("local")}>إدارة دفعات النقل</button>
+          </div>
+        </div>
+      )}
+
       {/* ── ٢) دفعات التخليص (من الصندوق) ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, borderTop: "1px solid var(--aseel-border, #ddd)", paddingTop: 8 }}>
-        <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>دفعات التخليص ({clearancePayments.length})</h4>
-        {clearance && <button type="button" className="aseel-toolbtn" onClick={() => setShowPaymentForm(!showPaymentForm)} disabled={saving}><Plus size={14} /> إضافة دفعة</button>}
+        <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>دفعات المخلّص ({clearancePayments.length})</h4>
+        {clearance && <button type="button" className="aseel-toolbtn" onClick={openClearancePayment} disabled={saving || clearanceRemaining <= 0}><Plus size={14} /> تسجيل دفعة للمخلّص</button>}
       </div>
+      {clearance && (
+        <div className="mb-2 flex flex-wrap gap-4 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+          <span>إجمالي الاستحقاق: <b>{fmt(clearanceCostTotal)} ₪</b></span>
+          <span>المدفوع: <b className="text-emerald-700">{fmt(paidClearance)} ₪</b></span>
+          <span>المتبقي: <b className="text-amber-700">{fmt(clearanceRemaining)} ₪</b></span>
+          <span className="text-slate-500">الدفع لا يغيّر مرحلة الإفراج ولا يشترط لإصدار الفاتورة الدولية.</span>
+        </div>
+      )}
       {showPaymentForm && (
         <div style={{ marginBottom: 8, border: "1px solid var(--aseel-border, #ddd)", padding: 8, borderRadius: 4 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "2px 8px", marginBottom: 4 }}>
-            {fld("المبلغ", <input className="aseel-input" type="number" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />)}
+          <div className="mb-1 grid grid-cols-1 gap-x-2 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
+            {fld(`المبلغ (المتبقي ${fmt(clearanceRemaining)} ₪)`, <input className="aseel-input" type="number" step="0.01" max={clearanceRemaining || undefined} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />)}
             {fld("الصندوق", <select className="aseel-input" value={payCashBoxId} onChange={(e) => setPayCashBoxId(e.target.value)}>
               <option value="">— اختر —</option>
               {cashBoxes.map((cb) => (
                 <option key={cb.external_id} value={cb.external_id}>{cb.name} ({cb.currency_code})</option>
               ))}
-            </select>)}
-            {fld("الغرض", <select className="aseel-input" value={payPurpose} onChange={(e) => setPayPurpose(e.target.value)}>
-              <option value="clearance_fee">رسوم تخليص</option>
-              <option value="shipping">شحن</option>
-              <option value="broker_fee">عمولة مخلِّص</option>
-              <option value="customs">جمارك</option>
-              <option value="vat">ضريبة</option>
-              <option value="other">أخرى</option>
             </select>)}
             {fld("التاريخ", <input className="aseel-input" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />)}
             {fld("ملاحظات", <input className="aseel-input" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} />)}
@@ -1682,7 +1935,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               action="تسجيل دفعة تخليص"
               warningMessage="تسجيل الدفعة يتطلب اتصالاً — يُولَّد قيد محاسبي على الـserver"
             >
-              <button type="button" className="aseel-toolbtn" onClick={() => void handleAddPayment()} disabled={saving || !payAmount || Number(payAmount) <= 0 || !payCashBoxId}>تسجيل الدفعة</button>
+              <button type="button" className="aseel-toolbtn" onClick={() => void handleAddPayment()} disabled={saving || !payAmount || Number(payAmount) <= 0 || Number(payAmount) > clearanceRemaining + 0.01 || !payCashBoxId}>تأكيد دفعة المخلّص</button>
             </OfflineGuard>
             <button type="button" className="aseel-toolbtn" onClick={() => setShowPaymentForm(false)}>إلغاء</button>
           </div>
@@ -1721,7 +1974,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const accountsContent = (
     <div style={{ padding: "4px 8px", fontSize: "var(--aseel-fs-sm, 12px)" }}>
       <div className="aseel-total-row"><span>قيد التحويل (الشحنة):</span><span><b>{s.transit_journal ? `#${s.transit_journal}` : "—"}</b></span></div>
-      <div className="aseel-total-row"><span>قيد التخليص:</span><span><b>{clearance?.journal ? `#${clearance.journal}` : "—"}</b></span></div>
+      <div className="aseel-total-row"><span>قيد استحقاق التخليص:</span><span><b>{clearance?.journal ? `#${clearance.journal}` : "—"}</b></span></div>
       <div className="aseel-total-row"><span>كشف الضريبة:</span><span><b>{clearance?.vat_statement ?? "—"}</b></span></div>
       {/* إجراءات التراجع عن الترحيل — نفس نمط فاتورة الشراء (task17) */}
       <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--aseel-border, #ddd)" }}>
@@ -1754,8 +2007,25 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     </div>
   );
 
-  const attachmentsContent = (
-    <p className="aseel-text-soft" style={{ padding: 8 }}>المرفقات (placeholder) — سَيُربط لاحقاً بـ`Attachment` polymorphic (راجع docs/decisions/attachments_model.md).</p>
+  const financialContent = (
+    <div className="space-y-3 p-2">
+      <section className="rounded-lg border border-slate-200 bg-white">
+        <h4 className="border-b border-slate-200 px-3 py-2 text-sm font-semibold">ملخص القيود وإجراءات التراجع</h4>
+        {accountsContent}
+      </section>
+      {s.id > 0 && (
+        <section className="rounded-lg border border-slate-200 bg-white">
+          <h4 className="border-b border-slate-200 px-3 py-2 text-sm font-semibold">حركات الشحنة المالية</h4>
+          <DocumentPaymentsTab referenceType="SHIPMENT" referenceId={s.id} searchQuery={s.shipment_number || ""} />
+        </section>
+      )}
+      {clearance?.id && (
+        <section className="rounded-lg border border-slate-200 bg-white">
+          <h4 className="border-b border-slate-200 px-3 py-2 text-sm font-semibold">حركات التخليص المالية</h4>
+          <DocumentPaymentsTab referenceType="CLEARANCE" referenceId={clearance.id} searchQuery={clearance.declaration_number || ""} />
+        </section>
+      )}
+    </div>
   );
 
   const notesContent = (
@@ -1768,56 +2038,29 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   );
 
   const tabsConfig: AseelTab[] = [
-    { key: "deals", label: "الصفقات", content: dealsContent },
+    { key: "deals", label: "الصفقات والشحن", content: dealsContent },
     { key: "clearance", label: "التخليص", content: clearanceContent },
     { key: "local", label: "النقل المحلي", content: localContent },
-    { key: "payments", label: "الدفعات والمراحل", content: paymentsContent },
-    ...(s.id ? [{
-      key: "financial_movements",
-      label: "الحركات المالية المرتبطة",
-      content: (
-        <DocumentPaymentsTab 
-          referenceType="SHIPMENT" 
-          referenceId={s.id} 
-          searchQuery={s.shipment_number || ""}
-        />
-      ),
-    }] : []),
-    ...(clearance?.id ? [{
-      key: "clearance_financial_movements",
-      label: "حركات التخليص المالية",
-      content: (
-        <DocumentPaymentsTab 
-          referenceType="CLEARANCE" 
-          referenceId={clearance.id} 
-          searchQuery={clearance.declaration_number || ""}
-        />
-      ),
-    }] : []),
-    { key: "accounts", label: "الحسابات", content: accountsContent },
-    { key: "attachments", label: "المرفقات", content: attachmentsContent },
+    { key: "payments", label: "الدفعات", content: paymentsContent },
+    { key: "financial", label: "السجل المالي", content: financialContent },
     { key: "notes", label: "ملاحظات", content: notesContent },
   ];
 
   const toolbarActions: AseelToolbarAction[] = [
     { key: "save", label: "تخزين (F12)", icon: <Save />, onClick: () => void handleSaveShipment(), disabled: !isShipmentDirty || saving },
     {
-      key: "to-invoice", label: "تحويل إلى فاتورة شراء", icon: <FileText />,
+      key: "to-invoice", label: allDealsConverted ? `فتح الفاتورة #${convertedPiId}` : remainingDealsCount < shipmentDeals.length ? `إنشاء الفواتير المتبقية (${remainingDealsCount})` : "إنشاء الفاتورة الدولية", icon: <FileText />,
       onClick: () => {
-        if (convertedPiId) {
+        if (allDealsConverted && convertedPiId) {
           window.open(`/purchase-invoices/${convertedPiId}`, "_blank");
         } else if (shipment?.id) {
           // كان يفتح /purchase-invoices/new?shipment= ولا أحد يقرأ البارامتر (T12-A4)
           // — الآن يفتح مودال «استيراد من تخليص جمركي» مسبق الاختيار على هذه الشحنة.
-          window.open(`/purchase-invoices?import_shipment=${shipment.id}`, "_blank");
+          window.open(`/international-invoices?import_shipment=${shipment.id}`, "_blank");
         }
       },
-      disabled: !shipment?.id || shipment?.shipment_type === "transport" || saving || (!convertedPiId && !clearance),
+      disabled: !shipment?.id || shipment?.shipment_type === "transport" || saving || (!allDealsConverted && (!clearance || !freightFullyPaid || clearanceCostTotal <= 0)),
     },
-    ...(convertedPiId ? [{
-      key: "view-pi", label: `فاتورة #${convertedPiId}`, icon: <FileText />,
-      onClick: () => window.open(`/purchase-invoices/${convertedPiId}`, "_blank"),
-    }] : []),
     ...(onClose ? [{ key: "back", label: "رجوع", onClick: onClose }] : []),
   ];
 
@@ -1849,8 +2092,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     },
     {
       key: "clearance", label: "٤. التخليص الجمركي",
-      sub: clearance ? `بيان ${clearance.declaration_number || `#${clearance.id}`}` : "أنشئ سجل التخليص وسجّل بنوده",
-      state: clearance ? "done" : "todo",
+      sub: !clearance
+        ? "أنشئ سجل التخليص وسجّل بنوده"
+        : clearanceCostTotal > 0
+          ? `بيان ${clearance.declaration_number || `#${clearance.id}`} · ${fmt(clearanceCostTotal)} ₪`
+          : "سجل التخليص موجود وينقصه إدخال التكلفة",
+      state: clearance && clearanceCostTotal > 0 ? "done" : "todo",
       onClick: () => setActiveTab("clearance"),
     },
     {
@@ -1861,58 +2108,105 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     },
     {
       key: "invoice", label: "٦. الفواتير الدولية",
-      sub: convertedPiId
-        ? `فاتورة #${convertedPiId} — افتحها`
+      sub: allDealsConverted
+        ? `${convertedInvoices.length} فاتورة — اكتمل تحويل كل الصفقات`
+        : convertedInvoices.length > 0
+          ? `${convertedInvoices.length} فاتورة منشأة · بقيت ${remainingDealsCount} صفقة`
         : !clearance
           ? "تتطلب التخليص أولاً"
+          : clearanceCostTotal <= 0
+            ? "أدخل تكلفة التخليص أولاً"
           : !freightFullyPaid
             ? "أكمل دفع الشحن ثم أنشئها"
-            : "فاتورة (شيكل) لكل صفقة مضمومة",
-      state: convertedPiId ? "done" : "todo",
+            : "جاهزة — لا يشترط دفع التخليص أو النقل المحلي",
+      state: allDealsConverted ? "done" : "todo",
       onClick: () => {
-        if (convertedPiId) {
+        if (allDealsConverted && convertedPiId) {
           window.open(`/purchase-invoices/${convertedPiId}`, "_blank");
         } else if (!clearance) {
+          setActiveTab("clearance");
+        } else if (clearanceCostTotal <= 0) {
           setActiveTab("clearance");
         } else if (!freightFullyPaid) {
           setActiveTab("payments");
         } else if (shipment?.id) {
-          window.open(`/purchase-invoices?import_shipment=${shipment.id}`, "_blank");
+          window.open(`/international-invoices?import_shipment=${shipment.id}`, "_blank");
         }
       },
     },
   ];
 
-  const stepStyles = (st: "done" | "todo" | "optional"): React.CSSProperties => ({
-    textAlign: "right",
-    border: `1px solid ${st === "done" ? "var(--aseel-ok, #267346)" : st === "todo" ? "var(--aseel-warn, #b45309)" : "var(--aseel-border, #ccc)"}`,
-    background: st === "done" ? "rgba(38, 115, 70, 0.08)" : "transparent",
-    color: "var(--aseel-ink, inherit)",
-    borderRadius: 6,
-    padding: "3px 8px",
-    cursor: "pointer",
-    minWidth: 110,
-    lineHeight: 1.35,
-  });
+  const guidanceJourneyKey: Record<ImportJourneyAction, string> = {
+    save_shipment: "ship",
+    link_deals: "deals",
+    set_freight: "freight",
+    pay_freight: "freight",
+    create_clearance: "clearance",
+    enter_clearance_costs: "clearance",
+    manage_local_transport: "local",
+    create_invoice: "invoice",
+    view_invoice: "invoice",
+  };
+
+  const guidancePanel = (
+    <div className="m-2 rounded-xl border border-blue-200 bg-gradient-to-l from-blue-50 to-white p-4 shadow-sm">
+      <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+        <div>
+          <span className="text-xs font-semibold text-blue-700">الخطوة التالية · {guidance.step} من 6</span>
+          <h3 className="mt-1 text-base font-bold text-slate-900">{guidance.title}</h3>
+          <p className="mt-1 text-sm text-slate-600">{guidance.description}</p>
+        </div>
+        <button
+          type="button"
+          className="aseel-toolbtn shrink-0 bg-blue-700 px-4 py-2 font-semibold text-white hover:bg-blue-800"
+          onClick={() => executeGuidanceAction(guidance.action)}
+          disabled={saving}
+        >
+          {guidance.actionLabel}
+        </button>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2 border-t border-blue-100 pt-3 text-xs">
+        <span className={`rounded-full px-3 py-1 font-medium ${freightFullyPaid ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+          الشحن الدولي: {freightFullyPaid ? "مكتمل" : `$${fmt(freightPaidUsd)} من $${fmt(freightTotalUsd)}`}
+        </span>
+        <span className={`rounded-full px-3 py-1 font-medium ${clearanceCostTotal > 0 ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}`}>
+          التخليص: {clearanceCostTotal > 0 ? `${fmt(clearanceCostTotal)} ₪` : "بانتظار التكلفة"}
+        </span>
+        <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-600">النقل المحلي: اختياري</span>
+      </div>
+    </div>
+  );
 
   const journeyStrip = (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "stretch", padding: "6px 8px", borderBottom: "1px solid var(--aseel-border, #ddd)" }}>
+    <div className="grid grid-cols-2 gap-1 border-b border-slate-200 px-2 pb-2 sm:grid-cols-3 xl:grid-cols-6">
       {journeySteps.map((st) => (
         <button
           key={st.key}
           type="button"
           onClick={st.onClick}
           disabled={!st.onClick}
-          style={stepStyles(st.state)}
+          className={`rounded-lg border px-2 py-2 text-right text-xs transition-colors ${
+            guidanceJourneyKey[guidance.action] === st.key
+              ? "border-blue-500 bg-blue-50 text-blue-900 ring-1 ring-blue-200"
+              : st.state === "done"
+                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                : "border-slate-200 bg-white text-slate-600"
+          }`}
           title={st.sub}
         >
-          <span style={{ display: "block", fontWeight: 700, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+          <span className="block font-semibold">
             {st.state === "done" ? "✓" : st.state === "optional" ? "○" : "●"} {st.label}
           </span>
-          <span className="aseel-text-soft" style={{ display: "block", fontSize: 11 }}>{st.sub}</span>
         </button>
       ))}
     </div>
+  );
+
+  const routeTimeline = (
+    <details className="mx-2 mb-2 rounded-lg border border-slate-200 bg-white text-xs">
+      <summary className="cursor-pointer px-3 py-2 font-semibold text-slate-700">عرض مسار حركة الشحنة والميناء</summary>
+      <CompactTimeline steps={timelineSteps} />
+    </details>
   );
 
   return (
@@ -1935,8 +2229,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         totals={totals}
         status={statusBar}
       >
+        {guidancePanel}
         {journeyStrip}
-        <CompactTimeline steps={timelineSteps} />
+        {routeTimeline}
       </AseelDocumentShell>
       {quickAddType && (
         <div

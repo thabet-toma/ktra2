@@ -8,7 +8,7 @@
  *   كحقول optional (يَتم تجاهلها إذا backend لا يَدعمها).
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { apiDelete, apiGetList, apiPatchObject, apiPostObject } from "../../services/restApi";
+import { apiDelete, apiGetList, apiGetPagedList, apiPatchObject, apiPostObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { Plus, Pencil, Trash2, RefreshCw, Save, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -41,7 +41,7 @@ type PartnerApi = {
   // N8-T8 fields (optional from backend)
   default_cost_center?: number | null;
   end_of_dealing_date?: string | null;
-  assigned_price_tier?: string | null;
+  assigned_price_tier?: number | null;
 };
 
 type CurrRow = { CurrencyID: number; Code: string; Name?: string | null };
@@ -49,10 +49,10 @@ type CostCenterRow = { id: number; name: string };
 
 const PRICE_TIERS = [
   { v: "", l: "—" },
-  { v: "retail", l: "تجزئة" },
-  { v: "wholesale", l: "جملة" },
-  { v: "distributor", l: "موزّع" },
-  { v: "vip", l: "VIP" },
+  { v: "1", l: "تجزئة" },
+  { v: "2", l: "جملة" },
+  { v: "3", l: "موزّع" },
+  { v: "4", l: "VIP" },
 ];
 
 const emptyForm = () => ({
@@ -89,6 +89,9 @@ export const SalesCustomersPage: React.FC = () => {
   const [search, setSearch] = useState("");
   const [filterTier, setFilterTier] = useState("");
   const [selectedKey, setSelectedKey] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const pageSize = 50;
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -97,44 +100,40 @@ export const SalesCustomersPage: React.FC = () => {
 
   const tenantId = useMemo(() => resolveTenantId(), []);
 
-  const load = useCallback(async () => {
+  const loadRows = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
-      const [all, cur, cc] = await Promise.allSettled([
-        apiGetList<PartnerApi>("partners/", { tenantId }),
-        apiGetList<CurrRow>("accounting/currencies/", { tenantId }),
-        apiGetList<CostCenterRow>("accounting/cost-centers/", { tenantId }),
-      ]);
-      if (all.status === "fulfilled") {
-        setRows(all.value.filter((p) => p.partner_type === "Customer"));
-      }
-      if (cur.status === "fulfilled") setCurrencies(cur.value);
-      if (cc.status === "fulfilled") setCostCenters(cc.value);
-      if (all.status === "rejected") {
-        setErr(all.reason instanceof Error ? all.reason.message : "فشل التحميل");
-      }
+      const result = await apiGetPagedList<PartnerApi>("partners/", {
+        tenantId,
+        query: {
+          page, page_size: pageSize, partner_type: "Customer",
+          search: search.trim() || undefined,
+          assigned_price_tier: filterTier || undefined,
+        },
+      });
+      setRows(result.results);
+      setTotal(result.count);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
     } finally {
       setLoading(false);
     }
+  }, [filterTier, page, search, tenantId]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void loadRows(); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [loadRows]);
+
+  useEffect(() => {
+    void Promise.allSettled([
+      apiGetList<CurrRow>("accounting/currencies/", { tenantId }).then(setCurrencies),
+      apiGetList<CostCenterRow>("accounting/cost-centers/", { tenantId }).then(setCostCenters),
+    ]);
   }, [tenantId]);
 
-  useEffect(() => { void load(); }, [load]);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (filterTier && r.assigned_price_tier !== filterTier) return false;
-      if (!q) return true;
-      const blob = [r.name, r.phone, r.email, r.city, r.tax_number, r.legal_name]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return blob.includes(q);
-    });
-  }, [rows, search, filterTier]);
+  const filtered = rows;
 
   const openNew = () => {
     setEditingId(null);
@@ -161,7 +160,7 @@ export const SalesCustomersPage: React.FC = () => {
       currency: p.currency ?? "",
       default_cost_center: p.default_cost_center ?? "",
       end_of_dealing_date: p.end_of_dealing_date || "",
-      assigned_price_tier: p.assigned_price_tier || "",
+      assigned_price_tier: p.assigned_price_tier != null ? String(p.assigned_price_tier) : "",
     });
     setModalOpen(true);
     setErr(null);
@@ -222,7 +221,7 @@ export const SalesCustomersPage: React.FC = () => {
         setMsg("تم إضافة العميل.");
       }
       setModalOpen(false);
-      await load();
+      await loadRows();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحفظ");
     } finally {
@@ -236,7 +235,7 @@ export const SalesCustomersPage: React.FC = () => {
     try {
       await apiDelete(`partners/${p.id}/`, { tenantId });
       setMsg("تم الحذف.");
-      await load();
+      await loadRows();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحذف");
     }
@@ -273,7 +272,7 @@ export const SalesCustomersPage: React.FC = () => {
       align: "center",
       render: (r) => (
         <span className="text-xs" style={{ color: "var(--aseel-ink-soft)" }}>
-          {PRICE_TIERS.find((t) => t.v === r.assigned_price_tier)?.l || "—"}
+          {PRICE_TIERS.find((t) => t.v === String(r.assigned_price_tier ?? ""))?.l || "—"}
         </span>
       ),
     },
@@ -331,12 +330,12 @@ export const SalesCustomersPage: React.FC = () => {
           data-aseel-field="search"
           placeholder="بحث... (F6)"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
         />
       </label>
       <label className="aseel-field" style={{ minWidth: "120px" }}>
         <span className="aseel-field-label">فئة السعر</span>
-        <select className="aseel-input" value={filterTier} onChange={(e) => setFilterTier(e.target.value)}>
+        <select className="aseel-input" value={filterTier} onChange={(e) => { setFilterTier(e.target.value); setPage(1); }}>
           <option value="">الكل</option>
           {PRICE_TIERS.filter((t) => t.v).map((t) => (
             <option key={t.v} value={t.v}>{t.l}</option>
@@ -352,7 +351,7 @@ export const SalesCustomersPage: React.FC = () => {
       key: "refresh",
       label: "تحديث",
       icon: <RefreshCw className={loading ? "animate-spin" : ""} />,
-      onClick: () => void load(),
+      onClick: () => void loadRows(),
       separatorBefore: true,
     },
   ];
@@ -375,6 +374,7 @@ export const SalesCustomersPage: React.FC = () => {
             selectedKey={selectedKey}
             onSelect={(k) => setSelectedKey(k as number | null)}
             onRowDoubleClick={(r) => openEdit(r)}
+            pagination={{ page, pageSize, total, onChange: setPage }}
           />
         </div>
       ),
@@ -385,13 +385,13 @@ export const SalesCustomersPage: React.FC = () => {
     <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title="عملاء المبيعات"
-        state={loading ? "جاري التحميل…" : `${filtered.length} من ${rows.length}`}
+        state={loading ? "جاري التحميل…" : `${filtered.length} في الصفحة من ${total}`}
         actions={toolbarActions}
         header={filterBar}
         tabs={tabs}
         status={
           <span className="aseel-status-item">
-            عميل <b>{filtered.length}</b>
+            عميل <b>{total}</b>
           </span>
         }
       />

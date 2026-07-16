@@ -41,6 +41,19 @@ interface InvoiceListProps {
   onImport?: () => void;
   /** إعادة تحميل القائمة. */
   onRefresh?: () => void;
+  page?: number;
+  pageSize?: number;
+  total?: number;
+  onPageChange?: (page: number) => void;
+  onFiltersChange?: (filters: InvoiceListFilters) => void;
+}
+
+export interface InvoiceListFilters {
+  search: string;
+  status: string;
+  kind: "all" | "invoice" | "return";
+  dateFrom: string;
+  dateTo: string;
 }
 
 const STATUS_OPTIONS = [
@@ -63,6 +76,11 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   onCreateNew,
   onImport,
   onRefresh,
+  page = 1,
+  pageSize = 50,
+  total = invoices.length,
+  onPageChange,
+  onFiltersChange,
 }) => {
   const navigate = useNavigate();
   const confirm = useConfirm();
@@ -75,6 +93,17 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+  const publishFilters = (patch: Partial<InvoiceListFilters>) => {
+    onFiltersChange?.({
+      search,
+      status: filterStatus,
+      kind: filterKind,
+      dateFrom,
+      dateTo,
+      ...patch,
+    });
+  };
 
   const grandOf = (invoice: Invoice): number => {
     const itemsTotal = (invoice.items || []).reduce((sum, it) => {
@@ -287,7 +316,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           data-aseel-field="search"
           placeholder="بحث... (F6)"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); publishFilters({ search: e.target.value }); }}
         />
       </label>
       <label className="aseel-field" style={{ minWidth: "110px" }}>
@@ -295,7 +324,11 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         <select
           className="aseel-input"
           value={filterKind}
-          onChange={(e) => setFilterKind(e.target.value as "all" | "invoice" | "return")}
+          onChange={(e) => {
+            const value = e.target.value as "all" | "invoice" | "return";
+            setFilterKind(value);
+            publishFilters({ kind: value });
+          }}
         >
           <option value="all">الكل</option>
           <option value="invoice">فواتير الشراء</option>
@@ -304,17 +337,17 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       </label>
       <label className="aseel-field" style={{ minWidth: "100px" }}>
         <span className="aseel-field-label">الحالة</span>
-        <select className="aseel-input" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+        <select className="aseel-input" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); publishFilters({ status: e.target.value }); }}>
           {STATUS_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
         </select>
       </label>
       <label className="aseel-field">
         <span className="aseel-field-label">من تاريخ</span>
-        <input type="date" className="aseel-input" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+        <input type="date" className="aseel-input" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); publishFilters({ dateFrom: e.target.value }); }} />
       </label>
       <label className="aseel-field">
         <span className="aseel-field-label">إلى تاريخ</span>
-        <input type="date" className="aseel-input" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+        <input type="date" className="aseel-input" value={dateTo} onChange={(e) => { setDateTo(e.target.value); publishFilters({ dateTo: e.target.value }); }} />
       </label>
     </div>
   );
@@ -343,7 +376,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
     <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title="فواتير الشراء"
-        state={`${filteredRows.length} من ${invoices.filter((i) => !i.isHistorical).length}`}
+        state={`${filteredRows.length} في الصفحة من ${total}`}
         actions={toolbarActions}
         header={filterBar}
         status={
@@ -366,6 +399,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             onSelect={(k) => setSelectedKey(k as string | null)}
             onRowClick={(r) => onEdit(r)}
             onRowDoubleClick={(r) => onEdit(r)}
+            pagination={onPageChange ? { page, pageSize, total, onChange: onPageChange } : undefined}
           />
         </div>
       </AseelDocumentShell>

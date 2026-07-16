@@ -2,6 +2,7 @@ import json
 import logging
 
 from django.core.files.storage import default_storage
+from django.db.models import Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -11,7 +12,7 @@ from core.api_defaults import ApiAuthAndUser
 from core.tenant_utils import get_tenant
 from tenants.models import Tenant
 from .models import CustomerNote, Partner, PartnerBankAccount
-from .serializers import CustomerNoteSerializer, PartnerSerializer
+from .serializers import CustomerNoteSerializer, PartnerListSerializer, PartnerSerializer
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,11 @@ class PartnerViewSet(viewsets.ModelViewSet):
     queryset = Partner.objects.all().order_by('-created_at')
     serializer_class = PartnerSerializer
     search_fields = ['name', 'legal_name', 'email', 'phone', 'tax_number']
+
+    def get_serializer_class(self):
+        if self.action in {"list", "lookup"}:
+            return PartnerListSerializer
+        return PartnerSerializer
 
     def _get_tenant(self):
         return get_tenant(self.request)
@@ -156,7 +162,34 @@ class PartnerViewSet(viewsets.ModelViewSet):
         tenant = self._get_tenant()
         if not tenant:
             return Partner.objects.none()
-        return super().get_queryset().filter(tenant=tenant)
+        qs = super().get_queryset().filter(tenant=tenant)
+        partner_type = self.request.query_params.get("partner_type")
+        if partner_type:
+            qs = qs.filter(partner_type=partner_type)
+        assigned_price_tier = self.request.query_params.get("assigned_price_tier")
+        if assigned_price_tier:
+            qs = qs.filter(assigned_price_tier=assigned_price_tier)
+        search = self.request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(
+                Q(name__icontains=search)
+                | Q(legal_name__icontains=search)
+                | Q(email__icontains=search)
+                | Q(phone__icontains=search)
+                | Q(tax_number__icontains=search)
+            )
+        return qs
+
+    @action(detail=False, methods=["get"], url_path="lookup")
+    def lookup(self, request):
+        """Bounded raw-array contract for pickers that do not render pages."""
+        try:
+            limit = int(request.query_params.get("limit", 200))
+        except (TypeError, ValueError):
+            limit = 200
+        limit = min(max(limit, 1), 500)
+        rows = self.get_queryset().order_by("name", "id")[:limit]
+        return Response(self.get_serializer(rows, many=True).data)
 
     def _handle_bank_accounts(self, partner, bank_accounts_data, tenant):
         """

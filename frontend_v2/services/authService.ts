@@ -1,4 +1,8 @@
 import { User } from "../types";
+import { apiFetch } from "./restApi";
+
+// المصادقة أيضاً يجب ألا تترك شاشة الدخول/الحفظ منتظرة بلا حد.
+const fetch = apiFetch;
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 

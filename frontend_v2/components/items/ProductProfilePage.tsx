@@ -24,6 +24,9 @@ interface ProductProfile {
   purchased_value: string;
   sold_qty: string;
   sold_value: string;
+  // W8: معدّلات البيع (من StockMovement) — أسبوعي 28ي÷4 · شهري 90ي÷3.
+  avg_weekly_sales?: string;
+  avg_monthly_sales?: string;
 }
 
 interface LedgerRow {
@@ -185,6 +188,9 @@ export const ProductProfilePage: React.FC = () => {
               <Kpi label="إجمالي المشتراة (قيمة)" value={formatMoney(profile.purchased_value, '—')} />
               <Kpi label="إجمالي المباعة (كمية)" value={formatQuantity(profile.sold_qty, '—')} />
               <Kpi label="إجمالي المباعة (قيمة)" value={formatMoney(profile.sold_value, '—')} />
+              {/* W8: معدّلات البيع من StockMovement (بعد خصم المرتجعات). */}
+              <Kpi label="متوسط البيع الأسبوعي (28ي÷4)" value={formatQuantity(profile.avg_weekly_sales ?? '', '—')} />
+              <Kpi label="متوسط البيع الشهري (90ي÷3)" value={formatQuantity(profile.avg_monthly_sales ?? '', '—')} />
               <Kpi label="التصنيف" value={profile.category || '—'} />
               <Kpi label="SKU" value={profile.sku} />
             </>

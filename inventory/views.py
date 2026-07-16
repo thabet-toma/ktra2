@@ -2,7 +2,8 @@ import datetime
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
-from django.db.models import F
+from django.db.models import F, Sum, Q, Value, DecimalField
+from django.db.models.functions import Coalesce
 from rest_framework import filters, serializers, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -11,7 +12,7 @@ from .models import (
     WarehouseTransfer, Stocktake,
 )
 from .serializers import (
-    CategorySerializer, ProductSerializer, UnitOfMeasureSerializer,
+    CategorySerializer, ProductSerializer, ProductLookupSerializer, UnitOfMeasureSerializer,
     StockMovementSerializer, WarehouseSerializer,
     WarehouseTransferSerializer, StocktakeSerializer,
 )
@@ -45,6 +46,25 @@ class CategoryViewSet(viewsets.ModelViewSet):
         tenant = get_tenant(self.request) 
         serializer.save(tenant=tenant)
 
+    def list(self, request, *args, **kwargs):
+        """Build the recursive tree from one flat tenant query (no recursive N+1)."""
+        queryset = list(self.filter_queryset(self.get_queryset()))
+        tenant = get_tenant(request)
+        # root_only still needs descendants to render its nested children.
+        all_categories = (
+            list(ProductCategory.objects.filter(tenant=tenant).order_by('name'))
+            if tenant and request.query_params.get('root_only') == 'true'
+            else queryset
+        )
+        child_map = {}
+        for category in all_categories:
+            if category.parent_id:
+                child_map.setdefault(category.parent_id, []).append(category)
+        context = self.get_serializer_context()
+        context['category_children'] = child_map
+        serializer = self.get_serializer(queryset, many=True, context=context)
+        return Response(serializer.data)
+
 class UnitOfMeasureViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = UnitOfMeasure.objects.filter(is_active=True)
     serializer_class = UnitOfMeasureSerializer
@@ -61,6 +81,11 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def _get_tenant(self):
         return get_tenant(self.request)
+
+    def get_serializer_class(self):
+        if self.action == 'list' and self.request.query_params.get('view') == 'lookup':
+            return ProductLookupSerializer
+        return ProductSerializer
 
     def get_queryset(self):
         # task11 M7: الأصناف كانت بلا فلترة tenant في القراءة —
@@ -95,7 +120,63 @@ class ProductViewSet(viewsets.ModelViewSet):
                 min_stock_level__gt=0,
                 quantity_on_hand__lte=F('min_stock_level'),
             )
+        # محددات الأصناف في الفواتير/الصفقات لا تعرض التحليلات؛ تجنّب ثلاث
+        # aggregations على جدول الحركات الكبير عند طلب view=lookup. عقد القائمة
+        # الكامل يبقى كما هو افتراضياً لجدول إدارة الأصناف.
+        if params.get('view') == 'lookup':
+            return qs
+
+        # W8: تجميعات محسوبة من StockMovement (المصدر الوحيد) — منقّطة، لا N+1.
+        # الوارد التراكمي (المشتريات) = مجموع حركات IN. متوسط المبيعات الشهري = صافي
+        # (OUT − RETURN_IN) خلال آخر 90 يوماً ÷ 3 (يُحسب في السيريالايزر من المجاميع).
+        cutoff_90 = datetime.date.today() - datetime.timedelta(days=90)
+        _zero = Value(Decimal('0'), output_field=DecimalField(max_digits=18, decimal_places=4))
+        qs = qs.annotate(
+            purchased_qty=Coalesce(
+                Sum('stock_movements__quantity',
+                    filter=Q(stock_movements__movement_type='IN')), _zero),
+            sold_qty_90d=Coalesce(
+                Sum('stock_movements__quantity',
+                    filter=Q(stock_movements__movement_type='OUT',
+                             stock_movements__movement_date__gte=cutoff_90)), _zero),
+            returned_qty_90d=Coalesce(
+                Sum('stock_movements__quantity',
+                    filter=Q(stock_movements__movement_type='RETURN_IN',
+                             stock_movements__movement_date__gte=cutoff_90)), _zero),
+        )
         return qs
+
+    def list(self, request, *args, **kwargs):
+        """Serialize attachments in one tenant-scoped query instead of one per row."""
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        products = list(page if page is not None else queryset)
+
+        attachment_map = {product.id: [] for product in products}
+        if products:
+            try:
+                from core.models import SystemAttachment
+                rows = SystemAttachment.objects.filter(
+                    tenant=self._get_tenant(),
+                    related_table='products',
+                    related_id__in=attachment_map,
+                )
+                for attachment in rows:
+                    attachment_map.setdefault(attachment.related_id, []).append({
+                        'id': attachment.id,
+                        'file_path': attachment.file_path,
+                        'file_type': attachment.file_type,
+                    })
+            except Exception:
+                # Legacy deployments may not have the unmanaged attachment table.
+                pass
+
+        context = self.get_serializer_context()
+        context['product_attachments'] = attachment_map
+        serializer = self.get_serializer(products, many=True, context=context)
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
 
     def _handle_attachments(self, product, data, tenant):
         from core.models import SystemAttachment
@@ -438,11 +519,19 @@ class StockMovementViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         data = request.data
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response(
+                {'error': 'الشركة غير محددة'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         product_id = data.get('product')
         if not product_id:
             return Response({'error': 'المنتج مطلوب'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            product = Product.objects.get(pk=product_id)
+            # لا تحل المنتج بالـ PK وحده: تمرير معرّف شركة أخرى كان يسمح
+            # بتعديل رصيدها من خلال هذا المسار اليدوي.
+            product = Product.objects.get(pk=product_id, tenant=tenant)
         except Product.DoesNotExist:
             return Response({'error': 'المنتج غير موجود'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -461,7 +550,9 @@ class StockMovementViewSet(viewsets.ModelViewSet):
         partner = None
         if partner_id:
             from partners.models import Partner
-            partner = Partner.objects.filter(pk=partner_id).first()
+            partner = Partner.objects.filter(pk=partner_id, tenant=tenant).first()
+            if partner is None:
+                return Response({'error': 'الشريك غير موجود'}, status=status.HTTP_404_NOT_FOUND)
 
         try:
             mv = record_stock_movement(
@@ -474,6 +565,7 @@ class StockMovementViewSet(viewsets.ModelViewSet):
                 partner=partner,
                 movement_date=movement_date,
                 notes=data.get('notes', ''),
+                tenant=tenant,
             )
             return Response(
                 StockMovementSerializer(mv).data,
@@ -484,8 +576,15 @@ class StockMovementViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'], url_path='summary')
     def summary(self, request):
-        from django.db.models import Sum, Count, Q
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({
+                'products': [],
+                'total_inventory_value': 0,
+                'total_products_in_stock': 0,
+            })
         products = Product.objects.filter(
+            tenant=tenant,
             quantity_on_hand__gt=0
         ).order_by('-quantity_on_hand')[:50]
         result = []

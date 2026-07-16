@@ -74,8 +74,11 @@ async function cacheFirst(request: Request, cacheName: string): Promise<Response
   if (cached) return cached;
   try {
     const response = await fetch(request);
-    const cache = await caches.open(cacheName);
-    cache.put(request, response.clone());
+    // لا تحفظ 4xx/5xx كأنها أصل صالح للأوفلاين.
+    if (response.ok) {
+      const cache = await caches.open(cacheName);
+      await cache.put(request, response.clone());
+    }
     return response;
   } catch {
     const fallback = await caches.match('/offline.html');
@@ -85,13 +88,16 @@ async function cacheFirst(request: Request, cacheName: string): Promise<Response
 }
 
 async function networkFirst(request: Request, cacheName: string, timeoutSeconds: number): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
   try {
-    const timeout = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('timeout')), timeoutSeconds * 1000)
-    );
-    const response = await Promise.race([fetch(request), timeout]);
-    const cache = await caches.open(cacheName);
-    cache.put(request, response.clone());
+    // Promise.race القديمة كانت تسقط للكاش بعد 8 ثوانٍ لكن تترك fetch الحقيقي
+    // يعمل في الخلفية. AbortController يحدّ العملية نفسها ويحرر الاتصال.
+    const response = await fetch(request, { signal: controller.signal });
+    if (response.ok) {
+      const cache = await caches.open(cacheName);
+      await cache.put(request, response.clone());
+    }
     return response;
   } catch {
     const cached = await caches.match(request);
@@ -99,6 +105,8 @@ async function networkFirst(request: Request, cacheName: string, timeoutSeconds:
     const fallback = await caches.match('/offline.html');
     if (fallback) return fallback;
     return new Response('Offline', { status: 503 });
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

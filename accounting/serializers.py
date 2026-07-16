@@ -18,17 +18,20 @@ class AccountSerializer(serializers.ModelSerializer):
         ]
 
     def get_linked_partner(self, obj):
-        p = (
-            Partner.objects.filter(linked_account_id=obj.id)
-            .values('id', 'name', 'legal_name')
-            .first()
-        )
+        prefetched = getattr(obj, '_api_linked_partners', None)
+        if prefetched is not None:
+            p = prefetched[0] if prefetched else None
+        else:
+            # توافق مع استخدام AccountSerializer منفرداً خارج AccountViewSet.
+            p = Partner.objects.filter(
+                tenant_id=obj.tenant_id, linked_account_id=obj.id,
+            ).only('id', 'name', 'legal_name').first()
         if not p:
             return None
         return {
-            'id': p['id'],
-            'trade_name': p['name'] or '',
-            'legal_name': p['legal_name'] or '',
+            'id': p.id,
+            'trade_name': p.name or '',
+            'legal_name': p.legal_name or '',
         }
 
 class CostCenterSerializer(serializers.ModelSerializer):
@@ -77,8 +80,12 @@ def _resolve_logistics_payment(rid, pay_map=None):
     return p
 
 
-def build_journal_reference_summary(obj, pay_map=None):
-    """ملخص مرجع القيد: رقم الصفقة + اسم المصنع + المورد + رقم الدفعة."""
+def build_journal_reference_summary(obj, pay_map=None, sales_map=None, cust_map=None):
+    """ملخص مرجع القيد: رقم الصفقة + اسم المصنع + المورد + رقم الدفعة.
+
+    perf: sales_map/cust_map (اختياريان) يُمرّران من قائمة القيود لتفادي N+1 —
+    استعلام لكل صف SALES_INVOICE/CUSTOMER_PAYMENT. عند غيابهما يسقط لاستعلام مفرد
+    (للاستهلاك المفرد للـserializer خارج القائمة). نفس نمط pay_map."""
     rt = (obj.reference_type or "").strip()
     rid = obj.reference_id
 
@@ -135,8 +142,10 @@ def build_journal_reference_summary(obj, pay_map=None):
 
     if rt == "SALES_INVOICE" and rid:
         try:
-            from sales.models import SalesInvoice
-            inv = SalesInvoice.objects.select_related("customer").filter(pk=rid).first()
+            inv = (sales_map or {}).get(rid)
+            if inv is None and not sales_map:
+                from sales.models import SalesInvoice
+                inv = SalesInvoice.objects.select_related("customer").filter(pk=rid).first()
             if inv:
                 cust = getattr(inv.customer, "name", "") or ""
                 return f"فاتورة مبيعات {inv.invoice_number}" + (f" — {cust}" if cust else "")
@@ -149,8 +158,10 @@ def build_journal_reference_summary(obj, pay_map=None):
 
     if rt == "CUSTOMER_PAYMENT" and rid:
         try:
-            from sales.models import CustomerPayment
-            pay = CustomerPayment.objects.select_related("partner").filter(pk=rid).first()
+            pay = (cust_map or {}).get(rid)
+            if pay is None and not cust_map:
+                from sales.models import CustomerPayment
+                pay = CustomerPayment.objects.select_related("partner").filter(pk=rid).first()
             if pay:
                 name = getattr(pay.partner, "name", "") or ""
                 return f"تحصيل عميل · دفعة #{pay.pk}" + (f" — {name}" if name else "")
@@ -234,7 +245,12 @@ class JournalHeaderListSerializer(serializers.ModelSerializer):
         return obj.currency.Code if obj.currency_id else None
 
     def get_reference_summary(self, obj):
-        return build_journal_reference_summary(obj, self.context.get("logistics_payments"))
+        return build_journal_reference_summary(
+            obj,
+            self.context.get("logistics_payments"),
+            sales_map=self.context.get("sales_invoices"),
+            cust_map=self.context.get("customer_payments"),
+        )
 
     def get_deal_ref_number(self, obj):
         return get_deal_ref_number(obj, self.context.get("logistics_payments"))
@@ -277,7 +293,12 @@ class JournalHeaderSerializer(serializers.ModelSerializer):
         return obj.currency.Code if obj.currency_id else None
 
     def get_reference_summary(self, obj):
-        return build_journal_reference_summary(obj, self.context.get("logistics_payments"))
+        return build_journal_reference_summary(
+            obj,
+            self.context.get("logistics_payments"),
+            sales_map=self.context.get("sales_invoices"),
+            cust_map=self.context.get("customer_payments"),
+        )
 
     def get_deal_ref_number(self, obj):
         return get_deal_ref_number(obj, self.context.get("logistics_payments"))
@@ -429,4 +450,3 @@ class TaxRateSerializer(serializers.ModelSerializer):
                     ),
                 })
         return attrs
-

@@ -1321,7 +1321,10 @@ export const itemsService = {
   checkItemHsCodeUnique: async (hsCode: string, excludeItemId?: string): Promise<boolean> => {
     if (!hsCode) return true;
     try {
-      const all = await apiGetList<any>("inventory/products/", { tenantId: resolveTenantId() });
+      const all = await apiGetList<any>("inventory/products/", {
+        tenantId: resolveTenantId(),
+        query: { view: "lookup" },
+      });
       return !all.some((p: any) => String(p.id) !== String(excludeItemId || "") && (p.hs_code || "") === hsCode);
     } catch {
       return true;
@@ -1330,19 +1333,32 @@ export const itemsService = {
 
   subscribeToItems: (callback: (items: Item[]) => void) => {
     let alive = true;
+    let inFlight = false;
     const load = async () => {
+      if (!alive || inFlight) return;
+      inFlight = true;
       try {
-        const products = await apiGetList<any>("inventory/products/", { tenantId: resolveTenantId() });
+        const products = await apiGetList<any>("inventory/products/", {
+          tenantId: resolveTenantId(),
+          query: { view: "lookup" },
+        });
         if (alive) callback(products.map((p: any) => itemsService._mapProductToItem(p)));
       } catch {
-        if (alive) callback([]);
+        // احتفظ بآخر snapshot ناجح؛ فشل refresh عابر لا يمسح المحددات.
+      } finally {
+        inFlight = false;
       }
     };
-    load();
-    const timer = setInterval(load, 5000);
+    void load();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
     return () => {
       alive = false;
-      clearInterval(timer);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
     };
   },
 
@@ -1577,7 +1593,7 @@ export const suppliersService = {
     currentSupplierId?: string
   ): Promise<{ isUnique: boolean; field?: string; existingName?: string }> => {
     try {
-      const all = await apiGetList<any>("partners/", { tenantId: resolveTenantId() });
+      const all = await apiGetList<any>("partners/lookup/?limit=500", { tenantId: resolveTenantId() });
       if (data.email?.trim()) {
         const d = all.find((x) => String(x.id) !== String(currentSupplierId) && (x.email || "").trim() === data.email!.trim());
         if (d) return { isUnique: false, field: "email", existingName: d.name };
@@ -1602,7 +1618,7 @@ export const suppliersService = {
     let alive = true;
     const load = async () => {
       try {
-        const partners = await apiGetList<any>("partners/", { tenantId: resolveTenantId() });
+        const partners = await apiGetList<any>("partners/lookup/?limit=500", { tenantId: resolveTenantId() });
         let mapped = partners.map((p: any) => suppliersService._mapPartnerToSupplier(p));
 
         // Fallback: if partners list is empty but deals exist, synthesize supplier list from deals.
@@ -1674,15 +1690,22 @@ export const suppliersService = {
           if (alive) callback(Array.from(byName.values()));
         } catch (e2) {
           // console suppressed
-          if (alive) callback([]);
+          // فشل المصدرين ليس «لا يوجد موردون»؛ احتفظ بآخر لقطة ناجحة.
         }
       }
     };
     load();
-    const timer = setInterval(load, 5000);
+    // كان كل مشترك يحمّل كل الموردين (وأحياناً كل الصفقات) كل 5 ثوانٍ.
+    // التحديث عند عودة التركيز يلتقط تغييرات التبويبات دون حمل شبكي دائم.
+    const onFocus = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
     return () => {
       alive = false;
-      clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
     };
   },
 
@@ -1730,12 +1753,12 @@ export const suppliersService = {
   },
 
   fetchAllSuppliers: async (): Promise<Supplier[]> => {
-    const partners = await apiGetList<any>("partners/", { tenantId: resolveTenantId() });
+    const partners = await apiGetList<any>("partners/lookup/?limit=500", { tenantId: resolveTenantId() });
     return partners.map((p: any) => suppliersService._mapPartnerToSupplier(p));
   },
 
   getSuppliersFromDb: async (): Promise<Supplier[]> => {
-    const partners = await apiGetList<any>("partners/", { tenantId: resolveTenantId() });
+    const partners = await apiGetList<any>("partners/lookup/?limit=500", { tenantId: resolveTenantId() });
     return partners.map((p: any) => suppliersService._mapPartnerToSupplier(p));
   },
 

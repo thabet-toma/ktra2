@@ -78,3 +78,81 @@ def test_purchase_return_requires_positive_line(env):
             return_date="2026-06-15",
             lines=[{"product": product.id, "quantity": 0, "unit_price": 50}],
         )
+
+
+def _original_invoice(tenant, supplier, product, *, qty, price=50):
+    from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
+    inv = PurchaseInvoice.objects.create(
+        tenant=tenant, invoice_number="PINV-ORIG", invoice_date="2026-06-01",
+        partner=supplier, currency=tenant._cur, is_return=False,
+    )
+    PurchaseInvoiceItem.objects.create(
+        invoice=inv, product=product, name="صنف",
+        quantity=Decimal(str(qty)), unit_price=Decimal(str(price)),
+        total_price=Decimal(str(qty * price)),
+    )
+    return inv
+
+
+# ── W6: حارس تجاوز الكمية المرتجعة الكمية الأصلية المفوترة (server-side) ──
+
+def test_return_exceeding_invoiced_qty_rejected(env):
+    """مرجع بكمية أكبر من المفوترة (12 من أصل 10) يُرفض."""
+    tenant, supplier, product, _ap, _inv = env
+    orig = _original_invoice(tenant, supplier, product, qty=10)
+    from django.core.exceptions import ValidationError
+    with pytest.raises(ValidationError):
+        create_purchase_return(
+            tenant, original_invoice=orig, partner=supplier,
+            return_date="2026-06-15",
+            lines=[{"product": product.id, "quantity": 12, "unit_price": 50}],
+        )
+
+
+def test_cumulative_returns_cannot_exceed_invoiced_qty(env):
+    """مجموع المراجيع لا يتجاوز المفوتر: 6 مسموح، ثم 5 (المجموع 11>10) مرفوض."""
+    tenant, supplier, product, _ap, _inv = env
+    orig = _original_invoice(tenant, supplier, product, qty=10)
+    create_purchase_return(
+        tenant, original_invoice=orig, partner=supplier,
+        return_date="2026-06-15",
+        lines=[{"product": product.id, "quantity": 6, "unit_price": 50}],
+    )
+    from django.core.exceptions import ValidationError
+    with pytest.raises(ValidationError):
+        create_purchase_return(
+            tenant, original_invoice=orig, partner=supplier,
+            return_date="2026-06-16",
+            lines=[{"product": product.id, "quantity": 5, "unit_price": 50}],
+        )
+
+
+def test_return_up_to_invoiced_qty_allowed(env):
+    """مرجع بكامل الكمية المفوترة (10 من 10) مسموح."""
+    tenant, supplier, product, _ap, _inv = env
+    orig = _original_invoice(tenant, supplier, product, qty=10)
+    ret = create_purchase_return(
+        tenant, original_invoice=orig, partner=supplier,
+        return_date="2026-06-15",
+        lines=[{"product": product.id, "quantity": 10, "unit_price": 50}],
+    )
+    assert ret.is_return is True
+
+
+def test_returnable_lines_reports_invoiced_returned_remaining(env):
+    """W6: منتقي بنود المرجع يعرض المفوتر/المرتجع/المتبقّي بدقة بعد مرجع جزئي."""
+    from logistics.services import returnable_lines_for_invoice
+    tenant, supplier, product, _ap, _inv = env
+    orig = _original_invoice(tenant, supplier, product, qty=10)
+    create_purchase_return(
+        tenant, original_invoice=orig, partner=supplier,
+        return_date="2026-06-15",
+        lines=[{"product": product.id, "quantity": 4, "unit_price": 50}],
+    )
+    rows = returnable_lines_for_invoice(orig)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["product"] == product.id
+    assert Decimal(row["invoiced_qty"]) == Decimal("10")
+    assert Decimal(row["returned_qty"]) == Decimal("4")
+    assert Decimal(row["remaining_qty"]) == Decimal("6")

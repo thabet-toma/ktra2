@@ -7,14 +7,16 @@ target is one source: the **Transport (LocalShipment) row**, allocated on the sa
 **chargeable unit** as freight (inland is a haulage cost, so CBM/KG is the right
 basis, not value).
 
-This module computes both the OLD and the NEW deal-level inland allocation so the
-owner can review the delta on sample and real data before we flip the live path.
-Nothing here changes the live invoice math yet — it is comparison-only until approved.
+The live invoice path uses ``transport_pool_ils`` as its canonical inland source.
+The reconciliation helpers remain available to compare the legacy clearance-line/value
+allocation with the current Transport/chargeable-unit allocation.
 """
 from __future__ import annotations
 
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, List
+
+from django.db.models import Q
 
 from logistics.models import LocalShipment
 from logistics import landed_cost as lc
@@ -29,7 +31,9 @@ def transport_pool_ils(shipment, clearance=None) -> Decimal:
     Prefers clearance link; falls back to the shipment link.
     """
     qs = LocalShipment.objects.filter(capitalize_to_inventory=True).exclude(status='cancelled')
-    if clearance is not None:
+    if clearance is not None and shipment is not None:
+        qs = qs.filter(Q(clearance=clearance) | Q(shipment=shipment))
+    elif clearance is not None:
         qs = qs.filter(clearance=clearance)
     elif shipment is not None:
         qs = qs.filter(shipment=shipment)

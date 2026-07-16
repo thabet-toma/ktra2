@@ -13,7 +13,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  listSalesInvoices,
+  listSalesInvoicesPage,
   postSalesInvoice,
   createDeliveryOrder,
   deliverOrder,
@@ -37,6 +37,7 @@ import { SalesInvoiceEditor, type PartnerRow, type ProductRow } from "./SalesInv
 import { resolveTenantId } from "../../utils/tenantContext";
 import { eventBus } from "../../utils/eventBus";
 import { openInNewTab } from "../../utils/openInNewTab";
+import { isOfflineRecordForTenant } from "../../utils/offlineTenantScope";
 import {
   AseelDocumentShell,
   AseelDenseTable,
@@ -112,22 +113,37 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
   const [selectedKey, setSelectedKey] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
+  const [totalRows, setTotalRows] = useState(0);
+  const pageSize = 50;
 
-  const load = useCallback(async () => {
+  const loadRows = useCallback(async () => {
     setLoading(true);
     setErr(null);
+    try {
+      const result = await listSalesInvoicesPage({
+        page,
+        page_size: pageSize,
+        search: search.trim() || undefined,
+        status: filterStatus || undefined,
+        invoice_type: filterType || undefined,
+        date_from: filterFrom || undefined,
+        date_to: filterTo || undefined,
+      });
+      setRows(result.results as ExtRow[]);
+      setTotalRows(result.count);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "فشل تحميل فواتير المبيعات");
+    } finally {
+      setLoading(false);
+    }
+  }, [filterFrom, filterStatus, filterTo, filterType, page, search]);
+
+  const loadMasterData = useCallback(async () => {
     const tenantId = resolveTenantId();
-    const parts = [
-      "فواتير المبيعات",
-      "العملاء",
-      "الأصناف",
-      "العملات",
-      "الحسابات",
-      "الضرائب",
-    ] as const;
+    const parts = ["العملاء", "الأصناف", "العملات", "الحسابات", "الضرائب"] as const;
     const settled = await Promise.allSettled([
-      listSalesInvoices(),
-      apiGetList<PartnerRow>("partners/", { tenantId }),
+      apiGetList<PartnerRow>("partners/lookup/", { tenantId, query: { limit: 500 } }),
       apiGetList<ProductRow>("inventory/products/", { tenantId }),
       apiGetList<CurrOpt>("accounting/currencies/", { tenantId }),
       apiGetList<AccountOpt>("accounting/accounts/", { tenantId }),
@@ -148,13 +164,11 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
         errs.push(`${parts[i]}: ${m}`);
       }
     });
-    if (settled[0].status === "fulfilled") setRows(settled[0].value as ExtRow[]);
-    if (settled[1].status === "fulfilled") setPartners(settled[1].value);
-    if (settled[2].status === "fulfilled") setProducts(settled[2].value);
-    if (settled[3].status === "fulfilled") setCurrencies(settled[3].value);
-    if (settled[4].status === "fulfilled")
-      setAccounts(settled[4].value.filter((a) => a.id));
-    if (settled[5].status === "fulfilled") setTaxRates(settled[5].value);
+    if (settled[0].status === "fulfilled") setPartners(settled[0].value);
+    if (settled[1].status === "fulfilled") setProducts(settled[1].value);
+    if (settled[2].status === "fulfilled") setCurrencies(settled[2].value);
+    if (settled[3].status === "fulfilled") setAccounts(settled[3].value.filter((a) => a.id));
+    if (settled[4].status === "fulfilled") setTaxRates(settled[4].value);
     try {
       const s = await getSalesSettings();
       setSalesSettings(s);
@@ -169,12 +183,14 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             : "")
       );
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    const timer = window.setTimeout(() => { void loadRows(); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [loadRows]);
+
+  useEffect(() => { void loadMasterData(); }, [loadMasterData]);
 
   useEffect(() => {
     const unsubscribe = eventBus.subscribe((event) => {
@@ -182,7 +198,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       if (event.type === "settings") {
         getSalesSettings().then(setSalesSettings).catch(() => {});
       } else if (event.type === "partners") {
-        apiGetList<PartnerRow>("partners/", { tenantId }).then(setPartners).catch(() => {});
+        apiGetList<PartnerRow>("partners/lookup/", { tenantId, query: { limit: 500 } }).then(setPartners).catch(() => {});
       } else if (event.type === "products") {
         apiGetList<ProductRow>("inventory/products/", { tenantId }).then(setProducts).catch(() => {});
       }
@@ -195,13 +211,16 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   const [pendingDrafts, setPendingDrafts] = useState<ExtRow[]>([]);
   useEffect(() => {
     let cancelled = false;
+    const tenantId = resolveTenantId();
     (async () => {
       try {
         const db = (await import("../../services/offline/db")).default;
         const queued = await db.mutation_queue
           .where("endpoint")
           .startsWith("sales/invoices")
-          .filter((m) => m.status !== "synced")
+          .filter((m) =>
+            isOfflineRecordForTenant(m, tenantId) && m.status !== "synced"
+          )
           .toArray();
         if (cancelled) return;
         const drafts: ExtRow[] = queued.map((m) => {
@@ -226,18 +245,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     return () => { cancelled = true; };
   }, [rows.length]);
 
-  const filteredRows = [...pendingDrafts, ...rows].filter((r) => {
-    if (search) {
-      const s = search.toLowerCase();
-      const hay = `${r.invoice_number || ""} ${r.customer_name || ""} ${r.customer || ""}`.toLowerCase();
-      if (!hay.includes(s)) return false;
-    }
-    if (filterStatus && r.status !== filterStatus) return false;
-    if (filterType && r.invoice_type !== filterType) return false;
-    if (filterFrom && r.invoice_date && r.invoice_date < filterFrom) return false;
-    if (filterTo && r.invoice_date && r.invoice_date > filterTo) return false;
-    return true;
-  });
+  const filteredRows = [...(page === 1 ? pendingDrafts : []), ...rows];
 
   // task16 A8: قائمة الفواتير (/sales/invoices) وتفصيل فاتورة واحدة
   // (/sales/invoices/:id) لهما مساران مستقلان — الـ URL هو مصدر الحقيقة لفتح
@@ -301,7 +309,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     try {
       await postSalesInvoice(id);
       setMsg(`تم ترحيل الفاتورة #${id}`);
-      await load();
+      await loadRows();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الترحيل");
     }
@@ -318,7 +326,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       } else {
         setMsg(`أمر إخراج #${created.id} (قيد التنفيذ)`);
       }
-      await load();
+      await loadRows();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل أمر الإخراج");
     }
@@ -331,7 +339,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     try {
       await deleteSalesInvoice(id);
       setMsg("تم حذف المسودة.");
-      await load();
+      await loadRows();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحذف");
     }
@@ -551,28 +559,28 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
           data-aseel-field="search"
           placeholder="بحث... (F6)"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
         />
       </label>
       <label className="aseel-field" style={{ minWidth: "100px" }}>
         <span className="aseel-field-label">النوع</span>
-        <select className="aseel-input" value={filterType} onChange={(e) => setFilterType(e.target.value)}>
+        <select className="aseel-input" value={filterType} onChange={(e) => { setFilterType(e.target.value); setPage(1); }}>
           {TYPE_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
         </select>
       </label>
       <label className="aseel-field" style={{ minWidth: "100px" }}>
         <span className="aseel-field-label">الحالة</span>
-        <select className="aseel-input" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+        <select className="aseel-input" value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }}>
           {STATUS_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
         </select>
       </label>
       <label className="aseel-field">
         <span className="aseel-field-label">من تاريخ</span>
-        <input type="date" className="aseel-input" value={filterFrom} onChange={(e) => setFilterFrom(e.target.value)} />
+        <input type="date" className="aseel-input" value={filterFrom} onChange={(e) => { setFilterFrom(e.target.value); setPage(1); }} />
       </label>
       <label className="aseel-field">
         <span className="aseel-field-label">إلى تاريخ</span>
-        <input type="date" className="aseel-input" value={filterTo} onChange={(e) => setFilterTo(e.target.value)} />
+        <input type="date" className="aseel-input" value={filterTo} onChange={(e) => { setFilterTo(e.target.value); setPage(1); }} />
       </label>
     </div>
   );
@@ -583,7 +591,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       key: "refresh",
       label: "تحديث",
       icon: loading ? <Loader2 className="animate-spin" /> : <RefreshCw />,
-      onClick: () => void load(),
+      onClick: () => void loadRows(),
       separatorBefore: true,
     },
     { key: "print", label: "طباعة", icon: <Printer />, onClick: () => window.print() },
@@ -601,7 +609,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       {!editorOpen ? (
         <AseelDocumentShell
           title="فواتير المبيعات"
-          state={loading ? "جاري التحميل…" : `${filteredRows.length} من ${rows.length}`}
+          state={loading ? "جاري التحميل…" : `${filteredRows.length} في الصفحة من ${totalRows}`}
           actions={toolbarActions}
           header={filterBar}
           status={
@@ -632,6 +640,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               onSelect={(k) => setSelectedKey(k as number | null)}
               onRowClick={(r) => openEdit(r.id)}
               onRowDoubleClick={(r) => openEdit(r.id)}
+              pagination={{ page, pageSize, total: totalRows, onChange: setPage }}
             />
           </div>
         </AseelDocumentShell>
@@ -664,7 +673,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             onDraftEditConsumed={() => setDraftToEditId(null)}
             onClose={closeEditor}
             onInvoiceSaved={() => {
-              load();
+              void loadRows();
             }}
             invoiceList={rows}
             onOpenGeneralLedger={onOpenGeneralLedger}

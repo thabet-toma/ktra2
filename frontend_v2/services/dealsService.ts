@@ -10,7 +10,14 @@ import {
   legacyDescriptionFromMisfiledOfferNumber,
 } from "../utils/dealTitleDisplay";
 import { pickBestDealPayment } from "../utils/dealPaymentMatch";
-import { apiDelete, apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "./restApi";
+import {
+  apiDelete,
+  apiGetList,
+  apiGetObject,
+  apiGetPagedList,
+  apiPatchObject,
+  apiPostObject,
+} from "./restApi";
 
 export type PaymentPostingDiagnostics = {
   payment_id: number;
@@ -480,6 +487,33 @@ export const dealsService = {
     return fetchDealsMapped();
   },
 
+  /** قائمة الشاشة الرئيسية: بحث خادمي + ترقيم، فلا يختفي مستند قديم من البحث. */
+  async listDealsPage(opts?: {
+    page?: number;
+    pageSize?: number;
+    search?: string;
+    status?: string;
+    dateFrom?: string;
+    dateTo?: string;
+  }): Promise<{ deals: Deal[]; count: number; hasNext: boolean }> {
+    const paged = await apiGetPagedList<SqlDeal>("logistics/deals/", {
+      tenantId: getTenantId(),
+      query: {
+        page: opts?.page ?? 1,
+        page_size: opts?.pageSize ?? 50,
+        search: opts?.search?.trim() || undefined,
+        status: opts?.status && opts.status !== "all" ? opts.status : undefined,
+        date_from: opts?.dateFrom || undefined,
+        date_to: opts?.dateTo || undefined,
+      },
+    });
+    return {
+      deals: paged.results.map(mapDealFromSql),
+      count: paged.count,
+      hasNext: paged.hasNext,
+    };
+  },
+
   /**
    * كان polling كل 5 ثوانٍ لكل مشترك (مكلف، وكان يقلب وضع الواجهة — بق «اختفاء
    * التعديل»). الآن: تحميل عند الاشتراك + تحديث عند عودة التركيز/الظهور للتبويب
@@ -488,15 +522,20 @@ export const dealsService = {
    */
   subscribeToDeals(
     callback: (deals: Deal[]) => void,
-    opts?: { intervalMs?: number | null; refreshOnFocus?: boolean }
+    opts?: {
+      intervalMs?: number | null;
+      refreshOnFocus?: boolean;
+      onError?: (error: unknown) => void;
+    }
   ) {
     let alive = true;
     const load = async () => {
       try {
         const mapped = await fetchDealsMapped();
         if (alive) callback(mapped);
-      } catch {
-        if (alive) callback([]);
+      } catch (error) {
+        // احتفظ بآخر بيانات ناجحة؛ الفشل ليس «صفر صفقات».
+        if (alive) opts?.onError?.(error);
       }
     };
     load();

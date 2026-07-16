@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { AseelSidePanel } from '../aseel/AseelSidePanel';
 import db, { type MutationEntry } from '../../services/offline/db';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
+import { resolveTenantId } from '../../utils/tenantContext';
+import { isOfflineRecordForTenant } from '../../utils/offlineTenantScope';
 
 export default function PendingMutationsPanel() {
   const [open, setOpen] = useState(false);
@@ -9,9 +11,11 @@ export default function PendingMutationsPanel() {
   const { online } = useOnlineStatus();
 
   const refresh = useCallback(async () => {
+    const tenantId = resolveTenantId();
     const items = await db.mutation_queue
       .where('status')
       .anyOf(['pending', 'syncing', 'failed'])
+      .filter((m) => isOfflineRecordForTenant(m, tenantId))
       .toArray();
     setMutations(items);
   }, []);

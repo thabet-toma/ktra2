@@ -14,6 +14,7 @@ import os
 import sys
 from pathlib import Path
 from corsheaders.defaults import default_headers
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -28,10 +29,27 @@ except ImportError:
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get(
+DEPLOYMENT_ENV = os.environ.get("DJANGO_ENV", "development").strip().lower()
+IS_PRODUCTION = DEPLOYMENT_ENV in {"production", "prod"}
+
+
+def _environment_value(name, development_default="", *, required_in_production=False):
+    """Read configuration without keeping production credentials in source control."""
+    value = os.environ.get(name)
+    if value is not None and value.strip():
+        return value.strip()
+    if required_in_production and IS_PRODUCTION:
+        raise ImproperlyConfigured(
+            f"{name} must be set when DJANGO_ENV={DEPLOYMENT_ENV}."
+        )
+    return development_default
+
+
+# Local-only fallback. Production fails fast unless the real secret is supplied.
+SECRET_KEY = _environment_value(
     "DJANGO_SECRET_KEY",
-    "django-insecure-lnhmu5#_*fb#2gae88(=q+4(m3^i!0i^z4hmymf#%a_n7x*&zo",
+    "django-insecure-ktra-local-development-only",
+    required_in_production=True,
 )
 
 # SECURITY WARNING: don't run with debug turned on in production!
@@ -111,22 +129,24 @@ WSGI_APPLICATION = 'core.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 #
-# كلمة المرور: إذا وُجد اسم المتغير MYSQL_PASSWORD في البيئة (مثل سطر MYSQL_PASSWORD= فارغ في .env)
-# يُستخدم كما هو. إذا حذفت السطر من .env بالكامل، تُستخدم القيمة الافتراضية 123456 للتطوير.
-_mysql_password = (
-    os.environ["MYSQL_PASSWORD"]
-    if "MYSQL_PASSWORD" in os.environ
-    else "123456"
-)
-
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.mysql",
-        "NAME": "smartktra_smart-ktra",
-        "USER": "smartktra_smartktra",
-        "PASSWORD": "smart@102030",
-        "HOST": "localhost",
-        "PORT": "3306",
+        "NAME": _environment_value(
+            "MYSQL_DATABASE", "ktra", required_in_production=True
+        ),
+        "USER": _environment_value(
+            "MYSQL_USER", "root", required_in_production=True
+        ),
+        "PASSWORD": _environment_value(
+            "MYSQL_PASSWORD", "", required_in_production=True
+        ),
+        "HOST": _environment_value(
+            "MYSQL_HOST", "localhost", required_in_production=True
+        ),
+        "PORT": _environment_value(
+            "MYSQL_PORT", "3306", required_in_production=True
+        ),
         # صيانة الأداء 2026-07: كان CONN_MAX_AGE الافتراضي 0 ⇒ اتصال TCP+مصادقة جديد
         # لكل طلب، وبلا أي مهلة على العميل ⇒ اتصال معطوب/قفل بطيء يعلّق الـ worker
         # بلا حد (بلاغ «الطلب يستغرق ساعة»). الآن: إعادة استخدام الاتصال 60 ثانية مع
@@ -228,9 +248,10 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^http://127\.0\.0\.1:\d+$",
 ]
 
-# Allow custom tenant header used by frontend SQL pages.
+# Allow custom tenant and branch headers used by frontend SQL pages.
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-tenant-id",
+    "x-branch-id",
 ]
 
 CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS) + ['https://api.smart.ktragroup.com']
@@ -244,12 +265,9 @@ CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS) + ['https://api.smart.ktragrou
 #     لا تخلط: 127.0.0.1:8000 مثال لعنوان Django أثناء التطوير، وليس سيرفر OpenClaw.
 # إن نجح (1) وفشل المساعد: راجع OPENCLAW_BEARER_TOKEN وصيغة الطلب في الكود.
 # الطلبات والتوكن يمرّان عبر Django فقط (لا يُعرَّض التوكن للمتصفح).
-# ملاحظة: إن وُجد المفتاح في البيئة بقيمة فارغة (مثل OPENCLAW_BEARER_TOKEN=) فـ get تعيد ""
-# وليس الافتراضي؛ لذلك نستخدم (or الافتراضي) حتى يعمل التوكن المضمّن بدون .env.
 _DEFAULT_OPENCLAW_MESSAGES_URL = "http://72.60.181.210:18789/v1/messages"
 _DEFAULT_OPENCLAW_FILES_URL = "http://72.60.181.210:18789/v1/files"
 _DEFAULT_OPENCLAW_STATUS_URL = "http://72.60.181.210:18789/v1/status"
-_DEFAULT_OPENCLAW_BEARER_TOKEN = "8c453853d17f13975d1d4d93849b114e76923b9b7776845c"
 OPENCLAW_MESSAGES_URL = (
     os.environ.get("OPENCLAW_MESSAGES_URL") or _DEFAULT_OPENCLAW_MESSAGES_URL
 ).strip()
@@ -261,10 +279,10 @@ OPENCLAW_STATUS_URL = (
 ).strip()
 # يُستخدم في Django فقط كـ: Authorization: Bearer <القيمة> على كل طلب لـ /v1/messages و /v1/files
 OPENCLAW_BEARER_TOKEN = (
-    os.environ.get("OPENCLAW_BEARER_TOKEN") or _DEFAULT_OPENCLAW_BEARER_TOKEN
-).strip()
+    _environment_value("OPENCLAW_BEARER_TOKEN", required_in_production=True)
+)
 OPENCLAW_ASSISTANT_TIMEOUT = int(
-    os.environ.get("OPENCLAW_ASSISTANT_TIMEOUT", "600") or "600"
+    os.environ.get("OPENCLAW_ASSISTANT_TIMEOUT", "60") or "60"
 )
 # WebSocket لـ /v1/messages (اختياري): إن وُضع فارغاً يُشتق من OPENCLAW_MESSAGES_URL → ws://…/v1/messages?token=…
 # بروتوكول OpenClaw يفرض مصافحة connect (challenge + device/signature) قبل الدردشة؛ للـ BFF الأنسب HTTP POST + Bearer.
@@ -306,11 +324,17 @@ REST_FRAMEWORK = {
     'EXCEPTION_HANDLER': 'core.exception_handler.custom_exception_handler',
 }
 
-# Cloudinary — يُفضّل تعريف المفاتيح عبر البيئة في الإنتاج
+# Cloudinary credentials are environment-only; production refuses missing values.
 CLOUDINARY_STORAGE = {
-    "CLOUD_NAME": os.environ.get("CLOUDINARY_CLOUD_NAME", "dd63wjj5x"),
-    "API_KEY": os.environ.get("CLOUDINARY_API_KEY", "156587365187698"),
-    "API_SECRET": os.environ.get("CLOUDINARY_API_SECRET", "mISroKaSW9B4ehHB_rA65Q8YVUg"),
+    "CLOUD_NAME": _environment_value(
+        "CLOUDINARY_CLOUD_NAME", required_in_production=True
+    ),
+    "API_KEY": _environment_value(
+        "CLOUDINARY_API_KEY", required_in_production=True
+    ),
+    "API_SECRET": _environment_value(
+        "CLOUDINARY_API_SECRET", required_in_production=True
+    ),
 }
 
 # DEFAULT_FILE_STORAGE = 'cloudinary_storage.storage.MediaCloudinaryStorage'

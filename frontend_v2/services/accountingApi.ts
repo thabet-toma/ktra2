@@ -2,7 +2,11 @@
  * محاسبة SQL عبر Django REST — نفس مسارات frontend v1 (MUI).
  */
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
-import { toPagedList } from "./restApi";
+import { apiFetch, toPagedList } from "./restApi";
+import { tenantScopedOfflineKey } from "../utils/offlineTenantScope";
+
+// كل نداءات هذا العميل القديمة تمر الآن من دورة الطلب المحدودة والموحّدة.
+const fetch = apiFetch;
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const ACC = `${API_BASE}/accounting`;
@@ -153,8 +157,10 @@ export const accountingApi = {
   // caller still gets [] if nothing has ever been cached.
   getPartners: async () => {
     const db = (await import("./offline/db")).default;
+    const tenantId = resolveTenantId();
+    const cacheMetaKey = tenantScopedOfflineKey(tenantId, "partners:list");
     try {
-      const data = await fetch(`${API_BASE}/partners/`, { headers: headers() }).then(asList);
+      const data = await fetch(`${API_BASE}/partners/lookup/?limit=500`, { headers: headers() }).then(asList);
       try {
         const now = new Date().toISOString();
         for (const p of data as Array<Record<string, unknown>>) {
@@ -162,20 +168,20 @@ export const accountingApi = {
           if (!Number.isFinite(id)) continue;
           await db.partners.put({
             id,
-            tenant_id: Number(p.tenant ?? 0),
+            tenant_id: tenantId,
             name: String(p.name ?? ""),
             partner_type: String(p.partner_type ?? ""),
             data: JSON.stringify(p),
             updated_at: now,
           });
         }
-        await db.cache_meta.put({ key: "partners:list", updated_at: now });
+        await db.cache_meta.put({ key: cacheMetaKey, updated_at: now });
       } catch { /* IndexedDB unavailable in private mode — non-fatal */ }
       return data;
     } catch {
       // Network failed — fall back to the last cached snapshot.
       try {
-        const cached = await db.partners.toArray();
+        const cached = await db.partners.where("tenant_id").equals(tenantId).toArray();
         return cached.map((c) => JSON.parse(c.data));
       } catch {
         return [];

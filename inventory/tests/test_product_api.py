@@ -7,9 +7,11 @@ import datetime
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
-from inventory.models import Product, ProductCategory
+from inventory.models import Product, ProductCategory, StockMovement, UnitOfMeasure
 from tenants.services import create_company
 
 PRODUCTS_URL = "/api/inventory/products/"
@@ -122,6 +124,131 @@ class ProductApiTest(APITestCase):
         self._post({"name_ar": "سري لشركة أ"})
         self._auth(user=self.owner_b, tenant=self.t_b)
         assert self._get().json() == []
+
+    def test_lookup_list_batches_attachments_and_skips_analytics(self):
+        Product.objects.bulk_create([
+            Product(tenant=self.t_a, sku=f"LOOK-{i}", name_ar=f"محدد {i}")
+            for i in range(3)
+        ])
+        self._auth()
+
+        with patch("core.models.SystemAttachment") as MockAttachment:
+            MockAttachment.objects.filter.return_value = []
+            res = self._get("?view=lookup")
+
+        assert res.status_code == 200, res.content[:300]
+        assert len(res.json()) == 3
+        assert MockAttachment.objects.filter.call_count == 1
+        assert all("purchased_qty" not in row for row in res.json())
+        assert all({
+            "id", "sku", "name_ar", "name_en", "display_name",
+            "category", "hs_code", "min_stock_level", "quantity_on_hand",
+            "avg_cost", "is_for_sale_online", "online_price",
+            "online_description", "attachments",
+        }.issubset(row) for row in res.json())
+
+    def test_category_tree_query_count_is_constant(self):
+        root = ProductCategory.objects.create(tenant=self.t_a, name="جذر")
+        ProductCategory.objects.bulk_create([
+            ProductCategory(tenant=self.t_a, parent=root, name=f"فرع {i}")
+            for i in range(20)
+        ])
+        self._auth()
+
+        with CaptureQueriesContext(connection) as captured:
+            res = self.client.get(
+                "/api/inventory/categories/?root_only=true",
+                HTTP_X_TENANT_ID=self._tenant_id,
+            )
+
+        assert res.status_code == 200, res.content[:300]
+        assert len(res.json()) == 1
+        assert len(res.json()[0]["children"]) == 20
+        assert len(captured) <= 6, [q["sql"] for q in captured]
+
+    def test_global_uom_list_contract(self):
+        uom, _ = UnitOfMeasure.objects.get_or_create(
+            code="EA", defaults={"name_ar": "حبة", "name_en": "Each"},
+        )
+        expected = {
+            "id": uom.id,
+            "code": "EA",
+            "name_ar": "حبة",
+            "name_en": "Each",
+        }
+
+        self._auth()
+        first = self.client.get(
+            "/api/inventory/uom/", HTTP_X_TENANT_ID=self._tenant_id,
+        )
+        assert first.status_code == 200, first.content[:300]
+        assert expected in first.json()
+
+        self._auth(user=self.owner_b, tenant=self.t_b)
+        second = self.client.get(
+            "/api/inventory/uom/", HTTP_X_TENANT_ID=self._tenant_id,
+        )
+        assert second.status_code == 200, second.content[:300]
+        assert expected in second.json()
+        assert "tenant" not in second.json()[0]
+
+    def test_stock_summary_is_tenant_scoped_and_totals_match_visible_rows(self):
+        Product.objects.create(
+            tenant=self.t_a, sku="SUM-A1", name_ar="محلي 1",
+            quantity_on_hand=2, avg_cost=10,
+        )
+        Product.objects.create(
+            tenant=self.t_a, sku="SUM-A2", name_ar="محلي 2",
+            quantity_on_hand=3, avg_cost=5,
+        )
+        foreign = Product.objects.create(
+            tenant=self.t_b, sku="SUM-B1", name_ar="شركة أخرى",
+            quantity_on_hand=99, avg_cost=100,
+        )
+
+        self._auth()
+        res = self.client.get(
+            "/api/inventory/stock-movements/summary/",
+            HTTP_X_TENANT_ID=self._tenant_id,
+        )
+        assert res.status_code == 200, res.content[:300]
+        data = res.json()
+        visible_ids = {row["id"] for row in data["products"]}
+        assert foreign.id not in visible_ids
+        assert visible_ids == {
+            Product.objects.get(tenant=self.t_a, sku="SUM-A1").id,
+            Product.objects.get(tenant=self.t_a, sku="SUM-A2").id,
+        }
+        assert data["total_products_in_stock"] == 2
+        assert data["total_inventory_value"] == 35.0
+
+    def test_stock_movement_create_rejects_foreign_tenant_product(self):
+        foreign = Product.objects.create(
+            tenant=self.t_b,
+            sku="FOREIGN-STOCK",
+            name_ar="رصيد شركة أخرى",
+            quantity_on_hand=7,
+            avg_cost=3,
+        )
+        self._auth()
+
+        res = self.client.post(
+            "/api/inventory/stock-movements/",
+            {
+                "product": foreign.id,
+                "movement_type": "IN",
+                "quantity": "5",
+                "unit_cost": "4",
+                "reference_type": "MANUAL",
+            },
+            format="json",
+            HTTP_X_TENANT_ID=self._tenant_id,
+        )
+
+        assert res.status_code == 404, res.content[:300]
+        foreign.refresh_from_db()
+        assert foreign.quantity_on_hand == 7
+        assert not StockMovement.objects.filter(product=foreign).exists()
 
     # ── جدول الأصناف: فلتر حالة المخزون + ترتيب حسب الكمية/الحد الأدنى ──
     def _seed_stock_mix(self):

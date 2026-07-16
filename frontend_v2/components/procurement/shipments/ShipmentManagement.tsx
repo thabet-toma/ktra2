@@ -4,9 +4,8 @@
  */
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Shipment, User, Supplier } from '../../../types';
+import { Shipment, User } from '../../../types';
 import { shipmentsService } from '../../../services/shipmentsService';
-import { suppliersService } from '../../../services/firestoreService';
 import { Plus, Eye, Edit, Trash2, RefreshCw } from 'lucide-react';
 import { LoadingSpinner } from '../../LoadingSpinner';
 import { ShipmentDetailView } from './ShipmentDetailView';
@@ -16,6 +15,7 @@ import { useAseelIndexKeymap } from '../../aseel/useAseelIndexKeymap';
 import { openInNewTab } from '@/utils/openInNewTab';
 import { useConfirm } from '../../../contexts/ConfirmContext';
 import { useToast } from '../../../contexts/ToastContext';
+import { AseelErrorState } from '../../aseel';
 
 interface ShipmentManagementProps {
     currentUser: User;
@@ -62,8 +62,12 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     const confirm = useConfirm();
     const toast = useToast();
     const [shipments, setShipments] = useState<Shipment[]>([]);
-    const [suppliers, setSuppliers] = useState<Supplier[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [reloadKey, setReloadKey] = useState(0);
+    const [totalCount, setTotalCount] = useState(0);
+    const [currentPage, setCurrentPage] = useState(1);
+    const [hasNextPage, setHasNextPage] = useState(false);
     const [search, setSearch] = useState('');
     const [typeFilter, setTypeFilter] = useState<'all' | 'sea' | 'air'>('all');
     const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -72,42 +76,72 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     const searchInputRef = useRef<HTMLInputElement | null>(null);
 
     useEffect(() => {
-        const unsubShipments = shipmentsService.subscribeToShipments((s) => {
-            setShipments(s);
-            setLoading(false);
-        });
-        const unsubSuppliers = suppliersService.subscribeToSuppliers((all) => {
-            setSuppliers(all.filter(s => s.type === 'shipping_agent'));
-        });
-        return () => { unsubShipments(); unsubSuppliers(); };
-    }, []);
+        let cancelled = false;
+        setLoading(true);
+        const timer = window.setTimeout(() => {
+            void shipmentsService.listShipmentsPage({
+                page: 1, pageSize: 50, search, status: statusFilter, shippingType: typeFilter,
+            }).then((result) => {
+                if (cancelled) return;
+                setShipments(result.shipments);
+                setTotalCount(result.count);
+                setHasNextPage(result.hasNext);
+                setCurrentPage(1);
+                setLoadError(null);
+            }).catch((error) => {
+                if (!cancelled) {
+                    setLoadError(error instanceof Error ? error.message : 'تعذّر تحميل الشحنات.');
+                }
+            }).finally(() => {
+                if (!cancelled) setLoading(false);
+            });
+        }, 250);
+        return () => { cancelled = true; window.clearTimeout(timer); };
+    }, [reloadKey, search, statusFilter, typeFilter]);
 
     const filteredShipments = useMemo(() => {
-        let result = shipments;
-        if (search.trim()) {
-            const term = search.toLowerCase();
-            result = result.filter(s =>
-                s.shipmentNumber?.toLowerCase().includes(term) ||
-                s.shipmentName?.toLowerCase().includes(term) ||
-                s.shippingAgentName?.toLowerCase().includes(term) ||
-                s.agentShipmentNumber?.toLowerCase().includes(term)
-            );
-        }
-        if (typeFilter !== 'all') {
-            result = result.filter(s => s.shippingInfo?.shippingType === typeFilter);
-        }
-        if (statusFilter !== 'all') {
-            result = result.filter(s => s.status === statusFilter);
-        }
-        return result;
-    }, [shipments, search, typeFilter, statusFilter]);
+        return shipments;
+    }, [shipments]);
 
     const stats = useMemo(() => ({
-        total: shipments.length,
+        total: totalCount,
         inTransit: shipments.filter(s => ['shipped'].includes(s.status)).length,
         delivered: shipments.filter(s => s.status === 'delivered').length,
         totalCost: shipments.reduce((sum, s) => sum + (s.totalShippingCostUsd || 0), 0),
-    }), [shipments]);
+    }), [shipments, totalCount]);
+
+    const openShipmentDetails = async (shipment: Shipment) => {
+        setLoading(true);
+        try {
+            const detail = await shipmentsService.getShipment(String(shipment.id));
+            setViewingShipment(detail);
+            setLoadError(null);
+        } catch (error) {
+            setLoadError(error instanceof Error ? error.message : 'تعذّر فتح تفاصيل الشحنة.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const loadMoreShipments = async () => {
+        if (!hasNextPage || loading) return;
+        setLoading(true);
+        try {
+            const nextPage = currentPage + 1;
+            const result = await shipmentsService.listShipmentsPage({
+                page: nextPage, pageSize: 50, search, status: statusFilter,
+                shippingType: typeFilter,
+            });
+            setShipments((rows) => [...rows, ...result.shipments]);
+            setCurrentPage(nextPage);
+            setHasNextPage(result.hasNext);
+            setTotalCount(result.count);
+        } catch (error) {
+            setLoadError(error instanceof Error ? error.message : 'تعذّر تحميل المزيد.');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     // «شحنة جديدة» تفتح فاتح اختيار الصفقات الجاهزة (المسار الصحيح: اختر صفقات →
     // أنشئ شحنة)، بدل الشحنة الفارغة القديمة. «إنشاء بلا صفقات» يبقى متاحاً من الفاتح.
@@ -139,9 +173,9 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                 <span>
                     <span style={{ marginLeft: 4 }}>{s.shippingInfo?.shippingType === 'air' ? '✈' : '🚢'}</span>
                     <b style={{ fontFamily: 'monospace' }}>{s.shipmentNumber}</b>
-                    {(s.deals?.length || 0) > 0 && (
+                    {(s.dealsCount ?? s.deals?.length ?? 0) > 0 && (
                         <span style={{ marginRight: 4, fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)' }}>
-                            ({s.deals?.length} صفقة)
+                            ({s.dealsCount ?? s.deals?.length ?? 0} صفقة)
                         </span>
                     )}
                 </span>
@@ -217,7 +251,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                     <button
                         className="aseel-toolbtn"
                         style={{ padding: '2px 4px' }}
-                        onClick={(e) => { e.stopPropagation(); setViewingShipment(s); }}
+                        onClick={(e) => { e.stopPropagation(); void openShipmentDetails(s); }}
                         title="عرض التفاصيل"
                     >
                         <Eye style={{ width: 13, height: 13 }} />
@@ -253,6 +287,12 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
     );
 
     if (loading) return <LoadingSpinner />;
+    if (loadError && shipments.length === 0) {
+        return <AseelErrorState message={loadError} onRetry={() => {
+            setLoading(true);
+            setReloadKey((key) => key + 1);
+        }} />;
+    }
 
     return (
         <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
@@ -325,7 +365,7 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                 loading={loading}
                 emptyHint="لا توجد شحنات — اضغط «شحنة جديدة»"
                 // فتح الشحنة = ملخصها الواضح؛ «رحلة الاستيراد» من زر التعديل فقط
-                onRowDoubleClick={(s) => setViewingShipment(s)}
+                onRowDoubleClick={(s) => { void openShipmentDetails(s); }}
                 footer={
                     filteredShipments.length > 0 ? (
                         <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>
@@ -334,6 +374,11 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
                     ) : undefined
                 }
             />
+            {hasNextPage && (
+                <button className="aseel-toolbtn" onClick={() => void loadMoreShipments()}>
+                    تحميل المزيد ({shipments.length} من {totalCount})
+                </button>
+            )}
 
             {viewingShipment && (
                 <ShipmentDetailView

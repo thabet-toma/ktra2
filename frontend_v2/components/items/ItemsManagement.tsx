@@ -19,6 +19,8 @@ import { openInNewTab } from "@/utils/openInNewTab";
 import { productProfilePath } from "../../utils/entityLinks";
 import { clientLogger } from "../../services/logger";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { resolveTenantId } from "../../utils/tenantContext";
+import { tenantScopedOfflineKey } from "../../utils/offlineTenantScope";
 
 // مبالغ مالية — يحذف الأصفار العشرية غير الدالّة عبر المُنسّق الموحّد.
 const fmt = (n: number | string) => formatMoney(n, "0");
@@ -87,6 +89,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
     search?: string; status?: StockStatus; ordering?: string;
   } = {}) => {
     const { search: currentSearch = "", status = "", ordering = "" } = opts;
+    const tenantId = resolveTenantId();
+    const cacheMetaKey = tenantScopedOfflineKey(tenantId, "products:list");
     setLoading(true);
     setErr(null);
     try {
@@ -110,23 +114,23 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         for (const p of allRows) {
           await db.products.put({
             id: p.id,
-            tenant_id: (p as { tenant?: number }).tenant ?? 0,
+            tenant_id: tenantId,
             sku: p.sku,
             name_ar: p.name_ar || "",
             data: JSON.stringify(p),
             updated_at: now,
           });
         }
-        await db.cache_meta.put({ key: "products:list", updated_at: now });
+        await db.cache_meta.put({ key: cacheMetaKey, updated_at: now });
       } catch { /* IndexedDB unavailable in private mode — non-fatal */ }
     } catch (e: unknown) {
       // Network failed — try to serve the last cached snapshot so the screen
       // stays usable offline. Surface the staleness via the badge.
       try {
-        const cached = await db.products.toArray();
+        const cached = await db.products.where("tenant_id").equals(tenantId).toArray();
         if (cached.length > 0) {
           setProducts(cached.map((c) => JSON.parse(c.data) as SqlProduct));
-          const meta = await db.cache_meta.get("products:list");
+          const meta = await db.cache_meta.get(cacheMetaKey);
           setLastSync(meta?.updated_at ?? cached[0].updated_at);
           setFromCache(true);
           setErr(null);
@@ -242,11 +246,18 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   }, []);
 
   const columns: DenseColumn<SqlProduct>[] = [
-    { key: "sku", header: "رقم الصنف", width: "110px", sortable: true, render: (p) => (
-        <b title={p.sku} style={{ display: "inline-block", maxWidth: "90px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "bottom" }}>
-          {p.sku}
-        </b>
-    ) },
+    // W8: الأعمدة القيادية بالترتيب المطلوب — الكمية المشتراة (الوارد التراكمي)،
+    // ثم الكمية المتبقية، ثم عمود الاسم (المثبَّت)، ثم متوسط المبيعات الشهري.
+    { key: "purchased", header: "الكمية المشتراة", width: "100px", align: "center", numeric: true,
+      // الوارد التراكمي (كل حركات IN) من StockMovement — منقّط خادمياً (لا N+1).
+      render: (p) => <span title="الوارد التراكمي (كل حركات الإدخال IN)">{p.purchased_qty != null ? formatQuantity(p.purchased_qty) : "—"}</span> },
+    { key: "qty", header: "الكمية المتبقية", width: "90px", align: "center", numeric: true, sortable: true,
+      render: (p) => {
+        const qty = Number(p.quantity_on_hand);
+        const low = qty <= 0;
+        return <span title="المخزون الحالي" style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{formatQuantity(qty)}</span>;
+      }
+    },
     { key: "name_ar", header: "اسم الصنف", sortable: true, render: (p) => (
       // FEAT-3: اسم الصنف يفتح بطاقة الصنف (الفواتير المرتبطة + دفتر الحركة).
       <button
@@ -258,13 +269,14 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         {p.display_name || p.name_ar || p.name_en || "—"}
       </button>
     ) },
-    { key: "qty", header: "الكمية", width: "80px", align: "center", numeric: true, sortable: true,
-      render: (p) => {
-        const qty = Number(p.quantity_on_hand);
-        const low = qty <= 0;
-        return <span style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{formatQuantity(qty)}</span>;
-      }
-    },
+    { key: "avg_monthly", header: "متوسط البيع الشهري", width: "120px", align: "center", numeric: true,
+      // صافي (OUT − RETURN_IN) خلال 90 يوماً ÷ 3.
+      render: (p) => <span title="متوسط المبيعات الشهري = صافي البيع (بعد المرتجعات) خلال آخر 90 يوماً ÷ 3">{p.avg_monthly_sales != null ? formatQuantity(p.avg_monthly_sales) : "—"}</span> },
+    { key: "sku", header: "رقم الصنف", width: "110px", sortable: true, render: (p) => (
+        <b title={p.sku} style={{ display: "inline-block", maxWidth: "90px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "bottom" }}>
+          {p.sku}
+        </b>
+    ) },
     { key: "avg_cost", header: "متوسط التكلفة", width: "110px", align: "center", numeric: true, sortable: true,
       render: (p) => <>{fmt(p.avg_cost)}</> },
     { key: "min", header: "الحد الأدنى", width: "90px", align: "center", sortable: true,

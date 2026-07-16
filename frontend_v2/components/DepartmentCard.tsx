@@ -1,5 +1,5 @@
 import React from 'react';
-import { Department } from '../../services/firestoreService';
+import { Department } from '../services/firestoreService';
 import { DepartmentIcon } from './icons/DepartmentIcons';
 import { Edit2 } from 'lucide-react';
 

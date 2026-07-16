@@ -3,6 +3,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '../types';
 import { fetchUserProfile as fetchUserProfileApi, logoutUser as logoutApi } from '../services/authService';
 import { activityService } from '../services/firestoreService';
+import { clientLogger } from '../services/logger';
 
 interface AuthContextType {
     currentUser: User | null;
@@ -16,6 +17,24 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+/**
+ * Activity/points are secondary session data. A slow mapper request must never
+ * hold the authenticated application shell behind the global loading screen.
+ */
+const bootstrapActivityStatus = async (userId: string): Promise<void> => {
+    try {
+        const status = await activityService.getActivityStatus(userId);
+        if (!status) {
+            await activityService.initializeActivityStatus(userId);
+        }
+    } catch (error) {
+        clientLogger.warn('auth.activity_bootstrap_failed', {
+            userId,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
+};
 
 export const useAuth = () => {
     const context = useContext(AuthContext);
@@ -42,14 +61,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const userProfile = await fetchUserProfile(userId);
         if (userProfile && userProfile.isApproved) {
             setCurrentUser(userProfile);
-            try {
-                const status = await activityService.getActivityStatus(userProfile.id);
-                if (!status) {
-                    await activityService.initializeActivityStatus(userProfile.id);
-                }
-            } catch (err) {
-                // console suppressed
-            }
+            void bootstrapActivityStatus(userProfile.id);
         } else {
             setCurrentUser(null);
         }
@@ -67,14 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const completeLogin = async (user: User) => {
         setCurrentUser(user);
-        try {
-            const status = await activityService.getActivityStatus(user.id);
-            if (!status) {
-                await activityService.initializeActivityStatus(user.id);
-            }
-        } catch (err) {
-            // console suppressed
-        }
+        void bootstrapActivityStatus(user.id);
     };
 
     useEffect(() => {

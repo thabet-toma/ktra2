@@ -28,6 +28,281 @@ python manage.py check                                 # 0 مشاكل
 
 ---
 
+## [FIX — تحويل جزئي احترافي + نقل محلي إلى الفاتورة الدولية, 2026-07-16]
+
+- صار `LocalShipment` المرسمل وغير الملغي مصدر النقل المحلي الحي في landed cost حتى قبل
+  الدفع؛ يُحوّل `amount × exchange_rate` إلى شيكل ويوزّع حسب CBM/KG مثل الشحن، مع fallback
+  لأسطر التخليص القديمة فقط عند غياب سجل نقل، كي لا تتكرر التكلفة. الدفع للناقل بقي مستقلاً
+  محاسبياً عن استحقاق التكلفة وعن دفعة مورد الفاتورة.
+- أضيف عقد `clearance-import-options` يعيد حالة كل صفقة في الشحنة (متبقية/محوّلة + رقم
+  الفاتورة)، ومنع خادمي ذري لإعادة تحويل الصفقة نفسها. يمكن تحويل صفقة واحدة ثم العودة لاحقاً
+  لتحويل البقية؛ رحلة الاستيراد لا تعتبر الشحنة مكتملة حتى تصبح كل الصفقات مفوترة.
+- مودال الفواتير الدولية يعرض عداد المتبقي/المحوّل، «اختيار كل المتبقي»، ويعطّل المحوّل مع
+  رابط فاتورته. روابط التحويل من رحلة الشحنة تفتح `/international-invoices` الصحيح، وتُحدّث
+  الحالة عند عودة التركيز. تفاصيل الفاتورة تكشف اسم/رقم الشحنة وزر «فتح رحلة الشحنة».
+- شاشة الدفعات تعرض استحقاق/مدفوع/متبقي النقل المحلي بوضوح وتشرح أن التكلفة تدخل الفواتير
+  بينما تسوية الناقل تبقى دفعة مستقلة.
+- الملفات: `logistics/domain/inland.py`, `logistics/landed_cost.py`, `logistics/views.py`,
+  `logistics/serializers.py`, `logistics/tests/test_clearance_import.py`,
+  `frontend_v2/components/import-flow/{ImportDocumentScreen.tsx,importJourneyGuidance.ts}`,
+  `frontend_v2/components/procurement/invoices/{ClearanceImportModal.tsx,sections/ConversionDetailsSection.tsx}`,
+  `frontend_v2/services/purchaseInvoiceApi.ts`, `frontend_v2/types/{invoice.ts,purchaseInvoice.ts}`,
+  `frontend_v2/utils/mapPurchaseInvoiceDto.ts`, و`frontend_v2/e2e/import-journey-guidance.spec.ts`.
+- تحقق نهائي: Django **303/303**، `check` صفر، migration drift صفر، TypeScript صفر،
+  Vite production build ناجح، واختبار guidance **5/5**؛ لا موديل أو هجرة جديدة لهذا الإصلاح.
+
+---
+
+## [MAINTENANCE — دورة الأداء والموثوقية وUX الشاملة, 2026-07-15]
+
+### خط الأساس والبيئة
+- التاريخ الفعلي: `2026-07-15 +03:00`؛ Python `3.13.5`، Node `24.13.0`، npm
+  `11.7.0`. المثبّت محلياً Django `6.0.3`/DRF `3.17.1` بينما requirements يثبّت
+  `6.0.1`/`3.16.1`؛ لم تُرفع الاعتماديات لأن لا عيب توافق مُثبتاً يستدعي ذلك.
+- قبل التعديل: backend **281/281** أخضر (122.384s)؛ `check` صفر؛ migration drift صفر؛
+  Vite build ناجح (main `1127.59kB` raw / `270.96kB` gzip، PWA 136 أصلاً / 3226.83KiB).
+  `tsc --noEmit` كان يفشل حصراً من import خاطئ في `DepartmentCard.tsx`.
+- تحسينات 2026-07-10 التاريخية ما زالت موجودة ومتصلة: مهل MySQL/connection reuse،
+  dashboard cache tenant-scoped، فهارس وترقيم القيود، journal batching، كاش أوفلاين بعمر
+  أقصى، Service Worker cross-origin guard، وroute-level lazy loading.
+
+### M1 — P0 عزل ملخص المخزون + عقد UOM
+- **الجذر/الدليل:** `StockMovementViewSet.summary` كان يستعلم كل `Product` بلا tenant؛
+  القياس أعاد منتج Tenant B داخل طلب Tenant A. أضيف `tenant=tenant` وempty آمن عند غيابه؛
+  اختبار يثبت إخفاء الأجنبي وصحة `count=2` و`value=35`.
+- `UnitOfMeasure` قاموس عالمي بلا tenant، لكن serializer طلب field وهمياً اسمه `tenant`
+  فكان endpoint يرد 500. صُحّح العقد إلى `id/code/name_ar/name_en` بلا موديل أو هجرة؛
+  القياس بعده 200 من شركتين ونفس القاموس بلا حقل tenant.
+- الملفات: `inventory/views.py`, `inventory/serializers.py`,
+  `inventory/tests/test_product_api.py`. لا تغيير تقييم مخزون أو منطق مالي.
+
+### M2 — P1 إزالة N+1 المقاسة
+- تفاصيل فاتورة البيع (`lines.product`): قبل **16→20 query** عند 2→6 أسطر؛ بعد
+  `prefetch_related('lines__product')` أصبحت **16→16**، و`product_name` لم يتغير.
+- قائمة عروض الأسعار: قبل 2→6 صفوف = **7→11 query** و`1179→3267B`؛ بعد list serializer
+  الخفيف = **4→4** و`541→1353B`. التفاصيل فقط تجلب `lines__product` وتبقى كاملة.
+- شجرة الحسابات/الشريك المرتبط: قبل 2→6 = **5→9 query**؛ بعد Prefetch tenant-scoped
+  = **4→4** بنفس payload، واختبار يمنع تسريب شريك شركة أخرى.
+- N+1 القيود المنفّذ في العمل السابق بقي ثابتاً ومختبراً، وكذلك
+  `LogisticsPayment.select_related('journal')`.
+
+### M3 — P1 دورة طلب ومزامنة محدودة
+- عميل REST كان ينتظر **120 ثانية** ويصبح بلا مهلة في متصفح لا يدعم
+  `AbortSignal.timeout`. أصبح السقف **30 ثانية** بـ`AbortController` فعلي مع احترام إلغاء
+  المستدعي؛ طُبّق على restApi وعلى عملاء المحاسبة والمخزون والمصادقة والداشبورد وفواتير الشراء.
+- طابور mutations كان يترك 5xx في `syncing` للأبد. الآن 4xx=`failed` كما كان، و5xx/فشل
+  الشبكة=`pending` مع نص خطأ مرئي ومهلة فعلية. Playwright يثبت 503→pending+error.
+- Service Worker لم يعد يترك fetch يعمل بعد سقوط مهلة navigation، ولا يخزّن 4xx/5xx كأصل
+  أوفلاين صالح؛ الكاش القديم/version cleanup ودعم الأوفلاين بقيا دون حذف.
+
+### M4 — P1 حالات UX والحمل الشبكي
+- فشل قائمة فواتير الشراء لم يعد يُبتلع كقائمة فارغة: `AseelErrorState` + Retry، وفشل detail
+  يعطي toast قبل الرجوع، والتحديث اليدوي يعلن loading/success/failure وينتهي دائماً.
+- اشتراك الشحنات كان يجلب القائمة كاملة كل **5 ثوانٍ** ويحوّل الخطأ إلى `[]`; صار initial +
+  refresh عند عودة focus، يحتفظ بآخر نجاح ويبلغ شاشة الشحنات بخطأ/Retry. حُذف اشتراك موردين
+  كامل غير مستخدم من الشاشة. اشتراك الموردين العام استُبدل كذلك من polling 5s إلى focus refresh.
+- الصفقات لا تحوّل فشل API إلى صفر صفقات؛ الشاشة تنهي loading إلى خطأ/Retry قابل للتنفيذ.
+- أُصلح import `DepartmentCard` السابق؛ `tsc --noEmit` صار نظيفاً.
+
+### التحقق والحدود
+- تحقق نهائي: Django **286/286** أخضر (120.255s)؛ `manage.py check` صفر؛
+  `makemigrations --check --dry-run` = No changes؛ TypeScript صفر؛ `git diff --check` نظيف.
+  Vite production build ناجح (main `1128.78kB` raw / `271.27kB` gzip، PWA 136 أصلاً /
+  `3229.63KiB`). الزيادة ~1.2kB raw مقابل baseline هي حالات الخطأ/Retry الجديدة؛ route splitting
+  التاريخي ما زال فعالاً، لكن تحذير chunk>500k و`eval` في الحاسبة ما زالا قائمين.
+- Playwright المركز: offline queue **3/3** وconflict flow **2/2**. التشغيل الكامل قبل إصلاح
+  preload أعطى **13/23**؛ عيب dynamic-import الأوفلاين أُصلح وثبت targeted أخضر، فتتبقى **9**
+  حالات بيئية/قديمة تفتح مسارات مصادقة بلا session وبلا Django محلي (لا يظهر الجدول/الأزرار)،
+  وليست فشلاً في الوحدات المعدلة. لم تتوفر credentials لاختبار مرئي مصادَق.
+- لا موديل/هجرة جديدة في هذه الدورة، ولم تُطبّق أي migration أو production mutation.
+- لم تتوفر جلسة إنتاج مصادَقة أو MySQL production، لذلك لا ادعاء p95 حي. الدليل المحلي هو
+  query-count/payload/build. بقيت قوائم deals/shipments ذات nested payload وN+1 مقاس، وقوائم
+  أخرى opt-in pagination فقط. لا تُرقّم sales/partners/deals عمياناً قبل نقل search/date/status
+  كاملة للخادم كي لا تختفي مستندات مالية قديمة.
+- أسرار قديمة موجودة كـdefaults في settings تستلزم **تدوير قيم الإنتاج ووضع env أولاً**؛
+  لا يمكن حذف defaults بأمان من هذه البيئة دون تنسيق إنتاج، وهي production-access-blocked.
+- rollback: عكس ملفات هذه الفقرة فقط يعيد السلوك السابق؛ لا rollback قاعدة بيانات مطلوب.
+  النشر: شغّل الاختبارات/check/migration check والبناء، ثم انشر backend+dist معاً؛ لا تنشر
+  migrations غير المرتبطة قبل مراجعة عمل الاستيراد غير الملتزم الموجود مسبقاً.
+
+## [MAINTENANCE — إغلاق حدود القوائم والحزمة والأسرار والهجرة, 2026-07-15]
+
+### الخطة والأولويات
+- **P1 — عقود الصفقات/الشحنات:** النجاح = list خفيف، detail كامل عند الفتح، وعدد SQL ثابت
+  مع نمو الصفحة. الدليل السابق كان 13 query للصفقات و24 للشحنات، مع payload قائمة صفقة
+  يكاد يساوي detail.
+- **P1 — الترقيم الآمن:** النجاح = نقل search/status/type/date للخادم قبل ترقيم أي شاشة
+  أساسية، 50 صفاً افتراضياً وسقف 200، وعدم إخفاء المستندات القديمة داخل client-side filter.
+- **P1 — الحزمة/الحاسبة:** النجاح = كل chunk أقل من 500kB، لا `eval`، ولا سر AI في bundle.
+- **P0 — الأسرار:** النجاح = صفر credential production literal، وفشل نشر واضح قبل أي mutation
+  إذا لم تكن قيم الإنتاج مضبوطة. تدوير القيم نفسها يتطلب وصول مالك الإنتاج.
+- **P1 — الهجرة/الاستيراد الموجودان مسبقاً:** النجاح = تدقيق additive/MySQL-safe قدر الإمكان
+  دون اتصال إنتاج، واختبارات مالية كاملة؛ لا تطبيق migration ولا نشر من هذه البيئة.
+
+### M5 — عقود deals/shipments الخفيفة وإزالة N+1
+- أضيف `LogisticsDealListSerializer` و`LogisticsShipmentListSerializer`؛ `list` يعيد headers
+  وعدادات/ملخصات فقط، بينما `retrieve` وحده يعيد items/payments/attachments/allocations.
+  فتح الصفقة أو الشحنة في الواجهة يجلب detail صراحةً بدلاً من الاعتماد على nested list.
+- نفس fixture (8 سجلات، ولكل سجل بند+دفعة+رابط): الصفقات **13→5 query**، وثبتت 5 عند
+  page-size 2→8؛ الشحنات **24→4** وثبتت 4. payload صفقة واحدة داخل الغلاف
+  **3064→1185B (-61.3%)**؛ شحنة خفيفة 1406B مقابل detail 2396B (-41.3%).
+- أضيفت فلاتر tenant-scoped: الصفقات search/status/date؛ الشحنات
+  search/status/shipping_type/date/deal_id. الشاشتان تستخدمان page=1/page_size=50، debounce،
+  و«تحميل المزيد». ربط شحنات الصفقة يستخدم `deal_id` بدل تنزيل كل الشحنات ومسح nested deals.
+- اختبار `logistics/tests/test_list_contract_perf.py` يثبت العقد، العزل، ثبات query count،
+  الفلاتر، وفصل list/detail.
+
+### M6 — ترقيم القوائم المالية والشركاء بلا كسر البحث
+- فواتير البيع، عروض الأسعار، العملاء، الشركاء، وفواتير الشراء أصبحت مرقمة في شاشاتها
+  الأساسية (50، max 200) بعد إضافة الفلاتر الخادمية المكافئة. query count لقوائم sales/partner
+  ثابت عند 5→20 صفاً، وقائمة الشريك لا تستعلم attachments لكل صف.
+- محددات partner/invoice التي لا تعرض pagination تستخدم endpoints `lookup` raw بسقف 500؛
+  هذا يمنع payload غير محدود ويحافظ على عقد المكوّنات الحالية. إذا تجاوز master data هذا السقف
+  يلزم server autocomplete في دورة لاحقة، لا إعادة unbounded lists.
+- فواتير الشراء كانت ثغرة إضافية: القائمة كانت تجلب `items__product` لكل الفواتير وتحسب
+  `items_count` من manager. أصبحت تستخدم `COUNT(items)` داخل queryset، وفلاتر
+  search/is_posted/is_return/date قبل pagination؛ التفاصيل وحدها prefetch للبنود.
+- اختبارات: `sales/tests/test_list_pagination_filters.py`,
+  `partners/tests/test_partner_list_pagination.py`, وpurchase-invoice regression ضمن
+  `logistics/tests/test_list_contract_perf.py`.
+
+### M7 — الحزمة و`eval` ومفتاح Gemini
+- main entry: **1128.78/271.27kB raw/gzip → 227.08/61.07kB** (-79.9%/-77.5%).
+  أكبر chunk نهائي Dashboard 324.76kB؛ كل chunks تحت 500kB واختفى تحذير large chunk.
+  PWA precache: **3229.63→2913.77KiB**.
+- أضيف lazy-loading للشاشات العامة/الثقيلة وmanual vendor chunks لـ React/Dexie/icons.
+  أزيل `@google/genai` من package/lock/importmap، وأزيل `define` الذي كان يحقن
+  `GEMINI_API_KEY` في JavaScript العام. لا يوجد backend AI endpoint مصادق في المستودع؛ لذلك
+  sourcing يعرض نتائج demo موسومة بوضوح، وإعادة AI الحقيقي يجب أن تكون server-side.
+- استُبدل `eval` في الحاسبة بمحلل محدود 256 حرفاً يدعم الأرقام و`+ - * /` وunary signs،
+  يرفض identifiers/JavaScript والقسمة غير المحدودة. فحص المستودع: صفر `eval/new Function`
+  وصفر Gemini key/SDK reference.
+
+### M8 — أسرار environment-only وبوابة النشر
+- أزيلت defaults الحقيقية لـ Django/MySQL/Cloudinary/OpenClaw من `core/settings.py`.
+  `DJANGO_ENV=production` يفرض القيم المطلوبة عبر `ImproperlyConfigured`; التطوير فقط يملك
+  defaults غير حساسة. مهلة OpenClaw الافتراضية أصبحت **60s بدل 600s**.
+- `deploy.ps1` يتحقق قبل النسخ/backup/migrate من `DJANGO_ENV=production` ومن جميع متغيرات
+  Django/MySQL/Cloudinary/OpenClaw، ويرفض SECRET_KEY placeholder/أقصر من 50 حرفاً.
+  `core/test_settings.py` يستخدم Cloudinary placeholders اختبارية فقط كي تصل اختبارات uploader
+  المموهة إلى mock؛ لا اتصال خارجي ولا سر إنتاج.
+- فحص آلي: صفر password/API secret/bearer token/SECRET_KEY literal في production settings؛
+  import بإنتاج ناقص env يفشل كما يجب، و`deploy.ps1` parse errors = 0.
+- **محجوب بالإنتاج:** القيم القديمة ظهرت سابقاً في المصدر/التاريخ؛ يجب تدوير DB password،
+  Django secret، Cloudinary secret، وOpenClaw token وضبط `.env` على الخادم قبل أول نشر.
+  لم تُعد كتابة Git history ولم تُدوّر أي قيمة من هذه البيئة.
+
+### M9 — تدقيق migration وعمل الاستيراد السابقين
+- `0054_localshipmentpayment.py` يطابق الموديل: `managed=True` وعملياته حصراً
+  `CreateModel + AddIndex + AddIndex`، بلا Remove/Alter/RunPython أو mutation لبيانات قائمة.
+  أسماء الفهارس 26/23 حرفاً (<64 MySQL). الهجرة additive، لكن لم تُطبّق محلياً أو إنتاجياً.
+- اختبارات فصل الاستحقاق عن الدفع/التخليص/مرجع الشراء **16/16** خضراء؛ المجموعة الكاملة
+  تثبت توازن القيود وعدم تغيير قواعد landed cost/payment separation. الملفات بقيت غير ملتزمة
+  كما كانت لأن worktree يحوي عملاً سابقاً متداخلاً؛ لم يُنشأ commit شامل أو نشر تلقائي.
+
+### تصحيح قاعدة التطوير المحلية (2026-07-15)
+- قاعدة `global_erp_pro` المحلية هي schema legacy (99 جدولاً): تسجل logistics 0001–0008
+  بلا أي inventory migrations، ولا تحتوي `stock_movements`؛ لذلك `migrate` يرفضها بـ
+  `InconsistentMigrationHistory`. لم تُعدّل القاعدة ولا جدول `django_migrations` ولم يُستخدم fake.
+- قاعدة التطوير الصحيحة هي `smartktra_smart-ktra` (149 جدولاً): inventory 0001–0012 وlogistics
+  0001–0054 متسقة. صُحّح `.env` المحلي المُهمَل من Git إليها؛ الاتصال ناجح،
+  `migrate --check` ناجح و`migrate --plan` = No planned migration operations.
+
+### M10 — P1 إزالة بوابة «البيانات المحلية» من فتح التطبيق (2026-07-15)
+- **معيار النجاح:** مصادقة Django تبقى إلزامية، لكن الشل المصادَق يجب أن يظهر قبل اكتمال
+  بيانات النشاط/النقاط غير الحرجة؛ طلب mapper بطيء أو متوقف لا يجوز أن يبقي spinner عاماً.
+- **الجذر والدليل القابل للتكرار:** `AuthContext.applyUserSession` كان ينتظر بالتسلسل
+  `GET /hr/users/:id/` ثم `GET /mapper/activityStatus/:id/` وربما `PUT` للتهيئة، ولا يخفض
+  `authLoading` إلا بعد الجميع. عميل `sqlApiClient` كان يستخدم `fetch` خاماً بلا timeout.
+  في Playwright مع profile فوري وactivity مؤخر 5s لم يظهر الشل خلال **8000ms** قبل الإصلاح.
+- **الحل الجراحي:** بقي profile/approval هو بوابة الأمان الوحيدة؛ بعد نجاحه تُضبط الجلسة فوراً
+  وتبدأ تهيئة activity fire-and-forget مع تحذير منظم عند الفشل. كل mapper requests أصبحت تمر
+  عبر `restApi.apiFetch` ذي `AbortController` والمهلة بدلاً من fetch غير المحدود. لم يتغير role
+  أو tenant enforcement أو أي منطق محاسبي/مالي.
+- **بعد الإصلاح:** بنفس activity delay (5s) ظهر الشل على Vite dev خلال **1693ms** والطلب غير
+  الحرج ما زال pending. على production `dist` الجاهز ظهر خلال **470ms** (<1500ms budget)،
+  وبقي activity pending؛ أي أن زمنه لم يعد جزءاً من critical path. الاختبار الدائم:
+  `frontend_v2/e2e/auth-startup-performance.spec.ts` ويمنع Service Worker من تجاوز mocks.
+- **الملفات/المخاطر/التراجع:** `frontend_v2/contexts/AuthContext.tsx`,
+  `frontend_v2/services/sqlApiClient.ts`, واختبار E2E أعلاه. الخطر المتبقي هو أن زر/عداد النشاط
+  قد يظهر بعد الشل عند شبكة بطيئة، وهو مقصود وأفضل من حجب النظام كله. rollback كودي فقط ولا
+  migration أو data rollback. يلزم نشر `dist` الجديد مع كود الواجهة؛ لم يحدث نشر تلقائي.
+
+### M11 — P1 منع إنذار الاتصال الكاذب المتكرر (2026-07-15)
+- **الجذر/الدليل:** `useOnlineStatus` كان يشغّل `HEAD /health/` مستقلاً من كل مكوّن يستخدم
+  hook (App ولوحة mutations ومحررات)، وأي timeout/503 منفرد خلال 5s يحوّل حالته فوراً إلى
+  offline. بذلك يمكن لفحص أن يفشل وفحص متزامن أن ينجح بينما الخادم سليم، فيظهر الشريط كل فترة.
+  وقت التدقيق أعاد health الإنتاج `200` في 5/5 محاولات (`0.625–1.455s`) مع CORS صحيح.
+- **الحل:** جميع مستهلكي hook يشتركون الآن في probe واحدة in-flight. الفحص يبدأ بـHEAD
+  `cache:no-store`؛ عند فشله ينتظر 500ms ويؤكد الحالة بـGET صغير. لا تظهر حالة الخادم غير
+  المتاح إلا بعد فشل الاثنين، بينما `navigator.offline` الحقيقي يبقى فورياً. كلا الطلبين له
+  `AbortController` وسقف 5s، لذلك أسوأ تأخير لتأكيد API-only outage محدود بنحو 10.5s.
+- **التحقق:** `connection-health-stability.spec.ts` **2/2**: 503 عابر ثم 200 لا يعرض الشريط،
+  وفشل مؤكد مرتين يعرض الرسالة وزر الإصلاح. مجموعة الاتصال/الأوفلاين المجاورة **8/8**،
+  TypeScript PASS، وحدات **3/3**، وVite/PWA build PASS. لا تغيير backend أو DB أو migrations.
+- **الحد/التراجع:** لا يمنع هذا انقطاعاً حقيقياً؛ يؤخر فقط إعلان API-only outage حتى تأكيده.
+  التراجع بعكس `frontend_v2/hooks/useOnlineStatus.ts` واختبار E2E؛ يلزم نشر `dist` الجديد حتى
+  يصل الإصلاح للمتصفح، ولم يحدث نشر تلقائي.
+
+### التحقق النهائي والقيود
+- Backend: **293/293 PASS (142.736s)**؛ `manage.py check` صفر؛
+  `makemigrations --check --dry-run` = No changes. لم يحدث اتصال أو تعديل لقاعدة الإنتاج.
+- Frontend: `npx tsc --noEmit` PASS؛ `npm test` **3/3**؛ Vite/PWA production build PASS
+  (3476 modules؛ main `227.01kB` raw / `61.13kB` gzip، وكل chunk <500kB)؛
+  `git diff --check` نظيف.
+- E2E المركّزة: **13/13 PASS** (auth startup 1، import guidance 4، fee editor 3، offline queue 3، conflict 2).
+  قياس production preview المنفصل **1/1 PASS** بميزانية 1500ms ونتيجة 470ms.
+  لم تتوفر جلسة مصادقة/credentials لفحص بصري حي ولا MySQL production/p95/EXPLAIN؛ لا ادعاء
+  p95 حي. بقيت تحذيرات build غير مانعة: Tailwind custom-property decimals، ومزج static/dynamic
+  imports لـ tenantContext/offline db؛ لا large-chunk ولا eval warning.
+
+### النشر والتراجع
+- قبل النشر: دوّر الأسرار واضبط `.env` المطلوبة، شغّل 293 tests + migration drift + check +
+  tsc/test/build وauth startup budget، راجع `0054` على نسخة staging MySQL/backup، ثم انشر
+  backend و`dist` معاً.
+- الناشر يأخذ backup قبل migrate ولا يعكس migrations تلقائياً عند الفشل. rollback للكود يعيد
+  backend/frontend؛ إن طُبقت 0054 وبدأت الكتابة فلا تُسقط الجدول للتراجع—اترك الجدول additive
+  وأعد الكود فقط حتى قرار صيانة بيانات صريح.
+
+## [DONE — إظهار إضافة ضريبة/رسم في فاتورة الشراء, 2026-07-14]
+- **السبب الجذري:** تبويب «الضرائب والرسوم» كان يخفي زر الإضافة بالكامل عند فتح فاتورة
+  محفوظة لأن `viewMode` يدخل ضمن `effectiveReadOnly`؛ لذلك ظهر جدول فارغ يطلب الإضافة بلا
+  أي إجراء ظاهر، كما كانت ضريبة القيمة المضافة الأساسية مختلطة مفاهيمياً مع البنود الإضافية.
+- **المسار الجديد:** الأزرار ظاهرة للمسودة المحفوظة وتنفذ «تحرير + إضافة» بضغطة واحدة، مع
+  فصل «ضبط ض.ق.م الأساسية» عن «إضافة ضريبة مستقلة» و«إضافة رسم». السطر الجديد يختار حساب
+  الضريبة 1105 أو حساب الرسوم 5307 عند توفره، ويضع المؤشر مباشرة في المبلغ.
+- **حالات المنع:** الفاتورة المرحّلة/التاريخية/للقراءة فقط تعرض سبباً واضحاً؛ المرحّلة تطلب
+  «تراجع عن الترحيل» أولاً بدلاً من إخفاء الإجراء بصمت. فشل تحميل الحسابات مسجل في console
+  ويظهر للمستخدم تنبيه قابل للتنفيذ.
+- **TDD/تحقّق:** `purchase-invoice-fee-editor.spec.ts` **3/3** خضراء، و`vite build` ناجح؛
+  اختبارات الواجهة مع انحدار رحلة الاستيراد **7/7**، واختبار الحفظ/الترحيل الخلفي **6/6**،
+  و`manage.py check` بلا مشاكل. `tsc --noEmit` لا يظهر سوى خطأ `DepartmentCard.tsx`
+  السابق والمسجل أدناه.
+
+## [DONE — ناشر إنتاج آلي آمن لـ cPanel/LiteSpeed, 2026-07-14]
+المصدر المرجعي الخارجي: `KTRA_DEPLOYMENT_GUIDE (2).md` (لم يُنسخ إلى المشروع لأنه يحتوي
+بيانات حساسة). أضيف `deploy.cmd` للتشغيل بالنقر و`deploy.ps1` كمنفذ النشر الكامل.
+- **المسار المحلي:** يفحص SSH أولاً، يعرض تغييرات Git، ثم يشغل اختبارات Django كاملة
+  و`makemigrations --check` و`manage.py check`، ويبني Vite بـAPI الإنتاج. `-SkipTests`
+  متاح للطوارئ فقط و`-DryRun` يبني ويدقق الحزمة بلا اتصال أو رفع.
+- **حزمة مقيدة ومدققة:** تضم تطبيقات Django و`frontend_v2` المصدرية و`dist` المبني فقط؛
+  تستبعد وتفحص `.env` والمفاتيح و`node_modules` و`dist` المصدرية والكاش وقواعد البيانات
+  والأرشيفات. الرفع يتم كحزمة واحدة عبر OpenSSH (`scp` ثم `ssh`) دون تخزين كلمة مرور.
+- **المسار البعيد:** يرفض أي Python أقل من 3.12 (Django 6)، ويتطلب `rsync/mysqldump/curl`،
+  ويقرأ مفتاح Django من `.env` داخل ذاكرة العملية دون طباعته. قبل التعديل ينشئ نسخاً من
+  كود الباك، ملفات الواجهة، وقاعدة MySQL؛ ثم مزامنة دقيقة مع حماية `.env/venv/media/static`
+  ومجلد subdomain والـ`.htaccess`، يليها requirements/check/migrate/collectstatic وإعادة
+  Gunicorn وفحص الصحة داخلياً وعبر النطاقين. عند الفشل يرجع الكود والواجهة تلقائياً ويحتفظ
+  بنسخة قاعدة البيانات (لا يعكس migrations آلياً كي لا يمسح كتابات حية). يحتفظ بآخر 5 نسخ.
+- **إعداد الاتصال:** الافتراضي `smartktra@smart.ktragroup.com:22` وقابل للتغيير عبر
+  `KTRA_DEPLOY_HOST/USER/PORT/KEY/HOME` أو معاملات PowerShell. النطاقان حالياً `200 OK`،
+  لكن SSH على 22 والمنافذ الشائعة المفحوصة مغلق من هذه الشبكة؛ لذلك النشر الحقيقي محجوب
+  بأمان حتى تزويد SSH host/port الصحيح أو تفعيل SSH في cPanel. يوجد أيضاً تعارض في الدليل
+  (`Python 3.10`) مع متطلب المشروع (`Django 6` → Python 3.12+) وسيكشفه الناشر قبل التعديل.
+- **تحقّق:** PowerShell parser ناجح · Bash `-n` ناجح · `DryRun -SkipTests` نجح وبنى Vite
+  ودقق SHA-256 للحزمة بلا رفع · اختبار الحارس الحقيقي توقف قبل أي mutation عند SSH المغلق ·
+  `git diff --check` نظيف.
+
 ## [EPIC — Staff Work Order (W1–W11) — الخطة معتمدة من المالك, 2026-07-13]
 أمر عمل من 11 بنداً (إعدادات/تهيئة/إدارة منصّة/مراجيع/UX مخزون/تقارير/إصلاح خطأ/أداء).
 معالم M1–M8 ببوابة موافقة بعد كل معلم. قرارات المالك المعتمدة:
@@ -94,6 +369,109 @@ python manage.py check                                 # 0 مشاكل
   بها سطر خاسر عند الحفظ+المفتاح مفعّل مع تأكيد التراجع · حفظها عند الإطفاء · المرجع مُعفى) ·
   الحزمة الكاملة 270 (unittest) خضراء · `makemigrations --check` = No changes · `check` 0 ·
   `tsc` = خطأ DepartmentCard السابق فقط · `vite build` ناجح.
+
+### [DONE — M3: مرتجع الشراء — منتقي البنود + هوية المستند + المورد الموروث, 2026-07-14]
+جراحي، بلا هجرة (لا حقل موديل جديد).
+- **W6 حارس تجاوز الكمية (خادمي):** `create_purchase_return` يرفض إن تجاوزت الكمية المرتجعة
+  المتبقّي القابل للإرجاع لكل صنف = المفوتر − مجموع كل المراجيع السابقة لنفس الفاتورة الأصلية
+  (داخل `transaction.atomic`). دالة مشتركة `returnable_lines_for_invoice` (مصدر حقيقة واحد)
+  + نقطة `GET purchase-invoices/{id}/returnable-lines/` تُرجع (المفوتر/المرتجع/المتبقّي).
+- **W6 منتقي البنود (واجهة):** `PurchaseReturnEditor` لم يعد ينسخ كل الأسطر تلقائياً — اختيار
+  الفاتورة الأصلية يفتح مودالاً يعرض لكل بند (المفوتر · المرتجع · المتبقّي) بخانة اختيار وحقل
+  «كمية الإرجاع» (افتراضي=المتبقّي، مقيّد به، البنود المستنفدة معطّلة). البنود المختارة فقط
+  تدخل المرجع — انتهى «كل شيء يظهر وأجلس أحذف صفوفاً».
+- **W7b المورد موروث (واجهة):** حقل المورد صار للقراءة فقط يُورَّث من الفاتورة الأصلية (قيد
+  العكس يجب أن يصيب نفس حساب ذمم المورد) مع تلميح توضيحي — لا حقل ميت. (شكوى المالك الحقيقية
+  «تعديل المورد» كانت في صفحة الموردين وحُلّت في M1.)
+- **W7a هوية مستند المرجع (واجهة):** `PurchaseInvoiceSerializer` يكشف `original_invoice_number`؛
+  `mapPurchaseInvoiceDtoToInvoice` يمرّر `isReturn`/`originalInvoiceId`/`originalInvoiceNumber`؛
+  و`InvoiceForm` عند فتح مرجع يعرض عنوان «مرجع شراء»، شارة حمراء «مرجع شراء ↩»، ورابط «الفاتورة
+  الأصلية #» + لغة معكوسة — بدل ظهوره كفاتورة شراء عادية.
+- **تنظيف:** أُزيل `partners` اليتيم من `PurchaseReturnEditor` (لم يعد يُستخدم بعد جعل المورد موروثاً).
+- **تحقّق:** `test_purchase_return_posting.py` **6** (+3 حارس التجاوز/التراكم + منتقي البنود) ·
+  الحزمة 270 خضراء · `makemigrations --check` = No changes · `check` 0 · `tsc` = DepartmentCard فقط ·
+  `vite build` ناجح.
+
+### [DONE — M4: W11 أداء — N+1 موثّقان + مُقاسان بعدّ الاستعلامات, 2026-07-14]
+جراحي، بلا هجرة. **القياس:** التوقيت الحيّ على الإنتاج متعذّر من هذه البيئة (خادم بعيد خلف
+دخول) — فالدليل هو **عدد استعلامات SQL** (اختبار تراجع)، والتغييرات كلها بلا تغيير سلوك.
+- **N+1 ملخّص مرجع القيد (`build_journal_reference_summary`):** كان كل صف
+  SALES_INVOICE/CUSTOMER_PAYMENT يُطلق استعلاماً مفرداً ⇒ صفحة 100 قيد = حتى 100 استعلام
+  زائد. الآن `JournalViewSet.list` يبني `sales_map`/`cust_map` من صفوف الصفحة (نفس نمط
+  `pay_map` القائم) ويُمرّرها بالـcontext؛ الدالة تقرأ من الـmap وتسقط لاستعلام مفرد فقط عند
+  الاستهلاك المفرد (توافق خلفي). اختبار `test_journal_reference_perf.py`: عدد الاستعلامات
+  **ثابت** (2 قيد ↔ 6 قيود) بدل أن يزيد بمقدار N.
+- **`LogisticsPaymentViewSet.get_queryset`:** أُضيف `select_related('journal')` (كان
+  `journal_id_display` يُطلق استعلاماً لكل صف مرحّل).
+- **مؤجَّل عمداً (يحتاج قياس إنتاج + خطر ارتداد مالي):** ترقيم قوائم فواتير المبيعات/الشركاء/
+  الصفقات/فواتير الشراء — بحثها client-side، فالترقيم قبل إضافة `search`/`date_from`/`date_to`
+  خادمياً = اختفاء فواتير قديمة من البحث. لا يُنفَّذ بلا دليل أنه عنق الزجاجة الفعلي (بروتوكول
+  «قِس أولاً»).
+- **تحقّق:** 271 اختباراً خضراء (+1) · `makemigrations --check` = No changes · `vite build` ناجح.
+
+### [DONE — M5: W8 أعمدة الأصناف + معدّلات البيع (منقّطة، بلا N+1), 2026-07-14]
+جراحي، بلا هجرة. المصدر الوحيد = `StockMovement`.
+- **تعريفات النوافذ (موثّقة):** المشتريات = الوارد التراكمي (كل حركات `IN`). متوسط البيع
+  الشهري = صافي (`OUT` − `RETURN_IN`) خلال آخر **90 يوماً ÷ 3**. الأسبوعي (البطاقة) = صافي
+  خلال **28 يوماً ÷ 4**. المرتجعات مخصومة.
+- **الجدول (`ProductViewSet.get_queryset`):** تجميعات **منقّطة** (`Coalesce(Sum(..., filter=Q))`)
+  — `purchased_qty`/`sold_qty_90d`/`returned_qty_90d` بجوين واحد، لا N+1. `ProductSerializer`
+  يكشف `purchased_qty` ويحسب `avg_monthly_sales`=(sold−returned)/3. أعمدة `ItemsManagement`
+  أُعيد ترتيبها: الكمية المشتراة → الكمية المتبقية → اسم الصنف (المثبَّت) → متوسط البيع الشهري
+  → (رقم الصنف/التكلفة/الحد/الحالة/تعديل). تلميحات تشرح كل عمود.
+- **البطاقة (`product_profile`):** أُضيف `avg_weekly_sales` و`avg_monthly_sales` (نفس مصدر
+  الجدول) + مؤشّران في `ProductProfilePage`.
+- **تحقّق:** `test_item_aggregates.py` **3** (الوارد التراكمي · الشهري بعد المرتجعات مع
+  استبعاد ما قبل 90ي · الأسبوعي 28ي) · 274 خضراء · `makemigrations --check` = No changes ·
+  `tsc` = DepartmentCard فقط · `vite build` ناجح.
+
+### [DONE — جراحة UX رحلة الاستيراد: فصل الاستحقاق عن الدفع + رسوم الفاتورة الدولية, 2026-07-14]
+تنفيذ جراحي لمسار الشحنة نفسه (`ImportDocumentScreen`) مع فصل محاسبي صريح، وهجرة إضافة
+نظيفة فقط (`logistics/0054_localshipmentpayment.py`).
+- **التخليص — قيدان مستقلان:** `POST clearances/{id}/post-to-accounting/` يثبت الاستحقاق
+  (مدين حساب البند 1105/5302/5303/5306/5307 أو الحساب الصريح، دائن ذمم المخلّص) ويخزّن
+  قيده في `LogisticsClearance.journal`. `pay_from_cashbox` يبقى قيد الدفع المستقل (مدين
+  ذمم المخلّص/دائن الصندوق). الدفعة وحدها لم تعد تقفل تحرير مستند التخليص؛ الحذف يبقى
+  محروساً عند وجود أي قيد. أضيف `unpost-accrual` للتراجع عن الاستحقاق وحده.
+- **النقل المحلي — استحقاق ثم دفع:** ترحيل `LocalShipment` صار دائماً مدين تكلفة النقل/
+  دائن ذمم الناقل حتى لو كانت نية التسوية نقدية. النموذج الجديد `LocalShipmentPayment`
+  يسجل دفعات جزئية/كاملة بقيد مستقل `LOCAL_SHIPMENT_PAYMENT` (مدين الناقل/دائن الصندوق)،
+  مع `amount_paid`/`remaining_balance`/`payment_status` وقائمة الدفعات وحارس تجاوز المتبقي.
+- **UX داخل رحلة الاستيراد:** أزرار واضحة «إثبات استحقاق التخليص»، «تسجيل دفعة للمخلّص»،
+  «إثبات الاستحقاق» و«تسجيل دفعة» للناقل في نفس السطر؛ بطاقات إجمالي/مدفوع/متبقي؛ تعبئة
+  المتبقي تلقائياً؛ النجاح يبقي المستخدم في رحلة الاستيراد ولا يرسله إلى القيود. خريطة
+  المسار توضّح أن دفع التخليص والنقل المحلي **ليس شرطاً** لإنشاء الفاتورة الدولية.
+- **الفاتورة الدولية — ضرائب ورسوم إضافية مهيكلة:** تبويب جديد في `InvoiceForm` لبنود
+  `PurchaseInvoiceFee` (بيان، مبلغ، حساب Expense/Asset، رسملة اختيارية) مع إجمالي أساسي/
+  مجموع الرسوم/إجمالي مستحق. الواجهة تحفظ `fees` في REST وتعيد تحميلها؛ السيريالايزر يكشف
+  `fees_total` و`payable_total` ويحسب المتبقي على الإجمالي الحقيقي. صُحح ترحيل الرسوم بحيث
+  تُضاف فوق `grand_total` ويظل القيد متوازناً (المرسمل للمخزون، وغيره لحساب الرسم).
+- **عدم اشتراط الدفع:** اختبار صريح يثبت نجاح `import-from-clearance` مع تخليص ونقل محلي
+  غير مدفوعين؛ شرط دفع الشحن الدولي/الصفقة القائم لم يتغير.
+- **Logging:** نجاح إثبات استحقاق التخليص، دفع المخلّص، إثبات النقل، ودفع الناقل مسجل عبر
+  logger؛ وأُصلح استدعاء `create_audit_log` القديم في ترحيل النقل (كان يمرر أسماء معاملات
+  غير موجودة فيفشل الترحيل بعد إنشاء القيد ثم يتراجع ذرّياً).
+- **TDD/تحقّق:** `test_import_payment_separation.py` **6** + توسيع `test_clearance_import.py`
+  (عدم اشتراط الدفع)؛ الحزمة الكاملة **281/281** خضراء · `makemigrations --check --dry-run`
+  = No changes · `manage.py check` = 0 · `vite build` ناجح. `tsc --noEmit` يتوقف فقط عند
+  خطأ **سابق** في `components/DepartmentCard.tsx` (مسار `../../services/firestoreService`).
+
+### [DONE — تبسيط UX رحلة الاستيراد ولوحة الخطوة التالية, 2026-07-14]
+- **لوحة قيادة سياقية:** أضيفت دالة نقية `getImportJourneyGuidance` تحدد إجراءً تالياً واحداً
+  من حفظ الشحنة حتى فتح الفاتورة، مع بطاقة بارزة تلخص الشحن الدولي والتخليص وتوضح أن النقل
+  المحلي اختياري. الشريط القديم صار مؤشراً مختصراً، ومسار الميناء التفصيلي صار قابلاً للفتح.
+- **تقليل الحمل المعرفي:** اختُصرت تبويبات الرحلة من **9 إلى 6**؛ دُمجت حسابات وحركات الشحنة
+  والتخليص في «السجل المالي»، وحُذف تبويب المرفقات غير المنفذ. الروابط القديمة للتبويبات
+  المحاسبية تُحوّل تلقائياً إلى التبويب الموحد حفاظاً على التوافق.
+- **إفصاح تدريجي:** بيانات الشحنة والتخليص والنقل المحلي تعرض الحقول اليومية أولاً، وتخفي
+  الحقول النادرة وتفصيل رسوم التخليص خلف أزرار واضحة. جدول النقل يعرض المبلغ/المدفوع/المتبقي
+  بدلاً من حشر بيانات السائق والمركبة، مع بقائها في نموذج التفاصيل.
+- **وضوح الدفع والفاتورة:** نموذج دفعة المخلّص لم يعد يعرض مسار «دفعة ناقل قديمة»؛ زر الفاتورة
+  موحّد بلا تكرار ولا يتاح قبل اكتمال تكلفة ودفع الشحن الدولي ووجود تكلفة تخليص، بينما لا يشترط
+  دفع التخليص أو النقل المحلي. الشحنة من نوع «نقل فقط» تتجه للنقل المحلي ولا تقترح فاتورة.
+- **TDD/تحقّق:** `import-journey-guidance.spec.ts` **4/4** خضراء · `vite build` ناجح ·
+  `git diff --check` نظيف. `tsc --noEmit` ما زال يتوقف فقط عند خطأ `DepartmentCard.tsx`
+  السابق نفسه.
 
 ## [FIX — Clearance Tab Layout & Agent Selection, 2026-07-13]
 - **UI Alignment Fix**: Wrapped the clearance form's input groups in a container with `className="aseel-headband"`. This allows individual inputs wrapped with `className="aseel-field"` (via the `fld` helper) to flex and align correctly per the new design system, preventing layout overflow.
@@ -1229,12 +1607,6 @@ SW لا يخزّن الـ API (يتخطّى عابر الأصل، `sw.ts:50`) ف
 - **العرض:** استبدال كل `toFixed`/`toLocaleString(min:2)` العرضية بـ `formatMoney`/`formatNumber`/`formatQuantity` — شمل تقارير المحاسبة (ميزان/دخل/ميزانية/دفتر أستاذ/ض.ق.م/قيود/شيكات/أرباح فواتير)، قوائم وطباعة الفواتير والصفقات (InvoiceList/InvoicePrintView/NIS*/Deal*)، الشحنات/التخليص/الأقساط، وكرت الشريك/قوائم الأسعار. المُنسّقات المحلية لكل ملف (`fmt`/`fmtMoney`/`fmtAmt`…) فُوّضت إلى الطبقة المشتركة (مصدر حقيقة واحد).
 - **لم يُمَسّ عمداً:** حسابات `Number(x.toFixed(2))`، وحمولات الـ API `String(x.toFixed(2))` (الـ backend يحتاج المنازل)، ومنسّقات الأعداد الصحيحة (min:0)، وأحجام الملفات KB/MB، وعملات 3-منازل (العقارات).
 تحقّق: `tsc --noEmit` نظيف (عدا خطأين سابقين غير متعلّقين: DepartmentCard/Breadcrumb) · صفر `minimumFractionDigits:2` وصفر `toFixed(2)` عرضية متبقّية في `components`.
-
-## [AI_TOOLING]
-- **Ruflo** (Multi-Agent Orchestrator): `.clone/ruflo/` — استخدمه دائماً للمهام المعقدة
-  - تشغيل: `npx ruflo init` أو `node .clone/ruflo/bin/ruflo.js`
-  - الدليل: `CLAUDE.md` (في جذر المشروع)
-  - المصدر: https://github.com/ruvnet/ruflo
 
 ## [TECH_STACK]
 - **Frontend:** React 19.2, TypeScript 5.8, Vite 6.2, Tailwind CSS 4.3, react-router-dom 7, date-fns 4

@@ -23,6 +23,10 @@ export interface SqlProduct {
   min_stock_level?: number | null;
   quantity_on_hand: number;
   avg_cost: number;
+  /** W8: الوارد التراكمي (كل حركات IN) — من StockMovement. */
+  purchased_qty?: string | null;
+  /** W8: متوسط المبيعات الشهري = صافي (OUT−RETURN_IN) 90ي ÷ 3. */
+  avg_monthly_sales?: string | null;
   stock_status: "in_stock" | "low_stock" | "out_of_stock";
 }
 

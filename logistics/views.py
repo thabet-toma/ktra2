@@ -8,22 +8,27 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, IntegrityError
-from django.db.models import Prefetch, Sum
+from django.db.models import (
+    Count, DecimalField, F, IntegerField, OuterRef, Prefetch, Q, Subquery, Sum,
+    Value,
+)
+from django.db.models.functions import Coalesce
+from django.utils.dateparse import parse_date
 from .models import (
     LogisticsDeal, LogisticsDealItem, LogisticsShipment,
     LogisticsClearance, LogisticsShipmentDeal,
     LogisticsPayment, LogisticsClearancePayment,
     PurchaseInvoice, PurchaseInvoiceItem, PurchaseInvoiceFee,
-    LocalShipment,
+    LocalShipment, LocalShipmentPayment,
 )
 from sales.models import SupplierPayment
 from .serializers import (
-    LogisticsDealSerializer, LogisticsDealItemSerializer,
-    LogisticsShipmentSerializer, LogisticsClearanceSerializer,
+    LogisticsDealSerializer, LogisticsDealListSerializer, LogisticsDealItemSerializer,
+    LogisticsShipmentSerializer, LogisticsShipmentListSerializer, LogisticsClearanceSerializer,
     LogisticsPaymentSerializer,
     LogisticsClearancePaymentSerializer,
     PurchaseInvoiceSerializer, PurchaseInvoiceListSerializer,
-    LocalShipmentSerializer, SupplierPaymentSerializer,
+    LocalShipmentSerializer, LocalShipmentPaymentSerializer, SupplierPaymentSerializer,
     PurchaseSettingsSerializer,
 )
 from accounting.models import Account, TaxRate
@@ -58,12 +63,53 @@ class LogisticsDealViewSet(BaseTenantViewSet):
     queryset = LogisticsDeal.objects.all().order_by('-order_date')
     serializer_class = LogisticsDealSerializer
 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return LogisticsDealListSerializer
+        return LogisticsDealSerializer
+
     def get_queryset(self):
-        return (
-            super()
-            .get_queryset()
-            .select_related('partner', 'currency', 'tenant', 'created_by')
-            .prefetch_related(
+        qs = super().get_queryset()
+        search = str(self.request.query_params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(ref_number__icontains=search)
+                | Q(description__icontains=search)
+                | Q(short_name__icontains=search)
+                | Q(factory_name__icontains=search)
+                | Q(original_offer_number__icontains=search)
+                | Q(supplier_invoice_number__icontains=search)
+                | Q(pi_number__icontains=search)
+                | Q(partner__name__icontains=search)
+                | Q(partner__legal_name__icontains=search)
+                | Q(items__name_snapshot__icontains=search)
+                | Q(items__description_line__icontains=search)
+                | Q(items__product__name_ar__icontains=search)
+                | Q(items__product__name_en__icontains=search)
+            ).distinct()
+        status_filter = str(self.request.query_params.get('status') or '').strip()
+        if status_filter:
+            status_filter = {
+                'initial': 'Open', 'shipped': 'Shipped', 'completed': 'Closed',
+                'cancelled': 'Cancelled',
+            }.get(status_filter.lower(), status_filter)
+            qs = qs.filter(status__iexact=status_filter)
+        date_from = parse_date(str(self.request.query_params.get('date_from') or ''))
+        date_to = parse_date(str(self.request.query_params.get('date_to') or ''))
+        if date_from:
+            qs = qs.filter(order_date__gte=date_from)
+        if date_to:
+            qs = qs.filter(order_date__lte=date_to)
+
+        qs = qs.select_related('partner', 'currency', 'tenant', 'created_by')
+        if self.action == 'list':
+            return qs.prefetch_related(
+                Prefetch(
+                    'logisticsshipmentdeal_set',
+                    queryset=LogisticsShipmentDeal.objects.select_related('shipment'),
+                )
+            )
+        return qs.prefetch_related(
                 Prefetch(
                     'items',
                     queryset=LogisticsDealItem.objects.select_related('product', 'deal'),
@@ -74,7 +120,6 @@ class LogisticsDealViewSet(BaseTenantViewSet):
                     queryset=LogisticsShipmentDeal.objects.select_related('shipment'),
                 ),
             )
-        )
 
     @staticmethod
     def _next_deal_ref(tenant):
@@ -905,9 +950,10 @@ class LogisticsPaymentViewSet(BaseTenantViewSet):
         tenant = get_tenant(self.request)
         if tenant:
             # نشمل دفعات الصفقات ودفعات الشحنات (deal=None) معاً
+            # perf: select_related('journal') يقتل N+1 على journal_id_display لكل صف.
             return LogisticsPayment.objects.filter(
                 Q(deal__tenant=tenant) | Q(shipment__tenant=tenant)
-            ).order_by('-created_at')
+            ).select_related('journal').order_by('-created_at')
         return LogisticsPayment.objects.none()
 
     def perform_create(self, serializer):
@@ -929,12 +975,95 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
     queryset = LogisticsShipment.objects.all().order_by('-id')
     serializer_class = LogisticsShipmentSerializer
 
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return LogisticsShipmentListSerializer
+        return LogisticsShipmentSerializer
+
     def get_queryset(self):
-        qs = (
-            super()
-            .get_queryset()
-            .select_related("shipping_agent")
-            .prefetch_related("deals__partner")
+        qs = super().get_queryset().select_related("shipping_agent")
+        search = str(self.request.query_params.get('search') or '').strip()
+        if search:
+            qs = qs.filter(
+                Q(shipment_number__icontains=search)
+                | Q(shipment_name__icontains=search)
+                | Q(agent_shipment_number__icontains=search)
+                | Q(container_number__icontains=search)
+                | Q(bill_of_lading__icontains=search)
+                | Q(shipping_agent__name__icontains=search)
+            )
+        shipping_type = str(self.request.query_params.get('shipping_type') or '').strip().lower()
+        if shipping_type in {'air', 'sea'}:
+            qs = qs.filter(shipping_type=shipping_type)
+        raw_status = str(self.request.query_params.get('status') or '').strip()
+        if raw_status and raw_status.lower() not in {
+            'draft', 'payment_pending', 'partially_paid', 'paid',
+        }:
+            status_value = {
+                'shipped': 'In-Transit', 'delivered': 'Cleared',
+            }.get(raw_status.lower(), raw_status)
+            qs = qs.filter(status__iexact=status_value)
+        deal_id = str(self.request.query_params.get('deal_id') or '').strip()
+        if deal_id.isdigit():
+            qs = qs.filter(deals__id=int(deal_id))
+        date_from = parse_date(str(self.request.query_params.get('date_from') or ''))
+        date_to = parse_date(str(self.request.query_params.get('date_to') or ''))
+        if date_from:
+            qs = qs.filter(Q(departure_date__gte=date_from) | Q(arrival_date__gte=date_from))
+        if date_to:
+            qs = qs.filter(Q(departure_date__lte=date_to) | Q(arrival_date__lte=date_to))
+
+        if self.action == 'list':
+            payment_summary = (
+                LogisticsPayment.objects.filter(shipment_id=OuterRef('pk'))
+                .values('shipment_id')
+                .annotate(total=Sum('amount'), row_count=Count('id'))
+            )
+            deal_summary = (
+                LogisticsShipmentDeal.objects.filter(shipment_id=OuterRef('pk'))
+                .values('shipment_id')
+                .annotate(row_count=Count('id'))
+            )
+            qs = qs.annotate(
+                payments_total=Coalesce(
+                    Subquery(
+                        payment_summary.values('total')[:1],
+                        output_field=DecimalField(max_digits=18, decimal_places=2),
+                    ),
+                    Value(Decimal('0.00')),
+                ),
+                payments_count=Coalesce(
+                    Subquery(
+                        payment_summary.values('row_count')[:1], output_field=IntegerField()
+                    ),
+                    Value(0),
+                ),
+                deals_count=Coalesce(
+                    Subquery(
+                        deal_summary.values('row_count')[:1], output_field=IntegerField()
+                    ),
+                    Value(0),
+                ),
+            )
+            status_key = raw_status.lower()
+            if status_key == 'draft':
+                qs = qs.filter(payments_count=0)
+            elif status_key == 'payment_pending':
+                qs = qs.filter(payments_count__gt=0, payments_total=0)
+            elif status_key == 'partially_paid':
+                qs = qs.filter(
+                    payments_total__gt=0,
+                    payments_total__lt=F('total_shipping_cost_usd'),
+                )
+            elif status_key == 'paid':
+                qs = qs.filter(
+                    total_shipping_cost_usd__gt=0,
+                    payments_total__gte=F('total_shipping_cost_usd'),
+                )
+            return qs
+
+        qs = qs.prefetch_related(
+            Prefetch('deals', queryset=LogisticsDeal.objects.select_related('partner')),
         )
         return qs.prefetch_related(
             Prefetch(
@@ -1556,7 +1685,7 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
         deal_mini = LogisticsDeal.objects.only(
             "id", "description", "ref_number", "notes"
         ).order_by("id")
-        return (
+        qs = (
             super()
             .get_queryset()
             .select_related("shipment", "customs_broker", "tenant")
@@ -1564,11 +1693,18 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                 Prefetch("shipment__deals", queryset=deal_mini),
                 "local_shipments",
                 "lines",
+                "payments",
             )
         )
+        shipment_id = self.request.query_params.get('shipment')
+        if shipment_id:
+            qs = qs.filter(shipment_id=shipment_id)
+        return qs
 
     def _clearance_is_posted(self, clearance):
-        return clearance.payments.filter(is_posted=True).exists() or bool(clearance.journal_id)
+        # دفعة المخلّص قيد مستقل (Dr ذمم المخلّص / Cr الصندوق) ولا تقفل مستند
+        # الاستحقاق. الذي يقفل بنود التخليص فقط هو قيد الاستحقاق نفسه.
+        return bool(clearance.journal_id)
 
     def perform_update(self, serializer):
         instance = serializer.instance
@@ -1578,12 +1714,116 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if self._clearance_is_posted(instance):
+        if self._clearance_is_posted(instance) or instance.payments.filter(is_posted=True).exists():
             return Response(
                 {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['post'], url_path='post-to-accounting')
+    def post_to_accounting(self, request, pk=None):
+        """إثبات استحقاق التخليص: Dr تكاليف/ضريبة، Cr ذمم المخلّص."""
+        clearance = self.get_object()
+        if clearance.journal_id:
+            return Response({'error': 'استحقاق التخليص مُرحّل بالفعل.'}, status=status.HTTP_400_BAD_REQUEST)
+        broker = clearance.customs_broker
+        if not broker:
+            return Response({'error': 'حدّد المخلّص الجمركي قبل إثبات الاستحقاق.'}, status=status.HTTP_400_BAD_REQUEST)
+        if not broker.linked_account_id:
+            return Response({'error': 'المخلّص غير مربوط بحساب ذمم في المحاسبة.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        default_codes = {
+            'vat': '1105',
+            'declaration_fee': '5303',
+            'terminal': '5306',
+            'permits': '5302',
+            'broker_commission': '5302',
+            'customs_system': '5303',
+            'other': '5307',
+        }
+        lines_data = []
+        for line in clearance.lines.select_related('account').all():
+            amount = (Decimal(str(line.debit or 0)) - Decimal(str(line.credit or 0))).quantize(Decimal('0.01'))
+            if amount <= 0 or line.description == 'دفعة الشحن (الناقل)':
+                continue
+            account = line.account
+            if not account:
+                account = Account.objects.filter(
+                    tenant=clearance.tenant,
+                    code=default_codes.get(line.line_type, '5307'),
+                    is_active=True,
+                ).first()
+            if not account:
+                return Response(
+                    {'error': f'لا يوجد حساب محاسبي مناسب لبند «{line.description}».'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            lines_data.append({
+                'account': account.id,
+                'partner': None,
+                'debit': amount,
+                'credit': Decimal('0'),
+                'description': f"{line.description} — {clearance.shipment.shipment_number}"[:500],
+            })
+
+        total = sum((row['debit'] for row in lines_data), Decimal('0'))
+        if total <= 0:
+            return Response({'error': 'أضف بند تخليص واحداً على الأقل بمبلغ أكبر من صفر.'}, status=status.HTTP_400_BAD_REQUEST)
+        lines_data.append({
+            'account': broker.linked_account_id,
+            'partner': broker.id,
+            'debit': Decimal('0'),
+            'credit': total,
+            'description': f"استحقاق المخلّص — {clearance.shipment.shipment_number}"[:500],
+        })
+        transaction_date = clearance.clearance_date or datetime.date.today()
+        currency = clearance.currency or Currency.objects.filter(Code__iexact='ILS').first()
+        exchange_rate = Decimal(str(clearance.exchange_rate or 1))
+        try:
+            with transaction.atomic():
+                journal = post_journal(
+                    tenant_id=clearance.tenant_id,
+                    transaction_date=transaction_date,
+                    reference_type='LOGISTICS_CLEARANCE',
+                    reference_id=clearance.id,
+                    description=f"استحقاق تخليص {clearance.shipment.shipment_number} | {broker.name}"[:500],
+                    lines_data=lines_data,
+                    currency=currency,
+                    exchange_rate=exchange_rate,
+                    user=request.user,
+                )
+                clearance.journal = journal
+                clearance.save(update_fields=['journal'])
+        except Exception as exc:
+            logger.exception('clearance accrual posting failed pk=%s', clearance.pk)
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        logger.info('clearance accrual posted clearance=%s journal=%s total=%s', clearance.pk, journal.pk, total)
+        return Response({
+            'journal_id': journal.id,
+            'total': str(total),
+            'message': 'تم إثبات استحقاق التخليص على ذمم المخلّص. الدفع يبقى إجراءً مستقلاً.',
+        }, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post'], url_path='unpost-accrual')
+    def unpost_accrual(self, request, pk=None):
+        clearance = self.get_object()
+        if not clearance.journal_id:
+            return Response({'error': 'استحقاق التخليص غير مُرحّل.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            with transaction.atomic():
+                result = unpost_document(
+                    tenant_id=clearance.tenant_id,
+                    reference_id=clearance.id,
+                    journal_reference_types=['LOGISTICS_CLEARANCE'],
+                    user=request.user,
+                    document_label=f"استحقاق تخليص {clearance.shipment.shipment_number}",
+                )
+                clearance.journal = None
+                clearance.save(update_fields=['journal'])
+        except Exception as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'message': 'تم التراجع عن إثبات استحقاق التخليص.', 'unpost_result': result})
 
     @action(detail=True, methods=['post'], url_path='unpost')
     def unpost(self, request, pk=None):
@@ -1877,6 +2117,10 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                 pay.save(update_fields=["journal", "is_posted"])
 
             ser = LogisticsClearancePaymentSerializer(pay)
+            logger.info(
+                'clearance payment posted clearance=%s payment=%s journal=%s amount=%s',
+                clearance.pk, pay.pk, jh.pk, amount,
+            )
             return Response(
                 {
                     "status": "تم ترحيل الدفع بنجاح.",
@@ -1989,7 +2233,11 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
     def get_queryset(self):
         qs = PurchaseInvoice.objects.all().select_related(
             'partner', 'deal', 'shipment', 'clearance', 'currency', 'journal',
-        ).prefetch_related('items__product').order_by('-created_at')
+        ).order_by('-created_at')
+        if self.action == 'list':
+            qs = qs.annotate(items_count=Count('items'))
+        else:
+            qs = qs.prefetch_related('items__product')
         tenant = self._get_tenant()
         if tenant:
             qs = qs.filter(tenant=tenant)
@@ -1997,6 +2245,9 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         s = params.get('status')
         if s:
             qs = qs.filter(status=s)
+        posted = str(params.get('is_posted') or '').lower()
+        if posted in ('true', '1', 'false', '0'):
+            qs = qs.filter(is_posted=posted in ('true', '1'))
         p = params.get('partner')
         if p:
             qs = qs.filter(partner_id=p)
@@ -2271,6 +2522,24 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    @action(detail=True, methods=['get'], url_path='returnable-lines')
+    def returnable_lines(self, request, pk=None):
+        """W6: بنود الفاتورة الأصلية القابلة للإرجاع (المفوتر · المرتجع · المتبقّي) —
+        يغذّي منتقي بنود مرجع الشراء في الواجهة بدل نسخ كل الأسطر."""
+        from .services import returnable_lines_for_invoice
+
+        tenant = self._get_tenant()
+        invoice = PurchaseInvoice.objects.filter(pk=pk, tenant=tenant).first()
+        if not invoice:
+            return Response({'error': 'الفاتورة غير موجودة.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            'original_invoice': invoice.id,
+            'invoice_number': invoice.invoice_number,
+            'partner': invoice.partner_id,
+            'partner_name': invoice.partner.name if invoice.partner_id else None,
+            'lines': returnable_lines_for_invoice(invoice),
+        }, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=['post'], url_path='preview-clearance-import')
     def preview_clearance_import(self, request):
         """معاينة توزيع التكاليف قبل الاستيراد."""
@@ -2302,6 +2571,50 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             use_cost_lines=use_cl,
         )
         return Response(prev)
+
+    @action(detail=False, methods=['get'], url_path='clearance-import-options')
+    def clearance_import_options(self, request):
+        tenant = self._get_tenant()
+        try:
+            clearance_id = int(request.query_params.get('clearance_id'))
+        except (TypeError, ValueError):
+            return Response({'error': 'clearance_id مطلوب'}, status=status.HTTP_400_BAD_REQUEST)
+        clearance = LogisticsClearance.objects.select_related('shipment').filter(
+            pk=clearance_id, tenant=tenant,
+        ).first()
+        if not clearance:
+            return Response({'error': 'التخليص غير موجود'}, status=status.HTTP_404_NOT_FOUND)
+        links = LogisticsShipmentDeal.objects.filter(
+            shipment=clearance.shipment,
+        ).select_related('deal').order_by('id')
+        invoices = {
+            int(invoice.deal_id): invoice
+            for invoice in PurchaseInvoice.objects.filter(
+                tenant=tenant, shipment=clearance.shipment,
+                deal_id__isnull=False, is_return=False,
+            ).order_by('id')
+        }
+        deals = []
+        for link in links:
+            invoice = invoices.get(int(link.deal_id))
+            deals.append({
+                'deal_id': link.deal_id,
+                'deal_ref': link.deal.ref_number,
+                'is_converted': invoice is not None,
+                'invoice_id': invoice.id if invoice else None,
+                'invoice_number': invoice.invoice_number if invoice else None,
+            })
+        logger.info(
+            'clearance import options clearance=%s shipment=%s pending=%s converted=%s',
+            clearance.id, clearance.shipment_id,
+            sum(1 for row in deals if not row['is_converted']),
+            sum(1 for row in deals if row['is_converted']),
+        )
+        return Response({
+            'clearance_id': clearance.id,
+            'shipment_id': clearance.shipment_id,
+            'deals': deals,
+        })
 
     @action(detail=False, methods=['post'], url_path='import-from-clearance')
     def import_from_clearance(self, request):
@@ -2363,6 +2676,10 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         ser = PurchaseInvoiceSerializer(created, many=True)
+        logger.info(
+            'clearance invoices imported clearance=%s deal_ids=%s invoice_ids=%s',
+            cid, deal_ids, [invoice.id for invoice in created],
+        )
         return Response({'preview': preview, 'created': ser.data}, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['get'], url_path='trace')
@@ -2616,12 +2933,9 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             Decimal('0'),
         )
 
-        # صافي المخزون = grand - tax - (الرسوم غير المرسملة)
-        # الرسوم المرسملة سنضيفها لبند المخزون مباشرةً (لذلك لا نخصمها من الصافي)
-        non_cap_fees_total = fees_total - capitalized_total
-        merchandise_net = grand - tax_amt - non_cap_fees_total
-        # يسمح هذا الترتيب بأن grand_total = merchandise_net + tax_amt + non_cap_fees
-        # (مع رسوم مرسملة مضمَّنة داخل grand إن وُجدت)
+        # grand_total هو إجمالي الفاتورة قبل بنود fees الإضافية. الرسوم تُضاف فوقه:
+        # غير المرسملة → حساب مصروف مستقل، المرسملة → تكلفة المخزون.
+        merchandise_net = grand - tax_amt
         inventory_debit = merchandise_net + capitalized_total
 
         items_with_landed = list(invoice.items.all())
@@ -3082,9 +3396,9 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
             'partner', 'currency', 'cash_or_bank_account', 'journal',
         ).order_by('-created_at')
         tenant = get_tenant(self.request)
-        if tenant:
-            qs = qs.filter(tenant=tenant)
-        return qs
+        if not tenant:
+            return qs.none()
+        return qs.filter(tenant=tenant)
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
@@ -3135,17 +3449,20 @@ class LocalShipmentViewSet(BaseTenantViewSet):
         'carrier', 'clearance', 'shipment', 'currency',
         'expense_account', 'cash_or_bank_account',
         'journal', 'purchase_invoice',
-    )
+    ).prefetch_related('payments__journal', 'payments__currency')
     serializer_class = LocalShipmentSerializer
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
 
     def get_queryset(self):
         qs = super().get_queryset()
         # فلاتر اختيارية عبر query params
+        shipment_id = self.request.query_params.get('shipment')
         clearance_id = self.request.query_params.get('clearance')
         carrier_id = self.request.query_params.get('carrier')
         status_f = self.request.query_params.get('status')
         is_posted = self.request.query_params.get('is_posted')
+        if shipment_id:
+            qs = qs.filter(shipment_id=shipment_id)
         if clearance_id:
             qs = qs.filter(clearance_id=clearance_id)
         if carrier_id:
@@ -3195,9 +3512,8 @@ class LocalShipmentViewSet(BaseTenantViewSet):
     def post_to_accounting(self, request, pk=None):
         """ترحيل القيد المحاسبي للشحن المحلي.
 
-        الحالات المدعومة:
-          1) credit (آجل): Dr expense_account / Cr AP الناقل
-          2) cash (نقدي):  Dr expense_account / Cr cash_or_bank_account
+        إثبات الاستحقاق دائماً: Dr expense_account / Cr AP الناقل.
+        الدفع للناقل إجراء مستقل عبر pay_from_cashbox.
 
         بعد الترحيل لا يُسمح بالتعديل إلا بعد إلغاء الترحيل.
         """
@@ -3234,28 +3550,19 @@ class LocalShipmentViewSet(BaseTenantViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        # حساب الدائن
-        if shipment.payment_type == 'cash':
-            credit_account = shipment.cash_or_bank_account
-            if not credit_account:
-                return Response(
-                    {'error': 'يجب اختيار حساب صندوق/بنك في الدفع النقدي.'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            credit_partner = None
-        else:
-            # آجل — AP الناقل
-            try:
-                ensure_partner_linked_account(shipment.carrier)
-            except Exception:
-                pass
-            credit_account = getattr(shipment.carrier, 'linked_account', None)
-            if not credit_account:
-                return Response(
-                    {'error': 'الناقل لا يملك حساب محاسبي مرتبط.'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            credit_partner = shipment.carrier
+        # الاستحقاق منفصل عن الدفع: الدائن دائماً ذمم الناقل، حتى لو كانت نية
+        # المستخدم الدفع نقداً لاحقاً.
+        try:
+            ensure_partner_linked_account(shipment.carrier)
+        except Exception:
+            pass
+        credit_account = getattr(shipment.carrier, 'linked_account', None)
+        if not credit_account:
+            return Response(
+                {'error': 'الناقل لا يملك حساب محاسبي مرتبط.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        credit_partner = shipment.carrier
 
         # T3-03: keep line amounts NOMINAL (transaction currency). The base
         # equivalent is derived once by JournalLine.save() from
@@ -3319,18 +3626,119 @@ class LocalShipmentViewSet(BaseTenantViewSet):
                 shipment.save(update_fields=['is_posted', 'journal'])
 
                 create_audit_log(
+                    tenant=tenant,
                     user=request.user,
                     action='local_shipment_posted',
-                    target_type='LocalShipment',
-                    target_id=shipment.pk,
-                    description=(
+                    model_name='LocalShipment',
+                    object_id=shipment.pk,
+                    change_details=(
                         f"ترحيل شحن محلي {shipment.shipment_number} بمبلغ {amt}"
                     ),
+                )
+                logger.info(
+                    'local shipment accrual posted shipment=%s journal=%s amount=%s',
+                    shipment.pk, journal.pk, amt,
                 )
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(LocalShipmentSerializer(shipment).data)
+
+    @action(detail=True, methods=['get'])
+    def payments(self, request, pk=None):
+        shipment = self.get_object()
+        rows = shipment.payments.select_related('journal', 'currency').all()
+        return Response(LocalShipmentPaymentSerializer(rows, many=True).data)
+
+    @action(detail=True, methods=['post'])
+    def pay_from_cashbox(self, request, pk=None):
+        """دفع الناقل: Dr ذمم الناقل / Cr الصندوق، بقيد مستقل عن الاستحقاق."""
+        shipment = self.get_object()
+        try:
+            amount = Decimal(str(request.data.get('amount') or '0')).quantize(Decimal('0.01'))
+        except Exception:
+            amount = Decimal('0')
+        if amount <= 0:
+            return Response({'error': 'المبلغ يجب أن يكون أكبر من صفر.'}, status=status.HTTP_400_BAD_REQUEST)
+        paid = sum(
+            (Decimal(str(p.amount or 0)) for p in shipment.payments.filter(is_posted=True)),
+            Decimal('0'),
+        )
+        remaining = max(Decimal('0'), Decimal(str(shipment.amount or 0)) - paid)
+        if amount > remaining + Decimal('0.01'):
+            return Response(
+                {'error': f'الدفعة ({amount:.2f}) تتجاوز المتبقي للناقل ({remaining:.2f}).'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not shipment.carrier.linked_account_id:
+            return Response({'error': 'الناقل غير مربوط بحساب ذمم في المحاسبة.'}, status=status.HTTP_400_BAD_REQUEST)
+        external_id = str(request.data.get('cash_box_external_id') or '').strip()
+        cash_link = CashBoxLedgerAccount.objects.filter(
+            tenant=shipment.tenant, external_id=external_id[:128],
+        ).select_related('account').first()
+        if not cash_link or not cash_link.account_id:
+            return Response({'error': 'اختر صندوقاً مربوطاً بحساب محاسبي.'}, status=status.HTTP_400_BAD_REQUEST)
+        raw_date = request.data.get('payment_date')
+        try:
+            payment_date = datetime.date.fromisoformat(str(raw_date)[:10]) if raw_date else datetime.date.today()
+        except (TypeError, ValueError):
+            payment_date = datetime.date.today()
+        currency = shipment.currency or Currency.objects.filter(Code__iexact='ILS').first()
+        exchange_rate = Decimal(str(shipment.exchange_rate or 1))
+        try:
+            with transaction.atomic():
+                payment = LocalShipmentPayment.objects.create(
+                    tenant=shipment.tenant,
+                    local_shipment=shipment,
+                    amount=amount,
+                    currency=currency,
+                    exchange_rate=exchange_rate,
+                    payment_date=payment_date,
+                    cash_box_external_id=external_id[:128],
+                    notes=str(request.data.get('notes') or '').strip(),
+                    created_by=request.user if request.user.is_authenticated else None,
+                )
+                journal = post_journal(
+                    tenant_id=shipment.tenant_id,
+                    transaction_date=payment_date,
+                    reference_type='LOCAL_SHIPMENT_PAYMENT',
+                    reference_id=payment.id,
+                    description=f"دفع نقل محلي {shipment.shipment_number} | {shipment.carrier.name}"[:500],
+                    lines_data=[
+                        {
+                            'account': shipment.carrier.linked_account_id,
+                            'partner': shipment.carrier_id,
+                            'debit': amount,
+                            'credit': Decimal('0'),
+                            'description': f"دفع للناقل — {shipment.shipment_number}",
+                        },
+                        {
+                            'account': cash_link.account_id,
+                            'partner': None,
+                            'debit': Decimal('0'),
+                            'credit': amount,
+                            'description': f"صرف من الصندوق {cash_link.name}",
+                        },
+                    ],
+                    currency=currency,
+                    exchange_rate=exchange_rate,
+                    user=request.user,
+                )
+                payment.journal = journal
+                payment.is_posted = True
+                payment.save(update_fields=['journal', 'is_posted'])
+        except Exception as exc:
+            logger.exception('local shipment payment failed shipment=%s', shipment.pk)
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        logger.info(
+            'local shipment payment posted shipment=%s payment=%s journal=%s amount=%s',
+            shipment.pk, payment.pk, journal.pk, amount,
+        )
+        return Response({
+            'status': 'تم تسجيل دفعة الناقل وبقيت في شاشة رحلة الاستيراد.',
+            'journal_id': journal.id,
+            'payment': LocalShipmentPaymentSerializer(payment).data,
+        }, status=status.HTTP_201_CREATED)
 
     def perform_update(self, serializer):
         instance = serializer.instance
@@ -3340,7 +3748,7 @@ class LocalShipmentViewSet(BaseTenantViewSet):
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
-        if getattr(instance, 'is_posted', False):
+        if getattr(instance, 'is_posted', False) or instance.payments.filter(is_posted=True).exists():
             return Response(
                 {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
                 status=status.HTTP_400_BAD_REQUEST,

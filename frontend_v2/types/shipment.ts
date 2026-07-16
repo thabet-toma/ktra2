@@ -106,6 +106,8 @@ export interface Shipment {
     israeliSideName?: string;
     shippingInfo?: ShipmentShippingInfo;
     deals: ShipmentDealInfo[];
+    /** Header-list summary; full `deals` is fetched only when the shipment opens. */
+    dealsCount?: number;
     totalShippingCostUsd: number;
     totalVolume: number;
     totalWeightKg: number;

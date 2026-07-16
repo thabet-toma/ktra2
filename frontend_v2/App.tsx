@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { SearchForm } from "./components/SearchForm";
 import { AppLayout } from "./components/layout/AppLayout";
-import { ResultsPage } from "./components/ResultsPage";
 import { LoadingSpinner } from "./components/LoadingSpinner";
 import { ErrorDisplay } from "./components/ErrorDisplay";
 import {
@@ -17,12 +15,6 @@ import {
   CashBox,
   AppView,
 } from "./types";
-import { findProducts } from "./services/geminiService";
-import { LoginPage } from "./components/LoginPage";
-import { LandingPage } from "./components/LandingPage";
-import { SignupPage } from "./components/SignupPage";
-import { Header } from "./components/Header";
-import { Sidebar } from "./components/Sidebar";
 import { NoSqlMigrationBanner } from "./components/NoSqlMigrationBanner";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { useAutoConnectionRecovery } from "./hooks/useAutoConnectionRecovery";
@@ -37,8 +29,6 @@ import { IdleTimeoutGuard } from "./components/IdleTimeoutGuard";
 import SyncConflictModal from "./components/offline/SyncConflictModal";
 import { useBroadcastSync } from "./hooks/useBroadcastSync";
 import { cleanOldCache } from "./services/offline/cacheCleaner";
-import { TaskList } from "./components/TaskList";
-import { RejectReasonModal } from "./components/modals/RejectReasonModal";
 import {
   seedUsersIfEmpty,
   subscribeToUsers,
@@ -59,8 +49,6 @@ import { useAuth } from "./contexts/AuthContext";
 import { activeTasksService } from "./services/activeTasksService";
 import { autoDisableScheduler } from "./services/autoDisableScheduler";
 import { PublicNavbar } from "./components/layout/PublicNavbar";
-import { TaskDetailsModal } from "./components/TaskDetailsModal";
-import { GroupConstantsPage } from './components/settings/GroupConstantsPage';
 import { useLocation, useNavigate } from "react-router-dom";
 
 // ── تقسيم الحزمة حسب الشاشة (صيانة الأداء 2026-07) ─────────────────────────
@@ -72,6 +60,15 @@ const lazyPage = <T extends React.ComponentType<any>>(
   loader: () => Promise<{ default: T }>
 ) => React.lazy(loader);
 
+const SearchForm = lazyPage(() => import("./components/SearchForm").then((m) => ({ default: m.SearchForm })));
+const ResultsPage = lazyPage(() => import("./components/ResultsPage").then((m) => ({ default: m.ResultsPage })));
+const LoginPage = lazyPage(() => import("./components/LoginPage").then((m) => ({ default: m.LoginPage })));
+const LandingPage = lazyPage(() => import("./components/LandingPage").then((m) => ({ default: m.LandingPage })));
+const SignupPage = lazyPage(() => import("./components/SignupPage").then((m) => ({ default: m.SignupPage })));
+const TaskList = lazyPage(() => import("./components/TaskList").then((m) => ({ default: m.TaskList })));
+const RejectReasonModal = lazyPage(() => import("./components/modals/RejectReasonModal").then((m) => ({ default: m.RejectReasonModal })));
+const TaskDetailsModal = lazyPage(() => import("./components/TaskDetailsModal").then((m) => ({ default: m.TaskDetailsModal })));
+const GroupConstantsPage = lazyPage(() => import("./components/settings/GroupConstantsPage").then((m) => ({ default: m.GroupConstantsPage })));
 const Dashboard = lazyPage(() => import("./components/Dashboard").then((m) => ({ default: m.Dashboard })));
 const TradeDashboard = lazyPage(() => import("./components/dashboard/TradeDashboard").then((m) => ({ default: m.TradeDashboard })));
 const TaskManagement = lazyPage(() => import("./components/TaskManagement").then((m) => ({ default: m.TaskManagement })));
@@ -1151,6 +1148,7 @@ const App: React.FC = () => {
     setSourcingView("loading");
     setError(null);
     try {
+      const { findProducts } = await import("./services/geminiService");
       const results = await findProducts(query);
       setProducts(results);
       setSourcingView("results");
@@ -1929,42 +1927,44 @@ const App: React.FC = () => {
         </main>
       </AppLayout>
 
-      {/* N0-T5: F11 modal portal لثوابت المجموعة */}
-      {groupConstantsOpen && (
-        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setGroupConstantsOpen(false)}>
-          <div className="w-full max-w-6xl h-[90vh] bg-white rounded-lg shadow-xl overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-            <GroupConstantsPage
-              currentUserName={currentUser?.name}
-              onClose={() => setGroupConstantsOpen(false)}
-            />
+      <React.Suspense fallback={null}>
+        {/* N0-T5: F11 modal portal لثوابت المجموعة */}
+        {groupConstantsOpen && (
+          <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setGroupConstantsOpen(false)}>
+            <div className="w-full max-w-6xl h-[90vh] bg-white rounded-lg shadow-xl overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <GroupConstantsPage
+                currentUserName={currentUser?.name}
+                onClose={() => setGroupConstantsOpen(false)}
+              />
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {selectedTaskDetails && (
-        <TaskDetailsModal
-          isOpen={!!selectedTaskDetails}
-          onClose={() => setSelectedTaskDetails(null)}
-          task={selectedTaskDetails}
-          user={currentUser}
-          users={users}
-          onUpdateUserTaskStatus={handleUpdateUserTaskStatus}
-          onCreateSubmission={handleCreateSubmission}
-          onEditSubmission={handleEditSubmission}
-          onUpdateTask={handleUpdateTask}
-          onOpenSearchPlatform={handleOpenSearchPlatform}
-          onUpdateSubmissionStatus={handleUpdateSubmissionStatus}
-        />
-      )}
-      {rejectingTask && (
-        <RejectReasonModal
-          isOpen={!!rejectingTask}
-          onClose={() => setRejectingTask(null)}
-          onSubmit={(reason) =>
-            handleRejectTaskWithReason(rejectingTask.id, reason)
-          }
-        />
-      )}
+        {selectedTaskDetails && (
+          <TaskDetailsModal
+            isOpen={!!selectedTaskDetails}
+            onClose={() => setSelectedTaskDetails(null)}
+            task={selectedTaskDetails}
+            user={currentUser}
+            users={users}
+            onUpdateUserTaskStatus={handleUpdateUserTaskStatus}
+            onCreateSubmission={handleCreateSubmission}
+            onEditSubmission={handleEditSubmission}
+            onUpdateTask={handleUpdateTask}
+            onOpenSearchPlatform={handleOpenSearchPlatform}
+            onUpdateSubmissionStatus={handleUpdateSubmissionStatus}
+          />
+        )}
+        {rejectingTask && (
+          <RejectReasonModal
+            isOpen={!!rejectingTask}
+            onClose={() => setRejectingTask(null)}
+            onSubmit={(reason) =>
+              handleRejectTaskWithReason(rejectingTask.id, reason)
+            }
+          />
+        )}
+      </React.Suspense>
       <UpdatePrompt />
       <OfflineCoachmark />
       <StorageQuotaGuard />

@@ -31,6 +31,7 @@ import {
   suppliersService,
 } from "@/services/firestoreService";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
+import { accountingApi } from "@/services/accountingApi";
 import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
 import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
 import { SupplierModal } from "@/components/common/SupplierModal";
@@ -78,6 +79,7 @@ import {
 import { formatInvoiceImportLogisticsLine } from "@/utils/invoiceConversionUtils";
 import { useToast } from "@/contexts/ToastContext";
 import { useConfirm } from "@/contexts/ConfirmContext";
+import { getPurchaseInvoiceFeeEditorState } from "./purchaseInvoiceFeeEditorState";
 
 interface InvoiceFormProps {
   invoice: Partial<Invoice> | null;
@@ -149,6 +151,18 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [inlineCreate, setInlineCreate] = useState<{ rowIndex: number; name: string } | null>(null);
   // task18 DEF-C1: رصيد المورد (قبل/بعد) عند اختيار مورد — يطابق شاشة المبيعات.
   const [supplierBalance, setSupplierBalance] = useState<PartnerBalanceResponse | null>(null);
+  const [feeAccounts, setFeeAccounts] = useState<Array<{ id: number; code?: string; name?: string; account_type?: string }>>([]);
+
+  useEffect(() => {
+    accountingApi.getAccounts()
+      .then((rows) => setFeeAccounts(
+        rows.filter((account: any) => account.is_active !== false && ["Expense", "Asset"].includes(String(account.account_type || ""))),
+      ))
+      .catch((error) => {
+        console.error("[PurchaseInvoiceFees] Failed to load fee accounts", error);
+        setFeeAccounts([]);
+      });
+  }, []);
 
   // حارس التغييرات غير المحفوظة (Dirty state tracking)
   const [viewMode, setViewMode] = useState<boolean>(!!initialInvoice?.id);
@@ -164,12 +178,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       return;
     }
     const t = window.setTimeout(() => {
-      getPartnerBalance({ partnerId: sid, proposedTotal: formData.grandTotal ?? 0 })
+      const feesTotal = (formData.fees || []).reduce((sum, fee) => sum + (Number(fee.amount) || 0), 0);
+      getPartnerBalance({ partnerId: sid, proposedTotal: (formData.grandTotal ?? 0) + feesTotal })
         .then(setSupplierBalance)
         .catch(() => setSupplierBalance(null));
     }, 400);
     return () => window.clearTimeout(t);
-  }, [formData.supplierId, formData.grandTotal]);
+  }, [formData.supplierId, formData.grandTotal, formData.fees]);
   /** بيانات الفاتورة والمورد — تُعرض من رأس الصفحة عند الضغط على «تفاصيل» */
   const [invoiceHeaderDetailsOpen, setInvoiceHeaderDetailsOpen] = useState(false);
   /** وصف الصفقة من SQL عند غيابه في الفاتورة المحمّلة */
@@ -424,6 +439,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       toast("الرجاء إضافة صنف واحد على الأقل", "error");
       return;
     }
+    const invalidFee = (formData.fees || []).find(
+      (fee) => !fee.description.trim() || Number(fee.amount) <= 0 || !fee.expenseAccountId,
+    );
+    if (invalidFee) {
+      toast("أكمل بيان ومبلغ وحساب كل بند في الضرائب والرسوم الإضافية", "error");
+      setActiveTabKey("fees");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -476,6 +499,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         shipping_cost: roundSqlMoney2(payload.shippingCost ?? 0),
         shipping_included: payload.shippingIncluded || false,
         grand_total: roundSqlMoney2(payload.grandTotal ?? 0),
+        invoice_type: payload.invoiceType || (payload.clearanceId || payload.shipment ? 'international' : 'local'),
+        fees: (payload.fees || []).map((fee: any) => ({
+          description: String(fee.description || '').trim(),
+          amount: roundSqlMoney2(fee.amount ?? 0),
+          expense_account: Number(fee.expenseAccountId),
+          capitalize_to_inventory: Boolean(fee.capitalizeToInventory),
+          is_taxable: Boolean(fee.isTaxable),
+        })),
         local_payments_json: payload.localPayments || null,
         conversion_metadata_json: payload.conversionMetadata || null,
         currency: payload.currency || 'ILS',
@@ -1278,6 +1309,30 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   const basicInfoTab = (
     <div className="aseel-legacy-tab">
+      {/* W7a: هوية مستند المرجع — شارة + رابط الفاتورة الأصلية + لغة معكوسة. */}
+      {formData.isReturn && (
+        <div
+          className="aseel-banner"
+          style={{ marginBottom: "8px", display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap", background: "var(--color-danger-bg, #fef2f2)", color: "var(--color-danger, #b91c1c)", fontWeight: 600 }}
+        >
+          <span style={{ padding: "2px 10px", borderRadius: "999px", background: "var(--color-danger, #b91c1c)", color: "#fff", fontSize: "12px" }}>
+            مرجع شراء ↩
+          </span>
+          <span style={{ fontWeight: 400 }}>
+            هذا مستند إرجاع بضاعة للمورد — يعكس فاتورة الشراء (يُخرج الكمية ويُخفّض ذمم المورد).
+          </span>
+          {formData.originalInvoiceId && (
+            <a
+              href={`#/purchase-invoices/${formData.originalInvoiceId}`}
+              onClick={(e) => { e.preventDefault(); if (formData.originalInvoiceId) openInNewTab(`/purchase-invoices/${formData.originalInvoiceId}`); }}
+              style={{ textDecoration: "underline", cursor: "pointer" }}
+              title="فتح الفاتورة الأصلية"
+            >
+              الفاتورة الأصلية #{formData.originalInvoiceNumber || formData.originalInvoiceId}
+            </a>
+          )}
+        </div>
+      )}
       {supplierBalance && (
         <div
           className="aseel-banner"
@@ -1392,6 +1447,115 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     </div>
   );
 
+  const feesTotal = (formData.fees || []).reduce(
+    (sum, fee) => sum + (Number(fee.amount) || 0), 0,
+  );
+  const payableTotal = (Number(formData.grandTotal) || 0) + feesTotal;
+  const feeEditorState = getPurchaseInvoiceFeeEditorState({
+    readOnly,
+    viewMode,
+    isPosted: Boolean(formData.isPosted),
+    isHistorical: Boolean(formData.isHistorical),
+  });
+  const enterFeeEditMode = () => {
+    if (!feeEditorState.canAdd) {
+      toast(feeEditorState.message || "لا يمكن تعديل الفاتورة", "info");
+      return false;
+    }
+    if (feeEditorState.requiresEdit) setViewMode(false);
+    return true;
+  };
+  const focusTaxRate = () => {
+    if (!enterFeeEditMode()) return;
+    window.setTimeout(() => document.querySelector<HTMLInputElement>("[data-purchase-tax-rate='true']")?.focus(), 0);
+  };
+  const appendFeeLine = (kind: "tax" | "fee") => {
+    if (!enterFeeEditMode()) return;
+    if (feeAccounts.length === 0) {
+      toast("لا توجد حسابات مصروف أو أصل متاحة. أضف الحساب المحاسبي أولاً ثم أعد المحاولة.", "error");
+      return;
+    }
+    const preferred = kind === "tax"
+      ? feeAccounts.find((account) => account.code === "1105")
+      : feeAccounts.find((account) => account.code === "5307") || feeAccounts.find((account) => account.account_type === "Expense");
+    const id = crypto.randomUUID();
+    setFormData((prev) => ({
+      ...prev,
+      fees: [...(prev.fees || []), {
+        id,
+        description: kind === "tax" ? "ضريبة إضافية" : "رسوم إضافية",
+        amount: 0,
+        expenseAccountId: preferred?.id || null,
+        expenseAccountCode: preferred?.code,
+        expenseAccountName: preferred?.name,
+        capitalizeToInventory: false,
+        isTaxable: false,
+      }],
+    }));
+    markDirty();
+    console.info("[PurchaseInvoiceFees] Added fee editor line", { kind, invoiceId: formData.id || null });
+    window.setTimeout(() => document.querySelector<HTMLInputElement>(`[data-fee-amount='${id}']`)?.focus(), 0);
+  };
+  const feesTab = (
+    <div className="aseel-legacy-tab">
+      <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-3">
+        <div><span className="block text-xs text-slate-500">إجمالي الفاتورة الأساسي</span><b>{formatMoney(formData.grandTotal || 0)} ₪</b></div>
+        <div><span className="block text-xs text-slate-500">ضرائب ورسوم إضافية</span><b className="text-amber-700">{formatMoney(feesTotal)} ₪</b></div>
+        <div><span className="block text-xs text-slate-500">إجمالي المستحق</span><b className="text-emerald-700">{formatMoney(payableTotal)} ₪</b></div>
+      </div>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div>
+          <h4 className="text-sm font-semibold">بنود الضرائب والرسوم الإضافية</h4>
+          <p className="text-xs text-slate-500">كل بند له حساب واضح؛ ويمكن رسملته على تكلفة المخزون أو تحميله كمصروف.</p>
+        </div>
+        {feeEditorState.canAdd && (
+          <div className="flex flex-wrap justify-end gap-2">
+            <button type="button" className="aseel-toolbtn" onClick={focusTaxRate}>
+              <Pencil size={14} /> {feeEditorState.requiresEdit ? "تحرير وضبط ض.ق.م" : "ضبط ض.ق.م الأساسية"}
+            </button>
+            <button type="button" className="aseel-toolbtn" onClick={() => appendFeeLine("tax")}>
+              <Plus size={14} /> {feeEditorState.requiresEdit ? "تحرير وإضافة ضريبة" : "إضافة ضريبة مستقلة"}
+            </button>
+            <button type="button" className="aseel-toolbtn" onClick={() => appendFeeLine("fee")}>
+              <Plus size={14} /> {feeEditorState.requiresEdit ? "تحرير وإضافة رسم" : "إضافة رسم"}
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+        ضريبة القيمة المضافة الأساسية تُحسب من «نسبة الضريبة %» أعلى الفاتورة. استخدم البنود أدناه للرسوم أو الضرائب المستقلة فقط.
+      </div>
+      {!feeEditorState.canAdd && feeEditorState.message && (
+        <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <Info size={15} className="shrink-0" /> {feeEditorState.message}
+        </div>
+      )}
+      <div className="overflow-x-auto">
+        <table className="aseel-input w-full text-xs">
+          <thead><tr>
+            <th className="p-1 text-start">البيان</th>
+            <th className="p-1 text-start">الحساب</th>
+            <th className="w-32 p-1 text-center">المبلغ (₪)</th>
+            <th className="w-24 p-1 text-center">رسملة</th>
+            <th className="w-14 p-1"></th>
+          </tr></thead>
+          <tbody>
+            {(formData.fees || []).map((fee, index) => (
+              <tr key={fee.id || index}>
+                <td className="p-1"><input className="aseel-input w-full" disabled={effectiveReadOnly} value={fee.description} placeholder="مثال: رسوم فحص أو ضريبة إضافية" onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, description: e.target.value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
+                <td className="p-1"><select className="aseel-input w-full" disabled={effectiveReadOnly} value={fee.expenseAccountId || ""} onChange={(e) => { const account = feeAccounts.find((row) => row.id === Number(e.target.value)); const fees = [...(formData.fees || [])]; fees[index] = { ...fee, expenseAccountId: account?.id || null, expenseAccountCode: account?.code, expenseAccountName: account?.name }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }}><option value="">— اختر الحساب —</option>{feeAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} — {account.name}</option>)}</select></td>
+                <td className="p-1"><input className="aseel-input w-full text-center" data-fee-amount={fee.id} type="number" min="0" step="0.01" disabled={effectiveReadOnly} value={fee.amount} onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, amount: Number(e.target.value) || 0 }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
+                <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly} checked={fee.capitalizeToInventory} onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, capitalizeToInventory: e.target.checked }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
+                <td className="p-1 text-center">{!effectiveReadOnly && <button type="button" className="aseel-toolbtn" onClick={() => { setFormData((prev) => ({ ...prev, fees: (prev.fees || []).filter((_, i) => i !== index) })); markDirty(); }}><Trash2 size={14} /></button>}</td>
+              </tr>
+            ))}
+            {(formData.fees || []).length === 0 && <tr><td colSpan={5} className="p-6 text-center text-slate-500">لا توجد ضرائب أو رسوم إضافية. استخدم «إضافة ضريبة مستقلة» أو «إضافة رسم» عند الحاجة.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
   const installmentsTab = (
     <div className="aseel-legacy-tab">
       <InstallmentsSection
@@ -1503,8 +1667,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       dir="rtl"
     >
     <AseelDocumentShell
-      title="فاتورة الشراء"
-      state={formData.id ? `فاتورة ${formData.invoiceNumber || `#${formData.id}`}` : "فاتورة جديدة"}
+      title={formData.isReturn ? "مرجع شراء (إرجاع للمورد)" : "فاتورة الشراء"}
+      state={
+        formData.id
+          ? `${formData.isReturn ? "مرجع" : "فاتورة"} ${formData.invoiceNumber || `#${formData.id}`}`
+          : (formData.isReturn ? "مرجع جديد" : "فاتورة جديدة")
+      }
       company={
         formData.glPurchaseReceiptJournalId != null ? `قيد محاسبي #${formData.glPurchaseReceiptJournalId}` : undefined
       }
@@ -1598,6 +1766,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             <input
               className="aseel-input"
               data-aseel-key="1"
+              data-purchase-tax-rate="true"
               type="number"
               min={0}
               max={100}
@@ -1659,6 +1828,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       tabs={[
         { key: "basic", label: "بيانات الفاتورة", content: basicInfoTab },
         { key: "items", label: "البنود والمنتجات", content: itemsTab },
+        { key: "fees", label: `الضرائب والرسوم${feesTotal > 0 ? ` (${formatMoney(feesTotal)})` : ""}`, content: feesTab },
         { key: "installments", label: "أقساط الدفع", content: installmentsTab },
         { key: "dealinfo", label: "معلومات الصفقة", content: dealInfoTab },
         { key: "notes", label: "الملاحظات", content: notesTab },

@@ -5,6 +5,10 @@
  */
 import { clientLogger } from "./logger";
 import { resolveBranchId } from "../utils/tenantContext";
+import {
+  remainingRequestBudgetMs,
+  retryFitsRequestBudget,
+} from "../utils/networkRequestBudget";
 import db from "./offline/db";
 
 /** فشل شبكة/مهلة (أوفلاين) — يميّزه عن أخطاء HTTP كي يرجع القارئ لكاش الأوفلاين. */
@@ -29,7 +33,10 @@ const NETWORK_HINT =
   "تعذر الاتصال بالخادم (شبكة/CORS). تحقق: (1) تشغيل Django (2) VITE_API_URL يشير إلى جذر الخادم أو ينتهي بـ /api " +
   `(المُحلّى: ${API_BASE}) (3) سجّل الدخول ليُرسل التوكن`;
 
-const FETCH_TIMEOUT_MS = 120_000;
+// سقف واضح لمسارات التطبيق العادية: يكفي لتذبذب الاستضافة المشتركة، ولا يترك
+// المستخدم أمام spinner لدقيقتين. التقارير الثقيلة ينبغي أن تعطي تقدماً بدلاً
+// من إبقاء طلب واجهة عادي مفتوحاً بلا تفسير.
+export const FETCH_TIMEOUT_MS = 30_000;
 
 // إعادة المحاولة التلقائية لفشل الاتصال العابر (HTTP/3/QUIC أو لحظة توقّف gunicorn).
 // تُطبَّق فقط على طلبات القراءة الآمنة (GET/HEAD) لتفادي تكرار عمليات الكتابة.
@@ -42,45 +49,72 @@ function isSafeToRetry(init?: RequestInit): boolean {
   return (method === "GET" || method === "HEAD") && !init?.signal;
 }
 
-function buildSignal(init?: RequestInit): AbortSignal | undefined {
-  if (init?.signal) return init.signal;
-  const timeoutFn = (AbortSignal as unknown as { timeout?: (ms: number) => AbortSignal })
-    .timeout;
-  return typeof timeoutFn === "function" ? timeoutFn(FETCH_TIMEOUT_MS) : undefined;
-}
-
-async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+export async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
   const canRetry = isSafeToRetry(init);
   const maxAttempts = canRetry ? MAX_FETCH_ATTEMPTS : 1;
+  // هذا deadline للطلب كله، لا لكل محاولة. سابقاً كانت كل محاولة تحصل على
+  // 30 ثانية مستقلة، فكان النص يقول 30 ثانية بينما الانتظار قد يصل 91.6 ثانية.
+  const deadlineMs = Date.now() + FETCH_TIMEOUT_MS;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const mergedInit: RequestInit = { ...init, signal: buildSignal(init) };
+    // AbortSignal.timeout غير متاح في بعض المتصفحات التي ما زالت مستخدمة في
+    // بيئة الاستضافة. Controller يدعم المهلة دائماً ويجمعها مع signal المتصل.
+    const controller = new AbortController();
+    const callerSignal = init?.signal;
+    let timedOut = false;
+    const remainingMs = remainingRequestBudgetMs(deadlineMs);
+    if (remainingMs <= 0) {
+      throw new NetworkError(
+        "انتهت مهلة انتظار الخادم (30 ثانية). تحقق من الاتصال، ثم أعد المحاولة."
+      );
+    }
+    const abortFromCaller = () => controller.abort(callerSignal?.reason);
+    if (callerSignal?.aborted) abortFromCaller();
+    else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
+    const timeoutId = globalThis.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, remainingMs);
+    const mergedInit: RequestInit = { ...init, signal: controller.signal };
     try {
       return await fetch(url, mergedInit);
     } catch (e) {
       const name = e instanceof Error ? e.name : "";
       const domName = e instanceof DOMException ? e.name : "";
       const isTimeout =
+        timedOut ||
         name === "TimeoutError" ||
-        domName === "TimeoutError" ||
-        domName === "AbortError";
+        domName === "TimeoutError";
+      const callerAborted = Boolean(callerSignal?.aborted) && !timedOut;
       const isNetwork = name === "TypeError" || String(e).includes("fetch");
+
+      // إلغاء المكوّن/المستخدم ليس فشل شبكة ولا timeout؛ اترك المستدعي يميّزه.
+      if (callerAborted) throw e;
 
       // فشل شبكة عابر على طلب آمن + ما زال في محاولات → انتظر ثم أعد
       if (canRetry && isNetwork && !isTimeout && attempt < maxAttempts - 1) {
-        await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt] ?? 1200));
-        continue;
+        const retryDelayMs = RETRY_DELAYS_MS[attempt] ?? 1200;
+        if (retryFitsRequestBudget(deadlineMs, retryDelayMs)) {
+          await new Promise((r) => setTimeout(r, retryDelayMs));
+          continue;
+        }
+        throw new NetworkError(
+          "انتهت مهلة انتظار الخادم (30 ثانية). تحقق من الاتصال، ثم أعد المحاولة."
+        );
       }
 
       if (isTimeout) {
         throw new NetworkError(
-          "انتهت مهلة انتظار الخادم (دقيقتان). تحقق من تشغيل Django والشبكة، ثم أعد المحاولة."
+          "انتهت مهلة انتظار الخادم (30 ثانية). تحقق من الاتصال، ثم أعد المحاولة."
         );
       }
       if (isNetwork) {
         throw new NetworkError(NETWORK_HINT);
       }
       throw e;
+    } finally {
+      globalThis.clearTimeout(timeoutId);
+      callerSignal?.removeEventListener("abort", abortFromCaller);
     }
   }
   // لا يُفترض الوصول هنا (الحلقة إمّا تُرجع استجابة أو ترمي خطأً)
@@ -390,4 +424,3 @@ export async function apiDelete(path: string, opts?: { tenantId?: number }): Pro
     await handleResponseError(res, path);
   }
 }
-

@@ -24,7 +24,6 @@ import {
 } from "../aseel";
 import { Plus, Save, X, RefreshCw, AlertTriangle, Trash2 } from "lucide-react";
 
-type Partner = { id: number; name: string };
 type Product = {
   id: number;
   name?: string;
@@ -59,6 +58,18 @@ interface ReturnLine {
   total: string;
 }
 
+// W6: صف في منتقي بنود المرجع — المفوتر/المرتجع/المتبقّي + كمية الإرجاع المختارة.
+interface PickerRow {
+  product: number;
+  name: string;
+  unit_price: string;
+  invoiced_qty: string;
+  returned_qty: string;
+  remaining_qty: string;
+  selected: boolean;
+  return_qty: string;
+}
+
 interface Props {
   onBack?: () => void;
 }
@@ -66,7 +77,6 @@ interface Props {
 export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
   const today = new Date().toISOString().slice(0, 10);
   const [originalInvoices, setOriginalInvoices] = useState<PurchaseInvoice[]>([]);
-  const [partners, setPartners] = useState<Partner[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -76,26 +86,30 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
   const [originalInvoiceId, setOriginalInvoiceId] = useState<number | "">("");
   const [returnDate, setReturnDate] = useState(today);
   const [supplierId, setSupplierId] = useState<number | "">("");
+  const [supplierName, setSupplierName] = useState<string>("");
   const [reason, setReason] = useState("");
   const [lines, setLines] = useState<ReturnLine[]>([
     { _idx: 0, product_id: "", product_name: "", quantity: "1", unit_price: "", total: "0" },
   ]);
+
+  // W6: منتقي بنود المرجع.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerRows, setPickerRows] = useState<PickerRow[]>([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
     const tenantId = resolveTenantId();
     try {
-      const [invs, parts, prods] = await Promise.allSettled([
+      const [invs, prods] = await Promise.allSettled([
         apiGetList<PurchaseInvoice>("logistics/purchase-invoices/", { tenantId }),
-        apiGetList<Partner>("partners/", { tenantId }),
         apiGetList<Product>("inventory/products/", { tenantId }),
       ]);
       if (invs.status === "fulfilled") {
         // مرحّلة فقط، وليست هي نفسها مرجعاً — صالحة كـ«فاتورة أصلية».
         setOriginalInvoices(invs.value.filter((i) => i.is_posted && !i.is_return));
       }
-      if (parts.status === "fulfilled") setPartners(parts.value.filter((p) => true));
       if (prods.status === "fulfilled") setProducts(prods.value);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
@@ -106,48 +120,80 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
 
   useEffect(() => { void load(); }, [load]);
 
+  // W7b: المورد موروث من الفاتورة الأصلية (يجب أن يصيب نفس حساب ذمم المورد عند العكس)
+  // — يُضبط تلقائياً ويُعرض للقراءة فقط، لا يُحرّره المستخدم.
   useEffect(() => {
     if (originalInvoiceId !== "") {
       const inv = originalInvoices.find((i) => i.id === originalInvoiceId);
       if (inv?.partner) setSupplierId(inv.partner);
+      setSupplierName(inv?.partner_name || (inv?.partner ? `#${inv.partner}` : ""));
+    } else {
+      setSupplierId("");
+      setSupplierName("");
     }
   }, [originalInvoiceId, originalInvoices]);
 
-  // نسخ بنود فاتورة الشراء الأصلية (لتعديل الكميات المرتجعة).
-  const copyFromOriginal = async () => {
-    if (originalInvoiceId === "") {
-      setErr("اختر الفاتورة الأصلية أولاً");
-      return;
-    }
+  // W6: فتح منتقي البنود — يجلب المفوتر/المرتجع/المتبقّي من الخادم.
+  const openPicker = useCallback(async (invId: number) => {
+    setPickerLoading(true);
     setErr(null);
     setMsg(null);
     try {
-      const inv = await purchaseInvoiceApi.get(Number(originalInvoiceId));
-      const copied: ReturnLine[] = (inv.items || [])
-        .filter((it) => it.product)
-        .map((it, idx) => ({
-          _idx: idx,
-          product_id: String(it.product),
-          product_name: it.product_name || it.name || "",
-          quantity: formatQuantity(String(it.quantity ?? "0"), "0"),
-          unit_price: formatQuantity(String(it.unit_price ?? "0"), "0"),
-          total: (Number(it.quantity) * Number(it.unit_price)).toFixed(2),
-        }));
-      copied.push({ _idx: copied.length, product_id: "", product_name: "", quantity: "1", unit_price: "", total: "0" });
-      setLines(copied.length > 1 ? copied : lines);
-      setMsg("تم نسخ بنود الفاتورة الأصلية — عدّل الكميات المرتجعة.");
+      const data = await purchaseInvoiceApi.getReturnableLines(invId);
+      const rows: PickerRow[] = (data.lines || []).map((l) => ({
+        product: l.product,
+        name: l.name,
+        unit_price: l.unit_price,
+        invoiced_qty: l.invoiced_qty,
+        returned_qty: l.returned_qty,
+        remaining_qty: l.remaining_qty,
+        // البنود التي لم يبقَ منها شيء تبدأ غير مختارة ومعطّلة.
+        selected: Number(l.remaining_qty) > 0,
+        return_qty: formatQuantity(l.remaining_qty, "0"),
+      }));
+      setPickerRows(rows);
+      setPickerOpen(true);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "تعذّر جلب بنود الفاتورة الأصلية.");
+    } finally {
+      setPickerLoading(false);
     }
-  };
+  }, []);
 
-  // تعبئة تلقائية لبنود الفاتورة الأصلية فور اختيارها (ما دامت البنود فارغة) —
-  // سلوك احترافي: تظهر أصناف الفاتورة جاهزةً لتعديل الكميات المرتجعة.
+  // فور اختيار الفاتورة الأصلية: افتح المنتقي (بدل نسخ كل الأسطر تلقائياً).
   useEffect(() => {
-    const isEmpty = lines.length === 1 && !lines[0].product_id;
-    if (originalInvoiceId !== "" && isEmpty) void copyFromOriginal();
+    if (originalInvoiceId !== "") void openPicker(Number(originalInvoiceId));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [originalInvoiceId]);
+
+  const setPickerField = (i: number, patch: Partial<PickerRow>) => {
+    setPickerRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
+  };
+
+  // تأكيد المنتقي: البنود المختارة فقط تدخل المرجع، بكميات مقيّدة بالمتبقّي.
+  const confirmPicker = () => {
+    const chosen = pickerRows.filter(
+      (r) => r.selected && Number(r.return_qty) > 0 && Number(r.remaining_qty) > 0,
+    );
+    if (chosen.length === 0) {
+      setErr("اختر بنداً واحداً على الأقل بكمية إرجاع موجبة.");
+      return;
+    }
+    const clamped = chosen.map((r, idx) => {
+      const q = Math.min(Number(r.return_qty) || 0, Number(r.remaining_qty) || 0);
+      return {
+        _idx: idx,
+        product_id: String(r.product),
+        product_name: r.name,
+        quantity: formatQuantity(String(q), "0"),
+        unit_price: formatQuantity(r.unit_price, "0"),
+        total: (q * (Number(r.unit_price) || 0)).toFixed(2),
+      } as ReturnLine;
+    });
+    setLines(clamped);
+    setPickerOpen(false);
+    setMsg("تم اختيار البنود — راجع الكميات ثم احفظ المرجع.");
+  };
 
   const updateLine = (i: number, patch: Partial<ReturnLine>) => {
     setLines((prev) => {
@@ -285,10 +331,13 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
       disabled: saving,
     },
     {
-      key: "copy",
-      label: "نسخ البنود من الأصلية",
+      key: "pick",
+      label: "اختيار البنود من الأصلية",
       icon: <Plus />,
-      onClick: () => void copyFromOriginal(),
+      onClick: () => {
+        if (originalInvoiceId === "") { setErr("اختر الفاتورة الأصلية أولاً"); return; }
+        void openPicker(Number(originalInvoiceId));
+      },
       separatorBefore: true,
     },
     {
@@ -364,15 +413,13 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
               </select>
             </label>
             <label className="aseel-field" style={{ minWidth: "180px" }}>
-              <span className="aseel-field-label">المورد</span>
-              <select
+              <span className="aseel-field-label">المورد (موروث من الفاتورة)</span>
+              <input
                 className="aseel-input"
-                value={supplierId}
-                onChange={(e) => setSupplierId(e.target.value ? Number(e.target.value) : "")}
-              >
-                <option value="">— اختر —</option>
-                {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
+                value={supplierName || "— اختر الفاتورة الأصلية —"}
+                readOnly
+                title="المورد يُورَّث من الفاتورة الأصلية ولا يُعدَّل — قيد العكس يجب أن يصيب نفس حساب ذمم المورد."
+              />
             </label>
           </>
         }
@@ -384,6 +431,93 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
           </>
         }
       />
+
+      {/* W6: منتقي بنود المرجع — اختَر البنود واضبط كمية الإرجاع (مقيّدة بالمتبقّي). */}
+      {pickerOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => setPickerOpen(false)}
+        >
+          <div
+            dir="rtl"
+            className="bg-[var(--color-surface)] rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col border border-gray-200 dark:border-gray-700"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+              <h3 className="text-sm font-bold text-[var(--color-text)]">اختيار بنود الإرجاع</h3>
+              <button type="button" className="aseel-iconbtn" onClick={() => setPickerOpen(false)} title="إغلاق">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-4 py-2 text-xs text-[var(--color-text-muted)]">
+              اختر البنود التي تريد إرجاعها وحدّد الكمية — لا يمكن تجاوز «المتبقّي القابل للإرجاع».
+            </div>
+            <div className="flex-1 overflow-y-auto px-2">
+              {pickerLoading ? (
+                <div className="p-6 text-center text-sm text-[var(--color-text-muted)]">جارٍ التحميل…</div>
+              ) : pickerRows.length === 0 ? (
+                <div className="p-6 text-center text-sm text-[var(--color-text-muted)]">لا توجد بنود قابلة للإرجاع.</div>
+              ) : (
+                <table className="w-full text-right text-xs">
+                  <thead className="text-[var(--color-text-muted)]">
+                    <tr className="border-b border-gray-200 dark:border-gray-700">
+                      <th className="p-2 w-8"></th>
+                      <th className="p-2">الصنف</th>
+                      <th className="p-2 text-center">المفوتر</th>
+                      <th className="p-2 text-center">المرتجع</th>
+                      <th className="p-2 text-center">المتبقّي</th>
+                      <th className="p-2 text-center w-24">كمية الإرجاع</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pickerRows.map((r, i) => {
+                      const remaining = Number(r.remaining_qty) || 0;
+                      const exhausted = remaining <= 0;
+                      return (
+                        <tr key={r.product} className={`border-b border-gray-100 dark:border-gray-800 ${exhausted ? "opacity-50" : ""}`}>
+                          <td className="p-2 text-center">
+                            <input
+                              type="checkbox"
+                              checked={r.selected}
+                              disabled={exhausted}
+                              onChange={(e) => setPickerField(i, { selected: e.target.checked })}
+                            />
+                          </td>
+                          <td className="p-2 font-medium text-[var(--color-text)]">{r.name}</td>
+                          <td className="p-2 text-center">{formatQuantity(r.invoiced_qty)}</td>
+                          <td className="p-2 text-center">{formatQuantity(r.returned_qty)}</td>
+                          <td className="p-2 text-center font-bold">{formatQuantity(r.remaining_qty)}</td>
+                          <td className="p-2 text-center">
+                            <input
+                              type="number"
+                              className="aseel-input"
+                              style={{ width: "80px", textAlign: "center" }}
+                              min={0}
+                              max={remaining}
+                              value={r.return_qty}
+                              disabled={exhausted || !r.selected}
+                              onChange={(e) => {
+                                const v = Math.max(0, Math.min(Number(e.target.value) || 0, remaining));
+                                setPickerField(i, { return_qty: String(v) });
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-200 dark:border-gray-700">
+              <button type="button" className="aseel-btn" onClick={() => setPickerOpen(false)}>إلغاء</button>
+              <button type="button" className="aseel-btn aseel-btn--primary" onClick={confirmPicker}>
+                إضافة البنود المختارة
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -3,13 +3,6 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import App from './App';
-import PublicGallery from './components/PublicGallery';
-import AboutUs from './components/AboutUs';
-import Contact from './components/pages/Contact';
-import DepartmentModal from './components/pages/DepartmentModal';
-import { PublicLayout } from './components/layout/PublicLayout';
-import { StorePage } from './components/store/StorePage';
-import { ProductDetailPage } from './components/store/ProductDetailPage'; // استيراد صفحة التفاصيل
 
 import { AuthProvider } from './contexts/AuthContext';
 import { CompanyProvider } from './contexts/CompanyContext';
@@ -20,6 +13,9 @@ import { AppearanceProvider } from './contexts/AppearanceContext';
 import { PriceVisibilityProvider } from './contexts/PriceVisibilityContext';
 
 import './styles/index.css';
+
+const StorePage = React.lazy(() => import('./components/store/StorePage').then((module) => ({ default: module.StorePage })));
+const ProductDetailPage = React.lazy(() => import('./components/store/ProductDetailPage').then((module) => ({ default: module.ProductDetailPage })));
 
 // عند تفعيل Service Worker جديد (بناء أحدث) أعِد تحميل الصفحة مرة واحدة كي يعمل
 // المستخدم دائماً على آخر كود — بلا مسح كاش يدوي. الحارس يمنع حلقة إعادة التحميل،
@@ -44,17 +40,19 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <BrowserRouter>
-      <Routes>
-        {/* مسار App للوحة التحكم والتطبيق الداخلي */}
-        <Route path="/*" element={<AuthProvider><CompanyProvider><ThemeProvider><AppearanceProvider><PriceVisibilityProvider><ConfirmProvider><ToastProvider><App /></ToastProvider></ConfirmProvider></PriceVisibilityProvider></AppearanceProvider></ThemeProvider></CompanyProvider></AuthProvider>} />
+      <React.Suspense fallback={<div className="min-h-screen flex items-center justify-center">جاري التحميل...</div>}>
+        <Routes>
+          {/* مسار App للوحة التحكم والتطبيق الداخلي */}
+          <Route path="/*" element={<AuthProvider><CompanyProvider><ThemeProvider><AppearanceProvider><PriceVisibilityProvider><ConfirmProvider><ToastProvider><App /></ToastProvider></ConfirmProvider></PriceVisibilityProvider></AppearanceProvider></ThemeProvider></CompanyProvider></AuthProvider>} />
 
-        {/* الصفحات العامة المنفصلة بالكامل */}
-        <Route path="/store" element={<StorePage />} />
-        <Route path="/store/product/:id" element={<ProductDetailPage />} />
+          {/* الصفحات العامة المنفصلة بالكامل */}
+          <Route path="/store" element={<StorePage />} />
+          <Route path="/store/product/:id" element={<ProductDetailPage />} />
 
-        {/* Fallback */}
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          {/* Fallback */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </React.Suspense>
     </BrowserRouter>
   </React.StrictMode>
 );

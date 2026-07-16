@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation, matchPath } from 'react-router-dom';
 import {
   Plus, FileText, Loader2, ScrollText
@@ -11,13 +11,14 @@ import { mapPurchaseInvoiceDtoToInvoice } from '@/utils/mapPurchaseInvoiceDto';
 import { roundSqlMoney2, roundSqlMoney4 } from '@/utils/sqlMoneyRound';
 import { InvoiceForm } from './invoices/InvoiceForm';
 import { dealsService } from '@/services/dealsService';
-import { InvoiceList } from './invoices/InvoiceList';
+import { InvoiceList, type InvoiceListFilters } from './invoices/InvoiceList';
 import { ClearanceImportModal, ShipmentImportContext } from './invoices/ClearanceImportModal';
 import { shipmentsService, advanceShipmentRouteAtLeast } from '@/services/shipmentsService';
 import { InvoicePrintView } from './invoices/InvoicePrintView';
 import { openInNewTab } from '@/utils/openInNewTab';
 import { useToast } from '@/contexts/ToastContext';
 import { useConfirm } from '@/contexts/ConfirmContext';
+import { AseelErrorState } from '../aseel';
 
 interface PurchaseInvoiceProps {
   currentUser?: User;
@@ -148,7 +149,15 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
   const [isReadOnly, setIsReadOnly] = useState(false);
 
   const [currentInvoice, setCurrentInvoice] = useState<Partial<Invoice> | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => initialPurchaseInvoiceViewMode() === 'list');
+  const [refreshing, setRefreshing] = useState(false);
+  const [listError, setListError] = useState<string | null>(null);
+  const [listPage, setListPage] = useState(1);
+  const [listTotal, setListTotal] = useState(0);
+  const [listFilters, setListFilters] = useState<InvoiceListFilters>({
+    search: '', status: 'all', kind: 'all', dateFrom: '', dateTo: '',
+  });
+  const listPageSize = 50;
   /** جاري جلب فاتورة من المسار (رقم) */
   const [invoiceRouteLoading, setInvoiceRouteLoading] = useState(initialInvoiceRouteLoading);
   const [showImportModal, setShowImportModal] = useState(false);
@@ -157,18 +166,39 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
   const [importing, setImporting] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
   const [printInvoice, setPrintInvoice] = useState<Invoice | null>(null);
+  const invoiceRouteRequestRef = useRef<string | null>(null);
 
-  const loadInvoices = useCallback(async () => {
+  const loadInvoices = useCallback(async (options?: { feedback?: boolean; blocking?: boolean }) => {
+    const blocking = options?.blocking ?? false;
+    if (blocking) setLoading(true);
+    else setRefreshing(true);
+    setListError(null);
     try {
-      const rows = await purchaseInvoiceApi.list({ invoice_type: invoiceType });
-      const mapped = rows.map(sqlListToInvoice);
+      const result = await purchaseInvoiceApi.listPage({
+        invoice_type: invoiceType,
+        page: listPage,
+        page_size: listPageSize,
+        search: listFilters.search.trim() || undefined,
+        is_posted: listFilters.status === 'posted' ? 'true' : listFilters.status === 'draft' ? 'false' : undefined,
+        is_return: listFilters.kind === 'return' ? 'true' : listFilters.kind === 'invoice' ? 'false' : undefined,
+        date_from: listFilters.dateFrom || undefined,
+        date_to: listFilters.dateTo || undefined,
+      });
+      const mapped = result.results.map(sqlListToInvoice);
       setInvoices(mapped);
+      setListTotal(result.count);
+      if (options?.feedback) toast('تم تحديث قائمة فواتير الشراء.', 'success');
     } catch (e) {
-      // console suppressed
+      const message = e instanceof Error && e.message.trim()
+        ? e.message
+        : 'تعذّر تحميل فواتير الشراء. تحقق من الاتصال ثم أعد المحاولة.';
+      setListError(message);
+      if (options?.feedback) toast(message, 'error');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [invoiceType]);
+  }, [invoiceType, listFilters, listPage, toast]);
 
   /** مزامنة قائمة/نموذج الفاتورة مع المسار: /purchase-invoices و /purchase-invoices/:id */
   const applyLocationToView = useCallback(async () => {
@@ -177,6 +207,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
     const detail = matchPath({ path: "/purchase-invoices/:invoiceId", end: true }, path);
 
     if (listOnly) {
+      invoiceRouteRequestRef.current = null;
       setInvoiceRouteLoading(false);
       setViewMode("list");
       setCurrentInvoice(null);
@@ -187,6 +218,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
     const pathId = (detail?.params as Record<string, string>)?.invoiceId;
     if (pathId) {
       if (pathId === "new") {
+        invoiceRouteRequestRef.current = null;
         setInvoiceRouteLoading(false);
         setCurrentInvoice(null);
         setIsReadOnly(false);
@@ -207,6 +239,9 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
         setInvoiceRouteLoading(false);
         return;
       }
+      const requestKey = `${numId}:${readOnly ? 'view' : 'edit'}`;
+      if (invoiceRouteRequestRef.current === requestKey) return;
+      invoiceRouteRequestRef.current = requestKey;
       setInvoiceRouteLoading(true);
       try {
         const full = await purchaseInvoiceApi.get(numId);
@@ -214,23 +249,34 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
         setIsReadOnly(readOnly);
         setViewMode("form");
       } catch (e) {
-        // console suppressed
+        invoiceRouteRequestRef.current = null;
+        const detail = e instanceof Error && e.message.trim() ? ` ${e.message}` : '';
+        toast(`تعذّر تحميل تفاصيل فاتورة الشراء.${detail}`, 'error');
         navigate(listPath, { replace: true });
       } finally {
         setInvoiceRouteLoading(false);
       }
     }
-  }, [location.pathname, location.search, navigate, currentInvoice?.id, listPath]);
+  }, [location.pathname, location.search, navigate, currentInvoice?.id, listPath, toast]);
 
   useEffect(() => {
-    void loadInvoices();
+    const path = location.pathname.replace(/\/$/, "") || "/";
+    if (!matchPath({ path: listPath, end: true }, path)) {
+      setLoading(false);
+      return;
+    }
+    const timer = window.setTimeout(() => { void loadInvoices(); }, 250);
+    return () => window.clearTimeout(timer);
+  }, [listPath, loadInvoices, location.pathname]);
+
+  useEffect(() => {
     const unsubItems = itemsService.subscribeToItems(setItems);
     const unsubSuppliers = suppliersService.subscribeToSuppliers(setSuppliers);
     return () => {
       unsubItems();
       unsubSuppliers();
     };
-  }, [loadInvoices]);
+  }, []);
 
   useEffect(() => {
     void applyLocationToView();
@@ -452,25 +498,48 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
     );
   }
 
+  if (viewMode === 'list' && listError) {
+    return (
+      <div data-skin="aseel" className="min-h-[500px] bg-[var(--color-surface-2)]">
+        <AseelErrorState
+          message={listError}
+          onRetry={() => void loadInvoices({ blocking: true })}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[var(--color-surface-2)] pb-10">
 
       {/* Content */}
       <div className="w-full">
         {viewMode === 'list' ? (
-          <InvoiceList
-            invoices={invoices}
-            onEdit={handleEdit}
-            onView={handleView}
-            onPrint={handlePrint}
-            onDelete={handleDelete}
-            items={items}
-            suppliers={suppliers}
-            onConvertToDeal={handleConvertToDeal}
-            onCreateNew={handleCreateNew}
-            onImport={isInternational ? () => setShowImportModal(true) : undefined}
-            onRefresh={() => void loadInvoices()}
-          />
+          <>
+            {refreshing && (
+              <div role="status" aria-live="polite" className="px-3 py-2 text-center text-sm text-[var(--color-text-muted)]">
+                جاري تحديث فواتير الشراء…
+              </div>
+            )}
+            <InvoiceList
+              invoices={invoices}
+              onEdit={handleEdit}
+              onView={handleView}
+              onPrint={handlePrint}
+              onDelete={handleDelete}
+              items={items}
+              suppliers={suppliers}
+              onConvertToDeal={handleConvertToDeal}
+              onCreateNew={handleCreateNew}
+              onImport={isInternational ? () => setShowImportModal(true) : undefined}
+              onRefresh={() => void loadInvoices({ feedback: true })}
+              page={listPage}
+              pageSize={listPageSize}
+              total={listTotal}
+              onPageChange={setListPage}
+              onFiltersChange={(filters) => { setListFilters(filters); setListPage(1); }}
+            />
+          </>
         ) : (
           <>
             <InvoiceForm

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { X, Delete, History as HistoryIcon, Trash2 } from "lucide-react";
+import { evaluateArithmeticExpression } from "../../utils/arithmetic";
 
 /** T-C1: ذاكرة العمليات السابقة — تُحفظ محلياً وتبقى بين الجلسات. */
 const HISTORY_KEY = "aseel_calc_history";
@@ -80,27 +81,17 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
 
   const handleEvaluate = () => {
     try {
-      // Safe evaluation of basic math expression
-      // Only allow digits, operators +, -, *, /, decimal point, and spaces
-      if (!/^[0-9+\-*/. ]*$/.test(expression)) {
-        throw new Error("Invalid expression");
+      const result = evaluateArithmeticExpression(expression);
+      const rounded = Number(result.toFixed(4));
+      // T-C1: سجّل العملية في الذاكرة قبل عرض/تأكيد الناتج.
+      if (expression.trim() && expression.trim() !== String(rounded)) {
+        pushHistory(expression.trim(), rounded);
       }
-      // eslint-disable-next-line no-eval
-      const result = eval(expression);
-      if (typeof result === "number" && !isNaN(result) && isFinite(result)) {
-        const rounded = Number(result.toFixed(4));
-        // T-C1: سجّل العملية في الذاكرة قبل عرض/تأكيد الناتج.
-        if (expression.trim() && expression.trim() !== String(rounded)) {
-          pushHistory(expression.trim(), rounded);
-        }
-        if (standalone) {
-          // حاسبة مستقلة: اعرض الناتج وأبقِ النافذة لمواصلة الحساب
-          setExpression(String(rounded));
-        } else {
-          onConfirm(rounded);
-        }
+      if (standalone) {
+        // حاسبة مستقلة: اعرض الناتج وأبقِ النافذة لمواصلة الحساب
+        setExpression(String(rounded));
       } else {
-        alert("تعبير غير صالح");
+        onConfirm(rounded);
       }
     } catch {
       alert("تعبير غير صالح");

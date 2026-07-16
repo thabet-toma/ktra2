@@ -481,6 +481,7 @@ def compute_deal_invoice_lines(
     internal_shipping_usd: Decimal,
     shipping_included: bool,
     clearance_local_lines_pool_ils: Decimal = Decimal('0'),
+    local_transport_share: Optional[Decimal] = None,
 ) -> Tuple[List[LandedLineResult], Dict[str, Decimal]]:
     """Merchandise + logistics per line in ILS."""
     items = list(deal.items.select_related('product').all())
@@ -520,7 +521,8 @@ def compute_deal_invoice_lines(
 
     deal_ship_ils = (ship_val_ils * share_freight).quantize(Q2, rounding=ROUND_HALF_UP)
     deal_clear_ils = (clearance_pool * share_clearance).quantize(Q2, rounding=ROUND_HALF_UP)
-    deal_local_clr_ils = (clearance_local_lines_pool_ils * share_clearance).quantize(Q2, rounding=ROUND_HALF_UP)
+    local_share = share_clearance if local_transport_share is None else local_transport_share
+    deal_local_clr_ils = (clearance_local_lines_pool_ils * local_share).quantize(Q2, rounding=ROUND_HALF_UP)
     internal_in_landed = Decimal('0') if shipping_included else internal_ils
     logistics_pool = (
         internal_in_landed + deal_ship_ils + deal_clear_ils + deal_local_clr_ils
@@ -698,7 +700,12 @@ def preview_landed_import(
     ship_pool_share = ship_val_ils
     ship_total_usd = _d(shipment.total_shipping_cost_usd)
     cost_lines_total = sum_cost_lines_all_ils(clearance)
-    local_clr_lines_total = sum_clearance_logistics_for_landed_share_ils(clearance)
+    from logistics.domain.inland import transport_pool_ils
+    local_transport_total = transport_pool_ils(shipment, clearance)
+    local_transport_source = 'local_shipment'
+    if local_transport_total <= 0:
+        local_transport_total = sum_clearance_logistics_for_landed_share_ils(clearance)
+        local_transport_source = 'clearance_lines' if local_transport_total > 0 else 'none'
     payments_total = sum_clearance_payments_ils(clearance, shipment_remaining_rate)
     clearance_pool, src = clearance_pool_ils(clearance, use_cost_lines, shipment_remaining_rate)
     deals_out = []
@@ -714,7 +721,8 @@ def preview_landed_import(
         deal_val_ils, _, _, _ = deal_total_ils(deal, deal_remaining_rate)
         deal_clear = (clearance_pool * share_value).quantize(Q2, rounding=ROUND_HALF_UP)
         deal_ship = (ship_pool_share * share_volume).quantize(Q2, rounding=ROUND_HALF_UP)
-        deal_local_clr = (local_clr_lines_total * share_value).quantize(Q2, rounding=ROUND_HALF_UP)
+        local_share = share_volume if local_transport_source == 'local_shipment' else share_value
+        deal_local_clr = (local_transport_total * local_share).quantize(Q2, rounding=ROUND_HALF_UP)
         deals_out.append({
             'deal_id': deal.id,
             'ref_number': deal.ref_number,
@@ -724,6 +732,7 @@ def preview_landed_import(
             'allocated_clearance_ils': float(deal_clear),
             'allocated_freight_ils': float(deal_ship),
             'allocated_local_shipping_from_clearance_lines_ils': float(deal_local_clr),
+            'allocated_local_transport_ils': float(deal_local_clr),
         })
     mismatch = abs(cost_lines_total - payments_total) > Decimal('0.02')
     freight_tol = Decimal('0.02')
@@ -740,7 +749,9 @@ def preview_landed_import(
         'shipment_freight_unpaid_usd': float(ship_unpaid_usd),
         'shipment_freight_fully_paid': ship_unpaid_usd <= freight_tol,
         'clearance_pool_ils': float(clearance_pool),
-        'clearance_local_shipping_cost_lines_total_ils': float(local_clr_lines_total),
+        'clearance_local_shipping_cost_lines_total_ils': float(local_transport_total),
+        'local_transport_total_ils': float(local_transport_total),
+        'local_transport_source': local_transport_source,
         'cost_lines_vs_payments_mismatch': mismatch,
         'deals': deals_out,
     }
@@ -777,7 +788,12 @@ def build_purchase_invoice_row(
     ship_val_ils, ship_paid_usd, ship_paid_ils, ship_unpaid_usd = shipment_freight_ils(shipment, shipment_remaining_rate)
     ship_pool_share = ship_val_ils
     cost_lines_total = sum_cost_lines_all_ils(clearance)
-    local_clr_lines_total = sum_clearance_logistics_for_landed_share_ils(clearance)
+    from logistics.domain.inland import transport_pool_ils
+    local_clr_lines_total = transport_pool_ils(shipment, clearance)
+    local_transport_source = 'local_shipment'
+    if local_clr_lines_total <= 0:
+        local_clr_lines_total = sum_clearance_logistics_for_landed_share_ils(clearance)
+        local_transport_source = 'clearance_lines' if local_clr_lines_total > 0 else 'none'
     payments_total = sum_clearance_payments_ils(clearance, shipment_remaining_rate)
     clearance_pool, clr_src = clearance_pool_ils(clearance, use_cost_lines, shipment_remaining_rate)
 
@@ -797,6 +813,7 @@ def build_purchase_invoice_row(
         internal_shipping_usd=internal_usd,
         shipping_included=bool(deal.is_shipping_included),
         clearance_local_lines_pool_ils=local_clr_lines_total,
+        local_transport_share=share_volume if local_transport_source == 'local_shipment' else share_value,
     )
     deal_xfer_ils = sum_settled_transfer_costs_ils(deal.payments.all())
     ship_xfer_total_ils = sum_settled_shipment_freight_transfer_commissions_ils(shipment)
@@ -875,6 +892,12 @@ def build_purchase_invoice_row(
         'deal_transfer_commissions_from_shipment_share_ils': float(deal_share_ship_xfer_ils),
         'deal_local_shipping_from_clearance_ils': float(deal_local_clr),
         'clearance_local_shipping_lines_total_ils': float(local_clr_lines_total),
+        'deal_local_transport_ils': float(deal_local_clr),
+        'local_transport_total_ils': float(local_clr_lines_total),
+        'local_transport_source': local_transport_source,
+        'local_transport_allocation_basis': (
+            'chargeable_unit' if local_transport_source == 'local_shipment' else 'deal_value'
+        ),
         'deal_paid_usd': float(deal_paid_usd),
         'deal_paid_ils': float(deal_paid_ils),
         'deal_unpaid_usd': float(deal_unpaid_usd),
@@ -947,7 +970,23 @@ def import_invoices_from_clearance(
 
     created: List[PurchaseInvoice] = []
     with transaction.atomic():
-        for did in deal_ids:
+        LogisticsShipment.objects.select_for_update().get(pk=shipment.pk, tenant=tenant)
+        requested_ids = list(dict.fromkeys(int(did) for did in deal_ids))
+        existing = {
+            int(row['deal_id']): row
+            for row in PurchaseInvoice.objects.select_for_update().filter(
+                tenant=tenant,
+                shipment=shipment,
+                deal_id__in=requested_ids,
+                is_return=False,
+            ).values('deal_id', 'invoice_number')
+        }
+        if existing:
+            numbers = '، '.join(str(row['invoice_number']) for row in existing.values())
+            raise ValueError(
+                f'الصفقة المختارة محوّلة مسبقاً إلى فاتورة ({numbers}). اختر الصفقات المتبقية فقط.'
+            )
+        for did in requested_ids:
             if not LogisticsShipmentDeal.objects.filter(shipment=shipment, deal_id=did).exists():
                 continue
             deal = LogisticsDeal.objects.get(pk=did, tenant=tenant)

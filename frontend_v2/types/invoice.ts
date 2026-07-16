@@ -17,6 +17,17 @@ export interface TaxesAndFeesLine {
     percentageBasis?: "goods" | "after_main_vat";
 }
 
+export interface PurchaseInvoiceFeeLine {
+    id?: string;
+    description: string;
+    amount: number;
+    expenseAccountId: number | null;
+    expenseAccountCode?: string;
+    expenseAccountName?: string;
+    capitalizeToInventory: boolean;
+    isTaxable: boolean;
+}
+
 export interface LocalPayments {
     customsClearanceFees?: number;
     customsDuties?: number;
@@ -191,6 +202,10 @@ export interface Invoice {
         dealLocalShippingFromClearanceIls?: number;
         /** مجموع أسطر الشحن المحلي في التخليص قبل ضرب نسبة الصفقة */
         clearanceLocalShippingLinesTotalIls?: number;
+        dealLocalTransportIls?: number;
+        localTransportTotalIls?: number;
+        localTransportSource?: string;
+        localTransportAllocationBasis?: string;
         allocationMethod?: string;
         /** من الخادم: شحن دولي بالحجم ووزن التخليص بالقيمة — غيابه = فاتورة قبل فصل النسب */
         dualShareAllocations?: boolean;
@@ -240,4 +255,12 @@ export interface Invoice {
     isPosted?: boolean;
     /** مرجع شراء (إرجاع بضاعة للمورد) بدل فاتورة شراء عادية. */
     isReturn?: boolean;
+    /** رقم الفاتورة الأصلية المرتبطة بالمرجع (W7a). */
+    originalInvoiceId?: string;
+    originalInvoiceNumber?: string;
+    /** ضرائب ورسوم إضافية مهيكلة تُرحّل فوق إجمالي الفاتورة الأساسي. */
+    fees?: PurchaseInvoiceFeeLine[];
+    feesTotal?: number;
+    payableTotal?: number;
+    invoiceType?: 'local' | 'international';
 }

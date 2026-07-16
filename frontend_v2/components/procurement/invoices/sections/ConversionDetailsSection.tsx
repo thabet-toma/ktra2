@@ -1,8 +1,9 @@
 import React from "react";
-import { Calculator, Ship } from "lucide-react";
+import { Calculator, ExternalLink, Ship } from "lucide-react";
 import type { Invoice, InvoiceImportLogistics } from "@/types";
 import { formatInvoiceImportLogisticsLine } from "@/utils/invoiceConversionUtils";
 import { formatNumber, formatMoney } from "@/utils/formatNumber";
+import { openInNewTab } from "@/utils/openInNewTab";
 
 type ConversionMetadata = NonNullable<Invoice["conversionMetadata"]>;
 
@@ -73,8 +74,20 @@ function normalizeConversionMetadata(meta: ConversionMetadata): ConversionMetada
         costLinesTotalIls: optionalNum(r.costLinesTotalIls ?? r.cost_lines_total_ils),
         dealLocalShippingFromClearanceIls: optionalNum(
             r.dealLocalShippingFromClearanceIls ??
-                r.deal_local_shipping_from_clearance_ils ??
-                lineMeta.local_shipping_from_clearance_ils
+            r.deal_local_shipping_from_clearance_ils ??
+            lineMeta.local_shipping_from_clearance_ils
+        ),
+        dealLocalTransportIls: optionalNum(
+            r.dealLocalTransportIls ?? r.deal_local_transport_ils
+        ),
+        localTransportTotalIls: optionalNum(
+            r.localTransportTotalIls ?? r.local_transport_total_ils
+        ),
+        localTransportSource: String(
+            r.localTransportSource ?? r.local_transport_source ?? ""
+        ),
+        localTransportAllocationBasis: String(
+            r.localTransportAllocationBasis ?? r.local_transport_allocation_basis ?? ""
         ),
         clearanceLocalShippingLinesTotalIls: optionalNum(
             r.clearanceLocalShippingLinesTotalIls ?? r.clearance_local_shipping_lines_total_ils
@@ -128,6 +141,20 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
     invoiceClearanceId,
 }) => {
     if (!metadata && !importLogistics) return null;
+    const metadataRecord = (metadata || {}) as Record<string, unknown>;
+    const shipmentId = String(
+        importLogistics?.shipmentId ?? metadataRecord.shipment_id ?? metadataRecord.shipmentId ?? ""
+    ).trim();
+    const shipmentLink = shipmentId ? (
+        <button
+            type="button"
+            onClick={() => openInNewTab(`/import-flow/${encodeURIComponent(shipmentId)}`)}
+            className="inline-flex items-center gap-1 rounded-lg border aseel-border-soft px-2.5 py-1.5 text-xs font-bold text-[var(--color-primary)] hover:bg-[var(--color-surface-2)]"
+        >
+            <ExternalLink className="h-3.5 w-3.5" />
+            فتح رحلة الشحنة
+        </button>
+    ) : null;
 
     if (!metadata) {
         return (
@@ -139,6 +166,7 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
                         <p className="text-[var(--color-primary)]/90 dark:text-[var(--color-primary)]/90 mt-1">
                             {formatInvoiceImportLogisticsLine(importLogistics!)}
                         </p>
+                        <div className="mt-2">{shipmentLink}</div>
                     </div>
                 </div>
             </div>
@@ -156,6 +184,8 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
         dealShipmentAllocatedIls,
         dealClearanceAllocatedIls,
         dealLocalShippingFromClearanceIls,
+        dealLocalTransportIls,
+        localTransportSource,
         dealTransferCommissionsIls,
         dealTransferCommissionsFromDealPaymentsIls,
         shipmentTransferCommissionsTotalIls,
@@ -187,7 +217,7 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
         Number(clearanceIdRaw) > 0;
 
     /** إن لم تُحدَّث metadata بعد، نُظهر حصة النقل من التخليص من فرق «شحن الفاتورة» − دولي − تقدير الصفقة */
-    const metaLocalClr = dealLocalShippingFromClearanceIls ?? 0;
+    const metaLocalClr = dealLocalTransportIls ?? dealLocalShippingFromClearanceIls ?? 0;
     const shipField = optionalNum(invoiceShippingCostIls);
     const intlPart = dealShipmentAllocatedIls ?? 0;
     const intDealPart = shippingIncluded ? 0 : internalShippingIls ?? 0;
@@ -245,7 +275,9 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
                                 </span>
                             ) : (
                                 <span className="text-[9px] aseel-text-soft dark:aseel-text-soft block">
-                                    من بنود التخليص (نقل / شحن محلي أو دفعة الناقل)
+                                    {localTransportSource === "local_shipment"
+                                        ? "من سجل النقل المحلي — موزّع حسب الحجم/الوزن"
+                                        : "من بنود التخليص (نقل / شحن محلي أو دفعة الناقل)"}
                                 </span>
                             )}
                         </div>
@@ -284,7 +316,9 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
                         <span className="text-[9px] aseel-text-soft dark:aseel-text-soft block">
                             {localFromInvoiceImplied
                                 ? "من التخليص (مُستنتج من شحن الفاتورة — يُفضَّل إعادة الحساب)"
-                                : "من التخليص (نقل / شحن محلي أو دفعة الناقل)"}
+                                : localTransportSource === "local_shipment"
+                                  ? "من سجل النقل المحلي — موزّع حسب الحجم/الوزن"
+                                  : "من التخليص (نقل / شحن محلي أو دفعة الناقل)"}
                         </span>
                     ) : null}
                 </div>
@@ -344,10 +378,13 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
     if (hasIlsLogisticsBreakdown) {
         return (
             <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl border aseel-border-soft dark:aseel-border-soft shadow-sm p-3 space-y-3">
-                <h4 className="flex items-center gap-2 text-sm font-bold aseel-text-ink dark:aseel-text-soft">
-                    <Calculator className="w-4 h-4 aseel-text-soft shrink-0" />
-                    توزيع التكلفة (شيكل) — أساس أعمدة التكلفة النهائية
-                </h4>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h4 className="flex items-center gap-2 text-sm font-bold aseel-text-ink dark:aseel-text-soft">
+                        <Calculator className="w-4 h-4 aseel-text-soft shrink-0" />
+                        توزيع التكلفة (شيكل) — أساس أعمدة التكلفة النهائية
+                    </h4>
+                    {shipmentLink}
+                </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
                     <div className="p-3 aseel-bg-panel dark:aseel-bg-panel/80 border aseel-border-soft dark:aseel-border-soft rounded-lg">

@@ -384,6 +384,52 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
     return {'movements': movements, 'journal': journal, 'receipt_status': invoice.receipt_status}
 
 
+def returnable_lines_for_invoice(original_invoice):
+    """W6: بنود الفاتورة الأصلية مع (المفوتر · المرتجع سابقاً · المتبقّي القابل للإرجاع)
+    لكل صنف — يغذّي منتقي بنود المرجع في الواجهة. مصدر حقيقة واحد مع حارس الإنشاء.
+    يُجمّع بالصنف (لو تكرّر الصنف في أسطر الفاتورة)."""
+    from decimal import Decimal as _D
+    from .models import PurchaseInvoiceItem
+
+    if original_invoice is None:
+        return []
+
+    orig: dict[int, dict] = {}
+    for it in original_invoice.items.all():
+        if not it.product_id:
+            continue
+        row = orig.setdefault(it.product_id, {
+            'product': it.product_id,
+            'name': it.name or (getattr(it.product, 'name_ar', None) or str(it.product_id)),
+            'unit_price': _D(str(it.unit_price or 0)),
+            'invoiced_qty': _D('0'),
+        })
+        row['invoiced_qty'] += _D(str(it.quantity or 0))
+
+    returned: dict[int, _D] = {}
+    prior = PurchaseInvoiceItem.objects.filter(
+        invoice__original_invoice=original_invoice,
+        invoice__is_return=True,
+    ).values_list('product_id', 'quantity')
+    for pid, q in prior:
+        if pid:
+            returned[pid] = returned.get(pid, _D('0')) + _D(str(q or 0))
+
+    out = []
+    for pid, row in orig.items():
+        ret_q = returned.get(pid, _D('0'))
+        remaining = row['invoiced_qty'] - ret_q
+        out.append({
+            'product': pid,
+            'name': row['name'],
+            'unit_price': str(row['unit_price']),
+            'invoiced_qty': str(row['invoiced_qty']),
+            'returned_qty': str(ret_q),
+            'remaining_qty': str(remaining if remaining > 0 else _D('0')),
+        })
+    return out
+
+
 def create_purchase_return(
     tenant, *, original_invoice, partner, return_date, lines, notes='',
     invoice_number=None, currency=None, exchange_rate=None, user=None,
@@ -440,6 +486,34 @@ def create_purchase_return(
     base_factor = _D(str(exchange_rate if exchange_rate is not None else 1))
 
     with transaction.atomic():
+        # W6: منع تجاوز الكمية المرتجعة الكمية الأصلية المفوترة (لكل صنف). المتبقّي
+        # القابل للإرجاع = المفوتر − (مجموع كل المراجيع السابقة لنفس الفاتورة الأصلية).
+        if original_invoice is not None:
+            orig_qty: dict[int, _D] = {}
+            for it in original_invoice.items.all():
+                if it.product_id:
+                    orig_qty[it.product_id] = orig_qty.get(it.product_id, _D('0')) + _D(str(it.quantity or 0))
+            returned_qty: dict[int, _D] = {}
+            prior = PurchaseInvoiceItem.objects.filter(
+                invoice__original_invoice=original_invoice,
+                invoice__is_return=True,
+            ).values_list('product_id', 'quantity')
+            for pid, q in prior:
+                if pid:
+                    returned_qty[pid] = returned_qty.get(pid, _D('0')) + _D(str(q or 0))
+            for l in clean_lines:
+                pid = l['product']
+                allowed = orig_qty.get(pid, _D('0')) - returned_qty.get(pid, _D('0'))
+                if l['quantity'] > allowed:
+                    prod = products.get(pid)
+                    pname = (getattr(prod, 'name_ar', None) or getattr(prod, 'sku', None)
+                             or f"#{pid}") if prod else f"#{pid}"
+                    remaining = allowed if allowed > 0 else _D('0')
+                    raise ValidationError(
+                        f"الكمية المرتجعة للصنف «{pname}» ({l['quantity']}) تتجاوز المتبقّي "
+                        f"القابل للإرجاع ({remaining}) من أصل {orig_qty.get(pid, _D('0'))} مفوترة."
+                    )
+
         if not invoice_number:
             last = (
                 PurchaseInvoice.objects.filter(tenant=tenant, is_return=True)

@@ -2,6 +2,8 @@
  * عميل وثائق يشبه واجهة Firestore لكنه يتحدث مع Django (MySQL) عبر /api/mapper/
  * — لا يستخدم Firebase.
  */
+import { apiFetch } from "./restApi";
+
 export const db = {};
 
 /** قاعدة عنوان الـ API: يجب أن تنتهي بدون شرطة مكررة؛ المسار النهائي .../api */
@@ -11,22 +13,6 @@ const API_BASE = (
 
 const mapperUrl = (docPath: string) =>
     `${API_BASE}/mapper/${docPath.replace(/^\/+/, "")}/`;
-
-const NETWORK_HINT =
-    "تعذر الاتصال بالخادم (شبكة/CORS). تحقق: (1) تشغيل Django (2) VITE_API_URL يشير لنفس الجهاز/المنفذ وينتهي بـ /api " +
-    `(الحالي: ${API_BASE}) (3) إذا تفتح الواجهة من IP الشبكة أضف المصدر في DJANGO_CORS_EXTRA_ORIGINS أو DJANGO_CORS_ALLOW_ALL=1 للتطوير (4) سجّل الدخول ليُرسل التوكن`;
-
-async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
-    try {
-        return await fetch(url, init);
-    } catch (e) {
-        const name = e instanceof Error ? e.name : "";
-        if (name === "TypeError" || String(e).includes("fetch")) {
-            throw new Error(NETWORK_HINT);
-        }
-        throw e;
-    }
-}
 
 import { resolveTenantId } from "../utils/tenantContext";
 
@@ -204,15 +190,38 @@ export const onSnapshot = (ref: any, callbackOrObserver: any) => {
             ? undefined
             : callbackOrObserver?.error?.bind(callbackOrObserver);
 
-    const tick = (silent: boolean) => {
-        const p = ref.queryString !== undefined ? getDocs(ref) : getDoc(ref);
-        p.then((snap) => next?.(snap)).catch((e) => {
-            if (!silent) onError?.(e);
-        });
+    let alive = true;
+    let inFlight = false;
+    const tick = async (silent: boolean) => {
+        if (!alive || inFlight) return;
+        inFlight = true;
+        try {
+            const snap = await (ref.queryString !== undefined ? getDocs(ref) : getDoc(ref));
+            if (alive) next?.(snap);
+        } catch (e) {
+            if (alive && !silent) onError?.(e);
+        } finally {
+            inFlight = false;
+        }
     };
-    tick(false);
-    const interval = setInterval(() => tick(true), 5000);
-    return () => clearInterval(interval);
+    void tick(false);
+
+    // Mapper subscriptions are HTTP snapshots, not server-pushed streams. Polling every
+    // five seconds made every signed-in tab repeatedly download users/tasks/activity even
+    // while idle. Keep the immediate snapshot, then refresh only when the user returns.
+    const refreshWhenVisible = () => {
+        if (typeof document === "undefined" || document.visibilityState === "visible") {
+            void tick(true);
+        }
+    };
+    if (typeof window !== "undefined") window.addEventListener("focus", refreshWhenVisible);
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", refreshWhenVisible);
+
+    return () => {
+        alive = false;
+        if (typeof window !== "undefined") window.removeEventListener("focus", refreshWhenVisible);
+        if (typeof document !== "undefined") document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
 };
 
 export const serverTimestamp = () => new Date().toISOString();

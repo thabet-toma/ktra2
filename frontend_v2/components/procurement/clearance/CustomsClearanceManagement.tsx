@@ -44,7 +44,7 @@ export const CustomsClearanceManagement: React.FC<{ currentUser: User }> = ({ cu
       const [cl, sh, pr] = await Promise.all([
         listClearances(),
         apiGetList<any>("logistics/shipments/", { tenantId: resolveTenantId() }),
-        apiGetList<BrokerPick>("partners/", { tenantId: resolveTenantId() }),
+        apiGetList<BrokerPick>("partners/lookup/?limit=500", { tenantId: resolveTenantId() }),
       ]);
       setClearances(cl);
       const mapped: ShipmentPick[] = sh.map((r: any) => ({

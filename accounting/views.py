@@ -4,7 +4,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction as db_transaction
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from rest_framework import serializers as drf_serializers, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -76,7 +76,15 @@ class AccountViewSet(viewsets.ModelViewSet):
         from core.import_access import user_can_access_import
         if not user_can_access_import(self.request.user, tenant):
             qs = qs.exclude(code__startswith="53")
-        return qs
+        return qs.prefetch_related(
+            Prefetch(
+                "linked_partners",
+                queryset=Partner.objects.filter(tenant=tenant).only(
+                    "id", "name", "legal_name", "linked_account_id",
+                ),
+                to_attr="_api_linked_partners",
+            )
+        )
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
@@ -234,10 +242,35 @@ class JournalViewSet(viewsets.ModelViewSet):
                 pk__in=pay_ids
             ):
                 pay_map[p.id] = p
+        # perf: نفس نمط pay_map لفواتير المبيعات وتحصيلات العملاء — يقتل N+1 في
+        # build_journal_reference_summary (كان استعلاماً لكل صف من هذين النوعين).
+        sales_ids = [
+            j.reference_id for j in target
+            if j.reference_type == "SALES_INVOICE" and j.reference_id
+        ]
+        sales_map = {}
+        if sales_ids:
+            from sales.models import SalesInvoice
+            for inv in SalesInvoice.objects.select_related("customer").filter(pk__in=sales_ids):
+                sales_map[inv.id] = inv
+        cust_ids = [
+            j.reference_id for j in target
+            if j.reference_type == "CUSTOMER_PAYMENT" and j.reference_id
+        ]
+        cust_map = {}
+        if cust_ids:
+            from sales.models import CustomerPayment
+            for pay in CustomerPayment.objects.select_related("partner").filter(pk__in=cust_ids):
+                cust_map[pay.id] = pay
         serializer = self.get_serializer(
             target,
             many=True,
-            context={**self.get_serializer_context(), "logistics_payments": pay_map},
+            context={
+                **self.get_serializer_context(),
+                "logistics_payments": pay_map,
+                "sales_invoices": sales_map,
+                "customer_payments": cust_map,
+            },
         )
         if page is not None:
             return self.get_paginated_response(serializer.data)

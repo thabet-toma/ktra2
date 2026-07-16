@@ -631,6 +631,22 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
 
     on_hand = Decimal(str(p.quantity_on_hand or 0))
     avg_cost = Decimal(str(p.avg_cost or 0))
+
+    # W8: معدّلات البيع من StockMovement (المصدر الوحيد، مطابق لجدول الأصناف):
+    # أسبوعي = صافي (OUT − RETURN_IN) خلال 28 يوماً ÷ 4؛ شهري = 90 يوماً ÷ 3.
+    import datetime as _dt
+    from .models import StockMovement
+    today = _dt.date.today()
+
+    def _net_rate(days: int, divisor: str) -> Decimal:
+        cutoff = today - _dt.timedelta(days=days)
+        mv = StockMovement.objects.filter(
+            tenant_id=tenant_id, product_id=product_id, movement_date__gte=cutoff)
+        out_q = mv.filter(movement_type='OUT').aggregate(q=Sum('quantity'))['q'] or 0
+        ret_q = mv.filter(movement_type='RETURN_IN').aggregate(q=Sum('quantity'))['q'] or 0
+        net = Decimal(str(out_q)) - Decimal(str(ret_q))
+        return (net / Decimal(divisor)).quantize(Decimal('0.01'))
+
     return {
         'id': p.id,
         'sku': p.sku,
@@ -643,6 +659,8 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
         'purchased_value': str(purchased['v'] or 0),
         'sold_qty': str(sold['q'] or 0),
         'sold_value': str(sold['v'] or 0),
+        'avg_weekly_sales': str(_net_rate(28, '4')),
+        'avg_monthly_sales': str(_net_rate(90, '3')),
     }
 
 

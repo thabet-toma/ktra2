@@ -5,6 +5,9 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.auth.models import User
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+from rest_framework.test import APITestCase
 
 from accounting.models import Account
 from accounting.services import create_fiscal_year
@@ -47,3 +50,53 @@ def test_sales_invoice_line_exposes_product_name(env):
 
     data = SalesInvoiceSerializer(inv).data
     assert data["lines"][0]["product_name"] == "إطار ميشلان"
+
+
+class SalesInvoiceDetailQueryCountTest(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create_user(username="salesdetailperf", password="x")
+        cls.tenant = create_company("شركة أداء تفاصيل البيع", cls.owner)
+        cls.currency, _ = Currency.objects.get_or_create(
+            Code="ILS", defaults={"Name": "شيكل", "Symbol": "₪", "IsBaseCurrency": True},
+        )
+        cls.customer = Partner.objects.create(
+            tenant=cls.tenant, name="عميل أداء", partner_type="Customer",
+        )
+        cls.invoice = SalesInvoice.objects.create(
+            tenant=cls.tenant, invoice_number="DETAIL-PERF-1",
+            customer=cls.customer, currency=cls.currency, invoice_date="2026-07-01",
+        )
+        cls.products = [
+            Product.objects.create(
+                tenant=cls.tenant, sku=f"DETAIL-P-{i}", name_ar=f"صنف {i}",
+            )
+            for i in range(6)
+        ]
+
+    def _add_lines(self, start, stop):
+        for i in range(start, stop):
+            SalesInvoiceLine.objects.create(
+                tenant=self.tenant, invoice=self.invoice, product=self.products[i],
+                quantity=Decimal("1"), unit_price=Decimal("10"),
+            )
+
+    def _detail_query_count(self):
+        self.client.force_authenticate(user=self.owner)
+        with CaptureQueriesContext(connection) as ctx:
+            res = self.client.get(
+                f"/api/sales/invoices/{self.invoice.id}/",
+                HTTP_X_TENANT_ID=str(self.tenant.TenantID),
+            )
+            assert res.status_code == 200, res.content[:300]
+        return len(ctx.captured_queries)
+
+    def test_product_name_query_count_is_constant_as_lines_grow(self):
+        self._add_lines(0, 2)
+        q_two = self._detail_query_count()
+        self._add_lines(2, 6)
+        q_six = self._detail_query_count()
+        assert q_six == q_two, (
+            f"N+1 in invoice lines: {q_two} queries for 2 lines, "
+            f"{q_six} for 6 lines"
+        )

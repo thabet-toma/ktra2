@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { AseelSpinner } from "../aseel/AseelStates";
 import {
-  listQuotations,
+  listQuotationsPage,
   getQuotation,
   createQuotation,
   updateQuotation,
@@ -66,6 +66,9 @@ export const SalesQuotationsPage: React.FC = () => {
   const [err, setErr] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalQuotations, setTotalQuotations] = useState(0);
+  const pageSize = 50;
 
   // Form state
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -205,7 +208,7 @@ export const SalesQuotationsPage: React.FC = () => {
   // M4-T5: Aseel keyboard shortcuts — real handlers.
   useAseelKeymap({
     F2: () => window.print(),
-    F5: () => loadAll(),
+    F5: () => loadQuotations(),
     F6: () => {
       const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
       el?.focus();
@@ -229,22 +232,32 @@ export const SalesQuotationsPage: React.FC = () => {
     CtrlIns: () => { setSelectedId(null); setShowForm(true); },
   });
 
-  const loadAll = useCallback(async () => {
+  const loadQuotations = useCallback(async () => {
     setLoading(true);
     setErr(null);
+    try {
+      const qs = await listQuotationsPage({ page, page_size: pageSize });
+      setQuotations(qs.results || []);
+      setTotalQuotations(qs.count);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "فشل التحميل");
+    } finally {
+      setLoading(false);
+    }
+  }, [page]);
+
+  const loadMasterData = useCallback(async () => {
     try {
       // task16 E17: منتقي الصنف في عرض السعر كان يحمّل شجرة الحسابات
       // (getAccounts) بدل الأصناف — يُصحَّح إلى أصناف المخزون (inventory/products).
       const tenantId = resolveTenantId();
-      const [qs, parts, prods] = await Promise.all([
-        listQuotations(),
+      const [parts, prods] = await Promise.all([
         accountingApi.getPartners() as Promise<Partner[]>,
         apiGetList<SqlProduct & { sale_price?: string; selling_price?: string }>(
           "inventory/products/",
           { tenantId }
         ),
       ]);
-      setQuotations(qs || []);
       setPartners(parts || []);
       setProducts(
         (prods || []).map((p: any) => ({
@@ -260,14 +273,14 @@ export const SalesQuotationsPage: React.FC = () => {
       );
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
-    } finally {
-      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    void loadQuotations();
+  }, [loadQuotations]);
+
+  useEffect(() => { void loadMasterData(); }, [loadMasterData]);
 
   const resetForm = () => {
     setSelectedId(null);
@@ -352,7 +365,7 @@ export const SalesQuotationsPage: React.FC = () => {
       }
       resetForm();
       setShowForm(false);
-      await loadAll();
+      await loadQuotations();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحفظ");
     } finally {
@@ -365,7 +378,7 @@ export const SalesQuotationsPage: React.FC = () => {
     try {
       const result = await convertQuotationToInvoice(id);
       alert(`✅ تم التحويل — فاتورة رقم: ${result.invoice_number}`);
-      await loadAll();
+      await loadQuotations();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحويل");
     }
@@ -375,7 +388,7 @@ export const SalesQuotationsPage: React.FC = () => {
     if (!(await confirm({ title: "حذف عرض السعر", message: "هل أنت متأكد من حذف هذا العرض؟" }))) return;
     try {
       await deleteQuotation(id);
-      await loadAll();
+      await loadQuotations();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحذف");
     }
@@ -433,7 +446,7 @@ export const SalesQuotationsPage: React.FC = () => {
           key: 'reload',
           label: 'تحديث',
           icon: <RefreshCw />,
-          onClick: () => loadAll(),
+          onClick: () => loadQuotations(),
           separatorBefore: true,
         },
         {
@@ -447,7 +460,7 @@ export const SalesQuotationsPage: React.FC = () => {
       status={
         <>
           <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
-          <span className="aseel-status-item">{quotations.length} عرض</span>
+          <span className="aseel-status-item">{quotations.length} من {totalQuotations} عرض</span>
         </>
       }
     >
@@ -547,6 +560,16 @@ export const SalesQuotationsPage: React.FC = () => {
               ))}
             </tbody>
           </table>
+          {totalQuotations > pageSize && (
+            <div className="aseel-pagination">
+              <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>السابق</button>
+              <span>صفحة {page} من {Math.ceil(totalQuotations / pageSize)} ({totalQuotations} سجل)</span>
+              <button
+                disabled={page >= Math.ceil(totalQuotations / pageSize)}
+                onClick={() => setPage((p) => p + 1)}
+              >التالي</button>
+            </div>
+          )}
         </div>
       )}
 

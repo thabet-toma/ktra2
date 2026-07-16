@@ -6,14 +6,14 @@
  * قديمة و/أو Cache Storage قديم و/أو اتصال HTTP/3 (QUIC) معطوب على النطاق الفرعي
  * للـ API — والتصفّح الخفي يبدأ بحالة نظيفة فيعمل.
  *
- * هذه الدالة تمنح المستخدم مكافئ «التصفّح الخفي» بضغطة واحدة دون معرفة الحيلة:
- * إلغاء تسجيل كل عمّال الخدمة + مسح كل Cache Storage ثم إعادة تحميل الصفحة (تفتح
- * عامل خدمة/اتصالاً جديدين). لا تُمسّ `localStorage` (التوكن/الفرع النشط) كي يبقى
- * المستخدم مسجّلاً دخوله.
+ * هذه الدالة تعمل فقط بطلب صريح من المستخدم: تلغي عامل الخدمة الذي يغطي صفحة
+ * K.T.R.A الحالية وتمسح كاشات K.T.R.A ذات البادئة `ktra-` ثم تعيد التحميل.
+ * لا تمس تسجيلات أو كاشات أخرى على الأصل، ولا تُمسّ `localStorage`.
  *
  * كل خطوة معزولة في try/catch حتى لا يمنع فشل إحداها الوصول لإعادة التحميل النهائية.
  */
 import { clientLogger } from "../services/logger";
+import { isKtraCacheName, serviceWorkerScopeCoversPage } from "./connectionRecoveryPolicy";
 
 export async function recoverConnection(): Promise<void> {
   clientLogger.info("connection.recovery.start");
@@ -21,7 +21,11 @@ export async function recoverConnection(): Promise<void> {
   if ("serviceWorker" in navigator) {
     try {
       const regs = await navigator.serviceWorker.getRegistrations();
-      await Promise.all(regs.map((r) => r.unregister()));
+      const currentPage = window.location.href;
+      const matching = regs.filter((r) =>
+        serviceWorkerScopeCoversPage(r.scope, currentPage)
+      );
+      await Promise.all(matching.map((r) => r.unregister()));
     } catch (e) {
       clientLogger.warn("connection.recovery.sw_failed", { error: String(e) });
     }
@@ -30,7 +34,7 @@ export async function recoverConnection(): Promise<void> {
   if ("caches" in window) {
     try {
       const keys = await caches.keys();
-      await Promise.all(keys.map((k) => caches.delete(k)));
+      await Promise.all(keys.filter(isKtraCacheName).map((k) => caches.delete(k)));
     } catch (e) {
       clientLogger.warn("connection.recovery.cache_failed", { error: String(e) });
     }

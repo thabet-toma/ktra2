@@ -30,7 +30,9 @@ import {
     ArrowLeftRight,
     Loader2,
     Truck,
+    ExternalLink,
 } from "lucide-react";
+import { openInNewTab } from "@/utils/openInNewTab";
 
 /** يمنع الاستيراد إذا أرجع الخادم تفصيلاً بالدولار وما زال هناك شحن غير مدفوع ومؤكّد. */
 function clearancePreviewBlocksImportForUnpaidFreight(
@@ -145,6 +147,13 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
     const [shipmentError, setShipmentError] = useState<string | null>(null);
 
     const [selectedDeals, setSelectedDeals] = useState<string[]>([]);
+    const [dealImportStates, setDealImportStates] = useState<Record<string, {
+        isConverted: boolean;
+        invoiceId: number | null;
+        invoiceNumber: string | null;
+    }>>({});
+    const [importOptionsLoading, setImportOptionsLoading] = useState(false);
+    const [importOptionsError, setImportOptionsError] = useState<string | null>(null);
 
     const [shipmentRemainingRate, setShipmentRemainingRate] = useState<number>(3.6);
     const [dealRemainingRate, setDealRemainingRate] = useState<number>(3.6);
@@ -212,6 +221,41 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
     }, [isOpen, selectedClearance]);
 
     useEffect(() => {
+        if (!isOpen || !selectedClearance) {
+            setDealImportStates({});
+            setImportOptionsError(null);
+            return;
+        }
+        let cancelled = false;
+        setImportOptionsLoading(true);
+        setImportOptionsError(null);
+        void purchaseInvoiceApi.getClearanceImportOptions(selectedClearance.id)
+            .then((result) => {
+                if (cancelled) return;
+                const next: Record<string, { isConverted: boolean; invoiceId: number | null; invoiceNumber: string | null }> = {};
+                result.deals.forEach((row) => {
+                    next[String(row.deal_id)] = {
+                        isConverted: row.is_converted,
+                        invoiceId: row.invoice_id,
+                        invoiceNumber: row.invoice_number,
+                    };
+                });
+                setDealImportStates(next);
+                setSelectedDeals((current) => current.filter((id) => !next[id]?.isConverted));
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setDealImportStates({});
+                    setImportOptionsError("تعذّر التحقق من الصفقات المحوّلة. أعد المحاولة قبل إنشاء الفواتير.");
+                }
+            })
+            .finally(() => {
+                if (!cancelled) setImportOptionsLoading(false);
+            });
+        return () => { cancelled = true; };
+    }, [isOpen, selectedClearance]);
+
+    useEffect(() => {
         if (!isOpen || !selectedClearance || !resolvedShipment || selectedDeals.length === 0) {
             setPreview(null);
             return;
@@ -265,6 +309,8 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
     });
     const importButtonDisabled =
         importBusy ||
+        importOptionsLoading ||
+        Boolean(importOptionsError) ||
         selectedDeals.length === 0 ||
         freightImportBlocked ||
         (selectedDeals.length > 0 && previewLoading);
@@ -296,10 +342,16 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
     };
 
     const handleToggleDeal = (dealId: string) => {
+        if (importOptionsLoading || importOptionsError) return;
+        if (dealImportStates[dealId]?.isConverted) return;
         setSelectedDeals((prev) =>
             prev.includes(dealId) ? prev.filter((id) => id !== dealId) : [...prev, dealId]
         );
     };
+
+    const remainingDealIds = resolvedShipment?.deals
+        .filter((deal) => !dealImportStates[deal.dealId]?.isConverted)
+        .map((deal) => deal.dealId) || [];
 
     const handleImportClick = async () => {
         if (!resolvedShipment || !selectedClearance) return;
@@ -739,7 +791,31 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                             <Package className="w-4 h-4" />
                                             الصفقات على شحنة «{shipmentTitleAndNumber(resolvedShipment).title}»
                                         </h4>
-                                        {selectedDeals.length === 0 ? (
+                                        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border aseel-border-soft px-3 py-2">
+                                            <span className="text-xs aseel-text-soft">
+                                                المتبقية للتحويل: <b className="aseel-text-ink">{remainingDealIds.length}</b>
+                                                {" · "}المحوّلة: <b className="aseel-text-ink">{resolvedShipment.deals.length - remainingDealIds.length}</b>
+                                            </span>
+                                            {remainingDealIds.length > 0 ? (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setSelectedDeals([...remainingDealIds])}
+                                                    className="rounded-lg border aseel-border-soft px-3 py-1.5 text-xs font-bold text-[var(--color-primary)] hover:bg-[var(--color-surface-2)]"
+                                                >
+                                                    اختيار كل المتبقي
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                        {importOptionsError ? (
+                                            <div className="rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700">
+                                                {importOptionsError}
+                                            </div>
+                                        ) : null}
+                                        {remainingDealIds.length === 0 && !importOptionsLoading ? (
+                                            <p className="text-sm font-semibold text-emerald-700">
+                                                تم تحويل جميع صفقات هذه الشحنة. يمكنك فتح كل فاتورة من بطاقتها أدناه.
+                                            </p>
+                                        ) : selectedDeals.length === 0 ? (
                                             <p className="text-sm aseel-text-soft dark:aseel-text-soft">
                                                 اختر صفقة من القائمة أدناه، ثم «استيراد الفواتير».
                                             </p>
@@ -749,6 +825,8 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                 (d) => String(d.id) === String(sd.dealId)
                                             );
                                             const isSelected = selectedDeals.includes(sd.dealId);
+                                            const importState = dealImportStates[sd.dealId];
+                                            const isConverted = Boolean(importState?.isConverted);
                                             const notesLong = (
                                                 deal?.internalNotes ||
                                                 sd.notes ||
@@ -784,13 +862,16 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                     key={sd.dealId}
                                                     role="checkbox"
                                                     aria-checked={isSelected}
+                                                    aria-disabled={isConverted}
                                                     tabIndex={0}
                                                     onClick={() => handleToggleDeal(sd.dealId)}
                                                     onKeyDown={(e) => {
                                                         if (e.key === "Enter" || e.key === " ")
                                                             handleToggleDeal(sd.dealId);
                                                     }}
-                                                    className={`p-4 sm:p-5 rounded-2xl border-2 cursor-pointer transition-all duration-300 flex justify-between items-start gap-3 sm:gap-4 group ${
+                                                    className={`p-4 sm:p-5 rounded-2xl border-2 transition-all duration-300 flex justify-between items-start gap-3 sm:gap-4 group ${
+                                                        isConverted ? "cursor-default opacity-75 aseel-border-soft bg-[var(--color-surface-2)]" : "cursor-pointer"
+                                                    } ${
                                                         isSelected
                                                             ? "border-[var(--color-border)] bg-[var(--color-surface-2)]/50 dark:bg-[var(--color-surface-2)]/20 shadow-lg shadow-indigo-100/50 dark:shadow-none"
                                                             : "aseel-border-soft dark:aseel-border-soft hover:aseel-border-soft dark:hover:aseel-border-soft"
@@ -805,6 +886,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                         tabIndex={-1}
                                                         className="mt-1.5 h-5 w-5 shrink-0 rounded aseel-border-soft text-[var(--color-primary)] focus:ring-[var(--color-primary)] pointer-events-none"
                                                         aria-hidden
+                                                        disabled={isConverted}
                                                     />
                                                     <div className="flex items-start gap-3 sm:gap-5 min-w-0 flex-1">
                                                         <div
@@ -874,6 +956,19 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                             </div>
                                                         </div>
                                                     </div>
+                                                    {isConverted ? (
+                                                        <button
+                                                            type="button"
+                                                            onClick={(event) => {
+                                                                event.stopPropagation();
+                                                                if (importState?.invoiceId) openInNewTab(`/purchase-invoices/${importState.invoiceId}`);
+                                                            }}
+                                                            className="inline-flex shrink-0 items-center gap-1 rounded-lg border aseel-border-soft px-2.5 py-1.5 text-xs font-bold text-[var(--color-primary)] hover:bg-[var(--color-surface-2)]"
+                                                        >
+                                                            <ExternalLink className="h-3.5 w-3.5" />
+                                                            محوّلة — {importState?.invoiceNumber || `فاتورة #${importState?.invoiceId}`}
+                                                        </button>
+                                                    ) : null}
                                                     <div className="text-left flex items-center gap-10">
                                                         <div className="text-right">
                                                             <div className="text-[10px] aseel-text-soft uppercase font-bold tracking-wider mb-1">

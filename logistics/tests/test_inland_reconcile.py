@@ -1,8 +1,7 @@
 """Q2 — inland single-source reconciliation (OLD clearance-lines/value vs NEW Transport/unit).
 
-Proves the redistribution: same inland pool, but volume-heavy deals carry more of it
-(haulage tracks volume), value-heavy deals carry less. Comparison-only — the live
-landed path is unchanged until the owner approves the flip.
+Proves the redistribution used by the live landed-cost path: same inland pool, but
+volume-heavy deals carry more of it (haulage tracks volume), value-heavy deals carry less.
 """
 from decimal import Decimal
 

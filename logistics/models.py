@@ -958,6 +958,53 @@ class LocalShipment(models.Model):
         return f"{self.shipment_number} — {self.carrier.name if self.carrier_id else '—'}"
 
 
+class LocalShipmentPayment(models.Model):
+    """دفعة مستقلة للناقل المحلي بعد إثبات استحقاق النقل."""
+
+    id = models.AutoField(primary_key=True, db_column='LocalShipmentPaymentID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    local_shipment = models.ForeignKey(
+        LocalShipment, on_delete=models.CASCADE, related_name='payments',
+        db_column='LocalShipmentID',
+    )
+    amount = models.DecimalField(max_digits=18, decimal_places=2, db_column='Amount')
+    currency = models.ForeignKey(
+        Currency, on_delete=models.PROTECT, db_column='CurrencyID',
+        related_name='local_shipment_payments',
+    )
+    exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, default=1, db_column='ExchangeRate',
+    )
+    payment_date = models.DateField(db_column='PaymentDate')
+    cash_box_external_id = models.CharField(max_length=128, db_column='CashBoxExternalID')
+    notes = models.TextField(blank=True, default='', db_column='Notes')
+    is_posted = models.BooleanField(default=False, db_column='IsPosted')
+    journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='JournalID', related_name='local_shipment_payments',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy_UserID', related_name='created_local_shipment_payments',
+    )
+
+    class Meta:
+        db_table = 'logistics_local_shipment_payments'
+        managed = True
+        ordering = ['-payment_date', '-id']
+        indexes = [
+            models.Index(
+                fields=['local_shipment', 'payment_date'],
+                name='lg_lspay_shipment_date_idx',
+            ),
+            models.Index(
+                fields=['tenant', 'cash_box_external_id'],
+                name='lg_lspay_tenant_box_idx',
+            ),
+        ]
+
+
 class PurchaseInvoice(models.Model):
     STATUS_CHOICES = [
         ('draft', 'مسودة'),

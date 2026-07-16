@@ -35,6 +35,10 @@ import { clientLogger } from "../../services/logger";
 import { apiPostObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import {
+  isOfflineRecordForTenant,
+  tenantScopedOfflineKey,
+} from "../../utils/offlineTenantScope";
+import {
   AlertCircle,
   CheckCircle2,
   Loader2,
@@ -894,7 +898,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   ]);
 
   // ── M4: local-draft persistence (Dexie) ────────────────────────────────
-  const localDraftKey = draftId ? String(draftId) : "new";
+  const activeTenantId = resolveTenantId();
+  const localDraftKey = tenantScopedOfflineKey(
+    activeTenantId,
+    draftId ? String(draftId) : "new",
+  );
 
   const clearLocalDraft = useCallback(async () => {
     try {
@@ -913,7 +921,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       void db.invoice_drafts
         .put({
           draft_id: localDraftKey,
-          tenant_id: resolveTenantId(),
+          tenant_id: activeTenantId,
           data: JSON.stringify(buildPayload()),
           updated_at: new Date().toISOString(),
         })
@@ -934,8 +942,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     let cancelled = false;
     (async () => {
       try {
-        const row = await db.invoice_drafts.get("new");
-        if (cancelled || !row?.data) return;
+        const row = await db.invoice_drafts.get(localDraftKey);
+        if (
+          cancelled ||
+          !row?.data ||
+          !isOfflineRecordForTenant(row, activeTenantId)
+        ) return;
         const parsed = JSON.parse(row.data) as Record<string, unknown>;
         const hasContent =
           Array.isArray(parsed.lines) && (parsed.lines as unknown[]).length > 0;
@@ -1442,7 +1454,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     if (!networkOnline) {
       try {
         const cached = await db.products.get(productId);
-        if (cached) {
+        if (cached && isOfflineRecordForTenant(cached, activeTenantId)) {
           const ageMs = Date.now() - new Date(cached.updated_at).getTime();
           if (ageMs > 3600_000) {
             const verdict = await confirmStale(
@@ -2190,7 +2202,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         type="button"
         className="mr-3 underline font-semibold hover:no-underline"
         onClick={() => {
-          void db.invoice_drafts.delete("new");
+          void db.invoice_drafts.delete(localDraftKey);
           setRecoverableDraft(null);
         }}
       >

@@ -83,7 +83,7 @@ export function SqlDealsPage() {
     }, []);
 
     useEffect(() => {
-        apiGetList<PartnerOption>('partners/', { tenantId: resolveTenantId() }).then(setPartners).catch(() => setPartners([]));
+        apiGetList<PartnerOption>('partners/lookup/?limit=500', { tenantId: resolveTenantId() }).then(setPartners).catch(() => setPartners([]));
     }, []);
 
     const filtered = useMemo(() => {

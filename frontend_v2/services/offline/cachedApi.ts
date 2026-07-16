@@ -1,4 +1,7 @@
 import db from './db';
+import { apiFetch } from '../restApi';
+import { resolveTenantId } from '../../utils/tenantContext';
+import { isOfflineRecordForTenant } from '../../utils/offlineTenantScope';
 
 type CacheResult<T> = { data: T; fromCache: boolean; age_ms: number };
 
@@ -88,13 +91,14 @@ export async function enqueueMutation(
   body: Record<string, unknown>,
   tenantId?: number,
 ): Promise<number> {
+  const effectiveTenantId = tenantId ?? resolveTenantId();
   const entry = {
     status: 'pending' as const,
     created_at: new Date().toISOString(),
     endpoint,
     method,
     body: JSON.stringify(body),
-    tenant_id: tenantId,
+    tenant_id: effectiveTenantId,
     temp_id: `temp-${crypto.randomUUID()}`,
   };
   const id = await db.mutation_queue.add(entry);
@@ -122,12 +126,15 @@ let conflictListener: ConflictListener | null = null;
 export function registerConflictListener(fn: ConflictListener | null) { conflictListener = fn; }
 
 export async function processMutationQueue(): Promise<void> {
-  const pending = await db.mutation_queue.where('status').equals('pending').sortBy('created_at');
+  const activeTenantId = resolveTenantId();
+  const pending = (
+    await db.mutation_queue.where('status').equals('pending').sortBy('created_at')
+  ).filter((entry) => isOfflineRecordForTenant(entry, activeTenantId));
   for (const entry of pending) {
     const url = `${API_BASE}/${entry.endpoint.replace(/^\/+/, '')}`;
     await db.mutation_queue.update(entry.id!, { status: 'syncing' });
     try {
-      const res = await fetch(url, {
+      const res = await apiFetch(url, {
         method: entry.method,
         headers: { 'Content-Type': 'application/json', ...getHeaders(entry.tenant_id) },
         body: entry.body,
@@ -184,10 +191,23 @@ export async function processMutationQueue(): Promise<void> {
         const errBody = await res.text().catch(() => '');
         await db.mutation_queue.update(entry.id!, { status: 'failed', error: errBody.slice(0, 500) });
         await log('error', `processMutationQueue: client error ${res.status}`, { id: entry.id, error: errBody.slice(0, 200) });
+      } else {
+        // كان 5xx يترك السجل في syncing إلى الأبد: لا يُعاد تلقائياً ولا يشرح
+        // للمستخدم ما حدث. أعده pending ليُحاوَل لاحقاً، مع سبب ظاهر في اللوحة.
+        const errBody = await res.text().catch(() => '');
+        const error = (errBody || `HTTP ${res.status}`).slice(0, 500);
+        await db.mutation_queue.update(entry.id!, { status: 'pending', error });
+        await log('warn', `processMutationQueue: server error ${res.status}`, {
+          id: entry.id,
+          error: error.slice(0, 200),
+        });
       }
     } catch (e) {
       await log('error', `processMutationQueue: fetch failed`, { id: entry.id, error: String(e).slice(0, 200) });
-      await db.mutation_queue.update(entry.id!, { status: 'pending' });
+      await db.mutation_queue.update(entry.id!, {
+        status: 'pending',
+        error: String(e).slice(0, 500),
+      });
     }
   }
 }

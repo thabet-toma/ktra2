@@ -315,15 +315,6 @@ export const DealForm: React.FC<DealFormProps> = ({
     return () => { unsubSuppliers(); unsubItems(); };
   }, []);
 
-  useEffect(() => {
-    if (deal?.id) {
-      (async () => {
-        try { await loadAndSetDealData(deal.id!); await loadActivities(); }
-        catch (error) { console.error("❌ Error loading deal:", error); toast("حدث خطأ في تحميل بيانات الصفقة", "error"); }
-      })();
-    }
-  }, [deal?.id]);
-
   const toggleInstallmentPlan = (enabled: boolean) => {
     setInstallmentPlanEnabled(enabled);
     if (enabled && installments.length === 0) {

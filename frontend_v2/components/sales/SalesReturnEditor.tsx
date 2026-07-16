@@ -11,7 +11,6 @@
  */
 import React, { useEffect, useState, useCallback } from "react";
 import {
-  listSalesInvoices,
   createSalesInvoice,
   getSalesInvoice,
   type SalesInvoiceRow,
@@ -87,8 +86,8 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
     const tenantId = resolveTenantId();
     try {
       const [invs, parts, prods] = await Promise.allSettled([
-        listSalesInvoices(),
-        apiGetList<Partner>("partners/", { tenantId }),
+        apiGetList<SalesInvoiceRow>("sales/invoices/lookup/?limit=500&status=posted", { tenantId }),
+        apiGetList<Partner>("partners/lookup/?limit=500", { tenantId }),
         apiGetList<Product>("inventory/products/", { tenantId }),
       ]);
       if (invs.status === "fulfilled") {

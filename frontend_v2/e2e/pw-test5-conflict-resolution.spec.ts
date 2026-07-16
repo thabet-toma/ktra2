@@ -14,6 +14,8 @@ test.describe('P5-E: Conflict resolution flow', () => {
 
   test('mutation queue processMutationQueue runs without error', async ({ page }) => {
     await page.goto('/');
+    // حمّل module قبل قطع الشبكة؛ الاختبار يفحص التنفيذ الأوفلاين لا تحميل JS.
+    await page.evaluate(() => import('../services/offline/cachedApi').then(() => undefined));
     await setOffline(page, true);
     await page.waitForTimeout(500);
 

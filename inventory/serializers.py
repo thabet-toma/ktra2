@@ -30,15 +30,18 @@ class CategorySerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'tenant']
 
     def get_children(self, obj):
-        if obj.children.exists():
-            return CategorySerializer(obj.children.all(), many=True).data
-        return []
+        child_map = self.context.get('category_children')
+        if child_map is not None:
+            children = child_map.get(obj.id, [])
+            return CategorySerializer(children, many=True, context=self.context).data
+        children = list(obj.children.all())
+        return CategorySerializer(children, many=True, context=self.context).data
 
 class UnitOfMeasureSerializer(serializers.ModelSerializer):
     class Meta:
         model = UnitOfMeasure
-        fields = ['id', 'tenant', 'code', 'name_ar', 'name_en']
-        read_only_fields = ['id', 'tenant']
+        fields = ['id', 'code', 'name_ar', 'name_en']
+        read_only_fields = ['id']
 
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
@@ -51,6 +54,10 @@ class ProductSerializer(serializers.ModelSerializer):
     group_key = serializers.SerializerMethodField()
     display_name = serializers.SerializerMethodField()
     has_group = serializers.SerializerMethodField()
+    # W8: تجميعات من StockMovement (منقّطة في ProductViewSet.get_queryset — لا N+1).
+    # المشتريات = الوارد التراكمي (IN). المتوسط الشهري = صافي (OUT−RETURN_IN) 90ي ÷ 3.
+    purchased_qty = serializers.SerializerMethodField()
+    avg_monthly_sales = serializers.SerializerMethodField()
 
     # task14 M2 (DEF-A2): رقم الصنف اختياري — يولَّد خادمياً عند الغياب
     sku = serializers.CharField(max_length=50, required=False, allow_blank=True)
@@ -65,6 +72,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'is_serialized', 'is_service',
             'is_for_sale_online', 'online_price', 'online_description',
             'quantity_on_hand', 'avg_cost',
+            'purchased_qty', 'avg_monthly_sales',
             'stock_status', 'group_key', 'display_name', 'has_group',
             'created_at',
             'attachments',
@@ -83,6 +91,20 @@ class ProductSerializer(serializers.ModelSerializer):
         from .services import product_has_explicit_group
         return product_has_explicit_group(obj)
 
+    def get_purchased_qty(self, obj):
+        v = getattr(obj, 'purchased_qty', None)
+        return str(v) if v is not None else None
+
+    def get_avg_monthly_sales(self, obj):
+        # المتوسط الشهري = صافي المبيعات (OUT − RETURN_IN) خلال آخر 90 يوماً ÷ 3.
+        sold = getattr(obj, 'sold_qty_90d', None)
+        if sold is None:
+            return None
+        from decimal import Decimal as _D
+        returned = getattr(obj, 'returned_qty_90d', None) or 0
+        net = _D(str(sold)) - _D(str(returned))
+        return str((net / _D('3')).quantize(_D('0.01')))
+
     def validate(self, attrs):
         # task14 M2 (DEF-A2/A3): الاسم هو الحقل الإلزامي الوحيد — والخطأ يسمّي حقله الحقيقي
         name_ar = attrs.get('name_ar', getattr(self.instance, 'name_ar', None))
@@ -94,9 +116,16 @@ class ProductSerializer(serializers.ModelSerializer):
         return attrs
 
     def get_attachments(self, obj):
+        attachment_map = self.context.get('product_attachments')
+        if attachment_map is not None:
+            return attachment_map.get(obj.id, [])
         try:
             from core.models import SystemAttachment
-            attachments = SystemAttachment.objects.filter(related_table='products', related_id=obj.id)
+            attachments = SystemAttachment.objects.filter(
+                tenant_id=obj.tenant_id,
+                related_table='products',
+                related_id=obj.id,
+            )
             return [{'id': a.id, 'file_path': a.file_path, 'file_type': a.file_type} for a in attachments]
         except Exception:
             return []
@@ -109,6 +138,18 @@ class ProductSerializer(serializers.ModelSerializer):
         if min_lvl > 0 and qty <= min_lvl:
             return 'low_stock'
         return 'in_stock'
+
+
+class ProductLookupSerializer(ProductSerializer):
+    """Small, explicit contract for invoice/deal product pickers."""
+
+    class Meta(ProductSerializer.Meta):
+        fields = [
+            'id', 'sku', 'name_ar', 'name_en', 'display_name',
+            'category', 'category_name', 'hs_code', 'min_stock_level',
+            'quantity_on_hand', 'avg_cost', 'is_for_sale_online',
+            'online_price', 'online_description', 'attachments',
+        ]
 
 
 class StockMovementSerializer(serializers.ModelSerializer):
@@ -248,4 +289,3 @@ class StocktakeSerializer(serializers.ModelSerializer):
             for ln in lines:
                 StocktakeLine.objects.create(stocktake=instance, **ln)
         return instance
-

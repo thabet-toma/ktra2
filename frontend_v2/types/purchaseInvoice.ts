@@ -44,6 +44,8 @@ export interface PurchaseInvoiceListDto {
   deal?: number | null;
   deal_ref?: string | null;
   shipment?: number | null;
+  shipment_number?: string | null;
+  shipment_name?: string | null;
   clearance?: number | null;
   currency?: number | null;
   currency_code?: string | null;
@@ -53,6 +55,8 @@ export interface PurchaseInvoiceListDto {
   tax_rate: number;
   tax_amount: number;
   grand_total: number;
+  fees_total?: string;
+  payable_total?: string;
   status: string;
   status_display: string;
   receipt_status?: ReceiptStatus;
@@ -75,6 +79,8 @@ export interface PurchaseInvoiceDto {
   deal?: number | null;
   deal_ref?: string | null;
   shipment?: number | null;
+  shipment_number?: string | null;
+  shipment_name?: string | null;
   clearance?: number | null;
   currency?: number | null;
   currency_code?: string | null;
@@ -87,6 +93,9 @@ export interface PurchaseInvoiceDto {
   shipping_cost?: number;
   shipping_included?: boolean;
   grand_total: number;
+  invoice_type?: "local" | "international";
+  fees_total?: string;
+  payable_total?: string;
   local_payments_json?: Record<string, unknown> | null;
   conversion_metadata_json?: Record<string, unknown> | null;
   status: string;
@@ -103,6 +112,10 @@ export interface PurchaseInvoiceDto {
   supplier_invoice_number?: string | null;
   factory_name?: string | null;
   is_posted?: boolean;
+  // W7a: هوية مستند المرجع.
+  is_return?: boolean;
+  original_invoice?: number | null;
+  original_invoice_number?: string | null;
   journal?: number | null;
   journal_id_display?: number | null;
   firestore_id?: string | null;

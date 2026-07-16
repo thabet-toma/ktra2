@@ -18,6 +18,7 @@ from logistics.models import (
     LogisticsPayment,
     LogisticsShipment,
     LogisticsShipmentDeal,
+    LocalShipment,
     PurchaseInvoice,
 )
 from partners.models import Partner
@@ -70,6 +71,20 @@ class ClearanceImportTest(APITestCase):
              "deal_remaining_rate": "3.7", "shipment_remaining_rate": "3.65"},
             format="json", **self._auth())
 
+    def _second_deal(self):
+        deal = LogisticsDeal.objects.create(
+            tenant=self.tenant, ref_number="D-0043", partner=self.partner,
+            order_date="2026-06-02", total_amount=Decimal("1000"),
+            currency=self.usd, description="الصفقة الثانية في نفس الشحنة",
+            total_cbm=Decimal("5"),
+        )
+        LogisticsShipmentDeal.objects.create(shipment=self.shipment, deal=deal)
+        LogisticsPayment.objects.create(
+            deal=deal, amount=Decimal("1000"), usd_to_ils=Decimal("3.7"),
+            status="Confirmed",
+        )
+        return deal
+
     def test_import_creates_international_invoice(self):
         resp = self._import()
         self.assertEqual(resp.status_code, 201, resp.content)
@@ -108,6 +123,116 @@ class ClearanceImportTest(APITestCase):
         self.assertEqual(recalc.json().get("updated"), 1)
         inv = PurchaseInvoice.objects.get(tenant=self.tenant, deal=self.deal)
         self.assertEqual(inv.import_deal_remaining_rate, Decimal("3.8"))
+
+    def test_import_does_not_require_clearance_or_local_transport_payment(self):
+        LocalShipment.objects.create(
+            tenant=self.tenant, shipment=self.shipment, clearance=self.clearance,
+            carrier=self.partner, amount=Decimal("450"), currency=self.ils,
+            exchange_rate=Decimal("1"), status="delivered",
+        )
+        resp = self._import()
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertTrue(PurchaseInvoice.objects.filter(
+            tenant=self.tenant, deal=self.deal, clearance=self.clearance,
+        ).exists())
+
+    def test_local_transport_cost_is_allocated_into_import_invoice_before_payment(self):
+        LocalShipment.objects.create(
+            tenant=self.tenant, shipment=self.shipment, clearance=self.clearance,
+            carrier=self.partner, amount=Decimal("2000"), currency=self.ils,
+            exchange_rate=Decimal("1"), status="delivered",
+            capitalize_to_inventory=True,
+        )
+
+        preview = self.client.post(
+            "/api/logistics/purchase-invoices/preview-clearance-import/",
+            {"clearance_id": self.clearance.id, "deal_ids": [self.deal.id],
+             "deal_remaining_rate": "3.7", "shipment_remaining_rate": "3.65"},
+            format="json", **self._auth(),
+        )
+        self.assertEqual(preview.status_code, 200, preview.content)
+        self.assertEqual(
+            Decimal(str(preview.json()["local_transport_total_ils"])),
+            Decimal("2000.0"),
+        )
+        self.assertEqual(
+            Decimal(str(preview.json()["deals"][0]["allocated_local_transport_ils"])),
+            Decimal("2000.0"),
+        )
+
+        imported = self._import()
+        self.assertEqual(imported.status_code, 201, imported.content)
+        invoice = PurchaseInvoice.objects.get(tenant=self.tenant, deal=self.deal)
+        detail = self.client.get(
+            f"/api/logistics/purchase-invoices/{invoice.id}/", **self._auth(),
+        )
+        metadata = detail.json()["conversion_metadata_json"]
+        self.assertEqual(
+            Decimal(str(metadata["deal_local_transport_ils"])), Decimal("2000.0"),
+        )
+        self.assertEqual(invoice.payments.count(), 0)
+
+    def test_partial_import_keeps_remaining_deal_available_and_rejects_duplicate(self):
+        second = self._second_deal()
+
+        first = self._import()
+        self.assertEqual(first.status_code, 201, first.content)
+        options = self.client.get(
+            f"/api/logistics/purchase-invoices/clearance-import-options/"
+            f"?clearance_id={self.clearance.id}",
+            **self._auth(),
+        )
+        self.assertEqual(options.status_code, 200, options.content)
+        by_deal = {row["deal_id"]: row for row in options.json()["deals"]}
+        self.assertTrue(by_deal[self.deal.id]["is_converted"])
+        self.assertFalse(by_deal[second.id]["is_converted"])
+        self.assertIsNotNone(by_deal[self.deal.id]["invoice_id"])
+
+        second_import = self.client.post(
+            "/api/logistics/purchase-invoices/import-from-clearance/",
+            {"clearance_id": self.clearance.id, "deal_ids": [second.id],
+             "deal_remaining_rate": "3.7", "shipment_remaining_rate": "3.65"},
+            format="json", **self._auth(),
+        )
+        self.assertEqual(second_import.status_code, 201, second_import.content)
+        self.assertEqual(PurchaseInvoice.objects.filter(
+            tenant=self.tenant, shipment=self.shipment, is_return=False,
+        ).count(), 2)
+
+        duplicate = self._import()
+        self.assertEqual(duplicate.status_code, 400, duplicate.content)
+        self.assertIn("محوّلة", duplicate.json()["error"])
+        self.assertEqual(PurchaseInvoice.objects.filter(
+            tenant=self.tenant, shipment=self.shipment, is_return=False,
+        ).count(), 2)
+
+    def test_import_journey_lists_filter_by_shipment(self):
+        other_shipment = LogisticsShipment.objects.create(
+            tenant=self.tenant, shipment_number="SH-OTHER",
+        )
+        other_clearance = LogisticsClearance.objects.create(
+            tenant=self.tenant, shipment=other_shipment, declaration_number="CL-OTHER",
+        )
+        own_local = LocalShipment.objects.create(
+            tenant=self.tenant, shipment=self.shipment, clearance=self.clearance,
+            carrier=self.partner, amount=Decimal("10"), currency=self.ils,
+        )
+        LocalShipment.objects.create(
+            tenant=self.tenant, shipment=other_shipment, clearance=other_clearance,
+            carrier=self.partner, amount=Decimal("20"), currency=self.ils,
+        )
+
+        clearances = self.client.get(
+            f"/api/logistics/clearances/?shipment={self.shipment.id}", **self._auth(),
+        )
+        local_shipments = self.client.get(
+            f"/api/logistics/local-shipments/?shipment={self.shipment.id}", **self._auth(),
+        )
+
+        self.assertEqual(clearances.status_code, 200, clearances.content)
+        self.assertEqual([row["id"] for row in clearances.json()], [self.clearance.id])
+        self.assertEqual(local_shipments.status_code, 200, local_shipments.content)
+        self.assertEqual([row["id"] for row in local_shipments.json()], [own_local.id])
 
 
 class DealTitlePriorityTest(SimpleTestCase):

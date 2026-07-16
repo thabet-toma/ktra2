@@ -26,6 +26,14 @@ CACHES = {
     "default": {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}
 }
 
+# Test-only placeholders let media tests reach the mocked Cloudinary uploader.
+# They are never used for network access and keep production credentials env-only.
+CLOUDINARY_STORAGE = {
+    "CLOUD_NAME": "test-cloud",
+    "API_KEY": "test-key",
+    "API_SECRET": "test-secret",
+}
+
 
 class _DisableMigrations:
     """تُرجِع None لكل تطبيق ⇒ Django يعدّه بلا هجرات فيبني جداوله من النماذج (syncdb)."""

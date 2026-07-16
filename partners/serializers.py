@@ -33,7 +33,9 @@ class PartnerSerializer(serializers.ModelSerializer):
             'street_address', 'city', 'state_or_province', 'postal_code',
             'credit_limit', 'image_path', 'created_at',
             'opening_balance', 'opening_balance_date', 'currency',
-            'linked_account', 'group', 'attachments'
+            'linked_account', 'group', 'default_cost_center',
+            'end_of_dealing_date', 'assigned_price_tier', 'row_color',
+            'attachments'
         ]
         read_only_fields = ['id', 'created_at']
 
@@ -44,4 +46,20 @@ class PartnerSerializer(serializers.ModelSerializer):
             return [{'id': a.id, 'file_path': a.file_path, 'file_type': a.file_type} for a in attachments]
         except Exception:
             return []
+
+
+class PartnerListSerializer(serializers.ModelSerializer):
+    """List/lookup contract without the per-row attachment query."""
+
+    class Meta:
+        model = Partner
+        fields = [
+            'id', 'name', 'legal_name', 'partner_type', 'tax_number', 'phone',
+            'email', 'country', 'street_address', 'city', 'state_or_province',
+            'postal_code', 'credit_limit', 'image_path', 'created_at',
+            'opening_balance', 'opening_balance_date', 'currency',
+            'linked_account', 'group', 'default_cost_center',
+            'end_of_dealing_date', 'assigned_price_tier', 'row_color',
+        ]
+        read_only_fields = fields
 

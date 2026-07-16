@@ -15,3 +15,21 @@ class NoStoreAPIMiddlewareTest(TestCase):
         resp = self.client.head("/api/health/")
         self.assertEqual(resp.status_code, 200)
         self.assertIn("no-store", resp.headers.get("Cache-Control", ""))
+
+
+class CorsPreflightTest(TestCase):
+    def test_active_branch_header_is_allowed(self):
+        resp = self.client.options(
+            "/api/health/",
+            HTTP_ORIGIN="https://smart.ktragroup.com",
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="GET",
+            HTTP_ACCESS_CONTROL_REQUEST_HEADERS="authorization,x-branch-id,x-tenant-id",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        allowed = {
+            header.strip().lower()
+            for header in resp.headers.get("Access-Control-Allow-Headers", "").split(",")
+        }
+        self.assertIn("x-tenant-id", allowed)
+        self.assertIn("x-branch-id", allowed)

@@ -3,10 +3,12 @@ import { eventBus } from "../utils/eventBus";
 import {
   apiDelete,
   apiGetList,
+  apiGetPagedList,
   apiGetObject,
   apiPatchObject,
   apiPostObject,
 } from "./restApi";
+import type { PagedList } from "./restApi";
 
 const tid = () => resolveTenantId();
 const BASE = "sales";
@@ -115,6 +117,15 @@ export async function listSalesInvoices(
   query?: Record<string, string | number | boolean | undefined>
 ): Promise<SalesInvoiceRow[]> {
   return apiGetList(`${BASE}/invoices/`, { tenantId: tid(), query });
+}
+
+export async function listSalesInvoicesPage(
+  query?: Record<string, string | number | boolean | undefined>
+): Promise<PagedList<SalesInvoiceRow>> {
+  return apiGetPagedList(`${BASE}/invoices/`, {
+    tenantId: tid(),
+    query: { ...query, page: query?.page ?? 1 },
+  });
 }
 
 export async function getSalesInvoice(id: number): Promise<SalesInvoiceDetail> {
@@ -531,6 +542,15 @@ export type SalesQuotationDetail = SalesQuotationRow & {
 
 export async function listQuotations(): Promise<SalesQuotationRow[]> {
   return apiGetList(`${BASE}/quotations/`, { tenantId: tid() });
+}
+
+export async function listQuotationsPage(
+  query?: Record<string, string | number | boolean | undefined>
+): Promise<PagedList<SalesQuotationRow>> {
+  return apiGetPagedList(`${BASE}/quotations/`, {
+    tenantId: tid(),
+    query: { ...query, page: query?.page ?? 1 },
+  });
 }
 
 export async function getQuotation(id: number): Promise<SalesQuotationDetail> {

@@ -1,5 +1,7 @@
 import { enqueueMutation } from './cachedApi';
 import db from './db';
+import { resolveTenantId } from '../../utils/tenantContext';
+import { isOfflineRecordForTenant } from '../../utils/offlineTenantScope';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
 
@@ -97,10 +99,11 @@ export async function offlineDelete(
 export async function getDrafts<T extends { id?: string; is_pending?: boolean }>(
   store: string,
 ): Promise<T[]> {
+  const tenantId = resolveTenantId();
   const items = await db.mutation_queue
     .where('endpoint')
     .startsWith(store)
-    .filter((m) => m.status !== 'synced')
+    .filter((m) => isOfflineRecordForTenant(m, tenantId) && m.status !== 'synced')
     .toArray();
   return items.map((m) => {
     const body = JSON.parse(m.body);
