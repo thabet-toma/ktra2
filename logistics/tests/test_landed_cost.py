@@ -210,6 +210,51 @@ class LandedCostInvariantTest(SimpleTestCase):
         self.assertLessEqual(drift, Decimal('0.01'),
             f"Shipping-included invariant broken: sum={total_landed} != expected={expected}. Drift={drift}")
 
+    def test_internal_shipping_not_double_counted(self):
+        """«شحن داخل الصين» جزء من إجمالي الصفقة أصلاً (بضاعة 5380 + شحن 120 = 5500)،
+        فيجب خصمه من حوض البضاعة لا إضافته فوق الإجمالي المحوّل."""
+        from types import SimpleNamespace
+        items = [
+            SimpleNamespace(
+                pk=1, product_id=1,
+                product=SimpleNamespace(name_ar='انفيرتر', name_en='Inverter', sku='5773'),
+                quantity=Decimal('20'), unit_price=Decimal('269.00'), notes=None,
+            ),
+        ]
+        deal = self._make_deal(5500, items)  # 20*269 = 5380 بضاعة + 120 شحن داخل الصين
+        deal.shipping_cost_estimate = Decimal('120')
+        deal_val_ils = Decimal('17820.00')  # 5500 * 3.24
+        ship_val_ils = Decimal('708.58')
+        clearance_pool = Decimal('2431.70')
+        share_clearance = Decimal('1.0')
+        share_freight = Decimal('1.0')
+
+        lines, meta = compute_deal_invoice_lines(
+            deal=deal,
+            deal_val_ils=deal_val_ils,
+            ship_val_ils=ship_val_ils,
+            clearance_pool=clearance_pool,
+            share_clearance=share_clearance,
+            share_freight=share_freight,
+            internal_shipping_usd=Decimal('120'),
+            shipping_included=False,
+            clearance_local_lines_pool_ils=Decimal('0'),
+        )
+
+        # 17820 * (120/5500) = 388.80 — يظهر مرة واحدة ضمن اللوجستيات
+        self.assertEqual(meta['internal_shipping_ils'], Decimal('388.80'))
+        # البضاعة وحدها = 5380 * 3.24
+        self.assertEqual(meta['subtotal_merch_ils'], Decimal('17431.20'))
+
+        total_landed = sum((ln.landed_line_total_ils for ln in lines), Decimal('0'))
+        expected = (
+            deal_val_ils
+            + meta['deal_ship_allocated_ils']
+            + meta['deal_clearance_allocated_ils']
+        ).quantize(Q2)
+        self.assertEqual(total_landed, expected,
+            f"Internal shipping double-counted: sum={total_landed} != expected={expected}")
+
 
 class T1_01_DoubleLocalTransportCapitalizationTest(SimpleTestCase):
     """T1-01: LocalShipment.capitalize_to_inventory + cost_lines local-shipping

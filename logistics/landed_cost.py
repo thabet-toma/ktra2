@@ -515,15 +515,20 @@ def compute_deal_invoice_lines(
         line_usd = (it.quantity * it.unit_price).quantize(Q4, rounding=ROUND_HALF_UP)
         weights.append(line_usd if line_usd > 0 else Decimal('0'))
 
-    # Use deal_val_ils directly — do NOT rescale by weight/total ratio
-    # (deal.total_amount may include tax/shipping/discount not in item prices)
-    merch_pool = deal_val_ils
-
     deal_ship_ils = (ship_val_ils * share_freight).quantize(Q2, rounding=ROUND_HALF_UP)
     deal_clear_ils = (clearance_pool * share_clearance).quantize(Q2, rounding=ROUND_HALF_UP)
     local_share = share_clearance if local_transport_share is None else local_transport_share
     deal_local_clr_ils = (clearance_local_lines_pool_ils * local_share).quantize(Q2, rounding=ROUND_HALF_UP)
     internal_in_landed = Decimal('0') if shipping_included else internal_ils
+
+    # Use deal_val_ils directly — do NOT rescale by weight/total ratio
+    # (deal.total_amount may include tax/shipping/discount not in item prices).
+    # الشحن داخل الصين مضمّن أصلاً في deal.total_amount عند عدم تضمينه بالأسعار
+    # (إجمالي الصفقة = بضاعة − خصم + شحن داخل الصين)، فيُخصم هنا ليظهر مرة واحدة
+    # ضمن اللوجستيات بدل احتسابه مرتين.
+    merch_pool = (deal_val_ils - internal_in_landed).quantize(Q2, rounding=ROUND_HALF_UP)
+    if merch_pool < 0:
+        merch_pool = Decimal('0')
     logistics_pool = (
         internal_in_landed + deal_ship_ils + deal_clear_ils + deal_local_clr_ils
     ).quantize(Q2, rounding=ROUND_HALF_UP)

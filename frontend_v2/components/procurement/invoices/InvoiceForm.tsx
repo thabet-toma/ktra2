@@ -1982,12 +1982,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           <>
             <div className="aseel-total-row">
               <span>{costLabels.merchandiseBase}</span>
-              <span className="aseel-total-value">{fmt(formData.conversionMetadata.deal_total_ils || 0)}</span>
+              <span className="aseel-total-value">{fmt(formData.conversionMetadata.line_meta.subtotal_merch_ils ?? formData.conversionMetadata.deal_total_ils ?? 0)}</span>
             </div>
-            <div className="aseel-total-row">
-              <span>الشحن داخل المنشأ</span>
-              <span className="aseel-total-value">{fmt(formData.conversionMetadata.line_meta.internal_shipping_ils || 0)}</span>
-            </div>
+            {/* الشحن داخل المنشأ مخصوم من البضاعة أعلاه؛ عند تضمينه بالأسعار لا يُعرض كسطر مستقل */}
+            {!formData.shippingIncluded && (
+              <div className="aseel-total-row">
+                <span>الشحن داخل المنشأ</span>
+                <span className="aseel-total-value">{fmt(formData.conversionMetadata.line_meta.internal_shipping_ils || 0)}</span>
+              </div>
+            )}
             <div className="aseel-total-row">
               <span>تكلفة الشحن الدولي</span>
               <span className="aseel-total-value">{fmt(formData.conversionMetadata.line_meta.deal_ship_allocated_ils || 0)}</span>
