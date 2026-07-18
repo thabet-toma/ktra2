@@ -399,18 +399,12 @@ LOGGING = {
         },
     },
     "handlers": {
-        # المعالج الفعلي (I/O) — لا يُربط بلوغر مباشرة بل يُغذّى من خلف الطابور.
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "verbose",
-        },
-        # G11 (بروتوكول 4): تسجيل غير حاجب. يضع QueueHandler السجل في طابور فوراً،
-        # ويعالجه QueueListener على خيط خلفي (ينشئه dictConfig ويشغّله تلقائياً في
-        # بايثون 3.12+)، فلا يُحجب خيط الطلب على I/O كتابة السجل.
+        # G11 (بروتوكول 4): تسجيل غير حاجب ومتوافق مع Python 3.10+.
+        # لا نستخدم مفتاح dictConfig المسمّى "handlers" داخل QueueHandler لأنه
+        # غير مدعوم قبل Python 3.12؛ الصنف المخصص يدير QueueListener بنفسه.
         "queue": {
-            "class": "logging.handlers.QueueHandler",
-            "handlers": ["console"],
-            "respect_handler_level": True,
+            "class": "core.logging_handlers.NonBlockingConsoleHandler",
+            "formatter": "verbose",
         },
     },
     "root": {
