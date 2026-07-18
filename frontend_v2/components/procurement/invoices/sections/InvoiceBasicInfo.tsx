@@ -107,7 +107,7 @@ export const InvoiceBasicInfo: React.FC<InvoiceBasicInfoProps> = ({
         <div className="md:col-span-5 space-y-1">
           <label className="text-xs font-semibold aseel-text-soft dark:aseel-text-soft flex items-center gap-1">
             <Building className="w-3 h-3 aseel-text-soft" />
-            المورد / المصنع <span className="aseel-text-soft">*</span>
+            المورد <span className="aseel-text-soft">*</span>
           </label>
           <div className="h-10">
             <SupplierSearch

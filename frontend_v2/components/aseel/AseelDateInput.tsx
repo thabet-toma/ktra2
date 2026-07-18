@@ -11,7 +11,9 @@
  *
  * Reference: docs/aseel_reference/invoices.txt 38–43, الجديد:111.
  */
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
+import { Calendar } from 'lucide-react';
+import { formatDateLocalized } from '../../utils/formatDate';
 
 export interface AseelDateInputProps
   extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type' | 'onChange'> {
@@ -206,7 +208,6 @@ export const AseelDateInput: React.FC<AseelDateInputProps> = ({
     const d = parseIso(value);
     return d ? d.getFullYear() : new Date().getFullYear();
   });
-  const inputRef = useRef<HTMLInputElement>(null);
 
   /** Sync displayed year with value when modal opens. */
   const openCalendar = useCallback(() => {
@@ -252,20 +253,44 @@ export const AseelDateInput: React.FC<AseelDateInputProps> = ({
     [className],
   );
 
+  const disabled = Boolean((rest as { disabled?: boolean }).disabled);
+  const openIfAllowed = () => { if (!disabled && !disableCalendar) openCalendar(); };
+
+  // G10: العرض محلي (dd/MM/yyyy) بحقل قراءة — يفتح التقويم السنوي العربي بالنقر/النقر
+  // المزدوج/زر التقويم بدل <input type=date> الذي كان يعرض mm/dd/yyyy حسب لغة المتصفّح.
   return (
-    <>
+    <span style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', width: '100%' }}>
       <input
         {...rest}
-        ref={inputRef}
-        type="date"
+        readOnly
+        type="text"
         data-aseel-field="date"
         className={inputClass}
-        value={value || ''}
-        onChange={(e) => onChange(e.target.value)}
+        style={{ width: '100%', cursor: disabled ? undefined : 'pointer' }}
+        value={formatDateLocalized(value)}
+        placeholder="يوم/شهر/سنة"
         onKeyDown={handleKeyDown}
+        onClick={openIfAllowed}
         onDoubleClick={handleDoubleClick}
-        title="*: يوم لاحق · -: يوم سابق · +: شهر · نقرتان: تقويم سنوي"
+        title="انقر لاختيار التاريخ · *: يوم لاحق · -: يوم سابق · +: شهر"
       />
+      {!disableCalendar && (
+        <button
+          type="button"
+          onClick={openIfAllowed}
+          disabled={disabled}
+          aria-label="فتح التقويم"
+          title="اختر التاريخ"
+          tabIndex={-1}
+          style={{
+            position: 'absolute', insetInlineStart: 6, background: 'none', border: 'none',
+            padding: 0, cursor: disabled ? 'default' : 'pointer', color: 'var(--aseel-ink-soft, #888)',
+            display: 'inline-flex',
+          }}
+        >
+          <Calendar className="w-3.5 h-3.5" />
+        </button>
+      )}
       {calOpen && (
         <YearCalendar
           year={calYear}
@@ -275,6 +300,6 @@ export const AseelDateInput: React.FC<AseelDateInputProps> = ({
           onClose={() => setCalOpen(false)}
         />
       )}
-    </>
+    </span>
   );
 };

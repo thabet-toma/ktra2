@@ -147,10 +147,27 @@ export const CreateShipmentFromDealsModal: React.FC<Props> = ({ isOpen, onClose,
           {loading ? (
             <p style={{ color: "var(--aseel-ink-soft)" }}>جارٍ تحميل الصفقات الجاهزة…</p>
           ) : rows.length === 0 ? (
-            <p style={{ color: "var(--aseel-ink-soft)" }}>
-              لا توجد صفقات بمرحلة «تم الشحن للوكيل» غير مربوطة. قدّم الصفقة إلى «تم الشحن
-              للوكيل» أولاً، أو أنشئ شحنة فارغة.
-            </p>
+            // G4: بدل رسالة سلبية تُشير لـ«شحنة فارغة» دون زر (طريق مسدود) —
+            // حالة فارغة موجِّهة بإجراء واضح للأمام.
+            <div style={{ textAlign: "center", padding: "18px 8px", color: "var(--aseel-ink-soft)" }}>
+              <PackageCheck style={{ width: 28, height: 28, opacity: 0.5, marginInline: "auto" }} />
+              <p style={{ margin: "10px 0 4px", fontWeight: 600, color: "var(--aseel-ink)" }}>
+                لا صفقات جاهزة للشحن بعد
+              </p>
+              <p style={{ margin: "0 auto", maxWidth: 460, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+                جهّز صفقة أولاً: افتحها ثم اضغط «ابدأ الشحن الدولي» في تبويب «المراحل والشحن»
+                (تصل المرحلة إلى «تم الشحن للوكيل»). أو ابدأ شحنة فارغة الآن واضمم الصفقات لاحقاً.
+              </p>
+              {onCreateEmpty && (
+                <button
+                  className="aseel-toolbtn"
+                  onClick={onCreateEmpty}
+                  style={{ marginTop: 12, background: "var(--aseel-accent, #1857a4)", color: "#fff" }}
+                >
+                  <Ship style={{ width: 14, height: 14 }} /> بدء شحنة فارغة
+                </button>
+              )}
+            </div>
           ) : (
             <table className="aseel-input" style={{ width: "100%", fontSize: "var(--aseel-fs-sm, 12px)", borderCollapse: "collapse" }}>
               <thead>

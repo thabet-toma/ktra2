@@ -68,6 +68,9 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentU
             <button
                 onClick={() => setIsOpen(!isOpen)}
                 className="relative p-2 text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-all"
+                title="الإشعارات"
+                aria-label={`الإشعارات${unreadCount > 0 ? ` (${unreadCount} غير مقروءة)` : ""}`}
+                aria-expanded={isOpen}
             >
                 <Bell className="w-6 h-6" />
                 {unreadCount > 0 && (

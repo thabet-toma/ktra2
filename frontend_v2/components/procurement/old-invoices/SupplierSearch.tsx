@@ -156,7 +156,7 @@ export const SupplierSearch: React.FC<SupplierSearchProps> = ({
             <input
               ref={inputRef}
               type="text"
-              placeholder={type === 'factory' ? "ابحث عن مصنع..." : "ابحث عن مورد..."}
+              placeholder="ابحث عن مورد..."
               value={supplierSearch}
               onChange={(e) => {
                 onSearchChange(e.target.value);
@@ -231,13 +231,13 @@ export const SupplierSearch: React.FC<SupplierSearchProps> = ({
             </ul>
           ) : (
             <div className="p-3 text-center aseel-text-soft dark:aseel-text-soft text-sm">
-              <p>لا توجد نتائج {type === 'factory' ? ' (مصانع)' : ''}</p>
+              <p>لا توجد نتائج</p>
               {onOpenAddModal && (
                 <button
                   onClick={onOpenAddModal}
                   className="mt-2 aseel-text-accent hover:underline text-xs flex items-center justify-center gap-1 w-full"
                 >
-                  <UserPlus className="w-3 h-3" /> إضافة {type === 'factory' ? 'مصنع' : 'مورد'} جديد
+                  <UserPlus className="w-3 h-3" /> إضافة مورد جديد
                 </button>
               )}
             </div>

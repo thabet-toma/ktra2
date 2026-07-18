@@ -64,6 +64,20 @@ ALLOWED_HOSTS = [
     '127.0.0.1'
 ]
 
+# G11: رؤوس أمان قياسية (SecurityMiddleware + XFrameOptionsMiddleware مُركّبان أصلاً).
+# الآمنة دائماً (رؤوس فقط، بلا تغيير سلوك) تُفعَّل دوماً. أمان HTTPS (HSTS + كوكيز آمنة)
+# يُفعَّل في الإنتاج فقط حيث ينتهي TLS، كي لا يكسر التطوير المحلي على http.
+SECURE_CONTENT_TYPE_NOSNIFF = True            # X-Content-Type-Options: nosniff
+SECURE_REFERRER_POLICY = "same-origin"        # Referrer-Policy
+X_FRAME_OPTIONS = "DENY"                       # X-Frame-Options — منع التأطير/clickjacking
+SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin"
+
+if not DEBUG:
+    SECURE_HSTS_SECONDS = 31536000            # سنة
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
 
 # Application definition
 
@@ -97,6 +111,7 @@ MIDDLEWARE = [
     'corsheaders.middleware.CorsMiddleware',
     'core.logger_middleware.RequestTracingMiddleware',
     'core.cache_control_middleware.NoStoreAPIMiddleware',
+    'core.security_headers_middleware.ContentSecurityPolicyMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -384,21 +399,30 @@ LOGGING = {
         },
     },
     "handlers": {
+        # المعالج الفعلي (I/O) — لا يُربط بلوغر مباشرة بل يُغذّى من خلف الطابور.
         "console": {
             "class": "logging.StreamHandler",
             "formatter": "verbose",
         },
+        # G11 (بروتوكول 4): تسجيل غير حاجب. يضع QueueHandler السجل في طابور فوراً،
+        # ويعالجه QueueListener على خيط خلفي (ينشئه dictConfig ويشغّله تلقائياً في
+        # بايثون 3.12+)، فلا يُحجب خيط الطلب على I/O كتابة السجل.
+        "queue": {
+            "class": "logging.handlers.QueueHandler",
+            "handlers": ["console"],
+            "respect_handler_level": True,
+        },
     },
     "root": {
-        "handlers": ["console"],
+        "handlers": ["queue"],
         "level": "WARNING",
     },
     "loggers": {
         # App loggers emit at INFO (or LOG_LEVEL) regardless of root level.
-        "core.request_tracing": {"handlers": ["console"], "level": LOG_LEVEL, "propagate": False},
-        "core.exception_handler": {"handlers": ["console"], "level": "INFO", "propagate": False},
-        "core.health": {"handlers": ["console"], "level": "INFO", "propagate": False},
-        "client_logs": {"handlers": ["console"], "level": "INFO", "propagate": False},
-        "django.request": {"handlers": ["console"], "level": "ERROR", "propagate": False},
+        "core.request_tracing": {"handlers": ["queue"], "level": LOG_LEVEL, "propagate": False},
+        "core.exception_handler": {"handlers": ["queue"], "level": "INFO", "propagate": False},
+        "core.health": {"handlers": ["queue"], "level": "INFO", "propagate": False},
+        "client_logs": {"handlers": ["queue"], "level": "INFO", "propagate": False},
+        "django.request": {"handlers": ["queue"], "level": "ERROR", "propagate": False},
     },
 }

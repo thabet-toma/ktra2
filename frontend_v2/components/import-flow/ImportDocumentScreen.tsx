@@ -9,7 +9,7 @@ import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRo
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
 import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, payLocalShipmentFromCashBox, importLocalShipmentToInvoice } from "@/services/localShippingApi";
-import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab } from "@/components/aseel";
+import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab, AseelDateInput } from "@/components/aseel";
 import { effectiveDealTitleForDisplay } from "@/utils/dealTitleDisplay";
 import { getShippingWorkflowLabel } from "@/utils/shippingWorkflowLabels";
 import { CompactTimeline } from "./CompactTimeline";
@@ -22,10 +22,17 @@ import { openInNewTab } from "@/utils/openInNewTab";
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => formatMoney(v, "—");
 
-const fld = (label: string, node: React.ReactNode) => (
-  <label className="aseel-field">
+// G6: تحقّق حقلي — عند تمرير `error` يُحاط الحقل بإطار أحمر وتظهر الرسالة أسفله.
+const fld = (label: string, node: React.ReactNode, error?: string | null) => (
+  <label
+    className="aseel-field"
+    style={error ? { outline: "1.5px solid var(--aseel-danger, #c0392b)", outlineOffset: 2, borderRadius: 4 } : undefined}
+  >
     <span className="aseel-field-label">{label}</span>
     {node}
+    {error ? (
+      <span role="alert" style={{ color: "var(--aseel-danger, #c0392b)", fontSize: "11px", marginTop: 2 }}>{error}</span>
+    ) : null}
   </label>
 );
 
@@ -160,6 +167,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // G6: خريطة «حقل الشحنة → رسالة» لإبراز الحقل الناقص عند فشل الحفظ خادمياً.
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [activeTab, setActiveTab] = useState(initialTab);
   // Deals tab state
   const [linkPickerOpen, setLinkPickerOpen] = useState(false);
@@ -265,8 +274,17 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   // ── Shipment form helpers ──
   const setSF = useCallback(
-    (patch: Partial<ShipmentApiRow>) =>
-      setShipmentForm((prev) => (prev ? { ...prev, ...patch } : prev)),
+    (patch: Partial<ShipmentApiRow>) => {
+      setShipmentForm((prev) => (prev ? { ...prev, ...patch } : prev));
+      // G6: امسح إبراز الخطأ عن أي حقل عدّله المستخدم.
+      setFieldErrors((prev) => {
+        const keys = Object.keys(patch);
+        if (!keys.some((k) => k in prev)) return prev;
+        const next = { ...prev };
+        keys.forEach((k) => delete next[k]);
+        return next;
+      });
+    },
     [],
   );
 
@@ -291,7 +309,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const handleSaveShipment = useCallback(async () => {
     if (!shipmentForm) return;
-    setSaving(true); setError(null);
+    setSaving(true); setError(null); setFieldErrors({});
     try {
       if (shipmentForm.id) {
         const patched = await apiPatchObject<ShipmentApiRow>(
@@ -318,6 +336,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      // G6: أبرِز الحقول التي رفضها الخادم (خريطة مرفقة على الاستثناء من restApi).
+      const fe = (e as { fieldErrors?: Record<string, string> })?.fieldErrors;
+      if (fe && Object.keys(fe).length) setFieldErrors(fe);
     } finally {
       setSaving(false);
     }
@@ -1243,10 +1264,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const headerBand = (
     <div className="grid w-full grid-cols-1 gap-x-2 gap-y-1 py-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6">
       {fld("رقم الشحنة", <input className="aseel-input" readOnly value={shipmentForm.shipment_number || (shipmentForm.id ? `#${shipmentForm.id}` : "— جديدة —")} />)}
-      {fld("تاريخ", <input className="aseel-input" type="date" value={shipmentForm.shipment_date ? String(shipmentForm.shipment_date).slice(0, 10) : ""} onChange={sfText("shipment_date")} />)}
+      {fld("تاريخ", <AseelDateInput value={shipmentForm.shipment_date ? String(shipmentForm.shipment_date).slice(0, 10) : ""} onChange={(v) => setSF({ shipment_date: v })} />, fieldErrors.shipment_date)}
       {showAdvancedShipment && <>
         {fld("الساعة", <input className="aseel-input" type="time" value={shipmentForm.transaction_time ? String(shipmentForm.transaction_time).slice(0, 5) : ""} onChange={sfText("transaction_time")} />)}
-        {fld("تاريخ ثاني", <input className="aseel-input" type="date" value={shipmentForm.second_date ? String(shipmentForm.second_date).slice(0, 10) : ""} onChange={sfText("second_date")} />)}
+        {fld("تاريخ ثاني", <AseelDateInput value={shipmentForm.second_date ? String(shipmentForm.second_date).slice(0, 10) : ""} onChange={(v) => setSF({ second_date: v })} />)}
       </>}
       {fld("وكيل الشحن", <span style={{ display: "flex", gap: 2 }}>
         <select
@@ -1270,7 +1291,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             )}
         </select>
         <button type="button" className="aseel-ellipsis" title="إضافة وكيل شحن جديد" onClick={() => { setQuickAddType("FreightForwarder"); setQuickAddName(""); }}>+</button>
-      </span>)}
+      </span>, fieldErrors.shipping_agent)}
       {showAdvancedShipment && <>
         {fld("اسم الوكيل", <input className="aseel-input" readOnly value={shipmentForm.agent_name || "—"} />)}
         {fld("نوع الشحنة", <select className="aseel-input" value={shipmentForm.shipment_type || "invoice"} onChange={sfText("shipment_type")}>
@@ -1283,11 +1304,11 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         <option value="sea">بحري</option>
         <option value="air">جوي</option>
         <option value="land">بري</option>
-      </select>)}
-      {fld("رقم البوليصة", <input className="aseel-input" value={shipmentForm.bill_of_lading || ""} onChange={sfText("bill_of_lading")} />)}
-      {fld("رقم الحاوية", <input className="aseel-input" value={shipmentForm.container_number || ""} onChange={sfText("container_number")} />)}
-      {fld("المغادرة", <input className="aseel-input" type="date" value={shipmentForm.departure_date ? String(shipmentForm.departure_date).slice(0, 10) : ""} onChange={sfText("departure_date")} />)}
-      {fld("الوصول", <input className="aseel-input" type="date" value={shipmentForm.arrival_date ? String(shipmentForm.arrival_date).slice(0, 10) : ""} onChange={sfText("arrival_date")} />)}
+      </select>, fieldErrors.shipping_type)}
+      {fld("رقم البوليصة", <input className="aseel-input" value={shipmentForm.bill_of_lading || ""} onChange={sfText("bill_of_lading")} />, fieldErrors.bill_of_lading)}
+      {fld("رقم الحاوية", <input className="aseel-input" value={shipmentForm.container_number || ""} onChange={sfText("container_number")} />, fieldErrors.container_number)}
+      {fld("المغادرة", <AseelDateInput value={shipmentForm.departure_date ? String(shipmentForm.departure_date).slice(0, 10) : ""} onChange={(v) => setSF({ departure_date: v })} />, fieldErrors.departure_date)}
+      {fld("الوصول", <AseelDateInput value={shipmentForm.arrival_date ? String(shipmentForm.arrival_date).slice(0, 10) : ""} onChange={(v) => setSF({ arrival_date: v })} />, fieldErrors.arrival_date)}
       {showAdvancedShipment && <>
         {fld("السفينة / الرحلة", <input className="aseel-input" value={shipmentForm.ship_name || shipmentForm.flight_number || ""} onChange={(e) => setSF({ ship_name: e.target.value, flight_number: e.target.value })} />)}
         {fld("رقم الحركة", <input className="aseel-input" value={shipmentForm.agent_shipment_number || ""} onChange={sfText("agent_shipment_number")} />)}

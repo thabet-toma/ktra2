@@ -4,6 +4,7 @@
  * لا تضع عنوان OpenClaw في الواجهة — التوكن والبروكسي على Django.
  */
 import { clientLogger } from "./logger";
+import { humanizeDrfError, extractDrfFieldErrors } from "../utils/drfError";
 import { resolveBranchId } from "../utils/tenantContext";
 import {
   remainingRequestBudgetMs,
@@ -205,28 +206,11 @@ async function readListCache<T>(key: string): Promise<T[] | null> {
   return null;
 }
 
-/** يسطح أخطاء DRF المتداخلة (مثل {lines: [{product: ["..."]}]} أو {customer: ["..."]}) إلى نص واحد. */
-function flattenDrfError(data: any): string {
-  if (!data) return "";
-  if (typeof data === "string") return data;
-  if (data.detail) return typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail);
-  if (data.error) return typeof data.error === "string" ? data.error : JSON.stringify(data.error);
-  const parts: string[] = [];
-  function walk(obj: any, prefix: string) {
-    if (typeof obj === "string") { parts.push(obj); return; }
-    if (Array.isArray(obj)) { obj.forEach(v => parts.push(typeof v === "string" ? v : JSON.stringify(v))); return; }
-    if (typeof obj === "object" && obj !== null) {
-      Object.entries(obj).forEach(([k, v]) => walk(v, prefix ? `${prefix}.${k}` : k));
-    }
-  }
-  walk(data, "");
-  return parts.join("; ") || JSON.stringify(data);
-}
-
 async function handleResponseError(res: Response, path: string): Promise<never> {
   const traceId = res.headers.get("X-Trace-ID") || undefined;
   const data = await parseJsonSafe(res);
-  let msg = flattenDrfError(data) || `API error: ${res.status} (${path})`;
+  // G2: أخطاء DRF تُحوَّل لنص عربي مربوط بالحقل (utils/drfError) بدل JSON خام.
+  let msg = humanizeDrfError(data) || `تعذّر إتمام العملية (${res.status})`;
   if (traceId) {
     msg = `${msg} [Trace ID: ${traceId}]`;
   }
@@ -235,7 +219,16 @@ async function handleResponseError(res: Response, path: string): Promise<never> 
     path,
     data: data as Record<string, unknown>,
   }, traceId);
-  throw new Error(msg);
+  // G6: أرفق خريطة أخطاء الحقول والحالة على الاستثناء كي تُبرز النماذج الحقل الناقص.
+  const err = new Error(msg) as Error & {
+    fieldErrors?: Record<string, string>;
+    status?: number;
+    data?: unknown;
+  };
+  err.fieldErrors = extractDrfFieldErrors(data);
+  err.status = res.status;
+  err.data = data;
+  throw err;
 }
 
 export async function apiGetList<T = any>(

@@ -156,7 +156,7 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
         <div className="md:col-span-5 space-y-1">
           <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
             <Building className="w-3 h-3 text-blue-500" />
-            المورد / المصنع <span className="text-red-500">*</span>
+            المورد <span className="text-red-500">*</span>
           </label>
           <div className="h-10">
             <SupplierSearch

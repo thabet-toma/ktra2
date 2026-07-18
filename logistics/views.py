@@ -1067,6 +1067,34 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
             ),
         )
 
+    @staticmethod
+    def _next_shipment_number(tenant):
+        """SH-#### التالي لكل الشركة — يماثل _next_deal_ref لـLogisticsDeal.
+
+        الواجهة (ImportDocumentScreen) تعرض حقل «رقم الشحنة» للقراءة فقط
+        وتتوقّع ترقيماً خادمياً بعد الحفظ (بنفس نمط رقم الصفقة D-####)، لكن
+        الخادم كان بلا perform_create مخصّص فيصطدم shipment_number الفارغ
+        بقيد blank=False على الموديل — 400 يمنع إنشاء أي شحنة من الواجهة.
+        """
+        import re
+        nums = [0]
+        refs = LogisticsShipment.objects.filter(tenant=tenant).values_list(
+            'shipment_number', flat=True
+        )
+        for r in refs:
+            m = re.match(r'^SH-(\d+)$', str(r or ''))
+            if m:
+                nums.append(int(m.group(1)))
+        return f"SH-{max(nums) + 1:04d}"
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        kwargs = {'tenant': tenant}
+        num = str(serializer.validated_data.get('shipment_number') or '').strip()
+        if not num or LogisticsShipment.objects.filter(tenant=tenant, shipment_number=num).exists():
+            kwargs['shipment_number'] = self._next_shipment_number(tenant)
+        serializer.save(**kwargs)
+
     @action(detail=False, methods=['post'], url_path='create-from-deals')
     def create_from_deals(self, request):
         """M1: create one shipment from many Ready-to-Ship deals (fixes RC-1).

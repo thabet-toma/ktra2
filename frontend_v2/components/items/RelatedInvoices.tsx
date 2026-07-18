@@ -27,7 +27,7 @@ export const RelatedInvoices: React.FC<RelatedInvoicesProps> = ({ item, invoices
             <tr>
               <th className="px-6 py-4 w-16">#</th>
               <th className="px-6 py-4">رقم الفاتورة</th>
-              <th className="px-6 py-4">المورد / المصنع</th>
+              <th className="px-6 py-4">المورد</th>
               <th className="px-6 py-4">تاريخ الفاتورة</th>
               <th className="px-6 py-4">الكمية المشتراة</th>
               <th className="px-6 py-4">سعر الوحدة</th>

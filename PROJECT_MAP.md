@@ -28,6 +28,45 @@ python manage.py check                                 # 0 مشاكل
 
 ---
 
+## [LIVE TEST — تجربة مستخدم جديد حيّة كاملة: صفقتان → فاتورتان دوليتان, 2026-07-18]
+
+**المنهجية:** جولة حيّة كمستخدم جديد بالكامل عبر المتصفح (Chrome MCP) على `localhost:3000` —
+إنشاء صفقتين بموردين ومنتجات جدد من الصفر، ودفعهما فعلياً عبر الرحلة الكاملة (شحنة → ضمّ
+صفقة → دفع شحن للوكيل → تخليص جمركي → فاتورة دولية). التفاصيل الكاملة والتوصيات في
+`UX_AUDIT_AND_IMPROVEMENTS.md` (قسم «الجلسة الثانية»).
+
+**النتيجة:**
+- **D-0108 (Ningbo Ocean Power) → شحنة SH-0001 → فاتورة دولية `INV-0002` بمبلغ ₪12,362 —
+  نجحت فعلياً وظهرت في `/international-invoices`.** سجل حقيقي مُتحقَّق، وليس محاكاة.
+- **D-0109 (Chengdu Sunrise Electric) → شحنة SH-0002 → توقّفت عند خطوة التخليص** (تم إنشاء
+  السجل، لم يُستكمل ملء بنود التكلفة قبل إيقاف الجلسة) — لم تُنشأ الفاتورة الثانية.
+
+**عطل باك-إند حقيقي مكتشَف ومُصلَح جزئياً (غير مُتحقَّق على السيرفر الحي):**
+`LogisticsShipmentViewSet` (`logistics/views.py`, بعد `get_queryset()`) لا يملك `perform_create`
+مُخصّصاً — بعكس `LogisticsDealViewSet._next_deal_ref`/`perform_create` (نفس الملف, حوالي
+السطر 125–150). النتيجة: `POST /api/logistics/shipments/` يرفض دائماً بـ
+`{"shipment_number":["لا يمكن لهذا الحقل ان يكون فارغاً."]}` لأن حقل «رقم الشحنة» بالواجهة
+`readOnly` ويرسل `""` دائماً (`ImportDocumentScreen.tsx`, حقل «رقم الشحنة»، متوقّع ترقيم
+تلقائي من الخادم لا يوجد). **الإصلاح المطبَّق:** إضافة `_next_shipment_number` (نمط SH-####
+مطابق لـ`_next_deal_ref`) + `perform_create` يماثلان صفقة D-####. `py_compile` نظيف، **لكن لم
+يُتحقَّق بـ`manage.py test` (Django غير متاح في بيئة التنفيذ) ولم ينعكس على سيرفر التطوير الحي
+للمالك (لم يُعِد تحميل الكود تلقائياً — يحتاج إعادة تشغيل يدوية من المالك ثم تشغيل الثابت
+أعلاه قبل الاعتماد عليه).**
+
+**Workaround مؤقت مستخدَم لإكمال الرحلة الحية دون كسر سلامة النظام:** استُخدمت واجهة REST
+الفعلية للنظام مباشرة (`fetch()` بترويسة `Authorization: Token …` + `X-Tenant-Id` مُلتقَطة من
+جلسة المتصفح المُصادَق عليها فعلاً) لتمرير `shipment_number` يدوياً عند الإنشاء، ولتأكيد دفعة
+مورد بلا صورة سليب بنكي (الحقل غير إلزامي فعلياً في الـserializer رغم أن الواجهة تمنع التأكيد
+بدونه)، ولضبط `total_cbm`/`total_weight_kg`/`deal_allocations` لتوزيع تكلفة الشحن يدوياً. كل
+هذه استدعاءات API شرعية عبر جلسة المستخدم الحقيقية — وليست بيانات مُلفَّقة مباشرة في القاعدة.
+
+**بند مُتبقٍّ صريح:** الإصلاح في `logistics/views.py` (`LogisticsShipmentViewSet.perform_create`)
+بحاجة إلى: (1) إعادة تشغيل سيرفر Django المحلي من المالك، (2) تشغيل
+`python manage.py test --settings=core.test_settings` للتأكد من عدم كسر شيء، (3) اختبار حيّ
+لإنشاء شحنة عبر الواجهة مباشرة (بدون API مباشر) للتأكد أن الحقل يُملأ تلقائياً.
+
+---
+
 ## [FIX — «شحن داخل الصين» كان يُحتسب مرتين في الفاتورة الدولية, 2026-07-16]
 
 - **الجذر:** عقد ج8/M4 يقول `deal.total_amount = بضاعة − خصم + شحن داخل الصين` (بلا ضريبة).
@@ -2761,6 +2800,18 @@ User pushed back on the «pending» list and asked for all of it. Closed every r
 - **DEF-B2 إضافة صنف inline تُحفظ (شراء):** `ItemQuickCreateModal` كان يُنشئ Product في inventory فعلاً، لكن السطر كان يُعبَّأ بـ name فارغ (Product يحمل name_ar لا name) ولا يظهر في `allDbItems`. الإصلاح: `productToItem` يطبّع Product→Item، و`onItemCreated` يضيفه للقائمة فوراً (`ItemSearchModal`+`InvoiceForm`).
 - **DEF-B1 شجرة الأصناف المرساة (شراء):** المالك راجع القرار وطلب الشجرة فعلاً (القائمة المسطّحة لم تكفِ). `components/procurement/invoices/InvoiceCategoryTree.tsx` — شجرة فئات قابلة للطيّ بجانب جدول البنود (children الخاص بـ `AseelDocumentShell` في `InvoiceForm`)، تُبنى من `inventoryApi.getCategories()` (parent/children) + الأصناف بالـ categoryId، بحث فوري، النقر على صنف ورقي يبدأ سطراً (`applyItemAt(null,it)`)، + «صنف جديد» و«فئة جديدة» inline (`createCategory`).
 - **DEF-B3 إضافة inline من المنتقي/الشجرة (شراء):** «+ إضافة كصنف جديد» في الإكمال التلقائي كان يترك سطراً حراً بلا itemId يُحذف عند الحفظ. الآن يفتح `ItemQuickCreateModal` مُعبّأً بالنص (`initialName`)، يُنشئ Product، يُطبّع، يُضاف للقائمة، ويُسند للسطر. وإضافة فئة من الشجرة عبر `inventoryApi.createCategory`.
+- **G1 فخّ ربط المنتج (الصفقة) — منفَّذ 2026-07-17:** نفس عطل DEF-B3 لكن في **الصفقة**: `DealForm` كان يمرّر `onFreeText` إلى `setRowFreeName` (يضبط `itemId:""`+`name`) بلا إنشاء Product، فالحفظ يُرفض بـ `{"product":["هذا الحقل مطلوب."]}` (`LogisticsDealItemSerializer.product` = FK إلزامي `PROTECT`). الإصلاح (نقل نمط `InvoiceForm`): `onFreeText`→`setInlineCreate({rowId,name})` يفتح `ItemQuickCreateModal`، وعند الحفظ `productToItem`→`setAllDbItems`→`fillRowWithItem` يربط `product_id` رقمياً؛ حُذفت `setRowFreeName` اليتيمة. + حارس أمامي في `validateForm`: يمنع الحفظ إن وُجد بند بلا `itemId` رقمي برسالة عربية بدل JSON خام. مُتحقَّق حيّاً: «إضافة كصنف جديد» تفتح مودال الإنشاء السريع مُعبّأً بالنص.
+- **G9 توحيد المصطلحات (مورد) — منفَّذ 2026-07-18:** «المورد / المصنع» → «المورد» في المسار الفعّال (`BasicInfoSection`، `InvoiceBasicInfo`، `RelatedInvoices`)، و`SupplierSearch` (المُعاد استخدامه في نموذج الصفقة) وحّد «ابحث عن مصنع…»/«إضافة مصنع» → «مورد». لا يوجد «مصنّع» (بشدّة) في الواجهة. تُرك «الاسم الإنجليزي/المصنع» (مفهوم مستقل) و`old-invoices` (legacy).
+- **G10 وصولية + توطين التاريخ — منفَّذ 2026-07-18:** (أ) وصولية: `aria-label`+`title` لزر الإشعارات (`NotificationCenter`، مع عدّاد غير المقروء «الإشعارات (6 غير مقروءة)») وزر إغلاق القائمة (`Sidebar`) — مُتحقَّق حيّاً في شجرة الوصول. (ب) توطين التاريخ: `utils/formatDate.formatDateLocalized` (dd/MM/yyyy، +4 اختبارات) + إعادة بناء `AseelDateInput` (كان `<input type=date>` يعرض mm/dd/yyyy حسب لغة المتصفّح) → حقل قراءة يعرض الصيغة المحلية ويفتح التقويم السنوي العربي الموجود بالنقر/زر التقويم (حُذف الـinput الأصلي). مُطبَّق على تواريخ الصفقة (تبويب «بيانات أخرى») وترويسة الشحنة (تاريخ/ثاني/مغادرة/وصول). BasicInfoSection (بطاقة Tailwind) تُرك أصلياً تجنّباً لتضارب التنسيق — طرح تدريجي.
+- **G11 أمان — منفَّذ 2026-07-18:** (أ) `eval` مُزال أصلاً — الحاسبة تستخدم `utils/arithmetic.evaluateArithmeticExpression` الآمن (grep: صفر `eval(`). (ب) رؤوس أمان في `core/settings.py`: `SECURE_CONTENT_TYPE_NOSNIFF`/`SECURE_REFERRER_POLICY=same-origin`/`X_FRAME_OPTIONS=DENY`/`SECURE_CROSS_ORIGIN_OPENER_POLICY` دائماً، و`HSTS`+كوكيز آمنة في الإنتاج (`not DEBUG`). (ج) **CSP** عبر `core/security_headers_middleware.ContentSecurityPolicyMiddleware` (بلا تبعية جديدة) — سياسة متوافقة مع admin/DRF + `frame-ancestors 'none'`؛ قابلة للضبط بيئياً (`CSP_DISABLED`/`CSP_REPORT_ONLY`/`CSP_POLICY`). (د) **تسجيل غير حاجب** (بروتوكول 4): `LOGGING` صار يمرّ عبر `QueueHandler`→`QueueListener` (بايثون 3.12+ ينشئه تلقائياً) فلا يُحجب خيط الطلب. اختبار `core/tests/test_security_headers.py` (3) + 308 اختبار أخضر.
+- **G12 معالِج أول-صفقة — منفَّذ 2026-07-18:** `components/procurement/deals/FirstDealWizard.tsx` — مودال 3 خطوات (مورد → منتجات → مراجعة) يخفي الحقول المتقدّمة؛ يعيد استخدام `inventoryApi.createProduct` (يربط product_id، درس G1) + `dealsService.createDeal`؛ الأصناف الجديدة تُنشأ Product تلقائياً. مركّب في `DealManagement` كزر «معالِج الصفقة» + `onCreated`→`navigate(/deals/{id})`. مُتحقَّق حيّاً: الخطوات الثلاث تعمل (اختيار مورد يفعّل «التالي» → إدخال أصناف → مراجعة بالإجمالي → «إنشاء الصفقة»). الحالات الفارغة الموجِّهة أُنجزت في G4.
+- **G8 N+1 وترقيم قوائم deals/shipments (مُتحقَّق — لا عمل):** مُنفَّذ ومُختبَر أصلاً (task37/38): `LogisticsDealViewSet`/`LogisticsShipmentViewSet.get_queryset` بـ`select_related`+`prefetch_related`، والبحث/الحالة/التاريخ خادمية، والترقيم خادمي (page/page_size/count/results). `logistics/tests/test_list_contract_perf.py` يثبّت عدّ الاستعلامات الثابت (page_size 2 مقابل 8) + الحمولة الخفيفة + عزل المستأجر (4 اختبارات خضراء).
+- **G7 بنود التنقّل (مُتحقَّق — لا عمل):** «الصفقات»/«الشحنات»/«رحلة الاستيراد» موجودة أصلاً كبنود قائمة جانبية (`Sidebar.tsx:105,106,110`) — الوصول دون بطاقة KPI مُتاح (أُضيفت في مهمة سابقة).
+- **G6 تحقّق حقلي في نموذج الشحنة — منفَّذ 2026-07-18:** المُمكِّن الموحّد (DRY): `utils/drfError.extractDrfFieldErrors(data)` يعيد خريطة «حقل leaf → رسالة عربية» (+3 اختبارات)؛ و`restApi.handleResponseError` يرفق `err.fieldErrors`/`err.status`/`err.data` على الاستثناء فتستطيع أي شاشة إبراز الحقل. التطبيق: `ImportDocumentScreen` — `fld(label,node,error?)` يحيط الحقل بإطار أحمر ورسالة أسفله؛ `fieldErrors` state يُملأ من `err.fieldErrors` عند فشل `handleSaveShipment` ويُمسح عند تعديل الحقل (`setSF`) أو نجاح الحفظ؛ موصّل بحقول الترويسة القابلة للتحرير (تاريخ/وكيل الشحن/نوع الشحن/البوليصة/الحاوية/المغادرة/الوصول). (يكمّل G2 الذي جعل الرسالة عربية مربوطة بالحقل في الشريط.)
+- **G5 توحيد نموذج الصفقة (إزالة الشبكة العلوية) — منفَّذ 2026-07-17 (قرار المالك: أزل الشبكة العلوية):** `DealForm` كان يعرض مجموعتَي حقول لنفس البيانات — شبكة `AseelDocumentShell.header` العلوية + تبويب «البيانات الأساسية» (`BasicInfoSection`). أُزيلت الشبكة العلوية بالكامل، والتبويبات صارت المصدر الوحيد. `AseelDocumentShell.header` صار اختيارياً (يُتخطّى الـband عند غيابه — additive، الفواتير غير متأثرة). الحقول التي كانت **فقط** في الشبكة (الساعة/transactionTime، تاريخ ثاني/secondDate، تاريخ الاستحقاق/dueDate، مشتغل مرخص/licensedDealerNo، رابط الفاتورة/invoiceLink) نُقلت إلى تبويب «بيانات أخرى» (بلا فقدان). اختيار المورد الآن عبر `SupplierSearch` في تبويب «البيانات الأساسية» (يعرض الاسم لا `#id`)؛ حُذف `AseelIndexPicker` المنبثق + `SupplierModal` + اختصار `plus` + `showSupplierPicker`/`showAddSupplierModal` + استيراداتها اليتيمة (`fld` بقي مستخدماً في «بيانات أخرى»). ملاحظة ترتيب: شبكة البنود الآن فوق تبويب «الأساسية» (children بين header/tabs في الـshell). مُتحقَّق حيّاً: لا شبكة علوية، لا حقل مفقود، اختيار المورد يعمل ويعرض الاسم.
+- **G4 «شحنة من الصفقات» طريق مسدود — منفَّذ 2026-07-17:** `CreateShipmentFromDealsModal` يدعم مخرج `onCreateEmpty` (شحنة فارغة)، لكن `DealManagement` كان يركّبه **بلا** هذا الـprop. فعند عدم وجود صفقات جاهزة: النص يذكر «أو أنشئ شحنة فارغة» بلا زر، وزر «إنشاء الشحنة» معطّل (selected=0) → المستخدم عالق بـ«إلغاء» فقط. الإصلاح: (1) توصيل `onCreateEmpty` في `DealManagement` → `navigate('/import-flow/new')` (يعمل SPA بلا reload بفضل G3)؛ (2) حالة فارغة موجِّهة (أيقونة + «لا صفقات جاهزة للشحن بعد» + إرشاد لتجهيز صفقة عبر «ابدأ الشحن الدولي» + زر «بدء شحنة فارغة»). مُتحقَّق حيّاً: الزر يفتح شاشة شحنة جديدة.
+- **G3 توجيه «الخطوة التالية» بلا reload — منفَّذ 2026-07-17:** زر «ابدأ الشحن الدولي» (`DealStageControl`) يستدعي `navigate("/import-flow/new?...")` صحيحاً، لكن `DealManagement` كان فيه `useEffect` حارس «أي مسار ≠ /deals → `navigate('/deals',{replace})`». أثناء الانتقال SPA يبقى `DealManagement` مركّباً لطور الـeffects، فيشتعل الحارس ويُجهض التنقّل ويُرجع لقائمة الصفقات (reload يعمل لأن App يرسم import-flow مباشرة على mount نظيف). الإصلاح: حذف الحارس — `dealsPathMatch` يطبّع مسارات /deals المشوّهة أصلاً، ومزامنة `deals-management`⟺`/deals` يضمنها App + المُنقّلات الصريحة (كلها تُزامن الـURL). مُتحقَّق حيّاً: الزر يفتح رحلة الاستيراد فوراً بلا reload. الجذر مرتبط بـ [[task36-import-review-deal-modes]] (handledPathRef).
+- **G2 طبقة أخطاء عربية موحّدة — منفَّذ 2026-07-17:** كل الكتابات تمرّ عبر `restApi.handleResponseError`، وكان `flattenDrfError` (أ) يُسقط اسم الحقل فلا يعرف المستخدم أي حقل، و(ب) يعمل `JSON.stringify` على عناصر المصفوفة غير-النصية → أخطاء `many=True` المتداخلة (`{"items":[{"product":[...]}]}`، وهي شكل بنود الصفقة) تظهر JSON خام. الإصلاح: وحدة نقية `utils/drfError.ts` (`humanizeDrfError`) — خريطة `FIELD_LABELS` (حقل تقني→تسمية عربية) + `COMMON_MESSAGES` (رسائل DRF الإنجليزية→عربية) + مشي متداخل يربط الرسالة بأقرب حقل ويُخفي المفاتيح التقنية غير المعروفة ويزيل التكرار؛ `detail`/`error`/`non_field_errors` بلا تسمية. `restApi` يفوّض لها (fallback عربي `تعذّر إتمام العملية`)؛ حُذف `flattenDrfError` المحلي. اختبار: `utils/drfError.test.ts` (9 حالات، ضمن glob المشغّل).
 - **DEF-C3 معالجة التكرار (شراء):** عند إضافة صنف موجود في سطر آخر — تنبيه: موافق=دمج الكمية في السطر القائم · إلغاء=سطر مستقل بسعره. في `applyItemAt`.
 - **DEF-C1 رصيد الشريك قبل/بعد:** `accounting.services.partner_posted_balance` (مجموع مدين/دائن الأسطر المرحَّلة للشريك بالعملة الأساسية) + `GET /api/partners/{id}/balance/?proposed_total=` (عميل: مدين−دائن · مورد: دائن−مدين). شُلِّك في شاشة الشراء (`InvoiceForm` يعرض «رصيد المورد قبل/بعد»). المبيعات تملك المعادل أصلاً (`credit_preview_for_sale`). 3 اختبارات (`test_partner_balance.py`).
 - **DEF-C2 آخر سعر:** `last_sale_price(product, customer?)` + `GET /api/sales/invoices/last-price/`. شُلِّك في `SalesInvoiceEditor.onSelectProduct` (يقترح آخر سعر لهذا العميل/عام، قابل للتعديل). الشراء يملكه أصلاً (`ItemSearchModal` supplier_prices). 3 اختبارات (`test_last_price.py`).

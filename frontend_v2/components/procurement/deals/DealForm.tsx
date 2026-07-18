@@ -16,9 +16,9 @@ import {
   AseelDocumentShell,
   useRecordNavigation,
   useAseelKeymap,
-  AseelIndexPicker,
   AseelGrid,
   AseelAutocomplete,
+  AseelDateInput,
   type AseelGridColumn,
   type AseelToolbarAction,
 } from "../../aseel";
@@ -49,7 +49,8 @@ import {
 import { BasicInfoSection } from "@/components/forms/shared/BasicInfoSection";
 import { DealStageControl } from "@/components/forms/deal-parts/DealStageControl";
 import { DealPaymentList } from "@/components/forms/deal-parts/DealPaymentList";
-import { ItemSearchModal } from "../price-offers/ItemSearchModal";
+import { ItemSearchModal, productToItem } from "../price-offers/ItemSearchModal";
+import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
 import { ImagePreviewModal } from "../price-offers/ImagePreviewModal";
 import { TermsAndShippingSection } from "@/components/forms/shared/TermsAndShippingSection";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
@@ -60,7 +61,6 @@ import { ActivityLog } from "./ActivityLog";
 import { InstallmentManager } from "./InstallmentManager";
 import { PaymentProgress } from "./PaymentProgress";
 import { SupplierViewModal } from "@/components/common/SupplierViewModal";
-import { SupplierModal } from "@/components/common/SupplierModal";
 import { useToast } from "@/contexts/ToastContext";
 import { useConfirm } from "@/contexts/ConfirmContext";
 import { DealPrintView } from "./DealPrintView";
@@ -180,9 +180,10 @@ export const DealForm: React.FC<DealFormProps> = ({
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [dealsList, setDealsList] = useState<Deal[]>([]);
-  const [showSupplierPicker, setShowSupplierPicker] = useState(false);
-  const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
   const [workflowError, setWorkflowError] = useState<string | null>(null);
+  // G1: «إضافة كصنف جديد» يفتح إنشاء صنف سريع يُنشئ Product فعلياً ويربط
+  // product_id في السطر — بدل ترك سطر حر بلا itemId يُرفض بـ {"product":[...]}.
+  const [inlineCreate, setInlineCreate] = useState<{ rowId: string; name: string } | null>(null);
 
   const nav = useRecordNavigation<Deal>({
     items: dealsList,
@@ -212,22 +213,13 @@ export const DealForm: React.FC<DealFormProps> = ({
       el?.focus();
     },
     F12: () => { if (!saving) handleFinalSave(); },
-    Escape: () => {
-      if (showSupplierPicker) { setShowSupplierPicker(false); return; }
-      onCancel();
-    },
-    plus: () => {
-      const ae = document.activeElement;
-      if (ae?.getAttribute?.('data-aseel-key') === '1') {
-        setShowSupplierPicker(true);
-      }
-    },
+    Escape: () => { onCancel(); },
     CtrlHome: () => nav?.first?.(),
     CtrlEnd: () => nav?.last?.(),
     CtrlPageUp: () => nav?.prev?.(),
     CtrlPageDown: () => nav?.next?.(),
     CtrlIns: () => handleNewDeal(),
-  }, { enabled: !showSupplierPicker });
+  });
 
   const handleNewDeal = () => {
     setFormData({});
@@ -649,6 +641,10 @@ export const DealForm: React.FC<DealFormProps> = ({
   const validateForm = (): boolean => {
     if (!formData.supplierId) { toast("يرجى اختيار المورد أولاً", "error"); return false; }
     if (nonEmptyItems().length === 0) { toast("يرجى إضافة منتجات على الأقل", "error"); return false; }
+    // G1: امنع الحفظ إن وُجد بند بلا صنف مربوط (itemId رقمي) — يكافئ رفض الخادم
+    // {"product":["هذا الحقل مطلوب."]} برسالة عربية واضحة بدل JSON خام.
+    const unlinked = nonEmptyItems().filter((i) => !(i.itemId && /^\d+$/.test(String(i.itemId))));
+    if (unlinked.length > 0) { toast("يوجد بند بلا صنف مربوط — اختر صنفاً من القائمة أو «إضافة كصنف جديد»", "error"); return false; }
     return true;
   };
 
@@ -811,14 +807,6 @@ export const DealForm: React.FC<DealFormProps> = ({
     recalculateTotals(updated);
   };
 
-  const setRowFreeName = (rowId: string, text: string) => {
-    const idx = items.findIndex((i) => i.id === rowId);
-    if (idx < 0) return;
-    const updated = [...items];
-    updated[idx] = { ...updated[idx], itemId: "", name: text };
-    recalculateTotals(updated);
-  };
-
   const renderItemNameCell = (row: DealItem) => (
     <AseelAutocomplete
       value={row.name || ""}
@@ -829,7 +817,7 @@ export const DealForm: React.FC<DealFormProps> = ({
         const it = allDbItems.find((x) => String(x.id) === String(id));
         if (it) fillRowWithItem(row.id, it);
       }}
-      onFreeText={(t) => setRowFreeName(row.id, t)}
+      onFreeText={(t) => setInlineCreate({ rowId: row.id, name: t.trim() })}
     />
   );
 
@@ -844,6 +832,12 @@ export const DealForm: React.FC<DealFormProps> = ({
 
   const otherTab = (
     <div className="aseel-other">
+      {/* G5: حقول كانت في الشبكة العلوية المحذوفة — نُقلت هنا كي لا تُفقد. */}
+      {fld("الساعة", <input className="aseel-input" type="time" disabled={isDealLocked} value={(formData as any).transactionTime || ""} onChange={(e) => setFormData(prev => ({ ...prev, transactionTime: e.target.value }) as any)} />)}
+      {fld("تاريخ ثاني", <AseelDateInput disabled={isDealLocked} value={(formData as any).secondDate || ""} onChange={(v) => setFormData(prev => ({ ...prev, secondDate: v }) as any)} />)}
+      {fld("تاريخ الاستحقاق", <AseelDateInput disabled={isDealLocked} value={formData.dueDate || ""} onChange={(v) => setFormData(prev => ({ ...prev, dueDate: v }))} />)}
+      {fld("مشتغل مرخص", <input className="aseel-input" disabled={isDealLocked} value={formData.licensedDealerNo || ""} onChange={(e) => setFormData(prev => ({ ...prev, licensedDealerNo: e.target.value }))} placeholder="رقم المشتغل المرخص" />)}
+      {fld("رابط الفاتورة", <input className="aseel-input" disabled={isDealLocked} value={(formData as any).invoiceLink || ""} onChange={(e) => setFormData(prev => ({ ...prev, invoiceLink: e.target.value }) as any)} placeholder="الفاتورة الأصلية" />)}
       <label className="aseel-field aseel-field--inline">
         <input type="checkbox" disabled={isDealLocked} checked={formData.shippingIncluded || false} onChange={(e) => setFormData(prev => ({ ...prev, shippingIncluded: e.target.checked }))} />
         <span className="aseel-field-label" style={{ flex: "unset" }}>الأسعار تشمل الشحن داخل الصين</span>
@@ -991,42 +985,6 @@ export const DealForm: React.FC<DealFormProps> = ({
         state={formData.id ? `صفقة ${formData.dealNumber || `#${formData.id}`}` : "صفقة جديدة"}
         nav={nav}
         actions={toolbarActions}
-        header={
-          <>
-            {fld("رقم الصفقة", <input className="aseel-input" readOnly value={formData.dealNumber ? (formData.id ? formData.dealNumber : `${formData.dealNumber} (جديدة)`) : "— جديدة —"} />)}
-            {fld("التاريخ", <input className="aseel-input" type="date" disabled={isDealLocked} value={formData.dealDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, dealDate: e.target.value }))} />)}
-            {fld("الساعة", <input className="aseel-input" type="time" disabled={isDealLocked} value={(formData as any).transactionTime || ""} onChange={(e) => setFormData(prev => ({ ...prev, transactionTime: e.target.value }) as any)} />)}
-            {fld("تاريخ ثاني", <input className="aseel-input" type="date" disabled={isDealLocked} value={(formData as any).secondDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, secondDate: e.target.value }) as any)} />)}
-            {fld("تاريخ الاستحقاق", <input className="aseel-input" type="date" disabled={isDealLocked} value={formData.dueDate || ""} onChange={(e) => setFormData(prev => ({ ...prev, dueDate: e.target.value }))} />)}
-            {fld("المورد", <div className="aseel-pickfield">
-              <input className="aseel-input aseel-input--hl" data-aseel-field="supplier" data-aseel-key="1" readOnly disabled={isDealLocked} value={selectedSupplier?.tradeName || selectedSupplier?.alias || formData.supplierName || formData.factoryName || (formData.supplierId ? `#${formData.supplierId}` : "")} title={formData.supplierId ? `معرف المورد: ${formData.supplierId}` : undefined} placeholder="+ للفهرس" onClick={() => { if (!isDealLocked) setShowSupplierPicker(true); }} />
-              <button type="button" className="aseel-ellipsis" disabled={isDealLocked} onClick={() => setShowSupplierPicker(true)} title="فهرس الموردين (+)">…</button>
-            </div>)}
-            {fld("الاسم", <input className="aseel-input" readOnly value={selectedSupplier?.tradeName || formData.factoryName || ""} />)}
-            {fld("رقم العرض", <input className="aseel-input" readOnly value={formData.originalOfferNumber || ""} />)}
-            {fld("مشتغل مرخص", <input className="aseel-input" disabled={isDealLocked} value={formData.licensedDealerNo || ""} onChange={(e) => setFormData(prev => ({ ...prev, licensedDealerNo: e.target.value }))} placeholder="رقم المشتغل المرخص" />)}
-            {fld("وصف الصفقة", <input className="aseel-input" disabled={isDealLocked} value={formData.dealDescription || ""} onChange={(e) => setFormData(prev => ({ ...prev, dealDescription: e.target.value }))} placeholder="وصف مختصر" />)}
-            {fld("رابط علي بابا", <input className="aseel-input" disabled={isDealLocked} value={formData.alibabaOrderLink || ""} onChange={(e) => setFormData(prev => ({ ...prev, alibabaOrderLink: e.target.value }))} placeholder="https://…" />)}
-            {fld("طريقة الشحن", <select className="aseel-input" disabled={isDealLocked} value={formData.shippingMethod || ""} onChange={(e) => setFormData(prev => ({ ...prev, shippingMethod: e.target.value }))}>
-              <option value="">— اختر —</option>
-              <option value="sea">بحري</option>
-              <option value="air">جوي</option>
-              <option value="land">بري</option>
-              <option value="express">إكسبرس</option>
-            </select>)}
-            {fld("طريقة الدفع", <input className="aseel-input" disabled={isDealLocked} value={(formData as any).paymentMethod || ""} onChange={(e) => setFormData(prev => ({ ...prev, paymentMethod: e.target.value }) as any)} placeholder="T/T / L/C / …" />)}
-            {fld("مدة الإنتاج", <input className="aseel-input" type="number" disabled={isDealLocked} value={(formData as any).productionDays ?? ""} onChange={(e) => setFormData(prev => ({ ...prev, productionDays: e.target.value === "" ? null : Number(e.target.value) }) as any)} placeholder="أيام" />)}
-            {fld("مدة التوصيل", <input className="aseel-input" type="number" disabled={isDealLocked} value={(formData as any).deliveryDays ?? ""} onChange={(e) => setFormData(prev => ({ ...prev, deliveryDays: e.target.value === "" ? null : Number(e.target.value) }) as any)} placeholder="أيام" />)}
-            {fld("الضمان", <input className="aseel-input" disabled={isDealLocked} value={(formData as any).warrantyDuration || ""} onChange={(e) => setFormData(prev => ({ ...prev, warrantyDuration: e.target.value }) as any)} placeholder="مدة الضمان" />)}
-            {fld("الشهادات", <input className="aseel-input" disabled={isDealLocked} value={(formData as any).certificates || ""} onChange={(e) => setFormData(prev => ({ ...prev, certificates: e.target.value }) as any)} placeholder="CE / FCC / ISO …" />)}
-            {fld("رابط الفاتورة", <input className="aseel-input" disabled={isDealLocked} value={(formData as any).invoiceLink || ""} onChange={(e) => setFormData(prev => ({ ...prev, invoiceLink: e.target.value }) as any)} placeholder="الفاتورة الأصلية" />)}
-            {fld("رقم المستند", <input className="aseel-input" disabled={isDealLocked} value={formData.supplierInvoiceNumber || ""} onChange={(e) => setFormData(prev => ({ ...prev, supplierInvoiceNumber: e.target.value }))} placeholder="رقم فاتورة المورد" />)}
-            <label className="aseel-field aseel-field--inline">
-              <input type="checkbox" disabled={isDealLocked} checked={formData.shippingIncluded || false} onChange={(e) => setFormData(prev => ({ ...prev, shippingIncluded: e.target.checked }))} />
-              <span className="aseel-field-label" style={{ flex: "unset" }}>الأسعار تشمل الشحن داخل الصين</span>
-            </label>
-          </>
-        }
         tabs={[
           { key: "basic", label: "البيانات الأساسية", content: basicInfoTab },
           { key: "terms", label: "الشروط والشحن", content: termsAndShippingTab },
@@ -1095,45 +1053,27 @@ export const DealForm: React.FC<DealFormProps> = ({
         )}
       </AseelDocumentShell>
 
-      {/* فهرس الموردين */}
-      <AseelIndexPicker<Supplier>
-        open={showSupplierPicker}
-        title="فهرس الموردين"
-        rows={suppliers}
-        columns={[
-          { key: "id", header: "الرقم", width: "70px", value: (r) => r.id },
-          { key: "tradeName", header: "الاسم التجاري", value: (r) => r.tradeName || "" },
-          { key: "city", header: "المدينة", value: (r) => r.city || "" },
-        ]}
-        getRowKey={(r) => r.id}
-        searchValue={(r) => `${r.id} ${r.tradeName || ""} ${r.city || ""}`}
-        actionButton={
-          <button
-            type="button"
-            onClick={() => setShowAddSupplierModal(true)}
-            className="flex items-center gap-1 px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors whitespace-nowrap"
-          >
-            <Plus className="w-4 h-4" /> إضافة مورد
-          </button>
-        }
-        onSelect={(r) => { setFormData({ ...formData, supplierId: r.id, supplierName: r.tradeName || r.alias || "" }); setShowSupplierPicker(false); }}
-        onClose={() => setShowSupplierPicker(false)}
-      />
-
-      {showAddSupplierModal && (
-        <SupplierModal
-          isOpen={showAddSupplierModal}
-          onClose={() => setShowAddSupplierModal(false)}
-          onSaveSuccess={(newSupplier) => {
-            setShowAddSupplierModal(false);
-            setFormData({ ...formData, supplierId: newSupplier.id, supplierName: newSupplier.tradeName || newSupplier.alias || "" });
-            setShowSupplierPicker(false);
-          }}
-        />
-      )}
+      {/* G5: فهرس الموردين المنبثق + مودال الإضافة أُزيلا مع الشبكة العلوية —
+          اختيار/إضافة المورد الآن عبر SupplierSearch داخل تبويب «البيانات الأساسية». */}
 
       {showItemSearch && (
         <ItemSearchModal isOpen={showItemSearch} onClose={() => setShowItemSearch(false)} onSelectItem={(item, price) => { handleAddItemFromModal(item, price); }} items={allDbItems} supplierId={formData.supplierId} />
+      )}
+
+      {inlineCreate && (
+        <ItemQuickCreateModal
+          isOpen
+          initialName={inlineCreate.name}
+          onClose={() => setInlineCreate(null)}
+          onSaved={(newProduct) => {
+            const item = productToItem(newProduct);
+            setAllDbItems((prev) =>
+              prev.some((p) => String(p.id) === String(item.id)) ? prev : [item, ...prev]
+            );
+            fillRowWithItem(inlineCreate.rowId, item);
+            setInlineCreate(null);
+          }}
+        />
       )}
 
       {previewImage && <ImagePreviewModal url={previewImage} onClose={() => setPreviewImage(null)} />}

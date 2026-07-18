@@ -43,8 +43,9 @@ export interface AseelDocumentShellProps {
   nav?: RecordNavigation;
   /** Command actions (add/save/delete/cancel/print/receipt/...). */
   actions?: AseelToolbarAction[];
-  /** Header field band (labelled inputs). */
-  header: React.ReactNode;
+  /** Header field band (labelled inputs). Optional — when omitted the band is
+   *  skipped entirely (G5: نموذج الصفقة صار بلا شبكة علوية، التبويبات هي المصدر). */
+  header?: React.ReactNode;
   /** Optional full-height right rail spanning the header band + grid (e.g. الشجرة).
    *  When provided, the header + grid are wrapped in a column beside this rail so
    *  it rises to the very top of the document instead of starting below the header. */
@@ -192,7 +193,7 @@ export const AseelDocumentShell: React.FC<AseelDocumentShellProps> = ({
           (سكرولر الصفحة الوحيد في main.app-content). عند تمرير `aside` تُغلَّف هذه
           المنطقة في عمود بجانب الشريط الجانبي ليرتفع لأعلى المستند. */}
       {(() => {
-        const band = <div className="aseel-headband">{header}</div>;
+        const band = header ? <div className="aseel-headband">{header}</div> : null;
         const grid = (
           <div className="aseel-gridwrap">
             {tabsInMain ? (

@@ -13,6 +13,8 @@ import { Plus, FileInput, Printer, Edit2, Trash2, RefreshCw, Ship } from 'lucide
 import { LoadingSpinner } from '../LoadingSpinner';
 import { PriceOfferSelectionModal } from './price-offers/PriceOfferSelectionModal';
 import { CreateShipmentFromDealsModal } from '../import-flow/CreateShipmentFromDealsModal';
+import { FirstDealWizard } from './deals/FirstDealWizard';
+import { Sparkles } from 'lucide-react';
 import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
 import { useConfirm } from '../../contexts/ConfirmContext';
@@ -102,14 +104,15 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     const [statusFilter, setStatusFilter] = useState<string>('all');
     const [isOfferModalOpen, setIsOfferModalOpen] = useState(false);
     const [isShipmentModalOpen, setIsShipmentModalOpen] = useState(false);
+    // G12: معالِج أول صفقة (مستخدم جديد) — 3 خطوات مبسّطة.
+    const [showWizard, setShowWizard] = useState(false);
     const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-    useEffect(() => {
-        const path = (location.pathname || '/').replace(/\/$/, '') || '/';
-        if (path !== '/deals' && !path.startsWith('/deals/')) {
-            navigate('/deals', { replace: true });
-        }
-    }, [location.pathname, navigate]);
+    // G3: أُزيل حارس «أعِد التوجيه إلى /deals لأي مسار غير /deals». كان يشتعل
+    // أثناء الانتقال بعيداً عن الشاشة (زر «ابدأ الشحن الدولي» → /import-flow/new)
+    // بينما DealManagement ما زال مركّباً، فيُجهض التنقّل ويُرجع لقائمة الصفقات
+    // (كان يتطلّب reload). طبّع مسارات /deals المشوّهة يتكفّل به dealsPathMatch أصلاً،
+    // ومزامنة الـURL مع deals-management يضمنها App + المُنقّلات الصريحة.
 
     useEffect(() => {
         if (dealsPathMatch?.mode !== 'list') {
@@ -572,6 +575,13 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 </button>
                 <button
                     className="aseel-toolbtn"
+                    onClick={() => setShowWizard(true)}
+                    title="معالِج موجّه لإنشاء أول صفقة (3 خطوات مبسّطة)"
+                >
+                    <Sparkles style={{ width: 14, height: 14 }} /> معالِج الصفقة
+                </button>
+                <button
+                    className="aseel-toolbtn"
                     onClick={handleCreateNew}
                     title="صفقة جديدة (Ctrl+Ins)"
                 >
@@ -615,6 +625,24 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                         '_blank',
                         'noopener,noreferrer',
                     );
+                }}
+                // G4: مخرج «شحنة فارغة» — كان مدعوماً في المودال لكنه غير موصّل، فالحالة
+                // الفارغة كانت طريقاً مسدوداً (نص يذكر شحنة فارغة بلا زر). يفتح شاشة شحنة
+                // جديدة (تعمل SPA بلا reload بعد إصلاح G3).
+                onCreateEmpty={() => {
+                    setIsShipmentModalOpen(false);
+                    navigate('/import-flow/new');
+                }}
+            />
+
+            {/* G12: معالِج أول صفقة */}
+            <FirstDealWizard
+                isOpen={showWizard}
+                onClose={() => setShowWizard(false)}
+                suppliers={suppliers}
+                onCreated={(dealId) => {
+                    setShowWizard(false);
+                    navigate(`/deals/${encodeURIComponent(dealId)}`);
                 }}
             />
 

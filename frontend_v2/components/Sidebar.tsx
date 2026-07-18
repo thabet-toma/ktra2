@@ -215,7 +215,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             {showText && <span className="mr-2 text-sm font-bold text-[var(--color-text)] truncate">K.T.R.A</span>}
           </div>
           {isMobile && (
-            <button onClick={() => setIsMobileMenuOpen(false)} className="p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] rounded">
+            <button onClick={() => setIsMobileMenuOpen(false)} className="p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] rounded" title="إغلاق القائمة" aria-label="إغلاق القائمة">
               <X className="h-5 w-5" />
             </button>
           )}
