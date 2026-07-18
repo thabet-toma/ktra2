@@ -62,6 +62,25 @@ class _Base(TestCase):
 
 
 class CreatePaymentEndpointTest(_Base):
+    def test_bank_slip_is_optional_when_cash_box_payment_is_recorded(self):
+        deal = self._mk_deal('D-0800')
+        resp = self.client.post(
+            self._payments_url(deal),
+            {
+                'payment_number': 1,
+                'title': 'دفعة بلا سليب',
+                'amount': '400',
+                'status': 'Paid',
+                'cash_box_external_id': 'usd-main',
+            },
+            format='json',
+        )
+
+        self.assertEqual(resp.status_code, 201, resp.content)
+        payment = LogisticsPayment.objects.get(pk=resp.json()['id'])
+        self.assertEqual(payment.cash_box_external_id, 'usd-main')
+        self.assertFalse(payment.bank_swift_image)
+
     def test_create_returns_real_sql_id(self):
         deal = self._mk_deal('D-0801')
         resp = self.client.post(

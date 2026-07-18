@@ -59,7 +59,7 @@ test.describe("Imported invoice VAT totals", () => {
     };
     const localPayments = {
       includedInPrice: false,
-      calculationMethod: "itemized" as const,
+      calculationMethod: "detailed" as const,
       customsClearanceFees: 15,
       customsDuties: 10,
       portFees: 5,
@@ -81,7 +81,7 @@ test.describe("Imported invoice VAT totals", () => {
     };
     const localPayments = {
       includedInPrice: false,
-      calculationMethod: "itemized" as const,
+      calculationMethod: "detailed" as const,
       customsClearanceFees: 15,
       customsDuties: 10,
       portFees: 5,

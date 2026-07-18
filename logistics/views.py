@@ -1093,6 +1093,7 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
         num = str(serializer.validated_data.get('shipment_number') or '').strip()
         if not num or LogisticsShipment.objects.filter(tenant=tenant, shipment_number=num).exists():
             kwargs['shipment_number'] = self._next_shipment_number(tenant)
+            logger.info('Auto-generated shipment number=%s tenant=%s', kwargs['shipment_number'], getattr(tenant, 'pk', None))
         serializer.save(**kwargs)
 
     @action(detail=False, methods=['post'], url_path='create-from-deals')

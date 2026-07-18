@@ -16,9 +16,10 @@ import { CompactTimeline } from "./CompactTimeline";
 import OfflineGuard from "@/components/offline/OfflineGuard";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import { formatMoney } from "@/utils/formatNumber";
-import { getImportJourneyGuidance, type ImportJourneyAction } from "./importJourneyGuidance";
+import { getImportJourneyGuidance, getMissingDealMeasureRefs, type ImportJourneyAction } from "./importJourneyGuidance";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { openInNewTab } from "@/utils/openInNewTab";
+import { captureScrollPosition, restoreScrollPosition as applyScrollPosition, type ScrollPositionSnapshot } from "@/utils/scrollPosition";
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => formatMoney(v, "—");
 
@@ -103,6 +104,8 @@ interface ShipmentApiRow {
   payments?: AgentPaymentApiRow[];
 }
 
+type ShipmentDealAllocation = NonNullable<ShipmentApiRow["shipment_deal_allocations"]>[number];
+
 interface DealRow {
   id: number;
   deal_name?: string;
@@ -143,6 +146,132 @@ function buildTimelineSteps(sw: string | undefined | null, shipType: string | un
 
 const EMPTY_SHIPMENT_ALLOCS: ShipmentApiRow["shipment_deal_allocations"] = [];
 
+interface ShipmentDealAllocationRowProps {
+  dealId: number;
+  dealRef?: string;
+  dealTitle?: string;
+  dealName?: string;
+  cbm: number;
+  kg: number;
+  allocatedShippingCost: number;
+  freightUnit: "cbm" | "kg";
+  busy: boolean;
+  disabled: boolean;
+  onUpdateMeasure: (dealId: number, patch: { total_cbm?: number; total_weight_kg?: number }) => void;
+  onUpdateAllocation: (dealId: number, value: number) => void;
+  onUnlink: (dealId: number) => void;
+}
+
+const ShipmentDealAllocationRow = React.memo(function ShipmentDealAllocationRow({
+  dealId,
+  dealRef,
+  dealTitle,
+  dealName,
+  cbm,
+  kg,
+  allocatedShippingCost,
+  freightUnit,
+  busy,
+  disabled,
+  onUpdateMeasure,
+  onUpdateAllocation,
+  onUnlink,
+}: ShipmentDealAllocationRowProps) {
+  const [cbmDraft, setCbmDraft] = useState(String(cbm));
+  const [kgDraft, setKgDraft] = useState(String(kg));
+  const [allocationDraft, setAllocationDraft] = useState(String(allocatedShippingCost));
+
+  useEffect(() => setCbmDraft(String(cbm)), [cbm]);
+  useEffect(() => setKgDraft(String(kg)), [kg]);
+  useEffect(() => setAllocationDraft(String(allocatedShippingCost)), [allocatedShippingCost]);
+
+  const activeValue = freightUnit === "kg" ? kg : cbm;
+  const missing = activeValue <= 0;
+  const rowDisabled = disabled || busy;
+
+  return (
+    <tr data-testid={`shipment-allocation-row-${dealId}`} aria-busy={busy || undefined}>
+      <td style={{ padding: "2px 4px", fontFamily: "monospace" }}>{dealRef || `#${dealId}`}</td>
+      <td style={{ padding: "2px 4px" }}>{dealTitle || dealName || "—"}</td>
+      <td style={{ padding: "2px 4px", textAlign: "center" }}>
+        <input
+          className="aseel-input"
+          type="number"
+          step="0.001"
+          min="0"
+          value={cbmDraft}
+          disabled={rowDisabled}
+          onChange={(event) => setCbmDraft(event.target.value)}
+          onBlur={() => {
+            const value = Number(cbmDraft);
+            if (Number.isFinite(value) && value !== cbm) onUpdateMeasure(dealId, { total_cbm: value });
+          }}
+          data-testid={`shipment-deal-cbm-${dealId}`}
+          title="حجم الصفقة (CBM) — عبّئه من هنا مباشرة"
+          style={{ width: 62, textAlign: "center", fontWeight: freightUnit === "cbm" ? 700 : 400, ...(freightUnit === "cbm" && missing ? { borderColor: "var(--aseel-danger, #c0392b)", color: "var(--aseel-danger, #c0392b)" } : {}) }}
+        />
+      </td>
+      <td style={{ padding: "2px 4px", textAlign: "center" }}>
+        <input
+          className="aseel-input"
+          type="number"
+          step="0.001"
+          min="0"
+          value={kgDraft}
+          disabled={rowDisabled}
+          onChange={(event) => setKgDraft(event.target.value)}
+          onBlur={() => {
+            const value = Number(kgDraft);
+            if (Number.isFinite(value) && value !== kg) onUpdateMeasure(dealId, { total_weight_kg: value });
+          }}
+          data-testid={`shipment-deal-kg-${dealId}`}
+          title="وزن الصفقة (KG) — عبّئه من هنا مباشرة"
+          style={{ width: 62, textAlign: "center", fontWeight: freightUnit === "kg" ? 700 : 400, ...(freightUnit === "kg" && missing ? { borderColor: "var(--aseel-danger, #c0392b)", color: "var(--aseel-danger, #c0392b)" } : {}) }}
+        />
+      </td>
+      <td style={{ padding: "2px 4px", textAlign: "center" }}>
+        <button
+          type="button"
+          className="aseel-toolbtn"
+          onClick={() => openInNewTab(`/deals/${dealId}`)}
+          disabled={rowDisabled}
+          title="فتح الصفقة وتعديل منتجاتها وقيمها"
+        >
+          <Pencil size={13} /> تعديل
+        </button>
+      </td>
+      <td style={{ padding: "2px 4px", textAlign: "center" }}>
+        <input
+          className="aseel-input"
+          type="number"
+          step="0.01"
+          value={allocationDraft}
+          disabled={rowDisabled}
+          onChange={(event) => setAllocationDraft(event.target.value)}
+          onBlur={() => {
+            const value = Number(allocationDraft);
+            if (Number.isFinite(value) && value !== allocatedShippingCost) onUpdateAllocation(dealId, value);
+          }}
+          data-testid={`shipment-deal-allocation-${dealId}`}
+          style={{ width: 90, textAlign: "center" }}
+        />
+      </td>
+      <td style={{ padding: "2px 4px", textAlign: "center" }}>
+        <button
+          type="button"
+          className="aseel-toolbtn"
+          onClick={() => onUnlink(dealId)}
+          disabled={rowDisabled}
+          style={{ color: "var(--aseel-danger, #c0392b)", padding: "0 4px" }}
+          title="فك ربط الصفقة من الشحنة"
+        >
+          ✕
+        </button>
+      </td>
+    </tr>
+  );
+});
+
 /** بنود تخليص تمثل نقلاً محلياً (مسار قديم) — المصدر الموحّد تبويب «النقل المحلي».
  *  تطابق LOCAL_SHIPPING_CLEARANCE_LINE_LABELS في logistics/landed_cost.py. */
 const LOCAL_SHIPPING_LINE_LABELS = ["شحن محلي", "الشحن المحلي", "شحن داخلي"];
@@ -166,6 +295,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const [clearancePayments, setClearancePayments] = useState<ClearancePaymentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingDealIds, setSavingDealIds] = useState<ReadonlySet<number>>(() => new Set());
   const [error, setError] = useState<string | null>(null);
   // G6: خريطة «حقل الشحنة → رسالة» لإبراز الحقل الناقص عند فشل الحفظ خادمياً.
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -208,8 +338,32 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   // إنشاء سريع لوكيل شحن / مخلص جمركي — الحقلان كانا readOnly بلا أي مسار إنشاء (ج7)
   const [quickAddType, setQuickAddType] = useState<null | "FreightForwarder" | "CustomsBroker">(null);
   const [quickAddName, setQuickAddName] = useState("");
+  const scrollPositionRef = React.useRef<ScrollPositionSnapshot | null>(null);
   // Empty nav (single-record view) — shell expects a nav prop but we don't browse here yet.
   const nav = useRecordNavigation({ items: [] as ShipmentApiRow[], getId: () => 0, currentId: null, onSelect: () => {} });
+
+  const saveScrollPosition = useCallback(() => {
+    const appContent = document.querySelector<HTMLElement>("main.app-content");
+    scrollPositionRef.current = captureScrollPosition(appContent, window.scrollY);
+  }, []);
+
+  const restoreScrollPosition = useCallback(() => {
+    const snapshot = scrollPositionRef.current;
+    scrollPositionRef.current = null;
+    if (!snapshot) return;
+    window.requestAnimationFrame(() => {
+      applyScrollPosition(snapshot, (top) => window.scrollTo(0, top));
+    });
+  }, []);
+
+  const setDealSaving = useCallback((dealId: number, value: boolean) => {
+    setSavingDealIds((current) => {
+      const next = new Set(current);
+      if (value) next.add(dealId);
+      else next.delete(dealId);
+      return next;
+    });
+  }, []);
 
   const loadAll = useCallback(async (id: number | string) => {
     setLoading(true); setError(null);
@@ -493,13 +647,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   // Deals missing their measure in the chosen unit → freight can't be allocated.
   const missingMeasureRefs = useMemo(() => {
-    const num = (v: number | string | undefined) => {
-      const n = typeof v === "string" ? parseFloat(v) : v ?? 0;
-      return Number.isFinite(n as number) ? (n as number) : 0;
-    };
-    return shipmentDeals
-      .filter((d) => num(freightUnit === "kg" ? d.deal_total_weight_kg : d.deal_total_cbm) <= 0)
-      .map((d) => d.deal_ref || `#${d.deal}`);
+    return getMissingDealMeasureRefs(shipmentDeals, freightUnit);
   }, [shipmentDeals, freightUnit]);
 
   const openLinkPicker = useCallback(async () => {
@@ -561,16 +709,17 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   }, [joinDealParam, shipment, shipmentDeals, openLinkPicker]);
 
   const handleUnlinkDeal = useCallback(async (dealId: number) => {
-    if (!shipment) return;
+    const currentShipmentId = shipment?.id;
+    if (!currentShipmentId) return;
     if (!(await confirm({ title: "فك ربط الصفقة", message: "هل تريد فك ربط هذه الصفقة من الشحنة؟", confirmText: "فك الربط" }))) return;
     setSaving(true); setError(null);
     try {
       await apiPostObject(
-        `logistics/shipments/${shipment.id}/remove_deal/`,
+        `logistics/shipments/${currentShipmentId}/remove_deal/`,
         { deal_id: dealId },
         { tenantId: tid() },
       );
-      const refreshed = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${shipment.id}/`, { tenantId: tid() });
+      const refreshed = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${currentShipmentId}/`, { tenantId: tid() });
       setShipment(refreshed);
       setShipmentForm({ ...refreshed });
     } catch (e) {
@@ -578,10 +727,11 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     } finally {
       setSaving(false);
     }
-  }, [shipment]);
+  }, [shipment?.id, confirm]);
 
   const handleRedistributeAllocations = useCallback(async () => {
     if (!shipment) return;
+    saveScrollPosition();
     setSaving(true); setError(null);
     try {
       await apiPostObject(`logistics/shipments/${shipment.id}/recalculate-distribution/`, {}, { tenantId: tid() });
@@ -592,8 +742,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
+      restoreScrollPosition();
     }
-  }, [shipment]);
+  }, [shipment, saveScrollPosition, restoreScrollPosition]);
 
   // M2: keep the freight basis controls in sync with the loaded shipment.
   React.useEffect(() => {
@@ -604,6 +755,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const handleSetFreight = useCallback(async (unit: "cbm" | "kg", rate: string) => {
     if (!shipment) return;
+    saveScrollPosition();
     setSaving(true); setError(null);
     try {
       const patched = await apiPatchObject<ShipmentApiRow>(
@@ -618,20 +770,23 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
+      restoreScrollPosition();
     }
-  }, [shipment, reconcileShipmentInvoices]);
+  }, [shipment, reconcileShipmentInvoices, saveScrollPosition, restoreScrollPosition]);
 
   // Edit a deal's CBM/KG inline from the shipment — no need to leave for the deal
   // screen. Saves to the deal, then (once every deal has the chosen measure and a
   // rate is set) recomputes the freight total + shares automatically.
   const handleUpdateDealMeasure = useCallback(
     async (dealId: number, patch: { total_cbm?: number; total_weight_kg?: number }) => {
-      if (!shipment) return;
-      setSaving(true); setError(null);
+      const currentShipmentId = shipment?.id;
+      if (!currentShipmentId) return;
+      saveScrollPosition();
+      setDealSaving(dealId, true); setError(null);
       try {
         await apiPatchObject(`logistics/deals/${dealId}/`, patch, { tenantId: tid() });
         let refreshed = await apiGetObject<ShipmentApiRow>(
-          `logistics/shipments/${shipment.id}/`, { tenantId: tid() });
+          `logistics/shipments/${currentShipmentId}/`, { tenantId: tid() });
         const allocs = refreshed.shipment_deal_allocations || [];
         const num = (v: number | string | undefined) => {
           const n = typeof v === "string" ? parseFloat(v) : v ?? 0;
@@ -642,7 +797,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         // كل الصفقات صار إلها قياس + في سعر شحن → أعِد حساب الإجمالي والحصص تلقائياً.
         if (!stillMissing && Number(freightRate) > 0) {
           refreshed = await apiPatchObject<ShipmentApiRow>(
-            `logistics/shipments/${shipment.id}/freight/`,
+            `logistics/shipments/${currentShipmentId}/freight/`,
             { chargeable_unit: freightUnit, freight_rate: Number(freightRate) },
             { tenantId: tid() });
         }
@@ -652,19 +807,22 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
-        setSaving(false);
+        setDealSaving(dealId, false);
+        restoreScrollPosition();
       }
     },
-    [shipment, freightUnit, freightRate, reconcileShipmentInvoices],
+    [shipment?.id, freightUnit, freightRate, reconcileShipmentInvoices, saveScrollPosition, restoreScrollPosition, setDealSaving],
   );
 
   const handleUpdateAllocation = useCallback(async (dealId: number, newAlloc: number) => {
-    if (!shipment) return;
-    setSaving(true); setError(null);
+    const currentShipmentId = shipment?.id;
+    if (!currentShipmentId) return;
+    saveScrollPosition();
+    setDealSaving(dealId, true); setError(null);
     try {
       // Use the existing deal_allocations write-only field on the shipment serializer.
       const patched = await apiPatchObject<ShipmentApiRow>(
-        `logistics/shipments/${shipment.id}/`,
+        `logistics/shipments/${currentShipmentId}/`,
         { deal_allocations: [{ deal_id: dealId, allocated_shipping_cost: newAlloc }] },
         { tenantId: tid() },
       );
@@ -674,9 +832,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setSaving(false);
+      setDealSaving(dealId, false);
+      restoreScrollPosition();
     }
-  }, [shipment, reconcileShipmentInvoices]);
+  }, [shipment?.id, reconcileShipmentInvoices, saveScrollPosition, restoreScrollPosition, setDealSaving]);
 
   // ── D: Local shipment helpers ──
   const reloadLocal = useCallback(async () => {
@@ -1459,94 +1618,24 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           <th style={{ padding: "2px 4px", textAlign: "center", width: 60 }}>إلغاء</th>
         </tr></thead>
         <tbody>
-          {shipmentDeals.map((d) => {
-            const cbm = Number(d.deal_total_cbm ?? 0);
-            const kg = Number(d.deal_total_weight_kg ?? 0);
-            const activeVal = freightUnit === "kg" ? kg : cbm;
-            const missing = activeVal <= 0;
-            return (
-            <tr key={d.id}>
-              <td style={{ padding: "2px 4px", fontFamily: "monospace" }}>{d.deal_ref || `#${d.deal}`}</td>
-              <td style={{ padding: "2px 4px" }}>{d.deal_title || d.deal_name || "—"}</td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}>
-                <input
-                  className="aseel-input"
-                  type="number"
-                  step="0.001"
-                  min="0"
-                  key={`cbm-${d.deal}-${cbm}`}
-                  defaultValue={cbm}
-                  disabled={saving}
-                  onBlur={(e) => {
-                    const v = Number(e.target.value);
-                    if (Number.isFinite(v) && v !== cbm) void handleUpdateDealMeasure(d.deal, { total_cbm: v });
-                  }}
-                  title="حجم الصفقة (CBM) — عبّئه من هنا مباشرة"
-                  style={{ width: 62, textAlign: "center", fontWeight: freightUnit === "cbm" ? 700 : 400, ...(freightUnit === "cbm" && missing ? { borderColor: "var(--aseel-danger, #c0392b)", color: "var(--aseel-danger, #c0392b)" } : {}) }}
-                />
-              </td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}>
-                <input
-                  className="aseel-input"
-                  type="number"
-                  step="0.001"
-                  min="0"
-                  key={`kg-${d.deal}-${kg}`}
-                  defaultValue={kg}
-                  disabled={saving}
-                  onBlur={(e) => {
-                    const v = Number(e.target.value);
-                    if (Number.isFinite(v) && v !== kg) void handleUpdateDealMeasure(d.deal, { total_weight_kg: v });
-                  }}
-                  title="وزن الصفقة (KG) — عبّئه من هنا مباشرة"
-                  style={{ width: 62, textAlign: "center", fontWeight: freightUnit === "kg" ? 700 : 400, ...(freightUnit === "kg" && missing ? { borderColor: "var(--aseel-danger, #c0392b)", color: "var(--aseel-danger, #c0392b)" } : {}) }}
-                />
-              </td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}>
-                <button
-                  type="button"
-                  className="aseel-toolbtn"
-                  onClick={() => openInNewTab(`/deals/${d.deal}`)}
-                  disabled={saving}
-                  title="فتح الصفقة وتعديل منتجاتها وقيمها"
-                >
-                  <Pencil size={13} /> تعديل
-                </button>
-              </td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}>
-                <input
-                  className="aseel-input"
-                  type="number"
-                  step="0.01"
-                  // key بالقيمة: defaultValue يُقرأ مرة واحدة فقط — بدونها تبقى الخانة
-                  // على 0.00 بعد إعادة التوزيع رغم أن القيم محفوظة (بق «التوزيع صفر»)
-                  key={`alloc-${d.deal}-${d.allocated_shipping_cost ?? 0}`}
-                  defaultValue={d.allocated_shipping_cost ?? 0}
-                  disabled={saving}
-                  onBlur={(e) => {
-                    const v = Number(e.target.value);
-                    if (Number.isFinite(v) && v !== Number(d.allocated_shipping_cost ?? 0)) {
-                      void handleUpdateAllocation(d.deal, v);
-                    }
-                  }}
-                  style={{ width: 90, textAlign: "center" }}
-                />
-              </td>
-              <td style={{ padding: "2px 4px", textAlign: "center" }}>
-                <button
-                  type="button"
-                  className="aseel-toolbtn"
-                  onClick={() => void handleUnlinkDeal(d.deal)}
-                  disabled={saving}
-                  style={{ color: "var(--aseel-danger, #c0392b)", padding: "0 4px" }}
-                  title="فك ربط الصفقة من الشحنة"
-                >
-                  ✕
-                </button>
-              </td>
-            </tr>
-            );
-          })}
+          {shipmentDeals.map((d: ShipmentDealAllocation) => (
+            <ShipmentDealAllocationRow
+              key={d.id}
+              dealId={d.deal}
+              dealRef={d.deal_ref}
+              dealTitle={d.deal_title}
+              dealName={d.deal_name}
+              cbm={Number(d.deal_total_cbm ?? 0)}
+              kg={Number(d.deal_total_weight_kg ?? 0)}
+              allocatedShippingCost={Number(d.allocated_shipping_cost ?? 0)}
+              freightUnit={freightUnit}
+              busy={savingDealIds.has(d.deal)}
+              disabled={saving}
+              onUpdateMeasure={handleUpdateDealMeasure}
+              onUpdateAllocation={handleUpdateAllocation}
+              onUnlink={handleUnlinkDeal}
+            />
+          ))}
           {shipmentDeals.length === 0 && (
             <tr><td colSpan={7} style={{ padding: "8px 4px", textAlign: "center", color: "#999" }}>لا توجد صفقات مرتبطة</td></tr>
           )}

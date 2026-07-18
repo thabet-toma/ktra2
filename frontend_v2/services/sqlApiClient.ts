@@ -15,6 +15,7 @@ const mapperUrl = (docPath: string) =>
     `${API_BASE}/mapper/${docPath.replace(/^\/+/, "")}/`;
 
 import { resolveTenantId } from "../utils/tenantContext";
+import { emitSessionExpired } from "../utils/sessionEvents";
 
 const getHeaders = () => {
     const token = localStorage.getItem("token");
@@ -32,6 +33,12 @@ async function throwIfBadResponse(
     context: string
 ): Promise<void> {
     if (res.ok) return;
+    // 401 = التوكن مفقود أو أُبطل (تبويب آخر أنهى الجلسة). لا تُظهر رسالة الخادم
+    // الخام «لم يتم تزويد بيانات الدخول» — أعِد المستخدم لتسجيل الدخول.
+    if (res.status === 401) {
+        emitSessionExpired();
+        throw new Error("انتهت الجلسة. الرجاء تسجيل الدخول من جديد للمتابعة.");
+    }
     let detail = `${context}: ${res.status}`;
     try {
         const j = await res.json();

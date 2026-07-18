@@ -6,6 +6,8 @@
 import { clientLogger } from "./logger";
 import { humanizeDrfError, extractDrfFieldErrors } from "../utils/drfError";
 import { resolveBranchId } from "../utils/tenantContext";
+import { emitSessionExpired, emitUserActivity } from "../utils/sessionEvents";
+import { isUserActivityRequest, writeLastActivity } from "../utils/idleSession";
 import {
   remainingRequestBudgetMs,
   retryFitsRequestBudget,
@@ -51,6 +53,12 @@ function isSafeToRetry(init?: RequestInit): boolean {
 }
 
 export async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  // كل عملية كتابة = المستخدم يعمل الآن؛ تُمدَّد مهلة الخمول ولو لم يلمس فأرة
+  // ولا لوحة مفاتيح منذ فترة (إدخال بالباركود، لصق، اختصارات).
+  if (isUserActivityRequest(init?.method)) {
+    writeLastActivity(localStorage, Date.now());
+    emitUserActivity();
+  }
   const canRetry = isSafeToRetry(init);
   const maxAttempts = canRetry ? MAX_FETCH_ATTEMPTS : 1;
   // هذا deadline للطلب كله، لا لكل محاولة. سابقاً كانت كل محاولة تحصل على
@@ -211,6 +219,13 @@ async function handleResponseError(res: Response, path: string): Promise<never> 
   const data = await parseJsonSafe(res);
   // G2: أخطاء DRF تُحوَّل لنص عربي مربوط بالحقل (utils/drfError) بدل JSON خام.
   let msg = humanizeDrfError(data) || `تعذّر إتمام العملية (${res.status})`;
+  // 401 = التوكن مفقود أو أُبطل (تبويب آخر أنهى الجلسة). رسالة الخادم
+  // «لم يتم تزويد بيانات الدخول» لا تقول للمستخدم ماذا يفعل — نستبدلها ونرفع
+  // حدث انتهاء الجلسة ليتولّى IdleTimeoutGuard إعادته لتسجيل الدخول.
+  if (res.status === 401) {
+    msg = "انتهت الجلسة. الرجاء تسجيل الدخول من جديد للمتابعة.";
+    emitSessionExpired();
+  }
   if (traceId) {
     msg = `${msg} [Trace ID: ${traceId}]`;
   }

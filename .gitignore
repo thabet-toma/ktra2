@@ -32,6 +32,8 @@ Thumbs.db
 # Logs & misc
 *.log
 .cache/
+/frontend_v2/playwright-report/
+/frontend_v2/test-results/
 
 # Django FileBasedCache (server-side cache — generated at runtime)
 django_cache/
@@ -101,3 +103,7 @@ frontend/
 /frontend_v2/LITERAL_COMPLETE_CODEBASE*.md
 /notes_extract.txt
 /task6_baseline.md
+
+# Local reference material — not used by the platform
+/old_landed_cost.py
+/الاصيل/

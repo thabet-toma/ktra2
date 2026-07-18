@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { getImportJourneyGuidance } from "../components/import-flow/importJourneyGuidance";
+import {
+  getImportJourneyGuidance,
+  getMissingDealMeasureRefs,
+} from "../components/import-flow/importJourneyGuidance";
 
 const ready = {
   shipmentSaved: true,
@@ -43,5 +46,15 @@ test.describe("Import journey guidance", () => {
 
   test("routes transport-only shipments to local transport instead of an invoice", () => {
     expect(getImportJourneyGuidance({ ...ready, invoiceEligible: false }).action).toBe("manage_local_transport");
+  });
+
+  test("identifies deals that need the selected freight measure before allocation", () => {
+    const allocations = [
+      { deal_ref: "D-0108", deal_total_cbm: 2, deal_total_weight_kg: 0 },
+      { deal_ref: "D-0109", deal_total_cbm: 0, deal_total_weight_kg: 40 },
+    ];
+
+    expect(getMissingDealMeasureRefs(allocations, "cbm")).toEqual(["D-0109"]);
+    expect(getMissingDealMeasureRefs(allocations, "kg")).toEqual(["D-0108"]);
   });
 });

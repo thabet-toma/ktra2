@@ -29,6 +29,26 @@ export interface ImportJourneyGuidance {
   actionLabel: string;
 }
 
+interface DealMeasureRow {
+  deal?: number;
+  deal_ref?: string;
+  deal_total_cbm?: number | string;
+  deal_total_weight_kg?: number | string;
+}
+
+export function getMissingDealMeasureRefs(
+  allocations: DealMeasureRow[],
+  unit: "cbm" | "kg",
+): string[] {
+  const numberValue = (value: number | string | undefined) => {
+    const parsed = typeof value === "string" ? parseFloat(value) : value ?? 0;
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+  return allocations
+    .filter((row) => numberValue(unit === "kg" ? row.deal_total_weight_kg : row.deal_total_cbm) <= 0)
+    .map((row) => row.deal_ref || `#${row.deal}`);
+}
+
 export function getImportJourneyGuidance(input: ImportJourneyGuidanceInput): ImportJourneyGuidance {
   if (!input.shipmentSaved) {
     return { action: "save_shipment", step: 1, title: "احفظ بيانات الشحنة", description: "أكمل البيانات الأساسية لتبدأ رحلة الاستيراد.", actionLabel: "حفظ الشحنة" };

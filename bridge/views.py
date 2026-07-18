@@ -329,8 +329,14 @@ class MapperView(View):
         is_public_read = request.method == 'GET' and root_col in PUBLIC_COLLECTIONS
 
         if user is None and not is_public_read:
+            # فرّق بين «لا توكن أصلاً» و«توكن أُبطل» — الرسالة الموحّدة السابقة
+            # كانت تُظهر «لم يتم تزويد بيانات الدخول» حتى لو أرسل العميل توكناً
+            # محذوفاً (خروج من تبويب آخر)، فيتعذّر تشخيص المشكلة.
+            sent_token = bool(request.headers.get('Authorization', '').strip())
             return None, JsonResponse(
-                {'detail': 'Authentication credentials were not provided.'}, status=401
+                {'detail': 'انتهت الجلسة. الرجاء تسجيل الدخول من جديد.'
+                 if sent_token else 'Authentication credentials were not provided.'},
+                status=401,
             )
             
         tenant, err = _resolve_tenant(request)

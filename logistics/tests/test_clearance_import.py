@@ -100,6 +100,27 @@ class ClearanceImportTest(APITestCase):
         self.assertEqual(inv.import_shipment_remaining_rate, Decimal("3.65"))
         self.assertGreater(inv.grand_total, 0)
 
+    def test_preview_exposes_supplier_payment_gate_before_import(self):
+        LogisticsPayment.objects.filter(deal=self.deal).update(amount=Decimal("997"))
+        preview = self.client.post(
+            "/api/logistics/purchase-invoices/preview-clearance-import/",
+            {"clearance_id": self.clearance.id, "deal_ids": [self.deal.id],
+             "deal_remaining_rate": "3.7", "shipment_remaining_rate": "3.65"},
+            format="json", **self._auth(),
+        )
+
+        self.assertEqual(preview.status_code, 200, preview.content)
+        deal_preview = preview.json()["deals"][0]
+        self.assertEqual(Decimal(str(deal_preview["deal_paid_usd"])), Decimal("997"))
+        self.assertEqual(Decimal(str(deal_preview["deal_unpaid_usd"])), Decimal("1000"))
+        self.assertFalse(deal_preview["deal_fully_paid"])
+        blocked = self._import()
+        self.assertEqual(blocked.status_code, 400, blocked.content)
+
+        LogisticsPayment.objects.filter(deal=self.deal).update(amount=Decimal("1997"))
+        imported = self._import()
+        self.assertEqual(imported.status_code, 201, imported.content)
+
     def test_detail_get_after_import(self):
         """GET للفاتورة الدولية غير المرحّلة يجب ألا ينهار على الحقول المحذوفة."""
         resp = self._import()

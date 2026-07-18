@@ -544,6 +544,7 @@ class LogisticsShipmentDealAllocationSerializer(serializers.ModelSerializer):
             return None
 
 class LogisticsShipmentSerializer(serializers.ModelSerializer):
+    shipment_number = serializers.CharField(required=False, allow_blank=True)
     agent_name = serializers.CharField(source='shipping_agent.name', read_only=True)
     deals = LogisticsDealShipmentSummarySerializer(many=True, read_only=True)
     shipment_deal_allocations = LogisticsShipmentDealAllocationSerializer(
@@ -567,6 +568,12 @@ class LogisticsShipmentSerializer(serializers.ModelSerializer):
             "payments",
         ]
         read_only_fields = ["id", "tenant"]
+
+    def validate_shipment_number(self, value):
+        value = str(value or '').strip()
+        if self.instance is not None and not value:
+            raise serializers.ValidationError('لا يمكن مسح رقم شحنة محفوظة.')
+        return value
 
     def validate_total_volume(self, value):
         return _quantize_decimal_10_3(value)

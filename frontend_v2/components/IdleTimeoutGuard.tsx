@@ -6,11 +6,17 @@
  *
  * قبل الانتهاء بـ {@link IDLE_WARNING_MS} يظهر تنبيه بعدّاد تنازلي يتيح للمستخدم
  * الضغط «متابعة الجلسة» لتمديدها دون فقد عمله (مهم لعمليات الجرد الطويلة).
+ *
+ * الخمول يُقاس على المستخدم لا على التبويب: النشاط يُسجَّل في localStorage
+ * (utils/idleSession) فيقرأه كل تبويب، وإلا أنهى تبويبٌ متروك الجلسةَ على تبويب
+ * يعمل فيه المستخدم فعلاً فتظهر «لم يتم تزويد بيانات الدخول» بلا تفسير.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { IDLE_TIMEOUT_MS, IDLE_WARNING_MS } from "../constants/session";
 import { logoutUser } from "../services/authService";
+import { ACTIVITY_KEY, idleRemainingMs, writeLastActivity } from "../utils/idleSession";
+import { SESSION_EXPIRED_EVENT, USER_ACTIVITY_EVENT } from "../utils/sessionEvents";
 
 interface Props {
   /** يُستدعى عند ضغط زر العودة — يُفترض أن يُفرّغ المستخدم الحالي (سياق المصادقة). */
@@ -42,11 +48,23 @@ export const IdleTimeoutGuard: React.FC<Props> = ({ onLogout }) => {
     setExpired(true);
   }, []);
 
-  // بدء التنبيه بعدّاد تنازلي يُحدَّث كل ثانية حتى الانتهاء.
-  const startWarning = useCallback(() => {
+  /**
+   * إظهار شاشة «تم إنهاء الجلسة» دون إعادة تسجيل خروج — تُستخدم حين انتهت الجلسة
+   * خارج هذا التبويب (تبويب آخر أنهاها، أو ردّ 401 من الخادم).
+   */
+  const showExpiredOnly = useCallback(() => {
     if (expiredRef.current) return;
-    const deadline = Date.now() + IDLE_WARNING_MS;
-    setWarnSeconds(Math.ceil(IDLE_WARNING_MS / 1000));
+    expiredRef.current = true;
+    clearTimers();
+    setExpired(true);
+  }, []);
+
+  // بدء التنبيه بعدّاد تنازلي يُحدَّث كل ثانية حتى الانتهاء.
+  // `leftMs` = ما تبقّى فعلياً (قد يقلّ عن IDLE_WARNING_MS عند فتح تبويب متأخر).
+  const startWarning = useCallback((leftMs: number = IDLE_WARNING_MS) => {
+    if (expiredRef.current) return;
+    const deadline = Date.now() + leftMs;
+    setWarnSeconds(Math.ceil(leftMs / 1000));
     if (countdownRef.current != null) window.clearInterval(countdownRef.current);
     countdownRef.current = window.setInterval(() => {
       const left = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
@@ -54,13 +72,33 @@ export const IdleTimeoutGuard: React.FC<Props> = ({ onLogout }) => {
     }, 1000);
   }, []);
 
-  const reset = useCallback(() => {
+  /**
+   * يعيد تسليح المؤقّتات على ما تبقّى من المهلة بحسب آخر نشاط في **أي** تبويب،
+   * لا على مهلة كاملة محلية.
+   */
+  const rearm = useCallback(() => {
     if (expiredRef.current) return;
     clearTimers();
     setWarnSeconds(null);
-    warnTimerRef.current = window.setTimeout(startWarning, IDLE_TIMEOUT_MS - IDLE_WARNING_MS);
-    expireTimerRef.current = window.setTimeout(handleExpire, IDLE_TIMEOUT_MS);
+    const remaining = idleRemainingMs(localStorage, Date.now(), IDLE_TIMEOUT_MS);
+    if (remaining <= 0) {
+      handleExpire();
+      return;
+    }
+    if (remaining > IDLE_WARNING_MS) {
+      warnTimerRef.current = window.setTimeout(startWarning, remaining - IDLE_WARNING_MS);
+    } else {
+      startWarning(remaining);
+    }
+    expireTimerRef.current = window.setTimeout(handleExpire, remaining);
   }, [handleExpire, startWarning]);
+
+  /** نشاط فعلي من المستخدم في هذا التبويب: يُسجَّل للجميع ثم يُعاد التسليح. */
+  const reset = useCallback(() => {
+    if (expiredRef.current) return;
+    writeLastActivity(localStorage, Date.now());
+    rearm();
+  }, [rearm]);
 
   useEffect(() => {
     // throttle: لا نعيد ضبط المؤقّت أكثر من مرة كل ثانية لتفادي ضغط الأحداث.
@@ -71,16 +109,42 @@ export const IdleTimeoutGuard: React.FC<Props> = ({ onLogout }) => {
       last = now;
       reset();
     };
+    // أوسع ما يدل على وجود المستخدم: حتى تحريك الفأرة أو الكتابة في حقل دون
+    // ضغط زر. الخانق (1ث) يمنع أي كلفة من mousemove/input المتكررين.
     const events: (keyof WindowEventMap)[] = [
-      "mousedown", "keydown", "scroll", "wheel", "touchstart", "pointerdown", "focus",
+      "mousedown", "mousemove", "keydown", "input", "change",
+      "scroll", "wheel", "touchstart", "touchmove", "pointerdown", "focus",
     ];
     events.forEach((e) => window.addEventListener(e, onActivity, { passive: true, capture: true }));
-    reset();
+
+    // مزامنة بين التبويبات: نشاط في تبويب آخر يمدّد المهلة هنا (ويخفي التنبيه)،
+    // وحذف التوكن من تبويب آخر يعرض شاشة «تم إنهاء الجلسة» بدل ترك هذا التبويب
+    // يعمل بلا توكن فيصطدم برسالة «لم يتم تزويد بيانات الدخول».
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === ACTIVITY_KEY) {
+        rearm();
+        return;
+      }
+      if (e.key === "token" && e.newValue === null) showExpiredOnly();
+    };
+    window.addEventListener("storage", onStorage);
+    // نشاط سجّلته طبقة الـ API (طلب كتابة) — `storage` لا يصل لنفس التبويب.
+    window.addEventListener(USER_ACTIVITY_EVENT, rearm);
+    // 401 من الخادم (توكن محذوف/غير صالح) — نفس الشاشة بدل بانر خطأ غامض.
+    window.addEventListener(SESSION_EXPIRED_EVENT, showExpiredOnly);
+
+    // لا نُصفّر عدّاد النشاط عند كل تحميل صفحة: تحديث الصفحة ليس نشاطاً بمعنى
+    // «المستخدم موجود»، والقراءة المشتركة تكفي لتحديد ما تبقّى.
+    if (localStorage.getItem(ACTIVITY_KEY) == null) writeLastActivity(localStorage, Date.now());
+    rearm();
     return () => {
       events.forEach((e) => window.removeEventListener(e, onActivity, { capture: true } as any));
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener(USER_ACTIVITY_EVENT, rearm);
+      window.removeEventListener(SESSION_EXPIRED_EVENT, showExpiredOnly);
       clearTimers();
     };
-  }, [reset]);
+  }, [reset, rearm, showExpiredOnly]);
 
   // تنبيه ما قبل الانتهاء — يظهر فقط عند الخمول قبل الانتهاء، وأي نشاط يخفيه.
   if (!expired && warnSeconds != null) {

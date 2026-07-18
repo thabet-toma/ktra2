@@ -37,6 +37,7 @@ import {
 } from "lucide-react";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { mergeClearanceImportDeals } from "@/utils/invoiceConversionUtils";
+import { getUnpaidImportDeals, type UnpaidImportDeal } from "@/utils/importPaymentReadiness";
 
 /** يمنع الاستيراد إذا أرجع الخادم تفصيلاً بالدولار وما زال هناك شحن غير مدفوع ومؤكّد. */
 function clearancePreviewBlocksImportForUnpaidFreight(
@@ -57,6 +58,7 @@ function importButtonFooterHint(args: {
     previewLoading: boolean;
     preview: Record<string, unknown> | null;
     freightImportBlocked: boolean;
+    unpaidDeals: UnpaidImportDeal[];
 }): ImportFooterHint | null {
     const {
         selectedDealsCount,
@@ -64,12 +66,22 @@ function importButtonFooterHint(args: {
         previewLoading,
         preview,
         freightImportBlocked,
+        unpaidDeals,
     } = args;
     if (selectedDealsCount === 0 || importBusy) return null;
     if (previewLoading) {
         return {
             text: "الزر معطّل مؤقتاً: جاري التحقق من المعاينة ومن حالة دفع شحن الشحنة على الخادم…",
             tone: "muted",
+        };
+    }
+    if (unpaidDeals.length > 0) {
+        const balances = unpaidDeals
+            .map((deal) => `${deal.dealRef}: $${formatMoney(deal.unpaidUsd)}`)
+            .join(" · ");
+        return {
+            text: `الزر معطّل لأن دفعات المورد المؤكدة غير مكتملة (${balances}). افتح كل صفقة وسجّل الرصيد المتبقي ثم أعد المحاولة.`,
+            tone: "danger",
         };
     }
     if (freightImportBlocked && preview) {
@@ -303,6 +315,8 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
     if (!isOpen) return null;
 
     const freightImportBlocked = clearancePreviewBlocksImportForUnpaidFreight(preview);
+    const unpaidDeals = getUnpaidImportDeals(preview);
+    const dealPaymentImportBlocked = unpaidDeals.length > 0;
     const hasUsdFreightPreview =
         preview != null && preview.shipment_freight_total_usd != null;
     const unpaidFreightUsd = hasUsdFreightPreview
@@ -314,6 +328,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
         previewLoading,
         preview,
         freightImportBlocked,
+        unpaidDeals,
     });
     const importButtonDisabled =
         importBusy ||
@@ -321,6 +336,7 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
         Boolean(importOptionsError) ||
         selectedDeals.length === 0 ||
         freightImportBlocked ||
+        dealPaymentImportBlocked ||
         (selectedDeals.length > 0 && previewLoading);
 
     const q = searchTerm.trim().toLowerCase();
@@ -378,6 +394,13 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
         if (clearancePreviewBlocksImportForUnpaidFreight(preview)) {
             toast(
                 "لا يمكن الاستيراد: شحن الشحنة غير مكتمل الدفع بالدولار. سجّل دفعات وكيل الشحن المؤكّدة من شاشة الشحنة ثم أعد المحاولة.",
+                "error"
+            );
+            return;
+        }
+        if (unpaidDeals.length > 0) {
+            toast(
+                `لا يمكن الاستيراد: دفعات المورد غير مكتملة للصفقات ${unpaidDeals.map((deal) => deal.dealRef).join("، ")}.`,
                 "error"
             );
             return;
@@ -738,6 +761,18 @@ export const ClearanceImportModal: React.FC<ClearanceImportModalProps> = ({
                                                         </span>{" "}
                                                         شحن دولي غير مدفوع ومؤكّد. أنجز «إجراء الدفع» أو تسجيل
                                                         الدفعة من شاشة الشحنة ثم أعد فتح هذه النافذة.
+                                                    </div>
+                                                ) : null}
+                                                {dealPaymentImportBlocked ? (
+                                                    <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2.5 text-xs text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-200">
+                                                        <strong>الخطوة المطلوبة قبل الفاتورة:</strong>{" "}
+                                                        أكمل دفعات المورد المؤكدة للصفقات{" "}
+                                                        {unpaidDeals.map((deal) => (
+                                                            <span key={deal.dealId} className="font-mono font-bold">
+                                                                {deal.dealRef} (متبقٍ ${formatMoney(deal.unpaidUsd)}){" "}
+                                                            </span>
+                                                        ))}
+                                                        ثم أعد المعاينة. هذا شرط لإنشاء الفاتورة الدولية، وليس دفع التخليص أو النقل المحلي.
                                                     </div>
                                                 ) : null}
                                                 {Array.isArray(preview.deals) && preview.deals.length > 0 ? (

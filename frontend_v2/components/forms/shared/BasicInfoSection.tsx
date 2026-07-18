@@ -338,7 +338,12 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
         }}
         onSaveSuccess={(savedSupplier) => {
           if (onSupplierAdded) onSupplierAdded(savedSupplier);
-          handleSelectSupplier(savedSupplier.id);
+          setData((prev: any) => ({
+            ...prev,
+            supplierId: savedSupplier.id,
+            factoryName: savedSupplier.tradeName || '',
+          }));
+          setSupplierSearch('');
         }}
         editingSupplier={supplierToEdit}
       />

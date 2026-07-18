@@ -27,9 +27,9 @@ export function getPurchaseInvoiceCostLabels(isShipmentLinkedImport: boolean) {
         };
 }
 
-export function mergeClearanceImportDeals(
+export function mergeClearanceImportDeals<T extends { deal_id: number; deal_ref: string }>(
     shipmentDeals: ShipmentDealInfo[],
-    optionDeals: Array<{ deal_id: number; deal_ref: string }>
+    optionDeals: T[]
 ): ShipmentDealInfo[] {
     const merged = new Map(shipmentDeals.map((deal) => [String(deal.dealId), deal]));
     optionDeals.forEach((row) => {

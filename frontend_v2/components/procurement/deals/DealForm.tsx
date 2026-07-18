@@ -66,6 +66,8 @@ import { useConfirm } from "@/contexts/ConfirmContext";
 import { DealPrintView } from "./DealPrintView";
 import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
 import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
+import { mergeSupplier } from "@/utils/supplierList";
+import { BANK_SWIFT_IMAGE_REQUIRED } from "@/utils/dealPaymentFlow";
 
 type OperationalStatus =
   | "initial"
@@ -417,7 +419,7 @@ export const DealForm: React.FC<DealFormProps> = ({
           }
           if (!swiftPaymentId) { toast("تعذر إنشاء أو العثور على سجل الدفعة", "error"); setLoading(false); return; }
           if (!data.cashBoxId) { toast("يجب اختيار صندوق مالي لتنفيذ عملية الدفع", "error"); setLoading(false); return; }
-          if (!data.bankSwiftImage) { toast("يجب رفع صورة السليب أولاً", "error"); setLoading(false); return; }
+          if (BANK_SWIFT_IMAGE_REQUIRED && !data.bankSwiftImage) { toast("يجب رفع صورة السليب أولاً", "error"); setLoading(false); return; }
           const swiftPrincipal = Number(data.amount ?? 0);
           const capSwiftEdit = maxPaymentPrincipalForDeal(formData, swiftPaymentId);
           if (swiftPrincipal > capSwiftEdit + 1e-6) { toast(`لا يُسمح بمبلغ يتجاوز قيمة الصفقة. الأقصى المسموح لهذه العملية: $${formatMoney(capSwiftEdit)}`, "error"); setLoading(false); return; }
@@ -436,7 +438,7 @@ export const DealForm: React.FC<DealFormProps> = ({
             const paymentToConfirm = formData.payments?.find(p => p.id === paymentId);
             if (paymentToConfirm) {
               if (paymentToConfirm.bankSwiftImage && !paymentToConfirm.cashBoxId) { toast("هذه الدفعة تحتوي على سليب ولكن لم يتم خصمها من الصندوق بعد", "info"); setLoading(false); return; }
-              if (paymentToConfirm.cashBoxId && !paymentToConfirm.bankSwiftImage) { toast("تم خصم المبلغ من الصندوق ولكن لم يتم رفع صورة السليب", "info"); setLoading(false); return; }
+              if (BANK_SWIFT_IMAGE_REQUIRED && paymentToConfirm.cashBoxId && !paymentToConfirm.bankSwiftImage) { toast("تم خصم المبلغ من الصندوق ولكن لم يتم رفع صورة السليب", "info"); setLoading(false); return; }
             }
             confirmAccountingMeta = await dealsService.confirmPayment(formData.id, paymentId, currentUser.id, currentUser.name, currentUser.role || "user", data.supplierConfirmationImage, data.supplierNotes, data.paymentConfirmationDate, data.cashBoxId);
           }
@@ -856,6 +858,7 @@ export const DealForm: React.FC<DealFormProps> = ({
         dealsService={dealsService}
         items={items}
         readOnly={isDealLocked}
+        onSupplierAdded={(savedSupplier) => setSuppliers((current) => mergeSupplier(current, savedSupplier))}
       />
     </div>
   );

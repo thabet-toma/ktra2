@@ -392,10 +392,10 @@ function mapSinglePaymentToSqlPayload(
     amount: Number(p.amount || 0),
     transfer_date: p.paymentDate ? String(p.paymentDate).slice(0, 10) : null,
     due_date: p.paymentDate ? String(p.paymentDate).slice(0, 10) : null,
-    // Paid يفعّل ترحيل التلقائي — يجب أن يصل لـ SQL مع السليب والصندوق
+    // Paid يفعّل الترحيل التلقائي — إثبات خصم الصندوق كافٍ، والسليب مرفق اختياري.
     status: p.confirmedBySupplier
       ? "Confirmed"
-      : swift
+      : swift || p.cashBoxId || (p as any).cash_box_external_id
         ? "Paid"
         : "Pending",
     notes: p.notes || "",

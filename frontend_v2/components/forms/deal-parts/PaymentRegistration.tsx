@@ -20,7 +20,7 @@ import type { TrialBalanceRow } from "@/types/accounting";
 import { Deal, DealPayment, DealStatus } from "@/types";
 import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
 import { validatePaymentInput } from "@/utils/usePaymentForm";
-import { isAwaitingSupplierConfirmation } from "@/utils/dealPaymentFlow";
+import { BANK_SWIFT_IMAGE_REQUIRED, isAwaitingSupplierConfirmation } from "@/utils/dealPaymentFlow";
 
 /** ربط صندوق (external_id = معرف Firestore) برصيد حسابه في ميزان المراجعة */
 async function fetchSqlBalanceByCashBoxExternalId(): Promise<Record<string, number>> {
@@ -245,7 +245,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
     onSaveClaim(data);
   };
 
-  // ⭐ دالة محسنة لحفظ السليب مع التواريخ
+  // ⭐ دالة محسنة لحفظ التحويل مع التواريخ
   const handleSaveSwift = () => {
     const vErr = validatePaymentInput({ amount: String(amount), date: paymentDate });
     if (vErr.amount || vErr.date) {
@@ -253,7 +253,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       return;
     }
 
-    if (!swiftImage) {
+    if (BANK_SWIFT_IMAGE_REQUIRED && !swiftImage) {
       alert("يرجى رفع صورة السليب");
       return;
     }
@@ -754,7 +754,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
 
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              صورة سليب البنك
+              صورة سليب البنك (اختيارية)
             </label>
             {swiftImage ? (
               <div className="relative group">
@@ -785,8 +785,8 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                     <div className="p-3 bg-green-100 dark:bg-green-900/20 rounded-full mb-3">
                       <Upload className="w-8 h-8 text-green-600 dark:text-green-400" />
                     </div>
-                    <p className="font-medium text-green-700 dark:text-green-300 mb-1">اضغط لرفع صورة السليب البنكي</p>
-                    <p className="text-sm text-green-600 dark:text-green-400">يُفضل صورة واضحة لسليب التحويل</p>
+                    <p className="font-medium text-green-700 dark:text-green-300 mb-1">أضف صورة السليب البنكي إن كانت متاحة</p>
+                    <p className="text-sm text-green-600 dark:text-green-400">يمكن إرفاقها لاحقاً؛ لا تمنع تسجيل التحويل</p>
                   </>
                 )}
                 <input
@@ -822,10 +822,10 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
 
           <button
             onClick={handleSaveSwift}
-            disabled={!swiftImage || !selectedCashBoxId || amount > maxPrincipal}
+            disabled={(BANK_SWIFT_IMAGE_REQUIRED && !swiftImage) || !selectedCashBoxId || amount > maxPrincipal}
             className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
-            {!swiftImage ? (
+            {BANK_SWIFT_IMAGE_REQUIRED && !swiftImage ? (
               <>
                 <AlertCircle className="w-5 h-5" />
                 ارفع صورة السليب أولاً

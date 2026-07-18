@@ -54,6 +54,45 @@ class _Base(TestCase):
 
 
 class CreateFromDealsTest(_Base):
+    def test_regular_create_assigns_a_shipment_number_when_the_form_sends_blank(self):
+        response = self.client.post(
+            '/api/logistics/shipments/',
+            {'shipment_number': '', 'shipment_name': 'شحنة واجهة جديدة'},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertRegex(response.data['shipment_number'], r'^SH-\d{4}$')
+        self.assertEqual(
+            LogisticsShipment.objects.get(pk=response.data['id']).tenant_id,
+            self.tenant.pk,
+        )
+
+    def test_regular_create_ignores_other_tenant_sequence(self):
+        LogisticsShipment.objects.create(
+            tenant=self.other_tenant, shipment_number='SH-0099'
+        )
+        response = self.client.post(
+            '/api/logistics/shipments/', {'shipment_number': ''}, format='json'
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.data['shipment_number'], 'SH-0001')
+
+    def test_blank_number_cannot_erase_a_saved_shipment_number(self):
+        shipment = LogisticsShipment.objects.create(
+            tenant=self.tenant, shipment_number='SH-0042'
+        )
+        response = self.client.patch(
+            f'/api/logistics/shipments/{shipment.pk}/',
+            {'shipment_number': ''},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        shipment.refresh_from_db()
+        self.assertEqual(shipment.shipment_number, 'SH-0042')
+
     def test_create_from_two_deals_cbm(self):
         d1 = self._mk_deal('D-1001', total_cbm=Decimal('2'))
         d2 = self._mk_deal('D-1002', total_cbm=Decimal('3'))

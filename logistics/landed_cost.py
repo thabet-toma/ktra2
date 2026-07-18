@@ -723,7 +723,9 @@ def preview_landed_import(
             continue
         share_value = deal_share_on_shipment(deal, shipment)
         share_volume = deal_volume_share_on_shipment(deal, shipment)
-        deal_val_ils, _, _, _ = deal_total_ils(deal, deal_remaining_rate)
+        deal_val_ils, deal_paid_usd, _, deal_unpaid_usd = deal_total_ils(
+            deal, deal_remaining_rate
+        )
         deal_clear = (clearance_pool * share_value).quantize(Q2, rounding=ROUND_HALF_UP)
         deal_ship = (ship_pool_share * share_volume).quantize(Q2, rounding=ROUND_HALF_UP)
         local_share = share_volume if local_transport_source == 'local_shipment' else share_value
@@ -734,6 +736,9 @@ def preview_landed_import(
             'share': float(share_value),
             'share_by_volume': float(share_volume),
             'deal_total_ils': float(deal_val_ils),
+            'deal_paid_usd': float(deal_paid_usd),
+            'deal_unpaid_usd': float(deal_unpaid_usd),
+            'deal_fully_paid': deal_unpaid_usd <= Decimal('0.02'),
             'allocated_clearance_ils': float(deal_clear),
             'allocated_freight_ils': float(deal_ship),
             'allocated_local_shipping_from_clearance_lines_ils': float(deal_local_clr),

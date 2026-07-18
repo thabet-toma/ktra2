@@ -48,7 +48,7 @@ import {
   transferCommissionsIlsForVat,
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
-import { formatMoney, formatQuantity } from "@/utils/formatNumber";
+import { formatMoney, formatNumber, formatQuantity } from "@/utils/formatNumber";
 import { inventoryApi } from "@/services/inventoryApi";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { ItemSearchModal, productToItem } from "../price-offers/ItemSearchModal";
@@ -571,8 +571,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         savedSqlId = String(formData.id);
       }
 
-      const expectedFeesCount = (sqlBody.fees || []).length;
-      if ((savedInvoice.fees || []).length !== expectedFeesCount) {
+      const expectedFeesCount = Array.isArray(sqlBody.fees) ? sqlBody.fees.length : 0;
+      const savedFees = Array.isArray(savedInvoice.fees) ? savedInvoice.fees : [];
+      if (savedFees.length !== expectedFeesCount) {
         throw new Error("لم يؤكد الخادم حفظ جميع بنود الضرائب والرسوم. لم يتم إغلاق وضع التحرير.");
       }
       const savedMapped = mapPurchaseInvoiceDtoToInvoice(savedInvoice);
@@ -1359,7 +1360,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   if (finalUnitColumn) {
     finalUnitColumn.render = (row) => {
       const index = (formData.items || []).indexOf(row);
-      return formatMoney(finalItemCosts[index]?.finalUnit || 0, { maxDecimals: 4 });
+      return formatNumber(finalItemCosts[index]?.finalUnit || 0, { maxDecimals: 4, group: true });
     };
   }
   const deleteColumn = itemColumns.find((column) => column.key === "del");
