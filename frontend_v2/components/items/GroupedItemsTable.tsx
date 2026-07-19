@@ -2,7 +2,7 @@
  * جدول أصناف شجري بأي عمق (نمط المواقع الاحترافية): يعرض **شجرة التصنيفات** كما بناها
  * المستخدم (أب/ابن/حفيد... بلا حدّ)، والمنتجات أوراق تحت تصنيفاتها. كبسة على أي تصنيف
  * ⇒ الكرت المجمّع لكل ما تحته (بكل الأعماق)؛ كبسة على منتج ⇒ كرته (عبر عمود الاسم).
- * يعيد استخدام نفس أعمدة AseelDenseTable وتنسيقها (DRY). الافتراضي **مطويّ**.
+ * يعيد استخدام نفس أعمدة AseelDenseTable وتنسيقها (DRY). الافتراضي **مفتوح**.
  */
 import React, { useState } from "react";
 import { ChevronDown, ChevronLeft, FolderTree } from "lucide-react";
@@ -33,9 +33,12 @@ export const GroupedItemsTable: React.FC<Props> = ({
   columns, rows, categories, getRowKey, loading, emptyHint = "لا توجد أصناف",
   sortKey, sortDir, onSort, onRowDoubleClick, onShowGroup,
 }) => {
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  // مفتوحة افتراضياً: البدء بالطيّ كان يُخفي كل الأصناف تحت اسم التصنيف فتبدو
+  // الشاشة فارغة. `collapsed` تحمل ما طواه المستخدم فقط (الجديد يبقى مفتوحاً).
+  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  const isExpanded = (id: number) => !collapsed.has(id);
   const toggle = (id: number) =>
-    setExpanded((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setCollapsed((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const getAlign = (col: DenseColumn<SqlProduct>) => col.align || (col.numeric ? "right" : "left");
   const handleSort = (col: DenseColumn<SqlProduct>) => {
@@ -92,7 +95,7 @@ export const GroupedItemsTable: React.FC<Props> = ({
 
   // صفّ تصنيف: سهم طيّ + مجلّد + اسم (كبسة ⇒ كرت مجمّع) + عدد + مجموع الكمية.
   const renderCatNode = (catId: number, name: string, depth: number) => {
-    const open = expanded.has(catId);
+    const open = isExpanded(catId);
     const ids = descendantIds(catId);
     return (
       <tr key={`c-${catId}`} style={{ background: depth === 0 ? "var(--aseel-bg-soft,#e7ecf1)" : "var(--aseel-bg-soft,#f1f3f5)" }}>
@@ -134,7 +137,7 @@ export const GroupedItemsTable: React.FC<Props> = ({
   const body: React.ReactNode[] = [];
   const walk = (cat: TreeCategory, depth: number) => {
     body.push(renderCatNode(cat.id, cat.name, depth));
-    if (!expanded.has(cat.id)) return;
+    if (!isExpanded(cat.id)) return;
     for (const ch of childrenOf.get(cat.id) || []) walk(ch, depth + 1);
     for (const p of productsOf.get(cat.id) || []) body.push(renderRow(p, depth + 1));
   };
@@ -142,7 +145,7 @@ export const GroupedItemsTable: React.FC<Props> = ({
   const uncategorized = productsOf.get(UNCAT) || [];
   if (uncategorized.length) {
     body.push(renderCatNode(UNCAT, "بدون تصنيف", 0));
-    if (expanded.has(UNCAT)) for (const p of uncategorized) body.push(renderRow(p, 1));
+    if (isExpanded(UNCAT)) for (const p of uncategorized) body.push(renderRow(p, 1));
   }
 
   return (

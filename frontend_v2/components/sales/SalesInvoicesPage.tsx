@@ -28,7 +28,6 @@ import {
   RefreshCw,
   Send,
   Truck,
-  Pencil,
   Trash2,
   Plus,
   Printer,
@@ -254,7 +253,8 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     openInNewTab("/sales/invoices/new");
   };
 
-  const openEdit = (id: number) => {
+  /** فتح الفاتورة — تُفتح على وضع العرض، والتحرير من زر «تحرير» داخلها. */
+  const openInvoice = (id: number) => {
     openInNewTab(`/sales/invoices/${id}`);
   };
 
@@ -287,7 +287,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     F2: () => {
       if (selectedKey != null) {
         const row = rows.find((r) => r.id === selectedKey);
-        if (row && row.status === "draft") openEdit(row.id);
+        if (row && row.status === "draft") openInvoice(row.id);
       }
     },
     F6: () => {
@@ -298,7 +298,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     Enter: () => {
       if (selectedKey != null) {
         const row = rows.find((r) => r.id === selectedKey);
-        if (row && row.status === "draft") openEdit(row.id);
+        if (row && row.status === "draft") openInvoice(row.id);
       }
     },
   });
@@ -368,7 +368,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               className="text-blue-700 hover:underline"
               onClick={(e) => {
                 e.stopPropagation();
-                openEdit(r.id);
+                openInvoice(r.id);
               }}
               title="فتح الفاتورة"
             >
@@ -487,15 +487,6 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
         <div style={{ display: "flex", gap: "3px", flexWrap: "wrap", justifyContent: "center" }}>
           {r.status === "draft" && (
             <>
-              <button
-                type="button"
-                className="aseel-toolbtn"
-                style={{ fontSize: "10px", padding: "2px 6px" }}
-                onClick={(e) => { e.stopPropagation(); openEdit(r.id); }}
-                title="تعديل"
-              >
-                <Pencil className="w-3 h-3" />
-              </button>
               <button
                 type="button"
                 className="aseel-toolbtn"
@@ -638,8 +629,8 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               selectable
               selectedKey={selectedKey}
               onSelect={(k) => setSelectedKey(k as number | null)}
-              onRowClick={(r) => openEdit(r.id)}
-              onRowDoubleClick={(r) => openEdit(r.id)}
+              onRowClick={(r) => openInvoice(r.id)}
+              onRowDoubleClick={(r) => openInvoice(r.id)}
               pagination={{ page, pageSize, total: totalRows, onChange: setPage }}
             />
           </div>

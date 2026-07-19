@@ -46,3 +46,20 @@ export function formatMoney(value: unknown, fallback = "0"): string {
 export function formatQuantity(value: unknown, fallback = ""): string {
   return formatNumber(value, { maxDecimals: 4, group: false, fallback });
 }
+
+/**
+ * رصيد محاسبي بجانبه صريحاً: «1,112 دائن» بدل «1,112-».
+ *
+ * الإشارة وحدها ملتبسة في واجهة RTL — المتصفح يرسم السالب في نهاية الرقم بصرياً
+ * («1,112-») فلا يعرف القارئ أمدينٌ هو أم دائن. الاصطلاح: موجب = مدين، سالب = دائن
+ * (الرصيد = مدين − دائن)، والصفر بلا جانب.
+ */
+export function formatBalanceWithSide(value: unknown, fallback = "0"): string {
+  const n = typeof value === "number" ? value : Number(value);
+  if (value === null || value === undefined || value === "" || !Number.isFinite(n)) {
+    return fallback;
+  }
+  const body = formatMoney(Math.abs(n));
+  if (Math.abs(n) < 0.005) return body;
+  return `${body} ${n > 0 ? "مدين" : "دائن"}`;
+}

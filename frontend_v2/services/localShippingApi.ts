@@ -167,14 +167,3 @@ export async function unpostLocalShipment(
     { tenantId: tid() },
   );
 }
-
-export async function importLocalShipmentToInvoice(
-  id: number,
-  invoiceId: number,
-): Promise<{ message: string; invoice_id: number; invoice_number: string }> {
-  return apiPostObject(
-    `logistics/local-shipments/${id}/import-to-invoice/`,
-    { invoice_id: invoiceId },
-    { tenantId: tid() },
-  );
-}

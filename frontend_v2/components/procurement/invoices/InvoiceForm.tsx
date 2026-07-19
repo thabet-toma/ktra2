@@ -73,6 +73,8 @@ import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import { EntityActivityLog } from "@/components/activity/EntityActivityLog";
 import {
   AseelDocumentShell,
+  AseelDocumentView,
+  AseelViewTable,
   AseelGrid,
   AseelIndexPicker,
   AseelAutocomplete,
@@ -1434,11 +1436,34 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const feesTotal = (formData.fees || []).reduce(
     (sum, fee) => sum + (Number(fee.amount) || 0), 0,
   );
+  // عمولات تحويل دفعات الصفقة — داخلة في تكلفة الصنف وأساس ض.ق.م، فتُعرض كسطر في الملخص.
+  const transferCommissionsIls = transferCommissionsIlsForVat(
+    formData.conversionMetadata as Record<string, unknown> | null,
+  );
   const payableTotal = (Number(formData.grandTotal) || 0) + feesTotal;
   const defaultInlineFeeAccount =
     feeAccounts.find((account) => account.code === "5307") ||
     feeAccounts.find((account) => account.account_type === "Expense") ||
     feeAccounts[0] || null;
+  // رسوم الفواتير الدولية تُصنَّف تحت شجرة «53 مصاريف الاستيراد المباشرة».
+  const isInternationalInvoice =
+    formData.invoiceType === "international" || isShipmentLinkedImport;
+  const importExpenseAccounts = feeAccounts.filter(
+    (account) => String(account.code || "").startsWith("53") && account.code !== "53",
+  );
+  const resolveImportFeeAccount = async (name: string) => {
+    try {
+      const account = await accountingApi.resolveImportExpenseAccount(name);
+      setFeeAccounts((prev) => (
+        prev.some((a) => a.id === account.id) ? prev : [...prev, account]
+      ));
+      return account as { id: number; code?: string; name?: string };
+    } catch (error) {
+      console.error("[PurchaseInvoiceFees] Failed to resolve import expense account", error);
+      toast("تعذّر ربط الرسم بحساب «مصاريف الاستيراد» — سيُستخدم الحساب الافتراضي.", "error");
+      return null;
+    }
+  };
 
   const itemsTab = (
     <div className="aseel-legacy-tab">
@@ -1472,6 +1497,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             vatBaseIls={ilsVatBase}
             fees={formData.fees || []}
             defaultFeeAccount={defaultInlineFeeAccount}
+            importExpenseAccounts={isInternationalInvoice ? importExpenseAccounts : []}
+            onResolveFeeAccount={isInternationalInvoice ? resolveImportFeeAccount : undefined}
             readOnly={effectiveReadOnly}
             onFinancial={handleUpdateFinancial}
             onFeesChange={(fees) => {
@@ -1491,6 +1518,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             invoiceVatBaseIls={ilsVatBase}
             hideShippingRow
             fees={formData.fees || []}
+            transferCommissionsIls={transferCommissionsIls}
           />
         </>
       ) : (
@@ -1762,17 +1790,144 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     </div>
   ) : null;
 
+  /* ───────────── العرض المستندي (شراء محلية / دولية) ─────────────
+     يشترك المساران في هذا النموذج، فالعرض واحد ويتبدّل عنوانه ورسومه حسب النوع. */
+  const invCurrency = formData.currency || "ILS";
+  const invMoney = (n: number) => `${fmt(n)} ${invCurrency}`;
+  const invItems = (formData.items || []).filter((i) => (i.name || "").trim() || i.itemId);
+  const invFees = (formData.fees || []).filter((f) => Number(f.amount) > 0);
+
+  const invoiceDocumentView = (
+    <AseelDocumentView<InvoiceItem>
+      title={
+        formData.isReturn
+          ? "مرجع شراء (إرجاع للمورد)"
+          : isInternationalInvoice
+            ? "فاتورة شراء دولية"
+            : "فاتورة شراء"
+      }
+      subtitle={isInternationalInvoice ? "INTERNATIONAL PURCHASE INVOICE" : "PURCHASE INVOICE"}
+      documentNumber={formData.invoiceNumber || (formData.id ? `#${formData.id}` : "مسودة")}
+      status={
+        formData.isPosted
+          ? { label: "مرحّلة", tone: "ok" }
+          : { label: "مسودة", tone: "warn" }
+      }
+      metrics={[
+        { label: "إجمالي المستحق", value: invMoney(payableTotal), tone: "info" },
+        { label: "المجموع قبل الضريبة", value: invMoney(Number(formData.subtotal) || 0) },
+        { label: "الضريبة", value: invMoney(Number(formData.taxAmount) || 0) },
+        { label: "عدد البنود", value: String(invItems.length) },
+      ]}
+      parties={[
+        {
+          title: "المورد",
+          fields: [
+            { label: "الاسم", value: formData.supplierName || "—" },
+            ...(formData.supplierInvoiceNumber
+              ? [{ label: "رقم فاتورة المورد", value: formData.supplierInvoiceNumber }]
+              : []),
+          ],
+        },
+      ]}
+      meta={[
+        { label: "تاريخ الفاتورة", value: formData.invoiceDate || "—" },
+        { label: "العملة", value: invCurrency },
+        ...(formData.exchangeRate
+          ? [{ label: "سعر الصرف", value: String(formData.exchangeRate) }]
+          : []),
+        ...(formData.journalId ? [{ label: "قيد اليومية", value: `#${formData.journalId}` }] : []),
+      ]}
+      columns={[
+        {
+          key: "name",
+          header: "الصنف",
+          render: (r) => (
+            <div>
+              <span className="font-semibold">{r.name || "—"}</span>
+              {r.specifications && (
+                <span className="block text-[11px] text-slate-500">{r.specifications}</span>
+              )}
+            </div>
+          ),
+        },
+        { key: "qty", header: "الكمية", width: "80px", align: "center", numeric: true, render: (r) => formatQuantity(r.quantity) },
+        { key: "price", header: "سعر الوحدة", width: "110px", align: "left", numeric: true, render: (r) => fmt(r.unitPrice) },
+        { key: "total", header: "الإجمالي", width: "120px", align: "left", numeric: true, render: (r) => <b>{fmt(r.totalPrice)}</b> },
+        ...(isInternationalInvoice
+          ? [
+              {
+                key: "landed",
+                header: "التكلفة النهائية/وحدة (₪)",
+                width: "140px",
+                align: "left" as const,
+                numeric: true,
+                render: (r: InvoiceItem) => (r.landedUnitPriceIls ? fmt(r.landedUnitPriceIls) : "—"),
+              },
+            ]
+          : []),
+      ]}
+      rows={invItems}
+      rowKey={(r, i) => r.id || i}
+      emptyRowsHint="لا توجد بنود في الفاتورة"
+      totals={[
+        { label: "المجموع قبل الضريبة", value: invMoney(Number(formData.subtotal) || 0) },
+        ...((Number(formData.discountAmount) || 0) > 0
+          ? [{ label: "الخصم", value: invMoney(Number(formData.discountAmount) || 0) }]
+          : []),
+        { label: "الضريبة", value: invMoney(Number(formData.taxAmount) || 0) },
+        ...(feesTotal > 0 ? [{ label: "الرسوم", value: invMoney(feesTotal) }] : []),
+        { label: "إجمالي المستحق", value: invMoney(payableTotal), emphasis: true },
+      ]}
+      sections={[
+        ...(invFees.length > 0
+          ? [
+              {
+                key: "fees",
+                title: `الرسوم (${invFees.length})`,
+                content: (
+                  <AseelViewTable<(typeof invFees)[number]>
+                    columns={[
+                      { key: "desc", header: "البيان", render: (f) => f.description || "—" },
+                      { key: "acc", header: "الحساب", width: "160px", render: (f) => f.expenseAccountName || "—" },
+                      {
+                        key: "cap",
+                        header: "يُرسمل على المخزون",
+                        width: "130px",
+                        align: "center",
+                        render: (f) => (f.capitalizeToInventory ? "نعم" : "لا"),
+                      },
+                      { key: "amt", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (f) => fmt(Number(f.amount) || 0) },
+                    ]}
+                    rows={invFees}
+                    rowKey={(f, i) => f.id || i}
+                    showIndex={false}
+                    emptyHint="لا توجد رسوم"
+                  />
+                ),
+              },
+            ]
+          : []),
+        ...(formData.notes
+          ? [{ key: "notes", title: "ملاحظات", content: formData.notes }]
+          : []),
+      ]}
+    />
+  );
+
   return (
     <div
       id="purchase-invoice-print"
       dir="rtl"
     >
     <AseelDocumentShell
-      title={formData.isReturn ? "مرجع شراء (إرجاع للمورد)" : "فاتورة الشراء"}
+      title={formData.isReturn
+        ? "مرجع شراء (إرجاع للمورد)"
+        : isInternationalInvoice ? "فاتورة شراء دولية" : "فاتورة الشراء"}
       state={
         formData.id
-          ? `${formData.isReturn ? "مرجع" : "فاتورة"} ${formData.invoiceNumber || `#${formData.id}`}`
-          : (formData.isReturn ? "مرجع جديد" : "فاتورة جديدة")
+          ? `${formData.isReturn ? "مرجع" : isInternationalInvoice ? "فاتورة دولية" : "فاتورة"} ${formData.invoiceNumber || `#${formData.id}`}`
+          : (formData.isReturn ? "مرجع جديد" : isInternationalInvoice ? "فاتورة دولية جديدة" : "فاتورة جديدة")
       }
       company={
         formData.glPurchaseReceiptJournalId != null ? `قيد محاسبي #${formData.glPurchaseReceiptJournalId}` : undefined
@@ -1935,7 +2090,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       }
       activeTab={activeTabKey}
       onTabChange={setActiveTabKey}
-      tabs={[
+      tabs={viewMode ? [] : [
         { key: "basic", label: "بيانات الفاتورة", content: basicInfoTab },
         { key: "items", label: "البنود والمنتجات", content: itemsTab },
         { key: "fees", label: `حسابات الرسوم${feesTotal > 0 ? ` (${formatMoney(feesTotal)})` : ""}`, content: feesTab },
@@ -2004,6 +2159,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               <span>تكلفة النقل</span>
               <span className="aseel-total-value">{fmt(formData.conversionMetadata.deal_local_shipping_from_clearance_ils || 0)}</span>
             </div>
+            {/* عمولات تحويل دفعات الصفقة — كانت محسوبة في تكلفة المنتج وأساس ض.ق.م بلا سطر ظاهر هنا */}
+            {transferCommissionsIls > 0 && (
+              <div className="aseel-total-row">
+                <span>عمولات تحويل الدفعات</span>
+                <span className="aseel-total-value">{fmt(transferCommissionsIls)}</span>
+              </div>
+            )}
             <div className="border-t border-gray-400 my-1 w-full" style={{ borderStyle: "dashed", borderColor: "rgba(0,0,0,0.15)" }} />
             {(formData.discountAmount || 0) > 0 && (
               <div className="aseel-total-row">
@@ -2013,7 +2175,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             )}
             <div className="aseel-total-row">
               <span>المجموع قبل الضريبة</span>
-              <span className="aseel-total-value">{fmt(formData.subtotal || 0)}</span>
+              <span className="aseel-total-value">{fmt((formData.subtotal || 0) + transferCommissionsIls)}</span>
             </div>
             <div className="aseel-total-row">
               <span>الضريبة المضافة</span>
@@ -2085,8 +2247,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       }
     >
       {accBanner}
+      {/* وضع القراءة: مستند مُنسَّق بدل شبكة الإدخال المعطّلة. */}
+      {viewMode && invoiceDocumentView}
       {/* الشجرة انتقلت إلى الشريط الجانبي (aside) ليرتفع لأعلى المستند. */}
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, minWidth: 0, display: viewMode ? "none" : "flex", flexDirection: "column" }}>
           {isShipmentLinkedImport && (
             <div
               data-testid="import-inclusive-cost-note"

@@ -9,7 +9,7 @@ const ready = {
   invoiceEligible: true,
   dealsCount: 1,
   freightTotalUsd: 100,
-  freightFullyPaid: true,
+  freightCostEstablished: true,
   clearanceExists: true,
   clearanceCostTotal: 50,
   convertedInvoiceId: null,
@@ -20,8 +20,7 @@ test.describe("Import journey guidance", () => {
   test("returns one clear next action for every required stage", () => {
     expect(getImportJourneyGuidance({ ...ready, shipmentSaved: false }).action).toBe("save_shipment");
     expect(getImportJourneyGuidance({ ...ready, dealsCount: 0 }).action).toBe("link_deals");
-    expect(getImportJourneyGuidance({ ...ready, freightTotalUsd: 0 }).action).toBe("set_freight");
-    expect(getImportJourneyGuidance({ ...ready, freightFullyPaid: false }).action).toBe("pay_freight");
+    expect(getImportJourneyGuidance({ ...ready, freightCostEstablished: false }).action).toBe("pay_freight");
     expect(getImportJourneyGuidance({ ...ready, clearanceExists: false }).action).toBe("create_clearance");
     expect(getImportJourneyGuidance({ ...ready, clearanceCostTotal: 0 }).action).toBe("enter_clearance_costs");
     expect(getImportJourneyGuidance(ready).action).toBe("create_invoice");
@@ -46,6 +45,14 @@ test.describe("Import journey guidance", () => {
 
   test("routes transport-only shipments to local transport instead of an invoice", () => {
     expect(getImportJourneyGuidance({ ...ready, invoiceEligible: false }).action).toBe("manage_local_transport");
+  });
+
+  test("a zero-cost freight shipment is import-ready without any payment", () => {
+    // كان الشحن الصفري يوقف الرحلة فيُضطر المستخدم لدفعة وهمية 0.01.
+    const guidance = getImportJourneyGuidance({
+      ...ready, freightTotalUsd: 0, freightCostEstablished: true,
+    });
+    expect(guidance.action).toBe("create_invoice");
   });
 
   test("identifies deals that need the selected freight measure before allocation", () => {

@@ -112,7 +112,9 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
   const [confirmationDate, setConfirmationDate] = useState(new Date().toISOString().split('T')[0]);
 
-  const [usdToIls, setUsdToIls] = useState(3.78);
+  // يبدأ فارغاً عمداً: قيمة افتراضية (3.78) كانت تُحفظ كما هي عند نسيان تعديلها
+  // فتُسعَّر الدفعة بسعر غير حقيقي وتتشوّه تكلفة الاستيراد.
+  const [usdToIls, setUsdToIls] = useState<string>("");
   const [transferFee, setTransferFee] = useState(0);
 
   // ⭐ استخدام جميع مصادر بيانات الدفعة
@@ -162,7 +164,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       }
 
       // تحميل البيانات الأخرى
-      setUsdToIls(paymentData.usdToIls || 3.78);
+      setUsdToIls(paymentData.usdToIls ? String(paymentData.usdToIls) : "");
       setTransferFee(paymentData.transferCost || 0);
       setAmount(paymentData.amount || remainingAmount || calculatedInstallmentAmount);
       setNotes(paymentData.notes || "");
@@ -199,7 +201,9 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       const url = await cloudinaryService.uploadImage(file);
       setter(url);
     } catch (err) {
-      alert("فشل رفع الصورة");
+      // كان يبتلع السبب الحقيقي (مثل «لم تُضبط بيانات Cloudinary على الخادم»)
+      // فيبدو الخلل عطلاً في السحابة بينما هو إعداد ناقص على الخادم.
+      alert(`فشل رفع الصورة: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsUploading(null);
     }
@@ -209,13 +213,6 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
   const handleSaveClaim = () => {
     if (!claimImage) {
       alert("يرجى رفع صورة المطالبة");
-      return;
-    }
-
-    if (amount > maxPrincipal) {
-      alert(
-        `❌ المبلغ ($${amount.toLocaleString()}) يتجاوز الحد المسموح ($${maxPrincipal.toLocaleString()}) — لا يجوز تجاوز إجمالي الصفقة`
-      );
       return;
     }
 
@@ -247,9 +244,11 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
 
   // ⭐ دالة محسنة لحفظ التحويل مع التواريخ
   const handleSaveSwift = () => {
-    const vErr = validatePaymentInput({ amount: String(amount), date: paymentDate });
-    if (vErr.amount || vErr.date) {
-      alert(vErr.amount || vErr.date);
+    const vErr = validatePaymentInput({
+      amount: String(amount), date: paymentDate, exchangeRate: usdToIls,
+    });
+    if (vErr.amount || vErr.date || vErr.exchangeRate) {
+      alert(vErr.amount || vErr.date || vErr.exchangeRate);
       return;
     }
 
@@ -273,16 +272,9 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       return;
     }
 
-    if (amount > maxPrincipal) {
-      alert(
-        `❌ المبلغ ($${amount.toLocaleString()}) يتجاوز الحد المسموح ($${maxPrincipal.toLocaleString()}) — لا يجوز تجاوز إجمالي الصفقة`
-      );
-      return;
-    }
-
     const data = {
       bankSwiftImage: swiftImage,
-      usdToIls: usdToIls,
+      usdToIls: Number(usdToIls),
       transferCost: transferFee,
       transferFee: transferFee,
       paymentDate: new Date(paymentDate + 'T00:00:00').toISOString(),
@@ -506,7 +498,6 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
               type="number"
               min="0.01"
               step="0.01"
-              max={maxPrincipal > 0 ? maxPrincipal : undefined}
               value={amount}
               onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
               className="w-full p-3 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-right text-lg font-medium"
@@ -515,16 +506,21 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
           </div>
 
           <div className="mt-2 flex justify-between text-sm">
-            <span className="text-gray-500">الحد الأقصى لهذه العملية:</span>
+            <span className="text-gray-500">المتبقي على الصفقة:</span>
             <span className="font-medium text-blue-600 dark:text-blue-400">
               ${maxPrincipal.toLocaleString()}
             </span>
           </div>
 
+          {/* الفائض عن إجمالي الصفقة دفعة مقدمة مشروعة: المورد يصبح مديناً لنا
+              وتُسوّى على صفقة لاحقة — إخبار لا منع (قرار المالك). */}
           {amount > maxPrincipal && (
-            <div className="mt-2 flex items-center gap-2 text-red-600 dark:text-red-400 text-sm">
+            <div className="mt-2 flex items-center gap-2 text-sky-700 dark:text-sky-400 text-sm">
               <AlertCircle className="w-4 h-4" />
-              <span>المبلغ يتجاوز المتاح ({maxPrincipal.toLocaleString()}$)</span>
+              <span>
+                يتجاوز المتبقي بـ ${(amount - maxPrincipal).toLocaleString()} — يُسجَّل
+                دفعة مقدمة ويصبح رصيداً لصالحك عند المورد.
+              </span>
             </div>
           )}
         </div>
@@ -616,7 +612,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
 
           <button
             onClick={handleSaveClaim}
-            disabled={!claimImage || amount > maxPrincipal || amount <= 0}
+            disabled={!claimImage || amount <= 0}
             className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {!claimImage ? (
@@ -665,7 +661,8 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                 type="number"
                 step="0.001"
                 value={usdToIls}
-                onChange={(e) => setUsdToIls(Number(e.target.value))}
+                onChange={(e) => setUsdToIls(e.target.value)}
+                placeholder="أدخل سعر التحويل"
                 className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
               />
             </div>
@@ -822,7 +819,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
 
           <button
             onClick={handleSaveSwift}
-            disabled={(BANK_SWIFT_IMAGE_REQUIRED && !swiftImage) || !selectedCashBoxId || amount > maxPrincipal}
+            disabled={(BANK_SWIFT_IMAGE_REQUIRED && !swiftImage) || !selectedCashBoxId || amount <= 0}
             className="w-full py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {BANK_SWIFT_IMAGE_REQUIRED && !swiftImage ? (

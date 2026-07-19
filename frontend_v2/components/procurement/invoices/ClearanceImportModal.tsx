@@ -44,6 +44,11 @@ function clearancePreviewBlocksImportForUnpaidFreight(
     preview: Record<string, unknown> | null
 ): boolean {
     if (!preview || preview.shipment_freight_total_usd == null) return false;
+    // البوابة = «التكلفة مُثبتة» لا «مدفوعة»: قيد الاستحقاق يثبّت تكلفة الشحن
+    // وسعر صرفها فلا يلزم دفع الوكيل (قرار المالك). الخادم يرسل الراية جاهزة.
+    if (preview.shipment_freight_cost_established != null) {
+        return !preview.shipment_freight_cost_established;
+    }
     if (preview.shipment_freight_unpaid_usd == null) return false;
     const unpaid = Number(preview.shipment_freight_unpaid_usd);
     return Number.isFinite(unpaid) && unpaid > 0.02;
@@ -91,7 +96,7 @@ function importButtonFooterHint(args: {
                 ? formatMoney(u)
                 : "—";
         return {
-            text: `الزر معطّل لأن شحن الشحنة غير مكتمل كدفع مؤكّد بالدولار على الخادم (المتبقي تقريباً $${unpaid}). أكمل دفعات وكيل الشحن من شاشة الشحنة حتى يساوي المدفوع إجمالي الشحن بالدولار ثم أعد المحاولة. ملاحظة: شارة حالة التخليص (مثل PROCESSING) لا تعطّل هذا الزر.`,
+            text: `الزر معطّل لأن تكلفة الشحن الدولي غير مُثبتة على **وكيل الشحن** (غير المُثبت تقريباً $${unpaid}) — وهذا طرف مستقل عن المورد، فاكتمال دفعات المورد لا يغنيه. أثبِت «استحقاق الشحن للوكيل» بسعر الصرف من شاشة الشحنة (لا يلزم دفعه)، أو أكمل دفعاته بالدولار، ثم أعد المحاولة. ملاحظة: شارة حالة التخليص (مثل PROCESSING) لا تعطّل هذا الزر.`,
             tone: "danger",
         };
     }

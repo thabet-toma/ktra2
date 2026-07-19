@@ -104,7 +104,8 @@ class CreatePaymentEndpointTest(_Base):
         self.assertEqual(resp.status_code, 201, resp.content)
         self.assertEqual(deal.payments.count(), 2)
 
-    def test_create_over_cap_rejected(self):
+    def test_create_over_cap_is_allowed_as_advance(self):
+        """الدفع الزائد للمورد دفعة مقدمة مشروعة — كان مرفوضاً (قرار المالك)."""
         deal = self._mk_deal('D-0803', total='1000')
         self._mk_payment(deal, number=1, amount='800')
         resp = self.client.post(
@@ -112,8 +113,8 @@ class CreatePaymentEndpointTest(_Base):
             {'payment_number': 2, 'title': 'الدفعة 2', 'amount': '300'},
             format='json',
         )
-        self.assertEqual(resp.status_code, 400, resp.content)
-        self.assertEqual(deal.payments.count(), 1)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        self.assertEqual(deal.payments.count(), 2)
 
     def test_duplicate_installment_number_rejected(self):
         deal = self._mk_deal('D-0804')
@@ -177,14 +178,17 @@ class UpdatePaymentEndpointTest(_Base):
         pay.refresh_from_db()
         self.assertEqual(Decimal(pay.amount), Decimal('700'))
 
-    def test_update_over_cap_rejected(self):
+    def test_update_over_cap_is_allowed_as_advance(self):
+        """رفع مبلغ دفعة فوق إجمالي الصفقة مسموح — الفائض دفعة مقدمة."""
         deal = self._mk_deal('D-0815', total='1000')
         self._mk_payment(deal, number=1, amount='600')
         pay2 = self._mk_payment(deal, number=2, amount='300')
         resp = self.client.patch(
             self._payments_url(deal, pay2), {'amount': '500'}, format='json',
         )
-        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        pay2.refresh_from_db()
+        self.assertEqual(str(pay2.amount), '500.00')
 
 
 class DealNotPostedDocTest(_Base):

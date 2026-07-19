@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { accountingApi } from "../../services/accountingApi";
-import { formatMoney } from "../../utils/formatNumber";
+import { formatMoney, formatBalanceWithSide } from "../../utils/formatNumber";
 import type { AccountingAccount, GeneralLedgerResponse, CurrencyDto } from "../../types/accounting";
 import {
   AseelDocumentShell,
@@ -53,25 +53,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
     appliedInitial.current = initialAccountId;
     setAccountId(String(initialAccountId));
     onInitialAccountConsumed?.();
-    // Auto-run when navigating from CoA
-    void (async () => {
-      setLoading(true);
-      setErr(null);
-      try {
-        const params: Record<string, string> = {
-          account_id: String(initialAccountId),
-          start_date: `${new Date().getFullYear()}-01-01`,
-          end_date: new Date().toISOString().split("T")[0],
-        };
-        const res = await accountingApi.getGeneralLedger(params);
-        setData(res as GeneralLedgerResponse);
-      } catch (e: unknown) {
-        setErr(e instanceof Error ? e.message : "فشل التقرير");
-        setData(null);
-      } finally {
-        setLoading(false);
-      }
-    })();
+    // التشغيل نفسه يتكفّل به التحميل التلقائي أدناه بمجرد ضبط الحساب.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialAccountId]);
 
@@ -100,7 +82,21 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
     }
   }, [accountId, start, end, unposted, currencyId]);
 
+  // تحميل تلقائي عند تغيّر الحساب أو الفترة أو العملة. كان لا بدّ من ضغط «عرض»
+  // يدوياً، فيبدو الحساب فارغاً بينما لم يُنفَّذ أي استعلام أصلاً. الإمهال القصير
+  // يمنع نداءً لكل ضغطة في حقول التاريخ.
+  useEffect(() => {
+    if (!accountId) {
+      setData(null);
+      setErr(null);
+      return;
+    }
+    const timer = window.setTimeout(() => { void run(); }, 350);
+    return () => window.clearTimeout(timer);
+  }, [accountId, run]);
+
   const fmt = (n: number) => formatMoney(n);
+  const fmtBalance = (n: number) => formatBalanceWithSide(n);
 
   // Use transactions from GeneralLedgerResponse
   const ledgerRows: LedgerRow[] = data?.transactions || [];
@@ -111,7 +107,8 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
     { key: "description", header: "البيان", render: (r) => r.description },
     { key: "debit", header: "مدين", numeric: true, render: (r) => fmt(Number(r.debit)) },
     { key: "credit", header: "دائن", numeric: true, render: (r) => fmt(Number(r.credit)) },
-    { key: "balance", header: "الرصيد المتراكم", numeric: true, render: (r) => fmt(Number(r.balance)) },
+    // الجانب صريح: «1,112 دائن» — الإشارة وحدها تُرسم في نهاية الرقم بـRTL فتلتبس.
+    { key: "balance", header: "الرصيد المتراكم", numeric: true, render: (r) => fmtBalance(Number(r.balance)) },
   ];
 
   const totalDebit = ledgerRows.reduce((s, r) => s + Number(r.debit), 0);
@@ -119,7 +116,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
   const totals = data ? {
     debit: fmt(totalDebit),
     credit: fmt(totalCredit),
-    balance: fmt(Number(data.closing_balance)),
+    balance: fmtBalance(Number(data.closing_balance)),
   } : undefined;
 
   const filterBar = (
@@ -166,8 +163,8 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
       {data && (
         <div style={{ padding: "8px 0", fontSize: "0.85rem", color: "var(--aseel-ink-soft)" }}>
           <strong>{data.account_code} — {data.account_name}</strong>
-          &nbsp;|&nbsp; رصيد افتتاحي: <strong>{fmt(Number(data.opening_balance))}</strong>
-          &nbsp;|&nbsp; رصيد ختامي: <strong>{fmt(Number(data.closing_balance))}</strong>
+          &nbsp;|&nbsp; رصيد افتتاحي: <strong>{fmtBalance(Number(data.opening_balance))}</strong>
+          &nbsp;|&nbsp; رصيد ختامي: <strong>{fmtBalance(Number(data.closing_balance))}</strong>
         </div>
       )}
       <AseelReportTable<LedgerRow>
@@ -177,7 +174,13 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
         totals={totals}
         exportable={true}
         loading={loading}
-        emptyHint="اختر حساباً واضغط عرض"
+        emptyHint={
+          data
+            // الفرق مهم: «لم تبحث بعد» ≠ «بحثت ولا يوجد». المستند المؤرَّخ بعد «إلى»
+            // (فاتورة بتاريخ لاحق) لا يظهر، وكانت الرسالة الثابتة توحي بأن الحساب فارغ.
+            ? `لا توجد حركات على هذا الحساب بين ${start} و${end}. المستندات المؤرَّخة خارج هذه الفترة لا تظهر — إن كان تاريخ الفاتورة لاحقاً فوسّع حقل «إلى».`
+            : "اختر حساباً لعرض حركته"
+        }
         getRowKey={(r, idx) => `${r.journal_id}-${idx}`}
       />
     </>

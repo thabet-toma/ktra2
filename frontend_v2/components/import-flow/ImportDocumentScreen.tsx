@@ -8,7 +8,7 @@ import { resolveTenantId } from "@/utils/tenantContext";
 import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, unpostClearanceAccrual } from "@/services/clearanceApi";
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
-import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, payLocalShipmentFromCashBox, importLocalShipmentToInvoice } from "@/services/localShippingApi";
+import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, payLocalShipmentFromCashBox } from "@/services/localShippingApi";
 import { AseelDocumentShell, useRecordNavigation, AseelToolbarAction, AseelTab, AseelDateInput } from "@/components/aseel";
 import { effectiveDealTitleForDisplay } from "@/utils/dealTitleDisplay";
 import { getShippingWorkflowLabel } from "@/utils/shippingWorkflowLabels";
@@ -18,6 +18,7 @@ import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import { formatMoney } from "@/utils/formatNumber";
 import { getImportJourneyGuidance, getMissingDealMeasureRefs, type ImportJourneyAction } from "./importJourneyGuidance";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
+import { shipmentsService } from "@/services/shipmentsService";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { captureScrollPosition, restoreScrollPosition as applyScrollPosition, type ScrollPositionSnapshot } from "@/utils/scrollPosition";
 const tid = () => resolveTenantId();
@@ -330,6 +331,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const [showAgentPayForm, setShowAgentPayForm] = useState(false);
   const [agentPayAmount, setAgentPayAmount] = useState("");
   const [agentPayRate, setAgentPayRate] = useState("3.6");
+  const [freightAccrualRate, setFreightAccrualRate] = useState("3.6");
   const [agentPayDate, setAgentPayDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [agentPayConfirmed, setAgentPayConfirmed] = useState(true);
   const [agentPayNotes, setAgentPayNotes] = useState("");
@@ -1019,20 +1021,6 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     }
   }, [payingLocalId, payCashBoxId, localPayAmount, localPayDate, localPayNotes, reloadLocal, toast]);
 
-  /** نقل تكلفة النقل المحلي إلى فاتورة الشراء المحوّلة كرسم (T12-A5 — كان المسار غير مكشوف في أي شاشة) */
-  const handleImportLocalToInvoice = useCallback(async (id: number, invoiceId: number) => {
-    if (!(await confirm({ title: "نقل التكلفة للفاتورة", message: "نقل تكلفة هذا النقل المحلي إلى فاتورة الشراء كرسم؟ سيُحتسب ضمن تكلفة الفاتورة عند ترحيلها.", danger: false, confirmText: "نقل" }))) return;
-    setSaving(true); setError(null);
-    try {
-      const res = await importLocalShipmentToInvoice(id, invoiceId);
-      setLocalShipments((prev) => prev.map((l) => l.id === id ? { ...l, purchase_invoice: invoiceId, purchase_invoice_number: res.invoice_number } : l));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  }, []);
-
   // ── تراجع عن الترحيل (task17 — كانت الـ endpoints جاهزة backend بلا واجهة) ──
   const handleUnpostShipment = useCallback(async () => {
     if (!shipment) return;
@@ -1248,6 +1236,55 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     }
   }, [shipment, agentPayAmount, agentPayRate, agentPayDate, agentPayConfirmed, agentPayNotes, toast, reconcileShipmentInvoices]);
 
+  // ── استحقاق شحن الوكيل: قيد مستقل تماماً عن دفعاته ──
+  const refetchShipment = useCallback(async (shipmentId: number) => {
+    const fresh = await apiGetObject<ShipmentApiRow>(
+      `logistics/shipments/${shipmentId}/`, { tenantId: tid() },
+    );
+    setShipment(fresh);
+    setShipmentForm({ ...fresh });
+  }, []);
+
+  const handlePostFreightAccrual = useCallback(async () => {
+    if (!shipment) return;
+    const rate = Number(freightAccrualRate);
+    if (!Number.isFinite(rate) || rate <= 0) {
+      setError("أدخل سعر صرف الدولار للشيكل (أكبر من صفر).");
+      return;
+    }
+    setSaving(true); setError(null);
+    try {
+      const res = await shipmentsService.postShipmentFreightAccrual(String(shipment.id), rate);
+      // تحديث فوري من ردّ الترحيل: لا ننتظر إعادة الجلب حتى تتقدّم الخطوة بلا لبس.
+      const accrued = { freight_is_posted: true, freight_exchange_rate: rate };
+      setShipment((prev) => (prev ? { ...prev, ...accrued } : prev));
+      setShipmentForm((prev) => (prev ? { ...prev, ...accrued } : prev));
+      await refetchShipment(shipment.id);
+      toast(`أُثبت استحقاق الشحن على الوكيل (${res.amount_ils || ""} ₪) — الدفع لاحقاً ومستقل.`, "success");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [shipment, freightAccrualRate, refetchShipment, toast]);
+
+  const handleUnpostFreightAccrual = useCallback(async () => {
+    if (!shipment) return;
+    setSaving(true); setError(null);
+    try {
+      await shipmentsService.unpostShipmentFreightAccrual(String(shipment.id));
+      const cleared = { freight_is_posted: false, freight_exchange_rate: null };
+      setShipment((prev) => (prev ? { ...prev, ...cleared } : prev));
+      setShipmentForm((prev) => (prev ? { ...prev, ...cleared } : prev));
+      await refetchShipment(shipment.id);
+      toast("تم التراجع عن استحقاق الشحن — دفعات الوكيل المرحّلة لم تتأثر.", "success");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }, [shipment, refetchShipment, toast]);
+
   // ── F: Convert to purchase invoice ──
   const [convertedInvoices, setConvertedInvoices] = useState<Array<{
     id: number;
@@ -1331,6 +1368,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     .filter(isAgentPaymentSettled)
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const freightFullyPaid = freightTotalUsd > 0 && freightPaidUsd >= freightTotalUsd - 0.02;
+  // بوابة الاستيراد صارت «التكلفة مُثبتة» لا «مدفوعة»: قيد الاستحقاق يثبّت تكلفة
+  // الشحن وسعر صرفها، فلا داعي لدفع الوكيل — ولا لدفعة وهمية عندما تكون التكلفة صفراً.
+  const freightAccrued = Boolean((s as { freight_is_posted?: boolean }).freight_is_posted);
+  /** الفائض عن تكلفة الشحن = دفعة مقدمة لدى الوكيل (يصبح مديناً لنا) */
+  const freightAgentAdvanceUsd = Math.max(0, freightPaidUsd - freightTotalUsd);
+  const freightCostEstablished = freightAccrued || freightFullyPaid || freightTotalUsd <= 0;
 
   const paidShipping = clearancePayments
     .filter((p) => p.payment_purpose === "shipping" && p.is_posted)
@@ -1343,12 +1386,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     0,
   );
   const clearanceRemaining = Math.max(0, clearanceCostTotal - paidClearance);
+  /** الفائض عن استحقاق التخليص = دفعة مقدمة لدى المخلّص (يصبح مديناً لنا) */
+  const clearanceAdvance = Math.max(0, paidClearance - clearanceCostTotal);
   const guidance = getImportJourneyGuidance({
     shipmentSaved: Boolean(s.id),
     invoiceEligible: s.shipment_type !== "transport",
     dealsCount: shipmentDeals.length,
     freightTotalUsd,
-    freightFullyPaid,
+    freightCostEstablished,
     clearanceExists: Boolean(clearance),
     clearanceCostTotal,
     convertedInvoiceId: convertedPiId,
@@ -1360,11 +1405,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setActiveTab("deals");
       void openLinkPicker();
     }
-    if (action === "set_freight") setActiveTab("deals");
-    if (action === "pay_freight") {
-      setActiveTab("payments");
-      setShowAgentPayForm(true);
-    }
+    if (action === "pay_freight") setActiveTab("payments");
     if (action === "create_clearance") {
       setActiveTab("clearance");
       void handleCreateClearance();
@@ -1672,10 +1713,18 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             <button type="button" className="aseel-toolbtn" onClick={() => void handleUnpostClearanceAccrual()} disabled={saving}>تراجع عن الاستحقاق</button>
           </>
         )}
-        <button type="button" className="aseel-toolbtn" onClick={openClearancePayment} disabled={saving || !clearanceForm.customs_broker || clearanceRemaining <= 0}>
+        <button
+          type="button" className="aseel-toolbtn" onClick={openClearancePayment}
+          disabled={saving || !clearanceForm.customs_broker}
+          title="دفع للمخلّص من الصندوق بقيد مستقل — يجوز تجاوز المتبقي (يصير دفعة مقدمة)"
+        >
           تسجيل دفعة للمخلّص
         </button>
-        <span className="text-xs text-slate-500">الإفراج وإثبات الاستحقاق لا يتطلبان دفع المبلغ كاملاً.</span>
+        <span className="text-xs text-slate-500">
+          {clearanceForm.journal
+            ? "الإفراج وإثبات الاستحقاق لا يتطلبان دفع المبلغ كاملاً."
+            : "الاستحقاق يُثبَّت تلقائياً عند ترحيل الشحنة إلى فاتورة — أو أثبِته الآن يدوياً."}
+        </span>
       </div>
       <div className="aseel-headband" style={{ marginBottom: 4 }}>
         {fld("رقم البيان", <input className="aseel-input" value={clearanceForm.declaration_number || ""} onChange={cfText("declaration_number")} />)}
@@ -1883,9 +1932,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                   {!ls.is_posted && (
                     <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handlePostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px", backgroundColor: "var(--aseel-primary)", color: "white", padding: "2px 6px" }} title="مدين تكلفة نقل محلي / دائن ذمم الناقل.">إثبات الاستحقاق</button>
                   )}
-                  {Number(ls.remaining_balance ?? ls.amount) > 0 && (
-                    <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); openLocalPayment(ls); }} disabled={saving} style={{ fontSize: "11px" }}>تسجيل دفعة</button>
-                  )}
+                  <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); openLocalPayment(ls); }} disabled={saving} style={{ fontSize: "11px" }} title="دفع للناقل من الصندوق بقيد مستقل — يجوز تجاوز المتبقي (يصير دفعة مقدمة)">تسجيل دفعة</button>
                   {ls.is_posted && (
                     <button type="button" className="aseel-toolbtn" onClick={(e) => { e.stopPropagation(); void handleUnpostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }} title="يحذف قيد المصروف ويعيد السجل مسودة">تراجع عن الترحيل</button>
                   )}
@@ -1900,7 +1947,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       </table>
       {localShipments.some((l) => !l.is_posted) && (
         <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", padding: "4px 0" }}>
-          «إثبات الاستحقاق» يدائن الناقل، و«تسجيل دفعة» يخصم من ذممه ويخرج المبلغ من الصندوق بقيد منفصل.
+          الاستحقاق («ارسالية») يُثبَّت تلقائياً عند ترحيل الشحنة إلى فاتورة فيصير الناقل دائناً — أو أثبِته الآن يدوياً. «تسجيل دفعة» يخصم من ذممه بقيد منفصل.
         </p>
       )}
       {payingLocalId && (
@@ -1972,7 +2019,63 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const paymentsContent = (
     <div style={{ padding: "4px 8px" }}>
-      {/* ── ١) دفعات وكيل الشحن الدولي (USD) — شرط استيراد الفاتورة الدولية ── */}
+      {/* ── ٠) استحقاق شحن الوكيل — منفصل عن الدفع، وهو ما يثبّت التكلفة ── */}
+      <div style={{ marginBottom: 10, border: "1px solid var(--aseel-border, #ddd)", borderRadius: 4, padding: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>
+            استحقاق شحن الوكيل — يجعله دائناً (مستقل عن الدفع)
+          </h4>
+          {freightAccrued && (
+            <span style={{ color: "var(--aseel-ok, #267346)", fontWeight: 700, fontSize: "var(--aseel-fs-sm, 12px)" }}>
+              ✓ مُستحق بسعر {fmt(Number(s.freight_exchange_rate) || 0)} ₪/$
+            </span>
+          )}
+        </div>
+        {freightTotalUsd <= 0 ? (
+          <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)" }}>
+            تكلفة الشحن صفر — لا استحقاق ولا دفعة، والاستيراد متاح مباشرة.
+          </p>
+        ) : (
+          <>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
+              {fld("سعر الصرف (₪/$)", (
+                <input
+                  className="aseel-input" type="number" step="0.001"
+                  value={freightAccrualRate}
+                  disabled={freightAccrued}
+                  onChange={(e) => setFreightAccrualRate(e.target.value)}
+                />
+              ))}
+              <span style={{ fontSize: "var(--aseel-fs-sm, 12px)" }}>
+                الاستحقاق:{" "}
+                <b style={{ fontFamily: "monospace" }}>
+                  {fmt(freightTotalUsd * (Number(freightAccrualRate) || 0))} ₪
+                </b>{" "}
+                (${fmt(freightTotalUsd)})
+              </span>
+              {freightAccrued ? (
+                <button type="button" className="aseel-toolbtn" disabled={saving} onClick={() => void handleUnpostFreightAccrual()}>
+                  تراجع عن الاستحقاق
+                </button>
+              ) : (
+                <button
+                  type="button" className="aseel-toolbtn"
+                  disabled={saving || !(Number(freightAccrualRate) > 0)}
+                  onClick={() => void handlePostFreightAccrual()}
+                >
+                  ترحيل الاستحقاق
+                </button>
+              )}
+            </div>
+            <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", marginTop: 4 }}>
+              مدين «مصاريف الشحن الدولي» / دائن «ذمم الوكيل». هذا السعر هو الذي يحكم تكلفة الشحن
+              بالشيكل في تكلفة الاستيراد — بلا حاجة لأي دفعة. ادفع للوكيل لاحقاً متى شئت.
+            </p>
+          </>
+        )}
+      </div>
+
+      {/* ── ١) دفعات وكيل الشحن الدولي (USD) — سداد الذمّة، لا شرط للاستيراد ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>
           دفعات وكيل الشحن — الشحن الدولي بالدولار ({agentPayments.length})
@@ -2000,11 +2103,16 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           <b style={{ fontFamily: "monospace" }}>${fmt(freightTotalUsd)}</b>
         </span>
         {freightTotalUsd > 0 && (
-          freightFullyPaid ? (
-            <span style={{ color: "var(--aseel-ok, #267346)", fontWeight: 700 }}>✓ مكتمل — الاستيراد متاح</span>
+          freightAgentAdvanceUsd > 0 ? (
+            // الدفع الزائد واقعة صحيحة: الوكيل يصبح مديناً لنا بالفائض.
+            <span style={{ color: "var(--aseel-ok, #267346)", fontWeight: 700 }}>
+              ✓ مسدَّد بالكامل · دفعة مقدمة لدى الوكيل ${fmt(freightAgentAdvanceUsd)} (رصيد لصالحنا)
+            </span>
+          ) : freightFullyPaid ? (
+            <span style={{ color: "var(--aseel-ok, #267346)", fontWeight: 700 }}>✓ مسدَّد بالكامل</span>
           ) : (
-            <span style={{ color: "var(--aseel-warn, #b45309)", fontWeight: 600 }}>
-              متبقٍ ${fmt(freightTotalUsd - freightPaidUsd)} — استيراد الفاتورة الدولية يتطلب إكماله
+            <span className="aseel-text-soft">
+              متبقٍ للوكيل ${fmt(freightTotalUsd - freightPaidUsd)} — الدفع اختياري ولا يعطّل الاستيراد
             </span>
           )
         )}
@@ -2029,7 +2137,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             <button type="button" className="aseel-toolbtn" onClick={() => setShowAgentPayForm(false)}>إلغاء</button>
           </div>
           <p className="aseel-text-soft" style={{ fontSize: "var(--aseel-fs-sm, 12px)", marginTop: 4 }}>
-            الدفعة «المؤكّدة» فقط تُحتسب لشرط الاستيراد. المجموع لا يتجاوز إجمالي تكلفة الشحن.
+            الدفع للوكيل مستقل عن الاستحقاق ولا يشترطه الاستيراد. يجوز الدفع بأكثر من تكلفة الشحن — الفائض دفعة مقدمة تُسوّى على شحنة لاحقة.
           </p>
         </div>
       )}
@@ -2079,20 +2187,28 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       {/* ── ٢) دفعات التخليص (من الصندوق) ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4, borderTop: "1px solid var(--aseel-border, #ddd)", paddingTop: 8 }}>
         <h4 style={{ fontSize: "var(--aseel-fs-sm, 12px)", fontWeight: 600 }}>دفعات المخلّص ({clearancePayments.length})</h4>
-        {clearance && <button type="button" className="aseel-toolbtn" onClick={openClearancePayment} disabled={saving || clearanceRemaining <= 0}><Plus size={14} /> تسجيل دفعة للمخلّص</button>}
+        {clearance && <button type="button" className="aseel-toolbtn" onClick={openClearancePayment} disabled={saving}><Plus size={14} /> تسجيل دفعة للمخلّص</button>}
       </div>
       {clearance && (
         <div className="mb-2 flex flex-wrap gap-4 rounded-lg bg-slate-50 px-3 py-2 text-xs">
           <span>إجمالي الاستحقاق: <b>{fmt(clearanceCostTotal)} ₪</b></span>
           <span>المدفوع: <b className="text-emerald-700">{fmt(paidClearance)} ₪</b></span>
-          <span>المتبقي: <b className="text-amber-700">{fmt(clearanceRemaining)} ₪</b></span>
+          {/* الفائض عن الاستحقاق دفعة مقدمة: المخلّص يصير مديناً لنا، فنعرضه
+              صراحةً بدل «متبقي 0» الذي يخفي أن له رصيداً عندنا. */}
+          {clearanceAdvance > 0 ? (
+            <span>دفعة مقدمة لدى المخلّص: <b className="text-sky-700">{fmt(clearanceAdvance)} ₪</b></span>
+          ) : (
+            <span>المتبقي: <b className="text-amber-700">{fmt(clearanceRemaining)} ₪</b></span>
+          )}
           <span className="text-slate-500">الدفع لا يغيّر مرحلة الإفراج ولا يشترط لإصدار الفاتورة الدولية.</span>
         </div>
       )}
       {showPaymentForm && (
         <div style={{ marginBottom: 8, border: "1px solid var(--aseel-border, #ddd)", padding: 8, borderRadius: 4 }}>
           <div className="mb-1 grid grid-cols-1 gap-x-2 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
-            {fld(`المبلغ (المتبقي ${fmt(clearanceRemaining)} ₪)`, <input className="aseel-input" type="number" step="0.01" max={clearanceRemaining || undefined} value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />)}
+            {/* بلا max: الدفع الزائد مسموح ويصبح دفعة مقدمة — المخلّص يصير مديناً
+                لنا بالفائض (قرار المالك). كان الحقل والزر يمنعانه رغم قبول الخادم. */}
+            {fld(`المبلغ (المتبقي ${fmt(clearanceRemaining)} ₪)`, <input className="aseel-input" type="number" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />)}
             {fld("الصندوق", <select className="aseel-input" value={payCashBoxId} onChange={(e) => setPayCashBoxId(e.target.value)}>
               <option value="">— اختر —</option>
               {cashBoxes.map((cb) => (
@@ -2107,7 +2223,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               action="تسجيل دفعة تخليص"
               warningMessage="تسجيل الدفعة يتطلب اتصالاً — يُولَّد قيد محاسبي على الـserver"
             >
-              <button type="button" className="aseel-toolbtn" onClick={() => void handleAddPayment()} disabled={saving || !payAmount || Number(payAmount) <= 0 || Number(payAmount) > clearanceRemaining + 0.01 || !payCashBoxId}>تأكيد دفعة المخلّص</button>
+              <button type="button" className="aseel-toolbtn" onClick={() => void handleAddPayment()} disabled={saving || !payAmount || Number(payAmount) <= 0 || !payCashBoxId}>تأكيد دفعة المخلّص</button>
             </OfflineGuard>
             <button type="button" className="aseel-toolbtn" onClick={() => setShowPaymentForm(false)}>إلغاء</button>
           </div>
@@ -2231,7 +2347,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           window.open(`/international-invoices?import_shipment=${shipment.id}`, "_blank");
         }
       },
-      disabled: !shipment?.id || shipment?.shipment_type === "transport" || saving || (!allDealsConverted && (!clearance || !freightFullyPaid || clearanceCostTotal <= 0)),
+      disabled: !shipment?.id || shipment?.shipment_type === "transport" || saving || (!allDealsConverted && (!clearance || !freightCostEstablished || clearanceCostTotal <= 0)),
     },
     ...(onClose ? [{ key: "back", label: "رجوع", onClick: onClose }] : []),
   ];
@@ -2255,11 +2371,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       onClick: () => setActiveTab("deals"),
     },
     {
-      key: "freight", label: "٣. دفع الشحن للوكيل",
-      sub: freightTotalUsd > 0
-        ? `$${fmt(freightPaidUsd)} من $${fmt(freightTotalUsd)}`
-        : "حدّد تكلفة الشحن ثم سجّل الدفعات",
-      state: freightFullyPaid ? "done" : "todo",
+      key: "freight", label: "٣. استحقاق الشحن للوكيل",
+      sub: freightTotalUsd <= 0
+        ? "لا توجد تكلفة شحن — لا حاجة لاستحقاق ولا دفعة"
+        : freightAccrued
+          ? `مُستحق على الوكيل · مدفوع $${fmt(freightPaidUsd)} من $${fmt(freightTotalUsd)}`
+          : "أثبت الاستحقاق بسعر الصرف (الدفع لاحقاً ومستقل)",
+      state: freightCostEstablished ? "done" : "todo",
       onClick: () => setActiveTab("payments"),
     },
     {
@@ -2288,9 +2406,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           ? "تتطلب التخليص أولاً"
           : clearanceCostTotal <= 0
             ? "أدخل تكلفة التخليص أولاً"
-          : !freightFullyPaid
-            ? "أكمل دفع الشحن ثم أنشئها"
-            : "جاهزة — لا يشترط دفع التخليص أو النقل المحلي",
+          : !freightCostEstablished
+            ? "أثبت استحقاق الشحن (أو أكمل دفعه) ثم أنشئها"
+            : "جاهزة — لا يشترط دفع الشحن أو التخليص أو النقل المحلي",
       state: allDealsConverted ? "done" : "todo",
       onClick: () => {
         if (allDealsConverted && convertedPiId) {
@@ -2299,7 +2417,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           setActiveTab("clearance");
         } else if (clearanceCostTotal <= 0) {
           setActiveTab("clearance");
-        } else if (!freightFullyPaid) {
+        } else if (!freightCostEstablished) {
           setActiveTab("payments");
         } else if (shipment?.id) {
           window.open(`/international-invoices?import_shipment=${shipment.id}`, "_blank");
@@ -2311,7 +2429,6 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const guidanceJourneyKey: Record<ImportJourneyAction, string> = {
     save_shipment: "ship",
     link_deals: "deals",
-    set_freight: "freight",
     pay_freight: "freight",
     create_clearance: "clearance",
     enter_clearance_costs: "clearance",
@@ -2338,8 +2455,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </button>
       </div>
       <div className="mt-3 flex flex-wrap gap-2 border-t border-blue-100 pt-3 text-xs">
-        <span className={`rounded-full px-3 py-1 font-medium ${freightFullyPaid ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
-          الشحن الدولي: {freightFullyPaid ? "مكتمل" : `$${fmt(freightPaidUsd)} من $${fmt(freightTotalUsd)}`}
+        <span className={`rounded-full px-3 py-1 font-medium ${freightCostEstablished ? "bg-emerald-100 text-emerald-800" : "bg-amber-100 text-amber-800"}`}>
+          الشحن الدولي: {
+            freightTotalUsd <= 0 ? "بلا تكلفة"
+              : freightAccrued ? "مُستحق"
+              : freightFullyPaid ? "مدفوع"
+              : `$${fmt(freightPaidUsd)} من $${fmt(freightTotalUsd)}`
+          }
         </span>
         <span className={`rounded-full px-3 py-1 font-medium ${clearanceCostTotal > 0 ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}`}>
           التخليص: {clearanceCostTotal > 0 ? `${fmt(clearanceCostTotal)} ₪` : "بانتظار التكلفة"}

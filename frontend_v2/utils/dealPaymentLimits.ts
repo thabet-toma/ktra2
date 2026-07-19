@@ -1,4 +1,4 @@
-import type { Deal, DealPayment, Shipment } from "@/types";
+import type { Deal, DealPayment } from "@/types";
 
 export function sumDealPaymentAmounts(
   payments: DealPayment[] | undefined
@@ -165,33 +165,5 @@ export function assertDealPaymentsNotOverTotal(
   const entity = labels?.valueEntityLabel ?? "الصفقة";
   throw new Error(
     `مجموع الدفعات ($${sum.toLocaleString()}) يتجاوز قيمة ${entity} ($${cap.toLocaleString()}). احذف دفعة زائدة أو خفّض المبلغ.`
-  );
-}
-
-function shipmentExtrasUsd(shipment: Partial<Shipment>): number {
-  return (shipment.deals || []).reduce(
-    (s, d) => s + Number((d as { extraCosts?: number }).extraCosts || 0),
-    0
-  );
-}
-
-/** إجمالي الشحنة كما في الواجهة: تكلفة أساسية + إضافات الصفوف */
-export function shipmentPaymentCapUsd(shipment: Partial<Shipment>): number {
-  return Number(shipment.totalShippingCostUsd || 0) + shipmentExtrasUsd(shipment);
-}
-
-/** دفعات وكيل الشحن: حدّ المبالغ = أساس الشحن + إضافات الصفوف، مع صياغة «شحنة» */
-export function assertShipmentPaymentsNotOverTotal(
-  shipment: Partial<Shipment>,
-  previousPayments?: DealPayment[] | null
-): void {
-  const cap = shipmentPaymentCapUsd(shipment);
-  assertDealPaymentsNotOverTotal(
-    {
-      totalAmount: cap,
-      payments: shipment.payments,
-    } as Partial<Deal>,
-    previousPayments,
-    { valueEntityLabel: "الشحنة" }
   );
 }

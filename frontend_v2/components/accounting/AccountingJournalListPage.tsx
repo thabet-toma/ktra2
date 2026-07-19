@@ -43,6 +43,7 @@ const REF_LABELS: Record<string, string> = {
   JOURNAL_REVERSAL: "عكس قيد",
   LOGISTICS_EXPENSE: "مصروف لوجستي",
   LOGISTICS_SHIPMENT: "شحنة دولية",
+  SHIPMENT_FREIGHT_ACCRUAL: "استحقاق شحن الوكيل",
   LOGISTICS_CLEARANCE_PAYMENT: "دفعة تخليص",
   SALES_INVOICE: "فاتورة مبيعات",
   SALES_DELIVERY_COGS: "تكلفة بضاعة مباعة",

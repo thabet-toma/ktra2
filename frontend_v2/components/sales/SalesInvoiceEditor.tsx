@@ -61,6 +61,7 @@ import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
 import { SalesInvoicePrintView } from "./SalesInvoicePrintView";
 import {
   AseelDocumentShell,
+  AseelDocumentView,
   AseelGrid,
   AseelIndexPicker,
   AseelAutocomplete,
@@ -2556,6 +2557,119 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     </div>
   );
 
+  /* ───────────── واجهة العرض المستندية (وضع القراءة) ─────────────
+     كان «وضع العرض» هو نموذج التحرير نفسه بحقول معطّلة، فيبدو صفوفاً من
+     المربّعات الرمادية لا مستنداً. الآن عرض مستندي مخصّص، والتحرير يُفتح من
+     زر «تحرير» في شريط الأدوات. */
+  const currencyCode =
+    currencyId !== "" ? currencies.find((c) => c.CurrencyID === currencyId)?.Code : undefined;
+  const money = (n: number) => `${fmt(n)}${currencyCode ? ` ${currencyCode}` : ""}`;
+  const filledLines = lines.filter((l) => l.product !== "");
+
+  const documentView = (
+    <AseelDocumentView<DraftLine>
+      title="فاتورة مبيعات"
+      subtitle="SALES INVOICE"
+      documentNumber={invoiceNumber || (draftId ? `#${draftId}` : "مسودة")}
+      status={
+        isPosted
+          ? { label: "مرحّلة", tone: "ok" }
+          : { label: "مسودة", tone: "warn" }
+      }
+      metrics={[
+        { label: "الإجمالي", value: money(totals.grandTotal), tone: "info" },
+        { label: "المجموع قبل الضريبة", value: money(totals.subtotalExclTax) },
+        { label: "الضريبة", value: money(totals.taxAmount) },
+        {
+          label: "نوع الفاتورة",
+          value: invType === "cash" ? "نقدي" : "ذمم",
+          tone: invType === "cash" ? "ok" : "warn",
+        },
+      ]}
+      parties={[
+        {
+          title: "العميل",
+          fields: [
+            { label: "الاسم", value: selectedCustomer?.name || "عميل نقدي" },
+            ...(selectedCustomer?.phone
+              ? [{ label: "الهاتف", value: selectedCustomer.phone }]
+              : []),
+          ],
+        },
+      ]}
+      meta={[
+        { label: "تاريخ الفاتورة", value: invDate || "—" },
+        { label: "تاريخ الاستحقاق", value: dueDate || "—" },
+        { label: "العملة", value: currencyCode || "—" },
+        ...(postedJournalId != null
+          ? [{ label: "قيد اليومية", value: `#${postedJournalId}` }]
+          : []),
+      ]}
+      columns={[
+        {
+          key: "name",
+          header: "الصنف",
+          render: (row) => {
+            const pr = productsById.get(Number(row.product));
+            return (
+              <span className="font-semibold">
+                {pr ? pr.name_ar || pr.name_en || pr.sku : "—"}
+              </span>
+            );
+          },
+        },
+        {
+          key: "qty",
+          header: "الكمية",
+          width: "80px",
+          align: "center",
+          numeric: true,
+          render: (row) => formatQuantity(row.quantity),
+        },
+        {
+          key: "price",
+          header: "سعر الوحدة",
+          width: "110px",
+          align: "left",
+          numeric: true,
+          render: (row) => fmt(Number(row.unit_price)),
+        },
+        {
+          key: "discount",
+          header: "الخصم",
+          width: "90px",
+          align: "left",
+          numeric: true,
+          render: (row) => fmt(Number(row.line_discount)),
+        },
+        {
+          key: "total",
+          header: "الإجمالي",
+          width: "120px",
+          align: "left",
+          numeric: true,
+          render: (row) => {
+            const idx = lines.findIndex((l) => l.key === row.key);
+            return (
+              <b>{fmt(idx >= 0 ? totals.perLine[idx]?.lineTotal || 0 : 0)}</b>
+            );
+          },
+        },
+      ]}
+      rows={filledLines}
+      rowKey={(row) => row.key}
+      totals={[
+        { label: "المجموع قبل الضريبة", value: money(totals.subtotalExclTax) },
+        ...(Number(invoiceDiscount) > 0
+          ? [{ label: "خصم الفاتورة", value: money(Number(invoiceDiscount)) }]
+          : []),
+        { label: "الضريبة", value: money(totals.taxAmount) },
+        { label: "الإجمالي", value: money(totals.grandTotal), emphasis: true },
+      ]}
+      sections={notes ? [{ key: "notes", title: "ملاحظات", content: notes }] : undefined}
+    />
+  );
+
   return (
     <div
       id="sales-invoice-print"
@@ -2571,7 +2685,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         nav={nav}
         actions={toolbarActions}
 
-        header={
+        header={viewMode ? undefined : (
           <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-1.5 flex flex-col gap-1 w-full shadow-sm">
             <div className="flex flex-col xl:flex-row gap-2 items-start">
               
@@ -2710,7 +2824,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
             </div>
           </div>
-        }
+        )}
         activeTab={activeTabKey}
         onTabChange={setActiveTabKey}
         tabs={[
@@ -2974,8 +3088,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         {banner}
         {stockWarningBanner}
         {restoreBanner}
+        {/* وضع القراءة: مستند مُنسَّق بدل شبكة الإدخال المعطّلة. */}
+        {viewMode && documentView}
         {/* الشجرة انتقلت إلى الشريط الجانبي (aside) ليرتفع لأعلى المستند. */}
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "8px" }}>
+        <div style={{ flex: 1, minWidth: 0, display: viewMode ? "none" : "flex", flexDirection: "column", gap: "8px" }}>
             <AseelGrid<DraftLine>
               columns={gridColumns}
               rows={lines}

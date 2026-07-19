@@ -15,6 +15,8 @@ import { useState, useCallback } from "react";
 export type PaymentFormErrors = {
   amount?: string;
   date?: string;
+  /** سعر تحويل الدولار للشيكل — مطلوب لدفعات العملة الأجنبية */
+  exchangeRate?: string;
   /** Per-source extra errors (partner/cashbox/currency) merged by the caller. */
   extra?: Record<string, string>;
   general?: string;
@@ -24,6 +26,12 @@ export type PaymentFormInput = {
   amount: string;
   /** ISO date string. Required — matches server `payment_date` rule. */
   date: string;
+  /**
+   * سعر التحويل ($ → ₪). يُمرَّر فقط لدفعات العملة الأجنبية. يبدأ فارغاً في
+   * الواجهة عمداً: القيمة الافتراضية كانت تُحفظ عند نسيان تعديلها فتُسعَّر
+   * الدفعة بسعر غير حقيقي وتتشوّه تكلفة الاستيراد.
+   */
+  exchangeRate?: string;
 };
 
 /** Pure validator (usable outside React, e.g. in tests or submit guards). */
@@ -42,6 +50,15 @@ export function validatePaymentInput(form: PaymentFormInput): PaymentFormErrors 
   } else if (isNaN(new Date(d).getTime())) {
     errs.date = "التاريخ غير صالح.";
   }
+  if (form.exchangeRate !== undefined) {
+    const rateRaw = (form.exchangeRate ?? "").trim();
+    const rate = Number(rateRaw);
+    if (!rateRaw) {
+      errs.exchangeRate = "سعر التحويل ($ → ₪) مطلوب.";
+    } else if (!Number.isFinite(rate) || rate <= 0) {
+      errs.exchangeRate = "سعر التحويل يجب أن يكون أكبر من صفر.";
+    }
+  }
   return errs;
 }
 
@@ -49,6 +66,7 @@ export function hasPaymentErrors(errs: PaymentFormErrors): boolean {
   return Boolean(
     errs.amount ||
       errs.date ||
+      errs.exchangeRate ||
       errs.general ||
       (errs.extra && Object.values(errs.extra).some(Boolean)),
   );

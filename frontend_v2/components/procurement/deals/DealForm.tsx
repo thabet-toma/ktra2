@@ -14,6 +14,8 @@ import {
 } from "../../../types";
 import {
   AseelDocumentShell,
+  AseelDocumentView,
+  AseelViewTable,
   useRecordNavigation,
   useAseelKeymap,
   AseelGrid,
@@ -27,7 +29,8 @@ import {
   suppliersService,
 } from "../../../services/firestoreService";
 import { purchaseInvoiceApi } from "../../../services/purchaseInvoiceApi";
-import { formatMoney, formatNumber } from "../../../utils/formatNumber";
+import { formatMoney, formatNumber, formatQuantity } from "../../../utils/formatNumber";
+import { getShippingWorkflowLabel } from "../../../utils/shippingWorkflowLabels";
 import {
   Save,
   X,
@@ -45,6 +48,7 @@ import {
   AlertTriangle,
   CheckCircle,
   Activity,
+  Pencil,
 } from "lucide-react";
 import { BasicInfoSection } from "@/components/forms/shared/BasicInfoSection";
 import { DealStageControl } from "@/components/forms/deal-parts/DealStageControl";
@@ -64,7 +68,6 @@ import { SupplierViewModal } from "@/components/common/SupplierViewModal";
 import { useToast } from "@/contexts/ToastContext";
 import { useConfirm } from "@/contexts/ConfirmContext";
 import { DealPrintView } from "./DealPrintView";
-import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
 import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
 import { mergeSupplier } from "@/utils/supplierList";
 import { BANK_SWIFT_IMAGE_REQUIRED } from "@/utils/dealPaymentFlow";
@@ -261,6 +264,9 @@ export const DealForm: React.FC<DealFormProps> = ({
   const [showItemSearch, setShowItemSearch] = useState(false);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [showPrintView, setShowPrintView] = useState(false);
+  /** الصفقة تُفتح على العرض المستندي، والتحرير من زر «تحرير» في شريط الأدوات.
+      كانت تفتح على نموذج التحرير مباشرة بلا وضع عرض إطلاقاً. */
+  const [viewMode, setViewMode] = useState<boolean>(!!deal?.id);
   const [viewSupplierId, setViewSupplierId] = useState<string | null>(null);
   const selectedSupplier = suppliers.find(s => s.id === formData.supplierId);
 
@@ -385,15 +391,11 @@ export const DealForm: React.FC<DealFormProps> = ({
       switch (operation) {
         case "add": {
           const addAmt = Number(data?.amount ?? 0);
-          const capAdd = maxPaymentPrincipalForDeal(formData);
-          if (addAmt > capAdd + 1e-6) { toast(`لا يُسمح بدفع يتجاوز قيمة الصفقة. الأقصى المتاح: $${formatMoney(capAdd)}`, "error"); setLoading(false); return; }
           await dealsService.addPayment(formData.id, { ...cleanData(data), type: paymentType, id: `payment_${Date.now()}`, paymentDate: new Date().toISOString(), confirmedBySupplier: false }, currentUser.id, currentUser.name, currentUser.role || "user");
           break;
         }
         case "claim": {
           const claimAmt = Number(data?.amount ?? 0);
-          const capClaim = maxPaymentPrincipalForDeal(formData);
-          if (claimAmt > capClaim + 1e-6) { toast(`لا يُسمح بدفع يتجاوز قيمة الصفقة. الأقصى المتاح لتسجيل مطالبة: $${formatMoney(capClaim)}`, "error"); setLoading(false); return; }
           await dealsService.addPayment(formData.id, { ...cleanData(data), type: paymentType, id: `payment_${Date.now()}`, paymentDate: new Date().toISOString(), confirmedBySupplier: false }, currentUser.id, currentUser.name, currentUser.role || "user");
           const nextSt = suggestStatusAfterClaim(formData, data.installmentNumber);
           if (nextSt) { try { await dealsService.updateDealStatus(formData.id, nextSt, currentUser.id, currentUser.name, currentUser.role || "user", "رفع مطالبة — جاهز لمسار الدفع"); } catch (e) { console.warn("updateDealStatus after claim:", e); } }
@@ -408,8 +410,6 @@ export const DealForm: React.FC<DealFormProps> = ({
           if (!swiftPaymentId) {
             if (!payment) {
               const swiftAmt = Number(data.amount ?? 0);
-              const capSwift = maxPaymentPrincipalForDeal(formData);
-              if (swiftAmt > capSwift + 1e-6) { toast(`لا يُسمح بدفع يتجاوز قيمة الصفقة. الأقصى المتاح: $${formatMoney(capSwift)}`, "error"); setLoading(false); return; }
               await dealsService.addPayment(formData.id, { type: paymentType, amount: swiftAmt, paymentDate: data.paymentDate || new Date().toISOString(), usdToIls: Number(data.usdToIls ?? 0), transferCost: Number(data.transferCost ?? data.transferFee ?? 0), notes: data.notes || "", installmentId: data.installmentId, installmentNumber: data.installmentNumber, confirmedBySupplier: false, alibabaClaimImage: undefined } as Omit<DealPayment, "id">, currentUser.id, currentUser.name, currentUser.role || "user");
               const fresh = await dealsService.getDeal(formData.id);
               const again = resolvePaymentForSwiftInstallment(fresh.payments, paymentType, instNum, null);
@@ -421,8 +421,6 @@ export const DealForm: React.FC<DealFormProps> = ({
           if (!data.cashBoxId) { toast("يجب اختيار صندوق مالي لتنفيذ عملية الدفع", "error"); setLoading(false); return; }
           if (BANK_SWIFT_IMAGE_REQUIRED && !data.bankSwiftImage) { toast("يجب رفع صورة السليب أولاً", "error"); setLoading(false); return; }
           const swiftPrincipal = Number(data.amount ?? 0);
-          const capSwiftEdit = maxPaymentPrincipalForDeal(formData, swiftPaymentId);
-          if (swiftPrincipal > capSwiftEdit + 1e-6) { toast(`لا يُسمح بمبلغ يتجاوز قيمة الصفقة. الأقصى المسموح لهذه العملية: $${formatMoney(capSwiftEdit)}`, "error"); setLoading(false); return; }
           const totalPayment = (data.amount || 0) + (data.transferCost || 0);
           if (!(await confirm({ title: "تنفيذ الدفع", message: `هل أنت متأكد من خصم $${formatMoney(totalPayment)} من الصندوق المحدد؟`, danger: false, confirmText: "تنفيذ الدفع" }))) { setLoading(false); return; }
           try {
@@ -974,9 +972,224 @@ export const DealForm: React.FC<DealFormProps> = ({
     </div>
   );
 
+  /* ───────────── العرض المستندي للصفقة ─────────────
+     الصفقة أغنى من الفاتورة (تنبيه المالك): أقساط، دفعات بمراحلها، قياسات
+     CBM/وزن، شحنة مرتبطة، شهادات. لذلك تُعرض كأقسام مستقلة أسفل المستند بدل
+     حشرها في قالب فاتورة. */
+  const dealMoney = (n: number) => `${fmt(n)} USD`;
+  const filledDealItems = items.filter((i) => i.itemId || (i.name || "").trim());
+  const dealPayments = formData.payments || [];
+  const dealInstallments = formData.installments || [];
+
+  const dealDocumentView = (
+    <AseelDocumentView<DealItem>
+      title="صفقة استيراد"
+      subtitle="IMPORT DEAL"
+      documentNumber={formData.dealNumber || (formData.id ? `#${formData.id}` : "جديدة")}
+      status={{
+        label: String(formData.status || "initial"),
+        tone:
+          formData.status === "completed"
+            ? "ok"
+            : formData.status === "cancelled"
+              ? "danger"
+              : "warn",
+      }}
+      metrics={[
+        { label: "إجمالي الصفقة", value: dealMoney(dealStats.totalAmount), tone: "info" },
+        { label: "المدفوع", value: dealMoney(dealStats.paidAmount), tone: "ok" },
+        dealStats.supplierAdvance > 0
+          ? { label: "رصيد لصالحك عند المورد", value: dealMoney(dealStats.supplierAdvance), tone: "info" }
+          : { label: "المتبقي", value: dealMoney(dealStats.remainingAmount), tone: "warn" },
+        { label: "نسبة الإنجاز", value: `${formatMoney(dealStats.paymentPercentage)}%` },
+      ]}
+      parties={[
+        {
+          title: "المورد",
+          icon: <Factory size={14} />,
+          fields: [
+            { label: "الاسم", value: selectedSupplier?.tradeName || "—" },
+            { label: "المصنع", value: formData.factoryName || "—" },
+            ...(formData.supplierInvoiceNumber
+              ? [{ label: "رقم فاتورة المورد", value: formData.supplierInvoiceNumber }]
+              : []),
+          ],
+        },
+        ...(formData.linkedShipment
+          ? [
+              {
+                title: "الشحنة المرتبطة",
+                icon: <Package size={14} />,
+                fields: [
+                  { label: "رقم الشحنة", value: formData.linkedShipment.shipmentNumber },
+                  { label: "اسم الشحنة", value: formData.linkedShipment.shipmentName || "—" },
+                  {
+                    label: "مرحلة الشحن",
+                    value: getShippingWorkflowLabel(formData.shippingWorkflowStatus || undefined),
+                  },
+                ],
+              },
+            ]
+          : []),
+      ]}
+      meta={[
+        { label: "تاريخ الصفقة", value: formData.dealDate || "—" },
+        { label: "رقم العرض الأصلي", value: formData.originalOfferNumber || "—" },
+        { label: "طريقة الشحن", value: formData.shippingMethod || "—" },
+        { label: "أيام الإنتاج", value: formData.productionDays ? String(formData.productionDays) : "—" },
+        { label: "أيام التسليم", value: formData.deliveryDays ? String(formData.deliveryDays) : "—" },
+      ]}
+      columns={[
+        {
+          key: "name",
+          header: "الصنف",
+          render: (r) => (
+            <div>
+              <span className="font-semibold">{r.name || "—"}</span>
+              {r.specifications && (
+                <span className="block text-[11px] text-slate-500">{r.specifications}</span>
+              )}
+            </div>
+          ),
+        },
+        { key: "model", header: "الموديل", width: "110px", render: (r) => r.modelNumber || "—" },
+        { key: "hs", header: "HS", width: "90px", align: "center", render: (r) => r.hsCodePrimary || "—" },
+        { key: "qty", header: "الكمية", width: "80px", align: "center", numeric: true, render: (r) => formatQuantity(r.quantity) },
+        { key: "price", header: "سعر الوحدة", width: "110px", align: "left", numeric: true, render: (r) => fmt(r.unitPrice) },
+        { key: "total", header: "الإجمالي", width: "120px", align: "left", numeric: true, render: (r) => <b>{fmt(r.totalPrice)}</b> },
+      ]}
+      rows={filledDealItems}
+      rowKey={(r) => r.id}
+      emptyRowsHint="لا توجد أصناف في الصفقة"
+      totals={[
+        { label: "مجموع البنود", value: dealMoney(calculateSubtotal()) },
+        ...((formData.discountAmount || 0) > 0
+          ? [{ label: "الخصم", value: dealMoney(formData.discountAmount || 0) }]
+          : []),
+        ...(!formData.shippingIncluded && (formData.shippingCost || 0) > 0
+          ? [{ label: "شحن داخل الصين", value: dealMoney(formData.shippingCost || 0) }]
+          : []),
+        { label: "إجمالي الصفقة (للمورد)", value: dealMoney(calculateGrandTotal()), emphasis: true },
+      ]}
+      sections={[
+        ...(dealInstallments.length > 0
+          ? [
+              {
+                key: "installments",
+                title: `خطة الأقساط (${dealInstallments.length})`,
+                content: (
+                  <AseelViewTable<DealInstallment>
+                    columns={[
+                      { key: "no", header: "القسط", width: "70px", align: "center", render: (r) => `#${r.installmentNumber}` },
+                      { key: "pct", header: "النسبة", width: "80px", align: "center", numeric: true, render: (r) => `${formatMoney(r.percentage)}%` },
+                      { key: "amt", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => fmt(r.amount) },
+                      { key: "due", header: "الاستحقاق", width: "110px", align: "center", render: (r) => r.dueDate || "—" },
+                      { key: "st", header: "الحالة", width: "100px", align: "center", render: (r) => String(r.status) },
+                    ]}
+                    rows={dealInstallments}
+                    rowKey={(r) => r.id}
+                    showIndex={false}
+                    emptyHint="لا توجد أقساط"
+                  />
+                ),
+              },
+            ]
+          : []),
+        ...(dealPayments.length > 0
+          ? [
+              {
+                key: "payments",
+                title: `الدفعات (${dealPayments.length})`,
+                content: (
+                  <AseelViewTable<DealPayment>
+                    columns={[
+                      { key: "date", header: "التاريخ", width: "110px", align: "center", render: (r) => (r.paymentDate || "").slice(0, 10) || "—" },
+                      { key: "amt", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => fmt(r.amount) },
+                      { key: "rate", header: "سعر الصرف", width: "100px", align: "left", numeric: true, render: (r) => (r.usdToIls ? formatMoney(r.usdToIls) : "—") },
+                      { key: "fee", header: "عمولة التحويل", width: "110px", align: "left", numeric: true, render: (r) => fmt(r.transferCost || 0) },
+                      {
+                        key: "conf",
+                        header: "تأكيد المورد",
+                        width: "100px",
+                        align: "center",
+                        render: (r) =>
+                          r.confirmedBySupplier ? (
+                            <span className="font-semibold text-emerald-700">مؤكّدة</span>
+                          ) : (
+                            <span className="text-amber-700">معلّقة</span>
+                          ),
+                      },
+                      { key: "jr", header: "القيد", width: "90px", align: "center", render: (r) => (r.journalId ? `#${r.journalId}` : "—") },
+                    ]}
+                    rows={dealPayments}
+                    rowKey={(r) => r.id}
+                    showIndex={false}
+                    emptyHint="لا توجد دفعات"
+                  />
+                ),
+              },
+            ]
+          : []),
+        ...(formData.totalVolume || formData.totalWeightKg || formData.totalWeight || formData.certificates || formData.warrantyDuration
+          ? [
+              {
+                key: "measures",
+                title: "القياسات والشهادات",
+                content: (
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <div>
+                      <span className="block text-[11px] text-slate-500">الحجم (CBM)</span>
+                      <b>{formData.totalVolume ? formatQuantity(formData.totalVolume) : "—"}</b>
+                    </div>
+                    <div>
+                      <span className="block text-[11px] text-slate-500">الوزن (كغ)</span>
+                      <b>{formatQuantity(formData.totalWeightKg ?? formData.totalWeight ?? 0) || "—"}</b>
+                    </div>
+                    <div>
+                      <span className="block text-[11px] text-slate-500">الضمان</span>
+                      <b>{formData.warrantyDuration ? `${formData.warrantyDuration} شهر` : "—"}</b>
+                    </div>
+                    <div>
+                      <span className="block text-[11px] text-slate-500">الشهادات</span>
+                      <b>{formData.certificates || "—"}</b>
+                    </div>
+                  </div>
+                ),
+              },
+            ]
+          : []),
+        ...(formData.internalNotes || formData.shipmentNotes
+          ? [
+              {
+                key: "notes",
+                title: "ملاحظات",
+                content: (
+                  <div className="space-y-1">
+                    {formData.internalNotes && (
+                      <p>
+                        <span className="text-slate-500">داخلية: </span>
+                        {formData.internalNotes}
+                      </p>
+                    )}
+                    {formData.shipmentNotes && (
+                      <p>
+                        <span className="text-slate-500">الشحنة: </span>
+                        {formData.shipmentNotes}
+                      </p>
+                    )}
+                  </div>
+                ),
+              },
+            ]
+          : []),
+      ]}
+    />
+  );
+
   const toolbarActions: AseelToolbarAction[] = [
     { key: "new", label: "إضافة", icon: <Plus />, onClick: handleNewDeal },
     { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: <Save />, onClick: !saving ? () => void handleFinalSave() : undefined, disabled: saving },
+    ...(viewMode ? [{ key: "edit", label: "تحرير", icon: <Pencil />, onClick: () => setViewMode(false), separatorBefore: true } as AseelToolbarAction] : []),
     { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => setShowPrintView(true), separatorBefore: true },
     { key: "cancel", label: "إلغاء", icon: <X />, onClick: onCancel, danger: true, separatorBefore: true },
   ];
@@ -988,7 +1201,7 @@ export const DealForm: React.FC<DealFormProps> = ({
         state={formData.id ? `صفقة ${formData.dealNumber || `#${formData.id}`}` : "صفقة جديدة"}
         nav={nav}
         actions={toolbarActions}
-        tabs={[
+        tabs={viewMode ? [] : [
           { key: "basic", label: "البيانات الأساسية", content: basicInfoTab },
           { key: "terms", label: "الشروط والشحن", content: termsAndShippingTab },
           { key: "payments", label: "الدفعات", content: paymentsTab },
@@ -1042,6 +1255,9 @@ export const DealForm: React.FC<DealFormProps> = ({
           </>
         }
       >
+        {/* وضع القراءة: مستند مُنسَّق بدل شبكة الإدخال المعطّلة. */}
+        {viewMode && dealDocumentView}
+        {!viewMode && (
         <AseelGrid<DealItem>
           columns={itemColumns}
           rows={items}
@@ -1051,7 +1267,8 @@ export const DealForm: React.FC<DealFormProps> = ({
           onAddRow={isDealLocked ? undefined : addRow}
           emptyHint="لا توجد بنود — أضف صنفاً (+ فهرس الأصناف)"
         />
-        {!isDealLocked && (
+        )}
+        {!viewMode && !isDealLocked && (
           <button type="button" className="aseel-addrow" onClick={addRow}><Plus className="h-3 w-3" /> إضافة سطر</button>
         )}
       </AseelDocumentShell>

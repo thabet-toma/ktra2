@@ -44,8 +44,11 @@ export function referenceTypeLabel(referenceType?: string | null): string {
   if (t.includes("PURCHASE_INVOICE") || t === "PURCHASE_RECEIPT") return "فاتورة مشتريات";
   if (t === "CUSTOMER_PAYMENT") return "سند قبض";
   if (t === "SUPPLIER_PAYMENT") return "سند صرف";
-  if (t === "LOGISTICS_PAYMENT" || t === "CLEARANCE_PAYMENT" || t === "PAYMENT")
-    return "سند دفع";
+  if (t === "LOGISTICS_CLEARANCE") return "مستحق تخليص";
+  if (t === "CLEARANCE_PAYMENT") return "دفع تخليص جمركي";
+  if (t === "LOCAL_SHIPMENT") return "ارسالية";
+  if (t === "LOCAL_SHIPMENT_PAYMENT") return "دفع للناقل";
+  if (t === "LOGISTICS_PAYMENT" || t === "PAYMENT") return "سند دفع";
   if (t === "CREDIT_DEBIT_NOTE") return "إشعار مدين/دائن";
   if (t === "PARTNER_OPENING") return "رصيد افتتاحي";
   if (t === "JOURNAL_REVERSAL") return "عكس قيد";

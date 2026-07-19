@@ -12,6 +12,11 @@ import datetime
 
 logger = logging.getLogger(__name__)
 
+def _normalize_account_name(value: str) -> str:
+    """اسم مُطبَّع للمقارنة: بلا فراغات زائدة، بلا حساسية لحالة الأحرف."""
+    return " ".join(str(value or "").split()).strip().casefold()
+
+
 def _expected_parent_code_for_partner_type(partner_type: str) -> str | None:
     # task13 M2: الأكواد القديمة 2102/2103/2104 كانت قروضاً/مستحقات/ضريبة مخرجات
     # في الشجرة المعيارية — حسابات الشركاء صارت تحت آباء ذمم مخصصين.
@@ -75,21 +80,37 @@ def manage_partner_account(sender, instance, created, **kwargs):
 
         if parent_acc:
             try:
-                # Generate unique code: ParentCode + PartnerID (padded)
-                new_code = f"{parent_acc.code}{str(instance.id).zfill(4)}"
-                
-                # Use get_or_create
-                partner_account, acc_created = Account.objects.get_or_create(
-                    tenant=tenant,
-                    code=new_code,
-                    defaults={
-                        'name': instance.name,
-                        'account_type': parent_acc.account_type,
-                        'parent': parent_acc,
-                        'is_active': True
-                    }
-                )
-                
+                # قد يكون بند الشجرة (مثل مخلّص جمركي أو ناقل محلي) قد أُنشئ يدوياً
+                # في الشجرة قبل وجود سجل شريك له — نربطه بدل تكرار حساب جديد.
+                target_name = _normalize_account_name(instance.name)
+                existing_account = None
+                if target_name:
+                    for acc in Account.objects.filter(tenant=tenant, parent=parent_acc):
+                        if _normalize_account_name(acc.name) != target_name:
+                            continue
+                        if Partner.objects.filter(linked_account=acc).exclude(pk=instance.pk).exists():
+                            continue
+                        existing_account = acc
+                        break
+
+                if existing_account:
+                    partner_account = existing_account
+                else:
+                    # Generate unique code: ParentCode + PartnerID (padded)
+                    new_code = f"{parent_acc.code}{str(instance.id).zfill(4)}"
+
+                    # Use get_or_create
+                    partner_account, acc_created = Account.objects.get_or_create(
+                        tenant=tenant,
+                        code=new_code,
+                        defaults={
+                            'name': instance.name,
+                            'account_type': parent_acc.account_type,
+                            'parent': parent_acc,
+                            'is_active': True
+                        }
+                    )
+
                 instance.linked_account = partner_account
                 instance.save(update_fields=['linked_account'])
             except Exception as e:

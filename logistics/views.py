@@ -39,6 +39,10 @@ from tenants.models import Tenant, Currency
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
 from accounting.cashbox import resolve_default_cash_box_account
 from accounting.services import create_audit_log, validate_fiscal_period, post_journal, get_exchange_rate, unpost_document
+from .accruals import (
+    AccrualSkipped, post_clearance_accrual, post_freight_accrual,
+    post_local_shipment_accrual,
+)
 from core.activity import log_activity, log_view
 from core.api_defaults import POSTED_DOC_WARNING
 from core.user_roles import user_can_unpost_logistics_deal_payment
@@ -217,17 +221,23 @@ class LogisticsDealViewSet(BaseTenantViewSet):
     _PAYMENT_PROTECTED_KEYS = ('id', 'deal', 'shipment', 'is_posted', 'journal')
 
     def _deal_payments_cap_error(self, deal, new_amount, exclude_payment_pk=None):
-        """سقف الدفعات: مجموع كل صفوف الدفع ≤ إجمالي الصفقة (نفس عقد النمط المتداخل السابق)."""
+        """الدفع الزائد للمورد مسموح — الفائض دفعة مقدمة تجعله مديناً لنا.
+
+        كان يرفض أي مجموع يتجاوز إجمالي الصفقة، فيمنع واقعة محاسبية صحيحة
+        (قرار المالك 2026-07-19 — نفس معاملة الوكيل والمخلّص والناقل). نسجّل
+        الفائض في اللوج ليبقى ظاهراً للمراجعة، ويعرضه الواجهة كـ«رصيد لصالحك
+        عند المورد».
+        """
         qs = deal.payments.all()
         if exclude_payment_pk is not None:
             qs = qs.exclude(pk=exclude_payment_pk)
         existing = qs.aggregate(t=Sum('amount'))['t'] or Decimal('0')
         cap = Decimal(deal.total_amount or 0)
-        eps = Decimal('0.01')
-        if existing + Decimal(new_amount or 0) > cap + eps:
-            return (
-                f'مجموع الدفعات ({existing + Decimal(new_amount or 0)}) يتجاوز إجمالي '
-                f'الصفقة ({cap}). خفّض المبلغ أو راجع بنود الصفقة.'
+        total = existing + Decimal(new_amount or 0)
+        if cap > 0 and total > cap + Decimal('0.01'):
+            logger.info(
+                'deal %s supplier payments exceed total -> advance: total=%s cap=%s advance=%s',
+                deal.pk, total, cap, total - cap,
             )
         return None
 
@@ -1653,6 +1663,36 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
             changed_fields = set(serializer.validated_data.keys())
             if changed_fields - {'agent_payments'}:
                 raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
+        # تغيير تكلفة الشحن بعد الاستحقاق يجعل القيد لا يطابق التكلفة. (سعر الصرف
+        # وحالة الترحيل read_only أصلاً — يملكهما مسارا الاستحقاق وحدهما.)
+        if (
+            instance is not None
+            and instance.freight_is_posted
+            and 'total_shipping_cost_usd' in serializer.validated_data
+            and Decimal(str(serializer.validated_data['total_shipping_cost_usd'] or 0))
+            != Decimal(str(instance.total_shipping_cost_usd or 0))
+        ):
+            raise ValidationError({
+                'detail': 'استحقاق شحن الوكيل مُرحّل — ألغِ ترحيل الاستحقاق قبل تعديل تكلفة الشحن.',
+                'can_unpost': True,
+            })
+        # الوكيل هو **الطرف المُدائن** في قيد الاستحقاق. تغييره أو إزالته بعد
+        # الترحيل كان مسموحاً، فتظهر الشحنة «بلا وكيل» بينما القيد ما يزال يُدائن
+        # الوكيل الأصلي — المستند والأستاذ يتناقضان ولا يعرف المستخدم من دائن.
+        if (
+            instance is not None
+            and instance.freight_is_posted
+            and 'shipping_agent' in serializer.validated_data
+            and getattr(serializer.validated_data['shipping_agent'], 'pk', None)
+            != instance.shipping_agent_id
+        ):
+            raise ValidationError({
+                'detail': (
+                    'استحقاق شحن الوكيل مُرحّل باسم الوكيل الحالي — ألغِ ترحيل الاستحقاق '
+                    'قبل تغيير الوكيل أو إزالته، وإلا بقي القيد يُدائن وكيلاً غير الظاهر.'
+                ),
+                'can_unpost': True,
+            })
         serializer.save()
 
     def destroy(self, request, *args, **kwargs):
@@ -1697,6 +1737,70 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
             err = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
             return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'message': 'تم التراجع عن الترحيل وحذف القيد.', 'unpost_result': result})
+
+    @action(detail=True, methods=['post'], url_path='post-freight-accrual')
+    def post_freight_accrual(self, request, pk=None):
+        """إثبات استحقاق شحن الوكيل: Dr مصاريف الشحن الدولي / Cr ذمم الوكيل.
+
+        الدفع إجراء مستقل تماماً (pay-agent / سند دفع). قبل هذا لم يكن للوكيل
+        دائن أبداً فيظهر مديناً، وكان لا بدّ من تسجيل دفعة لإعطاء النظام سعر
+        صرف — الآن سعر الصرف يُدخل هنا مرة واحدة ويحكم تكلفة الشحن.
+        """
+        shipment = self.get_object()
+        raw_rate = request.data.get('freight_exchange_rate', shipment.freight_exchange_rate)
+        try:
+            with transaction.atomic():
+                ship_locked = LogisticsShipment.objects.select_for_update().get(pk=shipment.pk)
+                journal = post_freight_accrual(ship_locked, raw_rate, user=request.user)
+                if journal is None:
+                    return Response(
+                        {'error': 'استحقاق شحن الوكيل مُرحّل بالفعل.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+        except AccrualSkipped as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        except (ValidationError, DjangoValidationError) as ve:
+            err = '؛ '.join(ve.messages) if hasattr(ve, 'messages') else str(ve)
+            return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                'status': 'تم إثبات استحقاق شحن الوكيل.',
+                'journal_id': journal.pk,
+                'amount_ils': str(
+                    (Decimal(str(ship_locked.total_shipping_cost_usd or 0))
+                     * ship_locked.freight_exchange_rate).quantize(Decimal('0.01'))
+                ),
+                'freight_exchange_rate': str(ship_locked.freight_exchange_rate),
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['post'], url_path='unpost-freight-accrual')
+    def unpost_freight_accrual(self, request, pk=None):
+        """تراجع عن استحقاق شحن الوكيل — لا يمسّ دفعاته المرحّلة."""
+        shipment = self.get_object()
+        if not shipment.freight_is_posted:
+            return Response(
+                {'error': 'استحقاق شحن الوكيل غير مُرحّل.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            with transaction.atomic():
+                result = unpost_document(
+                    tenant_id=shipment.tenant_id,
+                    reference_id=shipment.pk,
+                    journal_reference_types=['SHIPMENT_FREIGHT_ACCRUAL'],
+                    user=request.user,
+                    document_label=f"استحقاق شحن {shipment.shipment_number}",
+                )
+                shipment.freight_is_posted = False
+                shipment.freight_journal = None
+                shipment.save(update_fields=['freight_is_posted', 'freight_journal'])
+                logger.info('shipment freight accrual unposted shipment=%s', shipment.pk)
+        except Exception as e:
+            err = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
+            return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'message': 'تم التراجع عن استحقاق شحن الوكيل.', 'unpost_result': result})
 
 
 class LogisticsClearanceViewSet(BaseTenantViewSet):
@@ -1747,80 +1851,22 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
     def post_to_accounting(self, request, pk=None):
         """إثبات استحقاق التخليص: Dr تكاليف/ضريبة، Cr ذمم المخلّص."""
         clearance = self.get_object()
-        if clearance.journal_id:
-            return Response({'error': 'استحقاق التخليص مُرحّل بالفعل.'}, status=status.HTTP_400_BAD_REQUEST)
-        broker = clearance.customs_broker
-        if not broker:
-            return Response({'error': 'حدّد المخلّص الجمركي قبل إثبات الاستحقاق.'}, status=status.HTTP_400_BAD_REQUEST)
-        if not broker.linked_account_id:
-            return Response({'error': 'المخلّص غير مربوط بحساب ذمم في المحاسبة.'}, status=status.HTTP_400_BAD_REQUEST)
-
-        default_codes = {
-            'vat': '1105',
-            'declaration_fee': '5303',
-            'terminal': '5306',
-            'permits': '5302',
-            'broker_commission': '5302',
-            'customs_system': '5303',
-            'other': '5307',
-        }
-        lines_data = []
-        for line in clearance.lines.select_related('account').all():
-            amount = (Decimal(str(line.debit or 0)) - Decimal(str(line.credit or 0))).quantize(Decimal('0.01'))
-            if amount <= 0 or line.description == 'دفعة الشحن (الناقل)':
-                continue
-            account = line.account
-            if not account:
-                account = Account.objects.filter(
-                    tenant=clearance.tenant,
-                    code=default_codes.get(line.line_type, '5307'),
-                    is_active=True,
-                ).first()
-            if not account:
-                return Response(
-                    {'error': f'لا يوجد حساب محاسبي مناسب لبند «{line.description}».'},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-            lines_data.append({
-                'account': account.id,
-                'partner': None,
-                'debit': amount,
-                'credit': Decimal('0'),
-                'description': f"{line.description} — {clearance.shipment.shipment_number}"[:500],
-            })
-
-        total = sum((row['debit'] for row in lines_data), Decimal('0'))
-        if total <= 0:
-            return Response({'error': 'أضف بند تخليص واحداً على الأقل بمبلغ أكبر من صفر.'}, status=status.HTTP_400_BAD_REQUEST)
-        lines_data.append({
-            'account': broker.linked_account_id,
-            'partner': broker.id,
-            'debit': Decimal('0'),
-            'credit': total,
-            'description': f"استحقاق المخلّص — {clearance.shipment.shipment_number}"[:500],
-        })
-        transaction_date = clearance.clearance_date or datetime.date.today()
-        currency = clearance.currency or Currency.objects.filter(Code__iexact='ILS').first()
-        exchange_rate = Decimal(str(clearance.exchange_rate or 1))
         try:
             with transaction.atomic():
-                journal = post_journal(
-                    tenant_id=clearance.tenant_id,
-                    transaction_date=transaction_date,
-                    reference_type='LOGISTICS_CLEARANCE',
-                    reference_id=clearance.id,
-                    description=f"استحقاق تخليص {clearance.shipment.shipment_number} | {broker.name}"[:500],
-                    lines_data=lines_data,
-                    currency=currency,
-                    exchange_rate=exchange_rate,
-                    user=request.user,
-                )
-                clearance.journal = journal
-                clearance.save(update_fields=['journal'])
+                journal = post_clearance_accrual(clearance, user=request.user)
+                if journal is None:
+                    return Response(
+                        {'error': 'استحقاق التخليص مُرحّل بالفعل.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+        except AccrualSkipped as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:
             logger.exception('clearance accrual posting failed pk=%s', clearance.pk)
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        logger.info('clearance accrual posted clearance=%s journal=%s total=%s', clearance.pk, journal.pk, total)
+        total = sum(
+            (Decimal(str(line.credit or 0)) for line in journal.lines.all()), Decimal('0'),
+        )
         return Response({
             'journal_id': journal.id,
             'total': str(total),
@@ -2006,33 +2052,18 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                 start=Decimal("0"),
             )
 
-        eps = Decimal("0.01")
+        from .payment_posting_cap import clearance_broker_posting_cap_check
+
         if kind == "clearance":
-            if clearance_budget > 0:
-                if _paid_clearance() + amount > clearance_budget + eps:
-                    return Response(
-                        {
-                            "error": (
-                                f"مجموع دفعات التخليص ({_paid_clearance() + amount:.2f}) "
-                                f"يتجاوز مجموع بنود التخليص بدون الشحن ({clearance_budget:.2f}). "
-                                "خفّض المبلغ أو راجع البنود."
-                            )
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+            clearance_broker_posting_cap_check(
+                _paid_clearance(), amount, clearance_budget,
+                label=f"clearance {clearance.pk} broker",
+            )
         else:
-            if shipping_budget > 0:
-                if _paid_shipping() + amount > shipping_budget + eps:
-                    return Response(
-                        {
-                            "error": (
-                                f"مجموع دفعات الشحن ({_paid_shipping() + amount:.2f}) "
-                                f"يتجاوز مبلغ بند الشحن في البنود ({shipping_budget:.2f}). "
-                                "عدّل بند الشحن أو المبلغ."
-                            )
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
+            clearance_broker_posting_cap_check(
+                _paid_shipping(), amount, shipping_budget,
+                label=f"clearance {clearance.pk} shipping",
+            )
 
         try:
             with transaction.atomic():
@@ -3033,7 +3064,11 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 Decimal('0'),
             )
             if landed_sum > 0:
-                inventory_debit = landed_sum + capitalized_total
+                # use_landed يحكم توزيع الأسطر على حساباتها فقط. إجمالي مدين البضاعة
+                # يبقى (صافي الفاتورة + الرسوم المرسملة) — وهو المتوازن بالبناء مع
+                # دائن الذمم. الاستبدال بـ landed_sum كان يُسقط عمولات تحويل دفعات
+                # الصفقة: هي داخلة في grand_total لكنها ليست ضمن landed_line_total_ils،
+                # فيفشل الترحيل بفارق يساوي العمولة تماماً.
                 use_landed = True
 
         td = invoice.invoice_date or datetime.date.today()
@@ -3083,6 +3118,30 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 mapped_lines[it.expense_account_id]['desc'].append(it.name or '')
         
         inventory_debit -= mapped_debit
+        # تجاوز تكلفة الأسطر لصافي الفاتورة يعني انحرافاً حقيقياً في التوزيع؛ لولا هذا
+        # الفحص لسقط سطر المخزون السالب أدناه وظهر «قيد غير متوازن» بلا سبب مفهوم.
+        if inventory_debit < Decimal('-0.02'):
+            logger.error(
+                'purchase invoice %s landed allocation exceeds net: mapped=%s '
+                'merchandise_net=%s capitalized=%s residual=%s',
+                invoice.pk, mapped_debit, merchandise_net, capitalized_total, inventory_debit,
+            )
+            return Response(
+                {
+                    'error': (
+                        f'تكلفة أسطر الفاتورة ({mapped_debit.quantize(Decimal("0.01"))} ₪) '
+                        f'تتجاوز صافي الفاتورة ({(merchandise_net + capitalized_total).quantize(Decimal("0.01"))} ₪). '
+                        'اضغط «إعادة حساب التكلفة» ثم أعد الترحيل؛ إن استمر الفرق '
+                        'فراجع دفعات الصفقة وحصص الشحن والتخليص.'
+                    ),
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if Decimal('-0.02') <= inventory_debit < Decimal('0') and mapped_lines:
+            # كسور تقريب: نحسمها من أكبر سطر مُوجَّه حتى يبقى المجموع مطابقاً تماماً.
+            biggest = max(mapped_lines, key=lambda k: mapped_lines[k]['amount'])
+            mapped_lines[biggest]['amount'] += inventory_debit
+            inventory_debit = Decimal('0')
 
         # المبلغ الذي سيمرّ عبر الوسيط ثم يُرحَّل لقيد الاستلام (للفاتورة المحلية).
         goods_clearing_amt = inventory_debit if inventory_debit > 0 else Decimal('0')
@@ -3605,127 +3664,16 @@ class LocalShipmentViewSet(BaseTenantViewSet):
         بعد الترحيل لا يُسمح بالتعديل إلا بعد إلغاء الترحيل.
         """
         shipment = self.get_object()
-        tenant = shipment.tenant
-        if shipment.is_posted:
-            return Response(
-                {'error': 'الشحنة مُرحَّلة بالفعل.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if shipment.status == 'cancelled':
-            return Response(
-                {'error': 'لا يمكن ترحيل شحنة ملغاة.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        amt = Decimal(str(shipment.amount or 0))
-        if amt <= 0:
-            return Response(
-                {'error': 'مبلغ الشحنة يجب أن يكون أكبر من صفر.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # حساب المصروف (مدين)
-        expense_account = shipment.expense_account
-        if not expense_account:
-            expense_account = (
-                Account.objects.filter(tenant=tenant, code='5305', is_active=True).first()
-                or Account.objects.filter(tenant=tenant, code='5301', is_active=True).first()
-            )
-        if not expense_account:
-            return Response(
-                {'error': 'لا يوجد حساب مصروف للشحن المحلي (5305).'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # الاستحقاق منفصل عن الدفع: الدائن دائماً ذمم الناقل، حتى لو كانت نية
-        # المستخدم الدفع نقداً لاحقاً.
-        try:
-            ensure_partner_linked_account(shipment.carrier)
-        except Exception:
-            pass
-        credit_account = getattr(shipment.carrier, 'linked_account', None)
-        if not credit_account:
-            return Response(
-                {'error': 'الناقل لا يملك حساب محاسبي مرتبط.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        credit_partner = shipment.carrier
-
-        # T3-03: keep line amounts NOMINAL (transaction currency). The base
-        # equivalent is derived once by JournalLine.save() from
-        # journal.exchange_rate (C1-05). Pre-multiplying here AND letting
-        # save() multiply again caused amount × rate² (m3-09 double-convert).
-
-        td = shipment.delivery_date or shipment.pickup_date or datetime.date.today()
-
-        # التحقق من الفترة المالية
-        try:
-            validate_fiscal_period(tenant, td)
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-        lines_payload = [
-            {
-                'account': expense_account,
-                'debit': amt,
-                'credit': Decimal('0'),
-                'partner': credit_partner,
-                'description': f"شحن محلي {shipment.shipment_number} — {shipment.carrier.name}",
-            },
-            {
-                'account': credit_account,
-                'debit': Decimal('0'),
-                'credit': amt,
-                'partner': credit_partner,
-                'description': f"شحن محلي {shipment.shipment_number}",
-            },
-        ]
-
         try:
             with transaction.atomic():
-                journal = JournalHeader.objects.create(
-                    tenant=tenant,
-                    transaction_date=td,
-                    description=(
-                        f"شحن محلي {shipment.shipment_number} | {shipment.carrier.name}"
-                    )[:500],
-                    reference_type='LOCAL_SHIPMENT',
-                    reference_id=shipment.pk,
-                    is_posted=True,
-                    currency=shipment.currency,
-                    exchange_rate=shipment.exchange_rate,
-                )
-                for ln in lines_payload:
-                    JournalLine.objects.create(
-                        tenant=tenant,
-                        journal=journal,
-                        account=ln['account'],
-                        partner=ln.get('partner'),
-                        description=ln.get('description', '')[:255],
-                        debit=ln['debit'],
-                        credit=ln['credit'],
-                        # base_debit/base_credit auto-derived by JournalLine.save()
-                        # from journal.exchange_rate (C1-05). No exchange_rate
-                        # kwarg — JournalLine has no such field (was a TypeError).
+                journal = post_local_shipment_accrual(shipment, user=request.user)
+                if journal is None:
+                    return Response(
+                        {'error': 'الشحنة مُرحَّلة بالفعل.'},
+                        status=status.HTTP_400_BAD_REQUEST,
                     )
-                shipment.is_posted = True
-                shipment.journal = journal
-                shipment.save(update_fields=['is_posted', 'journal'])
-
-                create_audit_log(
-                    tenant=tenant,
-                    user=request.user,
-                    action='local_shipment_posted',
-                    model_name='LocalShipment',
-                    object_id=shipment.pk,
-                    change_details=(
-                        f"ترحيل شحن محلي {shipment.shipment_number} بمبلغ {amt}"
-                    ),
-                )
-                logger.info(
-                    'local shipment accrual posted shipment=%s journal=%s amount=%s',
-                    shipment.pk, journal.pk, amt,
-                )
+        except AccrualSkipped as exc:
+            return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -3751,12 +3699,10 @@ class LocalShipmentViewSet(BaseTenantViewSet):
             (Decimal(str(p.amount or 0)) for p in shipment.payments.filter(is_posted=True)),
             Decimal('0'),
         )
-        remaining = max(Decimal('0'), Decimal(str(shipment.amount or 0)) - paid)
-        if amount > remaining + Decimal('0.01'):
-            return Response(
-                {'error': f'الدفعة ({amount:.2f}) تتجاوز المتبقي للناقل ({remaining:.2f}).'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        from .payment_posting_cap import clearance_broker_posting_cap_check
+        clearance_broker_posting_cap_check(
+            paid, amount, shipment.amount, label=f"local shipment {shipment.pk} carrier",
+        )
         if not shipment.carrier.linked_account_id:
             return Response({'error': 'الناقل غير مربوط بحساب ذمم في المحاسبة.'}, status=status.HTTP_400_BAD_REQUEST)
         external_id = str(request.data.get('cash_box_external_id') or '').strip()
@@ -3869,93 +3815,29 @@ class LocalShipmentViewSet(BaseTenantViewSet):
 
     @action(detail=True, methods=['post'], url_path='import-to-invoice')
     def import_to_invoice(self, request, pk=None):
-        """نقل تكلفة الشحن المحلي إلى فاتورة مشتريات كرسم (Fee).
+        """معطَّل: تكلفة الناقل تُثبَّت باستحقاق مستقل لا كرسم على الفاتورة.
 
-        المدخلات:
-          - invoice_id: رقم فاتورة الشراء الهدف (يجب أن تكون لنفس tenant)
+        كان هذا المسار ينشئ PurchaseInvoiceFee بمبلغ الشحنة، لكن قيد الفاتورة
+        يُدائن **مورد الفاتورة** بمجموع الرسوم (credit_total = grand + fees_total)
+        بينما الرسم لا يحمل دائناً خاصاً به — فذمّة الناقل لا تُدائن أبداً، ثم
+        تأتي دفعته مديناً وحدها فيظهر الناقل مديناً لنا بدل أن نكون مدينين له.
 
-        يُنشئ PurchaseInvoiceFee بمبلغ الشحنة ويربطها بفاتورة المشتريات.
-        إذا كانت capitalize_to_inventory=True سيتم رسملتها على Landed Cost
-        تلقائياً عند ترحيل الفاتورة.
-
-        ملاحظة: لا يُرحِّل الشحن محاسبياً — الفاتورة هي التي سترحّل.
+        القاعدة الآن (قرار المالك): الاستحقاق مستقل عبر post-to-accounting
+        (Dr مصروف النقل / Cr ذمم الناقل) والدفع مستقل عنه. الرسملة على تكلفة
+        المخزون لا تتأثر: landed_cost يقرأ LocalShipment مباشرةً لا عبر رسوم
+        الفاتورة.
         """
-        shipment = self.get_object()
-        tenant = shipment.tenant
-        invoice_id = request.data.get('invoice_id')
-        if not invoice_id:
-            return Response(
-                {'error': 'invoice_id مطلوب.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        try:
-            invoice = PurchaseInvoice.objects.get(pk=invoice_id, tenant=tenant)
-        except PurchaseInvoice.DoesNotExist:
-            return Response(
-                {'error': 'الفاتورة غير موجودة.'},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        if invoice.is_posted:
-            return Response(
-                {'error': 'الفاتورة مرحّلة — لا يمكن إضافة رسوم.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if shipment.purchase_invoice_id:
-            return Response(
-                {'error': 'تم استيراد هذه الشحنة بالفعل.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if shipment.is_posted:
-            return Response(
-                {
-                    'error': (
-                        'لا يمكن استيراد شحن مُرحَّل محاسبياً — '
-                        'سيُسجَّل مرتين. ألغِ الترحيل أولاً.'
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # الحساب — افتراضياً الـexpense_account الخاص بالشحنة أو 5305
-        expense_account = shipment.expense_account
-        if not expense_account:
-            expense_account = (
-                Account.objects.filter(tenant=tenant, code='5305', is_active=True).first()
-                or Account.objects.filter(tenant=tenant, code='5301', is_active=True).first()
-            )
-        if not expense_account:
-            return Response(
-                {'error': 'لا يوجد حساب مصروف للشحن المحلي.'},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        try:
-            with transaction.atomic():
-                PurchaseInvoiceFee.objects.create(
-                    tenant=tenant,
-                    invoice=invoice,
-                    expense_account=expense_account,
-                    description=(
-                        f"شحن محلي {shipment.shipment_number} — "
-                        f"{shipment.carrier.name}"
-                    )[:255],
-                    amount=shipment.amount,
-                    calculation_type=PurchaseInvoiceFee.CALCULATION_AMOUNT,
-                    calculation_value=shipment.amount,
-                    percentage_basis=PurchaseInvoiceFee.BASIS_GOODS,
-                    capitalize_to_inventory=shipment.capitalize_to_inventory,
-                    is_taxable=False,
+        return Response(
+            {
+                'error': (
+                    'نقل تكلفة الناقل إلى الفاتورة معطَّل — كان يُدائن مورد الفاتورة '
+                    'بدل الناقل فتبقى ذمّته بلا استحقاق. استخدم «إثبات الاستحقاق» '
+                    'على سطر النقل المحلي: يدائن الناقل، والدفع يبقى إجراءً مستقلاً. '
+                    'التكلفة تُرسمل على المخزون كما هي بلا هذا النقل.'
                 )
-                shipment.purchase_invoice = invoice
-                shipment.save(update_fields=['purchase_invoice'])
-        except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response({
-            'message': 'تم استيراد الشحنة إلى الفاتورة كرسم',
-            'invoice_id': invoice.id,
-            'invoice_number': invoice.invoice_number,
-        })
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
 
 class LandedCostReportViewSet(viewsets.ViewSet):

@@ -180,6 +180,71 @@ def resolve_forex_account(tenant_id: int) -> Account | None:
     return None
 
 
+IMPORT_EXPENSE_PARENT_CODE = "53"
+
+
+def _normalize_account_name(value: str) -> str:
+    """اسم مُطبَّع للمقارنة: بلا فراغات زائدة وبلا الجزء الإنجليزي بين قوسين."""
+    text = " ".join(str(value or "").split()).strip()
+    if "(" in text:
+        text = text.split("(", 1)[0].strip() or text
+    return text.casefold()
+
+
+def resolve_import_expense_account(tenant_id: int, name: str):
+    """يُرجع (حساب، أُنشئ؟) لمصروف استيراد بالاسم المكتوب تحت شجرة «53».
+
+    إن وُجد حساب بنفس الاسم (تطبيع: فراغات + تجاهل الجزء الإنجليزي) يُعاد كما هو،
+    وإلا يُنشأ حساب جديد ابناً مباشراً للبند «53 مصاريف الاستيراد المباشرة».
+    يُرجع (None, False) إن لم يكن الاسم صالحاً أو شجرة الاستيراد غير مُهيّأة.
+    """
+    clean = " ".join(str(name or "").split()).strip()
+    if not clean:
+        return None, False
+    parent = Account.objects.filter(tenant_id=tenant_id, code=IMPORT_EXPENSE_PARENT_CODE).first()
+    if parent is None:
+        logger.warning("import expense parent 53 missing tenant=%s", tenant_id)
+        return None, False
+
+    subtree = list(
+        Account.objects.filter(
+            tenant_id=tenant_id, code__startswith=IMPORT_EXPENSE_PARENT_CODE,
+        ).exclude(code=IMPORT_EXPENSE_PARENT_CODE)
+    )
+    target = _normalize_account_name(clean)
+    for account in subtree:
+        if _normalize_account_name(account.name) == target:
+            return account, False
+
+    used = set()
+    for account in subtree:
+        code = str(account.code or "")
+        if code.startswith(IMPORT_EXPENSE_PARENT_CODE) and code[2:].isdigit():
+            used.add(int(code[2:]))
+    serial = max(used) + 1 if used else 1
+    for _ in range(9000):
+        candidate = f"{IMPORT_EXPENSE_PARENT_CODE}{serial:02d}"
+        if not Account.objects.filter(tenant_id=tenant_id, code=candidate).exists():
+            break
+        serial += 1
+    else:  # pragma: no cover - مساحة الترقيم لا تنفد عملياً
+        raise ValueError("تعذّر تخصيص رقم حساب جديد تحت «مصاريف الاستيراد».")
+
+    account = Account.objects.create(
+        tenant_id=tenant_id,
+        code=candidate,
+        name=clean,
+        parent=parent,
+        account_type="Expense",
+        is_active=True,
+    )
+    logger.info(
+        "import expense account created tenant=%s code=%s name=%s",
+        tenant_id, account.code, account.name,
+    )
+    return account, True
+
+
 def validate_fiscal_period(tenant_id, transaction_date):
     """
     Ensures transaction_date falls within an open fiscal period.
@@ -324,32 +389,52 @@ def validate_journal_entry(header, lines_data):
     total_debit_q = total_debit.quantize(Decimal('0.01'))
     total_credit_q = total_credit.quantize(Decimal('0.01'))
     if total_debit_q != total_credit_q:
-        raise ValidationError(f"Unbalanced entry: Total Debit ({total_debit_q}) != Total Credit ({total_credit_q}). Diff: {total_debit_q - total_credit_q}")
+        raise ValidationError(
+            "القيد غير متوازن: مجموع المدين "
+            f"{total_debit_q} ₪ لا يساوي مجموع الدائن {total_credit_q} ₪ "
+            f"(الفرق {total_debit_q - total_credit_q} ₪). "
+            "لم يُرحَّل شيء. جرّب «إعادة حساب التكلفة» ثم أعد الترحيل، "
+            "وإن استمر الفرق فأبلغ الدعم بهذا الرقم."
+        )
     
     if total_debit == 0:
         raise ValidationError("Journal entry cannot be empty (zero amount).")
 
+def _truncate_for_field(value, field_name: str):
+    """يقصّ النص على طول العمود. MySQL في وضع STRICT يرفض الأطول (خطأ 1406)."""
+    if value is None:
+        return value
+    text = str(value)
+    max_length = AccountingAuditLog._meta.get_field(field_name).max_length
+    return text[:max_length] if max_length else text
+
+
 def create_audit_log(tenant, user, action, model_name, object_id, change_details):
     try:
         auth_user = user if user and user.is_authenticated else None
-        
+
         # Handle Tenant vs None
         tenant_to_use = tenant
         if not tenant_to_use:
              # Try to find a system tenant or handle optionality
              # Ideally we shouldn't create logs without tenant, but existing logic allows it
-             pass 
+             pass
 
         # We can't really save without a valid tenant FK if strict, so we assume tenant is provided or we fetch default
         if tenant_to_use:
-            AccountingAuditLog.objects.create(
-                tenant=tenant_to_use,
-                user=auth_user,
-                action=action,
-                model_name=model_name,
-                object_id=object_id,
-                change_details=change_details
-            )
+            # savepoint مستقل: فشل سطر تدقيق يجب ألا يُسقط عملية المستدعي. بدونه
+            # كان خطأ DB هنا (مثل action أطول من varchar(20)) يُبتلع في except
+            # أدناه بينما Django قد وسم المعاملة needs_rollback ⇒ يُلغى القيد
+            # المحاسبي وحفظ المستند بصمت بينما الواجهة ترى «تم بنجاح».
+            with transaction.atomic():
+                AccountingAuditLog.objects.create(
+                    tenant=tenant_to_use,
+                    user=auth_user,
+                    action=_truncate_for_field(action, 'action'),
+                    model_name=_truncate_for_field(model_name, 'model_name'),
+                    object_id=object_id,
+                    change_details=change_details
+                )
     except Exception as e:
         import logging as _log
         _log.getLogger(__name__).warning("Failed to create accounting audit log: %s", e)

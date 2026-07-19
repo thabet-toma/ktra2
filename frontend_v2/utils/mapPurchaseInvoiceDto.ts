@@ -69,6 +69,7 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     glPurchaseReceiptJournalId: dto.journal_id_display || undefined,
     dealId: dto.deal ? String(dto.deal) : undefined,
     dealNumber: dto.deal_ref || undefined,
+    dealTitle: dto.deal_title || undefined,
     shipment: dto.shipment ? String(dto.shipment) : undefined,
     clearanceId: dto.clearance != null ? String(dto.clearance) : undefined,
     importLogistics: dto.shipment && dto.clearance != null ? {

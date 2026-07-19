@@ -13,7 +13,6 @@ import {
   Plus,
   RefreshCw,
   Printer,
-  Edit,
   Trash2,
   Eye,
   ArrowRightLeft,
@@ -39,6 +38,8 @@ interface InvoiceListProps {
   onCreateNew?: () => void;
   /** فتح نافذة الاستيراد من تخليص جمركي. */
   onImport?: () => void;
+  /** شاشة الفواتير الدولية — تُسمّى القائمة وبنودها «دولية» بدل «شراء». */
+  isInternational?: boolean;
   /** إعادة تحميل القائمة. */
   onRefresh?: () => void;
   page?: number;
@@ -75,6 +76,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   suppliers,
   onCreateNew,
   onImport,
+  isInternational = false,
   onRefresh,
   page = 1,
   pageSize = 50,
@@ -171,7 +173,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
     {
       key: "kind",
       header: "النوع",
-      width: "70px",
+      width: "90px",
       align: "center",
       render: (r) => (
         <span
@@ -184,7 +186,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             background: r.isReturn ? "rgba(176,74,0,0.12)" : "rgba(37,99,235,0.10)",
           }}
         >
-          {r.isReturn ? "مرجع" : "فاتورة"}
+          {r.isReturn ? "مرجع" : r.invoiceType === "international" ? "فاتورة دولية" : "فاتورة"}
         </span>
       ),
     },
@@ -212,6 +214,24 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         ) : (
           <span className="text-xs">{supplierName(r)}</span>
         ),
+    },
+    {
+      // الفاتورة الدولية تُنشأ من صفقة — اسمها هو ما يعرفه المستخدم، لا رقمها.
+      key: "dealTitle",
+      header: "الصفقة",
+      width: "180px",
+      render: (r) => (
+        r.dealId ? (
+          <button
+            type="button"
+            className="text-xs text-[var(--aseel-accent)] underline hover:no-underline cursor-pointer bg-transparent border-0 p-0 font-inherit text-right"
+            title="فتح الصفقة في تبويب جديد"
+            onClick={(e) => { e.stopPropagation(); openInNewTab(`/deals/${r.dealId}`); }}
+          >
+            {r.dealTitle || r.dealNumber || `#${r.dealId}`}
+          </button>
+        ) : <span className="text-xs aseel-text-soft">—</span>
+      ),
     },
     {
       key: "status",
@@ -253,15 +273,6 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             title="عرض"
           >
             <Eye className="w-3 h-3" />
-          </button>
-          <button
-            type="button"
-            className="aseel-toolbtn"
-            style={{ fontSize: "10px", padding: "2px 6px" }}
-            onClick={(e) => { e.stopPropagation(); onEdit(r); }}
-            title="تعديل"
-          >
-            <Edit className="w-3 h-3" />
           </button>
           <button
             type="button"
@@ -331,7 +342,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           }}
         >
           <option value="all">الكل</option>
-          <option value="invoice">فواتير الشراء</option>
+          <option value="invoice">{isInternational ? "الفواتير الدولية" : "فواتير الشراء"}</option>
           <option value="return">مراجيع الشراء</option>
         </select>
       </label>
@@ -375,7 +386,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   return (
     <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
-        title="فواتير الشراء"
+        title={isInternational ? "الفواتير الدولية" : "فواتير الشراء"}
         state={`${filteredRows.length} في الصفحة من ${total}`}
         actions={toolbarActions}
         header={filterBar}

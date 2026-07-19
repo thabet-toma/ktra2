@@ -1,7 +1,6 @@
 export type ImportJourneyAction =
   | "save_shipment"
   | "link_deals"
-  | "set_freight"
   | "pay_freight"
   | "create_clearance"
   | "enter_clearance_costs"
@@ -14,7 +13,8 @@ export interface ImportJourneyGuidanceInput {
   invoiceEligible: boolean;
   dealsCount: number;
   freightTotalUsd: number;
-  freightFullyPaid: boolean;
+  /** التكلفة مُثبتة: قيد استحقاق على الوكيل، أو دفع كامل، أو شحن بلا تكلفة */
+  freightCostEstablished: boolean;
   clearanceExists: boolean;
   clearanceCostTotal: number;
   convertedInvoiceId: number | null;
@@ -59,11 +59,8 @@ export function getImportJourneyGuidance(input: ImportJourneyGuidanceInput): Imp
   if (input.dealsCount === 0) {
     return { action: "link_deals", step: 2, title: "ضمّ الصفقات إلى الشحنة", description: "اختر الصفقات التي وصلت ضمن هذه الشحنة.", actionLabel: "فتح الصفقات" };
   }
-  if (input.freightTotalUsd <= 0) {
-    return { action: "set_freight", step: 3, title: "حدّد تكلفة الشحن الدولي", description: "اختر CBM أو KG وأدخل سعر الوحدة ليُوزّع المبلغ تلقائياً.", actionLabel: "إدخال تكلفة الشحن" };
-  }
-  if (!input.freightFullyPaid) {
-    return { action: "pay_freight", step: 3, title: "أكمل دفعات الشحن الدولي", description: "الفاتورة الدولية تحتاج أن تكون دفعات وكيل الشحن مؤكدة.", actionLabel: "تسجيل دفعة شحن" };
+  if (!input.freightCostEstablished) {
+    return { action: "pay_freight", step: 3, title: "أثبت استحقاق الشحن الدولي", description: "أدخل سعر الصرف ورحّل الاستحقاق على وكيل الشحن — الدفع إجراء مستقل لاحقاً.", actionLabel: "إثبات استحقاق الشحن" };
   }
   if (!input.clearanceExists) {
     return { action: "create_clearance", step: 4, title: "أنشئ ملف التخليص", description: "سجّل المخلّص ورقم البيان وتكاليف التخليص.", actionLabel: "إنشاء التخليص" };

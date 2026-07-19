@@ -549,6 +549,25 @@ class LogisticsShipment(SoftDeleteMixin, models.Model):
     vat_total = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='VATTotal', help_text='مجموع الضريبة')
     grand_total = models.DecimalField(max_digits=18, decimal_places=2, null=True, blank=True, db_column='GrandTotal', help_text='إجمالي الإرسالية')
 
+    # ── استحقاق شحن الوكيل: منفصل تماماً عن الدفع ──────────────────────────
+    # قبل هذا كان الوكيل يستقبل مدين الدفعات فقط (بلا دائن مقابل) فيظهر مديناً،
+    # وكانت تكلفة الشحن بالشيكل تُشتقّ من الدفعات — فتُضطر لتسجيل دفعة وهمية
+    # لمجرد إعطاء النظام سعر صرف. الآن: قيد استحقاق صريح بسعره الخاص.
+    freight_exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, null=True, blank=True,
+        db_column='FreightExchangeRate',
+        help_text='سعر صرف الدولار للشيكل المعتمد لاستحقاق شحن الوكيل',
+    )
+    freight_is_posted = models.BooleanField(
+        default=False, db_column='FreightIsPosted',
+        help_text='هل رُحّل قيد استحقاق شحن الوكيل؟',
+    )
+    freight_journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='FreightJournalID', related_name='freight_shipments',
+        help_text='قيد استحقاق شحن الوكيل (Dr مصاريف الشحن الدولي / Cr ذمم الوكيل)',
+    )
+
     deals = models.ManyToManyField(LogisticsDeal, through='LogisticsShipmentDeal', related_name='shipments')
 
     class Meta:

@@ -72,6 +72,20 @@ export const accountingApi = {
     return res.json();
   },
 
+  /**
+   * رسوم الفواتير الدولية: يُرجع حساب المصروف المطابق للاسم تحت «53 مصاريف الاستيراد»
+   * أو يُنشئه هناك إن لم يكن موجوداً.
+   */
+  resolveImportExpenseAccount: async (name: string) => {
+    const res = await fetch(`${ACC}/accounts/resolve-import-expense/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ name }),
+    });
+    await handle(res, "resolveImportExpenseAccount");
+    return res.json();
+  },
+
   updateAccount: async (id: number, body: Record<string, unknown>) => {
     const res = await fetch(`${ACC}/accounts/${id}/`, {
       method: "PATCH",

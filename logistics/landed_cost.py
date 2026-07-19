@@ -176,6 +176,12 @@ def shipment_freight_ils(shipment: LogisticsShipment, remaining_rate: Decimal) -
     unpaid = (total_usd - paid_usd).quantize(Q2, rounding=ROUND_HALF_UP)
     if unpaid < 0:
         unpaid = Decimal('0')
+    # قيد الاستحقاق يحكم التكلفة: سعره هو الملزم للقيمة بالشيكل، فتصبح تكلفة
+    # الشحن مستقلة تماماً عن وجود دفعات أو عددها (قرار المالك 2026-07-18).
+    accrual_rate = _d(getattr(shipment, 'freight_exchange_rate', None) or 0)
+    if getattr(shipment, 'freight_is_posted', False) and accrual_rate > 0:
+        total_ils = (total_usd * accrual_rate).quantize(Q2, rounding=ROUND_HALF_UP)
+        return total_ils, paid_usd, paid_ils, unpaid
     total_ils = (paid_ils + unpaid * remaining_rate).quantize(Q2, rounding=ROUND_HALF_UP)
     return total_ils, paid_usd, paid_ils, unpaid
 
@@ -758,6 +764,15 @@ def preview_landed_import(
         'shipment_freight_paid_ils': float(ship_paid_ils),
         'shipment_freight_unpaid_usd': float(ship_unpaid_usd),
         'shipment_freight_fully_paid': ship_unpaid_usd <= freight_tol,
+        # بوابة الاستيراد = «التكلفة مُثبتة» لا «مدفوعة» (قرار المالك، task44):
+        # قيد الاستحقاق يثبّت تكلفة الشحن وسعر صرفها فلا يلزم دفع الوكيل.
+        # كانت شاشة الرحلة تعتمد هذا بينما الخادم والمودال يطلبان الدفع الكامل،
+        # فيقول أحدهما «جاهزة» والآخر «غير مدفوع» على نفس الشحنة.
+        'shipment_freight_cost_established': bool(
+            getattr(shipment, 'freight_is_posted', False)
+            or ship_unpaid_usd <= freight_tol
+            or ship_total_usd <= 0
+        ),
         'clearance_pool_ils': float(clearance_pool),
         'clearance_local_shipping_cost_lines_total_ils': float(local_transport_total),
         'local_transport_total_ils': float(local_transport_total),
@@ -968,11 +983,21 @@ def import_invoices_from_clearance(
         .first()
         or shipment
     )
+    # التكلفة مُثبتة = استحقاق مرحّل أو دفع كامل أو شحن بلا تكلفة (قرار المالك،
+    # task44). قيد الاستحقاق يثبّت التكلفة وسعر صرفها فلا يلزم دفع الوكيل قبل
+    # الفوترة — الدفع حركة خزينة مستقلة. كان الشرط «مدفوع بالكامل» يناقض شاشة
+    # رحلة الاستيراد التي تعتبر الاستحقاق كافياً.
     _, _, _, ship_unpaid_usd = shipment_freight_ils(shipment_for_pay, shipment_remaining_rate)
-    if ship_unpaid_usd > Decimal('0.02') and not allow_unpaid_freight:
+    freight_cost_established = (
+        getattr(shipment_for_pay, 'freight_is_posted', False)
+        or ship_unpaid_usd <= Decimal('0.02')
+        or _d(shipment_for_pay.total_shipping_cost_usd) <= 0
+    )
+    if not freight_cost_established and not allow_unpaid_freight:
         raise ValueError(
-            'لا يمكن استيراد الفاتورة: يوجد مبلغ شحن دولي غير مدفوع بالدولار على الشحنة. '
-            'سجّل دفعات وكيل الشحن المؤكّدة حتى يصبح المدفوع مساوياً لإجمالي تكلفة الشحن بالدولار، ثم أعد المحاولة.'
+            'لا يمكن استيراد الفاتورة: تكلفة الشحن الدولي غير مُثبتة. '
+            'أثبِت استحقاق الشحن على الوكيل بسعر الصرف من شاشة الشحنة '
+            '(أو أكمل دفعاته بالدولار)، ثم أعد المحاولة.'
         )
     ils = get_ils_currency()
     if not ils:
@@ -1064,6 +1089,15 @@ def import_invoices_from_clearance(
                     landed_line_total_ils=row.get('landed_line_total_ils'),
                 )
             created.append(inv)
+
+        # «الإفراج لحظة الاستحقاق»: بمجرد أن تصير الشحنة فاتورة يصبح المخلّص
+        # والناقل ووكيل الشحن دائنين بقيودهم المستقلة. الدفع يبقى مديناً لاحقاً
+        # (داخل الشحنة أو بسند دفع). بلا هذا كان أستاذ كل طرف مدين-فقط.
+        if created:
+            from .accruals import accrue_all_on_release
+            accrue_all_on_release(
+                clearance, freight_rate=shipment_remaining_rate, user=None,
+            )
     return created
 
 

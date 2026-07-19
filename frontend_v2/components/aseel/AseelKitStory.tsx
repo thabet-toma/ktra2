@@ -5,6 +5,7 @@
  * verified WITHOUT touching any backend or real screen.
  */
 import React, { useMemo, useState } from 'react';
+import { formatMoney } from '../../utils/formatNumber';
 import {
   Plus,
   Save,
@@ -25,6 +26,7 @@ import {
 } from 'lucide-react';
 import {
   AseelDocumentShell,
+  AseelDocumentView,
   AseelGrid,
   AseelIndexPicker,
   AseelFormSection,
@@ -292,6 +294,9 @@ export const AseelKitStory: React.FC = () => {
 
         {/* N1-T5 — AseelDateInput */}
         <DateInputStoryPanel />
+
+        {/* عرض مستندي للقراءة — نفس المكوّن الذي يخدم المبيعات والشراء والصفقات */}
+        <DocumentViewStoryPanel />
       </div>
     </div>
   );
@@ -308,6 +313,69 @@ const DateInputStoryPanel: React.FC = () => {
       <div className="flex gap-3 items-center">
         <AseelDateInput value={d} onChange={setD} style={{ width: 180 }} />
         <span className="text-xs">القيمة الحالية: <b>{d || '—'}</b></span>
+      </div>
+    </div>
+  );
+};
+
+type StoryLine = { name: string; qty: number; price: number; discount: number; total: number };
+
+const DocumentViewStoryPanel: React.FC = () => {
+  const rows: StoryLine[] = [
+    { name: 'بطارية 15 كيلو zj مايكل', qty: 10, price: 783, discount: 0, total: 7830 },
+    { name: 'بطارية 30 كيلو zj مايكل', qty: 10, price: 1231, discount: 0, total: 12310 },
+    { name: 'شاحن سريع 60W', qty: 4, price: 145.5, discount: 20, total: 562 },
+  ];
+  const money = (n: number) => `${formatMoney(n)} ILS`;
+  return (
+    <div className="mt-4">
+      <h4 className="font-bold mb-2">AseelDocumentView — عرض مستندي للقراءة</h4>
+      <p className="text-xs text-gray-500 mb-2">
+        يفتح المستند على هذا العرض، و«تحرير» في شريط الأدوات يفتح نموذج التحرير.
+      </p>
+      <div className="border rounded-xl overflow-hidden bg-slate-50">
+        <AseelDocumentView<StoryLine>
+          title="فاتورة مبيعات"
+          subtitle="SALES INVOICE"
+          documentNumber="SI-2026-0042"
+          status={{ label: 'مرحّلة', tone: 'ok' }}
+          metrics={[
+            { label: 'الإجمالي', value: money(20702), tone: 'info' },
+            { label: 'المدفوع', value: money(20702), tone: 'ok' },
+            { label: 'المتبقي', value: money(0) },
+            { label: 'نوع الفاتورة', value: 'نقدي', tone: 'ok' },
+          ]}
+          parties={[
+            {
+              title: 'العميل',
+              fields: [
+                { label: 'الاسم', value: 'مؤسسة النور التجارية' },
+                { label: 'الهاتف', value: '0599-123456' },
+              ],
+            },
+          ]}
+          meta={[
+            { label: 'تاريخ الفاتورة', value: '2026-07-19' },
+            { label: 'تاريخ الاستحقاق', value: '2026-08-19' },
+            { label: 'العملة', value: 'ILS' },
+            { label: 'قيد اليومية', value: '#13200' },
+          ]}
+          columns={[
+            { key: 'name', header: 'الصنف', render: (r) => <span className="font-semibold">{r.name}</span> },
+            { key: 'qty', header: 'الكمية', width: '80px', align: 'center', numeric: true, render: (r) => formatMoney(r.qty) },
+            { key: 'price', header: 'سعر الوحدة', width: '110px', align: 'left', numeric: true, render: (r) => formatMoney(r.price) },
+            { key: 'disc', header: 'الخصم', width: '90px', align: 'left', numeric: true, render: (r) => formatMoney(r.discount) },
+            { key: 'total', header: 'الإجمالي', width: '120px', align: 'left', numeric: true, render: (r) => <b>{formatMoney(r.total)}</b> },
+          ]}
+          rows={rows}
+          totals={[
+            { label: 'المجموع قبل الضريبة', value: money(17693.16) },
+            { label: 'خصم الفاتورة', value: money(20) },
+            { label: 'الضريبة', value: money(3008.84) },
+            { label: 'الإجمالي', value: money(20702), emphasis: true },
+          ]}
+          sections={[{ key: 'notes', title: 'ملاحظات', content: 'تسليم على عنوان العميل خلال 3 أيام عمل.' }]}
+        />
       </div>
     </div>
   );

@@ -610,24 +610,53 @@ def _resolve_line_account(product, account_type='revenue', *, tenant_id=None):
 # ──────────────────────────────────────────────────────────────────────────
 # FEAT-3 — Product profile (KPIs + linked invoices + stock ledger)
 # ──────────────────────────────────────────────────────────────────────────
+def _purchased_totals_by_product(tenant_id: int, product_ids: list[int]) -> dict:
+    """مجاميع المشتريات المرحّلة لكل صنف — استعلام واحد لأي عدد أصناف.
+
+    مصدر واحد لشرط الاحتساب (فاتورة شراء مرحّلة) يخدم البطاقة المفردة والمجمّعة.
+    """
+    from django.db.models import Sum
+
+    from logistics.models import PurchaseInvoiceItem
+
+    rows = (
+        PurchaseInvoiceItem.objects
+        .filter(invoice__tenant_id=tenant_id, invoice__is_posted=True,
+                product_id__in=product_ids)
+        .values('product_id')
+        .annotate(q=Sum('quantity'), v=Sum('total_price'))
+    )
+    return {r['product_id']: (r['q'] or 0, r['v'] or 0) for r in rows}
+
+
+def _sold_totals_by_product(tenant_id: int, product_ids: list[int]) -> dict:
+    """مجاميع المبيعات المرحّلة (فواتير بيع فقط) لكل صنف — استعلام واحد."""
+    from django.db.models import Sum
+
+    from sales.models import SalesInvoice, SalesInvoiceLine
+
+    rows = (
+        SalesInvoiceLine.objects
+        .filter(tenant_id=tenant_id, product_id__in=product_ids,
+                invoice__status=SalesInvoice.STATUS_POSTED,
+                invoice__invoice_kind=SalesInvoice.INVOICE_KIND_SALE)
+        .values('product_id')
+        .annotate(q=Sum('quantity'), v=Sum('line_total_excl_tax'))
+    )
+    return {r['product_id']: (r['q'] or 0, r['v'] or 0) for r in rows}
+
+
 def product_profile(*, tenant_id: int, product_id: int) -> dict:
     """Header KPIs for the product profile. Totals come from posted documents;
     on-hand / valuation come from the canonical Product fields (A4)."""
     from django.db.models import Sum
 
-    from logistics.models import PurchaseInvoiceItem
-    from sales.models import SalesInvoice, SalesInvoiceLine
-
     p = Product.objects.select_related('category').get(id=product_id, tenant_id=tenant_id)
 
-    purchased = PurchaseInvoiceItem.objects.filter(
-        invoice__tenant_id=tenant_id, invoice__is_posted=True, product_id=product_id,
-    ).aggregate(q=Sum('quantity'), v=Sum('total_price'))
-    sold = SalesInvoiceLine.objects.filter(
-        tenant_id=tenant_id, product_id=product_id,
-        invoice__status=SalesInvoice.STATUS_POSTED,
-        invoice__invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
-    ).aggregate(q=Sum('quantity'), v=Sum('line_total_excl_tax'))
+    pq, pv = _purchased_totals_by_product(tenant_id, [product_id]).get(product_id, (0, 0))
+    sq, sv = _sold_totals_by_product(tenant_id, [product_id]).get(product_id, (0, 0))
+    purchased = {'q': pq, 'v': pv}
+    sold = {'q': sq, 'v': sv}
 
     on_hand = Decimal(str(p.quantity_on_hand or 0))
     avg_cost = Decimal(str(p.avg_cost or 0))
@@ -677,8 +706,10 @@ def product_group_profile(*, tenant_id: int, product_ids: list[int]) -> dict:
     """الكرت المجمّع: يجمع مؤشّرات كل البراندات (المنتجات) التي تشترك بنفس المقاس/
     الأساس في بطاقة واحدة — المخزون والمشتريات والمبيعات الإجمالية + تفصيل كل براند.
 
-    يعيد استخدام منطق `product_profile` لكل عضو (DRY) ثم يجمع، فيبقى مصدر حقيقة
-    واحد لطريقة احتساب المؤشّرات."""
+    كان يستدعي `product_profile` لكل عضو: 7 استعلامات × عدد الأصناف (منها 4 لمعدّلات
+    بيع لا تظهر هنا أصلاً) — 1490 صنفاً في «أصناف عامة» ⇒ ~10 آلاف استعلام وتجاوز
+    مهلة الـ30 ثانية. الآن مجاميع مجمَّعة باستعلامين مشتركين مع البطاقة المفردة،
+    والرصيد/التكلفة من حقول المنتج نفسه (بلا استعلام إضافي)."""
     members = _group_products(tenant_id, product_ids)
     if not members:
         return {
@@ -688,25 +719,33 @@ def product_group_profile(*, tenant_id: int, product_ids: list[int]) -> dict:
             'sold_qty': '0', 'sold_value': '0',
         }
 
+    member_ids = [p.id for p in members]
+    purchased_map = _purchased_totals_by_product(tenant_id, member_ids)
+    sold_map = _sold_totals_by_product(tenant_id, member_ids)
+
     qty = val = pq = pv = sq = sv = Decimal('0')
     member_rows = []
     for p in members:
-        prof = product_profile(tenant_id=tenant_id, product_id=p.id)
-        qty += Decimal(prof['quantity_on_hand'])
-        val += Decimal(prof['inventory_valuation'])
-        pq += Decimal(prof['purchased_qty'])
-        pv += Decimal(prof['purchased_value'])
-        sq += Decimal(prof['sold_qty'])
-        sv += Decimal(prof['sold_value'])
+        m_pq, m_pv = purchased_map.get(p.id, (0, 0))
+        m_sq, m_sv = sold_map.get(p.id, (0, 0))
+        on_hand = Decimal(str(p.quantity_on_hand or 0))
+        avg_cost = Decimal(str(p.avg_cost or 0))
+        valuation = (on_hand * avg_cost).quantize(Decimal('0.01'))
+        qty += on_hand
+        val += valuation
+        pq += Decimal(str(m_pq))
+        pv += Decimal(str(m_pv))
+        sq += Decimal(str(m_sq))
+        sv += Decimal(str(m_sv))
         member_rows.append({
             'id': p.id,
             'sku': p.sku,
             'brand': (p.brand or '').strip(),
             'name': product_display_name(p),
-            'quantity_on_hand': prof['quantity_on_hand'],
-            'avg_cost': prof['avg_cost'],
-            'inventory_valuation': prof['inventory_valuation'],
-            'sold_qty': prof['sold_qty'],
+            'quantity_on_hand': str(on_hand),
+            'avg_cost': str(avg_cost),
+            'inventory_valuation': str(valuation),
+            'sold_qty': str(m_sq),
         })
 
     first = members[0]
@@ -775,26 +814,28 @@ def product_linked_invoices(
 ) -> list[dict]:
     """All purchase + sales invoices that contain this product (clickable).
 
-    تمرير `product_ids` يجمع فواتير عدة براندات في قائمة واحدة (الكرت المجمّع)."""
-    from logistics.models import PurchaseInvoiceItem
-    from sales.models import SalesInvoiceLine
+    تمرير `product_ids` يجمع فواتير عدة براندات في قائمة واحدة (الكرت المجمّع).
+
+    الحذف المكرر يتم في SQL لا في بايثون: القراءة القديمة كانت تسحب **كل سطر**
+    في كل فاتورة تخصّ أي عضو (عشرات الآلاف من الأسطر مع join على الفاتورة والطرف)
+    ثم تتجاهل المكرر — 11 ثانية على مجموعة من 1490 صنفاً. الآن: معرّفات الفواتير
+    المميّزة أولاً ثم الفواتير نفسها فقط."""
+    from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
+    from sales.models import SalesInvoice, SalesInvoiceLine
 
     pid_filter = {'product_id__in': product_ids} if product_ids else {'product_id': product_id}
 
     out: list[dict] = []
-    pis = (
-        PurchaseInvoiceItem.objects.filter(
-            invoice__tenant_id=tenant_id, **pid_filter,
-        )
-        .select_related('invoice', 'invoice__partner')
-        .order_by('-invoice__invoice_date', '-invoice_id')
+    purchase_ids = (
+        PurchaseInvoiceItem.objects.filter(invoice__tenant_id=tenant_id, **pid_filter)
+        .values_list('invoice_id', flat=True).distinct()
     )
-    seen_p = set()
-    for it in pis:
-        if it.invoice_id in seen_p:
-            continue
-        seen_p.add(it.invoice_id)
-        inv = it.invoice
+    pis = (
+        PurchaseInvoice.objects.filter(tenant_id=tenant_id, id__in=list(purchase_ids))
+        .select_related('partner')
+        .order_by('-invoice_date', '-id')
+    )
+    for inv in pis:
         out.append({
             'document_type': 'PURCHASE_INVOICE',
             'document_id': inv.id,
@@ -803,17 +844,16 @@ def product_linked_invoices(
             'party': inv.partner.name if inv.partner_id else None,
             'is_posted': bool(inv.is_posted),
         })
-    sls = (
+    sales_ids = (
         SalesInvoiceLine.objects.filter(tenant_id=tenant_id, **pid_filter)
-        .select_related('invoice', 'invoice__customer')
-        .order_by('-invoice__invoice_date', '-invoice_id')
+        .values_list('invoice_id', flat=True).distinct()
     )
-    seen_s = set()
-    for ln in sls:
-        if ln.invoice_id in seen_s:
-            continue
-        seen_s.add(ln.invoice_id)
-        inv = ln.invoice
+    sls = (
+        SalesInvoice.objects.filter(tenant_id=tenant_id, id__in=list(sales_ids))
+        .select_related('customer')
+        .order_by('-invoice_date', '-id')
+    )
+    for inv in sls:
         out.append({
             'document_type': 'SALES_INVOICE',
             'document_id': inv.id,

@@ -9,7 +9,7 @@ import { priceOffersService, suppliersService } from '../../services/firestoreSe
 import { dealsService } from '../../services/dealsService';
 import { DealForm } from './deals/DealForm';
 import { DealPrintView } from './deals/DealPrintView';
-import { Plus, FileInput, Printer, Edit2, Trash2, RefreshCw, Ship } from 'lucide-react';
+import { Plus, FileInput, Printer, Trash2, RefreshCw, Ship } from 'lucide-react';
 import { LoadingSpinner } from '../LoadingSpinner';
 import { PriceOfferSelectionModal } from './price-offers/PriceOfferSelectionModal';
 import { CreateShipmentFromDealsModal } from '../import-flow/CreateShipmentFromDealsModal';
@@ -302,7 +302,8 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         }
     };
 
-    const handleEdit = (deal: Deal) => {
+    /** فتح الصفقة — تُفتح على وضع العرض، والتحرير من زر «تحرير» داخلها. */
+    const openDeal = (deal: Deal) => {
         // الأصل: يفتح في تاب جديد كي لا يفقد المستخدم سياق القائمة
         window.open(
             `${window.location.origin}/deals/${encodeURIComponent(deal.id)}`,
@@ -439,14 +440,6 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                         title="طباعة"
                     >
                         <Printer style={{ width: 13, height: 13 }} />
-                    </button>
-                    <button
-                        className="aseel-toolbtn"
-                        style={{ padding: '2px 4px' }}
-                        onClick={(e) => { e.stopPropagation(); handleEdit(d); }}
-                        title="تعديل"
-                    >
-                        <Edit2 style={{ width: 13, height: 13 }} />
                     </button>
                     <button
                         className="aseel-toolbtn"
@@ -596,7 +589,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 getRowKey={(d) => d.id}
                 loading={loading}
                 emptyHint="لا توجد صفقات — اضغط «صفقة جديدة»"
-                onRowDoubleClick={(d) => handleEdit(d)}
+                onRowDoubleClick={(d) => openDeal(d)}
                 footer={
                     filteredDeals.length > 0 ? (
                         <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>

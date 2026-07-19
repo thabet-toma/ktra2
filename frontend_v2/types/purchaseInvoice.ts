@@ -42,10 +42,13 @@ export interface PurchaseInvoiceListDto {
   invoice_number: string;
   invoice_name?: string | null;
   invoice_date?: string | null;
+  invoice_type?: "local" | "international";
   partner: number;
   partner_name: string;
   deal?: number | null;
   deal_ref?: string | null;
+  /** اسم الصفقة المحوَّلة (من قائمة الصفقات) */
+  deal_title?: string | null;
   shipment?: number | null;
   shipment_number?: string | null;
   shipment_name?: string | null;
@@ -81,6 +84,8 @@ export interface PurchaseInvoiceDto {
   partner_name?: string;
   deal?: number | null;
   deal_ref?: string | null;
+  /** اسم الصفقة المحوَّلة (من قائمة الصفقات) */
+  deal_title?: string | null;
   shipment?: number | null;
   shipment_number?: string | null;
   shipment_name?: string | null;

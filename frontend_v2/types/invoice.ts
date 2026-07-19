@@ -233,6 +233,8 @@ export interface Invoice {
     isHistorical?: boolean;
     dealId?: string;
     dealNumber?: string;
+    /** اسم الصفقة المحوَّلة إلى هذه الفاتورة (للعرض في القائمة) */
+    dealTitle?: string;
     installments?: InvoiceInstallment[];
     installmentPlanEnabled?: boolean;
     dealInfo?: DealInvoiceInfo;

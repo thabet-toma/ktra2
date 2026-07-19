@@ -61,8 +61,10 @@ function sqlListToInvoice(row: PurchaseInvoiceListDto): Invoice {
     updatedAt: row.updated_at,
     createdBy: '',
     glPurchaseReceiptJournalId: row.journal_id_display || undefined,
+    invoiceType: row.invoice_type,
     dealId: row.deal ? String(row.deal) : undefined,
     dealNumber: row.deal_ref || undefined,
+    dealTitle: row.deal_title || undefined,
     supplierSnapshot: { tradeName: row.partner_name },
   };
 }
@@ -532,6 +534,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
               onConvertToDeal={handleConvertToDeal}
               onCreateNew={handleCreateNew}
               onImport={isInternational ? () => setShowImportModal(true) : undefined}
+              isInternational={isInternational}
               onRefresh={() => void loadInvoices({ feedback: true })}
               page={listPage}
               pageSize={listPageSize}

@@ -109,61 +109,19 @@ def _payments_total_exceeds_shipment(payments_data, shipment_cost) -> bool:
     return s > total + eps
 
 
-def _payment_amounts_unchanged_for_shipment(shipment_instance, payments_data) -> bool:
-    if not payments_data:
-        try:
-            return not shipment_instance.agent_payments.exists()
-        except Exception:
-            return False
-    try:
-        existing_list = list(shipment_instance.agent_payments.all())
-    except Exception:
-        return False
-    if len(existing_list) != len(payments_data):
-        return False
-
-    def amount_key(x):
-        try:
-            return round(float(x or 0) * 100)
-        except (TypeError, ValueError):
-            return 0
-
-    existing_by_id = {p.id: float(p.amount or 0) for p in existing_list}
-    all_ids_valid = True
-    for row in payments_data:
-        pid = _coerce_logistics_payment_pk(row.get("id"))
-        if pid is None:
-            all_ids_valid = False
-            break
-        if pid not in existing_by_id:
-            all_ids_valid = False
-            break
-        try:
-            new_amt = float(row.get("amount") or 0)
-        except (TypeError, ValueError):
-            return False
-        if abs(existing_by_id[pid] - new_amt) > 0.05:
-            return False
-    if all_ids_valid:
-        return True
-
-    from collections import Counter
-
-    c_exist = Counter(amount_key(p.amount) for p in existing_list)
-    c_pay = Counter(amount_key(row.get("amount")) for row in payments_data)
-    return c_exist == c_pay
-
-
 def _sync_shipment_agent_payments(shipment, payments_data):
-    """مزامنة دفعات وكيل الشحن (بدون صفقة شراء) مع حد إجمالي total_shipping_cost_usd."""
+    """مزامنة دفعات وكيل الشحن (بدون صفقة شراء).
+
+    الدفع الزائد عن تكلفة الشحن مسموح: الفائض دفعة مقدمة لدى الوكيل (يصبح مديناً
+    لنا وتُسوّى على شحنة لاحقة). كان الحظر يمنع واقعة محاسبية صحيحة.
+    """
     cap = float(shipment.total_shipping_cost_usd or 0)
-    if _payments_total_exceeds_shipment(payments_data, cap):
-        if not _payment_amounts_unchanged_for_shipment(shipment, payments_data):
-            raise serializers.ValidationError(
-                {
-                    "payments": "مجموع دفعات الشحن يتجاوز تكلفة الشحن الأساسية. خفّض المبلغ أو راجع الإجمالي."
-                }
-            )
+    if cap > 0 and _payments_total_exceeds_shipment(payments_data, cap):
+        paid = sum(float(p.get("amount") or 0) for p in payments_data)
+        logger.info(
+            'shipment %s agent payments exceed freight → advance: paid=%s cap=%s',
+            shipment.pk, paid, cap,
+        )
     keep_payments = []
     matched_pks = set()
 
@@ -458,6 +416,17 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
 
             _apply_lines_subtotal_and_grand_total(instance, lines_subtotal)
             instance.save()
+        else:
+            # تعديل «شحن داخل الصين» أو الخصم وحده (بلا items) كان يترك
+            # total_amount قديماً محسوباً بلا الشحن، فتُقارَن الدفعات بأساس أصغر
+            # منها: نسبة إنجاز > 100% و«رصيد لصالحك عند المورد» وهمي يساوي
+            # الشحن بالضبط. الإجمالي مشتق دائماً فلا يمكن أن ينحرف.
+            lines_subtotal = sum(
+                (item.quantity * item.unit_price for item in instance.items.all()),
+                Decimal("0"),
+            )
+            _apply_lines_subtotal_and_grand_total(instance, lines_subtotal)
+            instance.save()
 
         return instance
 
@@ -567,7 +536,13 @@ class LogisticsShipmentSerializer(serializers.ModelSerializer):
             "deal_allocations",
             "payments",
         ]
-        read_only_fields = ["id", "tenant"]
+        # حالة استحقاق الشحن يملكها مسارا post/unpost-freight-accrual وحدهما.
+        # شاشة الشحنة تُرسل النموذج كاملاً عند «تخزين»، فلو بقيت قابلة للكتابة
+        # لمسح أي حفظ لاحق قيدَ الاستحقاق من السجل بينما القيد باقٍ في اليومية.
+        read_only_fields = [
+            "id", "tenant",
+            "freight_is_posted", "freight_journal", "freight_exchange_rate",
+        ]
 
     def validate_shipment_number(self, value):
         value = str(value or '').strip()
@@ -947,6 +922,11 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
     receipt_status_display = serializers.CharField(source='get_receipt_status_display', read_only=True)
     shipment_number = serializers.CharField(source='shipment.shipment_number', read_only=True, default=None)
     shipment_name = serializers.CharField(source='shipment.shipment_name', read_only=True, default=None)
+    # اسم الصفقة المحوَّلة — نفس مصدر قائمة الصفقات (بلا تكرار منطق الاشتقاق).
+    deal_title = serializers.SerializerMethodField()
+
+    def get_deal_title(self, obj):
+        return _deal_title_for_list_preview(obj.deal) if obj.deal_id else ''
 
     class Meta:
         model = PurchaseInvoice
@@ -954,7 +934,7 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'id', 'invoice_number', 'invoice_name', 'invoice_date',
             'invoice_type',
             'partner', 'partner_name',
-            'deal', 'deal_ref',
+            'deal', 'deal_ref', 'deal_title',
             'shipment', 'shipment_number', 'shipment_name', 'clearance',
             'currency', 'currency_code', 'exchange_rate',
             'subtotal', 'discount_amount', 'tax_rate', 'tax_amount',
@@ -1284,6 +1264,37 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         return data
 
     @staticmethod
+    def _bind_import_expense_account(invoice, fee_data):
+        """رسوم الفاتورة الدولية: اسم الرسم يحدّد حسابه تحت «53 مصاريف الاستيراد».
+
+        الضمان هنا على الخادم لا في الواجهة: ربط الواجهة يحدث عند الخروج من خانة
+        الاسم فقط، فلو رُحّلت الفاتورة قبل حفظ ذلك الربط بقي الرسم على الحساب
+        الافتراضي (5307) وظهر الأستاذ العام للحساب الجديد فارغاً. نحصر إعادة الربط
+        بالحساب الافتراضي/الفارغ حتى لا نلغي حساباً اختاره المستخدم عمداً.
+        """
+        if invoice.invoice_type != PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL:
+            return fee_data
+        description = str(fee_data.get('description') or '').strip()
+        if not description:
+            return fee_data
+        current = fee_data.get('expense_account')
+        current_code = str(getattr(current, 'code', '') or '')
+        if current is not None and current_code != '5307':
+            return fee_data
+        from accounting.services import resolve_import_expense_account
+        account, created = resolve_import_expense_account(invoice.tenant_id, description)
+        if account is None:
+            return fee_data
+        if current is None or account.pk != getattr(current, 'pk', None):
+            logger.info(
+                'purchase invoice fee bound to import expense account invoice=%s '
+                'fee=%s account=%s created=%s',
+                invoice.pk, description, account.code, created,
+            )
+        fee_data['expense_account'] = account
+        return fee_data
+
+    @staticmethod
     def _normalize_fee_amount(invoice, fee_data):
         calculation_type = fee_data.get(
             'calculation_type', PurchaseInvoiceFee.CALCULATION_AMOUNT,
@@ -1326,6 +1337,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             PurchaseInvoiceItem.objects.create(invoice=invoice, **item_data)
         for fee_data in fees_data:
             fee_data = self._normalize_fee_amount(invoice, fee_data)
+            fee_data = self._bind_import_expense_account(invoice, fee_data)
             PurchaseInvoiceFee.objects.create(
                 invoice=invoice, tenant=invoice.tenant, **fee_data,
             )
@@ -1349,6 +1361,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             instance.fees.all().delete()
             for fee_data in fees_data:
                 fee_data = self._normalize_fee_amount(instance, fee_data)
+                fee_data = self._bind_import_expense_account(instance, fee_data)
                 PurchaseInvoiceFee.objects.create(
                     invoice=instance, tenant=instance.tenant, **fee_data,
                 )

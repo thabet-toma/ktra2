@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useId, useMemo, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import type { PurchaseInvoiceFeeLine } from "@/types";
 import { formatMoney, formatNumber } from "@/utils/formatNumber";
@@ -19,10 +19,21 @@ interface NISInvoiceTaxStripProps {
     vatBaseIls?: number;
     fees: PurchaseInvoiceFeeLine[];
     defaultFeeAccount?: FeeAccountOption | null;
+    /** حسابات «مصاريف الاستيراد» (53*) — اقتراحات اسم الرسم */
+    importExpenseAccounts?: FeeAccountOption[];
+    /** يبحث عن الحساب بالاسم تحت «53» أو ينشئه هناك */
+    onResolveFeeAccount?: (name: string) => Promise<FeeAccountOption | null>;
     readOnly?: boolean;
     onFinancial: (field: string, value: unknown) => void;
     onFeesChange: (fees: PurchaseInvoiceFeeLine[]) => void;
 }
+
+/** اسم مُطبَّع للمطابقة: بلا فراغات زائدة وبلا الجزء الإنجليزي بين قوسين (مطابق للخادم). */
+const normalizeAccountName = (value?: string | null): string => {
+    const text = String(value || "").split(/\s+/).filter(Boolean).join(" ");
+    const arabicPart = text.includes("(") ? text.split("(")[0].trim() : text;
+    return (arabicPart || text).toLocaleLowerCase();
+};
 
 type Draft = {
     label: string;
@@ -49,12 +60,39 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
     vatBaseIls,
     fees,
     defaultFeeAccount,
+    importExpenseAccounts = [],
+    onResolveFeeAccount,
     readOnly,
     onFinancial,
     onFeesChange,
 }) => {
     const basisForInvoiceVat = vatBaseIls ?? taxableBaseIls;
     const [draft, setDraft] = useState<Draft>(() => emptyDraft());
+    const [resolving, setResolving] = useState(false);
+    const feeNameListId = useId();
+
+    /** الحساب المطابق للاسم محلياً (بلا نداء شبكة) */
+    const findLocalAccount = (name: string): FeeAccountOption | null => {
+        const target = normalizeAccountName(name);
+        if (!target) return null;
+        return importExpenseAccounts.find((a) => normalizeAccountName(a.name) === target) || null;
+    };
+
+    /**
+     * اسم الرسم ⇒ حساب تحت «مصاريف الاستيراد»: محلياً أولاً، ثم الخادم (يُنشئه إن لزم)،
+     * وإن تعذّر يبقى الحساب الافتراضي حتى لا يفشل حفظ الرسم.
+     */
+    const resolveAccountForName = async (name: string): Promise<FeeAccountOption | null> => {
+        const local = findLocalAccount(name);
+        if (local) return local;
+        if (!onResolveFeeAccount || !name.trim()) return defaultFeeAccount || null;
+        try {
+            setResolving(true);
+            return (await onResolveFeeAccount(name.trim())) || defaultFeeAccount || null;
+        } finally {
+            setResolving(false);
+        }
+    };
 
     const mainVatIls = useMemo(() => {
         if (taxType === "amount") return Math.max(0, Number(taxAmount) || 0);
@@ -96,13 +134,33 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
         isTaxable: false,
     });
 
-    const commitDraft = () => {
+    const commitDraft = async () => {
         if (!defaultFeeAccount || draft.calculationValue <= 0) return;
+        const description = draft.label.trim() || "رسم إضافي";
+        const account = await resolveAccountForName(description);
         onFeesChange([
             ...fees,
-            { ...draftFee, id: crypto.randomUUID(), description: draft.label.trim() || "رسم إضافي" },
+            {
+                ...draftFee,
+                id: crypto.randomUUID(),
+                description,
+                expenseAccountId: account?.id ?? defaultFeeAccount.id,
+                expenseAccountCode: account?.code ?? defaultFeeAccount.code,
+                expenseAccountName: account?.name ?? defaultFeeAccount.name,
+            },
         ]);
         setDraft(emptyDraft());
+    };
+
+    /** إعادة ربط سطر قائم بحساب الاستيراد بعد تعديل اسمه */
+    const rebindFeeAccount = async (index: number, name: string) => {
+        const account = await resolveAccountForName(name);
+        if (!account) return;
+        updateFee(index, {
+            expenseAccountId: account.id,
+            expenseAccountCode: account.code,
+            expenseAccountName: account.name,
+        });
     };
 
     const feesTotal = fees.reduce((sum, fee) => sum + (Number(fee.amount) || 0), 0);
@@ -115,8 +173,17 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                 </h3>
                 <p className="text-right text-[9px] aseel-text-soft dark:aseel-text-soft mt-0.5">
                     أضف الرسم هنا كمبلغ أو نسبة، واختر إن كانت النسبة على البضاعة أو بعد ضريبة القيمة المضافة. يُحفظ السطر مع الفاتورة.
+                    {onResolveFeeAccount ? " اسم الرسم يُربط بحساب تحت «مصاريف الاستيراد» — وإن لم يكن موجوداً يُضاف للشجرة تلقائياً." : ""}
                 </p>
             </div>
+
+            {importExpenseAccounts.length > 0 && (
+                <datalist id={feeNameListId}>
+                    {importExpenseAccounts.map((account) => (
+                        <option key={account.id} value={account.name || ""} />
+                    ))}
+                </datalist>
+            )}
 
             <div className="px-1 py-0.5 overflow-x-auto">
                 <table className="w-full border-collapse min-w-[520px]">
@@ -179,9 +246,12 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                     <td className="py-0.5 px-1">
                                         <input
                                             type="text"
+                                            list={importExpenseAccounts.length ? feeNameListId : undefined}
                                             disabled={readOnly}
                                             value={fee.description}
                                             onChange={(e) => updateFee(index, { description: e.target.value })}
+                                            onBlur={(e) => { void rebindFeeAccount(index, e.target.value); }}
+                                            title={fee.expenseAccountCode ? `الحساب: ${fee.expenseAccountCode} — ${fee.expenseAccountName || ""}` : undefined}
                                             className={cellIn}
                                         />
                                     </td>
@@ -243,7 +313,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                         {!readOnly && (
                             <tr className="align-middle bg-[var(--color-surface-2)]/40 border-t border-dashed border-[var(--color-border)]">
                                 <td className="py-0.5 px-1">
-                                    <input type="text" value={draft.label} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))} placeholder="اسم الرسم / الضريبة" className={cellIn} />
+                                    <input type="text" list={importExpenseAccounts.length ? feeNameListId : undefined} value={draft.label} onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))} placeholder="اسم الرسم / الضريبة" className={cellIn} />
                                 </td>
                                 <td className="py-0.5 px-1">
                                     <select value={draft.calculationType} onChange={(e) => setDraft((d) => ({ ...d, calculationType: e.target.value === "percentage" ? "percentage" : "amount" }))} className={cellIn + " text-center"}>
@@ -266,7 +336,7 @@ export const NISInvoiceTaxStrip: React.FC<NISInvoiceTaxStripProps> = ({
                                     ₪{formatMoney(draftFee.amount)}
                                 </td>
                                 <td className="py-0.5 px-0.5 text-center">
-                                    <button type="button" disabled={!defaultFeeAccount || draft.calculationValue <= 0} onClick={commitDraft} className="inline-flex items-center gap-0.5 rounded bg-[var(--color-primary)] px-1.5 py-0.5 text-[9px] font-bold text-white disabled:opacity-40" title={defaultFeeAccount ? "إضافة الرسم" : "لا يوجد حساب رسوم متاح"}>
+                                    <button type="button" disabled={!defaultFeeAccount || draft.calculationValue <= 0 || resolving} onClick={() => { void commitDraft(); }} className="inline-flex items-center gap-0.5 rounded bg-[var(--color-primary)] px-1.5 py-0.5 text-[9px] font-bold text-white disabled:opacity-40" title={defaultFeeAccount ? "إضافة الرسم — يُربط باسمه في «مصاريف الاستيراد»" : "لا يوجد حساب رسوم متاح"}>
                                         <Plus className="w-3 h-3" /> إضافة
                                     </button>
                                 </td>

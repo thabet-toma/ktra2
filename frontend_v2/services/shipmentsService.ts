@@ -1,6 +1,5 @@
 import { Shipment, DealPayment, Deal } from "../types";
 import { effectiveDealTitleForDisplay } from "../utils/dealTitleDisplay";
-import { assertShipmentPaymentsNotOverTotal } from "../utils/dealPaymentLimits";
 import {
   apiDelete,
   apiGetList,
@@ -514,9 +513,8 @@ export const shipmentsService = {
         ...(u.shippingInfo || {}),
       },
     };
-    if (Object.prototype.hasOwnProperty.call(u, "payments")) {
-      assertShipmentPaymentsNotOverTotal(merged, current.payments);
-    }
+    // الدفع الزائد لوكيل الشحن مسموح: الفائض دفعة مقدمة لديه (يصبح مديناً لنا)،
+    // فلا حدّ يُفرض هنا. سقف دفعات الصفقة (المورد) باقٍ كما هو.
     const payload = toSqlShipmentPayload(merged);
     await apiPatchObject(`logistics/shipments/${shipmentId}/`, payload, { tenantId: getTenantId() });
   },
@@ -565,6 +563,32 @@ export const shipmentsService = {
       } as Partial<Shipment>,
       "",
       ""
+    );
+  },
+
+  /**
+   * إثبات استحقاق شحن الوكيل: Dr مصاريف الشحن الدولي / Cr ذمم الوكيل.
+   * منفصل تماماً عن الدفع — وسعر الصرف هنا هو الذي يحكم تكلفة الشحن بالشيكل.
+   */
+  async postShipmentFreightAccrual(
+    shipmentId: string,
+    freightExchangeRate: number,
+  ): Promise<{ status?: string; journal_id?: number; amount_ils?: string; error?: string }> {
+    return apiPostObject(
+      `logistics/shipments/${shipmentId}/post-freight-accrual/`,
+      { freight_exchange_rate: freightExchangeRate },
+      { tenantId: getTenantId() },
+    );
+  },
+
+  /** تراجع عن استحقاق شحن الوكيل — لا يمسّ دفعاته المرحّلة. */
+  async unpostShipmentFreightAccrual(
+    shipmentId: string,
+  ): Promise<{ message?: string; error?: string }> {
+    return apiPostObject(
+      `logistics/shipments/${shipmentId}/unpost-freight-accrual/`,
+      {},
+      { tenantId: getTenantId() },
     );
   },
 

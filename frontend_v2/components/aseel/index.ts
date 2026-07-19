@@ -10,6 +10,18 @@ export type {
 } from './AseelDocumentShell';
 export { AseelGrid } from './AseelGrid';
 export type { AseelGridColumn, AseelGridProps } from './AseelGrid';
+export { AseelDocumentView, AseelViewTable } from './AseelDocumentView';
+export type {
+  AseelDocumentViewProps,
+  AseelViewColumn,
+  AseelViewField,
+  AseelViewMetric,
+  AseelViewParty,
+  AseelViewSection,
+  AseelViewStatus,
+  AseelViewTotal,
+  AseelViewTone,
+} from './AseelDocumentView';
 export { AseelCalculatorButton } from './AseelCalculatorButton';
 export { AseelIndexPicker } from './AseelIndexPicker';
 export type { AseelIndexColumn, AseelIndexPickerProps } from './AseelIndexPicker';

@@ -56,6 +56,7 @@ from .services import (
     post_journal,
     create_audit_log,
     create_fiscal_year,
+    resolve_import_expense_account,
     year_end_close,
 )
 
@@ -84,6 +85,40 @@ class AccountViewSet(viewsets.ModelViewSet):
                 ),
                 to_attr="_api_linked_partners",
             )
+        )
+
+    @action(detail=False, methods=["post"], url_path="resolve-import-expense")
+    def resolve_import_expense(self, request):
+        """يُرجع حساب مصروف الاستيراد المطابق للاسم أو يُنشئه تحت البند «53».
+
+        تستخدمه رسوم الفواتير الدولية: الكتابة بالاسم تكفي — إن كان موجوداً يُربط،
+        وإلا يُضاف للشجرة تحت «مصاريف الاستيراد المباشرة».
+        """
+        tenant = get_tenant(request)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        from core.import_access import user_can_access_import
+        if not user_can_access_import(request.user, tenant):
+            raise ValidationError({"error": "لا تملك صلاحية الوصول لحسابات الاستيراد."})
+        account, created = resolve_import_expense_account(
+            tenant.pk, request.data.get("name"),
+        )
+        if account is None:
+            raise ValidationError(
+                {"error": "تعذّر تحديد حساب مصاريف الاستيراد — تأكد من الاسم ومن وجود البند «53» في الشجرة."}
+            )
+        if created:
+            create_audit_log(
+                tenant=tenant,
+                user=request.user,
+                action='CREATE',
+                model_name='Account',
+                object_id=account.id,
+                change_details=f"Import expense account {account.code} - {account.name} created from invoice fees.",
+            )
+        return Response(
+            {**AccountSerializer(account).data, "created": created},
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
     def perform_create(self, serializer):
