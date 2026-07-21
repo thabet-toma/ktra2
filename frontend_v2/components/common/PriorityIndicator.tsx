@@ -12,6 +12,6 @@ export const PriorityIndicator: React.FC<PriorityIndicatorProps> = ({ priority }
       medium: "text-yellow-600 dark:text-yellow-400",
       high: "text-orange-600 dark:text-orange-400",
       urgent: "text-red-600 dark:text-red-400",
-    }[priority] || "text-gray-600 dark:text-gray-400";
+    }[priority] || "text-[var(--color-text-muted)]";
   return <span className={`font-semibold ${style}`}>{priority}</span>;
 };

@@ -2314,7 +2314,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   );
 
   const paymentsTab = (
-    <div className="aseel-legacy-tab space-y-4 p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700">
+    <div className="aseel-legacy-tab space-y-4 p-4 bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)]">
       {/* Cash */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <label className="aseel-field">
@@ -2677,6 +2677,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       style={{ height: "100%", minHeight: 0, display: "flex", flexDirection: "column" }}
     >
       <AseelDocumentShell
+        gridFitContent={viewMode}
         title="فاتورة مبيعات"
         state={docState}
         company={
@@ -2686,16 +2687,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         actions={toolbarActions}
 
         header={viewMode ? undefined : (
-          <div className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-1.5 flex flex-col gap-1 w-full shadow-sm">
+          <div className="bg-[var(--color-surface)] border-b border-[var(--color-border)] p-1.5 flex flex-col gap-1 w-full shadow-sm">
             <div className="flex flex-col xl:flex-row gap-2 items-start">
               
               {/* Customer Section */}
-              <div className="flex-1 flex flex-col gap-1 xl:border-l border-gray-100 dark:border-gray-700 pl-2 w-full">
+              <div className="flex-1 flex flex-col gap-1 xl:border-l border-[var(--color-border)] pl-2 w-full">
                 <div className="flex items-center gap-1">
-                  <span className="font-bold text-gray-800 dark:text-gray-100 min-w-[35px] text-xs">العميل</span>
+                  <span className="font-bold text-[var(--color-text)] min-w-[35px] text-xs">العميل</span>
                   <div className="flex-1 relative min-w-[120px]">
                     <input 
-                      className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-1.5 py-0.5 text-xs focus:ring-1 focus:ring-emerald-500 outline-none cursor-pointer"
+                      className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1.5 py-0.5 text-xs focus:ring-1 focus:ring-emerald-500 outline-none cursor-pointer"
                       readOnly 
                       disabled={readOnly} 
                       value={selectedCustomer ? `#${selectedCustomer.id} - ${selectedCustomer.name}` : ""} 
@@ -2714,7 +2715,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                     </button>
                   )}
                   <select
-                    className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-xs rounded px-1 py-0.5 focus:ring-1 focus:ring-emerald-500 outline-none"
+                    className="bg-[var(--color-surface-2)] border border-[var(--color-border)] text-xs rounded px-1 py-0.5 focus:ring-1 focus:ring-emerald-500 outline-none"
                     disabled={readOnly}
                     value={invType}
                     onChange={(e) => { setInvType(e.target.value as "cash" | "credit"); markDirty(); }}
@@ -2729,7 +2730,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                   const isDebtor = bal > 0.005;
                   const isCreditor = bal < -0.005;
                   const statusLabel = isDebtor ? "عليه" : isCreditor ? "له" : "متوازن";
-                  const color = isDebtor ? "text-red-600 dark:text-red-400" : isCreditor ? "text-emerald-600 dark:text-emerald-400" : "text-gray-500";
+                  const color = isDebtor ? "text-red-600 dark:text-red-400" : isCreditor ? "text-emerald-600 dark:text-emerald-400" : "text-[var(--color-text-muted)]";
                   const ledgerAcct = selectedCustomer?.linked_account ?? null;
                   const canDrill = Boolean(onOpenGeneralLedger && ledgerAcct);
 
@@ -2737,12 +2738,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                   const isDebtorAfter = balAfterRaw > 0.005;
                   const isCreditorAfter = balAfterRaw < -0.005;
                   const statusLabelAfter = isDebtorAfter ? "عليه" : isCreditorAfter ? "له" : "متوازن";
-                  const colorAfter = isDebtorAfter ? "text-red-600 dark:text-red-400" : isCreditorAfter ? "text-emerald-600 dark:text-emerald-400" : "text-gray-500";
+                  const colorAfter = isDebtorAfter ? "text-red-600 dark:text-red-400" : isCreditorAfter ? "text-emerald-600 dark:text-emerald-400" : "text-[var(--color-text-muted)]";
 
                   return (
                     <div className="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-[11px]">
                       <div className="flex items-center gap-1">
-                        <span className="text-gray-500">سابق:</span>
+                        <span className="text-[var(--color-text-muted)]">سابق:</span>
                         {canDrill ? (
                           <button type="button" className={`font-bold hover:underline ${color}`} onClick={() => onOpenGeneralLedger!(ledgerAcct as number)}>
                             {fmt(Math.abs(bal))} <span className="font-normal opacity-80">{statusLabel}</span>
@@ -2755,7 +2756,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                       </div>
                       <span className="text-gray-300 dark:text-gray-600 hidden sm:inline">|</span>
                       <div className="flex items-center gap-1">
-                        <span className="text-gray-500">متوقع:</span>
+                        <span className="text-[var(--color-text-muted)]">متوقع:</span>
                         <span className={`font-bold ${colorAfter}`}>
                           {fmt(Math.abs(balAfterRaw))} <span className="font-normal opacity-80">{statusLabelAfter}</span>
                         </span>
@@ -2766,7 +2767,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               </div>
 
               {/* Barcode Search */}
-              <div className="w-full xl:w-[250px] shrink-0 flex flex-col gap-0.5 xl:border-l border-gray-100 dark:border-gray-700 pl-2 justify-center">
+              <div className="w-full xl:w-[250px] shrink-0 flex flex-col gap-0.5 xl:border-l border-[var(--color-border)] pl-2 justify-center">
                  <div className="flex justify-between items-end">
                    <label className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400">بحث سريع / باركود (F6)</label>
                  </div>
@@ -2793,29 +2794,29 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
               {/* Invoice Metadata */}
               <div className="w-full xl:w-[280px] shrink-0 flex flex-col gap-1">
-                <div className="flex justify-between items-center text-xs pb-0.5 border-b border-gray-100 dark:border-gray-700">
-                  <span className="font-bold text-gray-800 dark:text-gray-100">الفاتورة</span>
+                <div className="flex justify-between items-center text-xs pb-0.5 border-b border-[var(--color-border)]">
+                  <span className="font-bold text-[var(--color-text)]">الفاتورة</span>
                   <span className="text-emerald-600 dark:text-emerald-400 font-extrabold">{invoiceNumber || "جديدة"}</span>
                 </div>
                 <div className="flex gap-1">
                   <div className="flex items-center gap-1 flex-1">
-                    <span className="text-gray-500 text-[10px] min-w-[30px]">تاريخ</span>
-                    <input type="date" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-emerald-500 text-[11px]" disabled={readOnly} value={invDate} onChange={(e) => { setInvDate(e.target.value); markDirty(); }} />
+                    <span className="text-[var(--color-text-muted)] text-[10px] min-w-[30px]">تاريخ</span>
+                    <input type="date" className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-emerald-500 text-[11px]" disabled={readOnly} value={invDate} onChange={(e) => { setInvDate(e.target.value); markDirty(); }} />
                   </div>
                   <div className="flex items-center gap-1 flex-1">
-                    <span className="text-gray-500 text-[10px] min-w-[35px]">استحقاق</span>
-                    <input type="date" className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-emerald-500 text-[11px]" disabled={readOnly} value={dueDate} onChange={(e) => { setDueDate(e.target.value); markDirty(); }} />
+                    <span className="text-[var(--color-text-muted)] text-[10px] min-w-[35px]">استحقاق</span>
+                    <input type="date" className="w-full bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-emerald-500 text-[11px]" disabled={readOnly} value={dueDate} onChange={(e) => { setDueDate(e.target.value); markDirty(); }} />
                   </div>
                 </div>
                 <div className="flex justify-between items-center">
                   <div className="flex items-center gap-1">
-                    <span className="text-gray-500 text-[10px] min-w-[30px]">عملة</span>
-                    <select className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded px-1 py-0.5 text-[11px] outline-none focus:ring-1 focus:ring-emerald-500" disabled={readOnly} value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}>
+                    <span className="text-[var(--color-text-muted)] text-[10px] min-w-[30px]">عملة</span>
+                    <select className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 text-[11px] outline-none focus:ring-1 focus:ring-emerald-500" disabled={readOnly} value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}>
                       <option value="">—</option>
                       {currencies.map((c) => (<option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>))}
                     </select>
                   </div>
-                  <label className="flex items-center gap-1 text-[11px] font-bold cursor-pointer text-gray-700 dark:text-gray-300">
+                  <label className="flex items-center gap-1 text-[11px] font-bold cursor-pointer text-[var(--color-text)]">
                     <input type="checkbox" className="rounded text-emerald-600 focus:ring-emerald-500 w-3 h-3" disabled={readOnly} checked={pricesIncludeTax} onChange={(e) => { setPricesIncludeTax(e.target.checked); markDirty(); }} /> 
                     شامل الضريبة
                   </label>
@@ -2850,7 +2851,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             content: (
               <div className="text-sm" style={{ padding: "8px", display: "flex", flexDirection: "column", gap: "6px" }}>
                 {!selectedCustomer ? (
-                  <span className="text-gray-500">اختر عميلاً لعرض رصيده.</span>
+                  <span className="text-[var(--color-text-muted)]">اختر عميلاً لعرض رصيده.</span>
                 ) : creditHint ? (
                   <>
                     <div className="aseel-total-row"><span>الرصيد الحالي</span><span className="aseel-total-value">{fmt(Number(creditHint.open_balance))}</span></div>
@@ -2858,7 +2859,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                     {creditHint.would_exceed && <span className="aseel-err-text">⚠ يتجاوز حد الائتمان</span>}
                   </>
                 ) : (
-                  <span className="text-gray-500">جارٍ حساب الرصيد…</span>
+                  <span className="text-[var(--color-text-muted)]">جارٍ حساب الرصيد…</span>
                 )}
               </div>
             ),
@@ -2886,7 +2887,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             content: <EntityActivityLog entityType="sales_invoice" entityId={draftId} defaultOpen refreshKey={isPosted ? "posted" : "draft"} />,
           }] : []),
         ]}
-        totals={
+        totals={viewMode ? undefined : (
           <>
             <div className="aseel-total-row">
               <span>مجموع البنود (قبل الخصم)</span>
@@ -3061,7 +3062,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               </span>
             </div>
           </>
-        }
+        )}
         status={
           <>
             <span className="aseel-status-item">
@@ -3179,7 +3180,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                   )}
                 </div>
                 {attachedCheques.length === 0 ? (
-                  <div className="text-sm text-gray-500 mt-2">لا توجد شيكات.</div>
+                  <div className="text-sm text-[var(--color-text-muted)] mt-2">لا توجد شيكات.</div>
                 ) : (
                   <div style={{ maxHeight: "80px", overflowY: "auto" }}>
                     {attachedCheques.map((c, i) => (

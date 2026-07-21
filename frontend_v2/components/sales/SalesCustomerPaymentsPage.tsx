@@ -215,7 +215,6 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
 
   return (
     <div
-      data-skin="aseel"
       style={{ minHeight: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
     >
     <AseelDocumentShell

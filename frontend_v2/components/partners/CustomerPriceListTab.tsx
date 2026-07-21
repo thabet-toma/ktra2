@@ -56,7 +56,7 @@ export const CustomerPriceListTab: React.FC<Props> = ({ customerId }) => {
   const hasEdits = Object.values(edits).some((v) => String(v).trim() !== '');
 
   return (
-    <div className="p-2" data-skin="aseel">
+    <div className="p-2">
       <div className="flex items-center gap-2 mb-2">
         <div className="relative flex-1 max-w-xs">
           <input
@@ -66,7 +66,7 @@ export const CustomerPriceListTab: React.FC<Props> = ({ customerId }) => {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <Search className="w-4 h-4 text-gray-400 absolute" style={{ insetInlineStart: 6, top: 7 }} />
+          <Search className="w-4 h-4 text-[var(--color-text-muted)] absolute" style={{ insetInlineStart: 6, top: 7 }} />
         </div>
         <button
           type="button"

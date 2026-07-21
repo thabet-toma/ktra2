@@ -153,7 +153,7 @@ export const AccountingVatReportPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel">
+    <div>
       <AseelDocumentShell
         title="تقرير ضريبة القيمة المضافة"
         actions={shellActions}

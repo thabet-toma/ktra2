@@ -166,7 +166,7 @@ export const InvoiceProfitsPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel">
+    <div>
       <AseelDocumentShell
         title="أرباح الفواتير"
         actions={shellActions}

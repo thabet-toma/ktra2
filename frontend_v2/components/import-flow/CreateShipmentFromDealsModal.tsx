@@ -120,7 +120,6 @@ export const CreateShipmentFromDealsModal: React.FC<Props> = ({ isOpen, onClose,
   return (
     <div
       dir="rtl"
-      data-skin="aseel"
       style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
       onClick={onClose}
     >

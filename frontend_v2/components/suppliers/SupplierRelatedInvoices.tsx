@@ -37,7 +37,7 @@ export const SupplierRelatedInvoices: React.FC<SupplierRelatedInvoicesProps> = (
               <th className="px-6 py-4">الحالة</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+          <tbody className="divide-y divide-[var(--color-border)]">
             {invoices.map((inv, index) => (
               <tr 
                 key={inv.id} 

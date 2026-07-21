@@ -174,7 +174,7 @@ export const BalanceSheetPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel">
+    <div>
       <AseelDocumentShell
         title="الميزانية العمومية"
         actions={shellActions}

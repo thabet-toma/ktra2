@@ -8,11 +8,15 @@ import { AuthProvider } from './contexts/AuthContext';
 import { CompanyProvider } from './contexts/CompanyContext';
 import { ConfirmProvider } from './contexts/ConfirmContext';
 import { ToastProvider } from './contexts/ToastContext';
-import { ThemeProvider } from './contexts/ThemeContext';
+import { ThemeProvider, applyThemeOnBoot } from './contexts/ThemeContext';
 import { AppearanceProvider } from './contexts/AppearanceContext';
 import { PriceVisibilityProvider } from './contexts/PriceVisibilityContext';
+import { applySkinOnBoot } from './styles/skin';
 
 import './styles/index.css';
+
+applySkinOnBoot();
+applyThemeOnBoot();
 
 const StorePage = React.lazy(() => import('./components/store/StorePage').then((module) => ({ default: module.StorePage })));
 const ProductDetailPage = React.lazy(() => import('./components/store/ProductDetailPage').then((module) => ({ default: module.ProductDetailPage })));

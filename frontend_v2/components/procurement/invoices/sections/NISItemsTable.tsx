@@ -137,7 +137,7 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                             ) : null}
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                    <tbody className="divide-y divide-[var(--color-border)]">
                         {items.map((item, idx) => {
                             const rate = conversionRate > 0 ? conversionRate : 1;
                             const usdUnitPrice = item.unitPrice / rate;

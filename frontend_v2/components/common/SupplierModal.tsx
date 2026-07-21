@@ -151,22 +151,22 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-gray-700">
+            <div className="bg-[var(--color-surface)] rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto border border-[var(--color-border)]">
 
                 {/* Header */}
-                <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center sticky top-0 bg-white dark:bg-gray-800 z-10">
+                <div className="p-6 border-b border-[var(--color-border)] flex justify-between items-center sticky top-0 bg-[var(--color-surface)] z-10">
                     <div>
-                        <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <h2 className="text-xl font-bold text-[var(--color-text)] flex items-center gap-2">
                             {editingSupplier ? <Edit2 className="w-5 h-5" /> : <Building className="w-5 h-5 text-blue-500" />}
                             {editingSupplier ? 'تعديل بيانات المورد' : 'إضافة مورد جديد'}
                         </h2>
-                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                        <p className="text-sm text-[var(--color-text-muted)] mt-1">
                             {editingSupplier ? 'قم بتعديل بيانات المورد الحالية' : 'أدخل بيانات المورد الأساسية وجهات الاتصال'}
                         </p>
                     </div>
                     <button
                         onClick={onClose}
-                        className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors"
+                        className="p-2 text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] rounded-full transition-colors"
                     >
                         <X className="w-6 h-6" />
                     </button>
@@ -182,15 +182,15 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                     )}
 
                     {/* Logo Section */}
-                    <div className="flex items-start gap-6 p-6 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-200 dark:border-gray-700 border-dashed">
+                    <div className="flex items-start gap-6 p-6 bg-[var(--color-surface-2)] rounded-xl border border-[var(--color-border)] border-dashed">
                         <div className="relative w-24 h-24 flex-shrink-0">
-                            <div className="w-full h-full rounded-full border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center overflow-hidden bg-white dark:bg-gray-800">
+                            <div className="w-full h-full rounded-full border-2 border-dashed border-[var(--color-border)] flex items-center justify-center overflow-hidden bg-[var(--color-surface)]">
                                 {currentSupplier.logoUrl ? (
                                     <img src={currentSupplier.logoUrl} alt="Logo" className="w-full h-full object-cover" />
                                 ) : uploadingLogo ? (
                                     <LoadingSpinner />
                                 ) : (
-                                    <ImageIcon className="w-8 h-8 text-gray-400" />
+                                    <ImageIcon className="w-8 h-8 text-[var(--color-text-muted)]" />
                                 )}
                             </div>
                             {currentSupplier.logoUrl && (
@@ -203,11 +203,11 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                             )}
                         </div>
                         <div className="flex-1">
-                            <h3 className="font-bold text-gray-900 dark:text-white mb-1">شعار الشركة</h3>
-                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                            <h3 className="font-bold text-[var(--color-text)] mb-1">شعار الشركة</h3>
+                            <p className="text-sm text-[var(--color-text-muted)] mb-4">
                                 يفضل استخدام صورة مربعة بحجم 500x500 بكسل. الصيغ المدعومة: PNG, JPG
                             </p>
-                            <label className="inline-flex cursor-pointer items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shadow-sm">
+                            <label className="inline-flex cursor-pointer items-center gap-2 px-4 py-2 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg text-sm font-medium hover:bg-[var(--color-surface-2)] transition-colors shadow-sm">
                                 <ImageIcon className="w-4 h-4 text-blue-500" />
                                 رفع صورة
                                 <input type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} disabled={uploadingLogo} />
@@ -219,7 +219,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
 
                         {/* Basic Info */}
                         <div className="lg:col-span-3">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-2">
+                            <h3 className="text-lg font-bold text-[var(--color-text)] mb-4 flex items-center gap-2 border-b border-[var(--color-border)] pb-2">
                                 <Building className="w-5 h-5 text-blue-500" />
                                 المعلومات الأساسية
                             </h3>
@@ -230,7 +230,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="text"
                                         value={currentSupplier.tradeName || ''}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, tradeName: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500"
                                         placeholder="اسم الشركة أو المورد"
                                     />
                                 </div>
@@ -240,7 +240,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="text"
                                         value={currentSupplier.alias || ''}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, alias: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500"
                                         placeholder="اسم بديل للعرض"
                                     />
                                 </div>
@@ -252,7 +252,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                     <select
                                         value={currentSupplier.type || 'factory'}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, type: e.target.value as any })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500"
                                     >
                                         {SUPPLIER_TYPES.map(opt => (
                                             <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -265,7 +265,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="email"
                                         value={currentSupplier.email || ''}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, email: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500"
                                     />
                                 </div>
                                 <div>
@@ -274,7 +274,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="tel"
                                         value={currentSupplier.phone || ''}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, phone: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500"
                                     />
                                 </div>
                                 <div>
@@ -283,7 +283,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="tel"
                                         value={currentSupplier.mobile || ''}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, mobile: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500"
                                     />
                                 </div>
                             </div>
@@ -291,7 +291,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
 
                         {/* Sales Rep */}
                         <div className="lg:col-span-3">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-2">
+                            <h3 className="text-lg font-bold text-[var(--color-text)] mb-4 flex items-center gap-2 border-b border-[var(--color-border)] pb-2">
                                 <User className="w-5 h-5 text-green-500" />
                                 بيانات المندوب
                             </h3>
@@ -302,7 +302,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="text"
                                         value={currentSupplier.salesRepName || ''}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, salesRepName: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500"
                                     />
                                 </div>
                                 <div>
@@ -311,7 +311,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="text"
                                         value={currentSupplier.salesRepWechat || ''}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, salesRepWechat: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500"
                                     />
                                 </div>
                                 <div>
@@ -320,7 +320,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="tel"
                                         value={currentSupplier.salesRepPhone || ''}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, salesRepPhone: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 focus:ring-2 focus:ring-blue-500"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-blue-500"
                                     />
                                 </div>
                             </div>
@@ -328,7 +328,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
 
                         {/* Address */}
                         <div className="lg:col-span-3">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-2">
+                            <h3 className="text-lg font-bold text-[var(--color-text)] mb-4 flex items-center gap-2 border-b border-[var(--color-border)] pb-2">
                                 <MapPin className="w-5 h-5 text-[var(--color-primary)]" />
                                 العنوان
                             </h3>
@@ -339,7 +339,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="text"
                                         value={currentSupplier.country || ''}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, country: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)]"
                                     />
                                 </div>
                                 <div>
@@ -348,7 +348,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="text"
                                         value={currentSupplier.city || ''}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, city: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)]"
                                     />
                                 </div>
                                 <div className="md:col-span-2">
@@ -357,7 +357,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="text"
                                         value={currentSupplier.street || ''}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, street: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)]"
                                     />
                                 </div>
                             </div>
@@ -365,7 +365,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
 
                         {/* Financial */}
                         <div className="lg:col-span-3">
-                            <h3 className="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-2">
+                            <h3 className="text-lg font-bold text-[var(--color-text)] mb-4 flex items-center gap-2 border-b border-[var(--color-border)] pb-2">
                                 <Wallet className="w-5 h-5 text-yellow-500" />
                                 البيانات المالية
                             </h3>
@@ -375,7 +375,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                     <select
                                         value={currentSupplier.currency || 'ILS'}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, currency: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)]"
                                     >
                                         <option value="ILS">ILS - شيكل إسرائيلي جديد</option>
                                         <option value="USD">USD - دولار أمريكي</option>
@@ -389,7 +389,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="number"
                                         value={currentSupplier.openingBalance || 0}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, openingBalance: parseFloat(e.target.value) || 0 })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)]"
                                     />
                                 </div>
                                 <div>
@@ -398,7 +398,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="date"
                                         value={currentSupplier.balanceDate || new Date().toISOString().split('T')[0]}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, balanceDate: e.target.value })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)]"
                                     />
                                 </div>
                                 <div>
@@ -407,7 +407,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                                         type="number"
                                         value={currentSupplier.creditLimit || ''}
                                         onChange={e => setCurrentSupplier({ ...currentSupplier, creditLimit: parseFloat(e.target.value) || 0 })}
-                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600"
+                                        className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)]"
                                         placeholder="0.00"
                                     />
                                 </div>
@@ -417,10 +417,10 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
                 </div>
 
                 {/* Footer */}
-                <div className="p-6 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 rounded-b-xl flex justify-end gap-3 sticky bottom-0">
+                <div className="p-6 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] rounded-b-xl flex justify-end gap-3 sticky bottom-0">
                     <button
                         onClick={onClose}
-                        className="px-6 py-2.5 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 font-medium transition-colors"
+                        className="px-6 py-2.5 bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] rounded-lg hover:bg-[var(--color-surface-2)] font-medium transition-colors"
                     >
                         إلغاء
                     </button>

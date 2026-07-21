@@ -71,7 +71,7 @@ export const CompanySwitcher: React.FC = () => {
         style={{ color: "var(--aseel-ink)" }}
       >
         {identity?.logo_url ? (
-          <img src={identity.logo_url} alt="Logo" className="w-5 h-5 rounded object-cover bg-white" />
+          <img src={identity.logo_url} alt="Logo" className="w-5 h-5 rounded object-cover bg-[var(--color-surface)]" />
         ) : (
           <Building className="w-4 h-4 opacity-70" />
         )}
@@ -174,7 +174,7 @@ export const CompanySwitcher: React.FC = () => {
 
             <form onSubmit={handleCreateCompany} className="space-y-5">
               {error && (
-                <div className="p-3 text-xs bg-red-50 text-red-700 rounded-lg border border-red-200 font-semibold">
+                <div className="p-3 text-xs bg-[color-mix(in_srgb,var(--color-danger)_10%,transparent)] text-[var(--color-danger)] rounded-lg border border-[color-mix(in_srgb,var(--color-danger)_35%,transparent)] font-semibold">
                   {error}
                 </div>
               )}

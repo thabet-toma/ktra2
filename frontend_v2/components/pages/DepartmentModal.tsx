@@ -32,12 +32,12 @@ const DepartmentModal: React.FC<DepartmentModalProps> = ({ department, onClose }
       />
 
       {/* Modal Content */}
-      <div className="relative bg-white dark:bg-slate-800 rounded-2xl shadow-2xl w-full max-w-md p-8 transform transition-all animate-in fade-in zoom-in duration-200">
+      <div className="relative bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-md p-8 transform transition-all animate-in fade-in zoom-in duration-200">
         
         {/* Close Button (X) */}
         <button 
           onClick={handleClose}
-          className="absolute top-4 left-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+          className="absolute top-4 left-4 text-slate-400 hover:text-[var(--color-text-muted)] transition-colors"
         >
           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-6 h-6">
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -46,14 +46,14 @@ const DepartmentModal: React.FC<DepartmentModalProps> = ({ department, onClose }
 
         {/* Content Body */}
         <div className="flex flex-col items-center text-center">
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
+          <h2 className="text-2xl font-bold text-[var(--color-text)] mb-2">
             {department.name}
           </h2>
-          <h3 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
+          <h3 className="text-2xl font-bold text-[var(--color-text)] mb-2">
             {department.nameEn}
           </h3>
           
-          <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300 mb-8">
+          <div className="flex items-center gap-2 text-[var(--color-text-muted)] mb-8">
             <span className="text-sm opacity-80">{department.managerTitle}:</span>
             <span className="font-semibold">{department.managerName}</span>
           </div>
@@ -61,10 +61,10 @@ const DepartmentModal: React.FC<DepartmentModalProps> = ({ department, onClose }
           <div className="w-full space-y-4">
             {/* Email Contact */}
             <div className="flex flex-col items-center gap-2 mb-4">
-               <span className="text-sm text-slate-500 dark:text-slate-400">البريد الإلكتروني</span>
+               <span className="text-sm text-[var(--color-text-muted)]">البريد الإلكتروني</span>
                <a 
                  href={`mailto:${department.email}`} 
-                 className="flex items-center gap-2 text-lg font-medium text-slate-800 dark:text-slate-100 hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors"
+                 className="flex items-center gap-2 text-lg font-medium text-[var(--color-text)] hover:text-cyan-600 dark:hover:text-cyan-400 transition-colors"
                >
                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
@@ -75,12 +75,12 @@ const DepartmentModal: React.FC<DepartmentModalProps> = ({ department, onClose }
 
             {/* Whatsapp Contact */}
              <div className="flex flex-col items-center gap-2 mb-6">
-               <span className="text-sm text-slate-500 dark:text-slate-400">واتساب</span>
+               <span className="text-sm text-[var(--color-text-muted)]">واتساب</span>
                <a 
                  href={`https://wa.me/${department.whatsapp}`} 
                  target="_blank" 
                  rel="noopener noreferrer"
-                 className="flex items-center gap-2 text-lg font-medium text-slate-800 dark:text-slate-100 hover:text-green-600 dark:hover:text-green-400 transition-colors"
+                 className="flex items-center gap-2 text-lg font-medium text-[var(--color-text)] hover:text-green-600 dark:hover:text-green-400 transition-colors"
                >
                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
                     <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />

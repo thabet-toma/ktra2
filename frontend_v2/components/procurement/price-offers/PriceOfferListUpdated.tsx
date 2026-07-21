@@ -212,7 +212,7 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                                 </th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        <tbody className="divide-y divide-[var(--color-border)]">
                             {filteredOffers.map((offer) => {
                                 const formattedDate = new Date(offer.createdAt).toLocaleDateString('ar-EG', {
                                     year: 'numeric',

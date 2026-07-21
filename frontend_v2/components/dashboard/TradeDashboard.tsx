@@ -475,11 +475,11 @@ function KpiCard({
       onClick={onClick}
       className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-3)] text-right hover:shadow-md transition-all group"
     >
-      <div className={`inline-flex p-[var(--spacing-1.5)] rounded-[var(--radius-md)] ${bg} text-white mb-3`}>
+      <div className={`inline-flex p-[var(--spacing-1-5)] rounded-[var(--radius-md)] ${bg} text-white mb-3`}>
         <Icon className="w-5 h-5" />
       </div>
       <p className="text-[var(--font-size-xl)] md:text-[var(--font-size-2xl)] font-bold text-[var(--color-text)]">{value}</p>
-      <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mt-[var(--spacing-0.5)]">{label}</p>
+      <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mt-[var(--spacing-0-5)]">{label}</p>
       {sub && <p className="text-[10px] text-[var(--color-text-muted)] mt-1">{sub}</p>}
     </button>
   );

@@ -147,7 +147,7 @@ export const CategoriesManagement: React.FC = () => {
       key: "id",
       header: "#",
       width: "60px",
-      render: (c) => (c.id === 0 ? <span className="text-gray-400">جديد</span> : c.id)
+      render: (c) => (c.id === 0 ? <span className="text-[var(--color-text-muted)]">جديد</span> : c.id)
     },
     {
       key: "name",
@@ -185,7 +185,7 @@ export const CategoriesManagement: React.FC = () => {
         if (editId === c.id) return parentSelect(c.id);
         return c.parent != null
           ? (nameById.get(c.parent) || `#${c.parent}`)
-          : <span className="text-gray-400">— رئيسي —</span>;
+          : <span className="text-[var(--color-text-muted)]">— رئيسي —</span>;
       }
     },
     {
@@ -198,7 +198,7 @@ export const CategoriesManagement: React.FC = () => {
           return (
             <div className="flex gap-1 justify-center">
               <button onClick={handleSave} disabled={loading} className="aseel-iconbtn text-green-600"><Check className="h-4 w-4" /></button>
-              <button onClick={() => setEditId(null)} disabled={loading} className="aseel-iconbtn text-gray-500"><X className="h-4 w-4" /></button>
+              <button onClick={() => setEditId(null)} disabled={loading} className="aseel-iconbtn text-[var(--color-text-muted)]"><X className="h-4 w-4" /></button>
             </div>
           );
         }
@@ -213,7 +213,7 @@ export const CategoriesManagement: React.FC = () => {
   ];
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8 }} data-skin="aseel">
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
           إدارة التصنيفات

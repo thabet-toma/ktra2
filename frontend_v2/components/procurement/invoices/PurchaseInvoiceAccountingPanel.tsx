@@ -730,7 +730,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                   <th className="px-4 py-2 text-right font-medium w-32">دائن</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+              <tbody className="divide-y divide-[var(--color-border)]">
                 {preview.lines.map((l, i) => (
                   <tr key={i}>
                     <td className="px-4 py-2 aseel-text-ink dark:aseel-text-soft">

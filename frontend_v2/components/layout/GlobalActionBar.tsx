@@ -152,7 +152,7 @@ export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate }) => {
       <button
         type="button"
         onClick={() => window.print()}
-        className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] hover:bg-[var(--color-surface-2)] rounded-lg transition-colors ml-1"
+        className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-primary-emphasis)] hover:bg-[var(--color-surface-2)] rounded-lg transition-colors ml-1"
         title="طباعة"
       >
         <Printer className="w-4 h-4" />
@@ -160,7 +160,7 @@ export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate }) => {
       <button
         type="button"
         onClick={() => window.location.reload()}
-        className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] hover:bg-[var(--color-surface-2)] rounded-lg transition-colors"
+        className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-primary-emphasis)] hover:bg-[var(--color-surface-2)] rounded-lg transition-colors"
         title="تحديث"
       >
         <RefreshCw className="w-4 h-4" />
@@ -177,9 +177,9 @@ export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate }) => {
                     key={a.key}
                     type="button"
                     onClick={a.onClick}
-                    className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-primary)] rounded-md transition-colors"
+                    className="flex items-center gap-2.5 w-full px-3 py-2 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)] hover:text-[var(--color-primary-emphasis)] rounded-md transition-colors"
                   >
-                    <span className="text-[var(--color-primary)] flex-shrink-0">{a.icon}</span>
+                    <span className="text-[var(--color-primary-emphasis)] flex-shrink-0">{a.icon}</span>
                     <span className="truncate">{a.label}</span>
                   </button>
                 ))}

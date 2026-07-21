@@ -317,7 +317,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   }
 
   return (
-    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", padding: "8px 12px" }} data-skin="aseel">
+    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", padding: "8px 12px" }}>
       {/* Tabs Header */}
       <div style={{ display: "flex", gap: "16px", borderBottom: "1px solid var(--aseel-border)", marginBottom: "8px" }}>
         <button

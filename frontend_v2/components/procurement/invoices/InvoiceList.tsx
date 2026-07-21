@@ -384,7 +384,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   const draftCount = filteredRows.length - postedCount;
 
   return (
-    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
+    <div style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title={isInternational ? "الفواتير الدولية" : "فواتير الشراء"}
         state={`${filteredRows.length} في الصفحة من ${total}`}

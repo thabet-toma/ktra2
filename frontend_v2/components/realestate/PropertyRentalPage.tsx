@@ -207,7 +207,7 @@ export const PropertyRentalPage: React.FC = () => {
   const formRow: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 10 };
 
   return (
-    <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 0, padding: '8px 12px', overflowY: 'auto' }}>
+    <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 0, padding: '8px 12px', overflowY: 'auto' }}>
       {/* Header */}
       <div style={{ paddingBottom: 8, borderBottom: '1px solid var(--aseel-border)', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

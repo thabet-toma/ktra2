@@ -242,7 +242,7 @@ export const ProductProfilePage: React.FC = () => {
       : 'جاري التحميل...';
 
   return (
-    <div data-skin="aseel" className="min-h-[calc(100vh-5rem)]">
+    <div className="min-h-[calc(100vh-5rem)]">
       <AseelDocumentShell
         title={title}
         initialTab={initialTab}

@@ -224,6 +224,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   // M4-T1: Aseel Navigation for invoices
   const [invoicesList, setInvoicesList] = useState<any[]>([]);
+  const invoicesListRequestedRef = useRef(false);
 
   const nav = useRecordNavigation<any>({
     items: invoicesList,
@@ -260,6 +261,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       if (!(await confirm({ message: "لديك تغييرات غير محفوظة. هل أنت متأكد من الخروج دون حفظ؟", confirmText: "خروج دون حفظ", cancelText: "بقاء", danger: false }))) {
         return;
       }
+    }
+    if (initialInvoice?.id && !viewMode) {
+      // فاتورة محفوظة كانت قيد التحرير: الإلغاء يتراجع عن التعديلات ويعيد وضع
+      // العرض داخل نفس الفاتورة، لا يغادرها لقائمة الفواتير.
+      setFormData(initialInvoice);
+      setInstallments(initialInvoice.installments || []);
+      setInstallmentPlanEnabled(initialInvoice.installmentPlanEnabled || false);
+      setDealInfo(initialInvoice.dealInfo || dealData || { createdBy: currentUser.id, createdAt: new Date().toISOString() });
+      dirtyRef.current = false;
+      setViewMode(true);
+      return;
     }
     onCancel();
   };
@@ -305,6 +317,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   // Load invoices list for navigation
   useEffect(() => {
+    if (invoicesListRequestedRef.current) return;
+    invoicesListRequestedRef.current = true;
     const loadInvoices = async () => {
       try {
         const list = await purchaseInvoiceApi.list();
@@ -1619,15 +1633,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
   const feesTab = (
     <div className="aseel-legacy-tab">
-      <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-3">
-        <div><span className="block text-xs text-slate-500">إجمالي الفاتورة الأساسي</span><b>{formatMoney(formData.grandTotal || 0)} ₪</b></div>
-        <div><span className="block text-xs text-slate-500">ضرائب ورسوم إضافية</span><b className="text-amber-700">{formatMoney(feesTotal)} ₪</b></div>
-        <div><span className="block text-xs text-slate-500">إجمالي المستحق</span><b className="text-emerald-700">{formatMoney(payableTotal)} ₪</b></div>
+      <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 sm:grid-cols-3">
+        <div><span className="block text-xs text-[var(--color-text-muted)]">إجمالي الفاتورة الأساسي</span><b>{formatMoney(formData.grandTotal || 0)} ₪</b></div>
+        <div><span className="block text-xs text-[var(--color-text-muted)]">ضرائب ورسوم إضافية</span><b className="text-amber-700">{formatMoney(feesTotal)} ₪</b></div>
+        <div><span className="block text-xs text-[var(--color-text-muted)]">إجمالي المستحق</span><b className="text-emerald-700">{formatMoney(payableTotal)} ₪</b></div>
       </div>
       <div className="mb-2 flex items-center justify-between gap-2">
         <div>
           <h4 className="text-sm font-semibold">بنود الضرائب والرسوم الإضافية</h4>
-          <p className="text-xs text-slate-500">كل بند له حساب واضح؛ ويمكن رسملته على تكلفة المخزون أو تحميله كمصروف.</p>
+          <p className="text-xs text-[var(--color-text-muted)]">كل بند له حساب واضح؛ ويمكن رسملته على تكلفة المخزون أو تحميله كمصروف.</p>
         </div>
         {feeEditorState.canAdd && (
           <div className="flex flex-wrap justify-end gap-2">
@@ -1670,7 +1684,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                 <td className="p-1 text-center">{!effectiveReadOnly && <button type="button" className="aseel-toolbtn" onClick={() => { setFormData((prev) => ({ ...prev, fees: (prev.fees || []).filter((_, i) => i !== index) })); markDirty(); }}><Trash2 size={14} /></button>}</td>
               </tr>
             ))}
-            {(formData.fees || []).length === 0 && <tr><td colSpan={5} className="p-6 text-center text-slate-500">لا توجد ضرائب أو رسوم إضافية. استخدم «إضافة ضريبة مستقلة» أو «إضافة رسم» عند الحاجة.</td></tr>}
+            {(formData.fees || []).length === 0 && <tr><td colSpan={5} className="p-6 text-center text-[var(--color-text-muted)]">لا توجد ضرائب أو رسوم إضافية. استخدم «إضافة ضريبة مستقلة» أو «إضافة رسم» عند الحاجة.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1754,7 +1768,21 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   const toolbarActions: AseelToolbarAction[] = [
     { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => { handleSave(); dirtyRef.current = false; } : undefined, disabled: saving || isPosted },
-    ...(viewMode && !isPosted && !formData.isHistorical ? [{ key: "edit", label: "تحرير", icon: <Pencil />, onClick: () => setViewMode(false), separatorBefore: true } as AseelToolbarAction] : []),
+    ...(viewMode && !formData.isHistorical ? [{
+      key: "edit",
+      label: "تحرير",
+      icon: <Pencil />,
+      // مرحّلة: التعديل ممنوع محاسبياً حتى التراجع عن الترحيل — نُبقي الزر ظاهراً
+      // لاكتشافه، ونوجّه المستخدم بدل إخفائه (المالك: «كبسة تحرير اختفت»).
+      onClick: () => {
+        if (isPosted) {
+          toast("الفاتورة مرحّلة — اضغط «تراجع عن الترحيل» أولاً لتعديلها.", "info");
+          return;
+        }
+        setViewMode(false);
+      },
+      separatorBefore: true,
+    } as AseelToolbarAction] : []),
     { key: "new", label: "جديدة", icon: <Plus />, onClick: guardedNew, separatorBefore: true },
     {
       key: "post",
@@ -1846,7 +1874,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             <div>
               <span className="font-semibold">{r.name || "—"}</span>
               {r.specifications && (
-                <span className="block text-[11px] text-slate-500">{r.specifications}</span>
+                <span className="block text-[11px] text-[var(--color-text-muted)]">{r.specifications}</span>
               )}
             </div>
           ),
@@ -1870,15 +1898,42 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       rows={invItems}
       rowKey={(r, i) => r.id || i}
       emptyRowsHint="لا توجد بنود في الفاتورة"
-      totals={[
-        { label: "المجموع قبل الضريبة", value: invMoney(Number(formData.subtotal) || 0) },
-        ...((Number(formData.discountAmount) || 0) > 0
-          ? [{ label: "الخصم", value: invMoney(Number(formData.discountAmount) || 0) }]
-          : []),
-        { label: "الضريبة", value: invMoney(Number(formData.taxAmount) || 0) },
-        ...(feesTotal > 0 ? [{ label: "الرسوم", value: invMoney(feesTotal) }] : []),
-        { label: "إجمالي المستحق", value: invMoney(payableTotal), emphasis: true },
-      ]}
+      /* ملخّص التكاليف كامل داخل المستند (يُرفع لأعلى بدل دوك سفلي عالق مع فراغ
+         فوقه — طلب المالك «ليش ما ترفعو فوق»). نفس تفصيل الدوك تماماً. */
+      totals={
+        formData.conversionMetadata?.line_meta
+          ? [
+              { label: costLabels.merchandiseBase, value: fmt(formData.conversionMetadata.line_meta.subtotal_merch_ils ?? formData.conversionMetadata.deal_total_ils ?? 0) },
+              ...(!formData.shippingIncluded
+                ? [{ label: "الشحن داخل المنشأ", value: fmt(formData.conversionMetadata.line_meta.internal_shipping_ils || 0) }]
+                : []),
+              { label: "تكلفة الشحن الدولي", value: fmt(formData.conversionMetadata.line_meta.deal_ship_allocated_ils || 0) },
+              { label: "تكلفة التخليص", value: fmt(formData.conversionMetadata.line_meta.deal_clearance_allocated_ils || 0) },
+              { label: "تكلفة النقل", value: fmt(formData.conversionMetadata.deal_local_shipping_from_clearance_ils || 0) },
+              ...(transferCommissionsIls > 0
+                ? [{ label: "عمولات تحويل الدفعات", value: fmt(transferCommissionsIls) }]
+                : []),
+              ...((Number(formData.discountAmount) || 0) > 0
+                ? [{ label: "الخصم", value: fmt(Number(formData.discountAmount) || 0) }]
+                : []),
+              { label: "المجموع قبل الضريبة", value: fmt((Number(formData.subtotal) || 0) + transferCommissionsIls) },
+              { label: "الضريبة المضافة", value: fmt(Number(formData.taxAmount) || 0) },
+              ...invFees.map((fee) => ({ label: fee.description || "رسم إضافي", value: fmt(Number(fee.amount) || 0) })),
+              { label: "إجمالي المستحق بعد الضريبة والرسوم", value: fmt(payableTotal), emphasis: true },
+              { label: "إجمالي الكمية", value: formatQuantity(totalQty) },
+            ]
+          : [
+              { label: "مجموع البنود (قبل الخصم)", value: fmt(ilsMerchandiseBase - (formData.shippingIncluded ? 0 : formData.shippingCost || 0)) },
+              ...((Number(formData.discountAmount) || 0) > 0
+                ? [{ label: "الخصم", value: fmt(Number(formData.discountAmount) || 0) }]
+                : []),
+              { label: "المجموع قبل الضريبة", value: fmt(Number(formData.subtotal) || 0) },
+              { label: "الضريبة المضافة", value: fmt(Number(formData.taxAmount) || 0) },
+              ...invFees.map((fee) => ({ label: fee.description || "رسم إضافي", value: fmt(Number(fee.amount) || 0) })),
+              { label: "إجمالي المستحق بعد الضريبة والرسوم", value: fmt(payableTotal), emphasis: true },
+              { label: "إجمالي الكمية", value: formatQuantity(totalQty) },
+            ]
+      }
       sections={[
         ...(invFees.length > 0
           ? [
@@ -1921,6 +1976,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       dir="rtl"
     >
     <AseelDocumentShell
+      gridFitContent={viewMode}
       title={formData.isReturn
         ? "مرجع شراء (إرجاع للمورد)"
         : isInternationalInvoice ? "فاتورة شراء دولية" : "فاتورة الشراء"}
@@ -1935,7 +1991,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       nav={nav}
       actions={toolbarActions}
 
-      header={
+      header={viewMode ? undefined : (
         <>
           {fld(
             "رقم الفاتورة",
@@ -2087,7 +2143,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             </span>
           </label>
         </>
-      }
+      )}
       activeTab={activeTabKey}
       onTabChange={setActiveTabKey}
       tabs={viewMode ? [] : [
@@ -2133,7 +2189,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           },
         ] : []),
       ]}
-      totals={
+      totals={viewMode ? undefined : (
         formData.conversionMetadata?.line_meta ? (
           <>
             <div className="aseel-total-row">
@@ -2232,7 +2288,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             </div>
           </>
         )
-      }
+      )}
       status={
         <>
           <span className="aseel-status-item">المستخدم <b>{currentUser?.name || "—"}</b></span>

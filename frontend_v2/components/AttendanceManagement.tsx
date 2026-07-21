@@ -156,7 +156,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
     ];
 
     return (
-        <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
+        <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
             {/* جلسة الحضور */}
             <div style={{ border: '1px solid var(--aseel-border)', borderRadius: 6, padding: '10px 14px', background: activeSession ? 'var(--aseel-surface-accent, #f0f5ff)' : undefined }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>

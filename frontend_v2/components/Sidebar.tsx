@@ -174,7 +174,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
       <div className="space-y-1">
         <button
           onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); toggle(); }}
-          className={`flex items-center justify-between w-full p-3 rounded-lg transition-all ${expanded ? "bg-[var(--color-surface-3)] text-[var(--color-primary)]" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+          className={`flex items-center justify-between w-full p-3 rounded-lg transition-all ${expanded ? "bg-[var(--color-surface-3)] text-[var(--color-primary-emphasis)]" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
           title={label}
         >
           <div className="flex items-center">
@@ -192,7 +192,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                   if (link.newTab && link.path) openInNewTab(link.path);
                   else { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }
                 }}
-                className={`flex items-center gap-2 w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) && !link.newTab ? "text-[var(--color-primary)] font-bold bg-[var(--color-surface-3)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
+                className={`flex items-center gap-2 w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) && !link.newTab ? "text-[var(--color-primary-emphasis)] font-bold bg-[var(--color-surface-3)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
                 title={link.newTab ? `${link.label} (تبويب جديد)` : link.label}
               >
                 <span className="flex-shrink-0">{link.icon}</span>
@@ -207,7 +207,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     );
 
     return (
-      <div className="flex flex-col h-full bg-[var(--color-surface-2)] border-l border-[var(--color-border)] transition-all duration-300 relative" data-skin="aseel">
+      <div className="flex flex-col h-full bg-[var(--color-surface-2)] border-l border-[var(--color-border)] transition-all duration-300 relative">
         {/* M5-T2: Header بنمط الأصيل */}
         <div className={`p-2 h-12 border-b border-[var(--color-border)] flex items-center ${isCollapsed && !isMobile ? 'justify-center' : 'justify-between'} bg-[var(--color-surface)]`}>
           <div className="flex items-center overflow-hidden">
@@ -260,7 +260,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
               <div className="space-y-1">
                 <button
                   onClick={() => setImportExpanded(!importExpanded)}
-                  className={`flex items-center justify-between w-full p-2 text-sm rounded transition-all ${importExpanded ? "bg-[var(--color-surface-3)] text-[var(--color-primary)]" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+                  className={`flex items-center justify-between w-full p-2 text-sm rounded transition-all ${importExpanded ? "bg-[var(--color-surface-3)] text-[var(--color-primary-emphasis)]" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
                   title="الاستيراد"
                 >
                   <div className="flex items-center gap-2">
@@ -275,7 +275,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                       <button
                         key={link.view}
                         onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
-                        className={`flex items-center gap-2 w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-[var(--color-primary)] font-bold bg-[var(--color-surface-3)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
+                        className={`flex items-center gap-2 w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-[var(--color-primary-emphasis)] font-bold bg-[var(--color-surface-3)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
                       >
                         <span className="flex-shrink-0">{link.icon}</span>
                         <span className="flex-1 text-right">{link.label}</span>
@@ -321,7 +321,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           <div className="space-y-0.5">
             <button
               onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); setUserManagementExpanded(!userManagementExpanded); }}
-              className={`flex items-center justify-between w-full p-2 text-sm rounded ${userManagementExpanded ? "bg-[var(--color-surface-2)] text-[var(--color-primary)]" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+              className={`flex items-center justify-between w-full p-2 text-sm rounded ${userManagementExpanded ? "bg-[var(--color-surface-2)] text-[var(--color-primary-emphasis)]" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
               title="إدارة الموظفين"
             >
               <div className="flex items-center">
@@ -336,7 +336,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                   <button
                     key={link.view}
                     onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
-                    className={`flex items-center w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-[var(--color-primary)] font-bold bg-[var(--color-surface-3)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
+                    className={`flex items-center w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-[var(--color-primary-emphasis)] font-bold bg-[var(--color-surface-3)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
                   >
                     <span className="ml-2">{link.icon}</span>
                     {link.label}
@@ -378,15 +378,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
         </nav>
 
         {/* User Profile */}
-        <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/20">
+        <div className="p-4 border-t border-[var(--color-border)] bg-[var(--color-surface-2)]">
           <div className={`flex items-center ${isCollapsed && !isMobile ? 'justify-center' : ''} p-2 rounded-xl`}>
-            <div className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white font-bold flex-shrink-0 shadow-sm">
+            <div className="w-10 h-10 rounded-full bg-[var(--color-primary)] flex items-center justify-center text-[var(--color-primary-foreground)] font-bold flex-shrink-0 shadow-sm">
               {user.name?.charAt(0)}
             </div>
             {showText && (
               <div className="mr-3 overflow-hidden">
-                <p className="text-sm font-bold dark:text-white truncate">{user.name}</p>
-                <p className="text-[10px] text-blue-500 font-medium uppercase tracking-wider">{user.role}</p>
+                <p className="text-sm font-bold text-[var(--color-text)] truncate">{user.name}</p>
+                <p className="text-[10px] text-[var(--color-primary)] font-medium uppercase tracking-wider">{user.role}</p>
               </div>
             )}
           </div>
@@ -398,13 +398,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   return (
     <>
       {/* Mobile Top Bar */}
-      <header className="md:hidden fixed top-0 left-0 right-0 h-14 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 z-40">
-        <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 rounded-full transition-colors">
+      <header className="md:hidden fixed top-0 left-0 right-0 h-14 bg-[var(--color-surface)] border-b border-[var(--color-border)] flex items-center justify-between px-4 z-40">
+        <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] rounded-full transition-colors">
           <Menu className="h-6 w-6" />
         </button>
         <div className="flex items-center">
-          <span className="font-bold dark:text-white">K.T.R.A</span>
-          <LogoIcon className="h-6 w-6 mr-2 text-blue-600" />
+          <span className="font-bold text-[var(--color-text)]">K.T.R.A</span>
+          <LogoIcon className="h-6 w-6 mr-2 text-[var(--color-primary)]" />
         </div>
         <div className="w-10" />
       </header>
@@ -425,7 +425,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
         {/* المبدل (Toggle Button) - الموضع الجديد المحسن */}
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}
-          className="absolute -left-4 top-20 w-8 h-8 bg-white dark:bg-gray-700 border-2 border-blue-100 dark:border-gray-600 rounded-full flex items-center justify-center shadow-lg z-50 text-blue-600 dark:text-blue-400 hover:bg-blue-600 hover:text-white dark:hover:bg-blue-500 transition-all duration-200 group"
+          className="absolute -left-4 top-20 w-8 h-8 bg-[var(--color-surface)] border-2 border-[var(--color-border)] rounded-full flex items-center justify-center shadow-lg z-50 text-[var(--color-primary)] hover:bg-[var(--color-primary)] hover:text-[var(--color-primary-foreground)] hover:border-[var(--color-primary)] transition-all duration-200 group"
           title={isCollapsed ? "فتح القائمة" : "إغلاق القائمة"}
         >
           {isCollapsed ? (

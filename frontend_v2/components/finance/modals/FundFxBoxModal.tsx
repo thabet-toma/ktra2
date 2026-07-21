@@ -87,13 +87,13 @@ export const FundFxBoxModal: React.FC<Props> = ({ isOpen, ledger, ilsBoxes, onCl
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4" dir="rtl">
-      <div className="w-full max-w-lg rounded-2xl bg-white dark:bg-gray-800 shadow-2xl p-6 max-h-[88vh] overflow-y-auto"
+      <div className="w-full max-w-lg rounded-2xl bg-[var(--color-surface)] shadow-2xl p-6 max-h-[88vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-bold dark:text-white">
-            تمويل {ledger.name} <span className="text-sm font-mono text-gray-500">({ledger.currency_code})</span>
+            تمويل {ledger.name} <span className="text-sm font-mono text-[var(--color-text-muted)]">({ledger.currency_code})</span>
           </h3>
-          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700" aria-label="إغلاق">
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-[var(--color-surface-3)]" aria-label="إغلاق">
             <X className="w-5 h-5" />
           </button>
         </div>
@@ -142,7 +142,7 @@ export const FundFxBoxModal: React.FC<Props> = ({ isOpen, ledger, ilsBoxes, onCl
               value={date} onChange={(e) => setDate(e.target.value)} />
           </label>
           {ils > 0 && (
-            <p className="text-xs text-gray-500">القيمة بالشيقل: <strong>{ils.toLocaleString()}</strong> — تُضاف كطبقة FIFO جديدة.</p>
+            <p className="text-xs text-[var(--color-text-muted)]">القيمة بالشيقل: <strong>{ils.toLocaleString()}</strong> — تُضاف كطبقة FIFO جديدة.</p>
           )}
         </div>
 

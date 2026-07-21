@@ -280,14 +280,14 @@ export const WhatsNewButton: React.FC = () => {
       <button
         type="button"
         onClick={openPanel}
-        className="relative flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-[var(--color-primary)] hover:bg-[var(--color-surface-2)] transition-colors"
+        className="relative flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-[var(--color-primary-emphasis)] hover:bg-[var(--color-surface-2)] transition-colors"
         title="ما الجديد في آخر تحديث"
         aria-label="ما الجديد"
       >
         <Sparkles className="w-4 h-4" />
         <span className="hidden sm:inline">ما الجديد</span>
         {hasUnseen && (
-          <span className="absolute -top-0.5 -start-0.5 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-[var(--color-surface)]" />
+          <span className="absolute -top-0.5 -start-0.5 w-2.5 h-2.5 rounded-full bg-[var(--color-danger)] ring-2 ring-[var(--color-surface)]" />
         )}
       </button>
 
@@ -303,11 +303,11 @@ export const WhatsNewButton: React.FC = () => {
           {/* اللوحة المنزلقة من اليسار */}
           <aside
             dir="rtl"
-            className="fixed top-0 left-0 z-50 h-full w-[92vw] max-w-[380px] bg-[var(--color-surface)] shadow-2xl border-e border-gray-200 dark:border-gray-700 flex flex-col animate-[whatsnew-in_.22s_ease-out]"
+            className="fixed top-0 left-0 z-50 h-full w-[92vw] max-w-[380px] bg-[var(--color-surface)] shadow-2xl border-e border-[var(--color-border)] flex flex-col animate-[whatsnew-in_.22s_ease-out]"
             role="dialog"
             aria-label="ما الجديد"
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-l from-[var(--color-primary)]/10 to-transparent">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--color-border)] bg-gradient-to-l from-[var(--color-primary)]/10 to-transparent">
               <div className="flex items-center gap-2">
                 <Sparkles className="w-5 h-5 text-[var(--color-primary)]" />
                 <h2 className="text-base font-bold text-[var(--color-text)]">ما الجديد</h2>
@@ -315,7 +315,7 @@ export const WhatsNewButton: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 transition-colors"
+                className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] transition-colors"
                 aria-label="إغلاق"
               >
                 <X className="w-4 h-4" />
@@ -346,7 +346,7 @@ export const WhatsNewButton: React.FC = () => {
               ))}
             </div>
 
-            <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 text-[11px] text-center text-[var(--color-text-muted)]">
+            <div className="px-4 py-3 border-t border-[var(--color-border)] text-[11px] text-center text-[var(--color-text-muted)]">
               K.T.R.A — نظام إدارة متكامل
             </div>
           </aside>

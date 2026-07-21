@@ -335,7 +335,7 @@ export const PartnerProfilePage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel" className="min-h-[calc(100vh-5rem)]">
+    <div className="min-h-[calc(100vh-5rem)]">
       <AseelDocumentShell
         title={partner ? `كشف حساب: ${partner.name}` : 'جاري التحميل...'}
         actions={[

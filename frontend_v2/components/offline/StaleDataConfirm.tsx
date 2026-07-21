@@ -47,13 +47,13 @@ export default function StaleDataConfirm({
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className="bg-white rounded-xl shadow-2xl max-w-lg w-full p-6"
+        className="bg-[var(--color-surface)] rounded-xl shadow-2xl max-w-lg w-full p-6"
       >
         <div className="flex items-center gap-3 mb-4">
           <span className="text-2xl">⚠️</span>
-          <h2 id="stale-confirm-title" className="text-lg font-bold text-gray-800">تحذير</h2>
+          <h2 id="stale-confirm-title" className="text-lg font-bold text-[var(--color-text)]">تحذير</h2>
         </div>
-        <div className="text-sm text-gray-600 space-y-2 mb-6">
+        <div className="text-sm text-[var(--color-text-muted)] space-y-2 mb-6">
           <p>
             كمية المنتج «<strong>{productName}</strong>» المعروضة (<strong>{cachedQuantity}</strong>)
             من cache آخر تحديث: <strong>{relativeTime(lastUpdated)}</strong>.
@@ -66,7 +66,7 @@ export default function StaleDataConfirm({
           <button
             type="button"
             onClick={() => onResolve('cancel')}
-            className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+            className="px-4 py-2 rounded-lg border border-[var(--color-border)] text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
           >
             إلغاء
           </button>

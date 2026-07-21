@@ -18,13 +18,13 @@ export const NoSqlMigrationBanner: React.FC<{ isManager: boolean }> = ({
 
   return (
     <div className="mx-3 sm:mx-6 mb-3">
-      <div className="bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 rounded-xl p-3 shadow-sm">
+      <div className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-xl p-3 shadow-sm">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+            <div className="text-sm font-semibold text-[var(--color-text)]">
               العمل يتم عبر قاعدة SQL
             </div>
-            <div className="text-xs text-slate-600 dark:text-slate-400 mt-1 leading-5">
+            <div className="text-xs text-[var(--color-text-muted)] mt-1 leading-5">
               تجنّب إنشاء أو تعديل بيانات من واجهات NoSQL القديمة بعد الترحيل.
             </div>
           </div>
@@ -39,7 +39,7 @@ export const NoSqlMigrationBanner: React.FC<{ isManager: boolean }> = ({
                 // ignore
               }
             }}
-            className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-slate-600 bg-white dark:bg-gray-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 text-xs whitespace-nowrap"
+            className="px-3 py-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] hover:bg-[var(--color-surface-3)] text-xs whitespace-nowrap"
           >
             فهمت
           </button>

@@ -34,7 +34,7 @@ export const RelatedInvoices: React.FC<RelatedInvoicesProps> = ({ item, invoices
               <th className="px-6 py-4">الإجمالي</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+          <tbody className="divide-y divide-[var(--color-border)]">
             {invoices.map((inv, index) => {
               const invoiceItem = inv.items.find(i => i.itemId === item.id);
               return (

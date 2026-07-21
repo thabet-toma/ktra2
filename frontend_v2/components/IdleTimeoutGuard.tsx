@@ -152,7 +152,6 @@ export const IdleTimeoutGuard: React.FC<Props> = ({ onLogout }) => {
     const ss = String(warnSeconds % 60).padStart(2, "0");
     return createPortal(
       <div
-        data-skin="aseel"
         role="alertdialog"
         aria-modal="true"
         aria-label="تنبيه انتهاء الجلسة"
@@ -199,7 +198,6 @@ export const IdleTimeoutGuard: React.FC<Props> = ({ onLogout }) => {
 
   return createPortal(
     <div
-      data-skin="aseel"
       role="alertdialog"
       aria-modal="true"
       aria-label="تم إنهاء الجلسة"

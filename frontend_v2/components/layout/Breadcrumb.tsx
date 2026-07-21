@@ -108,7 +108,7 @@ export const Breadcrumb: React.FC<{ activeView: AppView }> = ({ activeView }) =>
           console.log('[Routing] Back button clicked: Navigating back');
           navigate(-1);
         }}
-        className="px-3 py-1.5 rounded-lg bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold transition-all flex items-center gap-1.5 border border-gray-200 dark:border-gray-700 shadow-sm"
+        className="px-3 py-1.5 rounded-lg bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold transition-all flex items-center gap-1.5 border border-[var(--color-border)] shadow-sm"
         title="رجوع للصفحة السابقة"
         aria-label="رجوع"
       >
@@ -116,7 +116,7 @@ export const Breadcrumb: React.FC<{ activeView: AppView }> = ({ activeView }) =>
         <span className="text-sm">رجوع</span>
       </button>
 
-      <nav aria-label="breadcrumb" className="flex items-center gap-1 text-[var(--font-size-sm)] border-s border-gray-300 dark:border-gray-600 ps-2">
+      <nav aria-label="breadcrumb" className="flex items-center gap-1 text-[var(--font-size-sm)] border-s border-[var(--color-border)] ps-2">
         {crumbs.map((crumb, i) => (
           <React.Fragment key={i}>
             {i > 0 && <ChevronLeft className="h-3 w-3 text-[var(--color-text-muted)]" />}

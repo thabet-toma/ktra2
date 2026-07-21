@@ -255,7 +255,7 @@ export const GroupProfilePage: React.FC = () => {
   const title = profile ? `كرت مجمّع: ${nameParam || profile.name}` : `كرت مجمّع: ${nameParam}`;
 
   return (
-    <div data-skin="aseel" className="min-h-[calc(100vh-5rem)]">
+    <div className="min-h-[calc(100vh-5rem)]">
       <AseelDocumentShell
         title={title}
         actions={[{ key: 'back', label: 'عودة', onClick: () => navigate(-1) }]}

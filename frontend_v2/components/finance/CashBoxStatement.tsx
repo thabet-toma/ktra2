@@ -154,7 +154,7 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
       case "withdrawal":
         return <ArrowUpRight className="w-5 h-5 text-red-600" />;
       default:
-        return <Ban className="w-5 h-5 text-gray-500" />;
+        return <Ban className="w-5 h-5 text-[var(--color-text-muted)]" />;
     }
   };
 
@@ -177,19 +177,19 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
         <div className="flex items-center">
           <button
             onClick={onBack}
-            className="p-2 ml-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition"
+            className="p-2 ml-2 hover:bg-[var(--color-surface-3)] rounded-full transition"
           >
             <ArrowLeft className="w-6 h-6 dark:text-white" />
           </button>
           <div>
             <h1 className="text-2xl font-bold dark:text-white">{cashBox.name}</h1>
-            <p className="text-sm text-gray-500">كشف الصندوق + دفتر الأستاذ العام</p>
+            <p className="text-sm text-[var(--color-text-muted)]">كشف الصندوق + دفتر الأستاذ العام</p>
           </div>
         </div>
 
         <div className="flex items-center gap-4">
           <div className="text-left">
-            <p className="text-xs text-gray-500">الرصيد الحالي (الصندوق)</p>
+            <p className="text-xs text-[var(--color-text-muted)]">الرصيد الحالي (الصندوق)</p>
             <p className="text-2xl font-bold text-blue-600">
               {cashBox.currentBalance.toLocaleString()}
               <span className="text-sm mr-1">{cashBox.currency}</span>
@@ -206,39 +206,39 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
       </div>
 
       <div className="space-y-2">
-        <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+        <h2 className="text-lg font-bold text-[var(--color-text)] flex items-center gap-2">
           <Wallet className="w-5 h-5 text-blue-600" />
           حركات الصندوق والقيود
         </h2>
-        <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+        <p className="text-xs text-[var(--color-text-muted)] leading-relaxed">
           دمج سجل الصندوق (Firestore) مع أسطر دفتر الأستاذ لحساب النقدية المربوط بالصندوق — ترتيب زمني واحد.
           إيداع جديد يُنشئ حركة صندوق وقيداً (مدين الصندوق، دائن رأس المال) عند توفر الربط المحاسبي والفترة
           المفتوحة.
         </p>
       </div>
 
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div className="bg-[var(--color-surface)] rounded-xl shadow border border-[var(--color-border)] overflow-hidden">
         {!glAccountId ? (
           <div className="px-4 py-2 border-b border-amber-100 dark:border-amber-900/40 bg-amber-50/80 dark:bg-amber-950/20 text-xs text-amber-900 dark:text-amber-100">
             لا يوجد حساب GL مربوط — تظهر حركات الصندوق فقط. اربط الصندوق من قائمة الصناديق لعرض القيود
             وإنشاء قيد الإيداع تلقائياً.
           </div>
         ) : (
-          <div className="px-4 py-3 flex flex-wrap gap-4 text-sm border-b border-gray-100 dark:border-gray-700 bg-slate-50/80 dark:bg-slate-900/40">
+          <div className="px-4 py-3 flex flex-wrap gap-4 text-sm border-b border-[var(--color-border)] bg-slate-50/80 dark:bg-slate-900/40">
             <div className="flex items-center gap-1">
               <BookMarked className="w-4 h-4 text-[var(--color-primary)] shrink-0" />
-              <span className="text-gray-500">الحساب: </span>
+              <span className="text-[var(--color-text-muted)]">الحساب: </span>
               <span className="font-mono font-bold">{glMeta.account_code || "—"}</span>{" "}
               <span className="font-semibold">{glMeta.account_name || ""}</span>
             </div>
             <div>
-              <span className="text-gray-500">رصيد افتتاحي (GL): </span>
+              <span className="text-[var(--color-text-muted)]">رصيد افتتاحي (GL): </span>
               <span className="font-bold tabular-nums">
                 {formatMoney(glMeta.opening_balance ?? 0)}
               </span>
             </div>
             <div>
-              <span className="text-gray-500">رصيد ختامي (GL): </span>
+              <span className="text-[var(--color-text-muted)]">رصيد ختامي (GL): </span>
               <span className="font-bold tabular-nums text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                 {formatMoney(glMeta.closing_balance ?? 0)}
               </span>
@@ -246,13 +246,13 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
           </div>
         )}
         {glAccountId && glLoading ? (
-          <div className="p-10 text-center text-gray-500">جاري تحميل دفتر الأستاذ...</div>
+          <div className="p-10 text-center text-[var(--color-text-muted)]">جاري تحميل دفتر الأستاذ...</div>
         ) : glAccountId && glError ? (
           <div className="p-8 text-center text-red-600 text-sm">{glError}</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-right text-sm">
-              <thead className="bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-400 text-xs uppercase">
+              <thead className="bg-[var(--color-surface-3)] text-[var(--color-text-muted)] text-xs uppercase">
                 <tr>
                   <th className="px-3 py-2">التاريخ</th>
                   <th className="px-3 py-2">المصدر</th>
@@ -263,16 +263,16 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
                   <th className="px-3 py-2">رصيد</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+              <tbody className="divide-y divide-[var(--color-border)]">
                 {loading ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-10 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-10 text-center text-[var(--color-text-muted)]">
                       جاري التحميل...
                     </td>
                   </tr>
                 ) : mergedRows.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="px-6 py-10 text-center text-gray-500">
+                    <td colSpan={7} className="px-6 py-10 text-center text-[var(--color-text-muted)]">
                       لا توجد حركات في الجدول الموحّد
                     </td>
                   </tr>
@@ -290,11 +290,11 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
                           key={`c-${tx.id}`}
                           className="hover:bg-blue-50/50 dark:hover:bg-gray-700/40 bg-blue-50/20 dark:bg-blue-950/10"
                         >
-                          <td className="px-3 py-2 text-gray-700 dark:text-gray-300">
+                          <td className="px-3 py-2 text-[var(--color-text)]">
                             <div className="flex flex-col leading-tight text-xs">
                               <span className="font-semibold">{dayName}</span>
                               <span>{datePart}</span>
-                              <span className="text-gray-400">{timePart}</span>
+                              <span className="text-[var(--color-text-muted)]">{timePart}</span>
                             </div>
                           </td>
                           <td className="px-3 py-2">
@@ -309,7 +309,7 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
                             {tx.description}
                           </td>
                           <td
-                            className="px-3 py-2 text-xs text-gray-500 font-mono truncate max-w-[120px]"
+                            className="px-3 py-2 text-xs text-[var(--color-text-muted)] font-mono truncate max-w-[120px]"
                             title={tx.reference}
                           >
                             {tx.reference || "—"}
@@ -324,9 +324,9 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
                               ? Math.abs(tx.amount).toLocaleString(undefined, { maximumFractionDigits: 2 })
                               : "—"}
                           </td>
-                          <td className="px-3 py-2 font-bold tabular-nums text-xs text-gray-700 dark:text-gray-200">
+                          <td className="px-3 py-2 font-bold tabular-nums text-xs text-[var(--color-text)]">
                             {tx.balanceAfter != null ? tx.balanceAfter.toLocaleString() : "—"}
-                            <span className="block font-normal text-[10px] text-gray-400">رصيد صندوق</span>
+                            <span className="block font-normal text-[10px] text-[var(--color-text-muted)]">رصيد صندوق</span>
                           </td>
                         </tr>
                       );
@@ -341,7 +341,7 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
                         <td className="px-3 py-2 max-w-[280px] truncate" title={row.description}>
                           {row.description}
                         </td>
-                        <td className="px-3 py-2 text-xs text-gray-500 truncate max-w-[120px]">
+                        <td className="px-3 py-2 text-xs text-[var(--color-text-muted)] truncate max-w-[120px]">
                           {[row.ref_type, row.ref_id].filter(Boolean).join(" ") || "—"}
                         </td>
                         <td className="px-3 py-2 tabular-nums text-green-700 dark:text-green-400">
@@ -356,7 +356,7 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
                         </td>
                         <td className="px-3 py-2 font-bold tabular-nums dark:text-white text-xs">
                           {formatMoney(row.balance)}
-                          <span className="block font-normal text-[10px] text-gray-400">رصيد GL</span>
+                          <span className="block font-normal text-[10px] text-[var(--color-text-muted)]">رصيد GL</span>
                         </td>
                       </tr>
                     );

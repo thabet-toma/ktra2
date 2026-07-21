@@ -7,7 +7,6 @@ import {
   SearchQuery,
   User,
   Task,
-  Theme,
   TaskStatus,
   ActivityLog,
   Submission,
@@ -314,7 +313,6 @@ const App: React.FC = () => {
   const [accountingGlAccountId, setAccountingGlAccountId] = useState<number | null>(null);
   const [accountingSupplierPartnerId, setAccountingSupplierPartnerId] = useState<number | null>(null);
   const [rejectingTask, setRejectingTask] = useState<Task | null>(null);
-  const [theme, setTheme] = useState<Theme>("light");
   const onlineStatus = useOnlineStatus();
   // إصلاح تلقائي للاتصال العالق (إنترنت موجود لكن نبض الخادم يفشل) — مرة لكل نوبة.
   useAutoConnectionRecovery(onlineStatus);
@@ -616,18 +614,11 @@ const App: React.FC = () => {
     }
   }, [tasks, activeTask]);
 
-  // Theme
-  useEffect(() => {
-    if (theme === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
-  }, [theme]);
-
-  const toggleTheme = () => {
-    setTheme((prevTheme) => (prevTheme === "light" ? "dark" : "light"));
-  };
+  // M6: حُذف نظام السمة المكرّر الذي كان هنا (حالة محلية + useEffect يضيف/يزيل
+  // كلاس dark + toggleTheme). كان ميتاً وضاراً معاً: toggleTheme لا يُمرَّر لأي
+  // مكوّن، و«Header.tsx» الذي يستقبله غير مستورد في أي مكان — بينما الـ useEffect
+  // كان يزيل كلاس dark عند كل تركيب فيُلغي ما طبّقه applyThemeOnBoot، وهذا سبب
+  // ضياع الوضع الداكن مع كل تحديث للصفحة. المصدر الوحيد الآن: ThemeContext.
 
   // ... (Task & Submission Handlers - Same as before)
   const handleUpdateUserTaskStatus = async (
@@ -1810,7 +1801,7 @@ const App: React.FC = () => {
   // 1. Handle Store View (Public & Private)
   // if (appView === 'store') {
   //   return (
-  //     <div className={theme}>
+  //     <div>
   //       <StorePage
   //         currentUser={currentUser}
   //         onLoginSuccess={(user) => {
@@ -1840,7 +1831,7 @@ const App: React.FC = () => {
   // 2. Auth Checks
   if (authLoading) {
     return (
-      <div className={theme}>
+      <div>
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
           <LoadingSpinner />
         </div>
@@ -1851,7 +1842,7 @@ const App: React.FC = () => {
   if (!currentUser) {
     if (appView === "about-us") {
       return (
-        <div className={theme}>
+        <div>
           <PublicNavbar />
           <div className="pt-20 min-h-screen bg-gray-50 dark:bg-gray-900">
             <AboutUs />
@@ -1861,7 +1852,7 @@ const App: React.FC = () => {
     }
     if (appView === "gallery") {
       return (
-        <div className={theme}>
+        <div>
           <PublicNavbar />
           <div className="pt-20 min-h-screen bg-gray-50 dark:bg-gray-900">
             <PublicGallery />
@@ -1871,7 +1862,7 @@ const App: React.FC = () => {
     }
     if (appView === "contact") {
       return (
-        <div className={theme}>
+        <div>
           <PublicNavbar />
           <div className="pt-20 min-h-screen bg-gray-50 dark:bg-gray-900">
             <Contact currentUser={null} />
@@ -1882,14 +1873,14 @@ const App: React.FC = () => {
 
     if (authView === "signup") {
       return (
-        <div className={theme}>
+        <div>
           <SignupPage onNavigateToLogin={() => setAuthView("login")} accountType={signupType} />
         </div>
       );
     }
     if (authView === "login") {
       return (
-        <div className={theme}>
+        <div>
           <LoginPage
             onNavigateToSignup={() => { setSignupType('trader'); setAuthView("signup"); }}
             onGoToStore={() => setAppView('store')}
@@ -1899,7 +1890,7 @@ const App: React.FC = () => {
     }
     // صفحة هبوط تعريفية بالمنصة للزوّار غير الأعضاء (الافتراضية قبل تسجيل الدخول).
     return (
-      <div className={theme}>
+      <div>
         <LandingPage
           onLogin={() => setAuthView("login")}
           onSignup={(type) => { setSignupType(type); setAuthView("signup"); }}

@@ -18,13 +18,13 @@ export const ProductPreviewModal: React.FC<ProductPreviewModalProps> = ({ isOpen
             onClick={onClose}
         >
             <div 
-                className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-4xl h-[90vh] flex flex-col transform transition-all"
+                className="bg-[var(--color-surface)] rounded-2xl shadow-xl w-full max-w-4xl h-[90vh] flex flex-col transform transition-all"
                 onClick={e => e.stopPropagation()}
             >
-                <header className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                <header className="flex items-center justify-between p-4 border-b border-[var(--color-border)] flex-shrink-0">
                     <div className="flex items-center gap-4">
-                        <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-3xl font-light">&times;</button>
-                        <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100 truncate">Product Preview</h2>
+                        <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] text-3xl font-light">&times;</button>
+                        <h2 className="text-lg font-bold text-[var(--color-text)] truncate">Product Preview</h2>
                     </div>
                     <a 
                         href={productUrl}
@@ -38,11 +38,11 @@ export const ProductPreviewModal: React.FC<ProductPreviewModalProps> = ({ isOpen
 
                 <div className="flex-grow relative">
                     {isLoading && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-gray-50 dark:bg-gray-800">
+                        <div className="absolute inset-0 flex items-center justify-center bg-[var(--color-surface-2)]">
                             <div className="text-center">
                                 <div className="w-12 h-12 border-4 border-blue-500 border-dashed rounded-full animate-spin mx-auto"></div>
-                                <p className="mt-4 text-gray-600 dark:text-gray-300">Loading product page...</p>
-                                <p className="text-sm text-gray-400 dark:text-gray-500">Some sites may not load in a preview.</p>
+                                <p className="mt-4 text-[var(--color-text-muted)]">Loading product page...</p>
+                                <p className="text-sm text-[var(--color-text-muted)]">Some sites may not load in a preview.</p>
                             </div>
                         </div>
                     )}

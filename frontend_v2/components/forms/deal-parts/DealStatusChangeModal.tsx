@@ -34,7 +34,7 @@
 
 //     // ترجمة حالات الصفقة مع الأيقونات
 //     const statusConfig: Record<DealStatus, { label: string; icon: React.ElementType; color: string }> = {
-//         'initial': { label: 'مسودة / أولي', icon: FileText, color: 'text-gray-500 bg-gray-100' },
+//         'initial': { label: 'مسودة / أولي', icon: FileText, color: 'text-[var(--color-text-muted)] bg-[var(--color-surface-3)]' },
 //         'first_payment_pending': { label: 'بانتظار الدفعة الأولى', icon: Clock, color: 'text-yellow-500 bg-yellow-100' },
 //         'first_payment_completed': { label: 'تم دفع العربون', icon: DollarSign, color: 'text-green-500 bg-green-100' },
 //         'in_production': { label: 'قيد التصنيع', icon: Factory, color: 'text-blue-500 bg-blue-100' },
@@ -47,7 +47,7 @@
 //         'cancelled': { label: 'ملغاة', icon: Ban, color: 'text-red-500 bg-red-100' }
 //     };
 
-//     const currentConfig = statusConfig[currentStatus] || { label: currentStatus, icon: AlertCircle, color: 'text-gray-500 bg-gray-100' };
+//     const currentConfig = statusConfig[currentStatus] || { label: currentStatus, icon: AlertCircle, color: 'text-[var(--color-text-muted)] bg-[var(--color-surface-3)]' };
 //     const newConfig = statusConfig[newStatus] || { label: newStatus, icon: AlertCircle, color: 'text-blue-500 bg-blue-100' };
     
 //     const CurrentIcon = currentConfig.icon;
@@ -55,13 +55,13 @@
 
 //     return (
 //         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-//             <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-gray-200 dark:border-gray-700">
-//                 <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center bg-gray-50 dark:bg-gray-900/50">
-//                     <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
+//             <div className="bg-[var(--color-surface)] rounded-xl shadow-2xl w-full max-w-md overflow-hidden border border-[var(--color-border)]">
+//                 <div className="p-4 border-b border-[var(--color-border)] flex justify-between items-center bg-[var(--color-surface-2)]">
+//                     <h3 className="font-bold text-[var(--color-text)] flex items-center gap-2">
 //                         <AlertCircle className="w-5 h-5 text-blue-500" />
 //                         تأكيد تغيير الحالة
 //                     </h3>
-//                     <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 transition-colors">
+//                     <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text)] transition-colors">
 //                         <X className="w-5 h-5" />
 //                     </button>
 //                 </div>
@@ -73,10 +73,10 @@
 //                             <div className={`flex items-center justify-center w-16 h-16 rounded-full ${currentConfig.color} border-2 border-white dark:border-gray-800 mb-2 shadow-sm`}>
 //                                 <CurrentIcon className="w-7 h-7" />
 //                             </div>
-//                             <div className="text-sm font-medium text-gray-900 dark:text-white">
+//                             <div className="text-sm font-medium text-[var(--color-text)]">
 //                                 {currentConfig.label}
 //                             </div>
-//                             <div className="text-xs text-gray-500 dark:text-gray-400">الحالية</div>
+//                             <div className="text-xs text-[var(--color-text-muted)]">الحالية</div>
 //                         </div>
 
 //                         <div className="flex-1 flex items-center justify-center px-4">
@@ -97,7 +97,7 @@
 //                             <div className="text-sm font-bold text-blue-600 dark:text-blue-400">
 //                                 {newConfig.label}
 //                             </div>
-//                             <div className="text-xs text-gray-500 dark:text-gray-400">الجديدة</div>
+//                             <div className="text-xs text-[var(--color-text-muted)]">الجديدة</div>
 //                         </div>
 //                     </div>
 
@@ -106,10 +106,10 @@
 //                         <div className="flex items-start gap-3">
 //                             <MessageSquare className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
 //                             <div>
-//                                 <p className="text-sm text-gray-700 dark:text-gray-300">
+//                                 <p className="text-sm text-[var(--color-text)]">
 //                                     أنت على وشك تغيير حالة هذه الصفقة من <span className="font-bold">{currentConfig.label}</span> إلى <span className="font-bold text-blue-600 dark:text-blue-400">{newConfig.label}</span>.
 //                                 </p>
-//                                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+//                                 <p className="text-sm text-[var(--color-text-muted)] mt-1">
 //                                     سيتم تسجيل هذا التغيير في سجل الحالات تلقائياً.
 //                                 </p>
 //                             </div>
@@ -117,20 +117,20 @@
 //                     </div>
 
 //                     {/* Simple Confirmation Check */}
-//                     <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
+//                     <div className="flex items-center gap-3 p-3 bg-[var(--color-surface-2)] rounded-lg">
 //                         <div className="w-6 h-6 flex items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex-shrink-0">
 //                             <CheckCircle className="w-4 h-4" />
 //                         </div>
-//                         <p className="text-sm text-gray-600 dark:text-gray-300">
+//                         <p className="text-sm text-[var(--color-text-muted)]">
 //                             هل أنت متأكد من تغيير الحالة؟
 //                         </p>
 //                     </div>
 //                 </div>
 
-//                 <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 flex gap-3 justify-end">
+//                 <div className="p-4 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] flex gap-3 justify-end">
 //                     <button 
 //                         onClick={onClose}
-//                         className="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"
+//                         className="px-4 py-2 text-[var(--color-text)] hover:bg-[var(--color-surface-3)] rounded-lg transition-colors"
 //                     >
 //                         إلغاء
 //                     </button>

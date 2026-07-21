@@ -169,11 +169,10 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
   ];
 
   return createPortal(
-    // البطاقة تُحقن في <body> عبر بورتال، خارج شجرة `.aseel-doc`. أنماط
-    // `.aseel-picker-mask` مُحدَّدة بـ `[data-skin="aseel"] .aseel-picker-mask`
-    // (محدِّد سليل)، فلا تنطبق ما لم يكن للقناع جدّ يحمل data-skin — لذا نلفّه
-    // بعنصر `[data-skin="aseel"]` وإلا ظهر القناع بلا تنسيق (غير مرئي).
-    <div data-skin="aseel">
+    // البطاقة تُحقن في <body> عبر بورتال، خارج شجرة `.aseel-doc`.
+    // أنماط القناع عامة وتتبع الجلد المطبّق على جذر التطبيق، لذلك لا يحتاج
+    // المحتوى المنقول عبر البوابة إلى wrapper محلي يفرض جلداً بعينه.
+    <div>
     <div
       className="aseel-picker-mask"
       data-aseel-modal="1"

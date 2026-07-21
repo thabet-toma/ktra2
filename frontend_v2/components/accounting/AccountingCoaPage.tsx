@@ -693,7 +693,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
   );
 
   return (
-    <div data-skin="aseel">
+    <div>
       {/* task13 M6: الشجرة محتوى مباشر — كان tab وحيد يكرر العنوان للمرة الثالثة */}
       <AseelDocumentShell
         title="شجرة الحسابات"

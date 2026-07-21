@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test('Title group appears on the right side of the titlebar in AseelDocumentShell', async ({ page }) => {
-  await page.goto('http://localhost:3000/sales-invoices');
+  await page.goto('/aseel-kit');
   
   // Wait for the title bar
   const titlebar = page.locator('.aseel-titlebar');

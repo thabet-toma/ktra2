@@ -378,10 +378,35 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         {
             key: 'status',
             header: 'الحالة',
-            width: '90px',
+            width: '160px',
             render: (d) => (
-                <span style={{ color: STATUS_COLORS[d.status] || 'inherit', fontWeight: 500 }}>
-                    {STATUS_LABELS[d.status] || d.status}
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ color: STATUS_COLORS[d.status] || 'inherit', fontWeight: 500 }}>
+                        {STATUS_LABELS[d.status] || d.status}
+                    </span>
+                    {/* «تحولت إلى فاتورة» — رابط بجانب الحالة يفتح فاتورة الشراء الناتجة */}
+                    {d.linkedInvoice && (
+                        <button
+                            type="button"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                navigate(`/purchase-invoices/${d.linkedInvoice!.id}`);
+                            }}
+                            title="فتح الفاتورة الناتجة عن الصفقة"
+                            style={{
+                                color: 'var(--aseel-accent, #2563eb)',
+                                textDecoration: 'underline',
+                                fontWeight: 500,
+                                fontSize: '0.72rem',
+                                background: 'none',
+                                border: 'none',
+                                padding: 0,
+                                cursor: 'pointer',
+                            }}
+                        >
+                            ↗ تحولت إلى فاتورة{d.linkedInvoice.invoiceNumber ? ` #${d.linkedInvoice.invoiceNumber}` : ''}
+                        </button>
+                    )}
                 </span>
             ),
         },
@@ -511,7 +536,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     }
 
     return (
-        <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
+        <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 6, padding: '8px 12px' }}>
             {/* شريط العنوان والأدوات */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 4, borderBottom: '1px solid var(--aseel-border)' }}>
                 <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>

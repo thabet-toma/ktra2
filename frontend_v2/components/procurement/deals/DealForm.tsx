@@ -1047,7 +1047,7 @@ export const DealForm: React.FC<DealFormProps> = ({
             <div>
               <span className="font-semibold">{r.name || "—"}</span>
               {r.specifications && (
-                <span className="block text-[11px] text-slate-500">{r.specifications}</span>
+                <span className="block text-[11px] text-[var(--color-text-muted)]">{r.specifications}</span>
               )}
             </div>
           ),
@@ -1061,6 +1061,7 @@ export const DealForm: React.FC<DealFormProps> = ({
       rows={filledDealItems}
       rowKey={(r) => r.id}
       emptyRowsHint="لا توجد أصناف في الصفقة"
+      /* ملخّص كامل داخل المستند (يُرفع لأعلى بدل دوك سفلي عالق) — طلب المالك. */
       totals={[
         { label: "مجموع البنود", value: dealMoney(calculateSubtotal()) },
         ...((formData.discountAmount || 0) > 0
@@ -1070,6 +1071,12 @@ export const DealForm: React.FC<DealFormProps> = ({
           ? [{ label: "شحن داخل الصين", value: dealMoney(formData.shippingCost || 0) }]
           : []),
         { label: "إجمالي الصفقة (للمورد)", value: dealMoney(calculateGrandTotal()), emphasis: true },
+        { label: "المدفوع", value: dealMoney(dealStats.paidAmount) },
+        {
+          label: dealStats.supplierAdvance > 0 ? "رصيد لصالحك عند المورد" : "المتبقي",
+          value: dealMoney(dealStats.supplierAdvance > 0 ? dealStats.supplierAdvance : dealStats.remainingAmount),
+          tone: dealStats.supplierAdvance > 0 ? "info" : "warn",
+        },
       ]}
       sections={[
         ...(dealInstallments.length > 0
@@ -1138,19 +1145,19 @@ export const DealForm: React.FC<DealFormProps> = ({
                 content: (
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <div>
-                      <span className="block text-[11px] text-slate-500">الحجم (CBM)</span>
+                      <span className="block text-[11px] text-[var(--color-text-muted)]">الحجم (CBM)</span>
                       <b>{formData.totalVolume ? formatQuantity(formData.totalVolume) : "—"}</b>
                     </div>
                     <div>
-                      <span className="block text-[11px] text-slate-500">الوزن (كغ)</span>
+                      <span className="block text-[11px] text-[var(--color-text-muted)]">الوزن (كغ)</span>
                       <b>{formatQuantity(formData.totalWeightKg ?? formData.totalWeight ?? 0) || "—"}</b>
                     </div>
                     <div>
-                      <span className="block text-[11px] text-slate-500">الضمان</span>
+                      <span className="block text-[11px] text-[var(--color-text-muted)]">الضمان</span>
                       <b>{formData.warrantyDuration ? `${formData.warrantyDuration} شهر` : "—"}</b>
                     </div>
                     <div>
-                      <span className="block text-[11px] text-slate-500">الشهادات</span>
+                      <span className="block text-[11px] text-[var(--color-text-muted)]">الشهادات</span>
                       <b>{formData.certificates || "—"}</b>
                     </div>
                   </div>
@@ -1167,13 +1174,13 @@ export const DealForm: React.FC<DealFormProps> = ({
                   <div className="space-y-1">
                     {formData.internalNotes && (
                       <p>
-                        <span className="text-slate-500">داخلية: </span>
+                        <span className="text-[var(--color-text-muted)]">داخلية: </span>
                         {formData.internalNotes}
                       </p>
                     )}
                     {formData.shipmentNotes && (
                       <p>
-                        <span className="text-slate-500">الشحنة: </span>
+                        <span className="text-[var(--color-text-muted)]">الشحنة: </span>
                         {formData.shipmentNotes}
                       </p>
                     )}
@@ -1197,6 +1204,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   return (
     <div id="deal-print" dir="rtl">
       <AseelDocumentShell
+        gridFitContent={viewMode}
         title="صفقة استيراد"
         state={formData.id ? `صفقة ${formData.dealNumber || `#${formData.id}`}` : "صفقة جديدة"}
         nav={nav}
@@ -1227,7 +1235,7 @@ export const DealForm: React.FC<DealFormProps> = ({
             content: <EntityActivityLog entityType="deal" entityId={formData.id} defaultOpen />,
           }] : []),
         ]}
-        totals={
+        totals={viewMode ? undefined : (
           <>
             {/* ج8: الصفقة دولية = بضاعة المورد + شحن داخل الصين − خصم. الضريبة
                 تُدفع بالتخليص (لا تدخل إجمالي الصفقة ولا سقف دفعات المورد). */}
@@ -1243,7 +1251,7 @@ export const DealForm: React.FC<DealFormProps> = ({
               <span className="aseel-total-value">{fmt(dealStats.supplierAdvance > 0 ? dealStats.supplierAdvance : dealStats.remainingAmount)}</span>
             </div>
           </>
-        }
+        )}
         status={
           <>
             <span className="aseel-status-item">المستخدم <b>{currentUser?.name || "—"}</b></span>

@@ -388,7 +388,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
   return (
     <div className="space-y-6">
       {showPathPicker && (
-        <div className="rounded-xl border border-gray-200 dark:border-gray-600 bg-slate-50 dark:bg-slate-900/40 p-1 flex gap-1">
+        <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] p-1 flex gap-1">
           <button
             type="button"
             onClick={() => {
@@ -398,7 +398,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
             className={`flex-1 py-2.5 px-3 rounded-lg text-sm font-semibold transition-colors ${
               paymentPath === "direct"
                 ? "bg-emerald-600 text-white shadow"
-                : "text-gray-600 dark:text-gray-400 hover:bg-white/80 dark:hover:bg-slate-800"
+                : "text-[var(--color-text-muted)] hover:bg-white/80 dark:hover:bg-slate-800"
             }`}
           >
             تسجيل الدفع مباشرة
@@ -415,7 +415,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
             className={`flex-1 py-2.5 px-3 rounded-lg text-sm font-semibold transition-colors ${
               paymentPath === "claim_first"
                 ? "bg-amber-600 text-white shadow"
-                : "text-gray-600 dark:text-gray-400 hover:bg-white/80 dark:hover:bg-slate-800"
+                : "text-[var(--color-text-muted)] hover:bg-white/80 dark:hover:bg-slate-800"
             }`}
           >
             رفع مطالبة أولاً
@@ -427,7 +427,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
       )}
 
       {paymentData?.alibabaClaimImage && !paymentData?.bankSwiftImage && !paymentData?.confirmedBySupplier && (
-        <p className="text-xs text-slate-600 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-600 rounded-lg px-3 py-2">
+        <p className="text-xs text-[var(--color-text-muted)] bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg px-3 py-2">
           تم رفع المطالبة. يمكنك إكمال تسجيل الدفع أدناه عند الجاهزية.
         </p>
       )}
@@ -489,8 +489,8 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
 
       {/* ⭐ إدخال المبلغ */}
       {mode === "claim" || mode === "swift" ? (
-        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+        <div className="p-4 bg-[var(--color-surface-2)] rounded-lg border">
+          <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
             المبلغ المدفوع ($)
           </label>
           <div className="relative">
@@ -500,13 +500,13 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
               step="0.01"
               value={amount}
               onChange={(e) => setAmount(parseFloat(e.target.value) || 0)}
-              className="w-full p-3 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-right text-lg font-medium"
+              className="w-full p-3 pr-10 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-[var(--color-text)] text-right text-lg font-medium"
             />
-            <DollarSign className="absolute left-3 top-3.5 w-5 h-5 text-gray-400" />
+            <DollarSign className="absolute left-3 top-3.5 w-5 h-5 text-[var(--color-text-muted)]" />
           </div>
 
           <div className="mt-2 flex justify-between text-sm">
-            <span className="text-gray-500">المتبقي على الصفقة:</span>
+            <span className="text-[var(--color-text-muted)]">المتبقي على الصفقة:</span>
             <span className="font-medium text-blue-600 dark:text-blue-400">
               ${maxPrincipal.toLocaleString()}
             </span>
@@ -531,7 +531,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
         <div className="space-y-6">
           {/* ⭐ تاريخ المطالبة */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
               <div className="flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-yellow-600" />
                 تاريخ المطالبة
@@ -542,36 +542,36 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                 type="date"
                 value={claimDate}
                 onChange={(e) => setClaimDate(e.target.value)}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-[var(--color-text)]"
                 required
               />
-              <Calendar className="absolute left-3 top-3.5 w-5 h-5 text-gray-400" />
+              <Calendar className="absolute left-3 top-3.5 w-5 h-5 text-[var(--color-text-muted)]" />
             </div>
           </div>
 
           {/* إدخال الملاحظات */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
               ملاحظات (اختياري)
             </label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-[var(--color-text)]"
               rows={2}
               placeholder="أضف أي ملاحظات حول هذه المطالبة..."
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
               صورة المطالبة من علي بابا
             </label>
             {claimImage ? (
               <div className="relative group">
                 <img
                   src={claimImage}
-                  className="w-full h-48 object-contain rounded-lg border-2 border-blue-300 bg-gray-50"
+                  className="w-full h-48 object-contain rounded-lg border-2 border-blue-300 bg-[var(--color-surface-2)]"
                   alt="صورة المطالبة"
                 />
                 <button
@@ -636,7 +636,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* ⭐ تاريخ الدفع الفعلي */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
                 <div className="flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-blue-600" />
                   تاريخ الدفع الفعلي
@@ -647,14 +647,14 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                   type="date"
                   value={paymentDate}
                   onChange={(e) => setPaymentDate(e.target.value)}
-                  className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-[var(--color-text)]"
                 />
-                <Calendar className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                <Calendar className="absolute left-3 top-3 w-5 h-5 text-[var(--color-text-muted)]" />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
                 سعر التحويل ($ → ₪)
               </label>
               <input
@@ -663,16 +663,16 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                 value={usdToIls}
                 onChange={(e) => setUsdToIls(e.target.value)}
                 placeholder="أدخل سعر التحويل"
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-[var(--color-text)]"
               />
             </div>
           </div>
 
           {/* ⭐ حقل تكلفة الحوالة البنكية */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
               تكلفة الحوالة البنكية ($)
-              <span className="text-xs text-gray-500 dark:text-gray-400 ml-1">
+              <span className="text-xs text-[var(--color-text-muted)] ml-1">
                 (ستخصم من الصندوق كتكلفة إضافية)
               </span>
             </label>
@@ -683,38 +683,38 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                 step="0.01"
                 value={transferFee}
                 onChange={(e) => setTransferFee(Number(e.target.value) || 0)}
-                className="w-full p-3 pr-10 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                className="w-full p-3 pr-10 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-[var(--color-text)]"
                 placeholder="أدخل تكلفة الحوالة إذا كانت موجودة"
               />
-              <DollarSign className="absolute left-3 top-3.5 w-5 h-5 text-gray-400" />
+              <DollarSign className="absolute left-3 top-3.5 w-5 h-5 text-[var(--color-text-muted)]" />
             </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-xs text-[var(--color-text-muted)] mt-1">
               اتركها صفر إذا لم تكن هناك تكلفة حوالة
             </p>
           </div>
 
           {/* ⭐ بطاقة عرض التكلفة الإجمالية */}
           {transferFee > 0 && (
-            <div className="p-4 bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-600 rounded-lg">
+            <div className="p-4 bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded-lg">
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-3">
                   <div className="p-2 bg-slate-200/80 dark:bg-slate-700 rounded-lg">
-                    <CreditCard className="w-5 h-5 text-slate-600 dark:text-slate-300" />
+                    <CreditCard className="w-5 h-5 text-[var(--color-text-muted)]" />
                   </div>
                   <div>
-                    <p className="font-medium text-slate-800 dark:text-slate-200">
+                    <p className="font-medium text-[var(--color-text)]">
                       الإجمالي المخصوم من الصندوق
                     </p>
-                    <p className="text-xs text-slate-600 dark:text-slate-400">
+                    <p className="text-xs text-[var(--color-text-muted)]">
                       المبلغ + تكلفة الحوالة
                     </p>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-xl font-bold text-slate-900 dark:text-slate-100">
+                  <div className="text-xl font-bold text-[var(--color-text)]">
                     ${(amount + transferFee).toLocaleString()}
                   </div>
-                  <div className="text-sm text-slate-600 dark:text-slate-400">
+                  <div className="text-sm text-[var(--color-text-muted)]">
                     ${amount.toLocaleString()} + ${transferFee.toLocaleString()}
                   </div>
                 </div>
@@ -723,13 +723,13 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
           )}
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
               اختر صندوق الدفع
             </label>
             <select
               value={selectedCashBoxId}
               onChange={(e) => setSelectedCashBoxId(e.target.value)}
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-[var(--color-text)]"
             >
               <option value="">-- اختر صندوقاً مالياً --</option>
               {cashBoxes.map((cb) => {
@@ -744,20 +744,20 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                 );
               })}
             </select>
-            <p className="text-xs text-gray-500 mt-2">
+            <p className="text-xs text-[var(--color-text-muted)] mt-2">
               ⚠️ خصم فوري. الرصيد من المحاسبة عند وجود ربط للصندوق، وإلا من Firestore. يُسمح بالرصيد السالب.
             </p>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
               صورة سليب البنك (اختيارية)
             </label>
             {swiftImage ? (
               <div className="relative group">
                 <img
                   src={swiftImage}
-                  className="w-full h-48 object-contain rounded-lg border-2 border-green-300 bg-gray-50"
+                  className="w-full h-48 object-contain rounded-lg border-2 border-green-300 bg-[var(--color-surface-2)]"
                   alt="صورة السليب"
                 />
                 <button
@@ -865,7 +865,7 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
           </div>
           {/* ⭐ تاريخ تأكيد المورد */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
               <div className="flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-[var(--color-primary)]" />
                 تاريخ تأكيد المورد
@@ -876,35 +876,35 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                 type="date"
                 value={confirmationDate}
                 onChange={(e) => setConfirmationDate(e.target.value)}
-                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-[var(--color-text)]"
                 required
               />
-              <Calendar className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+              <Calendar className="absolute left-3 top-3 w-5 h-5 text-[var(--color-text-muted)]" />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
               ملاحظات المورد
             </label>
             <textarea
               value={supplierNotes}
               onChange={(e) => setSupplierNotes(e.target.value)}
-              className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              className="w-full p-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-[var(--color-text)]"
               rows={3}
               placeholder="أضف أي ملاحظات من المورد حول هذه الدفعة..."
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <label className="block text-sm font-medium text-[var(--color-text)] mb-2">
               صورة تأكيد المورد (اختياري)
             </label>
             {supplierImage ? (
               <div className="relative">
                 <img
                   src={supplierImage}
-                  className="w-full h-32 object-contain rounded-lg border border-gray-300 bg-gray-50"
+                  className="w-full h-32 object-contain rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)]"
                   alt="صورة تأكيد المورد"
                 />
                 <button
@@ -915,11 +915,11 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                 </button>
               </div>
             ) : (
-              <label className="flex items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+              <label className="flex items-center justify-center w-full h-32 border-2 border-dashed border-[var(--color-border)] rounded-lg cursor-pointer hover:bg-[var(--color-surface-2)] transition-colors">
                 <div className="text-center">
-                  <Upload className="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                  <p className="text-gray-500 dark:text-gray-400">رفع صورة التأكيد</p>
-                  <p className="text-xs text-gray-400 dark:text-gray-500">مثل: إشعار استلام، بريد إلكتروني، واتساب</p>
+                  <Upload className="w-8 h-8 text-[var(--color-text-muted)] mx-auto mb-2" />
+                  <p className="text-[var(--color-text-muted)]">رفع صورة التأكيد</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">مثل: إشعار استلام، بريد إلكتروني، واتساب</p>
                 </div>
                 <input
                   type="file"

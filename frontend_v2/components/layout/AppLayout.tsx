@@ -84,7 +84,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   }, [onOpenGroupConstants]);
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-[var(--color-surface)]" data-density={density} data-skin="aseel">
+    <div className="flex flex-col h-screen overflow-hidden bg-[var(--color-surface)]" data-density={density}>
       {/* task13 M6: حُذف chip العنوان (كان يكرر تسمية الشريط الجانبي والـ breadcrumb)
            ونُقلت «السنة المالية» إلى شريط الحالة السفلي بجانب المستخدم/الدور. */}
       <div className="aseel-titlebar flex-shrink-0">
@@ -99,7 +99,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium transition-colors ${
               activeView === 'smart-assistant'
                 ? 'bg-[var(--color-primary)] text-white'
-                : 'text-[var(--color-primary)] hover:bg-[var(--color-surface-2)]'
+                : 'text-[var(--color-primary-emphasis)] hover:bg-[var(--color-surface-2)]'
             }`}
             title="المساعد الذكي"
           >
@@ -112,15 +112,15 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         </div>
         <div className="flex items-center gap-3 ms-auto">
           {/* العناصر المنقولة من الشريط السفلي */}
-          <div className="hidden xl:flex items-center gap-2 text-xs text-[var(--color-text-muted)] border-e border-gray-200 dark:border-gray-700 pe-3 me-1">
+          <div className="hidden xl:flex items-center gap-2 text-xs text-[var(--color-text-muted)] border-e border-[var(--color-border)] pe-3 me-1">
             <UserIcon className="w-3.5 h-3.5" />
             <span className="font-semibold text-[var(--color-text)]">{user.name}</span>
-            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span className="text-[var(--color-border)]">|</span>
             <span>الدور: {user.role === 'manager' ? 'مدير' : user.role === 'procurement' ? 'مشتريات' : 'موظف'}</span>
-            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span className="text-[var(--color-border)]">|</span>
             <Calendar className="w-3.5 h-3.5" />
             <span>{new Date().toLocaleDateString('ar-EG')}</span>
-            <span className="text-gray-300 dark:text-gray-600">|</span>
+            <span className="text-[var(--color-border)]">|</span>
             <span>السنة المالية {new Date().getFullYear()}</span>
           </div>
 
@@ -134,7 +134,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             <button
               type="button"
               onClick={onOpenGroupConstants}
-              className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 transition-colors flex items-center justify-center"
+              className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] transition-colors flex items-center justify-center"
               title="ثوابت المجموعة (F11)"
               aria-label="ثوابت المجموعة"
             >
@@ -148,20 +148,20 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           <ThemeToggle />
           <button
             onClick={() => window.open(window.location.href, '_blank')}
-            className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800 transition-colors flex items-center justify-center"
+            className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] transition-colors flex items-center justify-center"
             title="فتح في علامة تبويب جديدة (تكرار الصفحة)"
             aria-label="تكرار الصفحة"
           >
             <Copy className="w-4 h-4" />
           </button>
-          <div className="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-1"></div>
+          <div className="w-px h-4 bg-[var(--color-border)] mx-1"></div>
           <button
             onClick={() => {
               if (window.confirm('هل تريد تأكيد تسجيل الخروج؟')) {
                 logout();
               }
             }}
-            className="p-1.5 rounded-md text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 transition-colors flex items-center justify-center"
+            className="p-1.5 rounded-md text-[var(--color-danger)] hover:bg-[color-mix(in_srgb,var(--color-danger)_10%,transparent)] transition-colors flex items-center justify-center"
             title="تسجيل الخروج"
             aria-label="تسجيل الخروج"
           >
@@ -182,7 +182,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             {/* task16 D14: اختصارات الوصول السريع القابلة للتهيئة */}
             {shortcuts.filter(v => v !== 'dashboard' && v !== activeView).length > 0 && (
               <div className="aseel-toolgrp flex items-center gap-1 ms-4" title="اختصارات سريعة (تُهيّأ من الإعدادات)">
-                <Zap className="w-3.5 h-3.5 text-[var(--color-primary)]" />
+                <Zap className="w-3.5 h-3.5 text-[var(--color-primary-emphasis)]" />
                 {shortcuts.filter(v => v !== 'dashboard' && v !== activeView).map((v) => (
                   <button
                     key={v}

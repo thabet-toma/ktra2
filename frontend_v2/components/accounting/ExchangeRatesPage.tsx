@@ -208,7 +208,7 @@ export const ExchangeRatesPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel">
+    <div>
       <AseelDocumentShell
         title="أسعار الصرف"
         actions={actions}

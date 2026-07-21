@@ -198,7 +198,7 @@ export const StockMovementsPage: React.FC = () => {
   ];
 
   return (
-    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }} data-skin="aseel">
+    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }}>
       {/* شريط الفلاتر */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
@@ -262,7 +262,7 @@ export const StockMovementsPage: React.FC = () => {
 
       {/* نموذج إضافة حركة يدوية */}
       {showForm && (
-        <div className="aseel-picker-mask" data-skin="aseel" data-aseel-modal="1">
+        <div className="aseel-picker-mask" data-aseel-modal="1">
           <div className="aseel-picker" role="dialog" aria-modal="true" aria-label="إضافة حركة مخزن"
             style={{ width: "min(520px, 96vw)" }}>
             <div className="aseel-picker-head">

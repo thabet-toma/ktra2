@@ -1697,10 +1697,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const clearanceContent = clearanceForm ? (
     <div style={{ padding: "4px 8px" }}>
-      <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-3">
-        <div><span className="block text-xs text-slate-500">إجمالي الاستحقاق</span><b>{fmt(clearanceCostTotal)} ₪</b></div>
-        <div><span className="block text-xs text-slate-500">المدفوع للمخلّص</span><b className="text-emerald-700">{fmt(paidClearance)} ₪</b></div>
-        <div><span className="block text-xs text-slate-500">المتبقي</span><b className="text-amber-700">{fmt(clearanceRemaining)} ₪</b></div>
+      <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 sm:grid-cols-3">
+        <div><span className="block text-xs text-[var(--color-text-muted)]">إجمالي الاستحقاق</span><b>{fmt(clearanceCostTotal)} ₪</b></div>
+        <div><span className="block text-xs text-[var(--color-text-muted)]">المدفوع للمخلّص</span><b className="text-emerald-700">{fmt(paidClearance)} ₪</b></div>
+        <div><span className="block text-xs text-[var(--color-text-muted)]">المتبقي</span><b className="text-amber-700">{fmt(clearanceRemaining)} ₪</b></div>
       </div>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         {!clearanceForm.journal ? (
@@ -1720,7 +1720,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         >
           تسجيل دفعة للمخلّص
         </button>
-        <span className="text-xs text-slate-500">
+        <span className="text-xs text-[var(--color-text-muted)]">
           {clearanceForm.journal
             ? "الإفراج وإثبات الاستحقاق لا يتطلبان دفع المبلغ كاملاً."
             : "الاستحقاق يُثبَّت تلقائياً عند ترحيل الشحنة إلى فاتورة — أو أثبِته الآن يدوياً."}
@@ -1800,7 +1800,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       </div>
       {/* بنود التكلفة ببساطة: بند + مبلغ. مدين/دائن شأن القيد المحاسبي الداخلي لا المستخدم
           (شكوى المالك: «شو هاد دائن ومدين — كان بنود») — المبلغ يُخزَّن debit والخادم يحوّله. */}
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-xs">
         <span>
           {clearanceForm.lines?.length
             ? `${clearanceForm.lines.length} بند تفصيلي · المجموع ${fmt(clearanceCostTotal)} ₪`
@@ -1951,7 +1951,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </p>
       )}
       {payingLocalId && (
-        <div className="my-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div className="my-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
           <h5 className="mb-2 text-sm font-semibold">تسجيل دفعة للناقل · نقل #{payingLocalId}</h5>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
             {fld("المبلغ", <input className="aseel-input" type="number" step="0.01" value={localPayAmount} onChange={(e) => setLocalPayAmount(e.target.value)} />)}
@@ -2190,7 +2190,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         {clearance && <button type="button" className="aseel-toolbtn" onClick={openClearancePayment} disabled={saving}><Plus size={14} /> تسجيل دفعة للمخلّص</button>}
       </div>
       {clearance && (
-        <div className="mb-2 flex flex-wrap gap-4 rounded-lg bg-slate-50 px-3 py-2 text-xs">
+        <div className="mb-2 flex flex-wrap gap-4 rounded-lg bg-[var(--color-surface-2)] px-3 py-2 text-xs">
           <span>إجمالي الاستحقاق: <b>{fmt(clearanceCostTotal)} ₪</b></span>
           <span>المدفوع: <b className="text-emerald-700">{fmt(paidClearance)} ₪</b></span>
           {/* الفائض عن الاستحقاق دفعة مقدمة: المخلّص يصير مديناً لنا، فنعرضه
@@ -2200,7 +2200,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           ) : (
             <span>المتبقي: <b className="text-amber-700">{fmt(clearanceRemaining)} ₪</b></span>
           )}
-          <span className="text-slate-500">الدفع لا يغيّر مرحلة الإفراج ولا يشترط لإصدار الفاتورة الدولية.</span>
+          <span className="text-[var(--color-text-muted)]">الدفع لا يغيّر مرحلة الإفراج ولا يشترط لإصدار الفاتورة الدولية.</span>
         </div>
       )}
       {showPaymentForm && (
@@ -2297,19 +2297,19 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const financialContent = (
     <div className="space-y-3 p-2">
-      <section className="rounded-lg border border-slate-200 bg-white">
-        <h4 className="border-b border-slate-200 px-3 py-2 text-sm font-semibold">ملخص القيود وإجراءات التراجع</h4>
+      <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+        <h4 className="border-b border-[var(--color-border)] px-3 py-2 text-sm font-semibold">ملخص القيود وإجراءات التراجع</h4>
         {accountsContent}
       </section>
       {s.id > 0 && (
-        <section className="rounded-lg border border-slate-200 bg-white">
-          <h4 className="border-b border-slate-200 px-3 py-2 text-sm font-semibold">حركات الشحنة المالية</h4>
+        <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <h4 className="border-b border-[var(--color-border)] px-3 py-2 text-sm font-semibold">حركات الشحنة المالية</h4>
           <DocumentPaymentsTab referenceType="SHIPMENT" referenceId={s.id} searchQuery={s.shipment_number || ""} />
         </section>
       )}
       {clearance?.id && (
-        <section className="rounded-lg border border-slate-200 bg-white">
-          <h4 className="border-b border-slate-200 px-3 py-2 text-sm font-semibold">حركات التخليص المالية</h4>
+        <section className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+          <h4 className="border-b border-[var(--color-border)] px-3 py-2 text-sm font-semibold">حركات التخليص المالية</h4>
           <DocumentPaymentsTab referenceType="CLEARANCE" referenceId={clearance.id} searchQuery={clearance.declaration_number || ""} />
         </section>
       )}
@@ -2442,8 +2442,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
         <div>
           <span className="text-xs font-semibold text-blue-700">الخطوة التالية · {guidance.step} من 6</span>
-          <h3 className="mt-1 text-base font-bold text-slate-900">{guidance.title}</h3>
-          <p className="mt-1 text-sm text-slate-600">{guidance.description}</p>
+          <h3 className="mt-1 text-base font-bold text-[var(--color-text)]">{guidance.title}</h3>
+          <p className="mt-1 text-sm text-[var(--color-text-muted)]">{guidance.description}</p>
         </div>
         <button
           type="button"
@@ -2463,16 +2463,16 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               : `$${fmt(freightPaidUsd)} من $${fmt(freightTotalUsd)}`
           }
         </span>
-        <span className={`rounded-full px-3 py-1 font-medium ${clearanceCostTotal > 0 ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"}`}>
+        <span className={`rounded-full px-3 py-1 font-medium ${clearanceCostTotal > 0 ? "bg-emerald-100 text-emerald-800" : "bg-[var(--color-surface-3)] text-[var(--color-text-muted)]"}`}>
           التخليص: {clearanceCostTotal > 0 ? `${fmt(clearanceCostTotal)} ₪` : "بانتظار التكلفة"}
         </span>
-        <span className="rounded-full bg-slate-100 px-3 py-1 font-medium text-slate-600">النقل المحلي: اختياري</span>
+        <span className="rounded-full bg-[var(--color-surface-3)] px-3 py-1 font-medium text-[var(--color-text-muted)]">النقل المحلي: اختياري</span>
       </div>
     </div>
   );
 
   const journeyStrip = (
-    <div className="grid grid-cols-2 gap-1 border-b border-slate-200 px-2 pb-2 sm:grid-cols-3 xl:grid-cols-6">
+    <div className="grid grid-cols-2 gap-1 border-b border-[var(--color-border)] px-2 pb-2 sm:grid-cols-3 xl:grid-cols-6">
       {journeySteps.map((st) => (
         <button
           key={st.key}
@@ -2484,7 +2484,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               ? "border-blue-500 bg-blue-50 text-blue-900 ring-1 ring-blue-200"
               : st.state === "done"
                 ? "border-emerald-200 bg-emerald-50 text-emerald-900"
-                : "border-slate-200 bg-white text-slate-600"
+                : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)]"
           }`}
           title={st.sub}
         >
@@ -2497,8 +2497,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   );
 
   const routeTimeline = (
-    <details className="mx-2 mb-2 rounded-lg border border-slate-200 bg-white text-xs">
-      <summary className="cursor-pointer px-3 py-2 font-semibold text-slate-700">عرض مسار حركة الشحنة والميناء</summary>
+    <details className="mx-2 mb-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-xs">
+      <summary className="cursor-pointer px-3 py-2 font-semibold text-[var(--color-text)]">عرض مسار حركة الشحنة والميناء</summary>
       <CompactTimeline steps={timelineSteps} />
     </details>
   );

@@ -119,26 +119,26 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
       ref={containerRef}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
-      className="fixed z-[99] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-2xl rounded-2xl p-3 w-64 outline-none select-none"
+      className="fixed z-[99] bg-[var(--color-surface)] border border-[var(--color-border)] shadow-2xl rounded-2xl p-3 w-64 outline-none select-none"
       style={{
         top: Math.min(y, window.innerHeight - 320),
         left: Math.min(x, window.innerWidth - 280),
       }}
       dir="ltr"
     >
-      <div className="flex justify-between items-center mb-2 pb-2 border-b border-gray-100 dark:border-gray-700">
+      <div className="flex justify-between items-center mb-2 pb-2 border-b border-[var(--color-border)]">
         <span className="text-xs font-bold bg-gradient-to-l from-emerald-500 to-blue-500 bg-clip-text text-transparent">حاسبة الأصيل</span>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setShowHistory((s) => !s)}
             title="ذاكرة العمليات السابقة"
-            className={`p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 ${showHistory ? "text-emerald-600" : "text-gray-400 hover:text-gray-600 dark:hover:text-white"}`}
+            className={`p-1 rounded-full hover:bg-[var(--color-surface-3)] ${showHistory ? "text-emerald-600" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)]"}`}
           >
             <HistoryIcon className="w-4 h-4" />
           </button>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600 dark:hover:text-white p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"
+            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] p-1 rounded-full hover:bg-[var(--color-surface-3)]"
           >
             <X className="w-4 h-4" />
           </button>
@@ -147,18 +147,18 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
 
       {/* T-C1: لوحة ذاكرة العمليات السابقة — نقرة على عملية تستعيد ناتجها. */}
       {showHistory && (
-        <div className="mb-2 border border-gray-100 dark:border-gray-700 rounded-xl overflow-hidden">
-          <div className="flex justify-between items-center px-2 py-1 bg-gray-50 dark:bg-gray-900/40">
-            <span className="text-[11px] font-semibold text-gray-500 dark:text-gray-400">العمليات السابقة</span>
+        <div className="mb-2 border border-[var(--color-border)] rounded-xl overflow-hidden">
+          <div className="flex justify-between items-center px-2 py-1 bg-[var(--color-surface-2)]">
+            <span className="text-[11px] font-semibold text-[var(--color-text-muted)]">العمليات السابقة</span>
             {history.length > 0 && (
-              <button onClick={clearHistory} title="مسح الذاكرة" className="text-gray-400 hover:text-red-500 p-0.5 rounded">
+              <button onClick={clearHistory} title="مسح الذاكرة" className="text-[var(--color-text-muted)] hover:text-red-500 p-0.5 rounded">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
           <div className="max-h-32 overflow-y-auto">
             {history.length === 0 ? (
-              <div className="px-2 py-3 text-center text-[11px] text-gray-400">لا عمليات محفوظة</div>
+              <div className="px-2 py-3 text-center text-[11px] text-[var(--color-text-muted)]">لا عمليات محفوظة</div>
             ) : (
               history.map((h, i) => (
                 <button
@@ -167,7 +167,7 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
                   title="استعادة الناتج"
                   className="w-full flex justify-between items-baseline gap-2 px-2 py-1 text-right hover:bg-emerald-50 dark:hover:bg-emerald-950/20 border-b border-gray-50 dark:border-gray-800 last:border-0"
                 >
-                  <span className="font-mono text-[11px] text-gray-400 truncate">{h.expr}</span>
+                  <span className="font-mono text-[11px] text-[var(--color-text-muted)] truncate">{h.expr}</span>
                   <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">= {h.result}</span>
                 </button>
               ))
@@ -177,7 +177,7 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
       )}
 
       {/* Screen */}
-      <div className="bg-gray-50 dark:bg-gray-900 border border-gray-150 dark:border-gray-700 rounded-xl p-2.5 mb-3 text-right font-mono text-lg font-bold text-gray-800 dark:text-white truncate min-h-[44px]">
+      <div className="bg-[var(--color-surface-2)] border border-gray-150 dark:border-gray-700 rounded-xl p-2.5 mb-3 text-right font-mono text-lg font-bold text-[var(--color-text)] truncate min-h-[44px]">
         {expression || "0"}
       </div>
 
@@ -186,7 +186,7 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
         <button onClick={handleClear} className="p-2.5 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 rounded-lg hover:opacity-80">
           C
         </button>
-        <button onClick={handleBackspace} className="p-2.5 bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 rounded-lg hover:opacity-80 flex items-center justify-center">
+        <button onClick={handleBackspace} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text-muted)] rounded-lg hover:opacity-80 flex items-center justify-center">
           <Delete className="w-4 h-4" />
         </button>
         <button onClick={() => handleKeyPress("/")} className="p-2.5 bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 rounded-lg hover:opacity-80">
@@ -196,49 +196,49 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
           *
         </button>
 
-        <button onClick={() => handleKeyPress("7")} className="p-2.5 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:opacity-80">
+        <button onClick={() => handleKeyPress("7")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
           7
         </button>
-        <button onClick={() => handleKeyPress("8")} className="p-2.5 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:opacity-80">
+        <button onClick={() => handleKeyPress("8")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
           8
         </button>
-        <button onClick={() => handleKeyPress("9")} className="p-2.5 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:opacity-80">
+        <button onClick={() => handleKeyPress("9")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
           9
         </button>
         <button onClick={() => handleKeyPress("-")} className="p-2.5 bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 rounded-lg hover:opacity-80">
           -
         </button>
 
-        <button onClick={() => handleKeyPress("4")} className="p-2.5 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:opacity-80">
+        <button onClick={() => handleKeyPress("4")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
           4
         </button>
-        <button onClick={() => handleKeyPress("5")} className="p-2.5 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:opacity-80">
+        <button onClick={() => handleKeyPress("5")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
           5
         </button>
-        <button onClick={() => handleKeyPress("6")} className="p-2.5 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:opacity-80">
+        <button onClick={() => handleKeyPress("6")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
           6
         </button>
         <button onClick={() => handleKeyPress("+")} className="p-2.5 bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 rounded-lg hover:opacity-80">
           +
         </button>
 
-        <button onClick={() => handleKeyPress("1")} className="p-2.5 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:opacity-80">
+        <button onClick={() => handleKeyPress("1")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
           1
         </button>
-        <button onClick={() => handleKeyPress("2")} className="p-2.5 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:opacity-80">
+        <button onClick={() => handleKeyPress("2")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
           2
         </button>
-        <button onClick={() => handleKeyPress("3")} className="p-2.5 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:opacity-80">
+        <button onClick={() => handleKeyPress("3")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
           3
         </button>
         <button onClick={handleEvaluate} className="row-span-2 p-2.5 bg-emerald-500 text-white rounded-lg hover:opacity-85 flex items-center justify-center font-bold">
           =
         </button>
 
-        <button onClick={() => handleKeyPress("0")} className="col-span-2 p-2.5 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:opacity-80">
+        <button onClick={() => handleKeyPress("0")} className="col-span-2 p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
           0
         </button>
-        <button onClick={() => handleKeyPress(".")} className="p-2.5 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-white rounded-lg hover:opacity-80">
+        <button onClick={() => handleKeyPress(".")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
           .
         </button>
       </div>

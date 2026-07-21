@@ -502,7 +502,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
 
   if (viewMode === 'list' && listError) {
     return (
-      <div data-skin="aseel" className="min-h-[500px] bg-[var(--color-surface-2)]">
+      <div className="min-h-[500px] bg-[var(--color-surface-2)]">
         <AseelErrorState
           message={listError}
           onRetry={() => void loadInvoices({ blocking: true })}

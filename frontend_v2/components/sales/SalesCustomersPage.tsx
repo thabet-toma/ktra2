@@ -382,7 +382,7 @@ export const SalesCustomersPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
+    <div style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title="عملاء المبيعات"
         state={loading ? "جاري التحميل…" : `${filtered.length} في الصفحة من ${total}`}

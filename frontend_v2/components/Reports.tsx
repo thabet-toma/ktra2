@@ -46,26 +46,26 @@ export const Reports: React.FC<ReportsProps> = ({ tasks, users }) => {
 
   return (
     <div className="animate-fade-in">
-        <h1 className="text-3xl font-bold mb-6 text-gray-800 dark:text-gray-100">التقارير والتحليلات</h1>
+        <h1 className="text-3xl font-bold mb-6 text-[var(--color-text)]">التقارير والتحليلات</h1>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 p-6">
-                 <h2 className="text-xl font-bold mb-4 text-gray-800 dark:text-gray-100">الوقت المستغرق لكل موظف</h2>
+            <div className="bg-[var(--color-surface)] rounded-2xl shadow-md border border-[var(--color-border)] p-6">
+                 <h2 className="text-xl font-bold mb-4 text-[var(--color-text)]">الوقت المستغرق لكل موظف</h2>
                  <div className="overflow-x-auto">
                     <table className="w-full text-right">
-                        <thead className="border-b border-gray-200 dark:border-gray-700">
+                        <thead className="border-b border-[var(--color-border)]">
                             <tr>
-                                <th className="p-3 font-semibold text-gray-600 dark:text-gray-300">الموظف</th>
-                                <th className="p-3 font-semibold text-gray-600 dark:text-gray-300">عدد المهام</th>
-                                <th className="p-3 font-semibold text-gray-600 dark:text-gray-300">إجمالي الوقت</th>
+                                <th className="p-3 font-semibold text-[var(--color-text-muted)]">الموظف</th>
+                                <th className="p-3 font-semibold text-[var(--color-text-muted)]">عدد المهام</th>
+                                <th className="p-3 font-semibold text-[var(--color-text-muted)]">إجمالي الوقت</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                        <tbody className="divide-y divide-[var(--color-border)]">
                             {employeeTimeData.map(data => (
                                 <tr key={data.name}>
-                                    <td className="p-3 font-medium text-gray-800 dark:text-gray-100">{data.name}</td>
-                                    <td className="p-3 text-gray-600 dark:text-gray-300">{data.taskCount}</td>
-                                    <td className="p-3 text-gray-600 dark:text-gray-300 font-mono">{formatTime(data.totalTime / 1000)}</td>
+                                    <td className="p-3 font-medium text-[var(--color-text)]">{data.name}</td>
+                                    <td className="p-3 text-[var(--color-text-muted)]">{data.taskCount}</td>
+                                    <td className="p-3 text-[var(--color-text-muted)] font-mono">{formatTime(data.totalTime / 1000)}</td>
                                 </tr>
                             ))}
                         </tbody>
@@ -73,8 +73,8 @@ export const Reports: React.FC<ReportsProps> = ({ tasks, users }) => {
                  </div>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 p-6">
-                <h2 className="text-xl font-bold mb-4 text-gray-800 dark:text-gray-100">رسم بياني للوقت المستغرق (بالدقائق)</h2>
+            <div className="bg-[var(--color-surface)] rounded-2xl shadow-md border border-[var(--color-border)] p-6">
+                <h2 className="text-xl font-bold mb-4 text-[var(--color-text)]">رسم بياني للوقت المستغرق (بالدقائق)</h2>
                 <BarChart data={chartData} />
             </div>
         </div>

@@ -65,7 +65,7 @@ function paymentSummary(data: any): { label: string; cls: string } {
     0
   );
   if (total <= 0 || paid <= 0)
-    return { label: "غير مدفوعة", cls: "bg-gray-100 text-gray-700 border-gray-300 dark:bg-gray-800 dark:text-gray-300 dark:border-gray-600" };
+    return { label: "غير مدفوعة", cls: "bg-[var(--color-surface-3)] text-[var(--color-text)] border-[var(--color-border)]" };
   if (paid >= total - 0.01)
     return { label: `مدفوعة كلياً — $${formatMoney(paid)}`, cls: "bg-emerald-50 text-emerald-800 border-emerald-300 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800" };
   return {
@@ -142,14 +142,14 @@ export const DealStageControl: React.FC<StageProps> = ({
 
   if (isCancelled) {
     return (
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-6">
+      <div className="bg-[var(--color-surface)] rounded-xl shadow-lg border border-[var(--color-border)] p-6">
         <div className="flex items-center gap-4">
           <div className="p-4 rounded-xl bg-red-100 text-red-800 border border-red-300">
             <AlertCircle className="w-6 h-6" />
           </div>
           <div>
-            <h3 className="text-xl font-bold text-gray-900 dark:text-white">ملغاة</h3>
-            <p className="text-gray-600 dark:text-gray-400">تم إلغاء الصفقة.</p>
+            <h3 className="text-xl font-bold text-[var(--color-text)]">ملغاة</h3>
+            <p className="text-[var(--color-text-muted)]">تم إلغاء الصفقة.</p>
           </div>
         </div>
       </div>
@@ -157,7 +157,7 @@ export const DealStageControl: React.FC<StageProps> = ({
   }
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 p-6 space-y-6">
+    <div className="bg-[var(--color-surface)] rounded-xl shadow-lg border border-[var(--color-border)] p-6 space-y-6">
       {/* حالتان مستقلتان: الدفع (مالي) × المرحلة (تشغيلي) */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -170,12 +170,12 @@ export const DealStageControl: React.FC<StageProps> = ({
             المرحلة: {wf ? WF_LABELS[wf] : "لم تُحدد بعد"}
           </span>
         </div>
-        <div className="text-xs text-gray-500">
+        <div className="text-xs text-[var(--color-text-muted)]">
           آخر تحديث:{" "}
           {new Date(data.updatedAt || data.createdAt).toLocaleDateString("ar-EG")}
         </div>
       </div>
-      <p className="text-xs text-gray-500 dark:text-gray-400 -mt-3">
+      <p className="text-xs text-[var(--color-text-muted)] -mt-3">
         حالة الدفع مستقلة عن مرحلة الشحن — الدفعات لا تمنع تقدّم المراحل، والمراحل لا تمنع الدفع.
       </p>
 
@@ -198,12 +198,12 @@ export const DealStageControl: React.FC<StageProps> = ({
       )}
 
       {/* خريطة المسار الموحّدة صفقة → فاتورة */}
-      <div className="border-t border-gray-200 dark:border-gray-700 pt-5">
-        <h4 className="font-bold text-gray-900 dark:text-white mb-1 flex items-center gap-2">
+      <div className="border-t border-[var(--color-border)] pt-5">
+        <h4 className="font-bold text-[var(--color-text)] mb-1 flex items-center gap-2">
           <Ship className="w-5 h-5 text-blue-600" />
           خريطة رحلة الاستيراد
         </h4>
-        <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        <p className="text-sm text-[var(--color-text-muted)] mb-4">
           اضغط إحدى المراحل الثلاث الأولى لتحديدها يدوياً. المراحل التالية يضبطها
           النظام تلقائياً (ضمّ لشحنة ← تخليص ← نقل محلي اختياري ← فاتورة).
         </p>
@@ -219,14 +219,14 @@ export const DealStageControl: React.FC<StageProps> = ({
               ? "border-blue-400 bg-blue-50 dark:bg-blue-900/20 dark:border-blue-700"
               : isDone
                 ? "border-emerald-200 bg-emerald-50/60 dark:bg-emerald-900/10 dark:border-emerald-800"
-                : "border-gray-200 dark:border-gray-700";
+                : "border-[var(--color-border)]";
             return (
               <React.Fragment key={step.code}>
                 {/* النقل المحلي: خطوة اختيارية تُدار من رحلة الاستيراد — قبل الفاتورة */}
                 {step.code === "sw_released" && (
-                  <li className="flex items-center gap-3 rounded-lg border border-dashed border-gray-300 dark:border-gray-600 px-3 py-2 opacity-80">
-                    <Truck className="w-4 h-4 text-gray-400 shrink-0" />
-                    <span className="text-sm text-gray-500 dark:text-gray-400">
+                  <li className="flex items-center gap-3 rounded-lg border border-dashed border-[var(--color-border)] px-3 py-2 opacity-80">
+                    <Truck className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
+                    <span className="text-sm text-[var(--color-text-muted)]">
                       النقل المحلي <span className="text-[11px]">(اختياري — يُدار من تبويب «النقل المحلي» في رحلة الاستيراد)</span>
                     </span>
                   </li>
@@ -239,20 +239,20 @@ export const DealStageControl: React.FC<StageProps> = ({
                     className={`w-full flex items-center gap-3 rounded-lg border px-3 py-2.5 text-right transition-colors ${stateCls} ${clickable ? "hover:border-blue-400 cursor-pointer" : "cursor-default"}`}
                     title={step.manual ? (clickable ? "اضغط لتحديد هذه المرحلة" : undefined) : step.autoHint}
                   >
-                    <span className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center border ${isDone ? "bg-emerald-100 text-emerald-700 border-emerald-300" : isCurrent ? "bg-blue-100 text-blue-700 border-blue-300" : "bg-gray-50 text-gray-400 border-gray-200 dark:bg-gray-700 dark:border-gray-600"}`}>
+                    <span className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center border ${isDone ? "bg-emerald-100 text-emerald-700 border-emerald-300" : isCurrent ? "bg-blue-100 text-blue-700 border-blue-300" : "bg-[var(--color-surface-2)] text-[var(--color-text-muted)] border-[var(--color-border)]"}`}>
                       {isDone ? <CheckCircle className="w-4 h-4" /> : <Icon className="w-4 h-4" />}
                     </span>
                     <span className="flex-1">
-                      <span className={`block text-sm font-semibold ${isCurrent ? "text-blue-900 dark:text-blue-200" : isDone ? "text-emerald-800 dark:text-emerald-300" : "text-gray-600 dark:text-gray-300"}`}>
+                      <span className={`block text-sm font-semibold ${isCurrent ? "text-blue-900 dark:text-blue-200" : isDone ? "text-emerald-800 dark:text-emerald-300" : "text-[var(--color-text-muted)]"}`}>
                         {step.label}
                         {isCurrent && <span className="mr-2 text-[11px] font-normal">● الحالية</span>}
                       </span>
                       {!step.manual && !isDone && !isCurrent && (
-                        <span className="block text-[11px] text-gray-400 mt-0.5">{step.autoHint}</span>
+                        <span className="block text-[11px] text-[var(--color-text-muted)] mt-0.5">{step.autoHint}</span>
                       )}
                     </span>
                     {step.manual && !inAutoPhase && !isReleased && (
-                      <span className="text-[10px] text-gray-400 border border-gray-200 dark:border-gray-600 rounded px-1.5 py-0.5 shrink-0">يدوي</span>
+                      <span className="text-[10px] text-[var(--color-text-muted)] border border-[var(--color-border)] rounded px-1.5 py-0.5 shrink-0">يدوي</span>
                     )}
                   </button>
                 </li>
@@ -262,7 +262,7 @@ export const DealStageControl: React.FC<StageProps> = ({
         </ol>
 
         {!data.id && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-3">
+          <p className="text-xs text-[var(--color-text-muted)] mt-3">
             احفظ الصفقة أولاً لتفعيل اختيار مرحلة الشحن.
           </p>
         )}
@@ -299,7 +299,7 @@ export const DealStageControl: React.FC<StageProps> = ({
           </p>
         </div>
       ) : (
-        <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+        <div className="pt-2 border-t border-[var(--color-border)]">
           <button
             type="button"
             onClick={() => void handleCancelDeal()}
@@ -308,7 +308,7 @@ export const DealStageControl: React.FC<StageProps> = ({
             <AlertCircle className="w-5 h-5" />
             إلغاء الصفقة
           </button>
-          <p className="text-xs text-gray-500 mt-2">
+          <p className="text-xs text-[var(--color-text-muted)] mt-2">
             الإلغاء متاح في أي مرحلة — يُحتفظ بالسجلات، ولا يمسّ القيود المرحّلة.
           </p>
         </div>

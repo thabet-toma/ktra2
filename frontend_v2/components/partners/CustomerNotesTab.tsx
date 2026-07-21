@@ -24,7 +24,7 @@ function daysUntil(iso: string): number {
 /** شارة حالة الملاحظة — منجز/متأخر/اليوم/قادم/ملاحظة. */
 function noteBadge(n: CustomerNote): { label: string; cls: string } {
   if (n.is_done) return { label: 'منجز', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300' };
-  if (!n.remind_on) return { label: 'ملاحظة', cls: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' };
+  if (!n.remind_on) return { label: 'ملاحظة', cls: 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)]' };
   const d = daysUntil(n.remind_on);
   if (d < 0) return { label: `متأخر ${Math.abs(d)} يوم`, cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' };
   if (d === 0) return { label: 'اليوم', cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' };
@@ -214,7 +214,7 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
                       type="button"
                       onClick={() => toggleDone(n)}
                       title={n.is_done ? 'إلغاء الإنجاز' : 'وضع كمنجز'}
-                      className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
+                      className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
                     >
                       {n.is_done ? <Undo2 className="w-4 h-4" /> : <Check className="w-4 h-4 text-emerald-600" />}
                     </button>

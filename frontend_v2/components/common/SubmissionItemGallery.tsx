@@ -47,7 +47,7 @@ export const SubmissionItemGallery: React.FC<SubmissionItemGalleryProps> = ({ im
   return (
     <>
       <div className="mt-3">
-        <h5 className="font-semibold text-gray-700 dark:text-gray-300 mb-2 text-sm">
+        <h5 className="font-semibold text-[var(--color-text)] mb-2 text-sm">
           صور مرفقة ({images.length})
         </h5>
         <div className="grid grid-cols-3 gap-2">
@@ -60,7 +60,7 @@ export const SubmissionItemGallery: React.FC<SubmissionItemGalleryProps> = ({ im
               <img
                 src={imageUrl}
                 alt={`صورة تسليم ${index + 1}`}
-                className="w-full h-16 object-cover rounded-md border border-gray-200 dark:border-gray-600 hover:border-blue-500 transition-colors"
+                className="w-full h-16 object-cover rounded-md border border-[var(--color-border)] hover:border-blue-500 transition-colors"
               />
               <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all rounded-md flex items-center justify-center">
                 <span className="text-white opacity-0 group-hover:opacity-100 text-xl">

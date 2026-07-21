@@ -47,7 +47,7 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
             onClick={onClose}
         >
             <div 
-                className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden"
+                className="bg-[var(--color-surface)] rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
@@ -70,39 +70,39 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
 
                     {/* Personal Info */}
                     <div>
-                        <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 mb-3 border-b dark:border-gray-700 pb-2">البيانات الشخصية</h3>
+                        <h3 className="text-lg font-bold text-[var(--color-text)] mb-3 border-b dark:border-gray-700 pb-2">البيانات الشخصية</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                             <div>
-                                <span className="block text-gray-500 dark:text-gray-400 mb-1">رقم الهاتف</span>
-                                <p className="text-gray-800 dark:text-gray-200 font-medium">{user.phone || '-'}</p>
+                                <span className="block text-[var(--color-text-muted)] mb-1">رقم الهاتف</span>
+                                <p className="text-[var(--color-text)] font-medium">{user.phone || '-'}</p>
                             </div>
                             <div>
-                                <span className="block text-gray-500 dark:text-gray-400 mb-1">العنوان</span>
-                                <p className="text-gray-800 dark:text-gray-200 font-medium">{user.address || '-'}</p>
+                                <span className="block text-[var(--color-text-muted)] mb-1">العنوان</span>
+                                <p className="text-[var(--color-text)] font-medium">{user.address || '-'}</p>
                             </div>
                             <div>
-                                <span className="block text-gray-500 dark:text-gray-400 mb-1">تاريخ التسجيل</span>
-                                <p className="text-gray-800 dark:text-gray-200 font-medium">{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : '-'}</p>
+                                <span className="block text-[var(--color-text-muted)] mb-1">تاريخ التسجيل</span>
+                                <p className="text-[var(--color-text)] font-medium">{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : '-'}</p>
                             </div>
                         </div>
                     </div>
 
                     {/* Professional Info */}
                     <div>
-                        <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 mb-3 border-b dark:border-gray-700 pb-2">البيانات المهنية</h3>
+                        <h3 className="text-lg font-bold text-[var(--color-text)] mb-3 border-b dark:border-gray-700 pb-2">البيانات المهنية</h3>
                         <div className="space-y-4 text-sm">
                             <div>
-                                <span className="block text-gray-500 dark:text-gray-400 mb-1">المؤهل الدراسي</span>
-                                <p className="text-gray-800 dark:text-gray-200 font-medium bg-gray-50 dark:bg-gray-700/50 p-2 rounded">{user.educationLevel || 'غير محدد'}</p>
+                                <span className="block text-[var(--color-text-muted)] mb-1">المؤهل الدراسي</span>
+                                <p className="text-[var(--color-text)] font-medium bg-[var(--color-surface-2)] p-2 rounded">{user.educationLevel || 'غير محدد'}</p>
                             </div>
                             <div>
-                                <span className="block text-gray-500 dark:text-gray-400 mb-1">الخبرات السابقة</span>
-                                <p className="text-gray-800 dark:text-gray-200 font-medium bg-gray-50 dark:bg-gray-700/50 p-3 rounded whitespace-pre-wrap leading-relaxed">
+                                <span className="block text-[var(--color-text-muted)] mb-1">الخبرات السابقة</span>
+                                <p className="text-[var(--color-text)] font-medium bg-[var(--color-surface-2)] p-3 rounded whitespace-pre-wrap leading-relaxed">
                                     {user.experienceDescription || 'لا يوجد وصف للخبرات.'}
                                 </p>
                             </div>
                             <div>
-                                <span className="block text-gray-500 dark:text-gray-400 mb-2">السيرة الذاتية</span>
+                                <span className="block text-[var(--color-text-muted)] mb-2">السيرة الذاتية</span>
                                 {user.resumeData ? (
                                     <a 
                                         href={user.resumeData.data} 
@@ -113,7 +113,7 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
                                         تحميل السيرة الذاتية ({user.resumeData.name})
                                     </a>
                                 ) : (
-                                    <p className="text-gray-500 italic">لم يتم إرفاق سيرة ذاتية.</p>
+                                    <p className="text-[var(--color-text-muted)] italic">لم يتم إرفاق سيرة ذاتية.</p>
                                 )}
                             </div>
                         </div>
@@ -131,7 +131,7 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
                             value={notes}
                             onChange={(e) => setNotes(e.target.value)}
                             rows={3}
-                            className="w-full p-3 border border-yellow-300 dark:border-yellow-600 rounded-lg bg-white dark:bg-gray-800 text-gray-800 dark:text-gray-200 focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
+                            className="w-full p-3 border border-yellow-300 dark:border-yellow-600 rounded-lg bg-[var(--color-surface)] text-[var(--color-text)] focus:ring-2 focus:ring-yellow-500 focus:border-transparent"
                             placeholder="اكتب ملاحظاتك الخاصة حول هذا الموظف هنا..."
                         />
                         <div className="flex justify-end mt-2">
@@ -147,7 +147,7 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
                 </main>
 
                 {/* Footer Actions */}
-                <footer className="bg-gray-50 dark:bg-gray-700/30 p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
+                <footer className="bg-[var(--color-surface-2)] p-4 border-t border-[var(--color-border)] flex justify-end gap-3">
                     {!user.isApproved && (
                         <button 
                             onClick={() => onApprove(user)} 
@@ -164,7 +164,7 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
                     </button>
                     <button 
                         onClick={onClose} 
-                        className="bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200 font-bold py-2 px-6 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition"
+                        className="bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold py-2 px-6 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition"
                     >
                         إغلاق
                     </button>

@@ -559,7 +559,7 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                 </th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+                        <tbody className="divide-y divide-[var(--color-border)]">
                             {paginatedInvoices.map((inv) => (
                                 <tr
                                     key={inv.id}

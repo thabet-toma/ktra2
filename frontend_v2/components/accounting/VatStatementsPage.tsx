@@ -182,7 +182,7 @@ export const VatStatementsPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel">
+    <div>
       <AseelDocumentShell
         title="كشوف الضريبة المضافة"
         actions={shellActions}

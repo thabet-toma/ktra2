@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test('Check settings api and localstorage', async ({ page }) => {
+  test.skip(process.env.LIVE_DEBUG !== '1', 'requires the live backend and is not part of the deterministic suite');
   // Login or go to the page directly if already logged in
   await page.goto('http://localhost:3000/sales/customer-payments');
   await page.waitForLoadState('networkidle');

@@ -154,7 +154,7 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
 
         {/* 1. المورد */}
         <div className="md:col-span-5 space-y-1">
-          <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
+          <label className="text-xs font-semibold text-[var(--color-text-muted)] flex items-center gap-1">
             <Building className="w-3 h-3 text-blue-500" />
             المورد <span className="text-red-500">*</span>
           </label>
@@ -180,7 +180,7 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
 
         {/* 2. وصف الصفقة → يُحفظ في SQL description (مصدر العنوان في الشحنة والتخليص والفواتير) */}
         <div className="md:col-span-4 space-y-1">
-          <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
+          <label className="text-xs font-semibold text-[var(--color-text-muted)] flex items-center gap-1">
             <Tag className="w-3 h-3 text-[var(--color-primary)]" />
             وصف الصفقة
           </label>
@@ -191,14 +191,14 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
               setData((prev: any) => ({ ...prev, dealDescription: e.target.value }))
             }
             disabled={readOnly}
-            className="w-full h-10 px-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-1 focus:ring-[var(--color-primary)] placeholder-gray-400"
+            className="w-full h-10 px-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-sm focus:ring-1 focus:ring-[var(--color-primary)] placeholder-gray-400"
             placeholder="مثال: طلبية أجهزة كهربائية..."
           />
         </div>
 
         {/* 3. التاريخ */}
         <div className="md:col-span-3 space-y-1">
-          <label className="text-xs font-semibold text-gray-600 dark:text-gray-400 flex items-center gap-1">
+          <label className="text-xs font-semibold text-[var(--color-text-muted)] flex items-center gap-1">
             <Calendar className="w-3 h-3 text-orange-500" />
             التاريخ
           </label>
@@ -207,15 +207,15 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
             value={data.dealDate ? data.dealDate.split('T')[0] : new Date().toISOString().split('T')[0]}
             onChange={e => setData((prev: any) => ({ ...prev, dealDate: e.target.value }))}
             disabled={readOnly}
-            className="w-full h-10 px-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-sm focus:ring-1 focus:ring-orange-500"
+            className="w-full h-10 px-3 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] text-sm focus:ring-1 focus:ring-orange-500"
           />
         </div>
       </div>
 
       {/* ================= التفاصيل الإضافية ================= */}
-      <div className="flex items-center justify-between border-t border-gray-100 dark:border-gray-700 pt-2">
-        <div className="text-sm font-bold text-gray-700 dark:text-gray-300 flex items-center gap-2">
-          <span className="text-gray-500 font-normal">الإجمالي :</span>
+      <div className="flex items-center justify-between border-t border-[var(--color-border)] pt-2">
+        <div className="text-sm font-bold text-[var(--color-text)] flex items-center gap-2">
+          <span className="text-[var(--color-text-muted)] font-normal">الإجمالي :</span>
           <span className="text-lg text-green-600">${grandTotal.toLocaleString()}</span>
         </div>
 
@@ -232,16 +232,16 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
       </div>
 
       {showDetails && (
-        <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 border border-gray-100 dark:border-gray-700 animate-in fade-in slide-in-from-top-2 duration-200 space-y-4">
+        <div className="bg-[var(--color-surface-2)] rounded-xl p-4 border border-[var(--color-border)] animate-in fade-in slide-in-from-top-2 duration-200 space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {/* رقم الصفقة */}
             <div className="space-y-1">
-              <label className="text-xs text-gray-500 block">
+              <label className="text-xs text-[var(--color-text-muted)] block">
                 {isDeal ? 'رقم الصفقة' : 'رقم العرض'}
               </label>
               <div className="relative">
-                <Hash className="absolute right-3 top-2.5 w-4 h-4 text-gray-400" />
-                <div className="w-full h-9 pr-9 pl-3 flex items-center bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded text-xs text-gray-500 font-mono">
+                <Hash className="absolute right-3 top-2.5 w-4 h-4 text-[var(--color-text-muted)]" />
+                <div className="w-full h-9 pr-9 pl-3 flex items-center bg-[var(--color-surface-3)] border border-[var(--color-border)] rounded text-xs text-[var(--color-text-muted)] font-mono">
                   {data.dealNumber || (isGeneratingNumber ? "جاري التوليد..." : "تلقائي عند الحفظ")}
                 </div>
               </div>
@@ -250,9 +250,9 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
             {/* رقم عرض السعر (مرجعي) — ليس وصف الصفقة */}
             {isDeal ? (
               <div className="space-y-1">
-                <label className="text-xs text-gray-500 block">رقم عرض السعر (مرجعي)</label>
+                <label className="text-xs text-[var(--color-text-muted)] block">رقم عرض السعر (مرجعي)</label>
                 <div className="relative">
-                  <FileText className="absolute right-3 top-2.5 w-4 h-4 text-gray-400" />
+                  <FileText className="absolute right-3 top-2.5 w-4 h-4 text-[var(--color-text-muted)]" />
                   <input
                     type="text"
                     placeholder="مثال: OF-2024-001"
@@ -261,7 +261,7 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
                       setData((prev: any) => ({ ...prev, originalOfferNumber: e.target.value }))
                     }
                     disabled={readOnly}
-                    className="w-full h-9 pr-9 pl-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm focus:ring-1 focus:ring-[var(--color-primary)] font-mono"
+                    className="w-full h-9 pr-9 pl-3 bg-[var(--color-surface)] border border-[var(--color-border)] rounded text-sm focus:ring-1 focus:ring-[var(--color-primary)] font-mono"
                   />
                 </div>
               </div>
@@ -269,33 +269,33 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
 
             {/* رقم فاتورة المورد */}
             <div className="space-y-1">
-              <label className="text-xs text-gray-500 block">رقم فاتورة المورد (PI)</label>
+              <label className="text-xs text-[var(--color-text-muted)] block">رقم فاتورة المورد (PI)</label>
               <div className="relative">
-                <FileText className="absolute right-3 top-2.5 w-4 h-4 text-gray-400" />
+                <FileText className="absolute right-3 top-2.5 w-4 h-4 text-[var(--color-text-muted)]" />
                 <input
                   type="text"
                   placeholder="PI Number"
                   value={data.supplierInvoiceNumber || ''}
                   onChange={e => setData((prev: any) => ({ ...prev, supplierInvoiceNumber: e.target.value }))}
                   disabled={readOnly}
-                  className="w-full h-9 pr-9 pl-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm focus:ring-1 focus:ring-blue-500"
+                  className="w-full h-9 pr-9 pl-3 bg-[var(--color-surface)] border border-[var(--color-border)] rounded text-sm focus:ring-1 focus:ring-blue-500"
                 />
               </div>
             </div>
 
             {/* رابط علي بابا */}
             <div className="space-y-1">
-              <label className="text-xs text-gray-500 block">رابط علي بابا</label>
+              <label className="text-xs text-[var(--color-text-muted)] block">رابط علي بابا</label>
               <div className="relative flex gap-2">
                 <div className="relative w-full">
-                  <LinkIcon className="absolute right-3 top-2.5 w-4 h-4 text-gray-400" />
+                  <LinkIcon className="absolute right-3 top-2.5 w-4 h-4 text-[var(--color-text-muted)]" />
                   <input
                     type="url"
                     placeholder="https://..."
                     value={data.alibabaOrderLink || ''}
                     onChange={e => setData((prev: any) => ({ ...prev, alibabaOrderLink: e.target.value }))}
                     disabled={readOnly}
-                    className="w-full h-9 pr-9 pl-3 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded text-sm focus:ring-1 focus:ring-orange-500 text-left ltr"
+                    className="w-full h-9 pr-9 pl-3 bg-[var(--color-surface)] border border-[var(--color-border)] rounded text-sm focus:ring-1 focus:ring-orange-500 text-left ltr"
                   />
                 </div>
                 {data.alibabaOrderLink && (
@@ -313,7 +313,7 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
 
           {/* الملاحظات الداخلية */}
           <div className="space-y-1">
-            <label className="text-xs text-gray-500 flex items-center gap-1">
+            <label className="text-xs text-[var(--color-text-muted)] flex items-center gap-1">
               <AlignLeft className="w-3 h-3" />
               ملاحظات داخلية
             </label>
@@ -322,7 +322,7 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
               onChange={e => setData((prev: any) => ({ ...prev, internalNotes: e.target.value }))}
               rows={2}
               disabled={readOnly}
-              className="w-full p-2 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg text-sm focus:ring-1 focus:ring-blue-500"
+              className="w-full p-2 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg text-sm focus:ring-1 focus:ring-blue-500"
               placeholder="اكتب أي ملاحظات إضافية هنا..."
             />
           </div>

@@ -13,7 +13,7 @@ const approvedUser = {
 };
 
 test("one transient health failure does not show the offline banner", async ({ page }) => {
-  let healthCalls = 0;
+  const healthMethods: string[] = [];
   let confirmRetry: (() => void) | undefined;
   const retryObserved = new Promise<void>((resolve) => {
     confirmRetry = resolve;
@@ -42,12 +42,13 @@ test("one transient health failure does not show the offline banner", async ({ p
     }
 
     if (url.pathname.endsWith("/health/")) {
-      healthCalls += 1;
-      if (healthCalls === 1) {
+      const method = route.request().method();
+      healthMethods.push(method);
+      if (method === "HEAD") {
         await route.fulfill({ status: 503, body: "temporary" });
       } else {
-        confirmRetry?.();
         await route.fulfill({ status: 200, body: "OK" });
+        confirmRetry?.();
       }
       return;
     }
@@ -55,15 +56,15 @@ test("one transient health failure does not show the offline banner", async ({ p
     await route.fulfill({ contentType: "application/json", body: "[]" });
   });
 
-  await page.goto("/dashboard");
+  await page.goto("/accounting/year-end-close");
   await retryObserved;
 
   await expect(page.getByText(/تعذّر الاتصال بالخادم رغم وجود إنترنت/)).toHaveCount(0);
-  expect(healthCalls).toBe(2);
+  expect(healthMethods).toEqual(expect.arrayContaining(["HEAD", "GET"]));
 });
 
 test("confirmed API failure still shows actionable offline state", async ({ page }) => {
-  let healthCalls = 0;
+  const healthMethods: string[] = [];
   let confirmSecondFailure: (() => void) | undefined;
   const twoFailuresObserved = new Promise<void>((resolve) => {
     confirmSecondFailure = resolve;
@@ -89,18 +90,19 @@ test("confirmed API failure still shows actionable offline state", async ({ page
       return;
     }
     if (url.pathname.endsWith("/health/")) {
-      healthCalls += 1;
-      if (healthCalls === 2) confirmSecondFailure?.();
+      const method = route.request().method();
+      healthMethods.push(method);
       await route.fulfill({ status: 503, body: "unavailable" });
+      if (method === "GET") confirmSecondFailure?.();
       return;
     }
     await route.fulfill({ contentType: "application/json", body: "[]" });
   });
 
-  await page.goto("/dashboard");
+  await page.goto("/accounting/year-end-close");
   await twoFailuresObserved;
 
   await expect(page.getByText(/تعذّر الاتصال بالخادم رغم وجود إنترنت/)).toBeVisible();
-  await expect(page.locator('button[title*="مسح كاش المتصفح"]')).toBeVisible();
-  expect(healthCalls).toBe(2);
+  await expect(page.getByRole("button", { name: "إصلاح الاتصال" })).toBeVisible();
+  expect(healthMethods).toEqual(expect.arrayContaining(["HEAD", "GET"]));
 });

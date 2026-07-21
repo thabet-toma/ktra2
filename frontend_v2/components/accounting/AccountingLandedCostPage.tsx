@@ -159,7 +159,7 @@ export const AccountingLandedCostPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel">
+    <div>
       <AseelDocumentShell
         title="تقرير التكلفة المستوردة"
         actions={shellActions}

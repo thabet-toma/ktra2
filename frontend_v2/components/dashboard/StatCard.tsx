@@ -27,19 +27,19 @@ export const StatCard: React.FC<StatCardProps> = ({ title, value, icon: Icon, tr
     const styles = colorStyles[color];
 
     return (
-        <div className={`relative overflow-hidden rounded-2xl bg-white dark:bg-gray-800 p-6 shadow-sm hover:shadow-md transition-all duration-300 border ${styles.border}`}>
+        <div className={`relative overflow-hidden rounded-2xl bg-[var(--color-surface)] p-6 shadow-sm hover:shadow-md transition-all duration-300 border ${styles.border}`}>
             <div className="flex items-center justify-between">
                 <div>
-                    <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">{title}</p>
+                    <p className="text-sm font-medium text-[var(--color-text-muted)] mb-1">{title}</p>
                     <div className="flex items-baseline gap-2">
-                        <h3 className="text-2xl font-bold text-gray-900 dark:text-white">{value}</h3>
+                        <h3 className="text-2xl font-bold text-[var(--color-text)]">{value}</h3>
                         {trend && (
                             <span className={`text-xs font-medium px-1.5 py-0.5 rounded-full ${trend.isPositive ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'}`}>
                                 {trend.isPositive ? '+' : ''}{trend.value}%
                             </span>
                         )}
                     </div>
-                    {description && <p className="text-xs text-gray-400 mt-2">{description}</p>}
+                    {description && <p className="text-xs text-[var(--color-text-muted)] mt-2">{description}</p>}
                 </div>
                 <div className={`p-3 rounded-xl ${styles.bg}`}>
                     <Icon className={`w-6 h-6 ${styles.text}`} />

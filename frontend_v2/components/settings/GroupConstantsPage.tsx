@@ -557,7 +557,6 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
   return (
     <div
       dir="rtl"
-      data-skin="aseel"
       style={{ minHeight: "100%", display: "flex", flexDirection: "column" }}
     >
       <AseelDocumentShell

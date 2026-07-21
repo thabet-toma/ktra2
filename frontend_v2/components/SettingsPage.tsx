@@ -12,6 +12,7 @@ import {
 } from '../utils/quickShortcuts';
 import { usePriceVisibility } from '../contexts/PriceVisibilityContext';
 import { useAppearance, FONT_SCALE_OPTIONS, FONT_FAMILY_OPTIONS } from '../contexts/AppearanceContext';
+import { getSkin, setSkin, UiSkin } from '../styles/skin';
 
 interface SettingsPageProps {
     user: User;
@@ -36,6 +37,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     const { showToggle, setShowToggle, defaultVisible, setDefaultVisible } = usePriceVisibility();
     // المظهر — حجم الخط ونوعه (تفضيل عام محلي في AppearanceContext).
     const { fontScale, setFontScale, fontFamily, setFontFamily } = useAppearance();
+    const [uiSkin, setUiSkin] = useState<UiSkin>(() => getSkin());
 
     const toggleShortcut = (view: AppView) => {
         setQuickShortcutsState((prev) => {
@@ -51,6 +53,15 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
             educationLevel: user.educationLevel || '', experienceDescription: user.experienceDescription || '',
         });
     }, [user]);
+
+    useEffect(() => {
+        const handleSkinChange = (event: Event) => {
+            setUiSkin((event as CustomEvent<UiSkin>).detail);
+        };
+
+        window.addEventListener('ktra:skin', handleSkinChange);
+        return () => window.removeEventListener('ktra:skin', handleSkinChange);
+    }, []);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -98,7 +109,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     const gridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 };
 
     return (
-        <div dir="rtl" data-skin="aseel" style={{ padding: '8px 12px', maxWidth: 780 }}>
+        <div dir="rtl" style={{ padding: '8px 12px', maxWidth: 780 }}>
             {/* العنوان */}
             <div style={{ paddingBottom: 8, borderBottom: '1px solid var(--aseel-border)', marginBottom: 14 }}>
                 <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>الإعدادات</strong>
@@ -231,6 +242,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
                     تحكّم بحجم الخط ونوعه في كامل الواجهة. يُطبَّق فوراً ويُحفظ لهذه الشركة (يثبت عند إعادة الدخول وعبر الأجهزة).
                 </p>
                 <div style={gridStyle}>
+                    <div style={fieldStyle}>
+                        <label style={labelStyle}>مظهر الواجهة</label>
+                        <select
+                            className="aseel-input"
+                            value={uiSkin}
+                            onChange={e => setSkin(e.target.value as UiSkin)}
+                        >
+                            <option value="aseel">كلاسيكي (الأصيل)</option>
+                            <option value="modern">حديث</option>
+                        </select>
+                    </div>
                     <div style={fieldStyle}>
                         <label style={labelStyle}>حجم الخط</label>
                         <select

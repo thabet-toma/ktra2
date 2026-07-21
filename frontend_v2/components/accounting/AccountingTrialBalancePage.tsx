@@ -172,7 +172,7 @@ export const AccountingTrialBalancePage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel">
+    <div>
       <AseelDocumentShell
         title="ميزان المراجعة"
         actions={shellActions}

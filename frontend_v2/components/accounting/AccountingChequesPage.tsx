@@ -287,7 +287,7 @@ export const AccountingChequesPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel">
+    <div>
       <AseelDocumentShell
         title="الشيكات"
         actions={actions}

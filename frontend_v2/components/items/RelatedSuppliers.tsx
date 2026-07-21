@@ -37,7 +37,7 @@ export const RelatedSuppliers: React.FC<RelatedSuppliersProps> = ({ item, data, 
               <th className="px-6 py-4">آخر شراء</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+          <tbody className="divide-y divide-[var(--color-border)]">
             {data.map(({ supplier, lastPurchaseDate, totalQuantity }, index) => (
               <tr 
                 key={supplier.id} 
