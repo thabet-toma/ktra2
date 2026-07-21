@@ -111,7 +111,9 @@ class LogisticsDealViewSet(BaseTenantViewSet):
                 Prefetch(
                     'logisticsshipmentdeal_set',
                     queryset=LogisticsShipmentDeal.objects.select_related('shipment'),
-                )
+                ),
+                # «تحولت إلى فاتورة» — prefetch فواتير الشراء لتفادي N+1 في القائمة
+                'purchase_invoices',
             )
         return qs.prefetch_related(
                 Prefetch(

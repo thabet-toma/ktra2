@@ -274,6 +274,9 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
     # ج7: الصفقة تعرف شحنتها — لعرض خريطة مسار الشحنة ورابط «رحلة الاستيراد»
     # داخل شاشة الصفقة (خريطة موحّدة صفقة→فاتورة).
     linked_shipment = serializers.SerializerMethodField()
+    # G-import: الصفقة «المحوّلة إلى فاتورة» يجب أن تشير لرقمها مباشرة (بدل نص حالة
+    # بلا رابط) — انظر get_linked_invoice.
+    linked_invoice = serializers.SerializerMethodField()
     posted_paid_amount = serializers.SerializerMethodField()
     amount_outstanding = serializers.SerializerMethodField()
     supplier_advance = serializers.SerializerMethodField()
@@ -299,6 +302,18 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
                 'id': sh.id,
                 'shipment_number': sh.shipment_number or '',
                 'shipment_name': sh.shipment_name or '',
+            }
+        except Exception:
+            return None
+
+    def get_linked_invoice(self, obj):
+        try:
+            pi = obj.purchase_invoices.order_by('-id').first()
+            if not pi:
+                return None
+            return {
+                'id': pi.id,
+                'invoice_number': pi.invoice_number or '',
             }
         except Exception:
             return None
@@ -439,6 +454,9 @@ class LogisticsDealListSerializer(serializers.ModelSerializer):
         source='partner.legal_name', read_only=True, allow_null=True, default=None
     )
     linked_shipment = serializers.SerializerMethodField()
+    # G-import: «تحولت إلى فاتورة» في قائمة الصفقات — رابط لرقم الفاتورة بجانب
+    # الحالة. يجب أن يكون في serializer القائمة (لا التفصيل) وإلا لا يظهر شيء.
+    linked_invoice = serializers.SerializerMethodField()
 
     class Meta:
         model = LogisticsDeal
@@ -452,7 +470,7 @@ class LogisticsDealListSerializer(serializers.ModelSerializer):
             'tax_rate', 'tax_amount', 'tax_type', 'shipping_method', 'payment_method',
             'production_days', 'delivery_days', 'total_cbm', 'total_weight',
             'total_weight_kg', 'certificates', 'shipping_workflow_status',
-            'created_by', 'created_at', 'linked_shipment',
+            'created_by', 'created_at', 'linked_shipment', 'linked_invoice',
         ]
         read_only_fields = fields
 
@@ -466,6 +484,14 @@ class LogisticsDealListSerializer(serializers.ModelSerializer):
             'shipment_number': shipment.shipment_number or '',
             'shipment_name': shipment.shipment_name or '',
         }
+
+    def get_linked_invoice(self, obj):
+        # prefetch-aware: يستهلك prefetch الـviewset (purchase_invoices) بلا استعلام لكل صف
+        invoices = list(obj.purchase_invoices.all())
+        if not invoices:
+            return None
+        pi = max(invoices, key=lambda inv: inv.id)
+        return {'id': pi.id, 'invoice_number': pi.invoice_number or ''}
 
 class LogisticsDealShipmentSummarySerializer(serializers.ModelSerializer):
     """The fields a shipment detail needs about a linked deal, without its document."""

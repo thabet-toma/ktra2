@@ -125,7 +125,9 @@ class LogisticsListContractPerformanceTest(TestCase):
             "/api/logistics/deals/?page=1&page_size=2"
         )
         self.assertEqual(response.data["count"], 8)
-        self.assertLessEqual(query_count, 5)
+        # 6: أضيف prefetch لـ purchase_invoices (رابط «تحولت إلى فاتورة») — استعلام
+        # ثابت واحد لكل الصفحة لا N+1، تحرسه assertion ثبات العدد أدناه.
+        self.assertLessEqual(query_count, 6)
         _, large_query_count = self._get_with_query_count(
             "/api/logistics/deals/?page=1&page_size=8"
         )
