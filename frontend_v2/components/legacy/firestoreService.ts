@@ -1110,12 +1110,41 @@ export const deleteUserFromDb = async (userId: string) => {
   await deleteDoc(userRef);
 };
 
-export const subscribeToUsers = (callback: (users: User[]) => void) => {
+export const subscribeToUsers = (isSuperuser: boolean, callback: (users: User[]) => void) => {
+  if (!isSuperuser) {
+    callback([]);
+    return () => { };
+  }
   const q = query(collection(db, "users"));
   return onSnapshot(q, (snapshot) => {
     const users = snapshot.docs.map(doc => doc.data() as User);
     callback(users);
   });
+};
+
+type CompanyMemberUserRow = {
+  user_id: number;
+  username: string;
+  email: string;
+  full_name: string;
+  role: string;
+};
+
+/** Minimal user records sourced from the membership-scoped API, never the
+ * platform-wide users mirror. */
+export const loadCompanyMemberUsers = async (tenantId: number): Promise<User[]> => {
+  const members = await apiGetObject<CompanyMemberUserRow[]>(
+    `tenants/companies/${tenantId}/members/`
+  );
+  return members.map((member) => ({
+    id: String(member.user_id),
+    name: member.full_name || member.username,
+    email: member.email || "",
+    role: member.role === "manager" ? "manager" : "employee",
+    employmentStatus: "",
+    isApproved: true,
+    isEmailVerified: true,
+  }));
 };
 
 // --- Tasks Service ---

@@ -38,6 +38,14 @@ test("authenticated shell does not wait for non-critical activity data", async (
       return;
     }
 
+    if (url.pathname.endsWith("/tenants/companies/my-companies/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify([{ id: 1, tenant: { TenantID: 1, CompanyName: "Test Company", SubscriptionPlan: "basic", Status: "active", CreatedAt: "2026-01-01" }, role: "manager", is_default: true, created_at: "2026-01-01" }]),
+      });
+      return;
+    }
+
     // Simulate a slow compatibility/local-data endpoint. It must not gate the app shell.
     if (url.pathname.includes("/mapper/activityStatus/e2e-user/")) {
       await new Promise((resolve) => setTimeout(resolve, 5_000));
@@ -93,6 +101,14 @@ test("idle authenticated shell does not poll mapper collections every five secon
           isApproved: true,
           isEmailVerified: true,
         }),
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith("/tenants/companies/my-companies/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify([{ id: 1, tenant: { TenantID: 1, CompanyName: "Test Company", SubscriptionPlan: "basic", Status: "active", CreatedAt: "2026-01-01" }, role: "manager", is_default: true, created_at: "2026-01-01" }]),
       });
       return;
     }

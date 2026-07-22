@@ -416,6 +416,7 @@ LOGGING = {
         "core.request_tracing": {"handlers": ["queue"], "level": LOG_LEVEL, "propagate": False},
         "core.exception_handler": {"handlers": ["queue"], "level": "INFO", "propagate": False},
         "core.health": {"handlers": ["queue"], "level": "INFO", "propagate": False},
+        "hr.auth_api": {"handlers": ["queue"], "level": "INFO", "propagate": False},
         "client_logs": {"handlers": ["queue"], "level": "INFO", "propagate": False},
         "django.request": {"handlers": ["queue"], "level": "ERROR", "propagate": False},
     },

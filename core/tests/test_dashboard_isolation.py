@@ -11,10 +11,12 @@ import datetime
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
-from accounting.models import Currency
+from accounting.models import Account, Currency, JournalHeader, JournalLine
 from inventory.models import Product
 from logistics.models import LogisticsDeal, LogisticsPayment, LogisticsShipment, PurchaseInvoice
 from partners.models import Partner
+from sales.models import SalesInvoice
+from tenants.models import UserCompanyMembership
 from tenants.services import create_company
 
 
@@ -23,8 +25,14 @@ class DashboardIsolationTest(APITestCase):
     def setUpTestData(cls):
         cls.owner_a = User.objects.create_user(username="dash_a", password="x")
         cls.owner_b = User.objects.create_user(username="dash_b", password="x")
+        cls.staff_a = User.objects.create_user(username="dash_staff_a", password="x")
         cls.t_a = create_company("الشركة القديمة", cls.owner_a)
         cls.t_b = create_company("الشركة الجديدة", cls.owner_b)
+        UserCompanyMembership.objects.create(
+            user=cls.staff_a, tenant=cls.t_a, role="staff", can_access_import=False
+        )
+        cls.t_a.import_enabled = True
+        cls.t_a.save(update_fields=["import_enabled"])
 
         currency = Currency.objects.filter(Code="ILS").first() or Currency.objects.create(
             Code="ILS", Symbol="₪", IsBaseCurrency=True,
@@ -43,6 +51,60 @@ class DashboardIsolationTest(APITestCase):
         )
         Product.objects.create(tenant=cls.t_a, sku="OLD-1", name_ar="صنف قديم",
                                quantity_on_hand=10, avg_cost=7)
+        customer = Partner.objects.create(
+            tenant=cls.t_a, name="عميل قديم", partner_type="Customer"
+        )
+        SalesInvoice.objects.create(
+            tenant=cls.t_a,
+            invoice_number="SALE-1",
+            customer=customer,
+            invoice_date=datetime.date.today(),
+            currency=currency,
+            status=SalesInvoice.STATUS_POSTED,
+            grand_total=900,
+        )
+        revenue_account = Account.objects.create(
+            tenant=cls.t_a, code="DASH-REV", name="إيرادات الاختبار", account_type="Revenue"
+        )
+        expense_account = Account.objects.create(
+            tenant=cls.t_a, code="DASH-EXP", name="مصروفات الاختبار", account_type="Expense"
+        )
+        journal = JournalHeader.objects.create(
+            tenant=cls.t_a,
+            transaction_date=datetime.date.today(),
+            is_posted=True,
+            currency=currency,
+            exchange_rate=1,
+        )
+        JournalLine.objects.create(
+            tenant=cls.t_a, journal=journal, account=revenue_account, credit=900
+        )
+        JournalLine.objects.create(
+            tenant=cls.t_a, journal=journal, account=expense_account, debit=250
+        )
+
+        # Even if legacy import records exist, a company with the module off
+        # must not query or expose an import section.
+        hidden_partner = Partner.objects.create(
+            tenant=cls.t_b, name="مورد مخفي", partner_type="Supplier"
+        )
+        LogisticsDeal.objects.create(
+            tenant=cls.t_b,
+            ref_number="HIDDEN-DEAL",
+            partner=hidden_partner,
+            currency=currency,
+            status="Open",
+            total_amount=777,
+            order_date=datetime.date.today(),
+        )
+        PurchaseInvoice.objects.create(
+            tenant=cls.t_b,
+            invoice_number="HIDDEN-INTL",
+            partner=hidden_partner,
+            currency=currency,
+            invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL,
+            grand_total=333,
+        )
 
     def _dashboard(self, user, tenant):
         self.client.force_authenticate(user=user)
@@ -52,15 +114,16 @@ class DashboardIsolationTest(APITestCase):
 
     def test_new_company_dashboard_all_zero(self):
         data = self._dashboard(self.owner_b, self.t_b)
-        assert data["deals"]["total"] == 0
-        assert data["deals"]["open_value"] == 0.0
-        assert data["deals"]["recent"] == []
-        assert data["shipments"]["total"] == 0
-        assert data["shipments"]["recent"] == []
-        assert data["payments"]["total"] == 0
-        assert data["payments"]["total_paid"] == 0.0
-        assert data["invoices"]["total"] == 0
-        assert data["invoices"]["recent"] == []
+        assert "import_operations" not in data
+        assert data["financials"] == {
+            "revenue": 0.0,
+            "expenses": 0.0,
+            "net_profit": 0.0,
+        }
+        assert data["sales_invoices"]["total"] == 0
+        # International invoices belong to the disabled import module.
+        assert data["purchase_invoices"]["total"] == 0
+        assert data["purchase_invoices"]["recent"] == []
         assert data["inventory"]["total_products"] == 0
         assert data["inventory"]["inventory_value"] == 0.0
         assert data["inventory"]["low_stock_items"] == []
@@ -69,13 +132,24 @@ class DashboardIsolationTest(APITestCase):
 
     def test_old_company_still_sees_its_numbers(self):
         data = self._dashboard(self.owner_a, self.t_a)
-        assert data["deals"]["total"] == 1
-        assert data["deals"]["open_value"] == 1000.0
-        assert data["payments"]["total_paid"] == 250.0
-        assert data["shipments"]["in_transit"] == 1
-        assert data["invoices"]["draft"] == 1
+        assert data["import_operations"]["deals"]["open"] == 1
+        assert data["import_operations"]["deals"]["active_value"] == 1000.0
+        assert data["import_operations"]["payments"]["paid_this_month"] == 250.0
+        assert data["import_operations"]["shipments"]["in_transit"] == 1
+        assert data["sales_invoices"]["total"] == 1
+        assert data["sales_invoices"]["recent"][0]["currency_code"] == "ILS"
+        assert data["purchase_invoices"]["draft"] == 1
         assert data["inventory"]["total_products"] == 1
         assert data["inventory"]["inventory_value"] == 70.0
+        assert data["financials"]["revenue"] == 900.0
+        assert data["financials"]["expenses"] == 250.0
+        assert data["financials"]["net_profit"] == 650.0
+
+    def test_enabled_company_staff_without_import_grant_sees_only_base_dashboard(self):
+        data = self._dashboard(self.staff_a, self.t_a)
+        assert "import_operations" not in data
+        assert data["sales_invoices"]["total"] == 1
+        assert data["purchase_invoices"]["total"] == 1
 
     def test_missing_tenant_header_returns_zeros_not_leak(self):
         """بلا X-Tenant-Id (وبوجود أكثر من شركة) — أصفار، لا تجميع عالمي."""
@@ -83,5 +157,6 @@ class DashboardIsolationTest(APITestCase):
         res = self.client.get("/api/dashboard/")
         assert res.status_code == 200
         data = res.json()
-        assert data["deals"]["total"] == 0
+        assert "import_operations" not in data
+        assert data["sales_invoices"]["total"] == 0
         assert data["inventory"]["total_products"] == 0

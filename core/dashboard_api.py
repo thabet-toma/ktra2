@@ -1,44 +1,63 @@
-"""
-Trade Dashboard API — single endpoint returning all business KPIs.
-"""
+"""Tenant-scoped business dashboard API."""
 import datetime
-from decimal import Decimal
 
 from django.core.cache import cache
-from django.db.models import Sum, Count, Q, F
+from django.db.models import Count, F, Q, Sum
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
-from tenants.models import Tenant
+from accounting.models import JournalHeader, JournalLine
+from core.import_access import user_can_access_import
 from core.tenant_utils import get_tenant as _get_tenant
-from logistics.models import (
-    LogisticsDeal, LogisticsShipment, LogisticsPayment,
-    PurchaseInvoice,
-)
 from inventory.models import Product, StockMovement
-from accounting.models import JournalHeader
+from logistics.models import LogisticsDeal, LogisticsPayment, LogisticsShipment, PurchaseInvoice
+from sales.models import SalesInvoice
 
 
-def _f(val):
-    """Decimal/None → float."""
-    if val is None:
+def _f(value):
+    if value is None:
         return 0.0
-    return round(float(val), 2)
+    return round(float(value), 2)
 
 
-# كاش الداشبورد: ~30 استعلاماً تجميعياً بكل تحميل. المفتاح بالمستأجر صراحةً
-# (لا @cache_page المُفهرَس بالـ URL — يفتح تسرّباً بين الشركات على نفس المسار).
-# TTL قصير: لوحة KPI لا سجل مالي رسمي، فتأخّر 60 ثانية مقبول بلا آلية invalidation.
 DASHBOARD_CACHE_TTL = 60
 
 
-@api_view(['GET'])
-def trade_dashboard(request):
-    # task13 M1: every queryset below MUST be tenant-scoped. A missing tenant
-    # returns the all-zero payload instead of leaking cross-company aggregates.
-    tenant = _get_tenant(request)
+def _invoice_summary(queryset, *, partner_field, date_field):
+    total = queryset.count()
+    posted = queryset.filter(status__in=["posted", "completed", "fully_paid"]).count()
+    draft = queryset.filter(status__in=["draft", "incomplete"]).count()
+    recent = list(
+        queryset.order_by(f"-{date_field}", "-id")[:5].values(
+            "id",
+            "invoice_number",
+            "status",
+            "grand_total",
+            date_field,
+            partner_name=F(partner_field),
+            currency_code=F("currency__Code"),
+        )
+    )
+    return {
+        "total": total,
+        "posted": posted,
+        "draft": draft,
+        "recent": recent,
+    }
 
-    cache_key = f"dashboard:v1:{tenant.pk if tenant else 'none'}"
+
+@api_view(["GET"])
+def trade_dashboard(request):
+    """Return the active company's general KPIs and optional import KPIs.
+
+    Import tables are deliberately not queried when the company has not enabled
+    that module. This keeps the base dashboard relevant and makes the feature
+    boundary enforceable at the API layer, not merely hidden in React.
+    """
+    tenant = _get_tenant(request)
+    can_access_import = user_can_access_import(request.user, tenant)
+    tenant_key = tenant.pk if tenant else "none"
+    cache_key = f"dashboard:v3:{tenant_key}:import-{int(can_access_import)}"
     cached = cache.get(cache_key)
     if cached is not None:
         return Response(cached)
@@ -46,212 +65,183 @@ def trade_dashboard(request):
     today = datetime.date.today()
     month_start = today.replace(day=1)
 
-    # ─── Deals ───────────────────────────────────────────────────
-    deals_qs = LogisticsDeal.objects.filter(is_deleted=False, tenant=tenant) \
-        if tenant else LogisticsDeal.objects.none()
-    total_deals = deals_qs.count()
-    open_deals = deals_qs.filter(status='Open').count()
-    shipped_deals = deals_qs.filter(status='Shipped').count()
-    cleared_deals = deals_qs.filter(status='Cleared').count()
-    closed_deals = deals_qs.filter(status='Closed').count()
+    sales_qs = (
+        SalesInvoice.objects.filter(
+            tenant=tenant,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+        ).exclude(status=SalesInvoice.STATUS_CANCELLED)
+        if tenant
+        else SalesInvoice.objects.none()
+    )
+    purchase_qs = (
+        PurchaseInvoice.objects.filter(tenant=tenant)
+        if tenant
+        else PurchaseInvoice.objects.none()
+    )
+    # An international invoice is part of the import workflow. A company that
+    # has not enabled import sees only its ordinary local purchase invoices.
+    if not can_access_import:
+        purchase_qs = purchase_qs.filter(invoice_type=PurchaseInvoice.INVOICE_TYPE_LOCAL)
 
-    open_deals_value = _f(
-        deals_qs.filter(status__in=['Open', 'Shipped', 'Cleared'])
-        .aggregate(s=Sum('total_amount'))['s']
+    sales_invoices = _invoice_summary(
+        sales_qs, partner_field="customer__name", date_field="invoice_date"
+    )
+    purchase_invoices = _invoice_summary(
+        purchase_qs, partner_field="partner__name", date_field="invoice_date"
     )
 
-    deals_this_month = deals_qs.filter(order_date__gte=month_start).count()
-
-    deal_status_dist = list(
-        deals_qs.values('status')
-        .annotate(count=Count('id'))
-        .order_by('status')
-    )
-
-    recent_deals = list(
-        deals_qs.order_by('-created_at')[:5]
-        .values('id', 'ref_number', 'status', 'total_amount', 'order_date',
-                partner_name=F('partner__name'))
-    )
-
-    # ─── Shipments ───────────────────────────────────────────────
-    ship_qs = LogisticsShipment.objects.filter(tenant=tenant) \
-        if tenant else LogisticsShipment.objects.none()
-    total_shipments = ship_qs.count()
-    in_transit = ship_qs.filter(status='In-Transit').count()
-    arrived = ship_qs.filter(status='Arrived').count()
-    clearing = ship_qs.filter(status='Clearing').count()
-    cleared_shipments = ship_qs.filter(status='Cleared').count()
-
-    recent_shipments = list(
-        ship_qs.order_by('-id')[:5]
-        .values('id', 'shipment_number', 'status', 'departure_date',
-                'arrival_date', 'total_shipping_cost_usd')
-    )
-
-    # ─── Payments ────────────────────────────────────────────────
-    # LogisticsPayment has no tenant FK — scoped through its deal/shipment.
-    pay_qs = LogisticsPayment.objects.filter(is_deleted=False).filter(
-        Q(deal__tenant=tenant) | Q(shipment__tenant=tenant)
-    ) if tenant else LogisticsPayment.objects.none()
-    total_payments = pay_qs.count()
-    posted_payments = pay_qs.filter(is_posted=True).count()
-    total_paid = _f(
-        pay_qs.filter(is_posted=True).aggregate(s=Sum('amount'))['s']
-    )
-    paid_this_month = _f(
-        pay_qs.filter(is_posted=True, transfer_date__gte=month_start)
-        .aggregate(s=Sum('amount'))['s']
-    )
-
-    # ─── Invoices (SQL) ──────────────────────────────────────────
-    inv_qs = PurchaseInvoice.objects.filter(tenant=tenant) \
-        if tenant else PurchaseInvoice.objects.none()
-    total_invoices = inv_qs.count()
-    posted_invoices = inv_qs.filter(is_posted=True).count()
-    draft_invoices = inv_qs.filter(status='draft').count()
-    invoices_total_value = _f(
-        inv_qs.aggregate(s=Sum('grand_total'))['s']
-    )
-
-    recent_invoices = list(
-        inv_qs.order_by('-created_at')[:5]
-        .values('id', 'invoice_number', 'status', 'grand_total',
-                'invoice_date', partner_name=F('partner__name'))
-    )
-
-    # ─── Inventory ───────────────────────────────────────────────
-    prod_qs = Product.objects.filter(tenant=tenant) \
-        if tenant else Product.objects.none()
-    products_in_stock = prod_qs.filter(quantity_on_hand__gt=0).count()
+    prod_qs = Product.objects.filter(tenant=tenant) if tenant else Product.objects.none()
     total_products = prod_qs.count()
+    products_in_stock = prod_qs.filter(quantity_on_hand__gt=0).count()
     inventory_value = _f(
-        prod_qs.filter(quantity_on_hand__gt=0)
-        .aggregate(
-            val=Sum(F('quantity_on_hand') * F('avg_cost'))
-        )['val']
+        prod_qs.filter(quantity_on_hand__gt=0).aggregate(
+            value=Sum(F("quantity_on_hand") * F("avg_cost"))
+        )["value"]
     )
     low_stock_qs = prod_qs.filter(
         quantity_on_hand__gt=0,
         min_stock_level__gt=0,
-        quantity_on_hand__lte=F('min_stock_level'),
+        quantity_on_hand__lte=F("min_stock_level"),
     )
     low_stock = low_stock_qs.count()
     out_of_stock = prod_qs.filter(
-        min_stock_level__gt=0,
-        quantity_on_hand__lte=0,
+        min_stock_level__gt=0, quantity_on_hand__lte=0
     ).count()
-
-    movements_qs = StockMovement.objects.filter(tenant=tenant) \
-        if tenant else StockMovement.objects.none()
-    movements_this_month = movements_qs.filter(
-        movement_date__gte=month_start,
-    ).count()
-
+    movements_qs = (
+        StockMovement.objects.filter(tenant=tenant)
+        if tenant
+        else StockMovement.objects.none()
+    )
     low_stock_items = list(
-        low_stock_qs.values('id', 'sku', 'name_ar', 'quantity_on_hand', 'min_stock_level')[:10]
+        low_stock_qs.values(
+            "id", "sku", "name_ar", "quantity_on_hand", "min_stock_level"
+        )[:5]
     )
 
-    # ─── Accounting ──────────────────────────────────────────────
-    journals_qs = JournalHeader.objects.filter(tenant=tenant) \
-        if tenant else JournalHeader.objects.none()
-    journals_this_month = journals_qs.filter(
-        transaction_date__gte=month_start, is_posted=True,
-    ).count()
+    posted_lines = (
+        JournalLine.objects.filter(
+            tenant=tenant,
+            journal__tenant=tenant,
+            journal__is_posted=True,
+            journal__transaction_date__gte=month_start,
+            journal__transaction_date__lte=today,
+        )
+        if tenant
+        else JournalLine.objects.none()
+    )
+    financial_totals = posted_lines.aggregate(
+        revenue_credit=Sum("base_credit", filter=Q(account__account_type="Revenue")),
+        revenue_debit=Sum("base_debit", filter=Q(account__account_type="Revenue")),
+        expense_debit=Sum("base_debit", filter=Q(account__account_type="Expense")),
+        expense_credit=Sum("base_credit", filter=Q(account__account_type="Expense")),
+    )
+    revenue = _f(
+        (financial_totals["revenue_credit"] or 0)
+        - (financial_totals["revenue_debit"] or 0)
+    )
+    expenses = _f(
+        (financial_totals["expense_debit"] or 0)
+        - (financial_totals["expense_credit"] or 0)
+    )
+    journals_qs = (
+        JournalHeader.objects.filter(tenant=tenant)
+        if tenant
+        else JournalHeader.objects.none()
+    )
 
-    # ─── Alerts ──────────────────────────────────────────────────
     alerts = []
-
-    if low_stock > 0:
+    if low_stock:
         alerts.append({
-            'type': 'warning',
-            'title': 'مخزون منخفض',
-            'message': f'{low_stock} منتج/أصناف تحت الحد الأدنى',
-            'link': 'stock-levels',
+            "type": "warning",
+            "title": "مخزون منخفض",
+            "message": f"{low_stock} صنف تحت الحد الأدنى",
+            "link": "stock-levels",
         })
-
-    if out_of_stock > 0:
+    if out_of_stock:
         alerts.append({
-            'type': 'danger',
-            'title': 'نفاد مخزون',
-            'message': f'{out_of_stock} منتج نفذت كميته',
-            'link': 'stock-levels',
+            "type": "danger",
+            "title": "أصناف نافدة",
+            "message": f"{out_of_stock} صنف يحتاج إلى إعادة طلب",
+            "link": "stock-levels",
         })
-
-    if in_transit > 0:
+    if sales_invoices["draft"]:
         alerts.append({
-            'type': 'info',
-            'title': 'شحنات في الطريق',
-            'message': f'{in_transit} شحنة قيد النقل',
-            'link': 'shipments-management',
+            "type": "info",
+            "title": "فواتير بيع غير مكتملة",
+            "message": f"{sales_invoices['draft']} فاتورة بانتظار الترحيل",
+            "link": "sales-invoices",
         })
-
-    if draft_invoices > 0:
+    if purchase_invoices["draft"]:
         alerts.append({
-            'type': 'info',
-            'title': 'فواتير مسودة',
-            'message': f'{draft_invoices} فاتورة بحاجة لإكمال',
-            'link': 'purchase-invoices',
-        })
-
-    unpaid_deals = deals_qs.filter(
-        payment_status__in=['Unpaid', 'Partially Paid'],
-        status__in=['Open', 'Shipped', 'Cleared'],
-    ).count()
-    if unpaid_deals > 0:
-        alerts.append({
-            'type': 'warning',
-            'title': 'صفقات غير مسددة',
-            'message': f'{unpaid_deals} صفقة بحاجة لدفعات',
-            'link': 'deals-management',
+            "type": "info",
+            "title": "فواتير شراء غير مكتملة",
+            "message": f"{purchase_invoices['draft']} فاتورة بحاجة للمراجعة",
+            "link": "purchase-invoices",
         })
 
     payload = {
-        'deals': {
-            'total': total_deals,
-            'open': open_deals,
-            'shipped': shipped_deals,
-            'cleared': cleared_deals,
-            'closed': closed_deals,
-            'open_value': open_deals_value,
-            'this_month': deals_this_month,
-            'status_distribution': deal_status_dist,
-            'recent': recent_deals,
+        "period": {"from": month_start.isoformat(), "to": today.isoformat()},
+        "financials": {
+            "revenue": revenue,
+            "expenses": expenses,
+            "net_profit": _f(revenue - expenses),
         },
-        'shipments': {
-            'total': total_shipments,
-            'in_transit': in_transit,
-            'arrived': arrived,
-            'clearing': clearing,
-            'cleared': cleared_shipments,
-            'recent': recent_shipments,
+        "sales_invoices": sales_invoices,
+        "purchase_invoices": purchase_invoices,
+        "inventory": {
+            "total_products": total_products,
+            "in_stock": products_in_stock,
+            "low_stock": low_stock,
+            "out_of_stock": out_of_stock,
+            "inventory_value": inventory_value,
+            "movements_this_month": movements_qs.filter(
+                movement_date__gte=month_start
+            ).count(),
+            "low_stock_items": low_stock_items,
         },
-        'payments': {
-            'total': total_payments,
-            'posted': posted_payments,
-            'total_paid': total_paid,
-            'paid_this_month': paid_this_month,
+        "accounting": {
+            "journals_this_month": journals_qs.filter(
+                transaction_date__gte=month_start,
+                transaction_date__lte=today,
+                is_posted=True,
+            ).count(),
         },
-        'invoices': {
-            'total': total_invoices,
-            'posted': posted_invoices,
-            'draft': draft_invoices,
-            'total_value': invoices_total_value,
-            'recent': recent_invoices,
-        },
-        'inventory': {
-            'total_products': total_products,
-            'in_stock': products_in_stock,
-            'low_stock': low_stock,
-            'out_of_stock': out_of_stock,
-            'inventory_value': inventory_value,
-            'movements_this_month': movements_this_month,
-            'low_stock_items': low_stock_items,
-        },
-        'accounting': {
-            'journals_this_month': journals_this_month,
-        },
-        'alerts': alerts,
+        "alerts": alerts,
     }
+
+    if can_access_import:
+        deals_qs = LogisticsDeal.objects.filter(
+            tenant=tenant, is_deleted=False
+        )
+        shipments_qs = LogisticsShipment.objects.filter(tenant=tenant)
+        payments_qs = LogisticsPayment.objects.filter(is_deleted=False).filter(
+            Q(deal__tenant=tenant) | Q(shipment__tenant=tenant)
+        )
+        payload["import_operations"] = {
+            "deals": {
+                "open": deals_qs.filter(status="Open").count(),
+                "active_value": _f(
+                    deals_qs.filter(status__in=["Open", "Shipped", "Cleared"])
+                    .aggregate(total=Sum("total_amount"))["total"]
+                ),
+                "status_distribution": list(
+                    deals_qs.values("status")
+                    .annotate(count=Count("id"))
+                    .order_by("status")
+                ),
+            },
+            "shipments": {
+                "in_transit": shipments_qs.filter(status="In-Transit").count(),
+                "clearing": shipments_qs.filter(status="Clearing").count(),
+            },
+            "payments": {
+                "paid_this_month": _f(
+                    payments_qs.filter(
+                        is_posted=True, transfer_date__gte=month_start
+                    ).aggregate(total=Sum("amount"))["total"]
+                ),
+            },
+        }
+
     cache.set(cache_key, payload, timeout=DASHBOARD_CACHE_TTL)
     return Response(payload)

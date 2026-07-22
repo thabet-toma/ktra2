@@ -7,6 +7,10 @@ import { CompanyManagementModal, ROLE_LABELS } from "./CompanyManagementModal";
 export const CompanySwitcher: React.FC = () => {
   const { companies, currentCompany, switchCompany, createCompany, loading, refreshCompanies } = useCompany();
   const { identity } = useTenantSettings();
+  const activeMembership = companies.find(
+    (membership) => membership.tenant.TenantID === currentCompany?.TenantID
+  );
+  const canManageCurrentCompany = activeMembership?.role === "manager";
   const [isOpen, setIsOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
@@ -110,7 +114,7 @@ export const CompanySwitcher: React.FC = () => {
           </div>
 
           <div className="border-t border-[var(--aseel-border-soft)] p-1.5 bg-[var(--aseel-panel)] space-y-1.5">
-            {currentCompany && (
+            {currentCompany && canManageCurrentCompany && (
               <button
                 type="button"
                 onClick={() => {
@@ -140,7 +144,7 @@ export const CompanySwitcher: React.FC = () => {
       )}
 
       {/* Company Management Modal — task12 M4 */}
-      {showManageModal && currentCompany && (
+      {showManageModal && currentCompany && canManageCurrentCompany && (
         <CompanyManagementModal
           isOpen={showManageModal}
           onClose={() => setShowManageModal(false)}

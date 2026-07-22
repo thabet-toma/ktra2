@@ -1,55 +1,46 @@
-import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Home, Users, Phone, Images } from 'lucide-react';
-import { LogoIcon } from '../icons/LogoIcon'; // تأكد من المسار الصحيح للأيقونة
+import React from "react";
+import { Link, useLocation } from "react-router-dom";
+import { ArrowUpLeft, Images, Info, Phone, ShoppingBag } from "lucide-react";
+import { LogoIcon } from "../icons/LogoIcon";
 
-export const PublicNavbar = () => {
+const NAV_ITEMS = [
+  { to: "/about-us", label: "عن المنصة", icon: Info },
+  { to: "/contact", label: "تواصل معنا", icon: Phone },
+  { to: "/gallery", label: "المعرض", icon: Images },
+];
+
+export const PublicNavbar: React.FC = () => {
   const location = useLocation();
 
-  const isActive = (path: string) => {
-    return location.pathname === path
-      ? "text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-white/10"
-      : "text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-white/5";
-  };
+  const linkClass = (path: string) =>
+    location.pathname === path
+      ? "text-blue-700 bg-blue-50 dark:bg-blue-400/10 dark:text-blue-300"
+      : "text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white";
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 px-6 py-4 flex justify-between items-center bg-white/80 dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200/50 dark:border-gray-700/50 shadow-sm transition-all duration-300" dir="rtl">
-      {/* الجزء الأيمن: الشعار */}
-      <Link to="/" className="flex items-center gap-3 group">
-        <div className="bg-gradient-to-tr from-blue-600 to-purple-600 p-2 rounded-lg shadow-lg group-hover:scale-105 transition-transform">
-          {/* تأكد من وجود LogoIcon أو استبدله بـ <Building2 /> من lucide-react */}
-          <LogoIcon className="w-6 h-6 text-white" />
+    <nav dir="rtl" className="fixed inset-x-0 top-0 z-50 border-b border-slate-200/70 bg-white/80 backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/80">
+      <div className="mx-auto flex h-20 max-w-7xl items-center justify-between gap-4 px-5 sm:px-8 lg:px-10">
+        <Link to="/" aria-label="العودة إلى الرئيسية" className="group flex shrink-0 items-center gap-3 focus:outline-none focus:ring-4 focus:ring-blue-200 dark:focus:ring-blue-900">
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-500 text-white shadow-lg shadow-blue-500/20 transition duration-300 group-hover:-rotate-3 group-hover:scale-105">
+            <LogoIcon className="h-6 w-6" />
+          </span>
+          <span className="hidden sm:block">
+            <strong className="block text-lg font-black tracking-[0.18em] text-slate-950 dark:text-white">K.T.R.A</strong>
+            <small className="block text-[9px] font-bold text-slate-400">إدارة أعمال متكاملة</small>
+          </span>
+        </Link>
+
+        <div className="hidden items-center rounded-2xl border border-slate-200/80 bg-slate-50/80 p-1 md:flex dark:border-white/10 dark:bg-white/[0.03]">
+          <Link to="/" className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${linkClass("/")}`}>الرئيسية</Link>
+          {NAV_ITEMS.map(({ to, label }) => (
+            <Link key={to} to={to} className={`rounded-xl px-4 py-2.5 text-sm font-bold transition ${linkClass(to)}`}>{label}</Link>
+          ))}
         </div>
-        <span className="text-xl font-bold bg-gradient-to-r from-blue-700 to-purple-700 dark:from-blue-400 dark:to-purple-400 bg-clip-text text-transparent hidden sm:block">
-          K.T.R.A
-        </span>
-      </Link>
 
-      {/* الجزء الأيسر: الروابط */}
-      <div className="flex items-center gap-1 md:gap-2 bg-gray-100/50 dark:bg-gray-800/50 p-1.5 rounded-full border border-gray-200/50 dark:border-gray-700/50 backdrop-blur-sm">
-        <Link to="/" className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-300 font-medium text-sm md:text-base ${isActive('/')}`}>
-          <Home className="w-4 h-4" />
-          <span className="hidden md:inline">Home</span>
-        </Link>
-
-        <Link to="/about-us" className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-300 font-medium text-sm md:text-base ${isActive('/about-us')}`}>
-          <Users className="w-4 h-4" />
-          <span className="hidden md:inline">About Us</span>
-        </Link>
-
-        <Link to="/contact" className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-300 font-medium text-sm md:text-base ${isActive('/contact')}`}>
-          <Phone className="w-4 h-4" />
-          <span className="hidden md:inline">Contact Us</span>
-        </Link>
-
-        {/* إذا كان لديك معرض صور */}
-        <Link to="/gallery" className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-300 font-medium text-sm md:text-base ${isActive('/gallery')}`}>
-          <Images className="w-4 h-4" />
-          <span className="hidden md:inline">Gallery</span>
-        </Link>
-        <Link to="/store" className={`flex items-center gap-2 px-4 py-2 rounded-full transition-all duration-300 font-medium text-sm md:text-base ${isActive('/store')}`}>
-          <Images className="w-4 h-4" />
-          Store
+        <Link to="/store" className={`group inline-flex min-h-11 items-center gap-2 rounded-xl border px-3.5 text-sm font-extrabold transition sm:px-4 ${location.pathname === "/store" ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:text-blue-700 dark:border-white/10 dark:bg-white/5 dark:text-white dark:hover:border-blue-400/30 dark:hover:text-blue-300"}`}>
+          <ShoppingBag className="h-4 w-4" />
+          <span>المتجر</span>
+          <ArrowUpLeft className="hidden h-3.5 w-3.5 transition-transform group-hover:-translate-x-0.5 group-hover:-translate-y-0.5 sm:block" />
         </Link>
       </div>
     </nav>

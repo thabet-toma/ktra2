@@ -28,6 +28,59 @@ python manage.py check                                 # 0 مشاكل
 
 ---
 
+## [FIX — لوحة الأعمال وعزل أعضاء الشركة, 2026-07-22]
+
+- **لوحة أعمال أولاً:** المؤشرات الرئيسية أصبحت إيرادات الشهر، المصروفات، صافي الربح،
+  فواتير المبيعات، فواتير المشتريات، وقيمة المخزون. القيم المالية مبنية على القيود المرحّلة
+  بالعملة الأساسية، وتُعرض عملة كل فاتورة منفردة بلا جمع عملات مختلفة.
+- **الاستيراد مشروط بالكامل:** لا ينفّذ `/api/dashboard/` استعلامات الصفقات أو الشحنات أو
+  دفعات الاستيراد إلا عند تفعيل الوحدة ومنح المستخدم صلاحيتها. القسم اختياري في العقد، وروابط
+  البحث السريع والمسارات المباشرة محجوبة عند غياب الصلاحية. الفواتير الدولية لا تدخل ملخص
+  المشتريات لمن لا يملك وصول الاستيراد.
+- **إغلاق تعداد المستخدمين:** `/api/hr/users/` للسوبر يوزر فقط؛ إدارة الشركة تعرض أعضاء
+  الشركة الحالية لا مستخدمي المنصة، والإضافة تتطلب بريداً أو اسم مستخدم كاملاً بلا اقتراحات.
+  أزيل اشتراك Firestore العام لغير السوبر أدمن واستُبدل بتحميل أعضاء الشركة tenant-scoped،
+  وزر إدارة الأعضاء ظاهر لمدير الشركة فقط.
+- **الاختبارات:** عزل لوحة التحكم، صلاحية الاستيراد، منع تعداد مستخدمي المنصة، الإضافة بالمعرّف
+  الدقيق، وعدم إصدار طلبات users العامة من شاشة الإدارة مغطاة. التحقق النهائي: Django
+  **364/364**، Node **42/42**، Playwright الموجّه **7/7**، وفحص TypeScript والبناء الإنتاجي
+  و`check` وmigration drift ناجحة.
+
+---
+
+## [FEAT — إعادة بناء رحلة التسجيل وإنشاء أول شركة, 2026-07-22]
+
+- **صفحة هبوط احترافية — الجولة البصرية الثانية:** أُعيد بناء `LandingPage` كـhero ثنائي RTL
+  يثبت المنتج داخل أول شاشة عبر dashboard mockup كامل مبني بـHTML/Tailwind (KPIs، مخطط،
+  صحة الأعمال، تنبيه ترحيل)، مع trust strip وأقسام قدرات/تدفق عمل وCTA واضح. أُعيد تصميم
+  `PublicNavbar` بالعربية بهوية متماسكة وروابط ومساراته الأصلية، ووُصل CTA المتجر فعلياً.
+  التحقق البصري الفعلي: desktop ‏1440×900 وmobile ‏390×844 بلا overflow أو فراغ hero مفرط؛
+  TypeScript صفر، Vite/PWA build ناجح، وPlaywright onboarding **4/4** بعد التغيير.
+- **تسجيل موحّد وفوري:** صفحة عامة واحدة وCTA واحد؛ العقد `fullName/email/password` فقط،
+  البريد يُطبّع lowercase ويُمنع تكراره case-insensitively، وكلمة المرور حدها الأدنى 6 أحرف
+  بلا قواعد تعقيد إضافية. الحساب الجديد `is_active=True` فوراً، وإنشاء المستخدم ومرآته atomic.
+- **صفر عضويات افتراضياً:** حُذف `_attach_default_company`؛ التسجيل لا يفترض KTRA ولا الشركة
+  رقم 1. `GET my-companies` هو مصدر الحقيقة الوحيد لاكتمال onboarding، بلا flag أو migration.
+- **بوابة قبل التطبيق:** `ApplicationBoundary` في composition root يمنع تركيب `App` ومزوّداته
+  وطلباته tenant-scoped حتى ينتهي جلب العضويات. الحالات منفصلة: loading، error/retry، صفر شركات،
+  وشركة نشطة؛ صفر الشركات يمسح `tenantId/branchId` القديمين ويعرض `FirstCompanyOnboarding`.
+- **إنشاء أول شركة:** الشاشة تشرح الخطوات وتطلب اسم الشركة فقط، ثم تعيد استخدام
+  `POST /api/tenants/companies/`. لا تُفعّل الشركة من رد POST وحده؛ يجب أن يؤكد refresh عضوية
+  نفس `TenantID` بدور `manager` و`is_default=true` قبل تثبيت tenant وفتح `/dashboard`.
+  حارس request-version/user يمنع ردّاً قديماً من إعادة شركة مستخدم سابق بعد logout/switch.
+- **اتساق الدور:** عضوية `manager` الموثوقة تتغلب في user payload على قيمة mirror القديمة
+  `employee`، لذلك يبقى منشئ الشركة مديراً بعد reload/profile لا في الذاكرة المؤقتة فقط.
+- **Logging:** إعادة استخدام queue logger في Django و`clientLogger` ذي idle flush في الواجهة؛
+  أحداث الحالة/الفشل/المدة فقط، بلا اسم أو بريد أو كلمة مرور أو اسم شركة، ولا dependency جديدة.
+- **الملفات الأساسية:** `hr/auth_api.py`, `core/settings.py`,
+  `frontend_v2/{index.tsx,App.tsx,components/{LandingPage,SignupPage,onboarding/FirstCompanyOnboarding}.tsx,contexts/CompanyContext.tsx,services/authService.ts}`
+  واختبارات `tenants/tests/test_company_isolation.py` و`frontend_v2/e2e/new-company-onboarding.spec.ts`.
+- **التحقق النهائي:** Django **363/363**؛ `check` صفر؛ migration drift صفر؛ Node unit **42/42**؛
+  Playwright الموجّه **6/6**؛ TypeScript صفر؛ Vite/PWA production build ناجح. لا model أو migration
+  أو endpoint أو package جديد.
+
+---
+
 ## [FIX — إغلاق ملاحظات الجلسة الثانية U11–U16, 2026-07-18]
 
 - **U11 — إنشاء الشحنة:** صار `shipment_number` يقبل الفراغ عند الإنشاء فقط، ويولّد الخادم

@@ -18,14 +18,6 @@ export const signupUser = async (data: {
     fullName: string;
     email: string;
     password: string;
-    phone: string;
-    address: string;
-    /** 'trader' = تاجر/شركة، 'employee' = موظف/فريق كترا */
-    accountType?: 'trader' | 'employee';
-    companyName?: string;
-    experienceDescription?: string;
-    educationLevel?: string;
-    resumeData?: { name: string; type: string; url: string };
 }) => {
     const response = await fetch(`${API_URL}/hr/auth/signup/`, {
         method: 'POST',
@@ -34,7 +26,17 @@ export const signupUser = async (data: {
     });
     if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.detail || "Signup failed");
+        const firstFieldError = Object.values(errData).find((value) =>
+            typeof value === "string" || (Array.isArray(value) && typeof value[0] === "string")
+        );
+        const message = typeof errData.detail === "string"
+            ? errData.detail
+            : Array.isArray(firstFieldError)
+                ? firstFieldError[0]
+                : typeof firstFieldError === "string"
+                    ? firstFieldError
+                    : "تعذّر إنشاء الحساب. تحقق من البيانات وحاول مرة أخرى.";
+        throw new Error(message);
     }
     const result = await response.json();
     return result.user as User;
@@ -93,6 +95,8 @@ export const logoutUser = async () => {
     }
     localStorage.removeItem("token");
     localStorage.removeItem("userId");
+    localStorage.removeItem("tenantId");
+    localStorage.removeItem("branchId");
 };
 
 export const fetchUserProfile = async (uid: string): Promise<User | null> => {

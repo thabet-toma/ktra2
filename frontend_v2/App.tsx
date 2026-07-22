@@ -31,6 +31,7 @@ import { cleanOldCache } from "./services/offline/cacheCleaner";
 import {
   seedUsersIfEmpty,
   subscribeToUsers,
+  loadCompanyMemberUsers,
   subscribeToTasks,
   createTaskInDb,
   updateTaskInDb,
@@ -45,6 +46,7 @@ import {
 } from "./services/firestoreService";
 import { fetchUserProfile, logoutUser } from "./services/authService";
 import { useAuth } from "./contexts/AuthContext";
+import { useCompany } from "./contexts/CompanyContext";
 import { activeTasksService } from "./services/activeTasksService";
 import { autoDisableScheduler } from "./services/autoDisableScheduler";
 import { PublicNavbar } from "./components/layout/PublicNavbar";
@@ -221,15 +223,25 @@ const PATH_TO_VIEW: Record<string, AppView> = Object.fromEntries(
   (Object.entries(VIEW_PATHS) as [AppView, string][]).map(([view, path]) => [path, view])
 );
 
+const IMPORT_VIEWS = new Set<AppView>([
+  "deals-management",
+  "shipments-management",
+  "customs-clearance",
+  "import-flow",
+  "international-invoices",
+  "sql-deals",
+  "sql-shipments",
+  "sql-clearances",
+]);
+
 const App: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
   const { currentUser, loading: authLoading, logout, updateUser } = useAuth();
+  const { currentCompany, canAccessImport } = useCompany();
 
   const [authView, setAuthView] = useState<AuthView>("landing");
-  // نوع التسجيل المختار من صفحة الهبوط: تاجر/شركة أو موظف/فريق كترا.
-  const [signupType, setSignupType] = useState<'trader' | 'employee'>('trader');
   const [users, setUsers] = useState<User[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
 
@@ -241,6 +253,11 @@ const App: React.FC = () => {
   /** مزامنة المسار مع الـ URL لكل شاشة مدعومة */
   const setViewAndSyncPath = useCallback(
     (view: AppView, targetId?: string) => {
+      if (IMPORT_VIEWS.has(view) && !canAccessImport) {
+        navigate("/dashboard", { replace: true });
+        setAppView("dashboard");
+        return;
+      }
       if (view === "deals-management") {
         navigate(targetId ? `/deals/${encodeURIComponent(targetId)}` : "/deals", { replace: false });
       } else if (view === "shipments-management") {
@@ -284,7 +301,7 @@ const App: React.FC = () => {
       }
       setAppView(view);
     },
-    [navigate]
+    [canAccessImport, navigate]
   );
   const [sourcingView, setSourcingView] = useState<SourcingView>("search");
   const [products, setProducts] = useState<Product[]>([]);
@@ -460,6 +477,12 @@ const App: React.FC = () => {
     const params = new URLSearchParams(location.search);
     const idLegacy = params.get("id");
     const viewParam = params.get("view") as AppView | null;
+    const isImportPath = /^\/(deals|shipments|import-flow|clearance)(\/|$)/.test(path);
+    if (!canAccessImport && (isImportPath || (viewParam && IMPORT_VIEWS.has(viewParam)))) {
+      navigate("/dashboard", { replace: true });
+      setAppView("dashboard");
+      return;
+    }
     if (viewParam === "deals-management" && idLegacy) {
       navigate(`/deals/${encodeURIComponent(idLegacy)}`, { replace: true });
       return;
@@ -533,7 +556,7 @@ const App: React.FC = () => {
     if (viewParam) {
       setAppView(viewParam);
     }
-  }, [currentUser, location.pathname, location.search, navigate]);
+  }, [canAccessImport, currentUser, location.pathname, location.search, navigate]);
 
   useEffect(() => {
     if (!currentUser?.isApproved) return;
@@ -549,18 +572,29 @@ const App: React.FC = () => {
   // Data Subscription
   useEffect(() => {
     if (!currentUser) return;
-    seedUsersIfEmpty();
-    const unsubscribeUsers = subscribeToUsers((fetchedUsers) => {
-      setUsers(fetchedUsers);
-    });
+    let active = true;
+    let unsubscribeUsers = () => { };
+    if (currentUser.isSuperAdmin) {
+      void seedUsersIfEmpty();
+      unsubscribeUsers = subscribeToUsers(true, (fetchedUsers) => {
+        if (active) setUsers(fetchedUsers);
+      });
+    } else if (currentCompany) {
+      void loadCompanyMemberUsers(currentCompany.TenantID)
+        .then((companyUsers) => { if (active) setUsers(companyUsers); })
+        .catch(() => { if (active) setUsers([]); });
+    } else {
+      setUsers([]);
+    }
     const unsubscribeTasks = subscribeToTasks((fetchedTasks) => {
       setTasks(fetchedTasks);
     });
     return () => {
+      active = false;
       unsubscribeUsers();
       unsubscribeTasks();
     };
-  }, [currentUser]);
+  }, [currentUser?.id, currentUser?.isSuperAdmin, currentCompany?.TenantID]);
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
@@ -1874,7 +1908,7 @@ const App: React.FC = () => {
     if (authView === "signup") {
       return (
         <div>
-          <SignupPage onNavigateToLogin={() => setAuthView("login")} accountType={signupType} />
+          <SignupPage onNavigateToLogin={() => setAuthView("login")} />
         </div>
       );
     }
@@ -1882,7 +1916,7 @@ const App: React.FC = () => {
       return (
         <div>
           <LoginPage
-            onNavigateToSignup={() => { setSignupType('trader'); setAuthView("signup"); }}
+            onNavigateToSignup={() => setAuthView("signup")}
             onGoToStore={() => setAppView('store')}
           />
         </div>
@@ -1893,7 +1927,7 @@ const App: React.FC = () => {
       <div>
         <LandingPage
           onLogin={() => setAuthView("login")}
-          onSignup={(type) => { setSignupType(type); setAuthView("signup"); }}
+          onSignup={() => setAuthView("signup")}
           onGoToStore={() => setAppView('store')}
         />
       </div>
