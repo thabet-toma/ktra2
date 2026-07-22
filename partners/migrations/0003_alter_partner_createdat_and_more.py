@@ -119,10 +119,6 @@ class Migration(migrations.Migration):
             model_name='partner',
             name='is_deleted',
         ),
-        migrations.AlterUniqueTogether(
-            name='partnerbankaccount',
-            unique_together={('tenant', 'partner', 'account_number')},
-        ),
         migrations.RemoveField(
             model_name='partnergroup',
             name='Name',
@@ -130,6 +126,31 @@ class Migration(migrations.Migration):
         migrations.RemoveField(
             model_name='partnergroup',
             name='Type',
+        ),
+        # تُحذف الأعمدة القديمة قبل إعادة استخدام نفس db_column في الحقول الجديدة.
+        migrations.RemoveField(
+            model_name='partnerbankaccount',
+            name='AccountNumber',
+        ),
+        migrations.RemoveField(
+            model_name='partnerbankaccount',
+            name='BankAddress',
+        ),
+        migrations.RemoveField(
+            model_name='partnerbankaccount',
+            name='BankName',
+        ),
+        migrations.RemoveField(
+            model_name='partnerbankaccount',
+            name='BeneficiaryName',
+        ),
+        migrations.RemoveField(
+            model_name='partnerbankaccount',
+            name='IBAN',
+        ),
+        migrations.RemoveField(
+            model_name='partnerbankaccount',
+            name='SwiftCode',
         ),
         migrations.AddField(
             model_name='partner',
@@ -286,30 +307,6 @@ class Migration(migrations.Migration):
             name='phone',
             field=models.CharField(blank=True, db_column='Phone', max_length=20, null=True),
         ),
-        migrations.RemoveField(
-            model_name='partnerbankaccount',
-            name='AccountNumber',
-        ),
-        migrations.RemoveField(
-            model_name='partnerbankaccount',
-            name='BankAddress',
-        ),
-        migrations.RemoveField(
-            model_name='partnerbankaccount',
-            name='BankName',
-        ),
-        migrations.RemoveField(
-            model_name='partnerbankaccount',
-            name='BeneficiaryName',
-        ),
-        migrations.RemoveField(
-            model_name='partnerbankaccount',
-            name='IBAN',
-        ),
-        migrations.RemoveField(
-            model_name='partnerbankaccount',
-            name='SwiftCode',
-        ),
         migrations.AddField(
             model_name='partnergroup',
             name='name',
@@ -319,5 +316,10 @@ class Migration(migrations.Migration):
             model_name='partnerbankaccount',
             name='iban',
             field=models.CharField(blank=True, db_column='IBAN', max_length=50, null=True),
+        ),
+        # يجب أن يأتي بعد إضافة الحقول التي يشير إليها (tenant/partner/account_number).
+        migrations.AlterUniqueTogether(
+            name='partnerbankaccount',
+            unique_together={('tenant', 'partner', 'account_number')},
         ),
     ]
