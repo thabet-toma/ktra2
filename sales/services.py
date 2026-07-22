@@ -79,15 +79,67 @@ def get_or_create_default_customer(tenant) -> Partner:
     )
 
 
+def resolve_default_account(
+    tenant_id, code_prefixes=None, acc_type=None, name_kw=None, *, allow_any_of_type=True
+):
+    """أفضل حساب مطابق من شجرة الشركة: الكود، ثم النوع+الاسم، ثم أول حساب من النوع.
+
+    `allow_any_of_type=False` يمنع الرجوع الأعمى لأول حساب من النوع (قد يكون
+    حساباً رئيسياً لا يصلح للترحيل) — يُستخدم عند تعبئة الافتراضيات تلقائياً.
+    """
+    qs = Account.objects.filter(tenant_id=tenant_id, is_active=True)
+    for cp in (code_prefixes or []):
+        hit = qs.filter(code__startswith=cp).order_by("code").first()
+        if hit:
+            return hit
+    if acc_type:
+        typed = qs.filter(account_type=acc_type)
+        if name_kw:
+            hit = typed.filter(name__icontains=name_kw).order_by("code").first()
+            if hit:
+                return hit
+        if allow_any_of_type:
+            return typed.order_by("code").first()
+    return None
+
+
+def _fill_missing_stock_accounts(settings_obj: SalesSettings, tenant_id) -> list[str]:
+    """يملأ حسابَي تكلفة المبيعات والمخزون إن كانا فارغين — يعيد الحقول المعدّلة.
+
+    تركهما NULL كان يوقف ترحيل أي فاتورة مبيعات في شركة جديدة برسالة «عيّن حساب
+    تكلفة المبيعات والمخزون…»، مع أن شجرة الحسابات القياسية تحوي الحسابين أصلاً.
+    """
+    filled: list[str] = []
+    if settings_obj.default_cogs_account_id is None:
+        acc = resolve_default_account(
+            tenant_id, ["5101", "51"], "Expense", "تكلفة", allow_any_of_type=False
+        )
+        if acc:
+            settings_obj.default_cogs_account = acc
+            filled.append("default_cogs_account")
+    if settings_obj.default_inventory_account_id is None:
+        acc = resolve_default_account(
+            tenant_id, ["1104"], "Asset", "مخزون", allow_any_of_type=False
+        )
+        if acc:
+            settings_obj.default_inventory_account = acc
+            filled.append("default_inventory_account")
+    return filled
+
+
 def get_or_create_sales_settings(tenant) -> SalesSettings:
     """يُعيد (أو يُنشئ) إعدادات المبيعات للشركة، ويضبط قيمًا افتراضية ذكية."""
     tenant_id = getattr(tenant, "TenantID", tenant)
     settings_obj = SalesSettings.objects.filter(tenant_id=tenant_id).first()
     if settings_obj:
+        updates: list[str] = []
         # تأكد أن العميل الافتراضي موجود
         if settings_obj.default_customer_id is None:
             settings_obj.default_customer = get_or_create_default_customer(tenant_id)
-            settings_obj.save(update_fields=["default_customer"])
+            updates.append("default_customer")
+        updates += _fill_missing_stock_accounts(settings_obj, tenant_id)
+        if updates:
+            settings_obj.save(update_fields=updates)
         return settings_obj
 
     default_customer = get_or_create_default_customer(tenant_id)
@@ -134,6 +186,9 @@ def get_or_create_sales_settings(tenant) -> SalesSettings:
         default_revenue_account_service=default_rev,
         default_vat_rate=default_vat,
     )
+    filled = _fill_missing_stock_accounts(settings_obj, tenant_id)
+    if filled:
+        settings_obj.save(update_fields=filled)
     return settings_obj
 
 
@@ -300,9 +355,10 @@ def _build_cogs_journal_line_dicts(
     products_by_id: dict[int, Product],
 ) -> list[dict]:
     """Dr COGS / Cr Inventory — مبالغ من متوسط التكلفة قبل الصرف (نفس منطق حركة المخزون)."""
-    ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
-    fb_cogs = ss.default_cogs_account_id if ss else None
-    fb_inv = ss.default_inventory_account_id if ss else None
+    # يعبّئ الحسابين الافتراضيين إن كانا فارغين بدل إسقاط الترحيل
+    ss = get_or_create_sales_settings(invoice.tenant_id)
+    fb_cogs = ss.default_cogs_account_id
+    fb_inv = ss.default_inventory_account_id
 
     pair_totals: dict[tuple[int, int], Decimal] = defaultdict(Decimal)
     for line in lines:

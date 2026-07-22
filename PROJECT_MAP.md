@@ -28,6 +28,50 @@ python manage.py check                                 # 0 مشاكل
 
 ---
 
+## [FIX — بيانات التأسيس الناقصة تُعطّل الشركة الجديدة: العملات وحسابا ت.ب.م/المخزون, 2026-07-23]
+
+بلاغ المالك: شركة جديدة على نشرة جديدة (`noor.smart.ktragroup.com`) لا تقبل **فاتورة شراء**
+ثم لا تقبل **ترحيل فاتورة مبيعات**، بينما الشركة القديمة تعمل. عطلان مستقلان بجذر واحد:
+**بيانات تأسيس تُقرأ ولا تُزرع**، فيسقط المستند على قيمة `NULL`/سجل غائب.
+
+- **العطل ١ — «currency: عنصر ب Code=ILS غير موجود»:** جدول `currencies` **عام بلا tenant**
+  ولا تزرعه أي هجرة (الزرع الوحيد في `seed_minimum_tenant` اليدوي)، فأي قاعدة تُبنى من صفر
+  تبقى بجدوله فارغاً. نموذج فاتورة الشراء يرسل الرمز `"ILS"` **نصاً ثابتاً** في الواجهة
+  (`InvoiceForm.tsx` — القائمة مكتوبة في الكود لا مجلوبة من الخادم) و
+  `PurchaseInvoiceSerializer.currency` هو `SlugRelatedField(slug_field='Code')` ⇒ رفض دائم.
+  `create_company` كان **يقرأ** العملة الأساسية فقط (`filter(IsBaseCurrency=True).first()`)
+  فيحفظ `TenantSettings.currency = NULL` صامتاً.
+- **الإصلاح ١:** `tenants/services.ensure_base_currencies()` (idempotent) تزرع `ILS`/`USD`
+  وتضبط الأساسية عند غيابها، و`create_company` يستدعيها بدل القراءة المجردة. لا تُغيَّر عملة
+  أساسية قائمة (احترام قاعدة «لا دمج أعمى» المتّبعة في `ensure_operational_accounts`).
+- **العطل ٢ — «الصنف … الفئة (بدون فئة): عيّن حساب تكلفة المبيعات والمخزون»:** قيد COGS
+  يقرأ فئة المنتج ثم `SalesSettings.default_cogs_account/default_inventory_account`، وكلاهما
+  `NULL` في شركة جديدة لأن `get_or_create_sales_settings` كان يستنتج **الإيراد والعملة والضريبة
+  فقط**. النتيجة: كل فاتورة مبيعات مرفوضة رغم أن الشجرة القياسية تحوي `51 تكلفة المبيعات`
+  و`1104 المخزون` أصلاً.
+- **الإصلاح ٢:** `resolve_default_account()` (كود ← نوع+اسم ← أول حساب من النوع) +
+  `_fill_missing_stock_accounts()` في `sales/services.py`. تُستدعى في ثلاث نقاط: إنشاء
+  الإعدادات، **قراءتها** (فتُشفى الشركات القائمة ذاتياً بلا SQL)، وداخل
+  `_build_cogs_journal_line_dicts` (صار يمرّ عبر `get_or_create_sales_settings` بدل قراءة خام
+  تُرجع `None`). التعبئة التلقائية تستعمل `allow_any_of_type=False` فلا تقع على حساب رئيسي
+  غير صالح للترحيل — بخلاف زر «استعادة الافتراضيات» اليدوي (T-S3) الذي يبقى بسلوكه الواسع.
+- **إزالة ازدواج:** `SalesSettingsViewSet.restore_defaults` كان يحمل نسخة ثانية من منطق
+  الحلّ (وفيها `1105` ضريبة مدخلات كمرشّح لحساب مخزون) — صار يفوّض إلى `resolve_default_account`.
+- **الملفات:** `tenants/services.py`, `sales/services.py`, `sales/views.py`. لا موديل ولا هجرة.
+- **تحقّق:** pytest **529/529** + 14 subtests · `manage.py check` صفر ·
+  `makemigrations --check --dry-run` = No changes.
+- **إصلاح البيانات القائمة (نُفِّذ على النشرة الجديدة عبر phpMyAdmin):** إدراج صفّي
+  `currencies` ثم `UPDATE tenant_settings SET CurrencyID = (…ILS…) WHERE CurrencyID IS NULL`
+  — تنبيه: أعمدة `tenant_settings` بأسماء صريحة (`db_column='CurrencyID'`) لا بنمط Django
+  (`currency_id`)، وإلا `#1054 Unknown column`.
+- **[PENDING]** قائمة العملات في `InvoiceForm.tsx` ما زالت نصاً ثابتاً (`ILS`/`USD`) بدل
+  `tenants/currencies/`؛ لم تعد تُسقط الترحيل بعد الزرع، لكنها تبقى مصدر انحراف لو أضاف
+  المالك عملة ثالثة. وكذلك fallback المخزون في `inventory/services.py` يبحث عن `5101`
+  فقط (غير موجود في الشجرة القياسية التي تحوي `51`) — يعمل حالياً لأن مستوى الإعدادات
+  يسبقه، فيبقى للتنظيف لا للإصلاح العاجل.
+
+---
+
 ## [FIX — لوحة الأعمال وعزل أعضاء الشركة, 2026-07-22]
 
 - **لوحة أعمال أولاً:** المؤشرات الرئيسية أصبحت إيرادات الشهر، المصروفات، صافي الربح،

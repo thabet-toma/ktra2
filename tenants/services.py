@@ -107,6 +107,34 @@ def ensure_operational_accounts(tenant) -> list[str]:
     return created
 
 
+DEFAULT_CURRENCIES = [
+    # (Code, Name, Symbol) — الأول هو الأساسي عند غياب أي عملة أساسية
+    ('ILS', 'شيكل', '₪'),
+    ('USD', 'دولار', '$'),
+]
+
+
+def ensure_base_currencies():
+    """يضمن وجود العملات الافتراضية ويعيد العملة الأساسية (idempotent).
+
+    جدول العملات عام (بلا tenant) ولا تزرعه أي هجرة، فأي قاعدة تُبنى من صفر
+    تبقى بجدول فارغ: نموذج فاتورة الشراء يرسل الرمز 'ILS' نصاً ثابتاً فيرفضه
+    الخادم بـ «عنصر ب Code=ILS غير موجود». نزرعها هنا فلا تتكرر المصيدة.
+    لا نغيّر عملة أساسية قائمة — إن وُجدت نحترمها كما هي.
+    """
+    for code, cur_name, symbol in DEFAULT_CURRENCIES:
+        Currency.objects.get_or_create(
+            Code=code, defaults={'Name': cur_name, 'Symbol': symbol},
+        )
+    base = Currency.objects.filter(IsBaseCurrency=True).first()
+    if base is None:
+        base = Currency.objects.filter(Code=DEFAULT_CURRENCIES[0][0]).first()
+        if base is not None:
+            base.IsBaseCurrency = True
+            base.save(update_fields=['IsBaseCurrency'])
+    return base
+
+
 def create_company(name: str, creator_user) -> Tenant:
     """
     Creates a new Tenant, boots it with default settings, seeds its TenantBooks
@@ -126,7 +154,7 @@ def create_company(name: str, creator_user) -> Tenant:
 
         # 2. Create TenantSettings
         # Find base currency if available
-        base_currency = Currency.objects.filter(IsBaseCurrency=True).first()
+        base_currency = ensure_base_currencies()
         TenantSettings.objects.create(
             tenant=tenant,
             company_name_primary=tenant.CompanyName,

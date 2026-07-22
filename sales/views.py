@@ -634,24 +634,12 @@ class SalesSettingsViewSet(viewsets.ViewSet):
         if not tenant:
             return Response({"error": "لا يوجد شركة (tenant)."}, status=status.HTTP_400_BAD_REQUEST)
         ss = get_or_create_sales_settings(tenant)
-        from accounting.models import Account
+        from sales.services import resolve_default_account
 
         def resolve(code_prefixes=None, acc_type=None, name_kw=None):
-            qs = Account.objects.filter(tenant=tenant, is_active=True)
-            for cp in (code_prefixes or []):
-                hit = qs.filter(code__startswith=cp).order_by("code").first()
-                if hit:
-                    return hit
-            if acc_type:
-                typed = qs.filter(account_type=acc_type)
-                if name_kw:
-                    hit = typed.filter(name__icontains=name_kw).first()
-                    if hit:
-                        return hit
-                hit = typed.order_by("code").first()
-                if hit:
-                    return hit
-            return None
+            return resolve_default_account(
+                tenant.TenantID, code_prefixes, acc_type, name_kw
+            )
 
         ss.default_cash_account = resolve(["1101", "1102", "1103"], "Asset", "صندوق")
         ss.default_ar_account = resolve(["1201", "1106"], "Asset", "ذمم")
