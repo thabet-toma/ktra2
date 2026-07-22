@@ -43,12 +43,17 @@ class ActivityServiceTest(APITestCase):
 
     def test_failure_is_swallowed(self):
         # مجموعة غير قابلة للتسلسل JSON → create يفشل داخلياً ويُبتلع (لا استثناء).
+        # assertLogs يلتقط سجل الخطأ فيمنع تسرّب traceback إلى مخرجات الاختبارات،
+        # ويؤكّد الشقّ الثاني من العقد: الفشل يُبتلع **ويُسجَّل** — لا يُبتلع بصمت.
         before = ActivityLog.objects.count()
-        log_activity(
-            action="create", entity_type="x", metadata={"bad": {1, 2, 3}},
-            tenant=self.tenant, user=self.manager,
-        )
+        with self.assertLogs("core.activity", level="ERROR") as captured:
+            log_activity(
+                action="create", entity_type="x", metadata={"bad": {1, 2, 3}},
+                tenant=self.tenant, user=self.manager,
+            )
         assert ActivityLog.objects.count() == before  # لم يُنشأ صف، ولم يُرمَ استثناء
+        assert "log_activity failed" in captured.output[0]
+        assert "TypeError" in captured.output[0]  # سبب الفشل محفوظ في الـ traceback
 
     def test_no_tenant_is_noop(self):
         # شركة ثانية تُعطّل auto-resolve أحادي الشركة، فيبقى tenant=None فعلاً.
