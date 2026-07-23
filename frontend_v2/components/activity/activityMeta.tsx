@@ -40,7 +40,12 @@ export const ENTITY_LABELS: Record<string, string> = {
   sales_invoice: "فاتورة مبيعات",
   purchase_invoice: "فاتورة شراء",
   deal: "صفقة",
+  shipment: "شحنة",
+  clearance: "تخليص جمركي",
+  local_shipment: "نقل محلي",
   customer_payment: "سند قبض",
+  supplier_payment: "سند صرف",
+  partner: "جهة",
   session: "جلسة",
 };
 

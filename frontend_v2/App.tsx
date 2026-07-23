@@ -14,7 +14,6 @@ import {
   CashBox,
   AppView,
 } from "./types";
-import { NoSqlMigrationBanner } from "./components/NoSqlMigrationBanner";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
 import { useAutoConnectionRecovery } from "./hooks/useAutoConnectionRecovery";
 import OfflineBanner from "./components/offline/OfflineBanner";
@@ -1943,7 +1942,6 @@ const App: React.FC = () => {
           <PendingMutationsPanel />
         </div>
         <OfflineBanner status={onlineStatus} onRetry={() => window.location.reload()} />
-        <NoSqlMigrationBanner isManager={currentUser?.role === "manager"} />
         <main className="p-3 sm:p-4 lg:p-6">
           {/* الصفحات chunks كسولة — سبينر ريثما يصل chunk الشاشة المطلوبة */}
           <React.Suspense fallback={<div className="flex justify-center py-16"><LoadingSpinner /></div>}>

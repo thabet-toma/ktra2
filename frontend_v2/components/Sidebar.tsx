@@ -99,7 +99,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "supplier-management", label: "الموردين", icon: <UsersIcon className="h-4 w-4" /> },
   ];
 
-  // 5b) المخزون → مجموعة فرعية «الاستيراد» (زر الاستيراد المستقل أُزيل ويعيش هنا).
+  // 5) الاستيراد
   const importLinks: NavLink[] = [
     { view: "international-invoices", label: "الفواتير الدولية", icon: <FileText className="h-4 w-4" /> },
     { view: "deals-management", label: "الصفقات", icon: <Handshake className="h-4 w-4" /> },
@@ -110,7 +110,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "import-flow", label: "رحلة الاستيراد", icon: <Package className="h-4 w-4" /> },
   ];
 
-  // 5) المخزون — الأصناف (شجرة، T-N3) + أرصدة + حركات. (إعدادات المخزون غير مبنية — مُدرجة بخارطة الطريق.)
+  // 6) المخزون — الأصناف (شجرة، T-N3) + أرصدة + حركات. (إعدادات المخزون غير مبنية — مُدرجة بخارطة الطريق.)
   const inventoryLinks: NavLink[] = [
     { view: "stock-levels", label: "أرصدة المخزون", icon: <BarChart3 className="h-4 w-4" /> },
     { view: "items-management", label: "الأصناف", icon: <Boxes className="h-4 w-4" /> },
@@ -121,13 +121,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "stocktake", label: "الجرد", icon: <ClipboardList className="h-4 w-4" /> },
   ];
 
-  // 6) المالية — (البنوك غير مبنية كشاشة مستقلة — مُدرجة بخارطة الطريق).
+  // 7) المالية — (البنوك غير مبنية كشاشة مستقلة — مُدرجة بخارطة الطريق).
   const financeLinks: NavLink[] = [
     { view: "cash-boxes", label: "صناديق الكاش", icon: <Banknote className="h-4 w-4" /> },
     { view: "accounting-cheques", label: "الشيكات", icon: <Receipt className="h-4 w-4" /> },
   ];
 
-  // 7) التقارير — كل تقرير يفتح في تبويبه الخاص (G2).
+  // 8) التقارير — كل تقرير يفتح في تبويبه الخاص (G2).
   const reportsLinks: NavLink[] = [
     { view: "reports", label: "التقارير العامة", icon: <ReportsIcon className="h-4 w-4" />, path: "/reports", newTab: true },
     { view: "stock-movements", label: "تقرير حركة صنف", icon: <ArrowLeftRight className="h-4 w-4" />, path: "/stock-movements", newTab: true },
@@ -144,7 +144,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     if (inAny(customersLinks)) setCustomersExpanded(true);
     if (inAny(purchasesLinks)) setPurchasesExpanded(true);
     if (inAny(inventoryLinks)) setInventoryExpanded(true);
-    if (inAny(importLinks)) { setInventoryExpanded(true); setImportExpanded(true); }
+    if (inAny(importLinks)) setImportExpanded(true);
     if (inAny(financeLinks)) setFinanceExpanded(true);
     if (activeView.startsWith("accounting-") || activeView === "property-rental") setAccountingExpanded(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -252,42 +252,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           {(user.role === 'manager' || user.role === 'procurement') &&
             renderGroup("المشتريات", <ShoppingBag className="h-5 w-5 flex-shrink-0" />, purchasesExpanded, () => setPurchasesExpanded(!purchasesExpanded), purchasesLinks)}
 
-          {/* 5) المخزون — يضم مجموعة «الاستيراد» الفرعية (زر الاستيراد المستقل أُزيل) */}
-          {(user.role === 'manager' || user.role === 'procurement') &&
-            renderGroup("المخزون", <Warehouse className="h-5 w-5 flex-shrink-0" />, inventoryExpanded, () => setInventoryExpanded(!inventoryExpanded), inventoryLinks,
-              // مجموعة «الاستيراد» الفرعية تظهر فقط عند تفعيل الاستيراد للشركة النشطة + صلاحية المستخدم.
-              canAccessImport ? (
-              <div className="space-y-1">
-                <button
-                  onClick={() => setImportExpanded(!importExpanded)}
-                  className={`flex items-center justify-between w-full p-2 text-sm rounded transition-all ${importExpanded ? "bg-[var(--color-surface-3)] text-[var(--color-primary-emphasis)]" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
-                  title="الاستيراد"
-                >
-                  <div className="flex items-center gap-2">
-                    <Download className="h-4 w-4 flex-shrink-0" />
-                    <span className="font-semibold">الاستيراد</span>
-                  </div>
-                  {importExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                </button>
-                {importExpanded && (
-                  <div className="mr-3 pr-2 border-r border-[var(--color-border)] space-y-1">
-                    {importLinks.map((link) => (
-                      <button
-                        key={link.view}
-                        onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
-                        className={`flex items-center gap-2 w-full p-2 text-sm rounded-md transition-all ${isViewActive(link.view) ? "text-[var(--color-primary-emphasis)] font-bold bg-[var(--color-surface-3)]" : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"}`}
-                      >
-                        <span className="flex-shrink-0">{link.icon}</span>
-                        <span className="flex-1 text-right">{link.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              ) : undefined
-            )}
+          {/* 5) الاستيراد — مجموعة مستقلة عن المخزون. */}
+          {(user.role === 'manager' || user.role === 'procurement') && canAccessImport &&
+            renderGroup("الاستيراد", <Download className="h-5 w-5 flex-shrink-0" />, importExpanded, () => setImportExpanded(!importExpanded), importLinks)}
 
-          {/* 6) المالية */}
+          {/* 6) المخزون */}
+          {(user.role === 'manager' || user.role === 'procurement') &&
+            renderGroup("المخزون", <Warehouse className="h-5 w-5 flex-shrink-0" />, inventoryExpanded, () => setInventoryExpanded(!inventoryExpanded), inventoryLinks)}
+
+          {/* 7) المالية */}
           {hasAccess('manager') &&
             renderGroup("المالية", <Landmark className="h-5 w-5 flex-shrink-0" />, financeExpanded, () => setFinanceExpanded(!financeExpanded), financeLinks)}
 
@@ -295,7 +268,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           {hasAccess('manager') &&
             renderGroup("المحاسبة", <Calculator className="h-5 w-5 flex-shrink-0" />, accountingExpanded, () => setAccountingExpanded(!accountingExpanded), accountingLinks)}
 
-          {/* 7) التقارير — كل تقرير يفتح في تبويبه الخاص (G2) */}
+          {/* 8) التقارير — كل تقرير يفتح في تبويبه الخاص (G2) */}
           {hasAccess('manager') &&
             renderGroup("التقارير", <ReportsIcon className="h-5 w-5 flex-shrink-0" />, reportsExpanded, () => setReportsExpanded(!reportsExpanded), reportsLinks)}
 
@@ -398,7 +371,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   return (
     <>
       {/* Mobile Top Bar */}
-      <header className="md:hidden fixed top-0 left-0 right-0 h-14 bg-[var(--color-surface)] border-b border-[var(--color-border)] flex items-center justify-between px-4 z-40">
+      <header className="aseel-app-chrome md:hidden fixed top-0 left-0 right-0 h-14 bg-[var(--color-surface)] border-b border-[var(--color-border)] flex items-center justify-between px-4 z-40">
         <button onClick={() => setIsMobileMenuOpen(true)} className="p-2 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)] rounded-full transition-colors">
           <Menu className="h-6 w-6" />
         </button>
@@ -415,12 +388,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
       )}
 
       {/* Mobile Sidebar */}
-      <aside className={`fixed top-0 right-0 bottom-0 w-72 z-50 transform transition-transform duration-300 md:hidden ${isMobileMenuOpen ? "translate-x-0" : "translate-x-full"}`}>
+      <aside className={`aseel-sidebar fixed top-0 right-0 bottom-0 w-72 z-50 transform transition-transform duration-300 md:hidden ${isMobileMenuOpen ? "translate-x-0" : "translate-x-full"}`}>
         {SidebarContent(true)}
       </aside>
 
       {/* Desktop Sidebar Wrapper */}
-      <aside className={`hidden md:flex flex-col sticky top-0 h-screen transition-all duration-300 z-30 ${isCollapsed ? "w-20" : "w-64"}`}>
+      <aside className={`aseel-sidebar hidden md:flex flex-col sticky top-0 h-screen transition-all duration-300 z-30 ${isCollapsed ? "w-20" : "w-64"}`}>
 
         {/* المبدل (Toggle Button) - الموضع الجديد المحسن */}
         <button
@@ -438,7 +411,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
         {SidebarContent(false)}
       </aside>
 
-      <div className="h-14 md:hidden" />
+      <div className="aseel-sidebar-spacer h-14 md:hidden" />
     </>
   );
 };

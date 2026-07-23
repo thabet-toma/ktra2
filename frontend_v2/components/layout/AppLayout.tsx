@@ -84,10 +84,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   }, [onOpenGroupConstants]);
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden bg-[var(--color-surface)]" data-density={density}>
+    <div className="app-shell flex flex-col h-screen overflow-hidden bg-[var(--color-surface)]" data-density={density}>
       {/* task13 M6: حُذف chip العنوان (كان يكرر تسمية الشريط الجانبي والـ breadcrumb)
            ونُقلت «السنة المالية» إلى شريط الحالة السفلي بجانب المستخدم/الدور. */}
-      <div className="aseel-titlebar flex-shrink-0">
+      <div className="aseel-titlebar aseel-app-chrome flex-shrink-0">
         <div className="aseel-company flex items-center gap-3">
           <CompanySwitcher />
           <BranchSwitcher />
@@ -170,10 +170,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         </div>
       </div>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="app-workspace flex flex-1 min-h-0 overflow-hidden">
         <Sidebar user={user} activeView={activeView} setView={onNavigate} />
 
-        <div className="flex flex-col flex-1 min-w-0">
+        <div className="app-main flex flex-col flex-1 min-w-0">
           {/* شريط التنقل السريع */}
           <div className="aseel-toolbar flex-shrink-0">
             <div className="aseel-toolgrp">

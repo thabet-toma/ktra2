@@ -16,6 +16,7 @@ import {
   ChevronDown
 } from "lucide-react";
 import { AppView, User } from "../../types";
+import { clientLogger } from "../../services/logger";
 
 type ActionItem = {
   key: string;
@@ -151,7 +152,10 @@ export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate }) => {
       {/* Quick single-click icons for Print & Refresh */}
       <button
         type="button"
-        onClick={() => window.print()}
+        onClick={() => {
+          clientLogger.info("app.print_requested");
+          window.print();
+        }}
         className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-primary-emphasis)] hover:bg-[var(--color-surface-2)] rounded-lg transition-colors ml-1"
         title="طباعة"
       >

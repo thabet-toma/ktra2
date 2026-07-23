@@ -276,6 +276,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   // task18: المدفوع/الإجمالي المحفوظان — لحساب المتبقي عند تسجيل سند قبض على فاتورة مرحّلة.
   const [paidAmount, setPaidAmount] = useState(0);
   const [savedGrandTotal, setSavedGrandTotal] = useState(0);
+  const [paymentStatusDisplay, setPaymentStatusDisplay] = useState("غير مدفوعة");
+  const [customerBalanceBeforeInvoice, setCustomerBalanceBeforeInvoice] = useState(0);
+  const [customerBalanceAfterInvoice, setCustomerBalanceAfterInvoice] = useState(0);
+  const [paymentDetails, setPaymentDetails] = useState<SalesInvoiceDetail["payment_details"]>([]);
   const [creatingReceipt, setCreatingReceipt] = useState(false);
   // P3-2-b wiring: offline status + stale-data confirm for line additions.
   const { online: networkOnline } = useOnlineStatus();
@@ -684,6 +688,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setPostedJournalId(d.journal ?? null);
     setPaidAmount(Number((d as { amount_paid?: number | string }).amount_paid ?? 0));
     setSavedGrandTotal(Number((d as { grand_total?: number | string }).grand_total ?? 0));
+    setPaymentStatusDisplay(d.payment_status_display || "غير مدفوعة");
+    setCustomerBalanceBeforeInvoice(Number(d.customer_balance_before_invoice || 0));
+    setCustomerBalanceAfterInvoice(Number(d.customer_balance_after_invoice || 0));
+    setPaymentDetails(d.payment_details || []);
     setProductPickerLineKey(null);
     setTaxEditKey(null);
     setTaxPercentDraft({});
@@ -1212,6 +1220,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setInvoiceNumber("");
     setInvoiceStatus("draft");
     setPostedJournalId(null);
+    setPaidAmount(0);
+    setSavedGrandTotal(0);
+    setPaymentStatusDisplay("غير مدفوعة");
+    setCustomerBalanceBeforeInvoice(0);
+    setCustomerBalanceAfterInvoice(0);
+    setPaymentDetails([]);
     // تطبيق العميل الافتراضي من الإعدادات
     setCustomerId(salesSettings?.default_customer ?? "");
     setInvDate(new Date().toISOString().slice(0, 10));
@@ -1612,7 +1626,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     {
       F2: () => {
         noteKey("F2 طباعة");
-        window.print();
+        setShowPrintView(true);
       },
       F3: () => {
         noteKey("F3 سند مالي");
@@ -2578,13 +2592,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       }
       metrics={[
         { label: "الإجمالي", value: money(totals.grandTotal), tone: "info" },
-        { label: "المجموع قبل الضريبة", value: money(totals.subtotalExclTax) },
-        { label: "الضريبة", value: money(totals.taxAmount) },
-        {
-          label: "نوع الفاتورة",
-          value: invType === "cash" ? "نقدي" : "ذمم",
-          tone: invType === "cash" ? "ok" : "warn",
-        },
+        { label: "المدفوع المرحّل", value: money(paidAmount), tone: "ok" },
+        { label: "المتبقي", value: money(Math.max(savedGrandTotal - paidAmount, 0)), tone: "warn" },
+        { label: "حالة الدفع", value: paymentStatusDisplay },
       ]}
       parties={[
         {
@@ -2665,8 +2675,44 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           : []),
         { label: "الضريبة", value: money(totals.taxAmount) },
         { label: "الإجمالي", value: money(totals.grandTotal), emphasis: true },
+        { label: "المدفوع المرحّل", value: money(paidAmount) },
+        { label: "المتبقي", value: money(Math.max(savedGrandTotal - paidAmount, 0)), tone: "warn" },
+        { label: "رصيد العميل قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(customerBalanceBeforeInvoice) },
+        { label: "رصيد العميل الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(customerBalanceAfterInvoice), emphasis: true },
       ]}
-      sections={notes ? [{ key: "notes", title: "ملاحظات", content: notes }] : undefined}
+      sections={[
+        {
+          key: "payments",
+          title: `تفاصيل سندات القبض (${paymentDetails?.length || 0})`,
+          content: paymentDetails?.length ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-[var(--color-border)] text-[var(--color-text-muted)]">
+                    <th className="p-2 text-right">السند</th>
+                    <th className="p-2 text-right">التاريخ</th>
+                    <th className="p-2 text-right">المبلغ المخصص</th>
+                    <th className="p-2 text-right">الحالة</th>
+                    <th className="p-2 text-right">قيد اليومية</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paymentDetails.map((payment) => (
+                    <tr key={payment.id} className="border-b border-[var(--color-border)]">
+                      <td className="p-2">سند قبض #{payment.id}</td>
+                      <td className="p-2">{payment.payment_date}</td>
+                      <td className="p-2">{money(Number(payment.allocated_amount))}</td>
+                      <td className="p-2">{payment.is_posted ? "مرحّل" : "غير مرحّل"}</td>
+                      <td className="p-2">{payment.journal ? `#${payment.journal}` : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : "لا توجد سندات قبض مخصصة لهذه الفاتورة.",
+        },
+        ...(notes ? [{ key: "notes", title: "ملاحظات", content: notes }] : []),
+      ]}
     />
   );
 
@@ -3308,7 +3354,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             totals,
             currentUserName,
             notes,
-            currencyCode: currencyId !== "" ? currencies.find((c) => c.CurrencyID === currencyId)?.Code : undefined
+            currencyCode: currencyId !== "" ? currencies.find((c) => c.CurrencyID === currencyId)?.Code : undefined,
+            amountPaid: paidAmount,
+            remainingBalance: Math.max(savedGrandTotal - paidAmount, 0),
+            paymentStatusDisplay,
+            customerBalanceBeforeInvoice,
+            customerBalanceAfterInvoice,
+            paymentDetails: paymentDetails || [],
           }}
           onClose={() => setShowPrintView(false)}
         />

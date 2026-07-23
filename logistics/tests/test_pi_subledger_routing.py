@@ -12,6 +12,7 @@ from rest_framework.test import APITestCase
 
 from accounting.models import Account, JournalLine
 from accounting.services import create_fiscal_year, partner_posted_balance
+from core.models import ActivityLog
 from inventory.models import Product
 from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
 from partners.models import Partner
@@ -111,6 +112,7 @@ class PurchaseSubledgerRoutingTest(APITestCase):
         pay = SupplierPayment.objects.filter(
             partner=self.partner, is_posted=True).first()
         assert pay is not None, "يجب إنشاء سند صرف تلقائي للشراء النقدي"
+        assert pay.purchase_invoice_id == inv.id
         assert pay.amount == inv.grand_total
         assert pay.cash_or_bank_account_id == self.cash.id
 
@@ -129,6 +131,72 @@ class PurchaseSubledgerRoutingTest(APITestCase):
         debit, credit = partner_posted_balance(self.tenant.TenantID, self.partner.id)
         assert (credit - debit) == Decimal("0"), \
             "الشراء النقدي يجب ألا يترك المورد دائناً"
+
+    def test_supplier_payment_api_logs_create_and_post_for_supplier(self):
+        invoice = PurchaseInvoice.objects.create(
+            tenant=self.tenant, invoice_number="PINV-PAY-LINK-1",
+            partner=self.partner, currency=self.ils, invoice_date="2026-06-14",
+            exchange_rate=Decimal("1"), grand_total=Decimal("500.00"),
+            payment_type=PurchaseInvoice.PAYMENT_TYPE_CREDIT,
+        )
+        PurchaseInvoiceItem.objects.create(
+            invoice=invoice, product=self.product, name="صنف شراء",
+            quantity=Decimal("1"), unit_price=Decimal("500.00"),
+            total_price=Decimal("500.00"),
+        )
+        post_invoice = self.client.post(
+            f"/api/logistics/purchase-invoices/{invoice.id}/post-to-accounting/",
+            {}, format="json", **self._auth(),
+        )
+        assert post_invoice.status_code == 201, post_invoice.content
+        create_response = self.client.post(
+            "/api/logistics/supplier-payments/",
+            {
+                "partner": self.partner.id,
+                "purchase_invoice": invoice.id,
+                "payment_date": "2026-06-14",
+                "amount": "125.00",
+                "currency": self.ils.CurrencyID,
+                "exchange_rate": "1",
+                "cash_or_bank_account": self.cash.id,
+                "notes": "صرف من بطاقة المورد",
+            },
+            format="json",
+            **self._auth(),
+        )
+        assert create_response.status_code == 201, create_response.content
+        payment_id = create_response.json()["id"]
+
+        post_response = self.client.post(
+            f"/api/logistics/supplier-payments/{payment_id}/post/",
+            {}, format="json", **self._auth(),
+        )
+        assert post_response.status_code == 200, post_response.content
+        detail = self.client.get(
+            f"/api/logistics/purchase-invoices/{invoice.id}/", **self._auth(),
+        )
+        assert detail.status_code == 200, detail.content
+        assert detail.json()["payment_status"] == "partially_paid"
+        assert Decimal(detail.json()["amount_paid"]) == Decimal("125.00")
+        assert Decimal(detail.json()["remaining_balance"]) == Decimal("375.00")
+        assert Decimal(detail.json()["supplier_balance_before_invoice"]) == Decimal("0.00")
+        assert Decimal(detail.json()["supplier_balance_after_invoice"]) == Decimal("375.00")
+        assert Decimal(detail.json()["supplier_balance_current"]) == Decimal("375.00")
+        assert len(detail.json()["payment_details"]) == 1
+        assert detail.json()["payment_details"][0]["id"] == payment_id
+        assert detail.json()["payment_details"][0]["source"] == "supplier_payment"
+        assert detail.json()["payment_details"][0]["is_posted"] is True
+
+        rows = ActivityLog.objects.filter(
+            tenant=self.tenant,
+            entity_type="supplier_payment",
+            entity_id=payment_id,
+        ).order_by("id")
+        assert list(rows.values_list("action", flat=True)) == ["payment", "post"]
+        assert all(
+            row.partner_links.filter(partner=self.partner).exists()
+            for row in rows
+        )
 
     def test_credit_purchase_supplier_owed_equals_grand_total(self):
         """آجل: الشراء بالأجل لا يُسوّى تلقائياً، فيبقى المورد دائناً بكامل

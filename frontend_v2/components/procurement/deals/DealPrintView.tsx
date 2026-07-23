@@ -18,7 +18,8 @@ export const DealPrintView: React.FC<DealPrintViewProps> = ({ deal, currentUser,
         window.print();
     };
 
-    const totalPaid = deal.payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
+    const totalPaid = Number(deal.postedPaidAmount) || 0;
+    const unpostedAmount = Number(deal.unpostedRegisteredAmount) || 0;
     const subtotal = deal.subtotal || deal.items.reduce((sum, item) => sum + item.totalPrice, 0);
 
     // G1: عرض الأرقام عبر formatMoney — بلا أصفار عشرية زائدة
@@ -199,6 +200,8 @@ export const DealPrintView: React.FC<DealPrintViewProps> = ({ deal, currentUser,
                                     <th className="py-2 px-3 text-right">التاريخ</th>
                                     <th className="py-2 px-3 text-right">النوع</th>
                                     <th className="py-2 px-3 text-right">الحالة</th>
+                                    <th className="py-2 px-3 text-right">الترحيل</th>
+                                    <th className="py-2 px-3 text-right">القيد</th>
                                     <th className="py-2 px-3 text-left">المبلغ</th>
                                 </tr>
                             </thead>
@@ -211,16 +214,18 @@ export const DealPrintView: React.FC<DealPrintViewProps> = ({ deal, currentUser,
                                             <td className="py-2 px-3">
                                                 {p.confirmedBySupplier ? <span className="text-green-600 font-bold">● مؤكدة</span> : <span className="aseel-text-soft font-bold">○ قيد الانتظار</span>}
                                             </td>
+                                            <td className="py-2 px-3">{p.isPosted ? "مرحّلة" : "غير مرحّلة"}</td>
+                                            <td className="py-2 px-3">{p.journalId ? `#${p.journalId}` : "—"}</td>
                                             <td className="py-2 px-3 text-left font-mono font-bold" dir="ltr">{formatCurrency(p.amount)}</td>
                                         </tr>
                                     ))
                                 ) : (
-                                    <tr><td colSpan={4} className="py-4 text-center aseel-text-soft italic">لا توجد سجلات دفع</td></tr>
+                                    <tr><td colSpan={6} className="py-4 text-center aseel-text-soft italic">لا توجد سجلات دفع</td></tr>
                                 )}
                             </tbody>
                             <tfoot className="aseel-bg-panel font-bold border-t-2 aseel-border-soft text-sm">
                                 <tr>
-                                    <td colSpan={3} className="py-2 px-3 text-left">إجمالي المدفوع:</td>
+                                    <td colSpan={5} className="py-2 px-3 text-left">إجمالي المدفوع والمرحّل:</td>
                                     <td className="py-2 px-3 text-left font-mono text-green-700" dir="ltr">{formatCurrency(totalPaid)}</td>
                                 </tr>
                             </tfoot>
@@ -256,7 +261,19 @@ export const DealPrintView: React.FC<DealPrintViewProps> = ({ deal, currentUser,
                             </div>
                             <div className="flex justify-between pt-1 aseel-text-state font-bold text-sm">
                                 <span>المبلغ المتبقي:</span>
-                                <span className="font-mono" dir="ltr">{formatCurrency(deal.remainingAmount)}</span>
+                                <span className="font-mono" dir="ltr">{formatCurrency(deal.amountOutstanding ?? deal.remainingAmount)}</span>
+                            </div>
+                            <div className="flex justify-between pt-1 text-sm">
+                                <span>مسجّل بانتظار الترحيل:</span>
+                                <span className="font-mono" dir="ltr">{formatCurrency(unpostedAmount)}</span>
+                            </div>
+                            <div className="flex justify-between pt-1 text-sm">
+                                <span>رصيد المورد قبل دفعات الصفقة (بالعملة الأساسية):</span>
+                                <span className="font-mono" dir="ltr">{formatMoney(deal.supplierBalanceBeforeDealPayments || 0)}</span>
+                            </div>
+                            <div className="flex justify-between pt-1 text-sm">
+                                <span>رصيد المورد الحالي بعد الدفعات المرحّلة (بالعملة الأساسية):</span>
+                                <span className="font-mono" dir="ltr">{formatMoney(deal.supplierBalanceAfterDealPayments || 0)}</span>
                             </div>
                         </div>
                     </div>

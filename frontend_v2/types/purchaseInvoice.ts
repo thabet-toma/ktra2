@@ -63,6 +63,11 @@ export interface PurchaseInvoiceListDto {
   grand_total: number;
   fees_total?: string;
   payable_total?: string;
+  amount_paid?: string;
+  remaining_balance?: string;
+  payment_status?: "paid" | "partially_paid" | "unpaid";
+  payment_status_display?: string;
+  supplier_balance?: string;
   status: string;
   status_display: string;
   receipt_status?: ReceiptStatus;
@@ -116,6 +121,21 @@ export interface PurchaseInvoiceDto {
   remaining_balance?: string;
   payment_status?: "paid" | "partially_paid" | "unpaid";
   payment_status_display?: string;
+  supplier_balance_current?: string;
+  supplier_balance_before_invoice?: string;
+  supplier_balance_after_invoice?: string;
+  payment_details?: Array<{
+    source: "supplier_payment" | "purchase_invoice_payment";
+    id: number;
+    payment_date: string;
+    amount: string;
+    currency_code: string;
+    exchange_rate: string;
+    cash_or_bank_account_name?: string | null;
+    is_posted: boolean;
+    journal: number | null;
+    notes?: string;
+  }>;
   notes?: string | null;
   supplier_invoice_number?: string | null;
   factory_name?: string | null;

@@ -8,7 +8,7 @@
  */
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { invoicePathForReference } from "../../utils/entityLinks";
+import { entityPathForReference } from "../../utils/entityLinks";
 
 export interface LedgerColumn<Row = Record<string, unknown>> {
   key: string;
@@ -37,7 +37,7 @@ export const DocRefCell: React.FC<{
   label?: React.ReactNode;
 }> = ({ referenceType, referenceId, label }) => {
   const navigate = useNavigate();
-  const path = invoicePathForReference(referenceType, referenceId);
+  const path = entityPathForReference(referenceType, referenceId);
   const text = label ?? (referenceId != null ? `#${referenceId}` : "—");
   if (!path) return <span>{text}</span>;
   return (

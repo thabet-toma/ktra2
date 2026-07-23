@@ -6,7 +6,9 @@ from django.db.models import Sum
 from rest_framework import serializers
 
 from sales.models import SupplierPayment
+from core.payments import document_partner_balance_summary, document_payment_summary
 
+from .services import purchase_invoice_payment_summary
 from .text_utils import has_arabic as _has_arabic
 from .text_utils import (
     is_english_payment_or_legal_boilerplate as _english_payment_boilerplate,
@@ -280,6 +282,13 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
     posted_paid_amount = serializers.SerializerMethodField()
     amount_outstanding = serializers.SerializerMethodField()
     supplier_advance = serializers.SerializerMethodField()
+    unposted_registered_amount = serializers.SerializerMethodField()
+    payment_status_summary = serializers.SerializerMethodField()
+    supplier_balance_current = serializers.DecimalField(
+        source='supplier_balance', max_digits=18, decimal_places=2, read_only=True,
+    )
+    supplier_balance_before_deal_payments = serializers.SerializerMethodField()
+    supplier_balance_after_deal_payments = serializers.SerializerMethodField()
 
     class Meta:
         model = LogisticsDeal
@@ -319,11 +328,48 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
             return None
 
     @staticmethod
+    def _payments(obj):
+        return list(obj.payments.all())
+
+    @staticmethod
     def _posted_paid_total(obj):
-        return (
-            obj.payments.filter(is_posted=True).aggregate(total=Sum('amount'))['total']
-            or Decimal('0')
+        return sum(
+            (Decimal(str(payment.amount or 0)) for payment in LogisticsDealSerializer._payments(obj) if payment.is_posted),
+            Decimal('0'),
         ).quantize(Decimal('0.01'))
+
+    def get_unposted_registered_amount(self, obj):
+        return str(sum(
+            (Decimal(str(payment.amount or 0)) for payment in self._payments(obj) if not payment.is_posted),
+            Decimal('0'),
+        ).quantize(Decimal('0.01')))
+
+    def get_payment_status_summary(self, obj):
+        return document_payment_summary(
+            obj.total_amount, self._posted_paid_total(obj),
+        )['payment_status']
+
+    def _supplier_balance_summary(self, obj):
+        from accounting.services import partner_posted_journal_effect
+
+        cached = getattr(obj, '_deal_supplier_balance_summary', None)
+        if cached is not None:
+            return cached
+        current = Decimal(str(getattr(obj, 'supplier_balance', 0) or 0))
+        effect = partner_posted_journal_effect(
+            obj.tenant_id,
+            obj.partner_id,
+            [payment.journal_id for payment in self._payments(obj) if payment.is_posted],
+            supplier=True,
+        )
+        obj._deal_supplier_balance_summary = (current - effect, current)
+        return obj._deal_supplier_balance_summary
+
+    def get_supplier_balance_before_deal_payments(self, obj):
+        return str(self._supplier_balance_summary(obj)[0])
+
+    def get_supplier_balance_after_deal_payments(self, obj):
+        return str(self._supplier_balance_summary(obj)[1])
 
     def get_posted_paid_amount(self, obj):
         return str(self._posted_paid_total(obj))
@@ -950,9 +996,33 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
     shipment_name = serializers.CharField(source='shipment.shipment_name', read_only=True, default=None)
     # اسم الصفقة المحوَّلة — نفس مصدر قائمة الصفقات (بلا تكرار منطق الاشتقاق).
     deal_title = serializers.SerializerMethodField()
+    fees_total = serializers.DecimalField(
+        source='list_fees_total', max_digits=18, decimal_places=2, read_only=True,
+    )
+    payable_total = serializers.DecimalField(
+        source='list_payable_total', max_digits=18, decimal_places=2, read_only=True,
+    )
+    amount_paid = serializers.DecimalField(
+        source='list_amount_paid', max_digits=18, decimal_places=2, read_only=True,
+    )
+    remaining_balance = serializers.DecimalField(
+        source='list_remaining_balance', max_digits=18, decimal_places=2, read_only=True,
+    )
+    payment_status = serializers.CharField(source='list_payment_status', read_only=True)
+    payment_status_display = serializers.SerializerMethodField()
+    supplier_balance = serializers.DecimalField(
+        max_digits=18, decimal_places=2, read_only=True,
+    )
 
     def get_deal_title(self, obj):
         return _deal_title_for_list_preview(obj.deal) if obj.deal_id else ''
+
+    def get_payment_status_display(self, obj):
+        return {
+            'paid': 'مدفوعة بالكامل',
+            'partially_paid': 'مدفوعة جزئياً',
+            'unpaid': 'غير مدفوعة',
+        }.get(obj.list_payment_status, 'غير مدفوعة')
 
     class Meta:
         model = PurchaseInvoice
@@ -965,6 +1035,9 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'currency', 'currency_code', 'exchange_rate',
             'subtotal', 'discount_amount', 'tax_rate', 'tax_amount',
             'grand_total', 'status', 'status_display',
+            'fees_total', 'payable_total',
+            'amount_paid', 'remaining_balance',
+            'payment_status', 'payment_status_display', 'supplier_balance',
             'receipt_status', 'receipt_status_display',
             'is_posted', 'is_return', 'original_invoice', 'journal_id_display',
             'items_count',
@@ -1043,6 +1116,12 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     payment_status_display = serializers.SerializerMethodField()
     fees_total = serializers.SerializerMethodField()
     payable_total = serializers.SerializerMethodField()
+    supplier_balance_current = serializers.DecimalField(
+        source='supplier_balance', max_digits=18, decimal_places=2, read_only=True,
+    )
+    supplier_balance_before_invoice = serializers.SerializerMethodField()
+    supplier_balance_after_invoice = serializers.SerializerMethodField()
+    payment_details = serializers.SerializerMethodField()
     cash_or_bank_account_name = serializers.CharField(
         source='cash_or_bank_account.name', read_only=True, default=None,
     )
@@ -1089,6 +1168,8 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'status', 'status_display', 'notes',
             'receipt_status', 'receipt_status_display', 'is_local',
             'amount_paid', 'remaining_balance', 'payment_status', 'payment_status_display',
+            'supplier_balance_current', 'supplier_balance_before_invoice',
+            'supplier_balance_after_invoice', 'payment_details',
             'fees_total', 'payable_total',
             'supplier_invoice_number', 'factory_name',
             'is_posted', 'is_return', 'original_invoice', 'original_invoice_number',
@@ -1110,29 +1191,14 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         return read_document_pdfs(obj.tenant_id, 'purchase_invoices', obj.id)
 
     def _computed_amount_paid(self, obj) -> Decimal:
-        """المدفوع = نقدي مرفق + دفعات صريحة؛ والفاتورة النقدية المرحَّلة مدفوعة بالكامل."""
-        payable = self._payable_total(obj)
-        paid = Decimal(str(obj.attached_cash_amount or 0))
-        try:
-            paid += sum((Decimal(str(p.amount or 0)) for p in obj.payments.all()), Decimal('0'))
-        except Exception:
-            pass
-        if obj.payment_type == 'cash' and obj.is_posted:
-            # تسوية الشراء النقدي (Section B) تُفرّغ ذمم المورد بالكامل
-            paid = max(paid, payable)
-        if payable and paid > payable:
-            paid = payable
-        return paid.quantize(Decimal('0.01'))
+        return purchase_invoice_payment_summary(obj)['amount_paid']
 
     @staticmethod
     def _fees_total(obj) -> Decimal:
-        return sum(
-            (Decimal(str(f.amount or 0)) for f in obj.fees.all()),
-            Decimal('0'),
-        ).quantize(Decimal('0.01'))
+        return purchase_invoice_payment_summary(obj)['fees_total']
 
     def _payable_total(self, obj) -> Decimal:
-        return (Decimal(str(obj.grand_total or 0)) + self._fees_total(obj)).quantize(Decimal('0.01'))
+        return purchase_invoice_payment_summary(obj)['payable_total']
 
     def get_fees_total(self, obj):
         return str(self._fees_total(obj))
@@ -1144,25 +1210,59 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         return str(self._computed_amount_paid(obj))
 
     def get_remaining_balance(self, obj):
-        return str((self._payable_total(obj) - self._computed_amount_paid(obj)).quantize(Decimal('0.01')))
+        return str(purchase_invoice_payment_summary(obj)['remaining_balance'])
 
     def get_payment_status(self, obj):
-        grand = self._payable_total(obj)
-        paid = self._computed_amount_paid(obj)
-        if grand <= 0:
-            return 'unpaid'
-        if paid >= grand - Decimal('0.01'):
-            return 'paid'
-        if paid > 0:
-            return 'partially_paid'
-        return 'unpaid'
+        return purchase_invoice_payment_summary(obj)['payment_status']
 
     def get_payment_status_display(self, obj):
-        return {
-            'paid': 'مدفوعة',
-            'partially_paid': 'مدفوعة جزئياً',
-            'unpaid': 'غير مدفوعة',
-        }.get(self.get_payment_status(obj), 'غير مدفوعة')
+        return purchase_invoice_payment_summary(obj)['payment_status_display']
+
+    def _balance_summary(self, obj):
+        summary = purchase_invoice_payment_summary(obj)
+        return document_partner_balance_summary(
+            getattr(obj, 'supplier_balance', 0),
+            summary['remaining_balance'],
+            obj.exchange_rate,
+            is_posted=obj.is_posted,
+            direction=-1 if obj.is_return else 1,
+        )
+
+    def get_supplier_balance_before_invoice(self, obj):
+        return str(self._balance_summary(obj)['balance_before'])
+
+    def get_supplier_balance_after_invoice(self, obj):
+        return str(self._balance_summary(obj)['balance_after'])
+
+    def get_payment_details(self, obj):
+        details = []
+        for payment in obj.supplier_payments.all():
+            details.append({
+                'source': 'supplier_payment',
+                'id': payment.id,
+                'payment_date': payment.payment_date,
+                'amount': str(payment.amount),
+                'currency_code': payment.currency.Code,
+                'exchange_rate': str(payment.exchange_rate),
+                'cash_or_bank_account_name': payment.cash_or_bank_account.name,
+                'is_posted': payment.is_posted,
+                'journal': payment.journal_id,
+                'notes': payment.notes or '',
+            })
+        for payment in obj.payments.all():
+            details.append({
+                'source': 'purchase_invoice_payment',
+                'id': payment.id,
+                'payment_date': payment.payment_date,
+                'amount': str(payment.amount),
+                'currency_code': payment.currency.Code,
+                'exchange_rate': str(payment.exchange_rate),
+                'cash_or_bank_account_name': payment.cash_or_bank_account.name,
+                'is_posted': payment.is_posted,
+                'journal': payment.journal_id,
+                'notes': payment.notes or '',
+            })
+        return sorted(details, key=lambda row: (row['payment_date'], row['id']), reverse=True)
 
     def validate(self, attrs):
         payment_type = attrs.get('payment_type') or (
@@ -1526,6 +1626,7 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'partner', 'partner_name',
+            'purchase_invoice',
             'payment_date',
             'amount',
             'currency', 'currency_code', 'exchange_rate',
@@ -1546,4 +1647,21 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'payment_date': 'تاريخ الدفعة مطلوب.'})
         if not attrs.get('cash_or_bank_account'):
             raise serializers.ValidationError({'cash_or_bank_account': 'الصندوق/البنك مطلوب.'})
+        invoice = attrs.get(
+            'purchase_invoice',
+            self.instance.purchase_invoice if self.instance else None,
+        )
+        partner = attrs.get('partner', self.instance.partner if self.instance else None)
+        if invoice:
+            from core.tenant_utils import get_tenant
+            request = self.context.get('request')
+            tenant = get_tenant(request) if request else None
+            if tenant and invoice.tenant_id != tenant.TenantID:
+                raise serializers.ValidationError({
+                    'purchase_invoice': 'فاتورة الشراء لا تتبع الشركة الحالية.',
+                })
+            if partner and invoice.partner_id != partner.id:
+                raise serializers.ValidationError({
+                    'purchase_invoice': 'فاتورة الشراء لا تتبع المورد المحدد.',
+                })
         return attrs

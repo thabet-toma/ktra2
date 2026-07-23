@@ -71,7 +71,9 @@ export const SupplierPaymentsPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(
+    () => new URLSearchParams(window.location.search).get("payment_id") || "",
+  );
   const [showForm, setShowForm] = useState(false);
 
   // Form state

@@ -267,5 +267,24 @@ export interface Invoice {
     fees?: PurchaseInvoiceFeeLine[];
     feesTotal?: number;
     payableTotal?: number;
+    amountPaid?: number;
+    remainingBalance?: number;
+    paymentStatus?: 'paid' | 'partially_paid' | 'unpaid';
+    paymentStatusDisplay?: string;
+    partnerBalance?: number;
+    partnerBalanceBeforeInvoice?: number;
+    partnerBalanceAfterInvoice?: number;
+    paymentDetails?: Array<{
+        source: 'supplier_payment' | 'purchase_invoice_payment';
+        id: number;
+        paymentDate: string;
+        amount: number;
+        currencyCode: string;
+        exchangeRate: number;
+        cashOrBankAccountName?: string;
+        isPosted: boolean;
+        journalId?: number;
+        notes?: string;
+    }>;
     invoiceType?: 'local' | 'international';
 }

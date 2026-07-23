@@ -55,6 +55,13 @@ function sqlListToInvoice(row: PurchaseInvoiceListDto): Invoice {
     taxRate: row.tax_rate,
     taxAmount: row.tax_amount,
     grandTotal: row.grand_total,
+    feesTotal: Number(row.fees_total || 0),
+    payableTotal: Number(row.payable_total || row.grand_total || 0),
+    amountPaid: Number(row.amount_paid || 0),
+    remainingBalance: Number(row.remaining_balance || 0),
+    paymentStatus: row.payment_status || 'unpaid',
+    paymentStatusDisplay: row.payment_status_display || 'غير مدفوعة',
+    partnerBalance: Number(row.supplier_balance || 0),
     currency: row.currency_code === 'USD' ? 'USD' : 'ILS',
     invoiceDate: row.invoice_date || undefined,
     createdAt: row.created_at,
@@ -157,7 +164,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
   const [listPage, setListPage] = useState(1);
   const [listTotal, setListTotal] = useState(0);
   const [listFilters, setListFilters] = useState<InvoiceListFilters>({
-    search: '', status: 'all', kind: 'all', dateFrom: '', dateTo: '',
+    search: '', status: 'all', paymentStatus: 'all', kind: 'all', dateFrom: '', dateTo: '',
   });
   const listPageSize = 50;
   /** جاري جلب فاتورة من المسار (رقم) */
@@ -182,6 +189,7 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
         page_size: listPageSize,
         search: listFilters.search.trim() || undefined,
         is_posted: listFilters.status === 'posted' ? 'true' : listFilters.status === 'draft' ? 'false' : undefined,
+        payment_status: listFilters.paymentStatus === 'all' ? undefined : listFilters.paymentStatus,
         is_return: listFilters.kind === 'return' ? 'true' : listFilters.kind === 'invoice' ? 'false' : undefined,
         date_from: listFilters.dateFrom || undefined,
         date_to: listFilters.dateTo || undefined,

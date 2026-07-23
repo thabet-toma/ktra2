@@ -202,6 +202,7 @@ export const purchaseInvoiceApi = {
   /** وصل دفع للمورد (Feature 2): يُنشئ SupplierPayment ثم يرحّله (Dr ذمم المورد / Cr صندوق). */
   addSupplierPayment: async (body: {
     partner: number;
+    purchase_invoice?: number;
     payment_date: string;
     amount: string;
     currency?: number | null;

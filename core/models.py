@@ -62,3 +62,26 @@ class ActivityLog(models.Model):
 
     def __str__(self):
         return f"{self.action} {self.entity_type}#{self.entity_id} by {self.user_id}"
+
+
+class ActivityLogPartner(models.Model):
+    """يربط حدث النشاط الواحد بكل الجهات المتأثرة دون نسخ الحدث."""
+
+    id = models.AutoField(primary_key=True)
+    activity = models.ForeignKey(
+        ActivityLog, on_delete=models.CASCADE, related_name="partner_links",
+        db_column="ActivityLogID",
+    )
+    partner = models.ForeignKey(
+        "partners.Partner", on_delete=models.CASCADE, related_name="activity_links",
+        db_column="PartnerID",
+    )
+
+    class Meta:
+        db_table = "activity_log_partners"
+        managed = True
+        constraints = [
+            models.UniqueConstraint(
+                fields=["activity", "partner"], name="uniq_activity_log_partner",
+            ),
+        ]

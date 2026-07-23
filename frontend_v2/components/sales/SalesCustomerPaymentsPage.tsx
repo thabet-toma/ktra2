@@ -144,6 +144,11 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
       setAccounts(accs || []);
       setCurrencies(currs || []);
       setAging(ag || []);
+      const paymentId = Number(new URLSearchParams(window.location.search).get("payment_id"));
+      if (paymentId) {
+        setSearch(String(paymentId));
+        setSelectedPayment((pays || []).find((payment) => payment.id === paymentId) || null);
+      }
       // T-A4: Set default cash account (prefer sales settings, fallback to purchase settings)
       const defCash = sSettings?.default_cash_account || pSettings?.default_cash_account;
       if (defCash) {
@@ -444,26 +449,50 @@ const newChequeLine = (): ChequeLine => ({
   account_number: "",
 });
 
-const NewPaymentModal: React.FC<{
-  partners: Partner[];
-  accounts: Account[];
-  currencies: Currency[];
-  aging: AgingInvoice[];
+export const NewPaymentModal: React.FC<{
+  partners?: Partner[];
+  accounts?: Account[];
+  currencies?: Currency[];
+  aging?: AgingInvoice[];
   onClose: () => void;
   onSaved: () => void;
   /** T-P2: عميل مُسبق التعبئة عند الفتح من كشف الحساب. */
   initialPartnerId?: number | null;
+  initialPartner?: Partner | null;
+  lockPartner?: boolean;
   defaultCashAccountId?: number | "";
-}> = ({ partners, accounts, currencies, aging, onClose, onSaved, initialPartnerId, defaultCashAccountId }) => {
+}> = ({
+  partners: providedPartners,
+  accounts: providedAccounts,
+  currencies: providedCurrencies,
+  aging: providedAging,
+  onClose,
+  onSaved,
+  initialPartnerId,
+  initialPartner,
+  lockPartner = false,
+  defaultCashAccountId,
+}) => {
   const today = new Date().toISOString().split("T")[0];
-  const [partnerId, setPartnerId] = useState<number | "">(initialPartnerId ?? "");
+  const [loadedPartners, setLoadedPartners] = useState<Partner[]>(initialPartner ? [initialPartner] : []);
+  const [loadedAccounts, setLoadedAccounts] = useState<Account[]>([]);
+  const [loadedCurrencies, setLoadedCurrencies] = useState<Currency[]>([]);
+  const [loadedAging, setLoadedAging] = useState<AgingInvoice[]>([]);
+  const [loadedDefaultCashAccountId, setLoadedDefaultCashAccountId] = useState<number | "">("");
+  const partners = providedPartners ?? loadedPartners;
+  const accounts = providedAccounts ?? loadedAccounts;
+  const currencies = providedCurrencies ?? loadedCurrencies;
+  const aging = providedAging ?? loadedAging;
+  const effectiveDefaultCashAccountId = defaultCashAccountId || loadedDefaultCashAccountId;
+  const [partnerId, setPartnerId] = useState<number | "">(initialPartnerId ?? initialPartner?.id ?? "");
   const [date, setDate] = useState(today);
   const [amount, setAmount] = useState(""); // total payment amount
   const [cashAmount, setCashAmount] = useState(""); // N4-T4: نقد جزء
   const [currencyId, setCurrencyId] = useState<number | "">("");
   const [exchangeRate, setExchangeRate] = useState("1");
-  const [cashAccountId, setCashAccountId] = useState<number | "">(defaultCashAccountId ?? "");
+  const [cashAccountId, setCashAccountId] = useState<number | "">(effectiveDefaultCashAccountId);
   const [notes, setNotes] = useState("");
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   // N4-T4: withholding (خصم المصدر) — يُحسَب من amount
   const [withholdingPct, setWithholdingPct] = useState("0");
   const [withholdingAmt, setWithholdingAmt] = useState("0");
@@ -478,12 +507,68 @@ const NewPaymentModal: React.FC<{
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (
+      providedPartners !== undefined &&
+      providedAccounts !== undefined &&
+      providedCurrencies !== undefined &&
+      providedAging !== undefined
+    ) return;
+
+    let cancelled = false;
+    Promise.all([
+      providedPartners !== undefined
+        ? Promise.resolve(providedPartners)
+        : lockPartner && initialPartner
+          ? Promise.resolve([initialPartner])
+          : accountingApi.getPartners() as Promise<Partner[]>,
+      providedAccounts !== undefined
+        ? Promise.resolve(providedAccounts)
+        : accountingApi.getAccounts() as Promise<Account[]>,
+      providedCurrencies !== undefined
+        ? Promise.resolve(providedCurrencies)
+        : accountingApi.getCurrencies() as Promise<Currency[]>,
+      providedAging !== undefined
+        ? Promise.resolve(providedAging)
+        : getAgingReport(),
+      defaultCashAccountId
+        ? Promise.resolve(null)
+        : purchaseInvoiceApi.getSettings().catch(() => null),
+      defaultCashAccountId
+        ? Promise.resolve(null)
+        : getSalesSettings().catch(() => null),
+    ])
+      .then(([parts, accs, currs, agingRows, purchaseSettings, salesSettings]) => {
+        if (cancelled) return;
+        setLoadedPartners(parts || []);
+        setLoadedAccounts(accs || []);
+        setLoadedCurrencies(currs || []);
+        setLoadedAging(agingRows || []);
+        const defaultAccount =
+          salesSettings?.default_cash_account || purchaseSettings?.default_cash_account;
+        if (defaultAccount) setLoadedDefaultCashAccountId(defaultAccount);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "فشل تحميل إعدادات السند");
+      });
+
+    return () => { cancelled = true; };
+  }, [
+    providedPartners,
+    providedAccounts,
+    providedCurrencies,
+    providedAging,
+    lockPartner,
+    initialPartner,
+    defaultCashAccountId,
+  ]);
+
   // تحديث الصندوق الافتراضي في حال تم تحميله بعد فتح النافذة (مثال: فتح من رابط)
   useEffect(() => {
-    if (defaultCashAccountId && cashAccountId === "") {
-      setCashAccountId(defaultCashAccountId);
+    if (effectiveDefaultCashAccountId && cashAccountId === "") {
+      setCashAccountId(effectiveDefaultCashAccountId);
     }
-  }, [defaultCashAccountId, cashAccountId]);
+  }, [effectiveDefaultCashAccountId, cashAccountId]);
 
   // مجموع الشيكات = sum cheques.amount
   const totalCheques = cheques.reduce((s, c) => s + (Number(c.amount) || 0), 0);
@@ -547,7 +632,7 @@ const NewPaymentModal: React.FC<{
     amtNum > 0 &&
     cashAccountId &&
     currencyId &&
-    Math.abs(diff) < 0.02;
+    (allocations.length === 0 || Math.abs(diff) < 0.02);
 
   const suggestFifo = async () => {
     if (!partnerId || amtNum <= 0) {
@@ -604,7 +689,11 @@ const NewPaymentModal: React.FC<{
   const submit = async () => {
     setError(null);
     if (!canSubmit) {
-      setError("تأكد من تساوي مجموع التوزيعات مع مبلغ الدفعة");
+      setError(
+        allocations.length > 0
+          ? "تأكد من تساوي مجموع التوزيعات مع مبلغ الدفعة"
+          : "أكمل الحقول المطلوبة",
+      );
       return;
     }
     setSubmitting(true);
@@ -617,10 +706,14 @@ const NewPaymentModal: React.FC<{
         exchange_rate: exchangeRate,
         cash_or_bank_account: cashAccountId as number,
         notes,
-        allocations: allocations.map((a) => ({
-          invoice: a.invoice,
-          amount: a.amount,
-        })),
+        ...(allocations.length > 0
+          ? {
+              allocations: allocations.map((a) => ({
+                invoice: a.invoice,
+                amount: a.amount,
+              })),
+            }
+          : {}),
       });
       onSaved();
     } catch (e: unknown) {
@@ -652,6 +745,7 @@ const NewPaymentModal: React.FC<{
               <select
                 className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
                 value={partnerId}
+                disabled={lockPartner}
                 onChange={(e) => {
                   setPartnerId(e.target.value ? Number(e.target.value) : "");
                   setAllocations([]);
@@ -687,33 +781,37 @@ const NewPaymentModal: React.FC<{
               />
             </div>
 
-            <div>
-              <label className="block text-xs aseel-text-soft mb-1">العملة *</label>
-              <select
-                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
-                value={currencyId}
-                onChange={(e) =>
-                  setCurrencyId(e.target.value ? Number(e.target.value) : "")
-                }
-              >
-                {currencies.map((c) => (
-                  <option key={c.CurrencyID} value={c.CurrencyID}>
-                    {c.Code} {c.Name ? `— ${c.Name}` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {advancedOpen && (
+              <div>
+                <label className="block text-xs aseel-text-soft mb-1">العملة *</label>
+                <select
+                  className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
+                  value={currencyId}
+                  onChange={(e) =>
+                    setCurrencyId(e.target.value ? Number(e.target.value) : "")
+                  }
+                >
+                  {currencies.map((c) => (
+                    <option key={c.CurrencyID} value={c.CurrencyID}>
+                      {c.Code} {c.Name ? `— ${c.Name}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
-            <div>
-              <label className="block text-xs aseel-text-soft mb-1">سعر الصرف</label>
-              <input
-                type="number"
-                step="0.000001"
-                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
-                value={exchangeRate}
-                onChange={(e) => setExchangeRate(e.target.value)}
-              />
-            </div>
+            {advancedOpen && (
+              <div>
+                <label className="block text-xs aseel-text-soft mb-1">سعر الصرف</label>
+                <input
+                  type="number"
+                  step="0.000001"
+                  className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
+                  value={exchangeRate}
+                  onChange={(e) => setExchangeRate(e.target.value)}
+                />
+              </div>
+            )}
 
             <div>
               <label className="block text-xs aseel-text-soft mb-1">الصندوق / البنك *</label>
@@ -734,8 +832,18 @@ const NewPaymentModal: React.FC<{
             </div>
           </div>
 
-          {/* N4-T4: حقول مالية: نقدا + شيكات + المجموع + خصم المصدر */}
-          <div className="aseel-bg-panel/40 dark:aseel-bg-panel/10 border aseel-border-soft dark:aseel-border-soft/40 rounded-lg p-3">
+          <button
+            type="button"
+            onClick={() => setAdvancedOpen((open) => !open)}
+            className="text-sm px-3 py-2 rounded-lg border aseel-border-soft dark:aseel-border-soft hover:aseel-bg-panel"
+          >
+            {advancedOpen ? "إخفاء الإعدادات المتقدمة" : "إعدادات متقدمة"}
+          </button>
+
+          {advancedOpen && (
+            <>
+            {/* N4-T4: حقول مالية: نقدا + شيكات + المجموع + خصم المصدر */}
+            <div className="aseel-bg-panel/40 dark:aseel-bg-panel/10 border aseel-border-soft dark:aseel-border-soft/40 rounded-lg p-3">
             <h3 className="text-xs font-semibold aseel-text-ink dark:aseel-text-soft mb-2">حقول الدفع (N4-T4)</h3>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
               <div>
@@ -788,10 +896,10 @@ const NewPaymentModal: React.FC<{
                 />
               </div>
             </div>
-          </div>
+            </div>
 
-          {/* Tabs using AseelTabs */}
-          <AseelTabs
+            {/* Tabs using AseelTabs */}
+            <AseelTabs
             activeTab={activeTab}
             onTabChange={(key) => setActiveTab(key as "alloc" | "cheques" | "notes" | "accounts")}
             tabs={[
@@ -1025,7 +1133,9 @@ const NewPaymentModal: React.FC<{
                 )
               }
             ]}
-          />
+            />
+            </>
+          )}
 
           {error && (
             <div className="p-2 rounded aseel-bg-panel dark:aseel-bg-panel/20 aseel-text-state text-sm">

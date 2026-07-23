@@ -1911,7 +1911,9 @@ tbody td {
    القيم هنا صلبة عمداً (أسود على أبيض) ولا تُشتق من توكنات الجلد: الورق
    واحد في الجلدين، وربطه بالمظهر يطبع خلفيات داكنة. لا تحوّلها لمتغيرات. */
 @media print {
+  :root[data-skin] .aseel-app-chrome,
   :root[data-skin] .aseel-sidebar,
+  :root[data-skin] .aseel-sidebar-spacer,
   :root[data-skin] .aseel-toolbar,
   :root[data-skin] .aseel-actionbar,
   :root[data-skin] .aseel-statusbar-global,
@@ -1919,8 +1921,18 @@ tbody td {
   /* M5: الكلاس الفعلي الذي يرسمه AseelDocumentShell كان غائباً عن القائمة
      (الموجودان أعلاه اسمان لا يستعملهما الشل) ⇒ شريط الحالة كان يُطبع. */
   :root[data-skin] .aseel-statusbar,
-  :root[data-skin] .aseel-pagination {
+  :root[data-skin] .aseel-pagination,
+  :root[data-skin] .aseel-print-hidden {
     display: none !important;
+  }
+  :root[data-skin] .app-shell,
+  :root[data-skin] .app-workspace,
+  :root[data-skin] .app-main,
+  :root[data-skin] .app-content {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
   }
   :root[data-skin] .aseel-grid {
     width: 100% !important;

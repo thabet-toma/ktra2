@@ -10,8 +10,133 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from accounting.models import Account, Cheque
+from core.payments import document_payment_summary
 
 DEC = Decimal("0.01")
+
+
+def purchase_invoice_payment_summary(invoice):
+    """ملخص دفع فاتورة الشراء من السندات المرتبطة والمرحّلة فقط."""
+    cached = getattr(invoice, "_payment_summary_cache", None)
+    if cached is not None:
+        return cached
+    fees_total = sum(
+        (Decimal(str(f.amount or 0)) for f in invoice.fees.all()),
+        Decimal("0"),
+    ).quantize(DEC)
+    payable = (Decimal(str(invoice.grand_total or 0)) + fees_total).quantize(DEC)
+    linked_paid = sum(
+        (
+            Decimal(str(payment.amount or 0))
+            for payment in invoice.supplier_payments.all()
+            if payment.is_posted
+        ),
+        Decimal("0"),
+    )
+    legacy_paid = sum(
+        (
+            Decimal(str(payment.amount or 0))
+            for payment in invoice.payments.all()
+            if payment.is_posted
+        ),
+        Decimal("0"),
+    )
+    recorded_paid = linked_paid + legacy_paid
+    paid = recorded_paid if recorded_paid > 0 else Decimal(str(invoice.attached_cash_amount or 0))
+    if invoice.payment_type == "cash" and invoice.is_posted:
+        paid = max(paid, payable)
+    summary = {
+        "fees_total": fees_total,
+        "payable_total": payable,
+        **document_payment_summary(payable, paid),
+    }
+    invoice._payment_summary_cache = summary
+    return summary
+
+
+def annotate_purchase_invoice_payment_summary(queryset):
+    """نسخة SQL لملخص الدفع تُستخدم في القوائم والفلترة قبل pagination."""
+    from django.db.models import (
+        Case, CharField, DecimalField, ExpressionWrapper, F, OuterRef,
+        Subquery, Sum, Value, When,
+    )
+    from django.db.models.functions import Coalesce, Greatest
+    from logistics.models import PurchaseInvoiceFee, PurchaseInvoicePayment
+    from sales.models import SupplierPayment
+
+    money = DecimalField(max_digits=18, decimal_places=2)
+
+    def total_subquery(model, amount_field="amount", **filters):
+        return (
+            model.objects
+            .filter(invoice_id=OuterRef("pk"), **filters)
+            .values("invoice_id")
+            .annotate(total=Sum(amount_field))
+            .values("total")[:1]
+        )
+
+    fee_total = total_subquery(PurchaseInvoiceFee)
+    linked_paid = (
+        SupplierPayment.objects
+        .filter(purchase_invoice_id=OuterRef("pk"), is_posted=True)
+        .values("purchase_invoice_id")
+        .annotate(total=Sum("amount"))
+        .values("total")[:1]
+    )
+    legacy_paid = total_subquery(PurchaseInvoicePayment, is_posted=True)
+    zero = Value(Decimal("0.00"), output_field=money)
+
+    queryset = queryset.annotate(
+        list_fees_total=Coalesce(Subquery(fee_total, output_field=money), zero),
+        list_linked_paid=Coalesce(Subquery(linked_paid, output_field=money), zero),
+        list_legacy_paid=Coalesce(Subquery(legacy_paid, output_field=money), zero),
+    ).annotate(
+        list_payable_total=ExpressionWrapper(
+            F("grand_total") + F("list_fees_total"), output_field=money,
+        ),
+        list_recorded_paid=ExpressionWrapper(
+            F("list_linked_paid") + F("list_legacy_paid"), output_field=money,
+        ),
+    ).annotate(
+        list_effective_paid=Case(
+            When(
+                payment_type="cash", is_posted=True,
+                then=F("list_payable_total"),
+            ),
+            When(list_recorded_paid__gt=0, then=F("list_recorded_paid")),
+            default=F("attached_cash_amount"),
+            output_field=money,
+        ),
+    ).annotate(
+        list_amount_paid=Case(
+            When(
+                list_effective_paid__gt=F("list_payable_total"),
+                then=F("list_payable_total"),
+            ),
+            default=F("list_effective_paid"),
+            output_field=money,
+        ),
+    ).annotate(
+        list_remaining_balance=Greatest(
+            ExpressionWrapper(
+                F("list_payable_total") - F("list_amount_paid"),
+                output_field=money,
+            ),
+            zero,
+        ),
+    ).annotate(
+        list_payment_status=Case(
+            When(list_payable_total__lte=0, then=Value("unpaid")),
+            When(
+                list_amount_paid__gte=F("list_payable_total"),
+                then=Value("paid"),
+            ),
+            When(list_amount_paid__gt=0, then=Value("partially_paid")),
+            default=Value("unpaid"),
+            output_field=CharField(),
+        ),
+    )
+    return queryset
 
 
 def get_or_create_purchase_settings(tenant):

@@ -31,6 +31,7 @@ def log_activity(
     entity_label: str = "",
     description: str = "",
     metadata: dict | None = None,
+    partner_ids=None,
     request=None,
     tenant=None,
     user=None,
@@ -41,7 +42,7 @@ def log_activity(
     يحلّ الطلب/الشركة/المستخدم/الـ IP تلقائياً عند عدم تمريرها.
     """
     try:
-        from core.models import ActivityLog
+        from core.models import ActivityLog, ActivityLogPartner
         from core.tenant_utils import get_tenant
         from core.logger_middleware import get_current_request
 
@@ -62,7 +63,7 @@ def log_activity(
         # Savepoint: لو فشل الإدراج داخل معاملة المتصل، يتراجع المخفظ (savepoint)
         # فقط دون كسر معاملته الأصلية — التسجيل يبقى غير حاظر تماماً.
         with transaction.atomic():
-            ActivityLog.objects.create(
+            activity = ActivityLog.objects.create(
                 tenant=tenant,
                 user=user,
                 action=action,
@@ -74,6 +75,20 @@ def log_activity(
                 metadata=metadata or {},
                 ip_address=_client_ip(request),
             )
+            requested_partner_ids = set(partner_ids or [])
+            if requested_partner_ids:
+                from partners.models import Partner
+
+                valid_partner_ids = Partner.objects.filter(
+                    tenant=tenant, id__in=requested_partner_ids,
+                ).values_list("id", flat=True)
+                ActivityLogPartner.objects.bulk_create(
+                    [
+                        ActivityLogPartner(activity=activity, partner_id=partner_id)
+                        for partner_id in valid_partner_ids
+                    ],
+                    ignore_conflicts=True,
+                )
     except Exception:  # noqa: BLE001 — التسجيل لا يعطّل الطلب أبداً
         logger.exception("log_activity failed (action=%s entity=%s#%s)", action, entity_type, entity_id)
 

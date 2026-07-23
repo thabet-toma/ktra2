@@ -70,6 +70,10 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         if not tenant:
             return qs.none()
         qs = qs.filter(tenant_id=tenant.TenantID)
+        from accounting.services import annotate_partner_posted_balance
+        qs = annotate_partner_posted_balance(
+            qs, "customer_id", supplier=False, alias="customer_balance",
+        )
         # task11 M4: الفرع النشط يرى فواتيره فقط (الرئيسي يشمل القديمة بلا فرع)
         branch = get_branch(self.request, tenant)
         if branch is not None:
@@ -86,6 +90,16 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         invoice_type = self.request.query_params.get("invoice_type")
         if invoice_type:
             qs = qs.filter(invoice_type=invoice_type)
+        payment_status = self.request.query_params.get("payment_status")
+        if payment_status == "paid":
+            qs = qs.filter(grand_total__gt=0, amount_paid__gte=models.F("grand_total"))
+        elif payment_status == "partially_paid":
+            qs = qs.filter(
+                grand_total__gt=0, amount_paid__gt=0,
+                amount_paid__lt=models.F("grand_total"),
+            )
+        elif payment_status == "unpaid":
+            qs = qs.filter(models.Q(grand_total__lte=0) | models.Q(amount_paid__lte=0))
         date_from = self.request.query_params.get("date_from")
         if date_from:
             qs = qs.filter(invoice_date__gte=date_from)
@@ -100,7 +114,11 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 | models.Q(customer__legal_name__icontains=search)
             )
         if self.action not in {"list", "lookup"}:
-            qs = qs.prefetch_related("lines__product")
+            qs = qs.prefetch_related(
+                "lines__product",
+                "payment_allocations__payment__currency",
+                "payment_allocations__payment__journal",
+            )
         return qs.order_by("-invoice_date", "-id")
 
     @action(detail=False, methods=["get"], url_path="lookup")
@@ -159,6 +177,7 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         log_activity(
             action="create", entity_type="sales_invoice", entity_id=invoice.id,
             entity_label=invoice.invoice_number, description="إنشاء فاتورة مبيعات",
+            partner_ids=[invoice.customer_id],
             request=self.request,
         )
 
@@ -181,6 +200,7 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         log_activity(
             action="update", entity_type="sales_invoice", entity_id=invoice.id,
             entity_label=invoice.invoice_number, description="تعديل فاتورة مبيعات",
+            partner_ids=[invoice.customer_id],
             request=self.request,
         )
 
@@ -191,11 +211,12 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 {"detail": POSTED_DOC_WARNING, "can_unpost": True},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        inv_id, inv_no = instance.id, instance.invoice_number
+        inv_id, inv_no, customer_id = instance.id, instance.invoice_number, instance.customer_id
         response = super().destroy(request, *args, **kwargs)
         log_activity(
             action="delete", entity_type="sales_invoice", entity_id=inv_id,
             entity_label=inv_no, description="حذف فاتورة مبيعات", request=request,
+            partner_ids=[customer_id],
         )
         return response
 
@@ -234,6 +255,7 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         log_activity(
             action="unpost", entity_type="sales_invoice", entity_id=invoice.id,
             entity_label=invoice.invoice_number, description="إلغاء ترحيل فاتورة مبيعات",
+            partner_ids=[invoice.customer_id],
             request=request,
         )
         ser = SalesInvoiceSerializer(invoice, context={"request": request})
@@ -306,6 +328,7 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         log_activity(
             action="duplicate", entity_type="sales_invoice", entity_id=inv.id,
             entity_label=inv.invoice_number, description=f"نسخ من فاتورة {src.invoice_number}",
+            partner_ids=[inv.customer_id],
             request=request,
         )
         ser = SalesInvoiceSerializer(inv, context={"request": request})
@@ -322,6 +345,7 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         log_activity(
             action="post", entity_type="sales_invoice", entity_id=invoice.id,
             entity_label=invoice.invoice_number, description="ترحيل فاتورة مبيعات",
+            partner_ids=[invoice.customer_id],
             request=request,
         )
         ser = SalesInvoiceSerializer(invoice, context={"request": request})
@@ -374,6 +398,7 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             action="payment", entity_type="sales_invoice", entity_id=invoice.id,
             entity_label=invoice.invoice_number,
             description="سند قبض" + (" + ترحيل" if want_post else ""),
+            partner_ids=[invoice.customer_id],
             request=request,
         )
         ser = SalesInvoiceSerializer(invoice, context={"request": request})
@@ -565,9 +590,30 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
                 raise DRFValidationError({"payment": errors})
         log_activity(
             action="payment", entity_type="customer_payment", entity_id=payment.id,
-            entity_label=getattr(payment, "payment_number", "") or str(payment.id),
+            entity_label=getattr(payment, "payment_number", "") or f"#{payment.id}",
             description="سند قبض عميل", request=self.request,
+            partner_ids=[payment.partner_id],
         )
+
+    def perform_update(self, serializer):
+        payment = serializer.save()
+        log_activity(
+            action="update", entity_type="customer_payment", entity_id=payment.id,
+            entity_label=getattr(payment, "payment_number", "") or f"#{payment.id}",
+            description="تعديل سند قبض عميل", request=self.request,
+            partner_ids=[payment.partner_id],
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        payment = self.get_object()
+        payment_id, partner_id = payment.id, payment.partner_id
+        response = super().destroy(request, *args, **kwargs)
+        log_activity(
+            action="delete", entity_type="customer_payment", entity_id=payment_id,
+            entity_label=f"#{payment_id}", description="حذف سند قبض عميل",
+            request=request, partner_ids=[partner_id],
+        )
+        return response
 
     @action(detail=True, methods=["post"], url_path="post")
     def post_payment(self, request, pk=None):
@@ -578,8 +624,9 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         log_activity(
             action="post", entity_type="customer_payment", entity_id=payment.id,
-            entity_label=getattr(payment, "payment_number", "") or str(payment.id),
+            entity_label=getattr(payment, "payment_number", "") or f"#{payment.id}",
             description="ترحيل سند قبض عميل", request=request,
+            partner_ids=[payment.partner_id],
         )
         return Response(CustomerPaymentSerializer(payment).data)
 

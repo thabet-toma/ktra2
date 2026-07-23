@@ -550,7 +550,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 {/* بحث (F6 = focus) */}
                 <input
                     ref={searchInputRef}
-                    className="aseel-input"
+                    className="aseel-input aseel-print-hidden"
                     style={{ width: 200 }}
                     placeholder="بحث برقم الصفقة، المورد، المنتج… (F6)"
                     value={search}
@@ -558,7 +558,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 />
                 {/* فلتر الحالة */}
                 <select
-                    className="aseel-input"
+                    className="aseel-input aseel-print-hidden"
                     style={{ width: 150 }}
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
@@ -569,14 +569,14 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                     ))}
                 </select>
                 <button
-                    className="aseel-toolbtn"
+                    className="aseel-toolbtn aseel-print-hidden"
                     onClick={() => { setSearch(''); setStatusFilter('all'); void reloadDeals(); }}
                     title="تحديث القائمة وإعادة تعيين الفلاتر"
                 >
                     <RefreshCw style={{ width: 14, height: 14 }} />
                 </button>
                 <button
-                    className="aseel-toolbtn"
+                    className="aseel-toolbtn aseel-print-hidden"
                     onClick={() => setIsOfferModalOpen(true)}
                     title="إنشاء من عرض سعر"
                 >
@@ -585,21 +585,21 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                     من عرض
                 </button>
                 <button
-                    className="aseel-toolbtn"
+                    className="aseel-toolbtn aseel-print-hidden"
                     onClick={() => setIsShipmentModalOpen(true)}
                     title="إنشاء شحنة من صفقات جاهزة للشحن (اختيار متعدد)"
                 >
                     <Ship style={{ width: 14, height: 14 }} /> شحنة من الصفقات
                 </button>
                 <button
-                    className="aseel-toolbtn"
+                    className="aseel-toolbtn aseel-print-hidden"
                     onClick={() => setShowWizard(true)}
                     title="معالِج موجّه لإنشاء أول صفقة (3 خطوات مبسّطة)"
                 >
                     <Sparkles style={{ width: 14, height: 14 }} /> معالِج الصفقة
                 </button>
                 <button
-                    className="aseel-toolbtn"
+                    className="aseel-toolbtn aseel-print-hidden"
                     onClick={handleCreateNew}
                     title="صفقة جديدة (Ctrl+Ins)"
                 >
@@ -626,7 +626,7 @@ export const DealManagement: React.FC<DealManagementProps> = ({
                 }
             />
             {hasNextPage && (
-                <button className="aseel-toolbtn" onClick={() => void loadMoreDeals()}>
+                <button className="aseel-toolbtn aseel-print-hidden" onClick={() => void loadMoreDeals()}>
                     تحميل المزيد ({deals.length} من {totalCount})
                 </button>
             )}

@@ -54,7 +54,6 @@ import { openInNewTab } from "@/utils/openInNewTab";
 import { ItemSearchModal, productToItem } from "../price-offers/ItemSearchModal";
 import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
 
-import { getPartnerBalance, type PartnerBalanceResponse } from "@/services/salesApi";
 import {
   InvoiceBasicInfo,
   DealInfoSection,
@@ -159,8 +158,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [activeItemSearchIndex, setActiveItemSearchIndex] = useState<number | null>(null);
   // task18 DEF-B1/B3: إنشاء صنف جديد inline من خلية اسم الصنف (النص المكتوب يُمرَّر مسبقاً)
   const [inlineCreate, setInlineCreate] = useState<{ rowIndex: number; name: string } | null>(null);
-  // task18 DEF-C1: رصيد المورد (قبل/بعد) عند اختيار مورد — يطابق شاشة المبيعات.
-  const [supplierBalance, setSupplierBalance] = useState<PartnerBalanceResponse | null>(null);
   const [feeAccounts, setFeeAccounts] = useState<Array<{ id: number; code?: string; name?: string; account_type?: string }>>([]);
 
   useEffect(() => {
@@ -181,20 +178,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const markDirty = () => {
     dirtyRef.current = true;
   };
-  useEffect(() => {
-    const sid = formData.supplierId;
-    if (!sid) {
-      setSupplierBalance(null);
-      return;
-    }
-    const t = window.setTimeout(() => {
-      const feesTotal = (formData.fees || []).reduce((sum, fee) => sum + (Number(fee.amount) || 0), 0);
-      getPartnerBalance({ partnerId: sid, proposedTotal: (formData.grandTotal ?? 0) + feesTotal })
-        .then(setSupplierBalance)
-        .catch(() => setSupplierBalance(null));
-    }, 400);
-    return () => window.clearTimeout(t);
-  }, [formData.supplierId, formData.grandTotal, formData.fees]);
   /** بيانات الفاتورة والمورد — تُعرض من رأس الصفحة عند الضغط على «تفاصيل» */
   const [invoiceHeaderDetailsOpen, setInvoiceHeaderDetailsOpen] = useState(false);
   /** وصف الصفقة من SQL عند غيابه في الفاتورة المحمّلة */
@@ -1426,14 +1409,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           )}
         </div>
       )}
-      {supplierBalance && (
+      {formData.supplierId && (
         <div
           className="aseel-banner"
           style={{ marginBottom: "8px", display: "flex", gap: "18px", flexWrap: "wrap", fontSize: "13px" }}
         >
-          {/* task18 DEF-C1: رصيد المورد قبل/بعد هذه الفاتورة (من الـ subledger). */}
-          <span>رصيد المورد قبل الفاتورة: <strong>{formatMoney(supplierBalance.open_balance)}</strong></span>
-          <span>الرصيد المتوقع بعدها: <strong>{formatMoney(supplierBalance.projected_balance)}</strong></span>
+          <span>رصيد المورد قبل احتساب متبقي الفاتورة (بالعملة الأساسية): <strong>{formatMoney(formData.partnerBalanceBeforeInvoice || 0)}</strong></span>
+          <span>الرصيد الحالي بعد احتسابه (بالعملة الأساسية): <strong>{formatMoney(formData.partnerBalanceAfterInvoice || 0)}</strong></span>
         </div>
       )}
       <InvoiceBasicInfo
@@ -1843,9 +1825,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       }
       metrics={[
         { label: "إجمالي المستحق", value: invMoney(payableTotal), tone: "info" },
-        { label: "المجموع قبل الضريبة", value: invMoney(Number(formData.subtotal) || 0) },
-        { label: "الضريبة", value: invMoney(Number(formData.taxAmount) || 0) },
-        { label: "عدد البنود", value: String(invItems.length) },
+        { label: "المدفوع المرحّل", value: invMoney(Number(formData.amountPaid) || 0), tone: "ok" },
+        { label: "المتبقي", value: invMoney(Number(formData.remainingBalance) || 0), tone: "warn" },
+        { label: "حالة الدفع", value: formData.paymentStatusDisplay || "غير مدفوعة" },
       ]}
       parties={[
         {
@@ -1920,6 +1902,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               { label: "الضريبة المضافة", value: fmt(Number(formData.taxAmount) || 0) },
               ...invFees.map((fee) => ({ label: fee.description || "رسم إضافي", value: fmt(Number(fee.amount) || 0) })),
               { label: "إجمالي المستحق بعد الضريبة والرسوم", value: fmt(payableTotal), emphasis: true },
+              { label: "المدفوع المرحّل", value: fmt(Number(formData.amountPaid) || 0) },
+              { label: "المتبقي", value: fmt(Number(formData.remainingBalance) || 0), tone: "warn" },
+              { label: "رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceBeforeInvoice) || 0) },
+              { label: "رصيد المورد الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceAfterInvoice) || 0), emphasis: true },
               { label: "إجمالي الكمية", value: formatQuantity(totalQty) },
             ]
           : [
@@ -1931,10 +1917,33 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               { label: "الضريبة المضافة", value: fmt(Number(formData.taxAmount) || 0) },
               ...invFees.map((fee) => ({ label: fee.description || "رسم إضافي", value: fmt(Number(fee.amount) || 0) })),
               { label: "إجمالي المستحق بعد الضريبة والرسوم", value: fmt(payableTotal), emphasis: true },
+              { label: "المدفوع المرحّل", value: fmt(Number(formData.amountPaid) || 0) },
+              { label: "المتبقي", value: fmt(Number(formData.remainingBalance) || 0), tone: "warn" },
+              { label: "رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceBeforeInvoice) || 0) },
+              { label: "رصيد المورد الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceAfterInvoice) || 0), emphasis: true },
               { label: "إجمالي الكمية", value: formatQuantity(totalQty) },
             ]
       }
       sections={[
+        {
+          key: "payments",
+          title: `تفاصيل دفعات المورد (${formData.paymentDetails?.length || 0})`,
+          content: formData.paymentDetails?.length ? (
+            <AseelViewTable<NonNullable<Invoice["paymentDetails"]>[number]>
+              columns={[
+                { key: "voucher", header: "السند", render: (p) => `${p.source === "supplier_payment" ? "سند صرف" : "دفعة فاتورة"} #${p.id}` },
+                { key: "date", header: "التاريخ", width: "110px", render: (p) => p.paymentDate },
+                { key: "account", header: "الصندوق/البنك", render: (p) => p.cashOrBankAccountName || "—" },
+                { key: "amount", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (p) => `${fmt(p.amount)} ${p.currencyCode}` },
+                { key: "status", header: "الحالة", width: "100px", render: (p) => p.isPosted ? "مرحّل" : "غير مرحّل" },
+                { key: "journal", header: "القيد", width: "90px", render: (p) => p.journalId ? `#${p.journalId}` : "—" },
+              ]}
+              rows={formData.paymentDetails}
+              rowKey={(p) => `${p.source}-${p.id}`}
+              showIndex={false}
+            />
+          ) : "لا توجد دفعات مرتبطة بهذه الفاتورة.",
+        },
         ...(invFees.length > 0
           ? [
               {

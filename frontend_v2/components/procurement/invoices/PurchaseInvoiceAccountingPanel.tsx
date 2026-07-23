@@ -273,6 +273,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
     try {
       await purchaseInvoiceApi.addSupplierPayment({
         partner: invoice.partner,
+        purchase_invoice: invoiceId,
         payment_date: new Date().toISOString().slice(0, 10),
         amount: amt.toFixed(2),
         currency: invoice.currency ?? null,
@@ -412,6 +413,9 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           {/* task16 C10: الإجمالي + المتبقي + حالة الدفع */}
           <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="إجمالي الفاتورة">
             الإجمالي: {Number(invoice.grand_total || 0).toLocaleString()} {invoice.currency_code || ""}
+          </span>
+          <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="المبلغ المدفوع المرحّل">
+            المدفوع: {Number(invoice.amount_paid || 0).toLocaleString()} {invoice.currency_code || ""}
           </span>
           <span className="px-3 py-1.5 rounded-full text-sm font-medium border aseel-border-soft aseel-bg-panel aseel-text-ink" title="المبلغ المتبقي">
             المتبقي: {Number(invoice.remaining_balance ?? invoice.grand_total ?? 0).toLocaleString()} {invoice.currency_code || ""}

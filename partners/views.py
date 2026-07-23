@@ -121,9 +121,10 @@ class PartnerViewSet(viewsets.ModelViewSet):
             offset = max(int(request.query_params.get("offset", 0)), 0)
         except (TypeError, ValueError):
             offset = 0
+        ordering = request.query_params.get("ordering", "newest")
         return Response(partner_account_statement(
             tenant_id=partner.tenant_id, partner_id=partner.id,
-            is_supplier=is_supplier, limit=limit, offset=offset))
+            is_supplier=is_supplier, limit=limit, offset=offset, ordering=ordering))
 
     @action(detail=True, methods=["get"], url_path="invoices")
     def invoices(self, request, pk=None):

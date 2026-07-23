@@ -166,8 +166,13 @@ export interface Deal {
     totalAmount: number;
     remainingAmount: number;
     postedPaidAmount?: number;
+    unpostedRegisteredAmount?: number;
     amountOutstanding?: number;
     supplierAdvance?: number;
+    paymentStatusSummary?: 'paid' | 'partially_paid' | 'unpaid';
+    supplierBalanceCurrent?: number;
+    supplierBalanceBeforeDealPayments?: number;
+    supplierBalanceAfterDealPayments?: number;
     subtotal: number;
     shippingCost: number;
     shippingIncluded: boolean;

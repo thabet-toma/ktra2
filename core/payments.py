@@ -158,6 +158,55 @@ def get_payment_summary(ctx: PaymentContext) -> dict[str, Any]:
     }
 
 
+def document_payment_summary(total, paid) -> dict[str, Any]:
+    """ملخص دفع موحّد للمستندات: مدفوع/جزئي/غير مدفوع مع متبقٍ غير سالب."""
+    total_dec = Decimal(str(total or 0)).quantize(Decimal("0.01"))
+    paid_dec = Decimal(str(paid or 0)).quantize(Decimal("0.01"))
+    if total_dec <= 0:
+        status = "unpaid"
+        paid_dec = Decimal("0.00")
+    else:
+        paid_dec = min(max(paid_dec, Decimal("0.00")), total_dec)
+        status = (
+            "paid" if paid_dec >= total_dec
+            else "partially_paid" if paid_dec > 0
+            else "unpaid"
+        )
+    remaining = max(total_dec - paid_dec, Decimal("0.00"))
+    return {
+        "amount_paid": paid_dec,
+        "remaining_balance": remaining,
+        "payment_status": status,
+        "payment_status_display": {
+            "paid": "مدفوعة بالكامل",
+            "partially_paid": "مدفوعة جزئياً",
+            "unpaid": "غير مدفوعة",
+        }[status],
+    }
+
+
+def document_partner_balance_summary(
+    current_balance,
+    remaining_balance,
+    exchange_rate,
+    *,
+    is_posted: bool,
+    direction: int = 1,
+) -> dict[str, Decimal]:
+    """رصيد الشريك قبل/بعد احتساب المتبقي الحالي للمستند بالعملة الأساسية."""
+    current = Decimal(str(current_balance or 0)).quantize(Decimal("0.01"))
+    remaining = Decimal(str(remaining_balance or 0))
+    rate = Decimal(str(exchange_rate or 1))
+    effect = (remaining * rate * Decimal(direction)).quantize(Decimal("0.01"))
+    before = current - effect if is_posted else current
+    after = current if is_posted else current + effect
+    return {
+        "balance_before": before.quantize(Decimal("0.01")),
+        "balance_after": after.quantize(Decimal("0.01")),
+        "balance_current": current,
+    }
+
+
 def post_payment(
     ctx: PaymentContext,
     *,

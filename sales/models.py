@@ -619,6 +619,11 @@ class SupplierPayment(models.Model):
         'partners.Partner', on_delete=models.PROTECT,
         db_column="PartnerID", related_name="supplier_payments",
     )
+    purchase_invoice = models.ForeignKey(
+        'logistics.PurchaseInvoice', on_delete=models.SET_NULL,
+        null=True, blank=True, db_column="PurchaseInvoiceID",
+        related_name="supplier_payments",
+    )
     payment_date = models.DateField(db_column="PaymentDate")
     amount = models.DecimalField(max_digits=18, decimal_places=2, db_column="Amount")
     currency = models.ForeignKey(

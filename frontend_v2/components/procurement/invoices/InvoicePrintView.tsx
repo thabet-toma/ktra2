@@ -280,12 +280,62 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                                 <span className="font-mono" dir="ltr">{formatCurrency(totals.grandTotal)}</span>
                             </div>
                             <div className="flex justify-between pt-1.5">
+                                <span className="aseel-text-soft">المدفوع المرحّل:</span>
+                                <span className="font-mono font-bold" dir="ltr">{formatCurrency(invoice.amountPaid || 0)}</span>
+                            </div>
+                            <div className="flex justify-between pt-1.5">
+                                <span className="aseel-text-soft">المتبقي:</span>
+                                <span className="font-mono font-bold" dir="ltr">{formatCurrency(invoice.remainingBalance || 0)}</span>
+                            </div>
+                            <div className="flex justify-between pt-1.5">
+                                <span className="aseel-text-soft">حالة الدفع:</span>
+                                <span className="font-bold">{invoice.paymentStatusDisplay || "غير مدفوعة"}</span>
+                            </div>
+                            <div className="flex justify-between pt-1.5">
+                                <span className="aseel-text-soft">رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية):</span>
+                                <span className="font-mono font-bold" dir="ltr">{formatMoney(invoice.partnerBalanceBeforeInvoice || 0)}</span>
+                            </div>
+                            <div className="flex justify-between pt-1.5">
+                                <span className="aseel-text-soft">الرصيد الحالي بعد احتسابه (بالعملة الأساسية):</span>
+                                <span className="font-mono font-bold" dir="ltr">{formatMoney(invoice.partnerBalanceAfterInvoice || 0)}</span>
+                            </div>
+                            <div className="flex justify-between pt-1.5">
                                 <span className="aseel-text-soft">إجمالي الكمية:</span>
                                 <span className="font-mono font-bold" dir="ltr">{formatQuantity((invoice.items || []).reduce((s, it) => s + (Number(it.quantity) || 0), 0))}</span>
                             </div>
                         </div>
                     </div>
                 </div>
+
+                {!!invoice.paymentDetails?.length && (
+                    <div className="mb-4 border aseel-border-soft rounded-lg overflow-hidden">
+                        <div className="aseel-bg-panel px-3 py-2 border-b aseel-border-soft font-bold">تفاصيل دفعات المورد</div>
+                        <table className="w-full text-[10px]">
+                            <thead>
+                                <tr className="border-b aseel-border-soft">
+                                    <th className="p-2 text-right">السند</th>
+                                    <th className="p-2 text-right">التاريخ</th>
+                                    <th className="p-2 text-right">الصندوق/البنك</th>
+                                    <th className="p-2 text-right">المبلغ</th>
+                                    <th className="p-2 text-right">الحالة</th>
+                                    <th className="p-2 text-right">القيد</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {invoice.paymentDetails.map((payment) => (
+                                    <tr key={`${payment.source}-${payment.id}`} className="border-b aseel-border-soft">
+                                        <td className="p-2">{payment.source === "supplier_payment" ? "سند صرف" : "دفعة فاتورة"} #{payment.id}</td>
+                                        <td className="p-2">{formatDate(payment.paymentDate)}</td>
+                                        <td className="p-2">{payment.cashOrBankAccountName || "—"}</td>
+                                        <td className="p-2">{formatMoney(payment.amount)} {payment.currencyCode}</td>
+                                        <td className="p-2">{payment.isPosted ? "مرحّل" : "غير مرحّل"}</td>
+                                        <td className="p-2">{payment.journalId ? `#${payment.journalId}` : "—"}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
 
                 {/* 6. Attachments Section */}
                 <div className="mt-4 border aseel-border-soft rounded-lg p-3 aseel-bg-field no-print">

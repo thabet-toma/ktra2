@@ -24,6 +24,10 @@ export type SalesInvoiceRow = {
   status: string;
   grand_total: string;
   amount_paid?: string;
+  remaining_balance?: string;
+  payment_status?: "paid" | "partially_paid" | "unpaid";
+  payment_status_display?: string;
+  customer_balance?: string;
   currency: number;
   stock_on_post?: boolean;
   /** M2-T1: book number (0 = manual). */
@@ -84,6 +88,19 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
   attached_cash_amount?: string;
   attached_cash_account?: number | null;
   cheques?: AttachedCheque[];
+  customer_balance_before_invoice?: string;
+  customer_balance_after_invoice?: string;
+  payment_details?: Array<{
+    id: number;
+    payment_date: string;
+    allocated_amount: string;
+    total_payment_amount: string;
+    currency_code: string;
+    exchange_rate: string;
+    is_posted: boolean;
+    journal: number | null;
+    notes?: string;
+  }>;
   // M2-T4: source-discount overrides (null = use customer default)
   source_discount_percent_override?: string | null;
   source_discount_amount_override?: string | null;

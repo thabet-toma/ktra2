@@ -37,9 +37,12 @@ import { resolveTenantId } from "../../utils/tenantContext";
 import { eventBus } from "../../utils/eventBus";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { isOfflineRecordForTenant } from "../../utils/offlineTenantScope";
+import { clientLogger } from "../../services/logger";
+import { PaymentStatusBadge } from "../shared/PaymentStatusBadge";
 import {
   AseelDocumentShell,
   AseelDenseTable,
+  AseelDateInput,
   useAseelIndexKeymap,
   type DenseColumn,
   type AseelToolbarAction,
@@ -108,6 +111,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   // filters
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
+  const [filterPaymentStatus, setFilterPaymentStatus] = useState("");
   const [filterType, setFilterType] = useState("");
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
@@ -125,6 +129,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
         page_size: pageSize,
         search: search.trim() || undefined,
         status: filterStatus || undefined,
+        payment_status: filterPaymentStatus || undefined,
         invoice_type: filterType || undefined,
         date_from: filterFrom || undefined,
         date_to: filterTo || undefined,
@@ -136,7 +141,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [filterFrom, filterStatus, filterTo, filterType, page, search]);
+  }, [filterFrom, filterPaymentStatus, filterStatus, filterTo, filterType, page, search]);
 
   const loadMasterData = useCallback(async () => {
     const tenantId = resolveTenantId();
@@ -440,6 +445,18 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmtNum(r.grand_total)}</span>,
     },
     {
+      key: "payment_status",
+      header: "حالة الدفع",
+      width: "125px",
+      align: "center",
+      render: (r) => (
+        <PaymentStatusBadge
+          status={r.payment_status}
+          label={r.payment_status_display}
+        />
+      ),
+    },
+    {
       key: "amount_paid",
       header: "المدفوع",
       width: "100px",
@@ -454,7 +471,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       align: "left",
       numeric: true,
       render: (r) => {
-        const bal = Number(r.grand_total || 0) - Number(r.amount_paid || 0);
+        const bal = Number(r.remaining_balance ?? (Number(r.grand_total || 0) - Number(r.amount_paid || 0)));
         return (
           <span
             className="aseel-num font-mono text-xs font-semibold"
@@ -466,6 +483,14 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
           </span>
         );
       },
+    },
+    {
+      key: "customer_balance",
+      header: "رصيد العميل",
+      width: "110px",
+      align: "left",
+      numeric: true,
+      render: (r) => <span className="aseel-num font-mono text-xs">{fmtNum(r.customer_balance)}</span>,
     },
     {
       key: "vat_statement",
@@ -542,7 +567,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   ];
 
   const filterBar = (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
+    <div className="aseel-print-hidden" style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
       <label className="aseel-field" style={{ flex: 1, minWidth: "200px" }}>
         <span className="aseel-field-label">بحث (رقم / عميل)</span>
         <input
@@ -565,13 +590,31 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
           {STATUS_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
         </select>
       </label>
+      <label className="aseel-field" style={{ minWidth: "125px" }}>
+        <span className="aseel-field-label">حالة الدفع</span>
+        <select
+          className="aseel-input"
+          value={filterPaymentStatus}
+          onChange={(e) => {
+            const value = e.target.value;
+            clientLogger.info("sales_invoice.payment_filter_changed", { paymentStatus: value || "all" });
+            setFilterPaymentStatus(value);
+            setPage(1);
+          }}
+        >
+          <option value="">الكل</option>
+          <option value="unpaid">غير مدفوعة</option>
+          <option value="partially_paid">مدفوعة جزئياً</option>
+          <option value="paid">مدفوعة بالكامل</option>
+        </select>
+      </label>
       <label className="aseel-field">
         <span className="aseel-field-label">من تاريخ</span>
-        <input type="date" className="aseel-input" value={filterFrom} onChange={(e) => { setFilterFrom(e.target.value); setPage(1); }} />
+        <AseelDateInput value={filterFrom} onChange={(value) => { clientLogger.info("sales_invoice.date_filter_changed", { boundary: "from", hasValue: Boolean(value) }); setFilterFrom(value); setPage(1); }} />
       </label>
       <label className="aseel-field">
         <span className="aseel-field-label">إلى تاريخ</span>
-        <input type="date" className="aseel-input" value={filterTo} onChange={(e) => { setFilterTo(e.target.value); setPage(1); }} />
+        <AseelDateInput value={filterTo} onChange={(value) => { clientLogger.info("sales_invoice.date_filter_changed", { boundary: "to", hasValue: Boolean(value) }); setFilterTo(value); setPage(1); }} />
       </label>
     </div>
   );

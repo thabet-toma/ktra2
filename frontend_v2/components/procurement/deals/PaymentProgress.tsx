@@ -91,10 +91,6 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
         }
     };
 
-    /** نفس منطق البطاقات العلوية في DealForm: مجموع مبالغ كل صفوف الدفع */
-    const paidAmountFromPayments =
-        deal.payments?.reduce((s, p) => s + Number(p.amount || 0), 0) || 0;
-
     const getPaymentForInstallment = (installmentId: string) => {
         const found = findPaymentForInstallmentId(deal, installmentId);
         if (found) return found;
@@ -134,9 +130,8 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
     };
 
     const grandTotal = deal.totalAmount || 0;
-    /** إجمالي المعروض = مجموع payments (مثل البطاقات الخضراء/الصفراء)، لا يعتمد على ربط القسط فقط */
-    const totalPaid = paidAmountFromPayments;
-    const supplierAdvance = Math.max(0, Number(deal.supplierAdvance) || totalPaid - grandTotal);
+    const totalPaid = Number(deal.postedPaidAmount) || 0;
+    const supplierAdvance = Math.max(0, Number(deal.supplierAdvance) || 0);
     const amountOutstanding = Math.max(0, Number(deal.amountOutstanding) || grandTotal - totalPaid);
     const progressPercentage =
         grandTotal > 0 ? (totalPaid / grandTotal) * 100 : 0;
@@ -490,7 +485,7 @@ export const PaymentProgress: React.FC<PaymentProgressProps> = ({
                                 <span>المدفوع:</span>
                                 <span className="aseel-text-accent dark:aseel-text-soft font-bold">${totalPaid.toLocaleString()}</span>
                                 <span className="aseel-text-soft">|</span>
-                                <span>{supplierAdvance > 0 ? "رصيد لصالحك عند المورد:" : "المتبقي:"}</span>
+                                <span>{supplierAdvance > 0 ? "دفعة مقدمة على هذه الصفقة:" : "المتبقي:"}</span>
                                 <span className="aseel-text-soft font-bold">
                                     ${supplierAdvance > 0 ? supplierAdvance.toLocaleString() : amountOutstanding.toLocaleString()}
                                 </span>

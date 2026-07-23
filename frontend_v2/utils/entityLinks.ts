@@ -25,6 +25,22 @@ export function invoicePathForReference(
   return null;
 }
 
+/** مسار مستند/حركة من سجل النشاط أو كشف الحساب — مصدر تنقّل واحد. */
+export function entityPathForReference(
+  referenceType?: string | null,
+  referenceId?: number | null
+): string | null {
+  const invoicePath = invoicePathForReference(referenceType, referenceId);
+  if (invoicePath) return invoicePath;
+  if (referenceId == null) return null;
+  const t = (referenceType || "").toUpperCase();
+  if (t === "DEAL" || t === "LOGISTICS_DEAL") return `/deals/${referenceId}`;
+  if (t === "SHIPMENT" || t === "LOGISTICS_SHIPMENT") return `/import-flow/${referenceId}`;
+  if (t === "CUSTOMER_PAYMENT") return `/sales/customer-payments?payment_id=${referenceId}`;
+  if (t === "SUPPLIER_PAYMENT") return `/supplier-payments?payment_id=${referenceId}`;
+  return null;
+}
+
 /**
  * كشف الحساب: تسمية عربية واضحة لنوع الحركة بدل رمز `reference_type` الإنجليزي الخام
  * (SALES_INVOICE / CUSTOMER_PAYMENT …). مصدر حقيقة واحد يخدم كشف الحساب ونافذة التفاصيل.

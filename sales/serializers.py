@@ -6,6 +6,7 @@ from rest_framework import serializers
 from inventory.models import Product
 from partners.models import Partner
 from tenants.models import Currency
+from core.payments import document_partner_balance_summary, document_payment_summary
 
 from .models import (
     CreditDebitNote,
@@ -123,7 +124,50 @@ class SalesInvoiceLineSerializer(serializers.ModelSerializer):
         return str(obj.product) if obj.product_id else None
 
 
-class SalesInvoiceListSerializer(serializers.ModelSerializer):
+class _SalesInvoicePaymentSummarySerializer(serializers.Serializer):
+    remaining_balance = serializers.SerializerMethodField()
+    payment_status = serializers.SerializerMethodField()
+    payment_status_display = serializers.SerializerMethodField()
+    customer_balance = serializers.DecimalField(
+        max_digits=18, decimal_places=2, read_only=True,
+    )
+
+    @staticmethod
+    def _payment_summary(obj):
+        return document_payment_summary(obj.grand_total, obj.amount_paid)
+
+    def get_remaining_balance(self, obj):
+        return str(self._payment_summary(obj)["remaining_balance"])
+
+    def get_payment_status(self, obj):
+        return self._payment_summary(obj)["payment_status"]
+
+    def get_payment_status_display(self, obj):
+        return self._payment_summary(obj)["payment_status_display"]
+
+
+class _SalesInvoicePaymentDetailSerializer(serializers.Serializer):
+    id = serializers.IntegerField(source="payment.id")
+    payment_date = serializers.DateField(source="payment.payment_date")
+    allocated_amount = serializers.SerializerMethodField()
+    total_payment_amount = serializers.DecimalField(
+        source="payment.amount", max_digits=18, decimal_places=2,
+    )
+    currency_code = serializers.CharField(source="payment.currency.Code")
+    exchange_rate = serializers.DecimalField(
+        source="payment.exchange_rate", max_digits=18, decimal_places=6,
+    )
+    is_posted = serializers.BooleanField(source="payment.is_posted")
+    journal = serializers.IntegerField(source="payment.journal_id", allow_null=True)
+    notes = serializers.CharField(source="payment.notes", allow_blank=True)
+
+    def get_allocated_amount(self, obj):
+        return str(obj.amount_in_invoice_currency if obj.amount_in_invoice_currency is not None else obj.amount)
+
+
+class SalesInvoiceListSerializer(
+    _SalesInvoicePaymentSummarySerializer, serializers.ModelSerializer,
+):
     customer_name = serializers.CharField(source="customer.name", read_only=True)
 
     class Meta:
@@ -139,6 +183,10 @@ class SalesInvoiceListSerializer(serializers.ModelSerializer):
             "status",
             "grand_total",
             "amount_paid",
+            "remaining_balance",
+            "payment_status",
+            "payment_status_display",
+            "customer_balance",
             "currency",
             "stock_on_post",
             "book_number",
@@ -158,7 +206,9 @@ class _AttachedChequeSerializer(serializers.Serializer):
     notes = serializers.CharField(allow_blank=True, allow_null=True)
 
 
-class SalesInvoiceSerializer(serializers.ModelSerializer):
+class SalesInvoiceSerializer(
+    _SalesInvoicePaymentSummarySerializer, serializers.ModelSerializer,
+):
     lines = SalesInvoiceLineSerializer(many=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     invoice_number = serializers.CharField(required=False, allow_blank=True)
@@ -183,6 +233,28 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
     # M2-T3: attached cheques (read-only). Posting/clearing handled via
     # the `payment-voucher` endpoint.
     cheques = _AttachedChequeSerializer(many=True, read_only=True)
+    customer_balance_before_invoice = serializers.SerializerMethodField()
+    customer_balance_after_invoice = serializers.SerializerMethodField()
+    payment_details = _SalesInvoicePaymentDetailSerializer(
+        source="payment_allocations", many=True, read_only=True,
+    )
+
+    def _balance_summary(self, obj):
+        summary = self._payment_summary(obj)
+        direction = -1 if obj.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN else 1
+        return document_partner_balance_summary(
+            getattr(obj, "customer_balance", 0),
+            summary["remaining_balance"],
+            obj.exchange_rate,
+            is_posted=obj.status == SalesInvoice.STATUS_POSTED,
+            direction=direction,
+        )
+
+    def get_customer_balance_before_invoice(self, obj):
+        return str(self._balance_summary(obj)["balance_before"])
+
+    def get_customer_balance_after_invoice(self, obj):
+        return str(self._balance_summary(obj)["balance_after"])
 
     class Meta:
         model = SalesInvoice
@@ -205,6 +277,13 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
             "tax_amount",
             "grand_total",
             "amount_paid",
+            "remaining_balance",
+            "payment_status",
+            "payment_status_display",
+            "customer_balance",
+            "customer_balance_before_invoice",
+            "customer_balance_after_invoice",
+            "payment_details",
             "revenue_account",
             "cash_or_bank_account",
             "accounts_receivable_account",
@@ -237,6 +316,13 @@ class SalesInvoiceSerializer(serializers.ModelSerializer):
             "tax_amount",
             "grand_total",
             "amount_paid",
+            "remaining_balance",
+            "payment_status",
+            "payment_status_display",
+            "customer_balance",
+            "customer_balance_before_invoice",
+            "customer_balance_after_invoice",
+            "payment_details",
             "created_at",
             "journal",
             "customer_name",

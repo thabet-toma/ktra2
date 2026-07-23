@@ -8,7 +8,9 @@ import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Invoice, Item, Supplier } from "@/types";
 import { openInNewTab } from "@/utils/openInNewTab";
+import { clientLogger } from "../../../services/logger";
 import { useConfirm } from "../../../contexts/ConfirmContext";
+import { PaymentStatusBadge } from "../../shared/PaymentStatusBadge";
 import {
   Plus,
   RefreshCw,
@@ -21,6 +23,7 @@ import {
 import {
   AseelDocumentShell,
   AseelDenseTable,
+  AseelDateInput,
   type DenseColumn,
   type AseelToolbarAction,
 } from "../../aseel";
@@ -52,6 +55,7 @@ interface InvoiceListProps {
 export interface InvoiceListFilters {
   search: string;
   status: string;
+  paymentStatus: "all" | "paid" | "partially_paid" | "unpaid";
   kind: "all" | "invoice" | "return";
   dateFrom: string;
   dateTo: string;
@@ -90,6 +94,9 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   // فلاتر
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterPaymentStatus, setFilterPaymentStatus] = useState<
+    "all" | "paid" | "partially_paid" | "unpaid"
+  >("all");
   // فلتر النوع: الكل / فواتير الشراء / مراجيع الشراء.
   const [filterKind, setFilterKind] = useState<"all" | "invoice" | "return">("all");
   const [dateFrom, setDateFrom] = useState("");
@@ -100,6 +107,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
     onFiltersChange?.({
       search,
       status: filterStatus,
+      paymentStatus: filterPaymentStatus,
       kind: filterKind,
       dateFrom,
       dateTo,
@@ -108,6 +116,9 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   };
 
   const grandOf = (invoice: Invoice): number => {
+    if (invoice.payableTotal != null && !Number.isNaN(Number(invoice.payableTotal))) {
+      return Number(invoice.payableTotal);
+    }
     const itemsTotal = (invoice.items || []).reduce((sum, it) => {
       const qty = parseFloat(it.quantity as any) || 0;
       const price = parseFloat(it.unitPrice as any) || 0;
@@ -124,9 +135,9 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   };
 
   const supplierName = (invoice: Invoice): string => {
-    if (!suppliers || !invoice.supplierId) return "مورد غير محدد";
-    const s = suppliers.find((x) => x.id === invoice.supplierId);
-    return s?.alias || s?.tradeName || invoice.factoryName || "مورد غير محدد";
+    if (!invoice.supplierId) return "مورد غير محدد";
+    const s = suppliers?.find((x) => x.id === invoice.supplierId);
+    return s?.alias || s?.tradeName || invoice.supplierSnapshot?.tradeName || invoice.factoryName || "مورد غير محدد";
   };
 
   const filteredRows = useMemo(() => {
@@ -137,6 +148,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         if (filterKind === "return" && !inv.isReturn) return false;
         if (filterStatus === "posted" && !inv.isPosted) return false;
         if (filterStatus === "draft" && inv.isPosted) return false;
+        if (filterPaymentStatus !== "all" && inv.paymentStatus !== filterPaymentStatus) return false;
         const d = inv.invoiceDate || (inv.createdAt ? inv.createdAt.slice(0, 10) : "");
         if (dateFrom && d && d < dateFrom) return false;
         if (dateTo && d && d > dateTo) return false;
@@ -152,7 +164,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         const db = new Date(b.invoiceDate || b.createdAt || "").getTime();
         return db - da;
       });
-  }, [invoices, filterStatus, filterKind, dateFrom, dateTo, search, suppliers]);
+  }, [invoices, filterStatus, filterPaymentStatus, filterKind, dateFrom, dateTo, search, suppliers]);
 
   const columns: DenseColumn<Invoice>[] = [
     {
@@ -259,6 +271,42 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmtNum(grandOf(r))}</span>,
     },
     {
+      key: "paymentStatus",
+      header: "حالة الدفع",
+      width: "125px",
+      align: "center",
+      render: (r) => (
+        <PaymentStatusBadge
+          status={r.paymentStatus}
+          label={r.paymentStatusDisplay}
+        />
+      ),
+    },
+    {
+      key: "amountPaid",
+      header: "المدفوع",
+      width: "100px",
+      align: "left",
+      numeric: true,
+      render: (r) => <span className="aseel-num font-mono text-xs">{fmtNum(r.amountPaid)}</span>,
+    },
+    {
+      key: "remainingBalance",
+      header: "المتبقي",
+      width: "100px",
+      align: "left",
+      numeric: true,
+      render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmtNum(r.remainingBalance)}</span>,
+    },
+    {
+      key: "partnerBalance",
+      header: "رصيد المورد",
+      width: "110px",
+      align: "left",
+      numeric: true,
+      render: (r) => <span className="aseel-num font-mono text-xs">{fmtNum(r.partnerBalance)}</span>,
+    },
+    {
       key: "actions",
       header: "إجراءات",
       width: "200px",
@@ -319,7 +367,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   ];
 
   const filterBar = (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
+    <div className="aseel-print-hidden" style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
       <label className="aseel-field" style={{ flex: 1, minWidth: "200px" }}>
         <span className="aseel-field-label">بحث (رقم / مورد)</span>
         <input
@@ -352,13 +400,31 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           {STATUS_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
         </select>
       </label>
+      <label className="aseel-field" style={{ minWidth: "125px" }}>
+        <span className="aseel-field-label">حالة الدفع</span>
+        <select
+          className="aseel-input"
+          value={filterPaymentStatus}
+          onChange={(e) => {
+            const value = e.target.value as InvoiceListFilters["paymentStatus"];
+            clientLogger.info("purchase_invoice.payment_filter_changed", { paymentStatus: value });
+            setFilterPaymentStatus(value);
+            publishFilters({ paymentStatus: value });
+          }}
+        >
+          <option value="all">الكل</option>
+          <option value="unpaid">غير مدفوعة</option>
+          <option value="partially_paid">مدفوعة جزئياً</option>
+          <option value="paid">مدفوعة بالكامل</option>
+        </select>
+      </label>
       <label className="aseel-field">
         <span className="aseel-field-label">من تاريخ</span>
-        <input type="date" className="aseel-input" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); publishFilters({ dateFrom: e.target.value }); }} />
+        <AseelDateInput value={dateFrom} onChange={(value) => { clientLogger.info("purchase_invoice.date_filter_changed", { boundary: "from", hasValue: Boolean(value) }); setDateFrom(value); publishFilters({ dateFrom: value }); }} />
       </label>
       <label className="aseel-field">
         <span className="aseel-field-label">إلى تاريخ</span>
-        <input type="date" className="aseel-input" value={dateTo} onChange={(e) => { setDateTo(e.target.value); publishFilters({ dateTo: e.target.value }); }} />
+        <AseelDateInput value={dateTo} onChange={(value) => { clientLogger.info("purchase_invoice.date_filter_changed", { boundary: "to", hasValue: Boolean(value) }); setDateTo(value); publishFilters({ dateTo: value }); }} />
       </label>
     </div>
   );

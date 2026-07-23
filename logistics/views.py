@@ -18,7 +18,7 @@ from .models import (
     LogisticsDeal, LogisticsDealItem, LogisticsShipment,
     LogisticsClearance, LogisticsShipmentDeal,
     LogisticsPayment, LogisticsClearancePayment,
-    PurchaseInvoice, PurchaseInvoiceItem, PurchaseInvoiceFee,
+    PurchaseInvoice, PurchaseInvoiceItem, PurchaseInvoiceFee, PurchaseInvoicePayment,
     LocalShipment, LocalShipmentPayment,
 )
 from sales.models import SupplierPayment
@@ -38,7 +38,14 @@ from partners.signals import ensure_partner_linked_account
 from tenants.models import Tenant, Currency
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
 from accounting.cashbox import resolve_default_cash_box_account
-from accounting.services import create_audit_log, validate_fiscal_period, post_journal, get_exchange_rate, unpost_document
+from accounting.services import (
+    annotate_partner_posted_balance,
+    create_audit_log,
+    get_exchange_rate,
+    post_journal,
+    unpost_document,
+    validate_fiscal_period,
+)
 from .accruals import (
     AccrualSkipped, post_clearance_accrual, post_freight_accrual,
     post_local_shipment_accrual,
@@ -58,7 +65,10 @@ from .landed_cost import (
 )
 from .domain.shipment_builder import create_shipment_from_deals
 from .domain.stages import derive_stage
-from .services import attach_pi_payment_voucher
+from .services import (
+    annotate_purchase_invoice_payment_summary,
+    attach_pi_payment_voucher,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +116,9 @@ class LogisticsDealViewSet(BaseTenantViewSet):
             qs = qs.filter(order_date__lte=date_to)
 
         qs = qs.select_related('partner', 'currency', 'tenant', 'created_by')
+        qs = annotate_partner_posted_balance(
+            qs, "partner_id", supplier=True, alias="supplier_balance",
+        )
         if self.action == 'list':
             return qs.prefetch_related(
                 Prefetch(
@@ -120,7 +133,10 @@ class LogisticsDealViewSet(BaseTenantViewSet):
                     'items',
                     queryset=LogisticsDealItem.objects.select_related('product', 'deal'),
                 ),
-                'payments',
+                Prefetch(
+                    'payments',
+                    queryset=LogisticsPayment.objects.select_related('journal'),
+                ),
                 Prefetch(
                     'logisticsshipmentdeal_set',
                     queryset=LogisticsShipmentDeal.objects.select_related('shipment'),
@@ -153,6 +169,7 @@ class LogisticsDealViewSet(BaseTenantViewSet):
         log_activity(
             action='create', entity_type='deal', entity_id=deal.id,
             entity_label=deal.ref_number, description='إنشاء صفقة', request=self.request,
+            partner_ids=[deal.partner_id],
         )
 
     def retrieve(self, request, *args, **kwargs):
@@ -277,6 +294,7 @@ class LogisticsDealViewSet(BaseTenantViewSet):
             action='create', entity_type='deal', entity_id=deal.id,
             entity_label=deal.ref_number,
             description=f'إضافة دفعة #{payment.payment_number} ({payment.amount})',
+            partner_ids=[deal.partner_id],
             request=request,
         )
         return Response(
@@ -345,6 +363,7 @@ class LogisticsDealViewSet(BaseTenantViewSet):
             action='update', entity_type='deal', entity_id=deal.id,
             entity_label=deal.ref_number,
             description=f'تحديث دفعة #{payment.payment_number}',
+            partner_ids=[deal.partner_id],
             request=request,
         )
         return Response(LogisticsPaymentSerializer(payment).data)
@@ -364,6 +383,7 @@ class LogisticsDealViewSet(BaseTenantViewSet):
         log_activity(
             action='update', entity_type='deal', entity_id=deal.id,
             entity_label=deal.ref_number, description='تعديل صفقة', request=self.request,
+            partner_ids=[deal.partner_id],
         )
 
     def destroy(self, request, *args, **kwargs):
@@ -373,11 +393,12 @@ class LogisticsDealViewSet(BaseTenantViewSet):
                 {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        deal_id, deal_ref = instance.id, instance.ref_number
+        deal_id, deal_ref, partner_id = instance.id, instance.ref_number, instance.partner_id
         response = super().destroy(request, *args, **kwargs)
         log_activity(
             action='delete', entity_type='deal', entity_id=deal_id,
             entity_label=deal_ref, description='حذف صفقة', request=request,
+            partner_ids=[partner_id],
         )
         return response
 
@@ -412,6 +433,7 @@ class LogisticsDealViewSet(BaseTenantViewSet):
         log_activity(
             action='unpost', entity_type='deal', entity_id=deal.id,
             entity_label=deal.ref_number, description='إلغاء ترحيل دفعات صفقة', request=request,
+            partner_ids=[deal.partner_id],
         )
         return Response({'message': 'تم التراجع عن الترحيل وحذف القيود.', 'unpost_result': total})
 
@@ -1099,6 +1121,17 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 nums.append(int(m.group(1)))
         return f"SH-{max(nums) + 1:04d}"
 
+    @staticmethod
+    def _activity_partner_ids(shipment):
+        partner_ids = set(
+            shipment.logisticsshipmentdeal_set.values_list(
+                "deal__partner_id", flat=True,
+            ),
+        )
+        if shipment.shipping_agent_id:
+            partner_ids.add(shipment.shipping_agent_id)
+        return partner_ids
+
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
         kwargs = {'tenant': tenant}
@@ -1106,7 +1139,12 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
         if not num or LogisticsShipment.objects.filter(tenant=tenant, shipment_number=num).exists():
             kwargs['shipment_number'] = self._next_shipment_number(tenant)
             logger.info('Auto-generated shipment number=%s tenant=%s', kwargs['shipment_number'], getattr(tenant, 'pk', None))
-        serializer.save(**kwargs)
+        shipment = serializer.save(**kwargs)
+        log_activity(
+            action='create', entity_type='shipment', entity_id=shipment.id,
+            entity_label=shipment.shipment_number, description='إنشاء شحنة',
+            partner_ids=self._activity_partner_ids(shipment), request=self.request,
+        )
 
     @action(detail=False, methods=['post'], url_path='create-from-deals')
     def create_from_deals(self, request):
@@ -1147,6 +1185,7 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
             action='create', entity_type='shipment', entity_id=shipment.id,
             entity_label=shipment.shipment_number,
             description=f'إنشاء شحنة من {len(deal_ids)} صفقة', request=request,
+            partner_ids=self._activity_partner_ids(shipment),
         )
         ser = self.get_serializer(shipment)
         return Response(ser.data, status=status.HTTP_201_CREATED)
@@ -2289,10 +2328,28 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         qs = PurchaseInvoice.objects.all().select_related(
             'partner', 'deal', 'shipment', 'clearance', 'currency', 'journal',
         ).order_by('-created_at')
+        qs = annotate_partner_posted_balance(
+            qs, "partner_id", supplier=True, alias="supplier_balance",
+        )
         if self.action == 'list':
             qs = qs.annotate(items_count=Count('items'))
+            qs = annotate_purchase_invoice_payment_summary(qs)
         else:
-            qs = qs.prefetch_related('items__product')
+            qs = qs.prefetch_related(
+                'items__product', 'fees',
+                Prefetch(
+                    'payments',
+                    queryset=PurchaseInvoicePayment.objects.select_related(
+                        'currency', 'cash_or_bank_account', 'journal',
+                    ),
+                ),
+                Prefetch(
+                    'supplier_payments',
+                    queryset=SupplierPayment.objects.select_related(
+                        'currency', 'cash_or_bank_account', 'journal',
+                    ),
+                ),
+            )
         tenant = self._get_tenant()
         if tenant:
             qs = qs.filter(tenant=tenant)
@@ -2300,6 +2357,9 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         s = params.get('status')
         if s:
             qs = qs.filter(status=s)
+        payment_status = params.get('payment_status')
+        if self.action == 'list' and payment_status in ('paid', 'partially_paid', 'unpaid'):
+            qs = qs.filter(list_payment_status=payment_status)
         posted = str(params.get('is_posted') or '').lower()
         if posted in ('true', '1', 'false', '0'):
             qs = qs.filter(is_posted=posted in ('true', '1'))
@@ -2411,6 +2471,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             action='create', entity_type='purchase_invoice', entity_id=invoice.id,
             entity_label=invoice.invoice_number,
             description='إنشاء ' + ('مرجع شراء' if invoice.is_return else 'فاتورة شراء'),
+            partner_ids=[invoice.partner_id],
             request=self.request,
         )
 
@@ -2886,6 +2947,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         log_activity(
             action='payment', entity_type='purchase_invoice', entity_id=invoice.id,
             entity_label=invoice.invoice_number, description='سند دفع', request=request,
+            partner_ids=[invoice.partner_id],
         )
         ser = PurchaseInvoiceSerializer(invoice, context={'request': request})
         return Response(ser.data)
@@ -2933,6 +2995,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             log_activity(
                 action='post', entity_type='purchase_invoice', entity_id=invoice.id,
                 entity_label=invoice.invoice_number, description='ترحيل مرجع شراء', request=request,
+                partner_ids=[invoice.partner_id],
             )
             return Response({
                 'journal_id': invoice.journal_id,
@@ -3268,6 +3331,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         log_activity(
             action='post', entity_type='purchase_invoice', entity_id=invoice.id,
             entity_label=invoice.invoice_number, description='ترحيل فاتورة شراء', request=request,
+            partner_ids=[invoice.partner_id],
         )
         return Response({
             'journal_id': journal.id,
@@ -3414,6 +3478,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         payment = SupplierPayment.objects.create(
             tenant=invoice.tenant,
             partner=invoice.partner,
+            purchase_invoice=invoice,
             payment_date=invoice.invoice_date or datetime.date.today(),
             amount=amount,
             currency=invoice.currency,
@@ -3422,6 +3487,18 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             notes=f"صرف نقدي تلقائي — فاتورة شراء {invoice.invoice_number}",
         )
         post_supplier_payment(payment, user=user)
+        log_activity(
+            action='payment', entity_type='supplier_payment', entity_id=payment.id,
+            entity_label=f'#{payment.id}', description='سند صرف نقدي تلقائي',
+            partner_ids=[payment.partner_id], request=request,
+            tenant=invoice.tenant, user=user,
+        )
+        log_activity(
+            action='post', entity_type='supplier_payment', entity_id=payment.id,
+            entity_label=f'#{payment.id}', description='ترحيل سند صرف نقدي تلقائي',
+            partner_ids=[payment.partner_id], request=request,
+            tenant=invoice.tenant, user=user,
+        )
         logger.info(
             "Auto-settled cash purchase %s via supplier payment %s (amount %s).",
             invoice.invoice_number, payment.id, amount,
@@ -3437,6 +3514,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             action='update', entity_type='purchase_invoice', entity_id=invoice.id,
             entity_label=invoice.invoice_number,
             description='تعديل ' + ('مرجع شراء' if invoice.is_return else 'فاتورة شراء'),
+            partner_ids=[invoice.partner_id],
             request=self.request,
         )
 
@@ -3447,12 +3525,15 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
                 {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        inv_id, inv_no, is_ret = instance.id, instance.invoice_number, instance.is_return
+        inv_id, inv_no, is_ret, partner_id = (
+            instance.id, instance.invoice_number, instance.is_return, instance.partner_id,
+        )
         response = super().destroy(request, *args, **kwargs)
         log_activity(
             action='delete', entity_type='purchase_invoice', entity_id=inv_id,
             entity_label=inv_no,
             description='حذف ' + ('مرجع شراء' if is_ret else 'فاتورة شراء'),
+            partner_ids=[partner_id],
             request=request,
         )
         return response
@@ -3487,6 +3568,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             log_activity(
                 action='unpost', entity_type='purchase_invoice', entity_id=invoice.id,
                 entity_label=invoice.invoice_number, description='إلغاء ترحيل مرجع شراء',
+                partner_ids=[invoice.partner_id],
                 request=request,
             )
             return Response({'message': 'تم التراجع عن ترحيل المرجع وإعادة الكمية للمخزن.', 'unpost_result': result})
@@ -3529,6 +3611,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         log_activity(
             action='unpost', entity_type='purchase_invoice', entity_id=invoice.id,
             entity_label=invoice.invoice_number, description='إلغاء ترحيل فاتورة شراء',
+            partner_ids=[invoice.partner_id],
             request=request,
         )
         return Response({'message': 'تم التراجع عن الترحيل وحذف القيود.', 'unpost_result': result})
@@ -3541,7 +3624,7 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
 
     def get_queryset(self):
         qs = SupplierPayment.objects.all().select_related(
-            'partner', 'currency', 'cash_or_bank_account', 'journal',
+            'partner', 'purchase_invoice', 'currency', 'cash_or_bank_account', 'journal',
         ).order_by('-created_at')
         tenant = get_tenant(self.request)
         if not tenant:
@@ -3558,6 +3641,30 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
             payment.delete()
             from rest_framework.exceptions import ValidationError as DRFValidationError
             raise DRFValidationError(str(e))
+        log_activity(
+            action='payment', entity_type='supplier_payment', entity_id=payment.id,
+            entity_label=f'#{payment.id}', description='سند صرف مورد',
+            partner_ids=[payment.partner_id], request=self.request,
+        )
+
+    def perform_update(self, serializer):
+        payment = serializer.save()
+        log_activity(
+            action='update', entity_type='supplier_payment', entity_id=payment.id,
+            entity_label=f'#{payment.id}', description='تعديل سند صرف مورد',
+            partner_ids=[payment.partner_id], request=self.request,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        payment = self.get_object()
+        payment_id, partner_id = payment.id, payment.partner_id
+        response = super().destroy(request, *args, **kwargs)
+        log_activity(
+            action='delete', entity_type='supplier_payment', entity_id=payment_id,
+            entity_label=f'#{payment_id}', description='حذف سند صرف مورد',
+            partner_ids=[partner_id], request=request,
+        )
+        return response
 
     @action(detail=True, methods=['post'], url_path='post')
     def post_to_accounting(self, request, pk=None):
@@ -3570,6 +3677,11 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         payment.refresh_from_db()
+        log_activity(
+            action='post', entity_type='supplier_payment', entity_id=payment.id,
+            entity_label=f'#{payment.id}', description='ترحيل سند صرف مورد',
+            partner_ids=[payment.partner_id], request=request,
+        )
         ser = SupplierPaymentSerializer(payment, context={'request': request})
         return Response(ser.data)
 

@@ -45,7 +45,7 @@ export const useCompany = () => {
 };
 
 export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, loading: authLoading } = useAuth();
   const [companies, setCompanies] = useState<CompanyMembership[]>([]);
   const [currentCompany, setCurrentCompany] = useState<Tenant | null>(null);
   const [loading, setLoading] = useState(true);
@@ -130,8 +130,9 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   useEffect(() => {
+    if (authLoading) return;
     void fetchCompanies();
-  }, [currentUser]);
+  }, [currentUser, authLoading]);
 
   const switchCompany = async (companyId: number) => {
     setLoading(true);
@@ -139,6 +140,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       localStorage.setItem("tenantId", String(companyId));
       // task11 M4: الفرع النشط تابع للشركة — تبديل الشركة يمسحه
       localStorage.removeItem("branchId");
+      clientLogger.info("company.switch_requested", { tenantId: companyId });
       window.location.reload();
     } catch (e) {
       console.error("Failed to switch company:", e);

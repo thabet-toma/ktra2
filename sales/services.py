@@ -711,6 +711,17 @@ def _auto_settle_cash_sale(invoice: SalesInvoice, *, user=None) -> None:
         amount=remaining,
     )
     post_customer_payment(payment, user=user)
+    from core.activity import log_activity
+    log_activity(
+        action="payment", entity_type="customer_payment", entity_id=payment.id,
+        entity_label=f"#{payment.id}", description="سند قبض نقدي تلقائي",
+        partner_ids=[payment.partner_id], tenant=invoice.tenant, user=user,
+    )
+    log_activity(
+        action="post", entity_type="customer_payment", entity_id=payment.id,
+        entity_label=f"#{payment.id}", description="ترحيل سند قبض نقدي تلقائي",
+        partner_ids=[payment.partner_id], tenant=invoice.tenant, user=user,
+    )
     logger.info(
         "Auto-settled cash sale %s via customer payment %s (amount %s).",
         invoice.invoice_number, payment.id, remaining,

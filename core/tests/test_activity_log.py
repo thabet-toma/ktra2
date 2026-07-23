@@ -7,14 +7,19 @@
   - login/logout يُسجَّلان في سجل النشاط.
 """
 import json
+from datetime import date
 
 from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from core.activity import log_activity, log_view
-from core.models import ActivityLog
+from core.models import ActivityLog, ActivityLogPartner
+from logistics.models import LogisticsDeal, LogisticsShipment, PurchaseInvoice
+from partners.models import Partner
+from sales.models import SalesInvoice
 from tenants.models import UserCompanyMembership
+from tenants.models import Currency
 from tenants.services import create_company
 
 
@@ -40,6 +45,23 @@ class ActivityServiceTest(APITestCase):
         row = ActivityLog.objects.get(entity_type="deal", entity_id=3)
         assert row.is_view is True
         assert row.action == "view"
+
+    def test_one_activity_links_multiple_partners_without_duplicates(self):
+        supplier = Partner.objects.create(
+            tenant=self.tenant, name="مورد النشاط", partner_type="Supplier")
+        agent = Partner.objects.create(
+            tenant=self.tenant, name="وكيل النشاط", partner_type="FreightForwarder")
+
+        log_activity(
+            action="create", entity_type="shipment", entity_id=17,
+            entity_label="SH-0017", tenant=self.tenant, user=self.manager,
+            partner_ids=[supplier.id, agent.id, supplier.id],
+        )
+
+        row = ActivityLog.objects.get(entity_type="shipment", entity_id=17)
+        assert ActivityLog.objects.filter(entity_type="shipment", entity_id=17).count() == 1
+        assert set(ActivityLogPartner.objects.filter(
+            activity=row).values_list("partner_id", flat=True)) == {supplier.id, agent.id}
 
     def test_failure_is_swallowed(self):
         # مجموعة غير قابلة للتسلسل JSON → create يفشل داخلياً ويُبتلع (لا استثناء).
@@ -128,6 +150,64 @@ class ActivityApiTest(APITestCase):
         rows = res.json().get("results", res.json())
         ids = {r["entity_id"] for r in rows}
         assert 100 in ids and 99 not in ids
+
+    def test_partner_feed_includes_current_and_historical_related_documents(self):
+        currency = Currency.objects.filter(Code="ILS").first()
+        supplier = Partner.objects.create(
+            tenant=self.tenant, name="مورد البطاقة", partner_type="Supplier")
+        customer = Partner.objects.create(
+            tenant=self.tenant, name="عميل البطاقة", partner_type="Customer")
+        agent = Partner.objects.create(
+            tenant=self.tenant, name="وكيل البطاقة", partner_type="FreightForwarder")
+        other = Partner.objects.create(
+            tenant=self.tenant, name="طرف آخر", partner_type="Supplier")
+
+        deal = LogisticsDeal.objects.create(
+            tenant=self.tenant, ref_number="D-ACT-1", partner=supplier,
+            order_date=date(2026, 7, 1), currency=currency,
+        )
+        purchase = PurchaseInvoice.objects.create(
+            tenant=self.tenant, invoice_number="PI-ACT-1", partner=supplier,
+            invoice_date=date(2026, 7, 2), currency=currency,
+        )
+        sale = SalesInvoice.objects.create(
+            tenant=self.tenant, invoice_number="SI-ACT-1", customer=customer,
+            invoice_date=date(2026, 7, 3), invoice_type="credit",
+            status="draft", currency=currency,
+        )
+        shipment = LogisticsShipment.objects.create(
+            tenant=self.tenant, shipment_number="SH-ACT-1", shipping_agent=agent)
+
+        # صفوف تاريخية بلا partner_links يجب أن تظهر من علاقة المستند الحالية.
+        log_activity(
+            action="update", entity_type="deal", entity_id=deal.id,
+            entity_label=deal.ref_number, tenant=self.tenant, user=self.manager)
+        log_activity(
+            action="update", entity_type="purchase_invoice", entity_id=purchase.id,
+            entity_label=purchase.invoice_number, tenant=self.tenant, user=self.manager)
+        log_activity(
+            action="update", entity_type="sales_invoice", entity_id=sale.id,
+            entity_label=sale.invoice_number, tenant=self.tenant, user=self.manager)
+        log_activity(
+            action="update", entity_type="shipment", entity_id=shipment.id,
+            entity_label=shipment.shipment_number, tenant=self.tenant, user=self.manager)
+        log_activity(
+            action="update", entity_type="deal", entity_id=999999,
+            entity_label="UNRELATED", tenant=self.tenant, user=self.manager,
+            partner_ids=[other.id],
+        )
+
+        expected = {
+            supplier.id: {"D-ACT-1", "PI-ACT-1"},
+            customer.id: {"SI-ACT-1"},
+            agent.id: {"SH-ACT-1"},
+        }
+        for partner_id, labels in expected.items():
+            response = self.client.get(
+                f"/api/activity/?partner_id={partner_id}", **self._h(self.staff))
+            assert response.status_code == 200, response.content
+            rows = response.json().get("results", response.json())
+            assert {row["entity_label"] for row in rows} == labels
 
 
 class SessionEventTest(APITestCase):

@@ -8,7 +8,10 @@ import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTabl
 import { CustomerPriceListTab } from './CustomerPriceListTab';
 import { CustomerNotesTab } from './CustomerNotesTab';
 import { StatementDetailsModal } from './StatementDetailsModal';
+import { EntityActivityLog } from '../activity/EntityActivityLog';
 import { referenceTypeLabel, clarifyStatementDescription } from '../../utils/entityLinks';
+import { clientLogger } from '../../services/logger';
+import { NewPaymentModal } from '../sales/SalesCustomerPaymentsPage';
 
 interface PartnerApi {
   id: number;
@@ -56,6 +59,7 @@ interface InvoiceRow {
 }
 
 const PAGE = 50;
+type StatementOrdering = 'newest' | 'oldest';
 
 export const PartnerProfilePage: React.FC = () => {
   // App مركّب على مسار splat (/*) بلا Route فيه :id ⇒ useParams().id = undefined.
@@ -83,6 +87,7 @@ export const PartnerProfilePage: React.FC = () => {
   const [stmt, setStmt] = useState<{ rows: StatementRow[]; count: number }>({ rows: [], count: 0 });
   const [stmtOffset, setStmtOffset] = useState(0);
   const [stmtLoading, setStmtLoading] = useState(false);
+  const [stmtOrdering, setStmtOrdering] = useState<StatementOrdering>('newest');
 
   // تفاصيل حركة كشف الحساب (نافذة)
   const [detailRow, setDetailRow] = useState<StatementRow | null>(null);
@@ -91,9 +96,15 @@ export const PartnerProfilePage: React.FC = () => {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [invLoading, setInvLoading] = useState(false);
   const [invError, setInvError] = useState<string | null>(null);
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [activityRefreshKey, setActivityRefreshKey] = useState(0);
 
   const tenantId = useMemo(() => resolveTenantId(), []);
   const isSupplier = (partner?.partner_type || '').toLowerCase() === 'supplier';
+  const receiptPartner = useMemo(
+    () => partner ? { id: partner.id, name: partner.name } : null,
+    [partner],
+  );
 
   useEffect(() => {
     if (!id) return;
@@ -133,14 +144,14 @@ export const PartnerProfilePage: React.FC = () => {
       if (!id) return;
       setStmtLoading(true);
       apiGetObject<{ results: StatementRow[]; count: number }>(
-        `partners/${id}/statement/?limit=${PAGE}&offset=${offset}`,
+        `partners/${id}/statement/?limit=${PAGE}&offset=${offset}&ordering=${stmtOrdering}`,
         { tenantId },
       )
         .then((d) => setStmt({ rows: d.results, count: d.count }))
         .catch((err) => setError(err instanceof Error ? err.message : String(err)))
         .finally(() => setStmtLoading(false));
     },
-    [id, tenantId],
+    [id, tenantId, stmtOrdering],
   );
 
   useEffect(() => {
@@ -267,6 +278,25 @@ export const PartnerProfilePage: React.FC = () => {
       label: 'كشف الحساب',
       content: (
         <div className="p-2">
+          <div className="mb-3 flex items-center justify-end gap-2">
+            <label htmlFor="partner-statement-ordering" className="text-sm text-[var(--aseel-ink-soft)]">
+              ترتيب الحركات:
+            </label>
+            <select
+              id="partner-statement-ordering"
+              value={stmtOrdering}
+              onChange={(event) => {
+                const ordering = event.target.value as StatementOrdering;
+                setStmtOrdering(ordering);
+                setStmtOffset(0);
+                clientLogger.info("partner.statement_order_changed", { ordering });
+              }}
+              className="rounded-lg border border-[var(--aseel-border)] bg-[var(--aseel-panel)] px-3 py-2 text-sm text-[var(--aseel-ink)]"
+            >
+              <option value="newest">الأحدث أولاً</option>
+              <option value="oldest">الأقدم أولاً</option>
+            </select>
+          </div>
           <LedgerTable<StatementRow>
             columns={stmtColumns}
             rows={stmt.rows}
@@ -316,6 +346,22 @@ export const PartnerProfilePage: React.FC = () => {
         </div>
       ),
     },
+    ...(id
+      ? [{
+          key: 'activity',
+          label: 'سجل النشاطات',
+          content: (
+            <div className="p-2">
+              <EntityActivityLog
+                partnerId={id}
+                title="سجل نشاطات المستخدمين لهذه الجهة"
+                defaultOpen
+                refreshKey={activityRefreshKey}
+              />
+            </div>
+          ),
+        } as AseelTab]
+      : []),
     // DEF-004: عرض السعر — مبيعات فقط (للعملاء، لا للموردين).
     ...(!isSupplier && id
       ? [{
@@ -346,7 +392,10 @@ export const PartnerProfilePage: React.FC = () => {
                 {
                   key: 'new-receipt',
                   label: 'سند قبض جديد',
-                  onClick: () => navigate(`/sales/customer-payments?pay_partner=${id}`),
+                  onClick: () => {
+                    setShowReceiptModal(true);
+                    clientLogger.info("partner.customer_payment_open");
+                  },
                   separatorBefore: true,
                 },
                 {
@@ -374,6 +423,23 @@ export const PartnerProfilePage: React.FC = () => {
         <></>
       </AseelDocumentShell>
       <StatementDetailsModal movement={detailRow} onClose={() => setDetailRow(null)} />
+      {showReceiptModal && receiptPartner && (
+        <NewPaymentModal
+          initialPartner={receiptPartner}
+          lockPartner
+          onClose={() => setShowReceiptModal(false)}
+          onSaved={() => {
+            setShowReceiptModal(false);
+            setStmtOffset(0);
+            loadStatement(0);
+            apiGetObject<PartnerProfile>(`partners/${id}/profile/`, { tenantId })
+              .then(setProfile)
+              .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            setActivityRefreshKey((key) => key + 1);
+            clientLogger.info("partner.customer_payment_saved");
+          }}
+        />
+      )}
     </div>
   );
 };

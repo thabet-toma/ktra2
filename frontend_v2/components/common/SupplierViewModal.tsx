@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { LoadingSpinner } from '../LoadingSpinner';
 import { AseelSidePanel } from '../aseel/AseelSidePanel';
+import { EntityActivityLog } from '../activity/EntityActivityLog';
 
 interface SupplierViewModalProps {
     isOpen: boolean;
@@ -195,6 +196,11 @@ export const SupplierViewModal: React.FC<SupplierViewModalProps> = ({
                                     </div>
                                 </div>
                             )}
+
+                            <EntityActivityLog
+                                partnerId={supplierId || supplier.supplierId}
+                                title="سجل نشاطات المستخدمين"
+                            />
 
                             {/* Footer meta */}
                             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[var(--color-border)] text-xs text-[var(--color-text-muted)]">
