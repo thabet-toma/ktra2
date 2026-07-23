@@ -1,7 +1,19 @@
+# ─────────────────────────────────────────────────────────────────
+# متطلبات الاستضافة (السيرفر: Python 3.10). هذا الملف هو المُعتمَد للنشر.
+# نسخة التطوير المحلي في requirements.local.txt (مُتجاهَلة في git).
+# أي تغيير على اعتمادية مشتركة هنا يجب أن يُطبَّق على الملفين معاً.
+# ─────────────────────────────────────────────────────────────────
+
 # ── Core framework ──────────────────────────────────────────────
-Django==6.0.1
+# Django 5.1 LTS يدعم Python 3.10–3.13. (6.0 يتطلب Python ≥3.12،
+# والسيرفر على 3.10 — لذلك لا تُرفَّع النسخة هنا.)
+Django==5.1.15
 djangorestframework==3.16.1
 django-cors-headers==4.9.0
+
+# ── Config ──────────────────────────────────────────────────────
+# settings.py يستورد `from dotenv import load_dotenv` لقراءة .env
+python-dotenv==1.0.1
 
 # ── Media / storage (loaded via INSTALLED_APPS) ─────────────────
 django-cloudinary-storage==0.3.0
@@ -14,6 +26,9 @@ mysqlclient==2.2.7
 # ── HTTP / realtime ─────────────────────────────────────────────
 requests==2.32.5
 websocket-client>=1.6.0
+
+# ── WSGI server (production runtime) ────────────────────────────
+gunicorn==23.0.0
 
 # ── Testing / coverage ──────────────────────────────────────────
 pytest>=8.0
