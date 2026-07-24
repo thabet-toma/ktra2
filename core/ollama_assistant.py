@@ -18,6 +18,7 @@ import logging
 import requests
 from django.conf import settings
 
+from core import assistant_memory
 from core.assistant_tools import TOOL_SCHEMAS, run_tool
 
 logger = logging.getLogger(__name__)
@@ -35,11 +36,19 @@ _SYSTEM_PROMPT_BASE = (
     "قواعد إلزامية:\n"
     "- كن مبادراً: إذا كان السؤال عاماً (مثل «آخر صفقة» أو «كم بعنا»)، اكتب استعلاماً "
     "معقولاً بافتراضات منطقية (الأحدث، الشهر الحالي، أعلى قيمة…) ونفّذه فوراً، ثم اعرض "
-    "النتيجة واعرض تضييقها. لا تطلب توضيحاً إلا إذا كان السؤال ملتبساً فعلاً بين معنيين.\n"
+    "النتيجة واعرض تضييقها.\n"
+    "- اسأل توضيحاً فقط عند الحاجة الحقيقية: نتيجة فارغة رغم أن السؤال يبدو صحيحاً، أو "
+    "أكثر من تفسير مختلف جوهرياً لنفس السؤال، أو معلومة ناقصة لا يمكن التخمين المعقول "
+    "عنها (مثل فترة زمنية لتقرير طويل). لا تخترع افتراضاً في هذه الحالات — اسأل بجملة "
+    "قصيرة ومحددة بدل رفض الإجابة أو التخمين.\n"
+    "- البحث بجزء من اسم/رمز/مقاس (مثل سؤال عن «195» لمقاس إطار): استخدم LIKE "
+    "'%195%' على الأعمدة ذات الصلة (SKU، Name_AR، Name_EN) لا مطابقة تامة، لأن أصنافاً "
+    "متعددة غالباً تبدأ بنفس المقاس/الرمز. أرجع **كل** الأصناف المطابقة مع كمية كل واحد "
+    "على حدة، ثم اذكر المجموع إن كان السؤال عن كمية إجمالية — لا تكتفِ بأول مطابقة.\n"
     "- لا تكتب أي شرط TenantID أو رقم شركة إطلاقاً — النظام يحصر النتائج بشركة المستخدم "
     "تلقائياً. لا تطلب من المستخدم معرّفات داخلية.\n"
     "- استعمل أسماء الجداول والأعمدة **حرفياً** كما في المخطط أدناه (حسّاسة لحالة الأحرف: "
-    "TenantID, GrandTotal, Name_AR…). للمطابقة النصية استخدم LIKE '%نص%'.\n"
+    "TenantID, GrandTotal, Name_AR…).\n"
     "- الأرقام المالية للفواتير المرحّلة فقط: Status = 'posted'. أنواع الفواتير في "
     "InvoiceKind: sale / sale_return / purchase / purchase_return (الطرف في CustomerID "
     "للبيع والشراء معاً). رصيد الصنف = products.QuantityOnHand. الصفقات في logistics_deals.\n"
@@ -47,6 +56,9 @@ _SYSTEM_PROMPT_BASE = (
     "دائماً باسم الطرف/الصنف عبر JOIN على الجدول المرجعي (partners.Name أو products.Name_AR).\n"
     "- لا تخترع أرقاماً؛ اعتمد فقط على صفوف run_sql. إن رجع خطأ، صحّح الاستعلام وأعد المحاولة.\n"
     "- عند عرض النتائج اذكر الأرقام والتواريخ بوضوح ولخّص المعنى بجملة مفيدة.\n"
+    "- المحادثة مستمرة: استفد من الأسئلة والأجوبة السابقة في نفس الجلسة لفهم المقصود "
+    "(مثل ضمائر أو إشارات لسؤال سابق)، لكن أعد تنفيذ run_sql دائماً للحصول على بيانات "
+    "حديثة — لا تعتمد على أرقام ذكرتها سابقاً قد تكون تغيّرت.\n"
     "\n"
     "مخطط قاعدة البيانات (جدول: أعمدة، والسهم → يعني مفتاحاً خارجياً لجدول آخر):\n"
 )
@@ -92,11 +104,14 @@ def _post_chat(messages: list, tools, base: str, key: str, model: str, timeout: 
     return resp.json()
 
 
-def chat(user_message: str, tenant) -> str:
+def chat(user_message: str, tenant, session_key: str | None = None) -> str:
     """
     يُجري محادثة كاملة مع النموذج بما فيها جولات الأدوات، ويعيد النص النهائي.
     `tenant` كائن Tenant مُحلَّل مسبقاً من المستدعي (get_tenant للويب، أو
     WhatsAppContact لواتساب) — لا يُشتق هنا ولا داخل الأدوات.
+    `session_key` (اختياري) يفعّل ذاكرة المحادثة (core.assistant_memory): آخر
+    عدة أدوار من نفس الجلسة تُحقن قبل السؤال الحالي، والسؤال+الجواب يُحفظان
+    بعدها. بلا session_key كل نداء مستقل تماماً (السلوك السابق).
     يرفع requests.RequestException / ValueError عند فشل الاتصال — يعالجها المستدعي.
     """
     base, key, model, timeout = _config()
@@ -105,11 +120,14 @@ def chat(user_message: str, tenant) -> str:
             "لم تُضبط إعدادات Ollama. أضف OLLAMA_API_KEY و OLLAMA_MODEL في بيئة الخادم."
         )
 
+    history = assistant_memory.get_history(session_key)
     messages = [
         {"role": "system", "content": _system_prompt()},
+        *history,
         {"role": "user", "content": user_message},
     ]
 
+    reply = ""
     for _round in range(MAX_TOOL_ROUNDS):
         data = _post_chat(messages, TOOL_SCHEMAS, base, key, model, timeout)
         choice = (data.get("choices") or [{}])[0]
@@ -117,7 +135,8 @@ def chat(user_message: str, tenant) -> str:
         tool_calls = msg.get("tool_calls") or []
 
         if not tool_calls:
-            return (msg.get("content") or "").strip()
+            reply = (msg.get("content") or "").strip()
+            break
 
         # سجّل رسالة المساعد (باستدعاءات الأدوات) ثم نفّذ كل أداة وأعد نتيجتها.
         messages.append(
@@ -143,8 +162,12 @@ def chat(user_message: str, tenant) -> str:
                     "content": json.dumps(result, ensure_ascii=False, default=str),
                 }
             )
+    else:
+        # تجاوزنا حد الجولات — اطلب رداً نصياً أخيراً بلا أدوات.
+        data = _post_chat(messages, None, base, key, model, timeout)
+        choice = (data.get("choices") or [{}])[0]
+        reply = ((choice.get("message") or {}).get("content") or "").strip()
 
-    # تجاوزنا حد الجولات — اطلب رداً نصياً أخيراً بلا أدوات.
-    data = _post_chat(messages, None, base, key, model, timeout)
-    choice = (data.get("choices") or [{}])[0]
-    return ((choice.get("message") or {}).get("content") or "").strip()
+    if session_key and reply:
+        assistant_memory.append_turn(session_key, user_message, reply)
+    return reply

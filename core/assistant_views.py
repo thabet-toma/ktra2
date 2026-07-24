@@ -175,8 +175,10 @@ def assistant_chat(request):
             tenant = get_tenant(request, raise_on_missing=True)
         except PermissionDenied as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        uid = getattr(request.user, "pk", None)
+        session_key = f"web:{uid}:{tenant.pk}"
         try:
-            reply = ollama_assistant.chat(message, tenant)
+            reply = ollama_assistant.chat(message, tenant, session_key=session_key)
         except requests.exceptions.Timeout:
             return Response(
                 {"detail": "المساعد يعالج طلبك لكنه يستغرق وقتاً أطول من المعتاد. اجعل سؤالك أكثر تحديداً وحاول مجدداً."},

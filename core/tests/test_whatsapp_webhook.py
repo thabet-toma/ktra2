@@ -198,6 +198,7 @@ def test_registered_number_gets_reply_scoped_to_its_own_company(env, client: Cli
     called_text, called_tenant = chat.call_args[0]
     assert called_text == "كم بعنا لأشرف؟"
     assert called_tenant.pk == a.pk
+    assert chat.call_args.kwargs["session_key"] == f"wa:972500000001:{a.pk}"
     send.assert_called_once_with("972500000001", "الرد النهائي")
 
 
