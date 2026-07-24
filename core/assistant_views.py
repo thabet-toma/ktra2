@@ -161,7 +161,10 @@ def assistant_chat(request):
     # تبقى على مسار OpenClaw. الافتراضي «ollama».
     backend = (getattr(settings, "ASSISTANT_BACKEND", "ollama") or "ollama").strip().lower()
     if backend == "ollama":
+        from django.core.exceptions import PermissionDenied
+
         from core import ollama_assistant
+        from core.tenant_utils import get_tenant
 
         if not ollama_assistant.is_configured():
             return Response(
@@ -169,7 +172,11 @@ def assistant_chat(request):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         try:
-            reply = ollama_assistant.chat(message, request)
+            tenant = get_tenant(request, raise_on_missing=True)
+        except PermissionDenied as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            reply = ollama_assistant.chat(message, tenant)
         except requests.exceptions.Timeout:
             return Response(
                 {"detail": "المساعد يعالج طلبك لكنه يستغرق وقتاً أطول من المعتاد. اجعل سؤالك أكثر تحديداً وحاول مجدداً."},

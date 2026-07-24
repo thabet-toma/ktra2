@@ -18,7 +18,7 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from core import assistant_views, agent_db_view, dashboard_api, health, media_views
+from core import assistant_views, agent_db_view, dashboard_api, health, media_views, whatsapp_views
 from core.activity_views import ActivityLogViewSet
 
 _activity_router = DefaultRouter()
@@ -35,6 +35,7 @@ urlpatterns = [
     path('api/assistant/files/', assistant_views.assistant_upload),
     path('api/assistant/openclaw-status/', assistant_views.assistant_openclaw_status),
     path('api/assistant/openclaw-ws-probe/', assistant_views.assistant_openclaw_ws_probe),
+    path('api/assistant/whatsapp/webhook/<str:secret>/', whatsapp_views.whatsapp_webhook),
     path('api/agent/query/', agent_db_view.agent_query),
     path('api/dashboard/', dashboard_api.trade_dashboard),
     path('api/', include('partners.urls')),

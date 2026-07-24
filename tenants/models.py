@@ -156,6 +156,39 @@ class Branch(models.Model):
         return f"{self.tenant.CompanyName} / {self.name}"
 
 
+# ── task49: WhatsAppContact (ربط رقم واتساب بشركة للمساعد الذكي) ───────
+
+class WhatsAppContact(models.Model):
+    """رقم واتساب مصرَّح له بمحادثة المساعد الذكي، مربوط بشركة واحدة.
+
+    هذا الربط هو حارس العزل الوحيد على مسار واتساب: أي رقم غير مُدرَج هنا
+    (أو مُدرَج لكنه غير نشط) لا يحصل على أي رد من المساعد مهما كان محتوى
+    رسالته — الأمان هنا خادمي بالكامل، لا يعتمد على النموذج أو على واتساب.
+    """
+
+    phone_number = models.CharField(
+        max_length=20, unique=True, db_column='PhoneNumber',
+        help_text='أرقام فقط بصيغة دولية بلا +، مثل 972501234567',
+    )
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='whatsapp_contacts',
+        db_column='TenantID',
+    )
+    label = models.CharField(
+        max_length=100, blank=True, default='', db_column='Label',
+        help_text='اسم توضيحي اختياري (مثال: أشرف — مدير المبيعات)',
+    )
+    is_active = models.BooleanField(default=True, db_column='IsActive')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'whatsapp_contacts'
+        managed = True
+
+    def __str__(self):
+        return f"{self.phone_number} → {self.tenant.CompanyName}"
+
+
 # ── N0-T2: TenantBook (أرقام الدفاتر) ──────────────────────────────────
 
 class TenantBook(models.Model):

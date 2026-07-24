@@ -7,7 +7,6 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.auth.models import User
-from django.test import RequestFactory
 
 from core.assistant_tools import (
     purchases_from_supplier,
@@ -96,22 +95,18 @@ def test_date_filter_scopes_range(env):
 
 
 def test_run_tool_is_tenant_scoped(env):
-    """الأداة عبر run_tool محصورة بشركة الطلب — لا تسريب من شركة ب."""
-    owner, _, a, _ = env
-    req = RequestFactory().post("/api/assistant/chat/", HTTP_X_TENANT_ID=str(a.TenantID))
-    req.user = owner
-    res = run_tool("search_products", {"query": "إطار"}, req)
+    """الأداة عبر run_tool محصورة بشركة tenant المُمرَّرة — لا تسريب من شركة ب."""
+    _, _, a, _ = env
+    res = run_tool("search_products", {"query": "إطار"}, a)
     # يرى كمية شركة أ (40) لا شركة ب (999)
     assert res["count"] == 1
     assert res["matches"][0]["quantity_on_hand"] == 40.0
 
-    sres = run_tool("sales_to_customer", {"customer": "أشرف"}, req)
+    sres = run_tool("sales_to_customer", {"customer": "أشرف"}, a)
     assert sres["gross_total"] == 700.0  # لا 8888 من شركة ب
 
 
 def test_unknown_tool_returns_error(env):
-    owner, _, a, _ = env
-    req = RequestFactory().post("/api/assistant/chat/", HTTP_X_TENANT_ID=str(a.TenantID))
-    req.user = owner
-    res = run_tool("drop_everything", {}, req)
+    _, _, a, _ = env
+    res = run_tool("drop_everything", {}, a)
     assert "error" in res

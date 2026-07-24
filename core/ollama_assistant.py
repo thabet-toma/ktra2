@@ -1,12 +1,14 @@
 """
 عميل المساعد الذكي على Ollama السحابي (واجهة متوافقة مع OpenAI).
 
-المسار: المتصفح → Django (assistant/chat/ بعد المصادقة) → Ollama.
-المفتاح لا يُعرَّض للمتصفح؛ الطلب صادر من خادم Django مع Authorization: Bearer.
+المسارات: المتصفح → Django (assistant/chat/ بعد المصادقة) → Ollama، أو
+واتساب → Evolution API → Django (whatsapp/webhook/) → Ollama. المفتاح لا
+يُعرَّض للمتصفح ولا لواتساب؛ الطلب صادر من خادم Django مع Authorization: Bearer.
 
-النموذج (Qwen على Ollama) يجيب من قاعدة بيانات كترا عبر استدعاء أدوات
-(function calling) مُعرّفة في core.assistant_tools — كل أداة مقفولة على شركة
-المستخدم، فلا يكتب النموذج SQL ولا يرى بيانات شركة أخرى.
+النموذج (Qwen/gpt-oss على Ollama) يجيب من قاعدة بيانات كترا عبر أداة run_sql
+(core.assistant_tools) التي تحقن عزل الشركة خادمياً — chat() يستقبل الشركة
+كائناً مُحلَّلاً مسبقاً من المستدعي، فلا يكتب النموذج SQL بلا حراسة ولا يرى
+بيانات شركة أخرى.
 """
 from __future__ import annotations
 
@@ -27,7 +29,7 @@ _SYSTEM_PROMPT_BASE = (
     "أنت «المساعد الذكي» لنظام كترا (K.T.R.A) للمحاسبة والتجارة واللوجستيات. "
     "تحدّث بنبرة إنسانية واضحة ومختصرة، وأجب بلغة سؤال المستخدم.\n"
     "\n"
-    "لديك أداة واحدة: run_sql — تنفّذ استعلام SELECT على قاعدة بيانات كترা (MySQL) "
+    "لديك أداة واحدة: run_sql — تنفّذ استعلام SELECT على قاعدة بيانات كترا (MySQL) "
     "وتعيد الصفوف. استعملها للإجابة عن أي سؤال عن البيانات بدل أن تسأل المستخدم.\n"
     "\n"
     "قواعد إلزامية:\n"
@@ -90,10 +92,12 @@ def _post_chat(messages: list, tools, base: str, key: str, model: str, timeout: 
     return resp.json()
 
 
-def chat(user_message: str, request) -> str:
+def chat(user_message: str, tenant) -> str:
     """
     يُجري محادثة كاملة مع النموذج بما فيها جولات الأدوات، ويعيد النص النهائي.
-    يرفع requests.RequestException / ValueError عند فشل الاتصال — يعالجها العرض.
+    `tenant` كائن Tenant مُحلَّل مسبقاً من المستدعي (get_tenant للويب، أو
+    WhatsAppContact لواتساب) — لا يُشتق هنا ولا داخل الأدوات.
+    يرفع requests.RequestException / ValueError عند فشل الاتصال — يعالجها المستدعي.
     """
     base, key, model, timeout = _config()
     if not (base and key and model):
@@ -131,7 +135,7 @@ def chat(user_message: str, request) -> str:
                 args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
             except (json.JSONDecodeError, TypeError):
                 args = {}
-            result = run_tool(name, args, request)
+            result = run_tool(name, args, tenant)
             messages.append(
                 {
                     "role": "tool",

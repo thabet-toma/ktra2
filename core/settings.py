@@ -325,6 +325,23 @@ OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "").strip()
 OLLAMA_MODEL = (os.environ.get("OLLAMA_MODEL") or "gpt-oss:120b").strip()
 OLLAMA_ASSISTANT_TIMEOUT = int(os.environ.get("OLLAMA_ASSISTANT_TIMEOUT", "120") or "120")
 
+# ── واتساب ↔ المساعد الذكي عبر Evolution API (self-hosted، غير رسمي) ───────
+# core/whatsapp_views.py يستقبل الرسائل الواردة على api/assistant/whatsapp/webhook/<secret>/
+# ويرسل الردود عبر EVOLUTION_API_BASE_URL. العزل الأمني الوحيد هو جدول
+# tenants.WhatsAppContact (رقم → شركة) — رقم غير مُدرَج لا يحصل على أي رد.
+# رابط الـ webhook الكامل الذي يُضبط داخل Evolution API:
+#   https://<نطاق-خادمك>/api/assistant/whatsapp/webhook/<WHATSAPP_WEBHOOK_SECRET>/
+# السرّ إلزامي في الإنتاج — لا افتراضي، لمنع رابط webhook عام بلا حماية.
+WHATSAPP_WEBHOOK_SECRET = _environment_value(
+    "WHATSAPP_WEBHOOK_SECRET", required_in_production=True
+)
+# عنوان خادم Evolution API نفسه (وليس Django) — مثال: http://127.0.0.1:8080 أو https://evo.example.com
+EVOLUTION_API_BASE_URL = (os.environ.get("EVOLUTION_API_BASE_URL") or "").strip().rstrip("/")
+# مفتاح apikey لنسخة Evolution API (Global API Key أو مفتاح الـ instance)
+EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY", "").strip()
+# اسم الـ instance المُنشأ داخل Evolution API (وليس رقم الهاتف)
+EVOLUTION_INSTANCE_NAME = os.environ.get("EVOLUTION_INSTANCE_NAME", "").strip()
+
 # ── كاش الخادم (صيانة الأداء 2026-07) ──────────────────────────────────────
 # استضافة مشتركة بلا root ⇒ لا Redis/Memcached. FileBasedCache مشتركة بين كل
 # عمليات WSGI (نفس القرص) وضربة الكاش = صفر استعلامات MySQL — بعكس LocMemCache

@@ -1,10 +1,11 @@
 """
 أدوات المساعد الذكي — قراءة فقط، مقفولة على شركة المستخدم (Tenant).
 
-كل أداة تُنفَّذ عبر run_tool(...) الذي يحلّ الشركة من الطلب بـ
-get_tenant(request, raise_on_missing=True). لا تستقبل الأدوات TenantID من
-النموذج إطلاقاً — العزل مفروض خادمياً، فيستحيل أن يرى المستخدم بيانات شركة
-أخرى مهما كان نص السؤال.
+كل أداة تُنفَّذ عبر run_tool(name, arguments, tenant) حيث tenant كائن مُحلَّل
+مسبقاً من المستدعي (core/assistant_views.py عبر get_tenant للويب، أو
+core/whatsapp_views.py عبر WhatsAppContact لواتساب). لا تستقبل الأدوات
+TenantID من النموذج إطلاقاً — العزل مفروض خادمياً، فيستحيل أن يرى المستخدم
+بيانات شركة أخرى مهما كان نص السؤال.
 
 النموذج (Qwen على Ollama) يختار الأداة ويعبّئ بارامتراتها فقط؛ لا يكتب SQL،
 ولا يمرّر أي معرّف شركة.
@@ -16,8 +17,6 @@ from datetime import date
 from decimal import Decimal
 
 from django.db.models import Count, Sum
-
-from core.tenant_utils import get_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -363,16 +362,17 @@ _DISPATCH = {
 }
 
 
-def run_tool(name: str, arguments: dict, request) -> dict:
+def run_tool(name: str, arguments: dict, tenant) -> dict:
     """
-    ينفّذ أداة واحدة بأمان. يحلّ الشركة خادمياً (raise_on_missing) فيمنع أي
-    نتيجة بلا سياق شركة صريح. يُعيد قاموساً قابلاً لتسلسل JSON دائماً.
+    ينفّذ أداة واحدة بأمان لصالح `tenant` (كائن Tenant مُحلَّل مسبقاً من المستدعي
+    — عبر get_tenant() لمسار الويب، أو عبر WhatsAppContact لمسار واتساب).
+    run_tool نفسه لا يحلّ الشركة ولا يقبلها كنص/رقم من النموذج، فيستحيل أن يرى
+    المستخدم بيانات شركة أخرى مهما كان نص السؤال. يُعيد قاموساً قابلاً لتسلسل JSON.
     """
     fn = _DISPATCH.get(name)
     if fn is None:
         return {"error": f"أداة غير معروفة: {name}"}
 
-    tenant = get_tenant(request, raise_on_missing=True)
     args = arguments if isinstance(arguments, dict) else {}
     try:
         return fn(tenant, **args)
