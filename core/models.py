@@ -64,6 +64,35 @@ class ActivityLog(models.Model):
         return f"{self.action} {self.entity_type}#{self.entity_id} by {self.user_id}"
 
 
+class AssistantLesson(models.Model):
+    """درس سلوكي عام يتعلّمه المساعد الذكي من تصحيح إنسان له أثناء محادثة.
+
+    عمداً **بلا** حقل شركة (Tenant) — هذا الجدول لقواعد سلوك/SQL عامة تنطبق
+    على كل الشركات (مثل «لا تفترض عمود X»)، وليس لحقائق أو أرقام خاصة بشركة
+    معيّنة؛ البرومبت يوجّه النموذج صراحةً لعدم كتابة بيانات شركة هنا.
+
+    `is_active=False` افتراضياً: يُلتقَط الدرس تلقائياً عند تصحيح واضح من
+    مستخدم، لكن لا يُحقَن في تعليمات النموذج (lessons_text) إلا بعد مراجعة
+    وتفعيل يدوي من /admin/ — يمنع درساً واحداً خاطئاً/مسيئاً من التأثير فوراً
+    على كل محادثات كل الشركات.
+    """
+
+    id = models.AutoField(primary_key=True)
+    text = models.CharField(max_length=500)
+    is_active = models.BooleanField(default=False, db_index=True)
+    # سياق تتبّع فقط (مفتاح الجلسة الذي وُلد منه الدرس) — ليس بيانات شركة.
+    source = models.CharField(max_length=100, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'assistant_lessons'
+        managed = True
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return self.text[:80]
+
+
 class ActivityLogPartner(models.Model):
     """يربط حدث النشاط الواحد بكل الجهات المتأثرة دون نسخ الحدث."""
 

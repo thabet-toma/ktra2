@@ -59,15 +59,23 @@ _SYSTEM_PROMPT_BASE = (
     "- المحادثة مستمرة: استفد من الأسئلة والأجوبة السابقة في نفس الجلسة لفهم المقصود "
     "(مثل ضمائر أو إشارات لسؤال سابق)، لكن أعد تنفيذ run_sql دائماً للحصول على بيانات "
     "حديثة — لا تعتمد على أرقام ذكرتها سابقاً قد تكون تغيّرت.\n"
+    "- إذا صحّحك المستخدم صراحةً (قال إن إجابتك أو طريقتك غلط وذكر الصح)، استخدم أداة "
+    "remember_lesson لتسجيل الدرس — قاعدة عامة بلا أرقام أو بيانات خاصة بهذه الشركة. "
+    "لا تستخدمها لغير هذه الحالة، ولا تخمّن أخطاءك بنفسك.\n"
     "\n"
     "مخطط قاعدة البيانات (جدول: أعمدة، والسهم → يعني مفتاحاً خارجياً لجدول آخر):\n"
 )
 
 
 def _system_prompt() -> str:
+    from core.assistant_lessons import lessons_text
     from core.assistant_sql import schema_catalog
 
-    return _SYSTEM_PROMPT_BASE + schema_catalog()
+    prompt = _SYSTEM_PROMPT_BASE + schema_catalog()
+    lessons = lessons_text()
+    if lessons:
+        prompt += "\n\n" + lessons
+    return prompt
 
 
 def _config():
@@ -154,7 +162,7 @@ def chat(user_message: str, tenant, session_key: str | None = None) -> str:
                 args = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
             except (json.JSONDecodeError, TypeError):
                 args = {}
-            result = run_tool(name, args, tenant)
+            result = run_tool(name, args, tenant, session_key=session_key or "")
             messages.append(
                 {
                     "role": "tool",

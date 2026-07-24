@@ -53,6 +53,30 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "remember_lesson",
+            "description": (
+                "يسجّل درساً سلوكياً عاماً للمساعد نفسه — استخدمه **فقط** عندما يصحّحك "
+                "المستخدم صراحةً (يقول مثلاً «لأ هيك غلط، الصح كذا» أو «تذكّر هيك دائماً»)، "
+                "وليس لتخمين أخطائك بنفسك. اكتب قاعدة عامة قابلة لإعادة الاستخدام مستقبلاً "
+                "(مثل «لا تفترض عمود X على جدول Y» أو «استخدم LIKE لا = عند البحث بمقاس»)، "
+                "**لا** تكتب أرقاماً أو أسماء أو بيانات خاصة بهذه الشركة تحديداً — الدرس "
+                "يُشارَك مع كل الشركات. الدرس لا يؤثر فوراً؛ يُراجعه مسؤول قبل تفعيله."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "lesson": {
+                        "type": "string",
+                        "description": "الدرس بجملة أو جملتين قصيرتين، عام وقابل لإعادة الاستخدام.",
+                    }
+                },
+                "required": ["lesson"],
+            },
+        },
+    },
 ]
 
 # الأدوات الضيقة السابقة — محفوظة للاختبارات وإعادة الاستخدام، غير معروضة للنموذج.
@@ -352,8 +376,28 @@ def run_sql(tenant, *, query: str = "", **_):
     return _run(tenant.pk, query or "")
 
 
+MAX_LESSON_LEN = 500
+
+
+def remember_lesson(tenant, *, lesson: str = "", session_key: str = "", **_):
+    """
+    يسجّل درساً بحالة غير مفعَّلة (is_active=False) — لا يؤثر على أي محادثة
+    حتى يراجعه أدمن ويفعّله من /admin/. tenant غير مستخدَم لعزل بيانات (لا
+    يوجد شركة لهذا الجدول عمداً)، فقط لتتبّع مصدر الدرس اختيارياً.
+    """
+    from core.models import AssistantLesson
+
+    text = (lesson or "").strip()
+    if not text:
+        return {"error": "الدرس فارغ."}
+    text = text[:MAX_LESSON_LEN]
+    AssistantLesson.objects.create(text=text, source=session_key or "")
+    return {"saved": True, "note": "سُجّل الدرس وينتظر مراجعة أدمن قبل التفعيل."}
+
+
 _DISPATCH = {
     "run_sql": run_sql,
+    "remember_lesson": remember_lesson,
     # أدوات ضيقة (غير معروضة للنموذج، تُستخدم في الاختبارات):
     "search_products": search_products,
     "sales_to_customer": sales_to_customer,
@@ -362,20 +406,23 @@ _DISPATCH = {
 }
 
 
-def run_tool(name: str, arguments: dict, tenant) -> dict:
+def run_tool(name: str, arguments: dict, tenant, session_key: str = "") -> dict:
     """
     ينفّذ أداة واحدة بأمان لصالح `tenant` (كائن Tenant مُحلَّل مسبقاً من المستدعي
     — عبر get_tenant() لمسار الويب، أو عبر WhatsAppContact لمسار واتساب).
     run_tool نفسه لا يحلّ الشركة ولا يقبلها كنص/رقم من النموذج، فيستحيل أن يرى
     المستخدم بيانات شركة أخرى مهما كان نص السؤال. يُعيد قاموساً قابلاً لتسلسل JSON.
+    `session_key` سياق خادمي فقط (لتتبّع مصدر remember_lesson) — يُفرض هنا لا
+    يُقبل من النموذج، حتى لو حاول تمريره ضمن arguments.
     """
     fn = _DISPATCH.get(name)
     if fn is None:
         return {"error": f"أداة غير معروفة: {name}"}
 
-    args = arguments if isinstance(arguments, dict) else {}
+    args = dict(arguments) if isinstance(arguments, dict) else {}
+    args.pop("session_key", None)  # وارد من الخادم حصراً — لا نثق بالنموذج فيه
     try:
-        return fn(tenant, **args)
+        return fn(tenant, session_key=session_key, **args)
     except TypeError as exc:
         logger.warning("assistant tool %s bad args %s: %s", name, args, exc)
         return {"error": f"بارامترات غير صحيحة للأداة {name}."}
