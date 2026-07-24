@@ -13,7 +13,8 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { IDLE_TIMEOUT_MS, IDLE_WARNING_MS } from "../constants/session";
+import { IDLE_WARNING_MS } from "../constants/session";
+import { useSessionSettings } from "../contexts/SessionSettingsContext";
 import { logoutUser } from "../services/authService";
 import { ACTIVITY_KEY, idleRemainingMs, writeLastActivity } from "../utils/idleSession";
 import { SESSION_EXPIRED_EVENT, USER_ACTIVITY_EVENT } from "../utils/sessionEvents";
@@ -24,6 +25,10 @@ interface Props {
 }
 
 export const IdleTimeoutGuard: React.FC<Props> = ({ onLogout }) => {
+  // مهلة الخمول قابلة للتهيئة per-company (SessionSettings). تُقرأ عبر ref كي تبقى
+  // دوال المؤقّتات مستقرة، وتُعاد التسليح فوراً عند تغييرها من الإعدادات.
+  const { idleTimeoutMs } = useSessionSettings();
+  const idleTimeoutMsRef = useRef(idleTimeoutMs);
   const [expired, setExpired] = useState(false);
   // ثوانٍ متبقية حتى الانتهاء أثناء التنبيه؛ null = لا تنبيه معروض.
   const [warnSeconds, setWarnSeconds] = useState<number | null>(null);
@@ -80,7 +85,7 @@ export const IdleTimeoutGuard: React.FC<Props> = ({ onLogout }) => {
     if (expiredRef.current) return;
     clearTimers();
     setWarnSeconds(null);
-    const remaining = idleRemainingMs(localStorage, Date.now(), IDLE_TIMEOUT_MS);
+    const remaining = idleRemainingMs(localStorage, Date.now(), idleTimeoutMsRef.current);
     if (remaining <= 0) {
       handleExpire();
       return;
@@ -92,6 +97,12 @@ export const IdleTimeoutGuard: React.FC<Props> = ({ onLogout }) => {
     }
     expireTimerRef.current = window.setTimeout(handleExpire, remaining);
   }, [handleExpire, startWarning]);
+
+  // تغيير المهلة من الإعدادات يسري فوراً: حدّث الـref ثم أعِد تسليح المؤقّتات.
+  useEffect(() => {
+    idleTimeoutMsRef.current = idleTimeoutMs;
+    rearm();
+  }, [idleTimeoutMs, rearm]);
 
   /** نشاط فعلي من المستخدم في هذا التبويب: يُسجَّل للجميع ثم يُعاد التسليح. */
   const reset = useCallback(() => {

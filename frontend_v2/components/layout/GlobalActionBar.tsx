@@ -1,15 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
 import {
-  FilePlus2,
-  ShoppingCart,
-  ReceiptText,
-  HandCoins,
-  ArrowLeftRight,
-  Search,
-  Network,
-  Wallet,
-  CreditCard,
-  Coins,
   Printer,
   RefreshCw,
   PlusCircle,
@@ -17,15 +7,7 @@ import {
 } from "lucide-react";
 import { AppView, User } from "../../types";
 import { clientLogger } from "../../services/logger";
-
-type ActionItem = {
-  key: string;
-  label: string;
-  icon: React.ReactNode;
-  onClick: () => void;
-  show: boolean;
-  danger?: boolean;
-};
+import { buildQuickActionGroups, visibleQuickActionGroups } from "./quickActions";
 
 interface Props {
   user: User;
@@ -33,8 +15,6 @@ interface Props {
 }
 
 export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate }) => {
-  const isManager = user.role === "manager";
-  const canInvoice = user.role === "manager" || user.role === "procurement";
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -53,86 +33,7 @@ export const GlobalActionBar: React.FC<Props> = ({ user, onNavigate }) => {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const groups: ActionItem[][] = [
-    [
-      {
-        key: "new-sales",
-        label: "فاتورة مبيعات",
-        icon: <FilePlus2 className="w-4 h-4" />,
-        onClick: go("sales-invoices", "new"),
-        show: canInvoice,
-      },
-      {
-        key: "new-purchase",
-        label: "فاتورة شراء",
-        icon: <ShoppingCart className="w-4 h-4" />,
-        onClick: go("purchase-invoices", "new"),
-        show: canInvoice,
-      },
-      {
-        key: "receipt",
-        label: "سند قبض",
-        icon: <ReceiptText className="w-4 h-4" />,
-        onClick: go("sales-customer-payments"),
-        show: canInvoice,
-      },
-      {
-        key: "payment",
-        label: "سند صرف",
-        icon: <HandCoins className="w-4 h-4" />,
-        onClick: go("supplier-payments"),
-        show: canInvoice,
-      },
-    ],
-    [
-      {
-        key: "transfer",
-        label: "قيد تحويل",
-        icon: <ArrowLeftRight className="w-4 h-4" />,
-        onClick: go("accounting-journal-entry"),
-        show: isManager,
-      },
-      {
-        key: "search-entry",
-        label: "البحث عن قيد",
-        icon: <Search className="w-4 h-4" />,
-        onClick: go("accounting-journals"),
-        show: isManager,
-      },
-      {
-        key: "coa",
-        label: "شجرة الحسابات",
-        icon: <Network className="w-4 h-4" />,
-        onClick: go("accounting-coa"),
-        show: isManager,
-      },
-      {
-        key: "cash-statement",
-        label: "كشف الصندوق",
-        icon: <Wallet className="w-4 h-4" />,
-        onClick: go("cash-boxes"),
-        show: isManager,
-      },
-      {
-        key: "cheques",
-        label: "الشيكات",
-        icon: <CreditCard className="w-4 h-4" />,
-        onClick: go("accounting-cheques"),
-        show: isManager,
-      },
-      {
-        key: "fx",
-        label: "صرف العملات",
-        icon: <Coins className="w-4 h-4" />,
-        onClick: go("accounting-exchange-rates"),
-        show: isManager,
-      },
-    ],
-  ];
-
-  const visibleGroups = groups
-    .map((g) => g.filter((a) => a.show))
-    .filter((g) => g.length > 0);
+  const visibleGroups = visibleQuickActionGroups(buildQuickActionGroups(user, go));
 
   if (visibleGroups.length === 0) return null;
 

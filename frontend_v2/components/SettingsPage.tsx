@@ -12,6 +12,7 @@ import {
 } from '../utils/quickShortcuts';
 import { usePriceVisibility } from '../contexts/PriceVisibilityContext';
 import { useAppearance, FONT_SCALE_OPTIONS, FONT_FAMILY_OPTIONS } from '../contexts/AppearanceContext';
+import { useSessionSettings, IDLE_MIN_MINUTES, IDLE_MAX_MINUTES } from '../contexts/SessionSettingsContext';
 import { getSkin, setSkin, UiSkin } from '../styles/skin';
 
 interface SettingsPageProps {
@@ -37,7 +38,20 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     const { showToggle, setShowToggle, defaultVisible, setDefaultVisible } = usePriceVisibility();
     // المظهر — حجم الخط ونوعه (تفضيل عام محلي في AppearanceContext).
     const { fontScale, setFontScale, fontFamily, setFontFamily } = useAppearance();
+    // مهلة الخمول قبل إنهاء الجلسة (per-company عبر SessionSettings).
+    const { idleTimeoutMinutes, setIdleTimeoutMinutes } = useSessionSettings();
+    const [idleInput, setIdleInput] = useState<string>(() => String(idleTimeoutMinutes));
     const [uiSkin, setUiSkin] = useState<UiSkin>(() => getSkin());
+
+    // مزامنة حقل الإدخال مع القيمة القادمة من الخادم بعد المزامنة الأوّلية.
+    useEffect(() => { setIdleInput(String(idleTimeoutMinutes)); }, [idleTimeoutMinutes]);
+
+    // اعتماد قيمة الحقل: يقصّها ضمن النطاق ويحفظها خادمياً؛ الفارغ/غير الرقمي يُعاد للحالي.
+    const commitIdleTimeout = () => {
+        const n = Number(idleInput);
+        if (!Number.isFinite(n)) { setIdleInput(String(idleTimeoutMinutes)); return; }
+        setIdleTimeoutMinutes(n);
+    };
 
     const toggleShortcut = (view: AppView) => {
         setQuickShortcutsState((prev) => {
@@ -276,6 +290,50 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
                                 <option key={o.id} value={o.id}>{o.label}</option>
                             ))}
                         </select>
+                    </div>
+                </div>
+            </div>
+
+            {/* الجلسة والخمول — مهلة إنهاء الجلسة عند عدم النشاط */}
+            <div style={sectionStyle}>
+                <div style={sectionTitleStyle}>الجلسة والخمول</div>
+                <p style={{ fontSize: 'var(--aseel-fs-sm)', color: 'var(--aseel-ink-soft)', marginBottom: 12 }}>
+                    عند عدم وجود أي نشاط (نقر/كتابة/تمرير) طوال هذه المدة تُنهى الجلسة تلقائياً وتُطلب
+                    إعادة الدخول. يظهر تنبيه بعدّاد تنازلي قبل الانتهاء لتمديد الجلسة. يُحفظ لهذه الشركة.
+                </p>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+                    <div style={{ ...fieldStyle, maxWidth: 220 }}>
+                        <label style={labelStyle}>مدة الخمول قبل إنهاء الجلسة (بالدقائق)</label>
+                        <input
+                            className="aseel-input aseel-num"
+                            type="number"
+                            min={IDLE_MIN_MINUTES}
+                            max={IDLE_MAX_MINUTES}
+                            step={5}
+                            value={idleInput}
+                            onChange={e => setIdleInput(e.target.value)}
+                            onBlur={commitIdleTimeout}
+                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitIdleTimeout(); } }}
+                        />
+                        <span style={{ fontSize: '10px', color: 'var(--aseel-ink-soft)' }}>
+                            من {IDLE_MIN_MINUTES} دقائق حتى {IDLE_MAX_MINUTES} دقيقة (24 ساعة)
+                        </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {[30, 60, 120, 180].map((m) => (
+                            <button
+                                key={m}
+                                type="button"
+                                className="aseel-toolbtn"
+                                onClick={() => setIdleTimeoutMinutes(m)}
+                                style={{
+                                    padding: '5px 12px', fontWeight: 700,
+                                    ...(idleTimeoutMinutes === m ? { color: 'var(--aseel-accent, #1857a4)', borderColor: 'var(--aseel-accent, #1857a4)' } : {}),
+                                }}
+                            >
+                                {m < 60 ? `${m} دقيقة` : `${m / 60} ساعة`}
+                            </button>
+                        ))}
                     </div>
                 </div>
             </div>

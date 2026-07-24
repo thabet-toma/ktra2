@@ -14,6 +14,7 @@ import { ConfirmProvider } from './contexts/ConfirmContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { ThemeProvider, applyThemeOnBoot } from './contexts/ThemeContext';
 import { AppearanceProvider } from './contexts/AppearanceContext';
+import { SessionSettingsProvider } from './contexts/SessionSettingsContext';
 import { PriceVisibilityProvider } from './contexts/PriceVisibilityContext';
 import { applySkinOnBoot } from './styles/skin';
 
@@ -28,11 +29,13 @@ const ProductDetailPage = React.lazy(() => import('./components/store/ProductDet
 const ApplicationProviders: React.FC = () => (
   <ThemeProvider>
     <AppearanceProvider>
-      <PriceVisibilityProvider>
-        <ConfirmProvider>
-          <ToastProvider><App /></ToastProvider>
-        </ConfirmProvider>
-      </PriceVisibilityProvider>
+      <SessionSettingsProvider>
+        <PriceVisibilityProvider>
+          <ConfirmProvider>
+            <ToastProvider><App /></ToastProvider>
+          </ConfirmProvider>
+        </PriceVisibilityProvider>
+      </SessionSettingsProvider>
     </AppearanceProvider>
   </ThemeProvider>
 );

@@ -264,6 +264,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         type="button"
         className="text-[var(--aseel-accent,#2563eb)] underline hover:opacity-80"
         title="عرض بطاقة الصنف"
+        data-ctx-item-id={p.id}
+        data-ctx-item-name={p.display_name || p.name_ar || p.name_en || ""}
         onClick={(e) => { e.stopPropagation(); openInNewTab(productProfilePath(p.id)); }}
       >
         {p.display_name || p.name_ar || p.name_en || "—"}

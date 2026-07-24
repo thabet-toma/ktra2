@@ -250,6 +250,9 @@ export const SalesCustomersPage: React.FC = () => {
           <button
             type="button"
             className="text-xs font-semibold text-blue-700 hover:underline text-right"
+            data-ctx-partner-id={r.id}
+            data-ctx-partner-name={r.name}
+            data-ctx-partner-kind="customer"
             onClick={(e) => {
               e.stopPropagation();
               openInNewTab(`/partners/${r.id}`);

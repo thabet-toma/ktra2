@@ -27,6 +27,9 @@ mysqlclient==2.2.7
 requests==2.32.5
 websocket-client>=1.6.0
 
+# ── المساعد الذكي: حقن عزل الشركة في SQL عبر AST ────────────────
+sqlglot>=25.0
+
 # ── WSGI server (production runtime) ────────────────────────────
 gunicorn==23.0.0
 

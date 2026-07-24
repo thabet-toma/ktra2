@@ -1,10 +1,17 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { X, Delete, History as HistoryIcon, Trash2 } from "lucide-react";
 import { evaluateArithmeticExpression } from "../../utils/arithmetic";
 
 /** T-C1: ذاكرة العمليات السابقة — تُحفظ محلياً وتبقى بين الجلسات. */
 const HISTORY_KEY = "aseel_calc_history";
 type CalcEntry = { expr: string; result: string };
+
+/** مستطيل الحقل الهدف (للإيفكت: الحاسبة تطير نحوه عند الإغلاق). */
+type AnchorRect = { x: number; y: number; width: number; height: number };
+
+/** مدة إيفكت الخروج (ms) — بطيء كفايةً كي تُرى الحاسبة وهي تطير نحو الحقل. */
+const EXIT_MS = 620;
+const ENTER_MS = 200;
 
 interface AseelCalculatorPopoverProps {
   initialValue: string | number;
@@ -14,7 +21,31 @@ interface AseelCalculatorPopoverProps {
   onClose: () => void;
   /** task16 E15: حاسبة مستقلة (من أيقونة الشريط) — «=» تعرض الناتج ولا تملأ خلية */
   standalone?: boolean;
+  /** إن مُرّر: عند الإغلاق/التأكيد تطير الحاسبة (تنكمش) نحو هذا الحقل بدل التلاشي مكانها. */
+  anchorRect?: AnchorRect | null;
 }
+
+/** يُظهر × و÷ و− للعرض فقط (التقييم يبقى على * و/ و-). */
+const prettyExpr = (s: string) =>
+  s.replace(/\*/g, "×").replace(/\//g, "÷").replace(/-/g, "−");
+
+/** زر عصري بلمعان 3D وتوهّج وضغطة حيّة. */
+const CalcButton: React.FC<{
+  children: React.ReactNode;
+  colorClass?: string;
+  className?: string;
+  onClick?: () => void;
+}> = ({ children, colorClass = "bg-white/5 text-slate-100 hover:bg-white/10 border border-white/10", className = "", onClick }) => (
+  <button
+    type="button"
+    onClick={onClick}
+    className={`relative overflow-hidden flex items-center justify-center text-xl font-semibold rounded-2xl transition-all duration-200 active:scale-90 shadow-lg ${colorClass} ${className}`}
+  >
+    {/* لمعان خفيف أعلى الزر لإعطاء بروز 3D */}
+    <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-white/15 to-transparent pointer-events-none" />
+    <span className="relative z-10">{children}</span>
+  </button>
+);
 
 export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
   initialValue,
@@ -23,12 +54,21 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
   onConfirm,
   onClose,
   standalone = false,
+  anchorRect = null,
 }) => {
   const [expression, setExpression] = useState(() => {
     const v = Number(initialValue);
     return isNaN(v) || v === 0 ? "" : String(v);
   });
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // تموضع مثبَّت داخل الشاشة — يُصحَّح بعد القياس كي لا يُقطع أسفل/يمين الحاسبة
+  // (يراعي الارتفاع الحقيقي مع/بلا لوحة الذاكرة). التصحيح في useLayoutEffect أدناه.
+  const [pos, setPos] = useState<{ top: number; left: number }>({ top: y, left: x });
+
+  // إيفكت الدخول/الخروج: enter (منكمش شفّاف) ← shown ← leave (يطير نحو الحقل).
+  const [anim, setAnim] = useState<"enter" | "shown" | "leave">("enter");
+  const leaveDelta = useRef<{ tx: number; ty: number }>({ tx: 0, ty: 0 });
 
   // T-C1: ذاكرة العمليات السابقة (محفوظة محلياً).
   const [history, setHistory] = useState<CalcEntry[]>(() => {
@@ -40,6 +80,18 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
     }
   });
   const [showHistory, setShowHistory] = useState(false);
+
+  // صحّح التموضع بعد القياس (وعند فتح/إغلاق لوحة الذاكرة التي تغيّر الارتفاع).
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const h = el.offsetHeight;
+    const w = el.offsetWidth;
+    setPos({
+      top: Math.max(8, Math.min(y, window.innerHeight - h - 8)),
+      left: Math.max(8, Math.min(x, window.innerWidth - w - 8)),
+    });
+  }, [x, y, showHistory]);
 
   const pushHistory = (expr: string, result: number) => {
     setHistory((prev) => {
@@ -62,10 +114,30 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
     }
   };
 
-  // Focus the container on mount to catch keyboard events
+  // Focus the container on mount + شغّل إيفكت الدخول في الإطار التالي.
   useEffect(() => {
     containerRef.current?.focus();
+    const raf = requestAnimationFrame(() => setAnim("shown"));
+    return () => cancelAnimationFrame(raf);
   }, []);
+
+  /** يشغّل إيفكت الخروج (طيران بطيء نحو الحقل إن وُجد) ثم ينفّذ الإجراء. */
+  const animateOut = (done: () => void) => {
+    const el = containerRef.current;
+    if (el && anchorRect) {
+      const rect = el.getBoundingClientRect();
+      leaveDelta.current = {
+        tx: anchorRect.x + anchorRect.width / 2 - (rect.left + rect.width / 2),
+        ty: anchorRect.y + anchorRect.height / 2 - (rect.top + rect.height / 2),
+      };
+    } else {
+      leaveDelta.current = { tx: 0, ty: 0 };
+    }
+    setAnim("leave");
+    window.setTimeout(done, EXIT_MS);
+  };
+
+  const requestClose = () => animateOut(onClose);
 
   const handleKeyPress = (char: string) => {
     setExpression((prev) => prev + char);
@@ -91,7 +163,8 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
         // حاسبة مستقلة: اعرض الناتج وأبقِ النافذة لمواصلة الحساب
         setExpression(String(rounded));
       } else {
-        onConfirm(rounded);
+        // إيفكت: الحاسبة تطير (ببطء) نحو الحقل ثم يُملأ الناتج.
+        animateOut(() => onConfirm(rounded));
       }
     } catch {
       alert("تعبير غير صالح");
@@ -101,7 +174,7 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") {
       e.preventDefault();
-      onClose();
+      requestClose();
     } else if (e.key === "Enter") {
       e.preventDefault();
       handleEvaluate();
@@ -114,31 +187,58 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
     }
   };
 
+  // نمط الإيفكت: انكماش/ظهور عند الدخول، وطيران/انكماش نحو الحقل عند الخروج.
+  const transform =
+    anim === "enter"
+      ? "scale(.9)"
+      : anim === "leave"
+        ? `translate(${leaveDelta.current.tx}px, ${leaveDelta.current.ty}px) scale(.05)`
+        : "scale(1)";
+  const transition =
+    anim === "leave"
+      ? `transform ${EXIT_MS}ms cubic-bezier(.5,0,.2,1), opacity ${EXIT_MS}ms cubic-bezier(.7,0,.9,1)`
+      : `transform ${ENTER_MS}ms cubic-bezier(.2,.8,.25,1), opacity ${ENTER_MS}ms ease`;
+
+  const opBtn = "bg-indigo-500/80 text-white border border-indigo-400/30 hover:bg-indigo-500 shadow-[0_0_14px_rgba(99,102,241,.35)]";
+
   return (
     <div
       ref={containerRef}
       tabIndex={-1}
       onKeyDown={handleKeyDown}
-      className="fixed z-[99] bg-[var(--color-surface)] border border-[var(--color-border)] shadow-2xl rounded-2xl p-3 w-64 outline-none select-none"
+      className="fixed z-[99] w-72 outline-none select-none rounded-[2rem] p-4 bg-slate-800/40 backdrop-blur-2xl border border-slate-700/50 shadow-[0_20px_50px_rgba(0,0,0,.55)] overflow-hidden"
       style={{
-        top: Math.min(y, window.innerHeight - 320),
-        left: Math.min(x, window.innerWidth - 280),
+        top: pos.top,
+        left: pos.left,
+        transform,
+        opacity: anim === "shown" ? 1 : 0,
+        transformOrigin: "center",
+        transition,
+        willChange: "transform, opacity",
       }}
       dir="ltr"
     >
-      <div className="flex justify-between items-center mb-2 pb-2 border-b border-[var(--color-border)]">
-        <span className="text-xs font-bold bg-gradient-to-l from-emerald-500 to-blue-500 bg-clip-text text-transparent">حاسبة الأصيل</span>
+      {/* توهّج خلفي زخرفي */}
+      <div className="absolute -top-16 -right-16 w-40 h-40 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-16 -left-16 w-40 h-40 bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+
+      {/* أدوات علوية: عنوان + ذاكرة + إغلاق */}
+      <div className="relative flex justify-between items-center mb-3">
+        <span className="text-xs font-extrabold bg-gradient-to-l from-emerald-400 to-indigo-400 bg-clip-text text-transparent tracking-wider">حاسبة الأصيل</span>
         <div className="flex items-center gap-1">
           <button
+            type="button"
             onClick={() => setShowHistory((s) => !s)}
             title="ذاكرة العمليات السابقة"
-            className={`p-1 rounded-full hover:bg-[var(--color-surface-3)] ${showHistory ? "text-emerald-600" : "text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)]"}`}
+            className={`p-1.5 rounded-full bg-black/25 hover:bg-black/40 ${showHistory ? "text-emerald-400" : "text-slate-200"}`}
           >
             <HistoryIcon className="w-4 h-4" />
           </button>
           <button
-            onClick={onClose}
-            className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] p-1 rounded-full hover:bg-[var(--color-surface-3)]"
+            type="button"
+            onClick={requestClose}
+            title="إغلاق"
+            className="p-1.5 rounded-full bg-black/25 text-slate-200 hover:bg-rose-500 hover:text-white"
           >
             <X className="w-4 h-4" />
           </button>
@@ -147,28 +247,29 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
 
       {/* T-C1: لوحة ذاكرة العمليات السابقة — نقرة على عملية تستعيد ناتجها. */}
       {showHistory && (
-        <div className="mb-2 border border-[var(--color-border)] rounded-xl overflow-hidden">
-          <div className="flex justify-between items-center px-2 py-1 bg-[var(--color-surface-2)]">
-            <span className="text-[11px] font-semibold text-[var(--color-text-muted)]">العمليات السابقة</span>
+        <div className="relative mb-3 border border-slate-700/60 rounded-2xl overflow-hidden bg-slate-950/50">
+          <div className="flex justify-between items-center px-2 py-1 bg-white/5">
+            <span className="text-[11px] font-semibold text-slate-400">العمليات السابقة</span>
             {history.length > 0 && (
-              <button onClick={clearHistory} title="مسح الذاكرة" className="text-[var(--color-text-muted)] hover:text-red-500 p-0.5 rounded">
+              <button type="button" onClick={clearHistory} title="مسح الذاكرة" className="text-slate-400 hover:text-rose-400 p-0.5 rounded">
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
           <div className="max-h-32 overflow-y-auto">
             {history.length === 0 ? (
-              <div className="px-2 py-3 text-center text-[11px] text-[var(--color-text-muted)]">لا عمليات محفوظة</div>
+              <div className="px-2 py-3 text-center text-[11px] text-slate-500">لا عمليات محفوظة</div>
             ) : (
               history.map((h, i) => (
                 <button
                   key={i}
+                  type="button"
                   onClick={() => { setExpression(h.result); setShowHistory(false); }}
                   title="استعادة الناتج"
-                  className="w-full flex justify-between items-baseline gap-2 px-2 py-1 text-right hover:bg-emerald-50 dark:hover:bg-emerald-950/20 border-b border-gray-50 dark:border-gray-800 last:border-0"
+                  className="w-full flex justify-between items-baseline gap-2 px-2 py-1 text-right hover:bg-white/5 border-b border-white/5 last:border-0"
                 >
-                  <span className="font-mono text-[11px] text-[var(--color-text-muted)] truncate">{h.expr}</span>
-                  <span className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">= {h.result}</span>
+                  <span className="font-mono text-[11px] text-slate-500 truncate">{prettyExpr(h.expr)}</span>
+                  <span className="font-mono text-xs font-bold text-emerald-400">= {h.result}</span>
                 </button>
               ))
             )}
@@ -176,71 +277,46 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
         </div>
       )}
 
-      {/* Screen */}
-      <div className="bg-[var(--color-surface-2)] border border-gray-150 dark:border-gray-700 rounded-xl p-2.5 mb-3 text-right font-mono text-lg font-bold text-[var(--color-text)] truncate min-h-[44px]">
-        {expression || "0"}
+      {/* الشاشة — داكنة أنيقة بلمعان علوي وثلاث نقاط حالة */}
+      <div className="relative bg-slate-950/80 rounded-3xl px-4 py-3 mb-4 border border-slate-800/80 shadow-inner min-h-[80px] flex flex-col justify-between overflow-hidden">
+        <div className="absolute top-0 left-0 w-full h-1/2 bg-gradient-to-b from-white/5 to-transparent pointer-events-none" />
+        <div className="relative flex justify-between items-center">
+          <span className="text-slate-500 text-[10px] tracking-[.2em] font-semibold uppercase">Aseel Calc</span>
+          <div className="flex gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+          </div>
+        </div>
+        <span className="relative text-white text-4xl font-light tracking-wider truncate w-full text-right drop-shadow-[0_0_15px_rgba(255,255,255,.2)]">
+          {prettyExpr(expression) || "0"}
+        </span>
       </div>
 
-      {/* Keyboard Grid */}
-      <div className="grid grid-cols-4 gap-1.5 text-sm font-semibold">
-        <button onClick={handleClear} className="p-2.5 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 rounded-lg hover:opacity-80">
-          C
-        </button>
-        <button onClick={handleBackspace} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text-muted)] rounded-lg hover:opacity-80 flex items-center justify-center">
-          <Delete className="w-4 h-4" />
-        </button>
-        <button onClick={() => handleKeyPress("/")} className="p-2.5 bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 rounded-lg hover:opacity-80">
-          /
-        </button>
-        <button onClick={() => handleKeyPress("*")} className="p-2.5 bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 rounded-lg hover:opacity-80">
-          *
-        </button>
+      {/* شبكة الأزرار */}
+      <div className="relative grid grid-cols-4 gap-2.5 h-64">
+        <CalcButton colorClass="bg-rose-500/80 text-white border border-rose-400/30 hover:bg-rose-500 shadow-[0_0_14px_rgba(244,63,94,.35)] text-lg font-bold" onClick={handleClear}>C</CalcButton>
+        <CalcButton colorClass="bg-amber-400/80 text-white border border-amber-300/30 hover:bg-amber-400 shadow-[0_0_14px_rgba(251,191,36,.3)]" onClick={handleBackspace}><Delete className="w-5 h-5" /></CalcButton>
+        <CalcButton colorClass={opBtn} onClick={() => handleKeyPress("/")}>÷</CalcButton>
+        <CalcButton colorClass={opBtn} onClick={() => handleKeyPress("*")}>×</CalcButton>
 
-        <button onClick={() => handleKeyPress("7")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
-          7
-        </button>
-        <button onClick={() => handleKeyPress("8")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
-          8
-        </button>
-        <button onClick={() => handleKeyPress("9")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
-          9
-        </button>
-        <button onClick={() => handleKeyPress("-")} className="p-2.5 bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 rounded-lg hover:opacity-80">
-          -
-        </button>
+        <CalcButton onClick={() => handleKeyPress("7")}>7</CalcButton>
+        <CalcButton onClick={() => handleKeyPress("8")}>8</CalcButton>
+        <CalcButton onClick={() => handleKeyPress("9")}>9</CalcButton>
+        <CalcButton colorClass={opBtn} onClick={() => handleKeyPress("-")}>−</CalcButton>
 
-        <button onClick={() => handleKeyPress("4")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
-          4
-        </button>
-        <button onClick={() => handleKeyPress("5")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
-          5
-        </button>
-        <button onClick={() => handleKeyPress("6")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
-          6
-        </button>
-        <button onClick={() => handleKeyPress("+")} className="p-2.5 bg-blue-50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 rounded-lg hover:opacity-80">
-          +
-        </button>
+        <CalcButton onClick={() => handleKeyPress("4")}>4</CalcButton>
+        <CalcButton onClick={() => handleKeyPress("5")}>5</CalcButton>
+        <CalcButton onClick={() => handleKeyPress("6")}>6</CalcButton>
+        <CalcButton colorClass={opBtn} onClick={() => handleKeyPress("+")}>+</CalcButton>
 
-        <button onClick={() => handleKeyPress("1")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
-          1
-        </button>
-        <button onClick={() => handleKeyPress("2")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
-          2
-        </button>
-        <button onClick={() => handleKeyPress("3")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
-          3
-        </button>
-        <button onClick={handleEvaluate} className="row-span-2 p-2.5 bg-emerald-500 text-white rounded-lg hover:opacity-85 flex items-center justify-center font-bold">
-          =
-        </button>
+        <CalcButton onClick={() => handleKeyPress("1")}>1</CalcButton>
+        <CalcButton onClick={() => handleKeyPress("2")}>2</CalcButton>
+        <CalcButton onClick={() => handleKeyPress("3")}>3</CalcButton>
+        <CalcButton className="row-span-2 text-2xl font-extrabold" colorClass="bg-emerald-500/90 text-white border border-emerald-400/30 hover:bg-emerald-500 shadow-[0_0_18px_rgba(16,185,129,.45)]" onClick={handleEvaluate}>=</CalcButton>
 
-        <button onClick={() => handleKeyPress("0")} className="col-span-2 p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
-          0
-        </button>
-        <button onClick={() => handleKeyPress(".")} className="p-2.5 bg-[var(--color-surface-2)] text-[var(--color-text)] rounded-lg hover:opacity-80">
-          .
-        </button>
+        <CalcButton className="col-span-2" onClick={() => handleKeyPress("0")}>0</CalcButton>
+        <CalcButton onClick={() => handleKeyPress(".")}>.</CalcButton>
       </div>
     </div>
   );

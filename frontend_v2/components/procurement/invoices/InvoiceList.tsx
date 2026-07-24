@@ -219,6 +219,9 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             type="button"
             className="text-xs text-[var(--aseel-accent)] underline hover:no-underline cursor-pointer bg-transparent border-0 p-0 font-inherit text-right"
             title="فتح كشف حساب المورد في تبويب جديد"
+            data-ctx-partner-id={r.supplierId}
+            data-ctx-partner-name={supplierName(r)}
+            data-ctx-partner-kind="supplier"
             onClick={(e) => { e.stopPropagation(); openInNewTab(`/partners/${r.supplierId}`); }}
           >
             {supplierName(r)}

@@ -398,6 +398,9 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
         <button
           type="button"
           className="text-xs text-blue-700 hover:underline"
+          data-ctx-partner-id={r.customer ?? undefined}
+          data-ctx-partner-name={r.customer_name || ""}
+          data-ctx-partner-kind="customer"
           onClick={(e) => { e.stopPropagation(); navigate(`/partners/${r.customer}`); }}
           title="فتح ملف العميل"
         >

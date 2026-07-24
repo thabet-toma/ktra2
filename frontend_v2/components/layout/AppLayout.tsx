@@ -22,6 +22,7 @@ import {
 } from './BranchSwitcher';
 import { AseelCalculatorButton } from '../aseel';
 import { GlobalActionBar } from './GlobalActionBar';
+import { GlobalContextMenu } from './GlobalContextMenu';
 import { NotificationCenter } from '../notifications/NotificationCenter';
 import { WhatsNewButton } from './WhatsNewButton';
 import {
@@ -206,6 +207,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         </div>
       </div>
 
+      {/* قائمة زر الفأرة اليمنى العامّة — تعمل في كامل الموقع (تُستثنى الحقول والقوائم الموضعية) */}
+      <GlobalContextMenu user={user} onNavigate={onNavigate} />
     </div>
   );
 };

@@ -12,6 +12,7 @@ import { EntityActivityLog } from '../activity/EntityActivityLog';
 import { referenceTypeLabel, clarifyStatementDescription } from '../../utils/entityLinks';
 import { clientLogger } from '../../services/logger';
 import { NewPaymentModal } from '../sales/SalesCustomerPaymentsPage';
+import { NewSupplierPaymentModal } from '../sales/NewSupplierPaymentModal';
 
 interface PartnerApi {
   id: number;
@@ -97,6 +98,10 @@ export const PartnerProfilePage: React.FC = () => {
   const [invLoading, setInvLoading] = useState(false);
   const [invError, setInvError] = useState<string | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  // سند صرف سريع للمورد (مرآة سند القبض للعميل).
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  // نيّة مؤجّلة من قائمة زر اليمين العامّة (سند قبض/صرف) — تُطبَّق بعد تحميل الشريك.
+  const [pendingCtxAction, setPendingCtxAction] = useState<string | null>(null);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
 
   const tenantId = useMemo(() => resolveTenantId(), []);
@@ -136,8 +141,22 @@ export const PartnerProfilePage: React.FC = () => {
         sessionStorage.removeItem('ktra_focus_partner_tab');
         sessionStorage.removeItem('ktra_focus_partner_note');
       }
+      // جسر قائمة زر اليمين: نيّة سند قبض/صرف (تُطبَّق بعد تحميل الشريك ومطابقة نوعه).
+      const ctxAction = sessionStorage.getItem('ktra_partner_action');
+      if (ctxAction) {
+        setPendingCtxAction(ctxAction);
+        sessionStorage.removeItem('ktra_partner_action');
+      }
     } catch { /* خاصية خاصة */ }
   }, [location.key]);
+
+  // تطبيق نيّة قائمة زر اليمين بعد تحميل الشريك — receipt للعميل، payment للمورد.
+  useEffect(() => {
+    if (!partner || !pendingCtxAction) return;
+    if (pendingCtxAction === 'receipt' && !isSupplier) setShowReceiptModal(true);
+    if (pendingCtxAction === 'payment' && isSupplier) setShowPaymentModal(true);
+    setPendingCtxAction(null);
+  }, [partner, pendingCtxAction, isSupplier]);
 
   const loadStatement = useCallback(
     (offset: number) => {
@@ -410,6 +429,25 @@ export const PartnerProfilePage: React.FC = () => {
                 },
               ]
             : []),
+          // سند صرف سريع + فاتورة شراء للمورد — مرآة أزرار العميل (المورد مُعبّأ مسبقاً).
+          ...(isSupplier && id
+            ? [
+                {
+                  key: 'new-payment',
+                  label: 'سند صرف جديد',
+                  onClick: () => {
+                    setShowPaymentModal(true);
+                    clientLogger.info("partner.supplier_payment_open");
+                  },
+                  separatorBefore: true,
+                },
+                {
+                  key: 'new-purchase',
+                  label: 'فاتورة مشتريات جديدة',
+                  onClick: () => navigate('/purchase-invoices/new'),
+                },
+              ]
+            : []),
         ]}
         tabs={tabs}
         activeTab={activeTabKey}
@@ -437,6 +475,23 @@ export const PartnerProfilePage: React.FC = () => {
               .catch((err) => setError(err instanceof Error ? err.message : String(err)));
             setActivityRefreshKey((key) => key + 1);
             clientLogger.info("partner.customer_payment_saved");
+          }}
+        />
+      )}
+      {showPaymentModal && receiptPartner && (
+        <NewSupplierPaymentModal
+          initialPartner={receiptPartner}
+          lockPartner
+          onClose={() => setShowPaymentModal(false)}
+          onSaved={() => {
+            setShowPaymentModal(false);
+            setStmtOffset(0);
+            loadStatement(0);
+            apiGetObject<PartnerProfile>(`partners/${id}/profile/`, { tenantId })
+              .then(setProfile)
+              .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+            setActivityRefreshKey((key) => key + 1);
+            clientLogger.info("partner.supplier_payment_saved");
           }}
         />
       )}

@@ -92,6 +92,9 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
         <button
           type="button"
           className="text-xs font-semibold text-blue-700 hover:underline text-right"
+          data-ctx-partner-id={p.id}
+          data-ctx-partner-name={p.name}
+          data-ctx-partner-kind="supplier"
           onClick={(e) => {
             e.stopPropagation();
             navigate(`/partners/${p.id}`);

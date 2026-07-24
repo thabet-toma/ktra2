@@ -306,6 +306,25 @@ OPENCLAW_WS_MESSAGES_URL = (os.environ.get("OPENCLAW_WS_MESSAGES_URL") or "").st
 _oc_ws = (os.environ.get("OPENCLAW_USE_WEBSOCKET", "0") or "0").strip().lower()
 OPENCLAW_USE_WEBSOCKET = _oc_ws in ("1", "true", "yes", "on")
 
+# ── المساعد الذكي عبر Ollama السحابي (Qwen) ────────────────────────────────
+# assistant/chat/ يوجّه للنموذج على Ollama عندما ASSISTANT_BACKEND=ollama
+# (الافتراضي). النموذج يجيب من قاعدة بيانات كترا عبر أدوات مقفولة على شركة
+# المستخدم (core/assistant_tools.py). المفتاح لا يُعرَّض للمتصفح — الطلب صادر
+# من خادم Django مع Authorization: Bearer.
+ASSISTANT_BACKEND = (os.environ.get("ASSISTANT_BACKEND", "ollama") or "ollama").strip().lower()
+# نقطة متوافقة مع OpenAI. السحابة: https://ollama.com/v1 — أو خادم Ollama محلي: http://IP:11434/v1
+OLLAMA_BASE_URL = (os.environ.get("OLLAMA_BASE_URL") or "https://ollama.com/v1").strip()
+# المفتاح سرّي — لا يُحفظ في git. يُقرأ من البيئة فقط.
+OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "").strip()
+# اسم الموديل بالضبط كما يظهر في /v1/models.
+# ملاحظة: qwen3.6 غير متاح سحابياً إطلاقاً (محلي فقط). qwen3.5:397b متاح لكنه
+# يتطلب اشتراك Ollama مدفوع (يرجع 403 على الخطة المجانية). النماذج المجانية
+# التي تدعم الأدوات: gpt-oss:120b و gpt-oss:20b — لذا الافتراضي gpt-oss:120b
+# ليعمل المساعد فوراً. للتبديل لكوين: اشترك ثم ضع OLLAMA_MODEL=qwen3.5:397b،
+# أو شغّل qwen3.6 على خادمك واضبط OLLAMA_BASE_URL على http://IP:11434/v1.
+OLLAMA_MODEL = (os.environ.get("OLLAMA_MODEL") or "gpt-oss:120b").strip()
+OLLAMA_ASSISTANT_TIMEOUT = int(os.environ.get("OLLAMA_ASSISTANT_TIMEOUT", "120") or "120")
+
 # ── كاش الخادم (صيانة الأداء 2026-07) ──────────────────────────────────────
 # استضافة مشتركة بلا root ⇒ لا Redis/Memcached. FileBasedCache مشتركة بين كل
 # عمليات WSGI (نفس القرص) وضربة الكاش = صفر استعلامات MySQL — بعكس LocMemCache

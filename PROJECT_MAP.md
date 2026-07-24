@@ -28,6 +28,125 @@ python manage.py check                                 # 0 مشاكل
 
 ---
 
+## [FEAT — المساعد الذكي عبر Ollama (Qwen/gpt-oss) + text-to-SQL بعزل شركة مضمون, 2026-07-24]
+
+أُعيد ربط «المساعد الذكي» (`SmartAssistantPage`) ليجيب من قاعدة بيانات كترا مباشرةً
+عبر نموذج على **Ollama السحابي** — بلا n8n وبلا OpenClaw. المالك رفض «الأدوات الضيّقة»
+(كل فجوة تجعله يستجوب المستخدم) فتحوّلنا إلى **text-to-SQL**: النموذج يرى المخطط الكامل
+ويكتب `SELECT` بحرية لأي سؤال، والخادم يضمن العزل والقراءة-فقط.
+
+- **`core/assistant_sql.py` (قلب الأمان):** `run_sql(tenant_id, query)` →
+  (1) تحقّق قراءة-فقط (`SELECT`/`WITH` فقط، كلمات DDL/تعديل مرفوضة، عبارة واحدة)،
+  (2) رفض أي جدول خارج **جداول الأعمال** (يمنع `auth_user` وجداول Django الداخلية)،
+  (3) **حقن عزل الشركة عبر شجرة SQL (`sqlglot` + `traverse_scope`)**: يضيف
+  `<alias>.TenantID = <شركة الجلسة>` لكل جدول مملوك لشركة في **كل نطاق** (JOIN/subquery/CTE)؛
+  الجداول العامة (`currencies`, `units_of_measure`) لا تُفلتر. حتى لو استهدف النموذج شركة
+  أخرى صراحةً → نتيجة فارغة. (4) سقف 200 صف. لهجة الإخراج تتبع `connection.vendor`.
+  `tenant_scoped_tables()` / `business_tables()` / `schema_catalog()` تُشتق من موديلات
+  Django (دائماً محدَّثة — لا كتالوج ثابت).
+- **`core/assistant_tools.py`:** `TOOL_SCHEMAS` يعرض أداة `run_sql` وحدها للنموذج.
+  (أدوات ضيّقة سابقة — search_products/sales_to_customer/… — بقيت في `_DISPATCH`
+  للاختبارات لكن غير معروضة.) `run_tool` يحلّ الشركة بـ
+  `get_tenant(request, raise_on_missing=True)` — العزل مفروض خادمياً.
+- **`core/ollama_assistant.py`:** حلقة دردشة OpenAI-compatible (`chat`) مع tool_calls
+  (حتى 5 جولات). `_system_prompt()` يُدرج المخطط الكامل + قواعد (كن مبادراً، لا تكتب
+  TenantID، لا تُظهر معرّفات داخلية اربطها بالاسم، أرقام مالية = `Status='posted'`).
+- **`core/assistant_views.py`:** `assistant/chat/` يوجّه لـ Ollama عند
+  `ASSISTANT_BACKEND=ollama` (الافتراضي)؛ كود OpenClaw القديم بقي fallback (المرفقات فقط).
+- **الواجهة:** `assistantApi.ts` صار يمرّر `{ tenantId: resolveTenantId() }` فيصل
+  `X-Tenant-Id` (لم يكن يُرسَل). نص وصف الشاشة حُدِّث.
+- **الإعدادات:** `OLLAMA_BASE_URL` (=https://ollama.com/v1)، `OLLAMA_API_KEY` (سرّي/بيئة)،
+  `OLLAMA_MODEL`، `OLLAMA_ASSISTANT_TIMEOUT`، `ASSISTANT_BACKEND` — في `settings.py`+`.env.example`.
+  **`sqlglot>=25` أُضيف لـ `requirements.txt` + `.local`.**
+- **gotcha — خطة Ollama المجانية:** المفتاح المجاني يعرض كل النماذج في `/v1/models` لكن
+  `/v1/chat/completions` يرجع **403 «requires a subscription»** لكل النماذج الكبيرة
+  (qwen3.5:397b، GLM، Kimi، DeepSeek). المتاح مجاناً ويدعم الأدوات: **`gpt-oss:120b`
+  و`gpt-oss:20b` فقط** → الافتراضي `gpt-oss:120b`. **`qwen3.6` غير متاح سحابياً إطلاقاً**
+  (وسوم صفحة التحميل محلية فقط) — يلزمه خادم خاص و`OLLAMA_BASE_URL=http://IP:11434/v1`.
+- **التحقّق:** `core/tests/test_assistant_sql.py` (9) يثبت حقن العزل في JOIN/subquery،
+  استحالة الوصول لشركة أخرى حتى بطلب صريح، رفض الكتابة ورفض `auth_user`.
+  `test_assistant_tools.py` (6) للأدوات الضيّقة. اختبار حي أثبت أن النموذج يكتب SQL
+  (مع JOIN لأسماء الأطراف) ويجيب «آخر صفقة»/«آخر بيع» مباشرة.
+
+---
+
+## [FEAT — قائمة يمين واعية بالسياق: حاسبة داخل الحقول + إجراءات الشريك, 2026-07-23]
+
+- **طبقة مشتركة نقيّة `utils/contextMenuTargets.ts`** (مصدر واحد، قابلة لاختبار Node):
+  `calcSeedFromRawValue` (يبذر الحاسبة من قيمة الحقل، ينظّف فواصل الآلاف/العملة)،
+  `formatCalcResult` (حتى 4 منازل بلا أصفار زائدة)، `readPartnerContext` (يقرأ
+  سياق الشريك من مُلتقِط سمات)، وأغلفة DOM رفيعة: `resolveEditableTarget` (حقل نصّي؟
+  يستثني أنواع input غير النصية)، `writeEditableValue` (يكتب عبر value-setter الأصيل
+  ويطلق `input`/`change` كي تلتقطه حقول React المتحكَّم بها)،
+  `resolvePartnerContextFromTarget` (`closest('[data-ctx-partner-id]')`).
+- **`layout/GlobalContextMenu.tsx` صار حسب الحالة** (كان: إجراءات صفحة + سريعة ثابتة):
+  - **داخل حقل نصّي** ⇒ «حاسبة» تفتح `AseelCalculatorPopover` مبذورة بقيمة الحقل،
+    و«=» تعيد الناتج إلى نفس الحقل (writeback) + حافظة (نسخ/قص/لصق/تحديد الكل).
+    Ctrl+C/V/X سليمة — نلمس `contextmenu` فقط. تصميم الحاسبة زجاجي داكن (glassmorphism:
+    `backdrop-blur`، توهّج، لمعان 3D، شاشة داكنة بمحارف × ÷ − للعرض والتقييم يبقى على
+    * / -)، مع إيفكت دخول سريع (انكماش/ظهور، ~200ms) وخروج **بطيء يطير نحو الحقل**
+    (~620ms) عبر prop `anchorRect` (يُمرّره `GlobalContextMenu` من مستطيل الحقل)؛ بلا
+    `anchorRect` يتلاشى مكانه (المستقلة/الخلايا). محرّك الحساب لم يُوسَّع — بلا مفاتيح شكلية.
+  - **فوق اسم شريك** (`data-ctx-partner-*`) ⇒ إجراءاته: عميل (بطاقة/فاتورة مبيعات/سند
+    قبض/عرض سعر/كشف)، مورد (بطاقة/فاتورة شراء/سند صرف/كشف). الروابط المُعبّأة مسبقاً
+    (`/sales/invoices/new?customer_id=`…) مدعومة أصلاً بكرت الشريك.
+  - **فوق اسم صنف** (`data-ctx-item-*`) ⇒ بطاقة الصنف + تكلفة الصنف
+    (`/products/:id`، `/product-cost?product=`).
+  - **الترتيب:** السياقي أولاً (حاسبة/حافظة ← شريك ← صنف ← الإجراءات السريعة) والعامّ
+    أخيراً (رجوع/الرئيسية/تحديث/طباعة) — دمج مجموعات غير فارغة بفاصل واحد بينها.
+  - `data-no-global-context-menu` يُبقي منيو المتصفح الأصلي.
+- **جسر سند القبض/الصرف:** سياق «سند قبض/صرف» يضع `ktra_partner_action` في
+  sessionStorage ثم ينتقل لكرت الشريك؛ `PartnerProfilePage` يقرأه ويفتح المودال
+  المناسب **بعد تحميل الشريك ومطابقة نوعه** (عميل=قبض، مورد=صرف) — مرآة جسر
+  `ktra_focus_partner_*` (task35). أسطح مربوطة: **عميل** — `SalesCustomersPage`،
+  `SalesInvoicesPage`؛ **مورد** — `SupplierManagement`، `SupplierPaymentsPage`،
+  `procurement/invoices/InvoiceList`؛ **صنف** — `ItemsManagement`. النمط قابل للتوسّع
+  لأي سطح بإضافة `data-ctx-partner-*` (customer|supplier) أو `data-ctx-item-*`.
+- **Logging:** `app.context_calc_confirm`، `app.context_partner_action`،
+  `app.context_copy_failed`/`app.context_paste_failed` — بلا قيم.
+- **التحقق:** TypeScript صفر؛ Node **53/53** (+6 لـ`contextMenuTargets`، بدأت بالفشل
+  قبل الوحدة ثم نجحت)؛ بناء Vite/PWA ناجح. تحقّق DOM في متصفح حقيقي: `writeEditableValue`
+  يحدّث القيمة (100→150) ويطلق حدث `input` واحداً، وقراءة سياق الشريك صحيحة. (القائمة
+  العامّة مُركَّبة داخل `AppLayout` للمستخدم المُصادَق — تعذّر تشغيل UI الكامل بلا
+  دخول/خادم؛ التغطية عبر Node + فحص الأنواع + البناء + تحقّق DOM المُحقَن.)
+
+---
+
+## [FEAT — مهلة جلسة قابلة للتهيئة + كبسة يمين عامّة + سند صرف بالمورد, 2026-07-23]
+
+- **مهلة الخمول قابلة للتهيئة (per-company):** كانت ثابتاً مبرمجاً (3 ساعات) في
+  `constants/session.ts`. صارت حقلاً `TenantSettings.idle_timeout_minutes`
+  (افتراضي 180، مقيّد 5..1440 عبر Min/MaxValueValidator) — هجرة
+  `tenants/migrations/0012_tenantsettings_idle_timeout.py`. `SessionSettingsContext`
+  (مرآة `AppearanceContext`: مصدر خادمي + cache محلي مفتاحه رقم الشركة + تطبيق فوري)
+  يزوّد `idleTimeoutMs`، و`IdleTimeoutGuard` يستهلكه عبر ref فتسري القيمة الجديدة
+  فوراً بلا فقد المؤقّتات. المستخدم يُدخل الدقائق من صفحة الإعدادات (قسم «الجلسة
+  والخمول») مع أزرار سريعة 30/60/120/180. المنطق النقيّ (الحدود/القصّ) في
+  `utils/sessionTimeout.ts` (قابل لاختبار Node).
+- **قائمة زر الفأرة اليمنى العامّة:** `layout/GlobalContextMenu.tsx` مركّبة في
+  `AppLayout`؛ تلتقط `contextmenu` على مستوى المستند في **مرحلة الفقاعة**، فأي قائمة
+  موضعية (شجرة المنتجات) توقف الانتشار/تستدعي preventDefault تفوز. تُستثنى حقول
+  التحرير (input/textarea/select/contenteditable) وأي `data-no-global-context-menu`
+  فيبقى منيو المتصفح للنسخ/اللصق. محتواها: إجراءات الصفحة (رجوع/الرئيسية/تحديث/طباعة)
+  + الإجراءات السريعة المُرشَّحة بالدور. مصدر واحد للإجراءات: `layout/quickActions.tsx`
+  (`buildQuickActionGroups`) يستهلكه `GlobalActionBar` و`GlobalContextMenu` معاً (DRY —
+  أُزيل التعريف المكرّر من شريط الإجراءات).
+- **سند صرف وأزرار سريعة للمورد (تكافؤ مع العميل):** استُخرج نموذج سند الصرف من
+  `SupplierPaymentsPage` إلى `sales/NewSupplierPaymentModal.tsx` قابل لإعادة الاستخدام
+  (مرآة `NewPaymentModal` للعميل: `initialPartner`/`lockPartner`)؛ تستهلكه الصفحة
+  والبطاقة. `PartnerProfilePage` صار يعرض للمورد زرّي «سند صرف جديد» (يفتح المودال
+  والمورد مثبّت) و«فاتورة مشتريات جديدة» — بعد أن كانت الأزرار السريعة للعميل فقط.
+  ملاحظة: فاتورة الشراء الجديدة لا تقرأ بعدُ بارامتر مورد مُسبق (نواقص).
+- **Logging:** `session.idle_timeout_changed`، `app.context_menu_open`،
+  `partner.supplier_payment_open/saved` — بلا أسماء أو مبالغ.
+- **التحقق:** Django **371/371**؛ Node **47/47** (+5 لـ`sessionTimeout`)؛ TypeScript
+  صفر؛ بناء Vite/PWA ناجح؛ `check` و`makemigrations --check --dry-run` ناجحان.
+  اختبار الخادم `tenants/tests/test_session_settings.py` (4: افتراضي/ثبات/عزل بين
+  الشركات/رفض خارج النطاق) بدأ بالفشل قبل الحقل ثم نجح. (Playwright لم يُشغَّل في هذه
+  البيئة — التغطية عبر اختبارات API/Node وفحص الأنواع والبناء.)
+
+---
+
 ## [FEAT — تبسيط إشعارات العملاء ووضوح دفع الفواتير, 2026-07-23]
 
 - **إشعار دائن/مدين:** شاشة الإشعارات تشرح الأثر بلغة مباشرة قبل الحفظ؛ الدائن

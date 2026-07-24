@@ -110,3 +110,6 @@ frontend/
 # Local reference material — not used by the platform
 /old_landed_cost.py
 /الاصيل/
+
+# Playwright run metadata (root-level)
+/test-results/

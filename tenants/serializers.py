@@ -48,6 +48,8 @@ class TenantSettingsSerializer(serializers.ModelSerializer):
             # تفضيل المظهر (per-company)
             "font_scale",
             "font_family",
+            # الجلسة (per-company)
+            "idle_timeout_minutes",
         ]
 
 

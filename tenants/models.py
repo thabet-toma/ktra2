@@ -1,3 +1,4 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 class Currency(models.Model):
@@ -107,6 +108,15 @@ class TenantSettings(models.Model):
     font_family = models.CharField(
         max_length=20, default='default', db_column='FontFamily',
         help_text="default | tahoma | segoe | arial",
+    )
+
+    # مهلة الخمول قبل إنهاء الجلسة (بالدقائق) — يُحفَظ خادمياً لكل شركة فيثبت
+    # عبر الأجهزة، ويُدخِله المستخدم من صفحة الإعدادات. مقيّد بنطاق معقول
+    # (5 دقائق .. 24 ساعة) حماية من إدخال خاطئ يُبقي الجلسة أبداً أو يقطعها فوراً.
+    idle_timeout_minutes = models.PositiveIntegerField(
+        default=180, db_column='IdleTimeoutMinutes',
+        validators=[MinValueValidator(5), MaxValueValidator(1440)],
+        help_text="مهلة إنهاء الجلسة عند الخمول بالدقائق (5..1440)",
     )
 
     class Meta:

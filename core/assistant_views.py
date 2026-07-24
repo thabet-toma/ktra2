@@ -156,6 +156,47 @@ def assistant_chat(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
+    # ── مسار Ollama (المساعد المرتبط بقاعدة بيانات كترا) ──────────────────────
+    # يُجيب من القاعدة عبر أدوات مقفولة على شركة المستخدم. لا يدعم مرفقات — تلك
+    # تبقى على مسار OpenClaw. الافتراضي «ollama».
+    backend = (getattr(settings, "ASSISTANT_BACKEND", "ollama") or "ollama").strip().lower()
+    if backend == "ollama":
+        from core import ollama_assistant
+
+        if not ollama_assistant.is_configured():
+            return Response(
+                {"detail": "لم تُضبط إعدادات Ollama. أضف OLLAMA_API_KEY و OLLAMA_MODEL في بيئة الخادم."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        try:
+            reply = ollama_assistant.chat(message, request)
+        except requests.exceptions.Timeout:
+            return Response(
+                {"detail": "المساعد يعالج طلبك لكنه يستغرق وقتاً أطول من المعتاد. اجعل سؤالك أكثر تحديداً وحاول مجدداً."},
+                status=status.HTTP_504_GATEWAY_TIMEOUT,
+            )
+        except requests.exceptions.ConnectionError:
+            return Response(
+                {"detail": "تعذّر الوصول إلى خدمة Ollama. تحقق من الاتصال والمفتاح."},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        except requests.RequestException as exc:
+            logger.warning("ollama assistant upstream error: %s", exc)
+            detail = "تعذّر الاتصال بخدمة Ollama."
+            resp_obj = getattr(exc, "response", None)
+            if resp_obj is not None:
+                detail = f"خطأ من Ollama (HTTP {resp_obj.status_code}). تحقّق من اسم الموديل والمفتاح."
+            return Response({"detail": detail}, status=status.HTTP_502_BAD_GATEWAY)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("ollama assistant failed")
+            return Response(
+                {"detail": f"تعذّر إكمال الطلب: {exc}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        if not reply:
+            reply = "لم أحصل على رد. حاول إعادة صياغة سؤالك."
+        return Response({"reply": reply})
+
     url = _messages_url()
     if not url:
         return Response(
