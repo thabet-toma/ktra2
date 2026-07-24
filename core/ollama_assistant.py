@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 import requests
 from django.conf import settings
@@ -123,6 +124,11 @@ def is_configured() -> bool:
     return bool(base and key and model)
 
 
+# أخطاء عابرة تستحق إعادة محاولة واحدة قصيرة: تقييد لحظي (429) أو خطأ خادم مؤقت
+# (5xx) من Ollama، أو انقطاع اتصال عابر — شائعة على الخطة المجانية تحت رسائل متتابعة.
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+
+
 def _post_chat(messages: list, tools, base: str, key: str, model: str, timeout: int):
     payload = {
         "model": model,
@@ -131,17 +137,31 @@ def _post_chat(messages: list, tools, base: str, key: str, model: str, timeout: 
     }
     if tools:
         payload["tools"] = tools
-    resp = requests.post(
-        f"{base}/chat/completions",
-        json=payload,
-        headers={
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-        },
-        timeout=timeout,
-    )
-    resp.raise_for_status()
-    return resp.json()
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+    }
+
+    last_exc = None
+    for attempt in range(2):  # محاولة أصلية + إعادة واحدة عند فشل عابر
+        try:
+            resp = requests.post(
+                f"{base}/chat/completions", json=payload, headers=headers, timeout=timeout,
+            )
+            if resp.status_code in _RETRYABLE_STATUS and attempt == 0:
+                logger.warning("ollama %s — إعادة محاولة بعد لحظة", resp.status_code)
+                time.sleep(2)
+                continue
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
+            last_exc = exc
+            if attempt == 0:
+                time.sleep(2)
+                continue
+            raise
+    if last_exc:
+        raise last_exc
 
 
 def chat(user_message: str, tenant, session_key: str | None = None, channel: str = "web") -> str:

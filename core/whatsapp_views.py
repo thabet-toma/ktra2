@@ -151,7 +151,11 @@ def whatsapp_webhook(request, secret: str, event_suffix: str | None = None):
         reply = "طلبك يستغرق وقتاً أطول من المعتاد. حاول تحديد سؤالك أكثر."
     except requests.RequestException as exc:
         logger.warning("[whatsapp] ollama upstream error tenant=%s: %s", contact.tenant_id, exc)
-        reply = "تعذّر الوصول لخدمة المساعد حالياً."
+        code = getattr(getattr(exc, "response", None), "status_code", None)
+        if code == 429:
+            reply = "الخدمة مشغولة حالياً (تجاوز حد الاستخدام اللحظي). انتظر دقيقة وأعد إرسال سؤالك."
+        else:
+            reply = "تعذّر الوصول لخدمة المساعد حالياً. حاول بعد قليل."
     except Exception:  # noqa: BLE001
         logger.exception("[whatsapp] assistant failed tenant=%s", contact.tenant_id)
         reply = "تعذّر إكمال طلبك، حاول مجدداً."
