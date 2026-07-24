@@ -90,6 +90,28 @@ def test_event_suffix_url_variant_also_works(env, client: Client):
     send.assert_called_once()
 
 
+@override_settings(WHATSAPP_WEBHOOK_SECRET=SECRET, OLLAMA_API_KEY="x", OLLAMA_MODEL="m")
+def test_event_suffix_without_trailing_slash_does_not_redirect(env, client: Client):
+    """
+    Evolution يبعث .../messages-upsert بلا شرطة مائلة بالآخر — تأكّدنا من سجلات
+    الإنتاج. اعتماد Django على APPEND_SLASH كان يحوّل الطلب لـGET ويُفقِد الرسالة
+    (301 يحوّل POST→GET) — هذا الاختبار يمنع رجوع الخلل.
+    """
+    a, _ = env
+    with patch("core.whatsapp_views._send_reply") as send, \
+         patch("core.ollama_assistant.chat") as chat:
+        chat.return_value = "رد"
+        resp = client.post(
+            WEBHOOK_PATH + "messages-upsert",  # بلا / بالآخر عمداً
+            data=json.dumps(_upsert_payload(
+                remote_jid="972500000001@s.whatsapp.net", text="سؤال")),
+            content_type="application/json",
+        )
+    assert resp.status_code == 200  # لا 301/301
+    chat.assert_called_once()
+    send.assert_called_once()
+
+
 @override_settings(WHATSAPP_WEBHOOK_SECRET=SECRET)
 def test_malformed_body_encoding_is_ignored_not_500(env, client: Client):
     """جسم بترميز غير UTF-8 صالح يجب أن يُتجاهل بأمان لا أن يُسقِط الخادم (500)."""
