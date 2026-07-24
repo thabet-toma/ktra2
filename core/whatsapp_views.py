@@ -83,10 +83,12 @@ def _send_reply(number: str, text: str) -> None:
 
 @csrf_exempt
 @require_POST
-def whatsapp_webhook(request, secret: str):
+def whatsapp_webhook(request, secret: str, event_suffix: str | None = None):
     """
-    POST /api/assistant/whatsapp/webhook/<secret>/
-    يُستدعى من Evolution API عند وصول رسالة (event=messages.upsert).
+    POST /api/assistant/whatsapp/webhook/<secret>/ أو .../<secret>/<event_suffix>/
+    يُستدعى من Evolution API عند وصول رسالة (event=messages.upsert). event_suffix
+    (مثل messages-upsert) قد تضيفه Evolution تلقائياً حسب إعداد عام بسيرفرها —
+    غير مستخدَم هنا، نعتمد على event داخل جسم الطلب لتحديد نوع الحدث الفعلي.
     يرجع 200 دائماً (حتى عند التجاهل) كي لا يعيد Evolution محاولة الإرسال.
     """
     if not _secret_ok(secret):
@@ -95,8 +97,9 @@ def whatsapp_webhook(request, secret: str):
 
     try:
         payload = json.loads(request.body or b"{}")
-    except (json.JSONDecodeError, TypeError):
-        return JsonResponse({"ignored": "invalid json"})
+    except (ValueError, TypeError):
+        # ValueError يغطي JSONDecodeError وUnicodeDecodeError (جسم بترميز غير UTF-8)
+        return JsonResponse({"ignored": "invalid body"})
 
     event = str(payload.get("event") or "")
     if "upsert" not in event.lower():

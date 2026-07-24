@@ -36,6 +36,9 @@ urlpatterns = [
     path('api/assistant/openclaw-status/', assistant_views.assistant_openclaw_status),
     path('api/assistant/openclaw-ws-probe/', assistant_views.assistant_openclaw_ws_probe),
     path('api/assistant/whatsapp/webhook/<str:secret>/', whatsapp_views.whatsapp_webhook),
+    # Evolution API قد يضيف اسم الحدث لآخر الرابط تلقائياً عند webhookByEvents=true
+    # (إعداد عام بسيرفر Evolution، غير قابل للتحكم لكل instance) — نقبل الشكلين.
+    path('api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>/', whatsapp_views.whatsapp_webhook),
     path('api/agent/query/', agent_db_view.agent_query),
     path('api/dashboard/', dashboard_api.trade_dashboard),
     path('api/', include('partners.urls')),

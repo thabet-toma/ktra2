@@ -72,6 +72,36 @@ def test_wrong_secret_returns_404(env, client: Client):
     assert resp.status_code == 404
 
 
+@override_settings(WHATSAPP_WEBHOOK_SECRET=SECRET, OLLAMA_API_KEY="x", OLLAMA_MODEL="m")
+def test_event_suffix_url_variant_also_works(env, client: Client):
+    """Evolution قد يضيف اسم الحدث لآخر الرابط (webhookByEvents) — نقبله أيضاً."""
+    a, _ = env
+    with patch("core.whatsapp_views._send_reply") as send, \
+         patch("core.ollama_assistant.chat") as chat:
+        chat.return_value = "رد"
+        resp = client.post(
+            WEBHOOK_PATH + "messages-upsert/",
+            data=json.dumps(_upsert_payload(
+                remote_jid="972500000001@s.whatsapp.net", text="سؤال")),
+            content_type="application/json",
+        )
+    assert resp.status_code == 200
+    chat.assert_called_once()
+    send.assert_called_once()
+
+
+@override_settings(WHATSAPP_WEBHOOK_SECRET=SECRET)
+def test_malformed_body_encoding_is_ignored_not_500(env, client: Client):
+    """جسم بترميز غير UTF-8 صالح يجب أن يُتجاهل بأمان لا أن يُسقِط الخادم (500)."""
+    resp = client.post(
+        WEBHOOK_PATH,
+        data=b"\xca\xfe\xba\xbe not valid utf-8",
+        content_type="application/json",
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ignored"] == "invalid body"
+
+
 @override_settings(WHATSAPP_WEBHOOK_SECRET=SECRET)
 def test_from_me_is_ignored(env, client: Client):
     with patch("core.whatsapp_views._send_reply") as send:
