@@ -52,8 +52,17 @@ _SYSTEM_PROMPT_BASE = (
     "- الأرقام المالية للفواتير المرحّلة فقط: Status = 'posted'. أنواع الفواتير في "
     "InvoiceKind: sale / sale_return / purchase / purchase_return (الطرف في CustomerID "
     "للبيع والشراء معاً). رصيد الصنف = products.QuantityOnHand. الصفقات في logistics_deals.\n"
-    "- لا تُظهر للمستخدم معرّفات داخلية (CustomerID, PartnerID, ProductID…)؛ اربطها "
-    "دائماً باسم الطرف/الصنف عبر JOIN على الجدول المرجعي (partners.Name أو products.Name_AR).\n"
+    "- **أسعار الصنف:** كلمة «سعر» لصنف غامضة، ولها معنيان:\n"
+    "  • **التكلفة** = products.AvgCost (متوسط تكلفة الشراء).\n"
+    "  • **سعر البيع** = آخر سعر بيع فعلي = آخر UnitPrice من sales_module_invoice_lines "
+    "لهذا الصنف من فاتورة بيع مرحّلة (JOIN على sales_module_invoices حيث Status='posted' و "
+    "InvoiceKind='sale'، ORDER BY InvoiceDate DESC LIMIT 1).\n"
+    "  إذا سأل المستخدم عن «السعر» بلا تحديد، **اسأله بجملة قصيرة**: «تقصد سعر البيع "
+    "أم التكلفة؟» قبل أن تجيب. لا تستخدم OnlinePrice ولا product_price_tiers لأسئلة السعر "
+    "(غالباً فارغة ولا تُعبّر عن السعر الفعلي).\n"
+    "- **لا تُظهر أي معرّف داخلي إطلاقاً** (ProductID, CustomerID, PartnerID, InvoiceID، ولا "
+    "أعمدة id): لا تضعها في الاستعلام للعرض ولا في الجواب. اعرض الاسم فقط. رقم الصنف (SKU) "
+    "لا يُعرض إلا إذا لزم للتمييز بين أصناف متعددة بنفس الاسم، أو طلبه المستخدم صراحةً.\n"
     "- لا تخترع أرقاماً؛ اعتمد فقط على صفوف run_sql. إن رجع خطأ، صحّح الاستعلام وأعد المحاولة.\n"
     "- عند عرض النتائج اذكر الأرقام والتواريخ بوضوح ولخّص المعنى بجملة مفيدة.\n"
     "- المحادثة مستمرة: استفد من الأسئلة والأجوبة السابقة في نفس الجلسة لفهم المقصود "
@@ -66,12 +75,29 @@ _SYSTEM_PROMPT_BASE = (
     "مخطط قاعدة البيانات (جدول: أعمدة، والسهم → يعني مفتاحاً خارجياً لجدول آخر):\n"
 )
 
+# تنسيق الرد حسب القناة — واتساب لا يعرض جداول ماركداون (تظهر كرموز | مبعثرة).
+_FORMAT_WHATSAPP = (
+    "\n\nتنسيق الرد (واتساب):\n"
+    "- اكتب رداً قصيراً وبسيطاً بلغة طبيعية. **ممنوع جداول ماركداون** (| و ---) — "
+    "واتساب يعرضها كرموز مبعثرة غير مقروءة.\n"
+    "- لعنصر واحد: جملة أو سطر واحد (مثل «سعر بيع 195/65/15: 250 شيكل — آخر بيع بتاريخ …»).\n"
+    "- لعدة عناصر: أسطر قصيرة، سطر لكل عنصر، بصيغة «الاسم: القيمة». استعمل *نجمة* للتعتيم "
+    "عند الحاجة فقط. لا ترقّم الأعمدة ولا تعرض SKU إلا للتمييز الضروري.\n"
+    "- تجنّب الحشو: لا مقدمات طويلة ولا شرح للجداول. أعطِ الجواب مباشرة.\n"
+)
+_FORMAT_WEB = (
+    "\n\nتنسيق الرد (ويب):\n"
+    "- ردود مرتبة ومختصرة. يمكن استخدام جدول عند تعدد الصفوف، لكن بلا أعمدة معرّفات "
+    "داخلية. لخّص المعنى بجملة بعد أي جدول.\n"
+)
 
-def _system_prompt() -> str:
+
+def _system_prompt(channel: str = "web") -> str:
     from core.assistant_lessons import lessons_text
     from core.assistant_sql import schema_catalog
 
-    prompt = _SYSTEM_PROMPT_BASE + schema_catalog()
+    fmt = _FORMAT_WHATSAPP if channel == "whatsapp" else _FORMAT_WEB
+    prompt = _SYSTEM_PROMPT_BASE + schema_catalog() + fmt
     lessons = lessons_text()
     if lessons:
         prompt += "\n\n" + lessons
@@ -112,7 +138,7 @@ def _post_chat(messages: list, tools, base: str, key: str, model: str, timeout: 
     return resp.json()
 
 
-def chat(user_message: str, tenant, session_key: str | None = None) -> str:
+def chat(user_message: str, tenant, session_key: str | None = None, channel: str = "web") -> str:
     """
     يُجري محادثة كاملة مع النموذج بما فيها جولات الأدوات، ويعيد النص النهائي.
     `tenant` كائن Tenant مُحلَّل مسبقاً من المستدعي (get_tenant للويب، أو
@@ -120,6 +146,7 @@ def chat(user_message: str, tenant, session_key: str | None = None) -> str:
     `session_key` (اختياري) يفعّل ذاكرة المحادثة (core.assistant_memory): آخر
     عدة أدوار من نفس الجلسة تُحقن قبل السؤال الحالي، والسؤال+الجواب يُحفظان
     بعدها. بلا session_key كل نداء مستقل تماماً (السلوك السابق).
+    `channel` ("web" أو "whatsapp") يضبط تنسيق الرد — واتساب بلا جداول ماركداون.
     يرفع requests.RequestException / ValueError عند فشل الاتصال — يعالجها المستدعي.
     """
     base, key, model, timeout = _config()
@@ -130,7 +157,7 @@ def chat(user_message: str, tenant, session_key: str | None = None) -> str:
 
     history = assistant_memory.get_history(session_key)
     messages = [
-        {"role": "system", "content": _system_prompt()},
+        {"role": "system", "content": _system_prompt(channel)},
         *history,
         {"role": "user", "content": user_message},
     ]

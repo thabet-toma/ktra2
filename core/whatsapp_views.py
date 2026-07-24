@@ -144,7 +144,9 @@ def whatsapp_webhook(request, secret: str, event_suffix: str | None = None):
 
     session_key = f"wa:{phone}:{contact.tenant_id}"
     try:
-        reply = ollama_assistant.chat(text, contact.tenant, session_key=session_key)
+        reply = ollama_assistant.chat(
+            text, contact.tenant, session_key=session_key, channel="whatsapp"
+        )
     except requests.exceptions.Timeout:
         reply = "طلبك يستغرق وقتاً أطول من المعتاد. حاول تحديد سؤالك أكثر."
     except requests.RequestException as exc:
