@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
 import { Plus, Save, Send, Trash2, RefreshCw, X } from "lucide-react";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 type Wh = { id: number; name: string; code?: string };
 type Prod = { id: number; sku: string; name_ar?: string; name_en?: string };
@@ -176,7 +177,7 @@ export const WarehouseTransferPage: React.FC = () => {
                 <tr key={r.id}>
                   <td>#{r.id}</td>
                   <td>{r.transfer_number || "—"}</td>
-                  <td>{r.transfer_date}</td>
+                  <td>{formatDateLocalized(r.transfer_date)}</td>
                   <td>{r.source_warehouse_name}</td>
                   <td>{r.dest_warehouse_name}</td>
                   <td>

@@ -39,6 +39,8 @@ export type AttachedCheque = {
   id: number;
   cheque_number: string;
   bank_name?: string;
+  account_number?: string;
+  bank_branch?: string;
   amount: string;
   due_date?: string | null;
   issue_date?: string | null;
@@ -105,30 +107,6 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
   source_discount_percent_override?: string | null;
   source_discount_amount_override?: string | null;
 };
-
-/** M2-T3: payload for attaching cash + cheques to an invoice. */
-export type PaymentVoucherInput = {
-  cash_amount: string;
-  cash_account_id?: number | null;
-  cheques: Array<{
-    cheque_number: string;
-    amount: string;
-    bank_name?: string;
-    due_date?: string | null;
-    issue_date?: string | null;
-    payee_name?: string;
-    notes?: string;
-  }>;
-};
-
-export async function attachPaymentVoucher(
-  invoiceId: number,
-  payload: PaymentVoucherInput
-): Promise<SalesInvoiceDetail> {
-  return apiPostObject(`${BASE}/invoices/${invoiceId}/payment-voucher/`, payload, {
-    tenantId: tid(),
-  });
-}
 
 export async function listSalesInvoices(
   query?: Record<string, string | number | boolean | undefined>
@@ -403,6 +381,7 @@ export type CustomerPaymentAllocation = {
 export type CustomerPaymentRow = {
   id: number;
   partner: number;
+  partner_name?: string;
   payment_date: string;
   amount: string;
   currency: number;
@@ -412,6 +391,9 @@ export type CustomerPaymentRow = {
   is_posted: boolean;
   notes: string;
   allocations: CustomerPaymentAllocation[];
+  /** T-ONACC: المُوزَّع على الفواتير والمتبقّي «على الحساب» (محسوبان في الخادم). */
+  allocated_amount?: string;
+  unallocated_amount?: string;
   created_at?: string;
 };
 
@@ -435,8 +417,21 @@ export async function createCustomerPayment(
     cash_or_bank_account: number;
     notes?: string;
     allocations?: Array<{ invoice: number; amount: string | number }>;
+    /** T-ONEPAY: شيكات داخل السند — مبالغها جزء من `amount` لا إضافة عليه. */
+    cheques?: Array<{
+      cheque_number: string;
+      amount: string | number;
+      bank_name?: string;
+      account_number?: string;
+      bank_branch?: string;
+      payee_name?: string;
+      due_date?: string | null;
+      issue_date?: string | null;
+    }>;
+    /** T-AUTOPOST: يسمو على إعداد الشركة — true = حفظ وترحيل، false = مسودة. */
+    auto_post?: boolean;
   },
-): Promise<CustomerPaymentRow> {
+): Promise<CustomerPaymentRow & { auto_post_error?: string }> {
   return apiPostObject(`${BASE}/payments/`, body, { tenantId: tid() });
 }
 
@@ -446,6 +441,17 @@ export async function postCustomerPayment(id: number): Promise<CustomerPaymentRo
 
 export async function deleteCustomerPayment(id: number): Promise<void> {
   return apiDelete(`${BASE}/payments/${id}/`, { tenantId: tid() });
+}
+
+/**
+ * T-ONACC: توزيع سند قبض على فواتير — يعمل قبل الترحيل وبعده. بعد الترحيل هو
+ * ربط فقط (لا قيد جديد): الذمم خُفِّضت وقت الترحيل «على الحساب».
+ */
+export async function allocateCustomerPayment(
+  id: number,
+  allocations: Array<{ invoice: number; amount: string | number }>,
+): Promise<CustomerPaymentRow> {
+  return apiPostObject(`${BASE}/payments/${id}/allocate/`, { allocations }, { tenantId: tid() });
 }
 
 // -------------------------------------------------------------
@@ -474,11 +480,21 @@ export type SalesSettings = {
   default_vat_rate_value?: string;
   prices_include_tax: boolean;
   auto_post_invoices: boolean;
+  /** T-AUTOPOST: ترحيل سندات القبض/الصرف فور الحفظ (الافتراضي: مُفعَّل). */
+  auto_post_payments: boolean;
   show_journal_preview: boolean;
   /** T-S2: تنبيه عند تكرار الصنف (يقود T-R3). */
   warn_on_duplicate_item: boolean;
   /** منع حفظ/ترحيل فاتورة بيع بخسارة (الافتراضي مُعطّل). */
   block_loss_invoices: boolean;
+  /** T-DORMANT: أيام صمت العميل قبل إشعار «عميل مختفٍ» (0 = تعطيل، الافتراضي 30). */
+  dormant_customer_days: number;
+  /** T-ORDERS: أيام صلاحية عرض السعر افتراضياً (0 = بلا انتهاء، الافتراضي 14). */
+  quotation_valid_days: number;
+  /** T-ORDERS: أيام حجز الكمية للطلبية المؤكَّدة (0 = بلا حجز، الافتراضي 7). */
+  order_reserve_days: number;
+  /** T-ORDERS: إظهار «حذف» للعروض والطلبيات (الإلغاء متاح دائماً). */
+  allow_document_delete: boolean;
   default_shipping_origin: string;
   default_shipping_destination: string;
   updated_at?: string;
@@ -521,6 +537,20 @@ export async function getAgingReport(): Promise<
   }[]
 > {
   return apiGetList(`${BASE}/reports/aging/`, { tenantId: tid() });
+}
+
+/** T-DORMANT: عملاء توقّفوا عن الشراء منذ عتبة الإعدادات (يغذّي إشعار «عميل مختفٍ»). */
+export type DormantCustomerRow = {
+  partner_id: number;
+  partner_name: string;
+  last_sale_date: string;
+  last_invoice_number: string | null;
+  days_since: number;
+};
+
+export async function getDormantCustomers(days?: number): Promise<DormantCustomerRow[]> {
+  const qs = days != null ? `?days=${days}` : "";
+  return apiGetList(`${BASE}/reports/dormant-customers/${qs}`, { tenantId: tid() });
 }
 
 // -------------------------------------------------------------
@@ -591,14 +621,117 @@ export async function deleteQuotation(id: number): Promise<void> {
   return apiDelete(`${BASE}/quotations/${id}/`, { tenantId: tid() });
 }
 
-export async function convertQuotationToInvoice(
+/**
+ * T-ORDERS: تحويل عرض السعر — الهدف يختاره المستخدم من حوار داخل الموقع:
+ * `invoice` (فاتورة) أو `order` (طلبية تحجز الكمية).
+ */
+export async function convertQuotation(
   id: number,
-): Promise<{ invoice_id: number; invoice_number: string }> {
+  target: "invoice" | "order" = "invoice",
+): Promise<{
+  status: string;
+  target: string;
+  invoice?: { id: number; invoice_number: string };
+  order?: SalesOrderRow;
+}> {
   return apiPostObject(
     `${BASE}/quotations/${id}/convert/`,
-    {},
+    { target },
     { tenantId: tid() },
   );
+}
+
+/** إلغاء عرض السعر — يُبقي المستند (بديل الحذف). */
+export async function cancelQuotation(
+  id: number,
+  reason = "",
+): Promise<SalesQuotationDetail> {
+  return apiPostObject(`${BASE}/quotations/${id}/cancel/`, { reason }, { tenantId: tid() });
+}
+
+// -------------------------------------------------------------
+// T-ORDERS — طلبيات الزبائن (حجز كمية + عربون)
+// -------------------------------------------------------------
+
+export type SalesOrderLineRow = {
+  id?: number;
+  product: number;
+  product_name?: string;
+  quantity: string;
+  unit_price: string;
+  line_discount?: string;
+  line_total?: string;
+};
+
+export type SalesOrderRow = {
+  id: number;
+  order_number: string;
+  customer: number;
+  customer_name?: string;
+  order_date: string;
+  delivery_date?: string | null;
+  reserved_until?: string | null;
+  status: string;
+  status_display?: string;
+  grand_total: string;
+  deposit_amount: string;
+  remaining_amount: string;
+  quotation?: number | null;
+  quotation_number?: string | null;
+  invoice?: number | null;
+  invoice_number?: string | null;
+  notes?: string | null;
+  cancel_reason?: string;
+  lines: SalesOrderLineRow[];
+};
+
+export async function listSalesOrders(
+  query?: Record<string, string | number | boolean | undefined>,
+): Promise<SalesOrderRow[]> {
+  return apiGetList(`${BASE}/orders/`, { tenantId: tid(), query });
+}
+
+export async function getSalesOrder(id: number): Promise<SalesOrderRow> {
+  return apiGetObject(`${BASE}/orders/${id}/`, { tenantId: tid() });
+}
+
+export async function createSalesOrder(
+  body: Record<string, unknown>,
+): Promise<SalesOrderRow> {
+  return apiPostObject(`${BASE}/orders/`, body, { tenantId: tid() });
+}
+
+export async function updateSalesOrder(
+  id: number,
+  body: Record<string, unknown>,
+): Promise<SalesOrderRow> {
+  return apiPatchObject(`${BASE}/orders/${id}/`, body, { tenantId: tid() });
+}
+
+export async function deleteSalesOrder(id: number): Promise<void> {
+  return apiDelete(`${BASE}/orders/${id}/`, { tenantId: tid() });
+}
+
+export async function confirmSalesOrder(id: number): Promise<SalesOrderRow> {
+  return apiPostObject(`${BASE}/orders/${id}/confirm/`, {}, { tenantId: tid() });
+}
+
+export async function cancelSalesOrder(id: number, reason = ""): Promise<SalesOrderRow> {
+  return apiPostObject(`${BASE}/orders/${id}/cancel/`, { reason }, { tenantId: tid() });
+}
+
+export async function convertSalesOrderToInvoice(
+  id: number,
+): Promise<{ status: string; invoice: { id: number; invoice_number: string } }> {
+  return apiPostObject(`${BASE}/orders/${id}/convert/`, {}, { tenantId: tid() });
+}
+
+/** عربون الطلبية — سند قبض مرحَّل «على الحساب» مربوط بها. */
+export async function recordOrderDeposit(
+  id: number,
+  body: { amount: string | number; cash_or_bank_account: number; payment_date?: string },
+): Promise<SalesOrderRow> {
+  return apiPostObject(`${BASE}/orders/${id}/deposit/`, body, { tenantId: tid() });
 }
 
 // -------------------------------------------------------------

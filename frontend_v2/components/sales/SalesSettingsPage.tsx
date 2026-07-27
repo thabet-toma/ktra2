@@ -157,9 +157,14 @@ export const SalesSettingsPage: React.FC = () => {
         default_vat_rate: rest.default_vat_rate,
         prices_include_tax: rest.prices_include_tax,
         auto_post_invoices: rest.auto_post_invoices,
+        auto_post_payments: rest.auto_post_payments,
         show_journal_preview: rest.show_journal_preview,
         warn_on_duplicate_item: rest.warn_on_duplicate_item,
         block_loss_invoices: rest.block_loss_invoices,
+        dormant_customer_days: rest.dormant_customer_days,
+        quotation_valid_days: rest.quotation_valid_days,
+        order_reserve_days: rest.order_reserve_days,
+        allow_document_delete: rest.allow_document_delete,
         default_shipping_origin: rest.default_shipping_origin,
         default_shipping_destination: rest.default_shipping_destination,
       };
@@ -555,6 +560,19 @@ export const SalesSettingsPage: React.FC = () => {
           </select>
         </FieldLabel>
 
+        <FieldLabel label="ترحيل سندات القبض والصرف بعد الحفظ">
+          <select
+            className={input}
+            value={settings.auto_post_payments ? "yes" : "no"}
+            onChange={(e) =>
+              setField("auto_post_payments", e.target.value === "yes")
+            }
+          >
+            <option value="yes">«حفظ» يرحّل السند مباشرةً (موصى به)</option>
+            <option value="no">حفظ كمسودة ثم ترحيل يدوي</option>
+          </select>
+        </FieldLabel>
+
         <FieldLabel label="إظهار معاينة القيد قبل الترحيل">
           <select
             className={input}
@@ -593,6 +611,52 @@ export const SalesSettingsPage: React.FC = () => {
             <option value="no">السماح بالحفظ (افتراضي)</option>
             <option value="yes">منع الحفظ والترحيل</option>
           </select>
+        </FieldLabel>
+        {/* T-DORMANT: عتبة إشعار «عميل مختفٍ» (توقّف عن الشراء). 0 = تعطيل. */}
+        <FieldLabel label="تنبيه «عميل مختفٍ» بعد (يوم بلا شراء)">
+          <input
+            type="number"
+            min={0}
+            className={input}
+            value={settings.dormant_customer_days ?? 30}
+            onChange={(e) =>
+              setField("dormant_customer_days", Math.max(0, Number(e.target.value) || 0))
+            }
+          />
+        </FieldLabel>
+        {/* T-ORDERS: صلاحية العرض، مدة حجز الطلبية، وإظهار زر الحذف. */}
+        <FieldLabel label="صلاحية عرض السعر (يوم)">
+          <input
+            type="number"
+            min={0}
+            className={input}
+            value={settings.quotation_valid_days ?? 14}
+            onChange={(e) =>
+              setField("quotation_valid_days", Math.max(0, Number(e.target.value) || 0))
+            }
+          />
+        </FieldLabel>
+        <FieldLabel label="حجز كمية الطلبية المؤكَّدة (يوم)">
+          <input
+            type="number"
+            min={0}
+            className={input}
+            value={settings.order_reserve_days ?? 7}
+            onChange={(e) =>
+              setField("order_reserve_days", Math.max(0, Number(e.target.value) || 0))
+            }
+          />
+        </FieldLabel>
+        <FieldLabel label="إظهار زر «حذف» في العروض والطلبيات">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-emerald-600"
+              checked={settings.allow_document_delete !== false}
+              onChange={(e) => setField("allow_document_delete", e.target.checked)}
+            />
+            <span>عند الإطفاء يبقى «إلغاء» فقط (لا يحذف المستند)</span>
+          </label>
         </FieldLabel>
       </Section>
 

@@ -22,6 +22,9 @@ type MemberRow = {
 export const ROLE_LABELS: Record<string, string> = {
   manager: "مدير",
   accountant: "محاسب",
+  // T-PERM: دورا الموظف المتخصّص — صلاحياتهما تُضبط من شاشة «الصلاحيات والأدوار».
+  sales: "موظف مبيعات",
+  procurement: "موظف مشتريات",
   staff: "موظف",
   viewer: "مستعرض (قراءة فقط)",
 };

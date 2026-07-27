@@ -21,6 +21,7 @@ import { Deal, DealPayment, DealStatus } from "@/types";
 import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
 import { validatePaymentInput } from "@/utils/usePaymentForm";
 import { BANK_SWIFT_IMAGE_REQUIRED, isAwaitingSupplierConfirmation } from "@/utils/dealPaymentFlow";
+import { formatDateValue } from "../../../utils/formatDate";
 
 /** ربط صندوق (external_id = معرف Firestore) برصيد حسابه في ميزان المراجعة */
 async function fetchSqlBalanceByCashBoxExternalId(): Promise<Record<string, number>> {
@@ -352,13 +353,13 @@ export const PaymentRegistration: React.FC<PaymentProps> = ({
                 {paymentData.paymentDate && (
                   <div className="flex items-center gap-1 text-blue-600">
                     <Calendar className="w-3 h-3" />
-                    <span>التحويل: {new Date(paymentData.paymentDate).toLocaleDateString('en-US')}</span>
+                    <span>التحويل: {formatDateValue(paymentData.paymentDate)}</span>
                   </div>
                 )}
                 {paymentData.confirmedAt && (
                   <div className="flex items-center gap-1 text-[var(--color-primary)]">
                     <Calendar className="w-3 h-3" />
-                    <span>التأكيد: {new Date(paymentData.confirmedAt).toLocaleDateString('en-US')}</span>
+                    <span>التأكيد: {formatDateValue(paymentData.confirmedAt)}</span>
                   </div>
                 )}
               </div>

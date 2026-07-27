@@ -8,6 +8,7 @@ import { QuickActions } from './dashboard/QuickActions';
 import { TasksDistributionChart } from './dashboard/TasksDistributionChart';
 import { useTenantSettings } from '../hooks/useTenantSettings';
 import { useCompany } from '../contexts/CompanyContext';
+import { formatDateValue } from "../utils/formatDate";
 
 interface DashboardProps {
     tasks: Task[];
@@ -86,7 +87,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tasks, users, onNavigate, 
                         {tasks.slice(0, 5).map(task => (
                             <div key={task.id} style={{ padding: '4px 10px', borderBottom: '1px solid var(--aseel-border)', fontSize: 'var(--aseel-fs-sm, 11px)' }}>
                                 <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--aseel-ink)' }}>{task.title}</div>
-                                <div style={{ color: 'var(--aseel-ink-soft)', fontSize: '10px' }}>{new Date(task.updatedAt).toLocaleDateString('ar-EG')}</div>
+                                <div style={{ color: 'var(--aseel-ink-soft)', fontSize: '10px' }}>{formatDateValue(task.updatedAt)}</div>
                             </div>
                         ))}
                         {tasks.length === 0 && (

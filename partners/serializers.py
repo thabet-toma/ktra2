@@ -5,26 +5,33 @@ from .models import CustomerNote, Partner, PartnerBankAccount
 class CustomerNoteSerializer(serializers.ModelSerializer):
     """ملاحظة/تذكير على بطاقة الزبون (CRM)."""
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
+    priority_display = serializers.CharField(source='get_priority_display', read_only=True)
 
     class Meta:
         model = CustomerNote
         fields = [
             'id', 'partner', 'title', 'body', 'remind_on', 'is_done',
+            'priority', 'priority_display',
             'created_by', 'created_by_name', 'created_at', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_by', 'created_by_name', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'created_by', 'created_by_name', 'priority_display',
+            'created_at', 'updated_at',
+        ]
 
 class PartnerBankAccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = PartnerBankAccount
         fields = [
-            'id', 'bank_name', 'account_number', 'iban', 
-            'swift_code', 'bank_address', 'beneficiary_name', 'currency', 'is_active'
+            'id', 'bank_name', 'account_number', 'branch_name', 'iban',
+            'swift_code', 'bank_address', 'beneficiary_name', 'currency',
+            'is_active', 'is_default',
         ]
         read_only_fields = ['id']
 
 class PartnerSerializer(serializers.ModelSerializer):
     attachments = serializers.SerializerMethodField()
+    bank_accounts = PartnerBankAccountSerializer(many=True, read_only=True)
     class Meta:
         model = Partner
         fields = [
@@ -35,7 +42,7 @@ class PartnerSerializer(serializers.ModelSerializer):
             'opening_balance', 'opening_balance_date', 'currency',
             'linked_account', 'group', 'default_cost_center',
             'end_of_dealing_date', 'assigned_price_tier', 'row_color',
-            'attachments'
+            'attachments', 'bank_accounts'
         ]
         read_only_fields = ['id', 'created_at']
 

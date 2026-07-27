@@ -47,6 +47,8 @@ class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     uom_name = serializers.CharField(source='uom_id', read_only=True)
     attachments = serializers.SerializerMethodField()
+    reserved_quantity = serializers.SerializerMethodField()
+    available_quantity = serializers.SerializerMethodField()
 
     stock_status = serializers.SerializerMethodField()
     # تجميع البراندات: مفتاح الصنف الفرعي (للشجرة/الجرد/الجدول) + اسم العرض (الاسم+
@@ -71,7 +73,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'weight_kg', 'volume_cbm', 'hs_code', 'min_stock_level',
             'is_serialized', 'is_service',
             'is_for_sale_online', 'online_price', 'online_description',
-            'quantity_on_hand', 'avg_cost',
+            'quantity_on_hand', 'reserved_quantity', 'available_quantity', 'avg_cost',
             'purchased_qty', 'avg_monthly_sales',
             'stock_status', 'group_key', 'display_name', 'has_group',
             'created_at',
@@ -82,6 +84,15 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_group_key(self, obj):
         from .services import product_group_key
         return product_group_key(obj)
+
+    def get_reserved_quantity(self, obj):
+        reserved = self.context.get('reserved_quantity_map', {}).get(obj.id, 0)
+        return str(reserved)
+
+    def get_available_quantity(self, obj):
+        from decimal import Decimal as _D
+        reserved = _D(str(self.context.get('reserved_quantity_map', {}).get(obj.id, 0)))
+        return str((_D(str(obj.quantity_on_hand or 0)) - reserved).quantize(_D('0.0001')))
 
     def get_display_name(self, obj):
         from .services import product_display_name
@@ -147,7 +158,8 @@ class ProductLookupSerializer(ProductSerializer):
         fields = [
             'id', 'sku', 'name_ar', 'name_en', 'display_name',
             'category', 'category_name', 'hs_code', 'min_stock_level',
-            'quantity_on_hand', 'avg_cost', 'is_for_sale_online',
+            'quantity_on_hand', 'reserved_quantity', 'available_quantity',
+            'avg_cost', 'is_for_sale_online',
             'online_price', 'online_description', 'attachments',
         ]
 

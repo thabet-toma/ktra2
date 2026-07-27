@@ -6,6 +6,336 @@ from accounting.models import Account, JournalHeader
 from django.contrib.auth.models import User
 from core.base_models import SoftDeleteMixin, TimeStampMixin
 
+
+class SupplierQuotation(SoftDeleteMixin, models.Model):
+    SCOPE_LOCAL = 'local'
+    SCOPE_IMPORT = 'import'
+    SCOPE_CHOICES = [
+        (SCOPE_LOCAL, 'Local purchase'),
+        (SCOPE_IMPORT, 'Import'),
+    ]
+
+    STATUS_DRAFT = 'draft'
+    STATUS_SENT = 'sent'
+    STATUS_ACCEPTED = 'accepted'
+    STATUS_REJECTED = 'rejected'
+    STATUS_EXPIRED = 'expired'
+    STATUS_CANCELLED = 'cancelled'
+    STATUS_CONVERTED = 'converted'
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, 'Draft'),
+        (STATUS_SENT, 'Sent'),
+        (STATUS_ACCEPTED, 'Accepted'),
+        (STATUS_REJECTED, 'Rejected'),
+        (STATUS_EXPIRED, 'Expired'),
+        (STATUS_CANCELLED, 'Cancelled'),
+        (STATUS_CONVERTED, 'Converted'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='SupplierQuotationID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='supplier_quotations',
+    )
+    quotation_number = models.CharField(max_length=50, db_column='QuotationNumber')
+    scope = models.CharField(
+        max_length=10, choices=SCOPE_CHOICES, default=SCOPE_LOCAL, db_column='Scope',
+    )
+    supplier = models.ForeignKey(
+        Partner, on_delete=models.PROTECT, db_column='SupplierID',
+        related_name='supplier_quotations',
+    )
+    quotation_date = models.DateField(db_column='QuotationDate')
+    valid_until = models.DateField(null=True, blank=True, db_column='ValidUntil')
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_column='Status',
+    )
+    currency = models.ForeignKey(
+        Currency, on_delete=models.PROTECT, db_column='CurrencyID',
+        related_name='supplier_quotations',
+    )
+    exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, default=1, db_column='ExchangeRate',
+    )
+    subtotal = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='Subtotal',
+    )
+    discount_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='DiscountAmount',
+    )
+    tax_rate = models.DecimalField(
+        max_digits=10, decimal_places=4, default=0, db_column='TaxRate',
+    )
+    tax_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='TaxAmount',
+    )
+    grand_total = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='GrandTotal',
+    )
+    shipping_cost_estimate = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='ShippingCostEstimate',
+    )
+    is_shipping_included = models.BooleanField(
+        default=False, db_column='IsShippingIncluded',
+    )
+    incoterms = models.CharField(max_length=10, default='FOB', db_column='Incoterms')
+    shipping_method = models.CharField(
+        max_length=50, default='Sea', db_column='ShippingMethod',
+    )
+    payment_method = models.CharField(
+        max_length=50, default='T/T', db_column='PaymentMethod',
+    )
+    production_days = models.PositiveIntegerField(default=0, db_column='ProductionDays')
+    delivery_days = models.PositiveIntegerField(default=0, db_column='DeliveryDays')
+    total_cbm = models.DecimalField(
+        max_digits=10, decimal_places=3, default=0, db_column='TotalCBM',
+    )
+    total_weight_kg = models.DecimalField(
+        max_digits=10, decimal_places=3, default=0, db_column='TotalWeightKg',
+    )
+    notes = models.TextField(blank=True, default='', db_column='Notes')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy_UserID', related_name='created_supplier_quotations',
+    )
+
+    class Meta:
+        db_table = 'supplier_quotations'
+        ordering = ['-quotation_date', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tenant', 'scope', 'quotation_number'],
+                name='uniq_supplier_quote_no_scope',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(exchange_rate__gt=0),
+                name='supplier_quote_rate_gt_zero',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(discount_amount__gte=0),
+                name='supplier_quote_discount_gte_zero',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tax_rate__gte=0),
+                name='supplier_quote_tax_gte_zero',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(shipping_cost_estimate__gte=0),
+                name='supplier_quote_shipping_gte_zero',
+            ),
+        ]
+
+    def __str__(self):
+        return self.quotation_number
+
+
+class SupplierQuotationLine(models.Model):
+    id = models.AutoField(primary_key=True, db_column='SupplierQuotationLineID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='supplier_quotation_lines',
+    )
+    quotation = models.ForeignKey(
+        SupplierQuotation, on_delete=models.CASCADE, db_column='SupplierQuotationID',
+        related_name='lines',
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, db_column='ProductID',
+        related_name='supplier_quotation_lines',
+    )
+    seq = models.PositiveIntegerField(default=1, db_column='Seq')
+    name_snapshot = models.CharField(max_length=255, blank=True, default='', db_column='NameSnapshot')
+    description_line = models.TextField(blank=True, default='', db_column='DescriptionLine')
+    quantity = models.DecimalField(max_digits=18, decimal_places=3, db_column='Quantity')
+    unit_price = models.DecimalField(max_digits=18, decimal_places=4, db_column='UnitPrice')
+    line_total = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='LineTotal',
+    )
+
+    class Meta:
+        db_table = 'supplier_quotation_lines'
+        ordering = ['seq', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['quotation', 'seq'], name='uniq_supplier_quote_line_seq',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(quantity__gt=0),
+                name='supplier_quote_line_qty_gt_zero',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(unit_price__gte=0),
+                name='supplier_quote_line_price_gte_zero',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.quotation.quotation_number} / {self.seq}'
+
+
+class PurchaseOrder(SoftDeleteMixin, models.Model):
+    STATUS_DRAFT = 'draft'
+    STATUS_CONFIRMED = 'confirmed'
+    STATUS_CONVERTED = 'converted'
+    STATUS_CANCELLED = 'cancelled'
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, 'مسودة'),
+        (STATUS_CONFIRMED, 'مؤكدة'),
+        (STATUS_CONVERTED, 'محوّلة إلى فاتورة'),
+        (STATUS_CANCELLED, 'ملغاة'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='PurchaseOrderID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='purchase_orders',
+    )
+    order_number = models.CharField(max_length=50, db_column='OrderNumber')
+    supplier = models.ForeignKey(
+        Partner, on_delete=models.PROTECT, db_column='SupplierID',
+        related_name='purchase_orders',
+    )
+    quotation = models.OneToOneField(
+        SupplierQuotation, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='SupplierQuotationID', related_name='local_order',
+    )
+    invoice = models.OneToOneField(
+        'PurchaseInvoice', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='PurchaseInvoiceID', related_name='source_purchase_order',
+    )
+    order_date = models.DateField(db_column='OrderDate')
+    expected_delivery_date = models.DateField(
+        null=True, blank=True, db_column='ExpectedDeliveryDate',
+    )
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_column='Status',
+    )
+    currency = models.ForeignKey(
+        Currency, on_delete=models.PROTECT, db_column='CurrencyID',
+        related_name='purchase_orders',
+    )
+    exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, default=1, db_column='ExchangeRate',
+    )
+    subtotal = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='Subtotal',
+    )
+    discount_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='DiscountAmount',
+    )
+    tax_rate = models.DecimalField(
+        max_digits=10, decimal_places=4, default=0, db_column='TaxRate',
+    )
+    tax_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='TaxAmount',
+    )
+    grand_total = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='GrandTotal',
+    )
+    shipping_cost = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='ShippingCost',
+    )
+    is_shipping_included = models.BooleanField(
+        default=False, db_column='IsShippingIncluded',
+    )
+    shipping_method = models.CharField(
+        max_length=50, blank=True, default='', db_column='ShippingMethod',
+    )
+    payment_method = models.CharField(
+        max_length=50, blank=True, default='', db_column='PaymentMethod',
+    )
+    delivery_days = models.PositiveIntegerField(default=0, db_column='DeliveryDays')
+    notes = models.TextField(blank=True, default='', db_column='Notes')
+    cancel_reason = models.TextField(blank=True, default='', db_column='CancelReason')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy_UserID', related_name='created_purchase_orders',
+    )
+
+    class Meta:
+        db_table = 'purchase_orders'
+        ordering = ['-order_date', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tenant', 'order_number'],
+                name='uniq_purchase_order_number',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(exchange_rate__gt=0),
+                name='purchase_order_rate_gt_zero',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(discount_amount__gte=0),
+                name='purchase_order_discount_gte_zero',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tax_rate__gte=0),
+                name='purchase_order_tax_gte_zero',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(shipping_cost__gte=0),
+                name='purchase_order_shipping_gte_zero',
+            ),
+        ]
+
+    def __str__(self):
+        return self.order_number
+
+
+class PurchaseOrderLine(models.Model):
+    id = models.AutoField(primary_key=True, db_column='PurchaseOrderLineID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='purchase_order_lines',
+    )
+    order = models.ForeignKey(
+        PurchaseOrder, on_delete=models.CASCADE, db_column='PurchaseOrderID',
+        related_name='lines',
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, db_column='ProductID',
+        related_name='purchase_order_lines',
+    )
+    seq = models.PositiveIntegerField(default=1, db_column='Seq')
+    name_snapshot = models.CharField(
+        max_length=255, blank=True, default='', db_column='NameSnapshot',
+    )
+    description_line = models.TextField(
+        blank=True, default='', db_column='DescriptionLine',
+    )
+    quantity = models.DecimalField(max_digits=18, decimal_places=3, db_column='Quantity')
+    unit_price = models.DecimalField(
+        max_digits=18, decimal_places=4, db_column='UnitPrice',
+    )
+    line_total = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column='LineTotal',
+    )
+
+    class Meta:
+        db_table = 'purchase_order_lines'
+        ordering = ['seq', 'id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['order', 'seq'], name='uniq_purchase_order_line_seq',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(quantity__gt=0),
+                name='purchase_order_line_qty_gt_zero',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(unit_price__gte=0),
+                name='purchase_order_line_price_gte_zero',
+            ),
+        ]
+
+    def __str__(self):
+        return f'{self.order.order_number} / {self.seq}'
+
+
 class LogisticsDeal(SoftDeleteMixin, models.Model):
     STATUS_CHOICES = [
         ('Open', 'Open'),
@@ -17,6 +347,14 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
 
     id = models.AutoField(primary_key=True, db_column='DealID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    source_quotation = models.OneToOneField(
+        SupplierQuotation,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        db_column='SourceQuotationID',
+        related_name='import_deal',
+    )
     ref_number = models.CharField(max_length=50, db_column='RefNumber')
     partner = models.ForeignKey(Partner, on_delete=models.PROTECT, db_column='PartnerID')
     order_date = models.DateField(db_column='OrderDate')

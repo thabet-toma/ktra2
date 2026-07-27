@@ -8,6 +8,7 @@ import { List, Eye, CheckCircle, XCircle, Clock, FileText, RefreshCw, Plus } fro
 import { AllSubmissionsView } from './tasks/AllSubmissionsView';
 import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from './aseel/useAseelIndexKeymap';
+import { formatDateLocalized } from "../utils/formatDate";
 
 interface TaskManagementProps {
     allTasks: Task[];
@@ -167,7 +168,7 @@ export const TaskManagement: React.FC<TaskManagementProps> = ({
             width: '100px',
             render: (t) => {
                 const isOverdue = new Date(t.dueDate) < new Date();
-                return <span style={{ color: isOverdue ? 'var(--aseel-danger, #c00)' : 'inherit' }}>{t.dueDate}</span>;
+                return <span style={{ color: isOverdue ? 'var(--aseel-danger, #c00)' : 'inherit' }}>{formatDateLocalized(t.dueDate)}</span>;
             },
         },
         {

@@ -4,12 +4,10 @@
  */
 import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
-import { suppliersService } from "../../services/firestoreService";
-import type { Supplier } from "../../types";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { RefreshCw, Search, Plus, Pencil } from "lucide-react";
-import { SupplierModal } from "../common/SupplierModal";
 import { useNavigate } from "react-router-dom";
+import { PartnerEditorModal } from "../partners/PartnerEditorModal";
 
 type Partner = {
   id: number;
@@ -41,16 +39,10 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
   const [showAddModal, setShowAddModal] = useState(false);
   // تعديل بيانات المورد من نفس الشاشة (كان لا يوجد أي مسار تعديل — الاسم/النقر المزدوج
   // يفتحان بطاقة العرض فقط، والمودال كان يُفتح للإضافة حصراً).
-  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [editingPartnerId, setEditingPartnerId] = useState<number | null>(null);
 
-  const openEdit = useCallback(async (p: Partner) => {
-    try {
-      const s = await suppliersService.getSupplierById(String(p.id));
-      if (s) setEditingSupplier(s);
-      else setErr("تعذّر تحميل بيانات المورد للتعديل");
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "تعذّر تحميل بيانات المورد للتعديل");
-    }
+  const openEdit = useCallback((p: Partner) => {
+    setEditingPartnerId(p.id);
   }, []);
 
   useEffect(() => {
@@ -115,7 +107,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
           type="button"
           className="aseel-toolbtn"
           title="تعديل بيانات المورد"
-          onClick={(e) => { e.stopPropagation(); void openEdit(p); }}
+          onClick={(e) => { e.stopPropagation(); openEdit(p); }}
         >
           <Pencil className="h-4 w-4" />
         </button>
@@ -159,23 +151,25 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
       />
 
       {showAddModal && (
-        <SupplierModal
-          isOpen={showAddModal}
+        <PartnerEditorModal
+          open={showAddModal}
+          fixedType="Supplier"
           onClose={() => setShowAddModal(false)}
-          onSaveSuccess={() => {
+          onSaved={() => {
             setShowAddModal(false);
             load();
           }}
         />
       )}
 
-      {editingSupplier && (
-        <SupplierModal
-          isOpen={!!editingSupplier}
-          editingSupplier={editingSupplier}
-          onClose={() => setEditingSupplier(null)}
-          onSaveSuccess={() => {
-            setEditingSupplier(null);
+      {editingPartnerId && (
+        <PartnerEditorModal
+          open={!!editingPartnerId}
+          partnerId={editingPartnerId}
+          fixedType="Supplier"
+          onClose={() => setEditingPartnerId(null)}
+          onSaved={() => {
+            setEditingPartnerId(null);
             load();
           }}
         />

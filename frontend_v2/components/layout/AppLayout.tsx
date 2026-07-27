@@ -28,17 +28,33 @@ import { WhatsNewButton } from './WhatsNewButton';
 import {
   User as UserIcon,
   Calendar,
-  Zap,
   Sparkles,
   LogOut,
   Copy,
   SlidersHorizontal,
+  Home,
+  ReceiptText,
+  ShoppingCart,
+  FileText,
+  ClipboardList,
+  Boxes,
+  Building2,
+  Users,
+  ArrowLeftRight,
+  BookOpen,
+  WalletCards,
+  BarChart3,
+  Zap,
+  type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { formatDateValue } from "../../utils/formatDate";
 import {
   getQuickShortcuts,
+  iconForShortcut,
   labelForShortcut,
   QUICK_SHORTCUTS_EVENT,
+  type ShortcutIconName,
 } from '../../utils/quickShortcuts';
 
 interface AppLayoutProps {
@@ -49,6 +65,38 @@ interface AppLayoutProps {
   /** N0-T5: callback لفتح صفحة ثوابت المجموعة (F11). */
   onOpenGroupConstants?: () => void;
 }
+
+const SHORTCUT_ICONS: Record<ShortcutIconName, LucideIcon> = {
+  home: Home,
+  "sales-invoice": ReceiptText,
+  "purchase-invoice": ShoppingCart,
+  quotation: FileText,
+  "supplier-offer": ClipboardList,
+  items: Boxes,
+  suppliers: Building2,
+  customers: Users,
+  "stock-movements": ArrowLeftRight,
+  journal: BookOpen,
+  cashboxes: WalletCards,
+  reports: BarChart3,
+  zap: Zap,
+};
+
+const SHORTCUT_ICON_COLORS: Record<ShortcutIconName, string> = {
+  home: "text-blue-600 dark:text-blue-400",
+  "sales-invoice": "text-emerald-600 dark:text-emerald-400",
+  "purchase-invoice": "text-amber-600 dark:text-amber-400",
+  quotation: "text-violet-600 dark:text-violet-400",
+  "supplier-offer": "text-rose-600 dark:text-rose-400",
+  items: "text-cyan-600 dark:text-cyan-400",
+  suppliers: "text-orange-600 dark:text-orange-400",
+  customers: "text-indigo-600 dark:text-indigo-400",
+  "stock-movements": "text-teal-600 dark:text-teal-400",
+  journal: "text-fuchsia-600 dark:text-fuchsia-400",
+  cashboxes: "text-green-600 dark:text-green-400",
+  reports: "text-sky-600 dark:text-sky-400",
+  zap: "text-slate-600 dark:text-slate-300",
+};
 
 export const AppLayout: React.FC<AppLayoutProps> = ({
   user,
@@ -120,7 +168,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             <span>الدور: {user.role === 'manager' ? 'مدير' : user.role === 'procurement' ? 'مشتريات' : 'موظف'}</span>
             <span className="text-[var(--color-border)]">|</span>
             <Calendar className="w-3.5 h-3.5" />
-            <span>{new Date().toLocaleDateString('ar-EG')}</span>
+            <span>{formatDateValue(new Date())}</span>
             <span className="text-[var(--color-border)]">|</span>
             <span>السنة المالية {new Date().getFullYear()}</span>
           </div>
@@ -176,28 +224,34 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
         <div className="app-main flex flex-col flex-1 min-w-0">
           {/* شريط التنقل السريع */}
-          <div className="aseel-toolbar flex-shrink-0">
-            <div className="aseel-toolgrp">
+          <div className="aseel-toolbar relative flex-shrink-0 overflow-hidden">
+            <div
+              className="pointer-events-none absolute inset-0 bg-gradient-to-l from-sky-100/90 via-blue-50/90 to-cyan-100/80 dark:from-slate-900 dark:via-blue-950/80 dark:to-cyan-950/70"
+              aria-hidden="true"
+            />
+            <div className="aseel-toolgrp relative z-10">
               <Breadcrumb activeView={activeView} />
             </div>
             {/* task16 D14: اختصارات الوصول السريع القابلة للتهيئة */}
             {shortcuts.filter(v => v !== 'dashboard' && v !== activeView).length > 0 && (
-              <div className="aseel-toolgrp flex items-center gap-1 ms-4" title="اختصارات سريعة (تُهيّأ من الإعدادات)">
-                <Zap className="w-3.5 h-3.5 text-[var(--color-primary-emphasis)]" />
-                {shortcuts.filter(v => v !== 'dashboard' && v !== activeView).map((v) => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => onNavigate(v)}
-                    className={`px-2 py-1 text-xs rounded transition-colors ${
-                      activeView === v
-                        ? 'bg-[var(--color-primary)] text-white'
-                        : 'text-[var(--color-text)] hover:bg-[var(--color-surface-2)]'
-                    }`}
-                  >
-                    {labelForShortcut(v)}
-                  </button>
-                ))}
+              <div className="aseel-toolgrp relative z-10 flex items-center gap-1.5 py-1 ms-4" title="اختصارات سريعة (تُهيّأ من الإعدادات)">
+                {shortcuts.filter(v => v !== 'dashboard' && v !== activeView).map((v) => {
+                  const iconName = iconForShortcut(v);
+                  const ShortcutIcon = SHORTCUT_ICONS[iconName];
+                  return (
+                    <button
+                      key={v}
+                      type="button"
+                      onClick={() => onNavigate(v)}
+                      className="group flex min-w-[4.75rem] flex-col items-center justify-center gap-1 rounded-lg border border-blue-100/80 bg-white/75 px-2.5 py-1.5 text-[11px] font-semibold text-[var(--color-text)] shadow-sm transition-all hover:-translate-y-0.5 hover:border-blue-300 hover:bg-white hover:shadow-md dark:border-blue-900/60 dark:bg-slate-900/55 dark:hover:border-blue-700 dark:hover:bg-slate-900"
+                    >
+                      <span className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/80 bg-white/90 shadow-inner transition-transform group-hover:scale-105 dark:border-slate-700 dark:bg-slate-800/90">
+                        <ShortcutIcon className={`h-5 w-5 ${SHORTCUT_ICON_COLORS[iconName]}`} />
+                      </span>
+                      <span className="whitespace-nowrap">{labelForShortcut(v)}</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>

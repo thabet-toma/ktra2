@@ -9,6 +9,7 @@ import { Eye, RefreshCw } from 'lucide-react';
 import { buildShipmentOptionLabel, ShipmentLabelInput } from '@/utils/shipmentLabel';
 import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
+import { formatDateLocalized } from "../../utils/formatDate";
 
 type ShipmentRow = ShipmentLabelInput & {
     status?: string;
@@ -70,8 +71,8 @@ export function SqlShipmentsPage() {
             key: 'status', header: 'الحالة', width: '100px',
             render: r => <span style={{ fontSize: 'var(--aseel-fs-sm)', fontWeight: 500 }}>{r.status || '—'}</span>,
         },
-        { key: 'departure_date', header: 'المغادرة', width: '90px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{r.departure_date || '—'}</span> },
-        { key: 'arrival_date', header: 'الوصول', width: '90px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{r.arrival_date || '—'}</span> },
+        { key: 'departure_date', header: 'المغادرة', width: '90px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{formatDateLocalized(r.departure_date) || '—'}</span> },
+        { key: 'arrival_date', header: 'الوصول', width: '90px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{formatDateLocalized(r.arrival_date) || '—'}</span> },
         {
             key: 'actions', header: '', width: '60px', align: 'center',
             render: r => (

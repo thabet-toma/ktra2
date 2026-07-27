@@ -1,5 +1,6 @@
 import React from 'react';
 import { Task, User } from '../types';
+import { formatDateLocalized, formatDateValue } from "../utils/formatDate";
 
 interface TaskCardProps {
     task: Task;
@@ -297,7 +298,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 {/* تاريخ التسليم */}
                 <div className="flex items-center justify-between">
                     <span className="font-semibold text-[var(--color-text)]">تاريخ التسليم:</span>
-                    <span className="text-xs">{task.dueDate}</span>
+                    <span className="text-xs">{formatDateLocalized(task.dueDate)}</span>
                 </div>
                 
                 {/* السعر المستهدف */}
@@ -346,7 +347,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                 {/* معلومات إضافية */}
                 <div className="flex items-center justify-between mt-3 text-xs text-[var(--color-text-muted)]">
                     <span>
-                        أنشئت في: {new Date(task.createdAt).toLocaleDateString()}
+                        أنشئت في: {formatDateValue(task.createdAt)}
                     </span>
                     {userTaskStatus.submissionCount > 0 && (
                         <span>

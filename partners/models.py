@@ -102,7 +102,19 @@ class CustomerNote(models.Model):
 
     remind_on (اختياري): عند حلول هذا اليوم (أو تجاوزه) يظهر تذكير في إشعارات
     الموقع لملاحظة غير منجزة. is_done: عند إنجازها يتوقف التذكير.
+
+    priority: ملاحظة «عاجل» غير منجزة وحلّ موعدها (أو تأخّر) تُعرَض كتنبيه لكل
+    مستخدم يفتح معاملة لهذا الطرف — عميلاً كان أو مورداً.
     """
+    PRIORITY_URGENT = 'urgent'
+    PRIORITY_MEDIUM = 'medium'
+    PRIORITY_NORMAL = 'normal'
+    PRIORITY_CHOICES = [
+        (PRIORITY_URGENT, 'عاجل'),
+        (PRIORITY_MEDIUM, 'متوسط'),
+        (PRIORITY_NORMAL, 'عادي'),
+    ]
+
     id = models.AutoField(primary_key=True, db_column='CustomerNoteID')
     tenant = models.ForeignKey(
         Tenant, on_delete=models.CASCADE, related_name='customer_notes', db_column='TenantID')
@@ -114,6 +126,10 @@ class CustomerNote(models.Model):
         null=True, blank=True, db_column='RemindOn',
         help_text='يوم التذكير — يظهر في إشعارات الموقع عند حلوله')
     is_done = models.BooleanField(default=False, db_column='IsDone')
+    priority = models.CharField(
+        max_length=10, choices=PRIORITY_CHOICES, default=PRIORITY_NORMAL,
+        db_column='Priority',
+        help_text='أولوية الملاحظة — «عاجل» تُنبّه عند أي معاملة للطرف بعد حلول موعدها')
     created_by = models.ForeignKey(
         'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
         db_column='CreatedBy_UserID', related_name='+')
@@ -126,6 +142,7 @@ class CustomerNote(models.Model):
         indexes = [
             models.Index(fields=['tenant', 'partner', '-created_at'], name='pcn_tenant_partner_created'),
             models.Index(fields=['tenant', 'is_done', 'remind_on'], name='pcn_tenant_done_remind'),
+            models.Index(fields=['tenant', 'partner', 'priority', 'is_done'], name='pcn_tenant_partner_prio'),
         ]
 
     def __str__(self):
@@ -138,12 +155,14 @@ class PartnerBankAccount(models.Model):
     partner = models.ForeignKey(Partner, on_delete=models.CASCADE, related_name='bank_accounts', db_column='PartnerID', default=1)
     bank_name = models.CharField(max_length=100, db_column='BankName', default='Bank')
     account_number = models.CharField(max_length=50, db_column='AccountNumber', default='-')
+    branch_name = models.CharField(max_length=100, blank=True, null=True, db_column='BranchName')
     iban = models.CharField(max_length=50, blank=True, null=True, db_column='IBAN')
     swift_code = models.CharField(max_length=20, blank=True, null=True, db_column='SwiftCode')
     bank_address = models.CharField(max_length=255, blank=True, null=True, db_column='BankAddress')
     beneficiary_name = models.CharField(max_length=150, blank=True, null=True, db_column='BeneficiaryName')
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT, db_column='CurrencyID', default=1)
     is_active = models.BooleanField(default=True, db_column='IsActive')
+    is_default = models.BooleanField(default=False, db_column='IsDefault')
 
     class Meta:
         db_table = 'partner_bank_accounts'

@@ -10,6 +10,7 @@ from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
 from core.api_defaults import ApiAuthAndUser
+from core.access import require_perm
 from core.tenant_utils import get_tenant
 from .models import Branch, Currency, TenantBook, TenantSettings, Tenant, UserCompanyMembership
 from .serializers import BranchSerializer, TenantBookSerializer, TenantSettingsSerializer, TenantSerializer, UserCompanyMembershipSerializer
@@ -67,11 +68,20 @@ class TenantSettingsViewSet(viewsets.ModelViewSet):
         if request.method == "GET":
             return Response(TenantSettingsSerializer(settings_obj).data)
 
-        # PUT / PATCH
+        # PUT / PATCH — T-PERM: الكتابة تتطلب «إعدادات الشركة العامة».
+        require_perm(request, "admin.settings.manage", tenant=tenant)
         partial = request.method == "PATCH"
         ser = TenantSettingsSerializer(settings_obj, data=request.data, partial=partial)
         ser.is_valid(raise_exception=True)
+        old_start_day = settings_obj.dashboard_month_start_day
         ser.save()
+        if ser.instance.dashboard_month_start_day != old_start_day:
+            logger.info(
+                "dashboard_month_start updated tenant=%s start_day=%s by_user=%s",
+                tenant.TenantID,
+                ser.instance.dashboard_month_start_day,
+                getattr(request.user, "pk", None),
+            )
         return Response(ser.data)
 
 
@@ -162,14 +172,8 @@ class BranchViewSet(viewsets.ModelViewSet):
         return Response(BranchSerializer(self.get_queryset(), many=True).data)
 
     def _require_manager(self, request, tenant):
-        user = request.user
-        if user.is_superuser:
-            return
-        is_manager = UserCompanyMembership.objects.filter(
-            user=user, tenant=tenant, role="manager"
-        ).exists()
-        if not is_manager:
-            raise PermissionDenied("فقط مدير الشركة يمكنه إدارة الفروع.")
+        # T-PERM: الفروع جزء من إعدادات الشركة.
+        require_perm(request, "admin.settings.manage", tenant=tenant)
 
     def create(self, request, *args, **kwargs):
         tenant = get_tenant(request)
@@ -248,20 +252,19 @@ class TenantViewSet(viewsets.ModelViewSet):
         return Response(TenantSerializer(tenant).data, status=status.HTTP_201_CREATED)
 
     # ── إدارة الشركة (task12 M4) ──
-    def _require_company_manager(self, request, tenant):
-        user = request.user
-        if user.is_superuser:
-            return
-        if not UserCompanyMembership.objects.filter(user=user, tenant=tenant, role="manager").exists():
-            raise PermissionDenied("فقط مدير الشركة يمكنه تنفيذ هذا الإجراء.")
+    def _require_company_manager(self, request, tenant, key="admin.members.manage"):
+        """T-PERM: الحَكَم صار الصلاحية لا اسم الدور — فمن يمنحه المدير
+        «إدارة الأعضاء» يديرهم دون أن يصير مديراً. الشركة تُمرَّر صراحةً (من
+        مسار الطلب) فلا يفتح ترويسة X-Tenant-Id باباً لشركة أخرى."""
+        require_perm(request, key, tenant=tenant)
 
     def update(self, request, *args, **kwargs):
         """تعديل بيانات الشركة (الاسم…) — كان مفتوحاً لأي عضو (T12-B3)."""
-        self._require_company_manager(request, self.get_object())
+        self._require_company_manager(request, self.get_object(), "admin.settings.manage")
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
-        self._require_company_manager(request, self.get_object())
+        self._require_company_manager(request, self.get_object(), "admin.settings.manage")
         return super().partial_update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):

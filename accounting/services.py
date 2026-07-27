@@ -1075,6 +1075,82 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
 #  task18 DEF-C1: رصيد الشريك من دفتر الأستاذ الفرعي (subledger)
 # ─────────────────────────────────────────────────────────
 
+def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
+    """يربط حركات كشف الحساب بمستند المرساة (الفاتورة) — استعلامات بالدفعة لا لكل صف.
+
+    الفاتورة مرساة مجموعتها، وسند القبض/الصرف ينضمّ لمجموعة الفاتورة التي وُزّع
+    عليها؛ فتُعرَض الحركتان متجاورتين في الواجهة. سند موزَّع على أكثر من فاتورة
+    يبقى بلا مرساة واحدة (link_key=None) ويحمل عددها في link_count. يعدّل `rows`
+    في مكانها.
+    """
+    invoice_type = "PURCHASE_INVOICE" if is_supplier else "SALES_INVOICE"
+    payment_type = "SUPPLIER_PAYMENT" if is_supplier else "CUSTOMER_PAYMENT"
+    invoice_ids = {
+        r["reference_id"] for r in rows
+        if r["reference_type"] == invoice_type and r["reference_id"]
+    }
+    payment_ids = {
+        r["reference_id"] for r in rows
+        if r["reference_type"] == payment_type and r["reference_id"]
+    }
+
+    by_payment: dict[int, list[int]] = {}
+    if payment_ids:
+        if is_supplier:
+            from sales.models import SupplierPayment, SupplierPaymentAllocation
+            allocations = SupplierPaymentAllocation.objects.filter(
+                payment_id__in=payment_ids,
+            ).values_list("payment_id", "invoice_id")
+        else:
+            from sales.models import PaymentAllocation
+            allocations = PaymentAllocation.objects.filter(
+                payment_id__in=payment_ids,
+            ).values_list("payment_id", "invoice_id")
+        for pay_id, inv_id in allocations:
+            by_payment.setdefault(pay_id, []).append(inv_id)
+        if is_supplier:
+            # سندات الصرف القديمة مربوطة بالحقل المفرد لا بجدول التوزيعات.
+            legacy = SupplierPayment.objects.filter(
+                id__in=[p for p in payment_ids if p not in by_payment],
+                purchase_invoice__isnull=False,
+            ).values_list("id", "purchase_invoice_id")
+            for pay_id, inv_id in legacy:
+                by_payment.setdefault(pay_id, []).append(inv_id)
+        invoice_ids.update(inv_id for links in by_payment.values() for inv_id in links)
+
+    numbers: dict[int, str] = {}
+    if invoice_ids:
+        if is_supplier:
+            from logistics.models import PurchaseInvoice
+            source = PurchaseInvoice.objects.filter(id__in=invoice_ids)
+        else:
+            from sales.models import SalesInvoice
+            source = SalesInvoice.objects.filter(id__in=invoice_ids)
+        numbers = dict(source.values_list("id", "invoice_number"))
+
+    for row in rows:
+        ref_id = row["reference_id"]
+        row["document_number"] = None
+        row["link_key"] = None
+        row["link_label"] = None
+        row["link_count"] = 0
+        if not ref_id:
+            continue
+        if row["reference_type"] == invoice_type:
+            row["document_number"] = numbers.get(ref_id) or f"#{ref_id}"
+            row["link_key"] = f"{invoice_type}:{ref_id}"
+            row["link_label"] = row["document_number"]
+            row["link_count"] = 1
+        elif row["reference_type"] == payment_type:
+            links = by_payment.get(ref_id, [])
+            row["link_count"] = len(links)
+            if len(links) == 1:
+                row["link_key"] = f"{invoice_type}:{links[0]}"
+                row["link_label"] = numbers.get(links[0]) or f"#{links[0]}"
+            elif links:
+                row["link_label"] = f"{len(links)} فواتير"
+
+
 def partner_account_statement(
     *, tenant_id: int, partner_id: int, is_supplier: bool,
     limit: int = 50, offset: int = 0, ordering: str = "newest",
@@ -1127,6 +1203,7 @@ def partner_account_statement(
             "credit": str(jl.base_credit),
             "running_balance": str(running_by_id[lid]),
         })
+    _attach_statement_document_links(rows, is_supplier=is_supplier)
     return {
         "results": rows,
         "count": total,

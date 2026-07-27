@@ -15,6 +15,8 @@ from django.db.models import (
 from django.db.models.functions import Coalesce
 from django.utils.dateparse import parse_date
 from .models import (
+    SupplierQuotation,
+    PurchaseOrder,
     LogisticsDeal, LogisticsDealItem, LogisticsShipment,
     LogisticsClearance, LogisticsShipmentDeal,
     LogisticsPayment, LogisticsClearancePayment,
@@ -23,6 +25,8 @@ from .models import (
 )
 from sales.models import SupplierPayment
 from .serializers import (
+    SupplierQuotationSerializer,
+    PurchaseOrderSerializer,
     LogisticsDealSerializer, LogisticsDealListSerializer, LogisticsDealItemSerializer,
     LogisticsShipmentSerializer, LogisticsShipmentListSerializer, LogisticsClearanceSerializer,
     LogisticsPaymentSerializer,
@@ -45,6 +49,7 @@ from accounting.services import (
     post_journal,
     unpost_document,
     validate_fiscal_period,
+    next_document_number,
 )
 from .accruals import (
     AccrualSkipped, post_clearance_accrual, post_freight_accrual,
@@ -52,6 +57,7 @@ from .accruals import (
 )
 from core.activity import log_activity, log_view
 from core.api_defaults import POSTED_DOC_WARNING
+from core.access import require_perm, requires_perm
 from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
 from core.mixins import BaseTenantViewSet
@@ -68,9 +74,265 @@ from .domain.stages import derive_stage
 from .services import (
     annotate_purchase_invoice_payment_summary,
     attach_pi_payment_voucher,
+    convert_local_quotation_to_order,
+    convert_import_quotation_to_deal,
+    convert_purchase_order_to_invoice,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class SupplierQuotationViewSet(BaseTenantViewSet):
+    serializer_class = SupplierQuotationSerializer
+    queryset = SupplierQuotation.objects.all()
+
+    def get_queryset(self):
+        qs = (
+            super().get_queryset()
+            .select_related('tenant', 'supplier', 'currency', 'created_by')
+            .prefetch_related('lines__product')
+        )
+        scope = str(self.request.query_params.get('scope') or '').strip()
+        quote_status = str(self.request.query_params.get('status') or '').strip()
+        supplier = str(self.request.query_params.get('supplier') or '').strip()
+        search = str(self.request.query_params.get('search') or '').strip()
+        if scope:
+            qs = qs.filter(scope=scope)
+        if quote_status:
+            qs = qs.filter(status=quote_status)
+        if supplier.isdigit():
+            qs = qs.filter(supplier_id=int(supplier))
+        if search:
+            qs = qs.filter(
+                Q(quotation_number__icontains=search)
+                | Q(supplier__name__icontains=search)
+                | Q(supplier__legal_name__icontains=search)
+                | Q(lines__name_snapshot__icontains=search)
+                | Q(lines__description_line__icontains=search)
+                | Q(lines__product__name_ar__icontains=search)
+                | Q(lines__product__name_en__icontains=search)
+            ).distinct()
+        return qs.order_by('-quotation_date', '-id')
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        kwargs = {'tenant': tenant}
+        if self.request.user.is_authenticated:
+            kwargs['created_by'] = self.request.user
+        number = str(serializer.validated_data.get('quotation_number') or '').strip()
+        if not number:
+            scope = serializer.validated_data.get('scope', SupplierQuotation.SCOPE_LOCAL)
+            prefix = 'IQ' if scope == SupplierQuotation.SCOPE_IMPORT else 'PQ'
+            sequence = next_document_number(
+                tenant.pk, f'supplier_quotation_{scope}',
+            )
+            kwargs['quotation_number'] = f'{prefix}-{sequence:04d}'
+        quotation = serializer.save(**kwargs)
+        log_activity(
+            action='create',
+            entity_type='supplier_quotation',
+            entity_id=quotation.id,
+            entity_label=quotation.quotation_number,
+            description='إنشاء عرض سعر مورد',
+            request=self.request,
+            partner_ids=[quotation.supplier_id],
+        )
+
+    def perform_destroy(self, instance):
+        if instance.status == SupplierQuotation.STATUS_CONVERTED:
+            raise ValidationError('عرض السعر المحوّل لا يمكن حذفه.')
+        super().perform_destroy(instance)
+
+    @action(detail=True, methods=['post'], url_path='convert-to-import-deal')
+    def convert_to_import_deal(self, request, pk=None):
+        quotation = self.get_object()
+        try:
+            deal, created = convert_import_quotation_to_deal(
+                quotation,
+                user=request.user,
+            )
+        except DjangoValidationError as exc:
+            detail = getattr(exc, 'message_dict', None) or getattr(
+                exc, 'messages', None,
+            ) or [str(exc)]
+            raise ValidationError(detail)
+
+        if created:
+            log_activity(
+                action='convert',
+                entity_type='supplier_quotation',
+                entity_id=quotation.id,
+                entity_label=quotation.quotation_number,
+                description=f'تحويل عرض السعر إلى طلبية {deal.ref_number}',
+                request=request,
+                partner_ids=[deal.partner_id],
+                metadata={'deal_id': deal.id, 'deal_ref_number': deal.ref_number},
+            )
+        payload = {
+            'status': 'converted',
+            'created': created,
+            'deal': LogisticsDealSerializer(deal, context={'request': request}).data,
+        }
+        return Response(
+            payload,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=['post'], url_path='convert-to-purchase-order')
+    def convert_to_purchase_order(self, request, pk=None):
+        quotation = self.get_object()
+        try:
+            order, created = convert_local_quotation_to_order(
+                quotation,
+                user=request.user,
+            )
+        except DjangoValidationError as exc:
+            detail = getattr(exc, 'message_dict', None) or getattr(
+                exc, 'messages', None,
+            ) or [str(exc)]
+            raise ValidationError(detail)
+        if created:
+            log_activity(
+                action='convert',
+                entity_type='supplier_quotation',
+                entity_id=quotation.id,
+                entity_label=quotation.quotation_number,
+                description=f'تحويل عرض السعر إلى طلبية {order.order_number}',
+                request=request,
+                partner_ids=[order.supplier_id],
+                metadata={'purchase_order_id': order.id},
+            )
+        return Response(
+            {
+                'status': 'converted',
+                'created': created,
+                'order': PurchaseOrderSerializer(
+                    order, context={'request': request},
+                ).data,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class PurchaseOrderViewSet(BaseTenantViewSet):
+    serializer_class = PurchaseOrderSerializer
+    queryset = PurchaseOrder.objects.all()
+
+    def get_queryset(self):
+        qs = (
+            super().get_queryset()
+            .select_related(
+                'tenant', 'supplier', 'quotation', 'invoice', 'currency', 'created_by',
+            )
+            .prefetch_related('lines__product')
+        )
+        order_status = str(self.request.query_params.get('status') or '').strip()
+        supplier = str(self.request.query_params.get('supplier') or '').strip()
+        search = str(self.request.query_params.get('search') or '').strip()
+        if order_status:
+            qs = qs.filter(status=order_status)
+        if supplier.isdigit():
+            qs = qs.filter(supplier_id=int(supplier))
+        if search:
+            qs = qs.filter(
+                Q(order_number__icontains=search)
+                | Q(supplier__name__icontains=search)
+                | Q(supplier__legal_name__icontains=search)
+                | Q(lines__name_snapshot__icontains=search)
+                | Q(lines__product__name_ar__icontains=search)
+                | Q(lines__product__name_en__icontains=search)
+            ).distinct()
+        return qs.order_by('-order_date', '-id')
+
+    def perform_create(self, serializer):
+        tenant = get_tenant(self.request)
+        kwargs = {'tenant': tenant}
+        if self.request.user.is_authenticated:
+            kwargs['created_by'] = self.request.user
+        number = str(serializer.validated_data.get('order_number') or '').strip()
+        if not number:
+            sequence = next_document_number(tenant.pk, 'purchase_order')
+            kwargs['order_number'] = f'PO-{sequence:04d}'
+        order = serializer.save(**kwargs)
+        log_activity(
+            action='create',
+            entity_type='purchase_order',
+            entity_id=order.id,
+            entity_label=order.order_number,
+            description='إنشاء طلبية شراء',
+            request=self.request,
+            partner_ids=[order.supplier_id],
+        )
+
+    def perform_destroy(self, instance):
+        if instance.status != PurchaseOrder.STATUS_DRAFT:
+            raise ValidationError('يمكن حذف طلبية الشراء المسودة فقط.')
+        super().perform_destroy(instance)
+
+    @action(detail=True, methods=['post'])
+    def confirm(self, request, pk=None):
+        with transaction.atomic():
+            order = PurchaseOrder.objects.select_for_update().get(
+                pk=self.get_object().pk,
+                tenant=get_tenant(request),
+            )
+            if order.status == PurchaseOrder.STATUS_CONFIRMED:
+                return Response(PurchaseOrderSerializer(
+                    order, context={'request': request},
+                ).data)
+            if order.status != PurchaseOrder.STATUS_DRAFT:
+                raise ValidationError('يمكن تأكيد الطلبية المسودة فقط.')
+            if not order.lines.exists():
+                raise ValidationError('لا يمكن تأكيد طلبية بلا أصناف.')
+            order.status = PurchaseOrder.STATUS_CONFIRMED
+            order.save(update_fields=['status', 'updated_at'])
+        return Response(PurchaseOrderSerializer(
+            order, context={'request': request},
+        ).data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        with transaction.atomic():
+            order = PurchaseOrder.objects.select_for_update().get(
+                pk=self.get_object().pk,
+                tenant=get_tenant(request),
+            )
+            if order.status == PurchaseOrder.STATUS_CONVERTED:
+                raise ValidationError('الطلبية المحوّلة إلى فاتورة لا يمكن إلغاؤها.')
+            if order.status == PurchaseOrder.STATUS_CANCELLED:
+                return Response(PurchaseOrderSerializer(
+                    order, context={'request': request},
+                ).data)
+            order.status = PurchaseOrder.STATUS_CANCELLED
+            order.cancel_reason = str(request.data.get('reason') or '').strip()
+            order.save(update_fields=['status', 'cancel_reason', 'updated_at'])
+        return Response(PurchaseOrderSerializer(
+            order, context={'request': request},
+        ).data)
+
+    @action(detail=True, methods=['post'], url_path='convert-to-invoice')
+    def convert_to_invoice(self, request, pk=None):
+        try:
+            invoice, created = convert_purchase_order_to_invoice(
+                self.get_object(),
+                user=request.user,
+            )
+        except DjangoValidationError as exc:
+            detail = getattr(exc, 'message_dict', None) or getattr(
+                exc, 'messages', None,
+            ) or [str(exc)]
+            raise ValidationError(detail)
+        return Response(
+            {
+                'status': 'converted',
+                'created': created,
+                'invoice': {
+                    'id': invoice.id,
+                    'invoice_number': invoice.invoice_number,
+                },
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
 
 
 class LogisticsDealViewSet(BaseTenantViewSet):
@@ -403,6 +665,7 @@ class LogisticsDealViewSet(BaseTenantViewSet):
         return response
 
     @action(detail=True, methods=['post'], url_path='unpost')
+    @requires_perm('import.doc.unpost')
     def unpost(self, request, pk=None):
         """تراجع عن ترحيل الصفقة: حذف قيود كل دفعاتها المرحّلة وإرجاعها مسودات."""
         deal = self.get_object()
@@ -1746,6 +2009,7 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'], url_path='unpost')
+    @requires_perm('import.doc.unpost')
     def unpost(self, request, pk=None):
         """تراجع عن الترحيل: حذف قيد الشحن وعكس حركات استلام مخزونها."""
         shipment = self.get_object()
@@ -1817,6 +2081,7 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
         )
 
     @action(detail=True, methods=['post'], url_path='unpost-freight-accrual')
+    @requires_perm('import.doc.unpost')
     def unpost_freight_accrual(self, request, pk=None):
         """تراجع عن استحقاق شحن الوكيل — لا يمسّ دفعاته المرحّلة."""
         shipment = self.get_object()
@@ -1915,6 +2180,7 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
         }, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='unpost-accrual')
+    @requires_perm('import.doc.unpost')
     def unpost_accrual(self, request, pk=None):
         clearance = self.get_object()
         if not clearance.journal_id:
@@ -1935,6 +2201,7 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
         return Response({'message': 'تم التراجع عن إثبات استحقاق التخليص.', 'unpost_result': result})
 
     @action(detail=True, methods=['post'], url_path='unpost')
+    @requires_perm('import.doc.unpost')
     def unpost(self, request, pk=None):
         """تراجع عن ترحيل التخليص: حذف قيود كل دفعاته المرحّلة وإرجاعها مسودات."""
         clearance = self.get_object()
@@ -2231,6 +2498,7 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
             return Response({"error": "حدث خطأ غير متوقع أثناء تسجيل الدفع."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['post'], url_path='unpost-payment')
+    @requires_perm('import.doc.unpost')
     def unpost_payment(self, request, pk=None):
         """إلغاء ترحيل دفعة تخليص جمركي — قيد عكسي."""
         from accounting.services import validate_fiscal_period
@@ -2448,6 +2716,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             logger.exception('purchase-invoice attachment sync failed for invoice=%s', getattr(invoice, 'id', None))
 
     def perform_create(self, serializer):
+        require_perm(self.request, 'purchase.invoice.create')
         tenant = self._get_tenant()
         inv_num = self.request.data.get('invoice_number') or self._next_invoice_number(tenant)
         # نوع الفاتورة: صريح إن مُرّر، وإلا يُشتق من ارتباط مسار الاستيراد.
@@ -2507,10 +2776,12 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         ).purchase_default_price_strategy
         rate = request.query_params.get('exchange_rate')
         cur = request.query_params.get('currency')
+        sup = request.query_params.get('supplier')
         data = resolve_purchase_price(
             tenant_id=tenant.TenantID,
             product_id=int(pid),
             strategy=strategy,
+            supplier_id=int(sup) if sup and str(sup).isdigit() else None,
             target_currency_id=int(cur) if cur and str(cur).isdigit() else None,
             target_exchange_rate=Decimal(str(rate)) if rate else Decimal('1'),
         )
@@ -2521,6 +2792,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         """task24: سعر الشراء المقترح لكل المنتجات دفعة واحدة — يُعرض داخل خيارات
         منتقي الأصناف في الفاتورة بلا نقر. يفوّض لـ core.pricing (المصدر المشترك).
         الاستراتيجية من إعدادات الشراء افتراضياً ويمكن تجاوزها بـ ?strategy=.
+        و‍`?supplier=` يحصر «آخر شراء» بمورد الفاتورة (يبقى «أقل شراء» عاماً).
         """
         from core.pricing import purchase_price_list
         from logistics.services import get_or_create_purchase_settings
@@ -2531,7 +2803,12 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         strategy = request.query_params.get('strategy') or get_or_create_purchase_settings(
             tenant
         ).purchase_default_price_strategy
-        prices = purchase_price_list(tenant_id=tenant.TenantID, strategy=strategy)
+        sup = request.query_params.get('supplier')
+        prices = purchase_price_list(
+            tenant_id=tenant.TenantID,
+            strategy=strategy,
+            supplier_id=int(sup) if sup and str(sup).isdigit() else None,
+        )
         rows = [
             {
                 "product_id": pid,
@@ -2953,6 +3230,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         return Response(ser.data)
 
     @action(detail=True, methods=['post'], url_path='post-to-accounting')
+    @requires_perm('purchase.invoice.post')
     def post_to_accounting(self, request, pk=None):
         """
         ترحيل فاتورة الشراء إلى دفتر اليومية — قيد مزدوج كامل متوازن.
@@ -3505,6 +3783,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         )
 
     def perform_update(self, serializer):
+        require_perm(self.request, 'purchase.invoice.edit')
         instance = serializer.instance
         if instance is not None and instance.is_posted:
             raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
@@ -3519,6 +3798,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         )
 
     def destroy(self, request, *args, **kwargs):
+        require_perm(request, 'purchase.invoice.delete')
         instance = self.get_object()
         if instance.is_posted:
             return Response(
@@ -3539,6 +3819,7 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         return response
 
     @action(detail=True, methods=['post'], url_path='unpost')
+    @requires_perm('purchase.invoice.unpost')
     def unpost(self, request, pk=None):
         """تراجع عن الترحيل: حذف كل قيود الفاتورة وحركات استلامها وإرجاعها مسودة."""
         invoice = self.get_object()
@@ -3625,11 +3906,19 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
     def get_queryset(self):
         qs = SupplierPayment.objects.all().select_related(
             'partner', 'purchase_invoice', 'currency', 'cash_or_bank_account', 'journal',
-        ).order_by('-created_at')
+        ).prefetch_related('allocations__invoice').order_by('-created_at')
         tenant = get_tenant(self.request)
         if not tenant:
             return qs.none()
-        return qs.filter(tenant=tenant)
+        qs = qs.filter(tenant=tenant)
+        # بطاقة المورد تجلب سنداته وحدها (لا كل سندات الشركة).
+        partner_id = self.request.query_params.get('partner')
+        if partner_id:
+            try:
+                qs = qs.filter(partner_id=int(partner_id))
+            except (TypeError, ValueError):
+                pass
+        return qs
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
@@ -3646,6 +3935,34 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
             entity_label=f'#{payment.id}', description='سند صرف مورد',
             partner_ids=[payment.partner_id], request=self.request,
         )
+        # T-AUTOPOST: سند الصرف يُرحَّل فور الحفظ (لا مسودة) ما لم يُطلب خلاف ذلك —
+        # نفس مصدر القرار المشترك مع سند القبض (core.payments).
+        from core.payments import should_auto_post_payment
+        if should_auto_post_payment(tenant, self.request.data):
+            try:
+                from sales.services import post_supplier_payment
+                post_supplier_payment(payment, user=self.request.user)
+                log_activity(
+                    action='post', entity_type='supplier_payment', entity_id=payment.id,
+                    entity_label=f'#{payment.id}', description='ترحيل سند صرف مورد',
+                    partner_ids=[payment.partner_id], request=self.request,
+                )
+            except Exception as e:  # noqa: BLE001
+                # الفشل لا يُضيع السند — يبقى مسودة وتُعاد الرسالة مع الاستجابة.
+                logger.warning("Auto-post supplier payment %s failed: %s", payment.id, e)
+                payment._auto_post_error = str(e)
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        instance = serializer.instance
+        headers = self.get_success_headers(serializer.data)
+        # T-AUTOPOST: نُعيد الحالة بعد الترحيل التلقائي (is_posted/journal).
+        data = SupplierPaymentSerializer(instance).data
+        if getattr(instance, '_auto_post_error', None):
+            data['auto_post_error'] = instance._auto_post_error
+        return Response(data, status=status.HTTP_201_CREATED, headers=headers)
 
     def perform_update(self, serializer):
         payment = serializer.save()
@@ -3666,7 +3983,30 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
         )
         return response
 
+    @action(detail=True, methods=['post'], url_path='allocate')
+    def allocate(self, request, pk=None):
+        """T-ONACC: توزيع سند صرف على فواتير شراء — يعمل قبل الترحيل وبعده.
+
+        بعد الترحيل التوزيع ربط فقط (لا قيد جديد): ذمم المورد دُينت وقت الترحيل.
+        """
+        payment = self.get_object()
+        try:
+            from sales.services import allocate_supplier_payment
+            allocate_supplier_payment(
+                payment, request.data.get('allocations') or [], user=request.user,
+            )
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        payment.refresh_from_db()
+        log_activity(
+            action='update', entity_type='supplier_payment', entity_id=payment.id,
+            entity_label=f'#{payment.id}', description='توزيع سند صرف على الفواتير',
+            partner_ids=[payment.partner_id], request=request,
+        )
+        return Response(SupplierPaymentSerializer(payment).data)
+
     @action(detail=True, methods=['post'], url_path='post')
+    @requires_perm('purchase.payment.post')
     def post_to_accounting(self, request, pk=None):
         payment = self.get_object()
         if payment.is_posted:
@@ -3903,6 +4243,7 @@ class LocalShipmentViewSet(BaseTenantViewSet):
         return super().destroy(request, *args, **kwargs)
 
     @action(detail=True, methods=['post'], url_path='unpost')
+    @requires_perm('inventory.doc.unpost')
     def unpost(self, request, pk=None):
         """تراجع عن الترحيل: حذف قيد الشحن المحلي وإرجاعه مسودة."""
         shipment = self.get_object()
@@ -4196,6 +4537,7 @@ class PurchaseSettingsViewSet(BaseTenantViewSet):
         ps = get_or_create_purchase_settings(tenant)
         if request.method == 'GET':
             return Response(PurchaseSettingsSerializer(ps).data)
+        require_perm(request, 'purchase.settings.manage', tenant=tenant)
         ser = PurchaseSettingsSerializer(ps, data=request.data, partial=True)
         ser.is_valid(raise_exception=True)
         ser.save()

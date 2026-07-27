@@ -17,6 +17,7 @@ import { resolveTenantId } from "../../utils/tenantContext";
 import { formatQuantity, formatMoney } from "../../utils/formatNumber";
 import { productProfilePath } from "../../utils/entityLinks";
 import { LedgerTable, DocRefCell, type LedgerColumn } from "./LedgerTable";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 interface ProductProfile {
   id: number;
@@ -151,7 +152,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
 
   // أعمدة حركة المخزون المعروضة داخل البطاقة (مختصرة — نفس دفتر ProductProfilePage).
   const ledColumns: LedgerColumn<LedgerRow>[] = [
-    { key: "date", header: "التاريخ", render: (r) => r.date || "—" },
+    { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) || "—" },
     { key: "type", header: "النوع", render: (r) => ledgerTypeLabel(r) },
     {
       key: "ref", header: "المستند",

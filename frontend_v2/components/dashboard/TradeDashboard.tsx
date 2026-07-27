@@ -29,6 +29,7 @@ import type {
 } from "../../types/dashboard";
 import type { AppView } from "../../types/common";
 import type { DashboardData } from "../../types/dashboard";
+import { formatDateLocalized } from "../../utils/formatDate";
 import { formatMoney } from "../../utils/formatNumber";
 import { EmptyState, Spinner } from "../ui";
 
@@ -102,11 +103,7 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
     );
   }
 
-  const isNewCompany =
-    data.sales_invoices.total === 0 &&
-    data.purchase_invoices.total === 0 &&
-    data.inventory.total_products === 0 &&
-    data.accounting.journals_this_month === 0;
+  const isNewCompany = data.is_new_company;
   const showImport = canAccessImport && !!data.import_operations;
 
   return (
@@ -124,7 +121,7 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
             أهلاً {userName.split(" ")[0]}، هذه صورة أعمالك اليوم
           </h1>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-            المؤشرات المالية والمبيعات والمشتريات والمخزون للشهر الحالي
+            المؤشرات المالية والمبيعات والمشتريات من {formatDateLocalized(data.period.from)} إلى {formatDateLocalized(data.period.to)}، مع حالة المخزون الحالية
           </p>
         </div>
         <button
@@ -150,8 +147,8 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
       )}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6" aria-label="المؤشرات الرئيسية">
-        <KpiCard icon={TrendingUp} label="إيرادات الشهر" value={baseMoney(data.financials.revenue)} note="بالعملة الأساسية" tone="success" />
-        <KpiCard icon={TrendingDown} label="مصروفات الشهر" value={baseMoney(data.financials.expenses)} note="بالعملة الأساسية" tone="danger" />
+        <KpiCard icon={TrendingUp} label="إيرادات الفترة" value={baseMoney(data.financials.revenue)} note="بالعملة الأساسية" tone="success" />
+        <KpiCard icon={TrendingDown} label="مصروفات الفترة" value={baseMoney(data.financials.expenses)} note="بالعملة الأساسية" tone="danger" />
         <KpiCard
           icon={WalletCards}
           label="صافي الربح"
@@ -366,7 +363,7 @@ function AccountingPanel({ journals, onNavigate }: { journals: number; onNavigat
     <article className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
       <div className="flex items-center gap-3">
         <span className="rounded-[var(--radius-lg)] bg-[var(--color-primary)]/10 p-2 text-[var(--color-primary)]"><BookOpen className="h-5 w-5" /></span>
-        <div><p className="text-xs text-[var(--color-text-muted)]">القيود المرحلة هذا الشهر</p><p className="text-xl font-bold text-[var(--color-text)]">{journals}</p></div>
+        <div><p className="text-xs text-[var(--color-text-muted)]">القيود المرحلة خلال الفترة</p><p className="text-xl font-bold text-[var(--color-text)]">{journals}</p></div>
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2">
         <button type="button" onClick={() => onNavigate("accounting-journals")} className="rounded-[var(--radius-lg)] bg-[var(--color-muted)] px-3 py-2 text-xs font-medium text-[var(--color-text)]">دفتر اليومية</button>

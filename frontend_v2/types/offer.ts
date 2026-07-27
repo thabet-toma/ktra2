@@ -34,6 +34,8 @@ export interface PriceOffer {
     quote_images?: string[];
     items: PriceOfferItem[];
     status: PriceOfferStatus;
+    /** الحالة الأصلية في API SQL؛ تستخدم لقفل المستندات المحوّلة/المؤكدة. */
+    backendStatus?: string;
     internalNotes?: string;
     subtotal: number;
     discountAmount: number;

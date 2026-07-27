@@ -4,6 +4,7 @@ import { dealsService } from "@/services/dealsService";
 import { formatMoney } from "@/utils/formatNumber";
 import { useToast } from "@/contexts/ToastContext";
 import { useConfirm } from "@/contexts/ConfirmContext";
+import { formatDateValue } from "../../../utils/formatDate";
 import {
   Clock,
   Trash2,
@@ -272,7 +273,7 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
                   </td>
                   <td className={`${cellCls} font-mono text-xs`}>
                     {payment.paymentDate
-                      ? new Date(payment.paymentDate).toLocaleDateString("en-GB")
+                      ? formatDateValue(payment.paymentDate)
                       : "—"}
                   </td>
                   <td className={`${cellCls} font-mono font-bold`}>

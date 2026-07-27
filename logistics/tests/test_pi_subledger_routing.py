@@ -166,12 +166,9 @@ class PurchaseSubledgerRoutingTest(APITestCase):
         )
         assert create_response.status_code == 201, create_response.content
         payment_id = create_response.json()["id"]
+        # T-AUTOPOST: الحفظ يُرحّل السند فوراً (لا خطوة ترحيل منفصلة).
+        assert create_response.json()["is_posted"] is True, create_response.content
 
-        post_response = self.client.post(
-            f"/api/logistics/supplier-payments/{payment_id}/post/",
-            {}, format="json", **self._auth(),
-        )
-        assert post_response.status_code == 200, post_response.content
         detail = self.client.get(
             f"/api/logistics/purchase-invoices/{invoice.id}/", **self._auth(),
         )

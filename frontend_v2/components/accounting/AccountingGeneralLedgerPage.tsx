@@ -8,6 +8,7 @@ import {
 } from "../aseel";
 import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
 import { Search } from "lucide-react";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 type LedgerRow = GeneralLedgerResponse["transactions"][number];
 
@@ -102,7 +103,7 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
   const ledgerRows: LedgerRow[] = data?.transactions || [];
 
   const columns: ReportColumn<LedgerRow>[] = [
-    { key: "date", header: "التاريخ", render: (r) => r.date },
+    { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) },
     { key: "journal_id", header: "رقم القيد", render: (r) => `#${r.journal_id}` },
     { key: "description", header: "البيان", render: (r) => r.description },
     { key: "debit", header: "مدين", numeric: true, render: (r) => fmt(Number(r.debit)) },

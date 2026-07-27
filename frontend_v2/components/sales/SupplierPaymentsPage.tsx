@@ -23,7 +23,9 @@ import {
   type AseelToolbarAction,
   type AseelTab,
 } from "../aseel";
-import { Plus, X, RefreshCw, AlertTriangle, Banknote } from "lucide-react";
+import { Plus, X, RefreshCw, AlertTriangle, Banknote, Check, Split } from "lucide-react";
+import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
+import { VoucherAllocationModal } from "../shared/VoucherAllocationModal";
 import { NewSupplierPaymentModal } from "./NewSupplierPaymentModal";
 
 type Partner = { id: number; name: string };
@@ -39,9 +41,19 @@ interface SupplierPaymentRow {
   is_posted: boolean;
   journal?: number | null;
   notes?: string | null;
+  /** T-ONACC: التوزيع على فواتير الشراء والمتبقّي «على الحساب». */
+  allocations?: Array<{ id: number; invoice: number; invoice_number?: string; amount: string }>;
+  unallocated_amount?: string;
 }
 
+/** المتبقّي غير الموزَّع (محسوب في الخادم، ويُشتق احتياطاً). */
+const unallocatedOf = (p: SupplierPaymentRow) =>
+  p.unallocated_amount != null
+    ? Number(p.unallocated_amount)
+    : Number(p.amount) - (p.allocations || []).reduce((s, a) => s + Number(a.amount || 0), 0);
+
 import { formatMoney } from "@/utils/formatNumber";
+import { formatDateLocalized } from "../../utils/formatDate";
 const fmt = (n: string | number) => formatMoney(n);
 
 export const SupplierPaymentsPage: React.FC = () => {
@@ -56,6 +68,9 @@ export const SupplierPaymentsPage: React.FC = () => {
     () => new URLSearchParams(window.location.search).get("payment_id") || "",
   );
   const [showForm, setShowForm] = useState(false);
+  // T-ONACC: السند المُراد توزيعه على فواتير الشراء + الفواتير المفتوحة لمورده.
+  const [allocating, setAllocating] = useState<SupplierPaymentRow | null>(null);
+  const [allocDocs, setAllocDocs] = useState<Array<{ id: number; label: string; remaining: string }>>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,6 +118,40 @@ export const SupplierPaymentsPage: React.FC = () => {
     return (p.partner_name || "").toLowerCase().includes(s) || String(p.id).includes(s);
   });
 
+  /** T-ONACC: يفتح نافذة التوزيع بعد جلب فواتير الشراء المفتوحة لهذا المورد. */
+  const openAllocation = async (row: SupplierPaymentRow) => {
+    setErr(null);
+    try {
+      const rows = await purchaseInvoiceApi.list({
+        partner: String(row.partner),
+        is_posted: "true",
+      }) as Array<{ id: number; invoice_number?: string; remaining_balance?: string }>;
+      setAllocDocs(
+        (rows || [])
+          .filter((inv) => Number(inv.remaining_balance ?? 0) > 0.009)
+          .map((inv) => ({
+            id: inv.id,
+            label: inv.invoice_number || `#${inv.id}`,
+            remaining: String(inv.remaining_balance ?? "0"),
+          })),
+      );
+      setAllocating(row);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "تعذّر جلب فواتير الشراء المفتوحة");
+    }
+  };
+
+  const handlePost = async (id: number) => {
+    setErr(null);
+    try {
+      await purchaseInvoiceApi.postSupplierPayment(id);
+      setMsg("✓ تم ترحيل سند الصرف");
+      await load();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "فشل الترحيل");
+    }
+  };
+
   const partnerName = (id: number) => partners.find((p) => p.id === id)?.name || `#${id}`;
   const accountName = (id: number) => {
     const a = accounts.find((x) => x.id === id);
@@ -111,10 +160,35 @@ export const SupplierPaymentsPage: React.FC = () => {
 
   const columns: DenseColumn<SupplierPaymentRow>[] = [
     { key: "id", header: "#", width: "60px", align: "center", render: (r) => <span className="font-mono text-xs">#{r.id}</span> },
-    { key: "payment_date", header: "التاريخ", width: "110px", align: "center", render: (r) => <span className="text-xs">{r.payment_date}</span> },
+    { key: "payment_date", header: "التاريخ", width: "110px", align: "center", render: (r) => <span className="text-xs">{formatDateLocalized(r.payment_date)}</span> },
     { key: "supplier", header: "المورد", render: (r) => <span className="text-xs" data-ctx-partner-id={r.partner ?? undefined} data-ctx-partner-name={r.partner_name || partnerName(r.partner)} data-ctx-partner-kind="supplier">{r.partner_name || partnerName(r.partner)}</span> },
     { key: "amount", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmt(r.amount)}</span> },
+    {
+      // T-ONACC: المتبقّي غير الموزَّع = رصيد لنا عند المورد.
+      key: "unallocated", header: "على الحساب", width: "110px", align: "left", numeric: true,
+      render: (r) => {
+        const u = unallocatedOf(r);
+        return (
+          <span
+            className="aseel-num font-mono text-xs"
+            style={{ color: u > 0.009 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ink-soft)" }}
+          >
+            {fmt(u)}
+          </span>
+        );
+      },
+    },
     { key: "cash_account", header: "الصندوق", render: (r) => <span className="text-xs">{accountName(r.cash_or_bank_account)}</span> },
+    {
+      key: "allocations", header: "التوزيعات",
+      render: (r) => (
+        <span className="text-[11px]">
+          {r.allocations && r.allocations.length > 0
+            ? r.allocations.map((a) => `${a.invoice_number || "#" + a.invoice} = ${fmt(a.amount)}`).join(" · ")
+            : <span style={{ color: "var(--aseel-ink-soft)" }}>بدون توزيع</span>}
+        </span>
+      ),
+    },
     {
       key: "status", header: "الحالة", width: "100px", align: "center",
       render: (r) => (
@@ -127,6 +201,29 @@ export const SupplierPaymentsPage: React.FC = () => {
         >
           {r.is_posted ? `مرحَّل ${r.journal ? "#" + r.journal : ""}` : "مسودة"}
         </span>
+      ),
+    },
+    {
+      // T-AUTOPOST: السندات تُرحَّل فور الحفظ افتراضياً؛ زر الترحيل لمن حُفظ كمسودة.
+      // T-ONACC: زر التوزيع على فواتير الشراء لمن بقي فيه رصيد على الحساب.
+      key: "actions", header: "إجراءات", width: "90px", align: "center",
+      render: (r) => (
+        <div style={{ display: "flex", gap: "2px", justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
+          {!r.is_posted && (
+            <button type="button" className="aseel-toolbtn" title="ترحيل" onClick={() => void handlePost(r.id)}>
+              <Check className="w-3 h-3" />
+            </button>
+          )}
+          <button
+            type="button"
+            className="aseel-toolbtn"
+            title="توزيع على فواتير الشراء"
+            disabled={unallocatedOf(r) <= 0.009}
+            onClick={() => void openAllocation(r)}
+          >
+            <Split className="w-3 h-3" />
+          </button>
+        </div>
       ),
     },
   ];
@@ -219,9 +316,29 @@ export const SupplierPaymentsPage: React.FC = () => {
       {showForm && (
         <NewSupplierPaymentModal
           onClose={() => setShowForm(false)}
-          onSaved={() => {
+          onSaved={(posted) => {
             setShowForm(false);
-            setMsg("✓ تم إنشاء سند الصرف وترحيله");
+            setMsg(posted ? "✓ تم إنشاء سند الصرف وترحيله" : "✓ حُفظ سند الصرف كمسودة");
+            void load();
+          }}
+        />
+      )}
+
+      {allocating && (
+        <VoucherAllocationModal
+          kind="supplier"
+          voucher={{
+            id: allocating.id,
+            amount: allocating.amount,
+            unallocated: unallocatedOf(allocating),
+            is_posted: allocating.is_posted,
+          }}
+          partnerLabel={allocating.partner_name || partnerName(allocating.partner)}
+          docs={allocDocs}
+          onClose={() => setAllocating(null)}
+          onSaved={() => {
+            setAllocating(null);
+            setMsg("✓ تم توزيع سند الصرف على فواتير الشراء");
             void load();
           }}
         />

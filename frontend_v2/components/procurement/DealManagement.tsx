@@ -12,6 +12,7 @@ import { DealPrintView } from './deals/DealPrintView';
 import { Plus, FileInput, Printer, Trash2, RefreshCw, Ship } from 'lucide-react';
 import { LoadingSpinner } from '../LoadingSpinner';
 import { PriceOfferSelectionModal } from './price-offers/PriceOfferSelectionModal';
+import { convertSupplierQuotationToImportDeal } from '../../services/procurementDocumentsApi';
 import { CreateShipmentFromDealsModal } from '../import-flow/CreateShipmentFromDealsModal';
 import { FirstDealWizard } from './deals/FirstDealWizard';
 import { Sparkles } from 'lucide-react';
@@ -52,11 +53,12 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 import { formatMoney } from "@/utils/formatNumber";
+import { formatDateValue } from "../../utils/formatDate";
 const fmtAmt = (n: number) => formatMoney(n);
 
 const fmtDate = (s: string | undefined) => {
     if (!s) return '—';
-    try { return new Date(s).toLocaleDateString('ar'); } catch { return s; }
+    return formatDateValue(s);
 };
 
 export const DealManagement: React.FC<DealManagementProps> = ({
@@ -148,9 +150,9 @@ export const DealManagement: React.FC<DealManagementProps> = ({
     useEffect(() => {
         const unsubOffers = priceOffersService.subscribeToPriceOffers((offers) => {
             setPriceOffers(offers.filter(o =>
-                o.status === 'approved_for_shipping' || o.status === 'under_discussion'
+                o.offerType === 'incoming_offer' && o.status === 'approved_for_shipping'
             ));
-        });
+        }, 'import');
         const unsubSuppliers = suppliersService.subscribeToSuppliers(setSuppliers);
         return () => { unsubOffers(); unsubSuppliers(); };
     }, []);
@@ -267,38 +269,12 @@ export const DealManagement: React.FC<DealManagementProps> = ({
         const selectedOffer = priceOffers.find(o => o.id === priceOfferId);
         if (!selectedOffer) return;
         try {
-            const dealNumber = await dealsService.getNextDealNumber();
-            const dealData: Partial<Deal> = {
-                priceOfferId: selectedOffer.id,
-                originalOfferNumber: selectedOffer.offerNumber,
-                dealNumber,
-                supplierId: selectedOffer.supplierId,
-                factoryName: selectedOffer.factoryName || '',
-                totalAmount: selectedOffer.grandTotal,
-                remainingAmount: selectedOffer.grandTotal,
-                subtotal: selectedOffer.subtotal,
-                shippingCost: selectedOffer.shippingCost || 0,
-                status: 'initial',
-                internalNotes: selectedOffer.internalNotes || '',
-                items: selectedOffer.items?.map(item => ({
-                    ...item,
-                    id: crypto.randomUUID(),
-                    itemId: item.itemId || item.id,
-                } as DealItem)) || [],
-                payments: [],
-                statusHistory: [{
-                    status: 'initial',
-                    timestamp: new Date().toISOString(),
-                    notes: 'تم إنشاء الصفقة من عرض السعر',
-                    changedBy: currentUser.id
-                }],
-                quoteImages: selectedOffer.quote_images || [],
-                quotePdfs: selectedOffer.quote_pdfs || []
-            };
-            newFormInitRef.current = false;
-            navigate('/deals/new', { state: { draftDeal: dealData } });
+            const match = /^quote-(\d+)$/.exec(selectedOffer.id);
+            if (!match) throw new Error('عرض الاستيراد المحدد غير مرتبط بقاعدة البيانات.');
+            const result = await convertSupplierQuotationToImportDeal(Number(match[1]));
+            navigate(`/deals/${encodeURIComponent(String(result.deal.id))}`);
         } catch (error) {
-            // console suppressed
+            setLoadError(error instanceof Error ? error.message : 'تعذّر تحويل العرض إلى طلبية استيراد.');
         }
     };
 

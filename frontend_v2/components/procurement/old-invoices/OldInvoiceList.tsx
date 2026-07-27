@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { Invoice, Supplier } from '../../../types';
+import { formatDateValue } from "../../../utils/formatDate";
 import {
     Calendar, History, FileText, ChevronDown, Edit2,
     Search, Filter, X, Eye,
@@ -572,7 +573,7 @@ export const OldInvoiceList: React.FC<OldInvoiceListProps> = ({
                                             {inv.invoiceDate}
                                         </div>
                                         <div className="text-xs aseel-text-soft mt-1">
-                                            أرشفت: {new Date(inv.createdAt).toLocaleDateString('ar-EG')}
+                                            أرشفت: {formatDateValue(inv.createdAt)}
                                         </div>
                                     </td>
                                     <td className="px-6 py-4">

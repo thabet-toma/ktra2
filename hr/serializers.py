@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from .models import Task, TaskSubmission, AttendanceRecord, PointsHistory
+from .models import Task, TaskSubmission, AttendanceRecord, PointsHistory, PersonalExpense
 from django.contrib.auth.models import User
 
 class UserSerializer(serializers.ModelSerializer):
@@ -31,3 +31,14 @@ class PointsHistorySerializer(serializers.ModelSerializer):
     class Meta:
         model = PointsHistory
         fields = '__all__'
+
+class PersonalExpenseSerializer(serializers.ModelSerializer):
+    """المالك يُشتق من الطلب دائماً — لا يُقبل من الجسم كي لا يُنسب مصروف لغيره."""
+    category_label = serializers.CharField(source='get_category_display', read_only=True)
+
+    class Meta:
+        model = PersonalExpense
+        fields = [
+            'id', 'date', 'title', 'category', 'category_label',
+            'amount', 'is_paid', 'notes', 'created_at', 'updated_at',
+        ]

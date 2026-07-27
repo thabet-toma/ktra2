@@ -53,8 +53,9 @@ const statusColor = (s?: string) => {
     return 'inherit';
 };
 
-const fmtDate = (d?: string | null) => { if (!d) return '—'; const dt = new Date(d); return Number.isNaN(dt.getTime()) ? String(d) : dt.toLocaleDateString('en-GB'); };
+const fmtDate = (d?: string | null) => (d ? formatDateValue(d) : '—');
 import { formatMoney } from "@/utils/formatNumber";
+import { formatDateValue } from "../../utils/formatDate";
 const fmtMoney = (v: any) => formatMoney(v, String(v ?? '—'));
 
 export function SqlDealsPage() {

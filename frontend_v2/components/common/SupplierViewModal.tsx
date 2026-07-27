@@ -10,6 +10,7 @@ import {
 import { LoadingSpinner } from '../LoadingSpinner';
 import { AseelSidePanel } from '../aseel/AseelSidePanel';
 import { EntityActivityLog } from '../activity/EntityActivityLog';
+import { formatDateValue } from "../../utils/formatDate";
 
 interface SupplierViewModalProps {
     isOpen: boolean;
@@ -204,8 +205,8 @@ export const SupplierViewModal: React.FC<SupplierViewModalProps> = ({
 
                             {/* Footer meta */}
                             <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[var(--color-border)] text-xs text-[var(--color-text-muted)]">
-                                <span>تاريخ الإنشاء: {new Date(supplier.createdAt).toLocaleDateString('ar-EG')}</span>
-                                <span>آخر تحديث: {new Date(supplier.updatedAt).toLocaleDateString('ar-EG')}</span>
+                                <span>تاريخ الإنشاء: {formatDateValue(supplier.createdAt)}</span>
+                                <span>آخر تحديث: {formatDateValue(supplier.updatedAt)}</span>
                             </div>
                         </>
                     ) : null}

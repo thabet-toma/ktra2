@@ -12,6 +12,7 @@ import { CashBox, CashBoxTransaction } from "../../types";
 import { cashBoxTransactionsService } from "../../services/firestoreService";
 import { accountingApi } from "../../services/accountingApi";
 import { DepositModal } from "./modals/DepositModal";
+import { formatDateLocalized, formatDateValue } from "../../utils/formatDate";
 
 interface CashBoxStatementProps {
   cashBox: CashBox;
@@ -33,7 +34,7 @@ type GlRow = {
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
   const dayName = date.toLocaleDateString("ar-EG", { weekday: "long" });
-  const datePart = date.toLocaleDateString("en-GB");
+  const datePart = formatDateValue(date);
   const timePart = date.toLocaleTimeString("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
@@ -334,7 +335,7 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
                     const row = item.row;
                     return (
                       <tr key={`g-${row.id}`} className="hover:bg-[var(--color-primary-hover)]/40 dark:hover:bg-gray-700/40">
-                        <td className="px-3 py-2 whitespace-nowrap font-mono text-xs">{row.date}</td>
+                        <td className="px-3 py-2 whitespace-nowrap font-mono text-xs">{formatDateLocalized(row.date)}</td>
                         <td className="px-3 py-2 text-xs font-semibold text-[var(--color-primary)] dark:text-[var(--color-primary)]">
                           قيد #{row.journal_id}
                         </td>

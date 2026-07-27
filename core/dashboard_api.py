@@ -1,17 +1,26 @@
 """Tenant-scoped business dashboard API."""
+import calendar
 import datetime
+import logging
 
 from django.core.cache import cache
 from django.db.models import Count, F, Q, Sum
+from django.utils import timezone
 from rest_framework.decorators import api_view
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
 from accounting.models import JournalHeader, JournalLine
+from core.access import user_tenant_role
 from core.import_access import user_can_access_import
 from core.tenant_utils import get_tenant as _get_tenant
 from inventory.models import Product, StockMovement
 from logistics.models import LogisticsDeal, LogisticsPayment, LogisticsShipment, PurchaseInvoice
 from sales.models import SalesInvoice
+from tenants.models import TenantSettings
+
+
+logger = logging.getLogger(__name__)
 
 
 def _f(value):
@@ -21,6 +30,35 @@ def _f(value):
 
 
 DASHBOARD_CACHE_TTL = 60
+
+
+def _month_anchor(year, month, start_day):
+    return datetime.date(
+        year,
+        month,
+        min(start_day, calendar.monthrange(year, month)[1]),
+    )
+
+
+def _dashboard_period(tenant):
+    today = timezone.localdate()
+    start_day = 1
+    if tenant is not None:
+        configured_day = (
+            TenantSettings.objects.filter(tenant=tenant)
+            .values_list("dashboard_month_start_day", flat=True)
+            .first()
+        )
+        if configured_day:
+            start_day = configured_day
+
+    period_start = _month_anchor(today.year, today.month, start_day)
+    if period_start > today:
+        if today.month == 1:
+            period_start = _month_anchor(today.year - 1, 12, start_day)
+        else:
+            period_start = _month_anchor(today.year, today.month - 1, start_day)
+    return period_start, today
 
 
 def _invoice_summary(queryset, *, partner_field, date_field):
@@ -55,17 +93,29 @@ def trade_dashboard(request):
     boundary enforceable at the API layer, not merely hidden in React.
     """
     tenant = _get_tenant(request)
+    # T-DASHPERIOD: ملخص الشركة المالي محصور بالمدير نفسه، ولا تفتحه منحة صلاحية
+    # قديمة محفوظة لدور أو عضو. بلا شركة محلولة تبقى استجابة الأصفار المعزولة.
+    role = user_tenant_role(request.user, tenant) if tenant is not None else ""
+    if tenant is not None and role != "manager":
+        logger.warning(
+            "dashboard access denied tenant=%s user=%s role=%s",
+            tenant.TenantID,
+            getattr(request.user, "pk", None),
+            role,
+        )
+        raise PermissionDenied("ملخص لوحة الأعمال متاح لمدير الشركة فقط.")
     can_access_import = user_can_access_import(request.user, tenant)
+    period_start, period_end = _dashboard_period(tenant)
     tenant_key = tenant.pk if tenant else "none"
-    cache_key = f"dashboard:v3:{tenant_key}:import-{int(can_access_import)}"
+    cache_key = (
+        f"dashboard:v5:{tenant_key}:{period_start.isoformat()}:"
+        f"{period_end.isoformat()}:import-{int(can_access_import)}"
+    )
     cached = cache.get(cache_key)
     if cached is not None:
         return Response(cached)
 
-    today = datetime.date.today()
-    month_start = today.replace(day=1)
-
-    sales_qs = (
+    sales_base_qs = (
         SalesInvoice.objects.filter(
             tenant=tenant,
             invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
@@ -73,7 +123,7 @@ def trade_dashboard(request):
         if tenant
         else SalesInvoice.objects.none()
     )
-    purchase_qs = (
+    purchase_base_qs = (
         PurchaseInvoice.objects.filter(tenant=tenant)
         if tenant
         else PurchaseInvoice.objects.none()
@@ -81,7 +131,18 @@ def trade_dashboard(request):
     # An international invoice is part of the import workflow. A company that
     # has not enabled import sees only its ordinary local purchase invoices.
     if not can_access_import:
-        purchase_qs = purchase_qs.filter(invoice_type=PurchaseInvoice.INVOICE_TYPE_LOCAL)
+        purchase_base_qs = purchase_base_qs.filter(
+            invoice_type=PurchaseInvoice.INVOICE_TYPE_LOCAL
+        )
+
+    sales_qs = sales_base_qs.filter(
+        invoice_date__gte=period_start,
+        invoice_date__lte=period_end,
+    )
+    purchase_qs = purchase_base_qs.filter(
+        invoice_date__gte=period_start,
+        invoice_date__lte=period_end,
+    )
 
     sales_invoices = _invoice_summary(
         sales_qs, partner_field="customer__name", date_field="invoice_date"
@@ -123,8 +184,8 @@ def trade_dashboard(request):
             tenant=tenant,
             journal__tenant=tenant,
             journal__is_posted=True,
-            journal__transaction_date__gte=month_start,
-            journal__transaction_date__lte=today,
+            journal__transaction_date__gte=period_start,
+            journal__transaction_date__lte=period_end,
         )
         if tenant
         else JournalLine.objects.none()
@@ -180,7 +241,13 @@ def trade_dashboard(request):
         })
 
     payload = {
-        "period": {"from": month_start.isoformat(), "to": today.isoformat()},
+        "period": {"from": period_start.isoformat(), "to": period_end.isoformat()},
+        "is_new_company": not (
+            sales_base_qs.exists()
+            or purchase_base_qs.exists()
+            or prod_qs.exists()
+            or journals_qs.exists()
+        ),
         "financials": {
             "revenue": revenue,
             "expenses": expenses,
@@ -195,14 +262,15 @@ def trade_dashboard(request):
             "out_of_stock": out_of_stock,
             "inventory_value": inventory_value,
             "movements_this_month": movements_qs.filter(
-                movement_date__gte=month_start
+                movement_date__gte=period_start,
+                movement_date__lte=period_end,
             ).count(),
             "low_stock_items": low_stock_items,
         },
         "accounting": {
             "journals_this_month": journals_qs.filter(
-                transaction_date__gte=month_start,
-                transaction_date__lte=today,
+                transaction_date__gte=period_start,
+                transaction_date__lte=period_end,
                 is_posted=True,
             ).count(),
         },
@@ -237,7 +305,9 @@ def trade_dashboard(request):
             "payments": {
                 "paid_this_month": _f(
                     payments_qs.filter(
-                        is_posted=True, transfer_date__gte=month_start
+                        is_posted=True,
+                        transfer_date__gte=period_start,
+                        transfer_date__lte=period_end,
                     ).aggregate(total=Sum("amount"))["total"]
                 ),
             },

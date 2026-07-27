@@ -72,6 +72,41 @@ export function referenceTypeLabel(referenceType?: string | null): string {
 }
 
 /**
+ * كشف الحساب: نبرة الحركة للتمييز اللوني. ما يُنشئ ذمّة على الطرف (فاتورة/مستحق)
+ * أحمر، وما يسدّدها (سند قبض/صرف) أخضر، وما عداه محايد. مصدر حقيقة واحد كي لا
+ * تختلف الألوان بين بطاقة العميل والمورد.
+ */
+export type StatementTone = "invoice" | "payment" | "neutral";
+
+export function statementMovementTone(referenceType?: string | null): StatementTone {
+  const t = (referenceType || "").toUpperCase();
+  if (!t) return "neutral";
+  if (t.includes("PAYMENT")) return "payment";
+  if (
+    t.includes("SALES_INVOICE") ||
+    t.includes("PURCHASE_INVOICE") ||
+    t.includes("SALES_DELIVERY") ||
+    t === "SALE" ||
+    t === "STOCK_ISSUE" ||
+    t === "PURCHASE_RECEIPT" ||
+    t === "LOGISTICS_CLEARANCE" ||
+    t === "LOCAL_SHIPMENT" ||
+    t === "SHIPMENT_FREIGHT_ACCRUAL"
+  ) {
+    return "invoice";
+  }
+  return "neutral";
+}
+
+/** صنف خلفية الصف حسب نبرة الحركة — يخدم كشف الحساب في كل البطاقات. */
+export function statementToneRowClass(referenceType?: string | null): string {
+  const tone = statementMovementTone(referenceType);
+  if (tone === "payment") return "bg-emerald-50 dark:bg-emerald-900/20";
+  if (tone === "invoice") return "bg-red-50 dark:bg-red-900/20";
+  return "";
+}
+
+/**
  * كشف الحساب: «بيان» مقروء بدل مصطلح الحساب الخام («ذمم» / «تسديد ذمم») الذي يربك
  * المستخدم. يستبدل الجزء الأول (اسم الحساب) بتسمية الحركة العربية ويُبقي رقم المستند
  * في الذيل — يعمل على البيانات القديمة (تحويل وقت العرض، بلا مساس بسجلّ القيد).

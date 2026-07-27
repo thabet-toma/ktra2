@@ -74,6 +74,65 @@ def product_display_name(product) -> str:
 INBOUND_TYPES = {'IN', 'ADJUST_IN', 'RETURN_IN'}
 OUTBOUND_TYPES = {'OUT', 'ADJUST_OUT', 'RETURN_OUT'}
 
+
+def warehouse_stock_summary(*, tenant_id: int, warehouse_id: int) -> dict:
+    """رصيد مستودع وقيمته بالتكلفة المتوسطة الحالية للصنف."""
+    from django.db.models import Sum
+
+    movement_totals = (
+        StockMovement.objects.filter(
+            tenant_id=tenant_id,
+            warehouse_id=warehouse_id,
+            product__tenant_id=tenant_id,
+        )
+        .values('product_id', 'movement_type')
+        .annotate(total_quantity=Sum('quantity'))
+    )
+    balances: dict[int, Decimal] = {}
+    for row in movement_totals:
+        quantity = Decimal(str(row['total_quantity'] or 0))
+        sign = Decimal('1') if row['movement_type'] in INBOUND_TYPES else Decimal('-1')
+        balances[row['product_id']] = (
+            balances.get(row['product_id'], Decimal('0')) + (sign * quantity)
+        )
+
+    products = Product.objects.filter(
+        tenant_id=tenant_id,
+        id__in=[product_id for product_id, quantity in balances.items() if quantity],
+    ).in_bulk()
+    items = []
+    total_value = Decimal('0')
+    for product_id, quantity in balances.items():
+        if quantity == 0:
+            continue
+        product = products.get(product_id)
+        if product is None:
+            continue
+        quantity = quantity.quantize(Decimal('0.0001'))
+        avg_cost = Decimal(str(product.avg_cost or 0)).quantize(Decimal('0.0001'))
+        stock_value = (quantity * avg_cost).quantize(Decimal('0.01'))
+        total_value += stock_value
+        items.append({
+            'product_id': product.id,
+            'sku': product.sku,
+            'name': product_display_name(product),
+            'quantity': str(quantity),
+            'avg_cost': str(avg_cost),
+            'stock_value': str(stock_value),
+        })
+    items.sort(key=lambda item: (item['sku'], item['product_id']))
+    logger.info(
+        "warehouse_stock_summary tenant=%s warehouse=%s item_count=%s",
+        tenant_id, warehouse_id, len(items),
+    )
+    return {
+        'items': items,
+        'item_count': len(items),
+        'total_value': str(total_value.quantize(Decimal('0.01'))),
+        'valuation_method': 'moving_average_cost',
+    }
+
+
 # task14 M2 (DEF-A2/A4): توليد رقم صنف خادمي قصير — أرقام صرفة تسلسلية لكل شركة
 SKU_PAD = 6
 

@@ -48,6 +48,7 @@ type TenantSettingsData = {
   fiscal_period_label?: string | null;
   fiscal_period_start?: string | null;
   fiscal_period_end?: string | null;
+  dashboard_month_start_day?: number;
   default_freight_credit_account?: number | null;
   mixture_auto_fill_enabled?: boolean;
   barcode_action?: string | null;
@@ -194,6 +195,11 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
   /** Save Tab 1 + Tab 2 (TenantSettings + TenantBook changes). */
   const handleSave = async () => {
     if (!settings) return;
+    const monthStartDay = Number(settings.dashboard_month_start_day);
+    if (!Number.isInteger(monthStartDay) || monthStartDay < 1 || monthStartDay > 31) {
+      setLocalErr("يوم بداية شهر ملخص الأعمال يجب أن يكون بين 1 و31.");
+      return;
+    }
     setSaving(true);
     setLocalErr(null);
     setMsg(null);
@@ -331,13 +337,19 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
         <input className="aseel-input" value={settings?.fiscal_period_label || ""}
           onChange={(e) => upd("fiscal_period_label", e.target.value)} />
       ))}
-      {fld("بداية الفترة", (
+      {fld("بداية الفترة المالية", (
         <input className="aseel-input" type="date" value={settings?.fiscal_period_start || ""}
           onChange={(e) => upd("fiscal_period_start", e.target.value)} />
       ))}
-      {fld("نهاية الفترة", (
+      {fld("نهاية الفترة المالية", (
         <input className="aseel-input" type="date" value={settings?.fiscal_period_end || ""}
           onChange={(e) => upd("fiscal_period_end", e.target.value)} />
+      ))}
+      {fld("يوم بداية شهر ملخص الأعمال (1–31)", (
+        <input className="aseel-input" type="number" min={1} max={31}
+          title="مثال: 20 — تُحسب الدورة كل شهر من آخر يوم 20 حتى اليوم"
+          value={settings?.dashboard_month_start_day ?? 1}
+          onChange={(e) => upd("dashboard_month_start_day", Number(e.target.value))} />
       ))}
       {fld("إجراء الباركود", (
         <select className="aseel-input" value={settings?.barcode_action || "index"}

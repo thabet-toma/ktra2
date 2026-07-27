@@ -12,6 +12,7 @@ import type { PurchaseInvoiceDto } from "../../types/purchaseInvoice";
 import { referenceTypeLabel, invoicePathForReference } from "../../utils/entityLinks";
 import { formatMoney } from "../../utils/formatNumber";
 import { clientLogger } from "../../services/logger";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 /**
  * كشف الحساب — «تفاصيل الحركة»: نافذة تعرض تفاصيل السطر حسب نوعه:
@@ -108,7 +109,7 @@ export const StatementDetailsModal: React.FC<{
 
         <div className="p-4 space-y-3 text-sm">
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-[var(--aseel-ink-soft)]">
-            <span>التاريخ: <b className="text-[var(--aseel-ink)]">{movement.date || "—"}</b></span>
+            <span>التاريخ: <b className="text-[var(--aseel-ink)]">{formatDateLocalized(movement.date) || "—"}</b></span>
             <span>مدين: <b className="text-[var(--aseel-ink)] aseel-num">{movement.debit}</b></span>
             <span>دائن: <b className="text-[var(--aseel-ink)] aseel-num">{movement.credit}</b></span>
           </div>
@@ -176,7 +177,7 @@ export const StatementDetailsModal: React.FC<{
             <div className="space-y-3">
               <div className="flex flex-wrap gap-x-6 gap-y-1">
                 <span className="text-[var(--aseel-ink-soft)]">المبلغ المقبوض: <b className="text-[var(--aseel-ink)] aseel-num">{formatMoney(payment.amount)}</b></span>
-                <span className="text-[var(--aseel-ink-soft)]">تاريخ القبض: <b className="text-[var(--aseel-ink)]">{payment.payment_date || "—"}</b></span>
+                <span className="text-[var(--aseel-ink-soft)]">تاريخ القبض: <b className="text-[var(--aseel-ink)]">{formatDateLocalized(payment.payment_date) || "—"}</b></span>
               </div>
               {payment.notes && (
                 <div className="text-[var(--aseel-ink-soft)]">ملاحظات: <span className="text-[var(--aseel-ink)]">{payment.notes}</span></div>

@@ -2,7 +2,7 @@
  * لوحة محاسبة فاتورة الشراء — فصلاً عن نموذج الفاتورة الرئيسي.
  *
  * الغرض: ضمان ترحيل صحيح للمحاسبة مع:
- *  - اختيار نوع الدفع (آجل/نقدي) + حساب الصندوق عند النقدي
+ *  - مربع «مدفوعة» (مؤشَّر = نقدي) + حساب الصندوق عند التأشير
  *  - إدارة الرسوم الإضافية (شحن/تخليص/جمركي/…) مع اختيار حساب لكل رسم
  *  - معاينة القيد المحاسبي قبل الترحيل
  *  - زر ترحيل يستدعي post-to-accounting الآمن (مع تحقق توازن)
@@ -32,6 +32,7 @@ import type {
   ReceiptStatus,
 } from "@/types/purchaseInvoice";
 import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
+import { SettleFromOnAccountModal } from "@/components/shared/SettleFromOnAccountModal";
 import { useConfirm } from "@/contexts/ConfirmContext";
 
 const RECEIPT_BADGE: Record<ReceiptStatus, { label: string; cls: string }> = {
@@ -82,6 +83,8 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [showReceive, setShowReceive] = useState(false);
+  // T-ONACC: تسديد الفاتورة من رصيد المورد «على الحساب» (سندات صرف غير موزَّعة).
+  const [showSettleModal, setShowSettleModal] = useState(false);
   // وصل دفع للمورد (Feature 2)
   const [payAmount, setPayAmount] = useState("");
   const [payAccountId, setPayAccountId] = useState<number | null>(null);
@@ -279,6 +282,8 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         currency: invoice.currency ?? null,
         cash_or_bank_account: payAccountId,
         notes: `وصل دفع فاتورة ${invoice.invoice_number || invoice.id}`,
+        // T-AUTOPOST: وصل الدفع من داخل الفاتورة يُرحَّل دائماً (لا مسودة) مهما كان إعداد الشركة.
+        auto_post: true,
       });
       setSuccess("✅ تم تسجيل وصل الدفع وترحيله (مدين ذمم المورد / دائن الصندوق).");
       setPayAmount("");
@@ -497,17 +502,20 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         <div className="grid sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium aseel-text-ink dark:aseel-text-soft mb-1.5">
-              نوع الدفع
+              حالة الدفع
             </label>
-            <select
-              value={paymentType}
-              onChange={(e) => setPaymentType(e.target.value as PaymentType)}
-              disabled={disableEdit}
-              className="w-full h-11 px-3 border aseel-border-soft dark:aseel-border-soft rounded-lg aseel-bg-field dark:aseel-bg-panel aseel-text-ink dark:text-white disabled:opacity-60"
-            >
-              <option value="credit">آجل — على ذمم المورد</option>
-              <option value="cash">نقدي — من صندوق/بنك</option>
-            </select>
+            {/* «مدفوعة» بدل قائمة آجل/نقدي — مربع اختيار: مؤشَّر = مدفوعة من
+                صندوق/بنك، فارغ = على ذمم المورد. القيم الخادمية كما هي. */}
+            <label className="flex items-center gap-2 h-11 aseel-text-ink dark:text-white cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="w-4 h-4 accent-emerald-600"
+                checked={paymentType === "cash"}
+                onChange={(e) => setPaymentType((e.target.checked ? "cash" : "credit") as PaymentType)}
+                disabled={disableEdit}
+              />
+              مدفوعة
+            </label>
             <p className="text-xs aseel-text-soft dark:aseel-text-soft mt-1">
               {paymentType === "credit"
                 ? "الدائن = حساب ذمم المورد المربوط."
@@ -875,10 +883,39 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                 )}
                 تسجيل وصل الدفع
               </button>
+              {/* T-ONACC: تسديد من رصيد المورد «على الحساب» (سندات صرف غير موزَّعة). */}
+              {Number(invoice.remaining_balance ?? 0) > 0.009 && (
+                <button
+                  onClick={() => setShowSettleModal(true)}
+                  className="flex items-center gap-2 px-5 py-2 rounded-lg font-medium border aseel-border-soft"
+                  title="تسديد الفاتورة من رصيدنا عند المورد"
+                >
+                  <Receipt className="w-4 h-4" />
+                  تسديد من الرصيد
+                </button>
+              )}
             </div>
           </div>
         )}
       </div>
+
+      {/* T-ONACC: تسديد فاتورة الشراء من رصيدنا عند المورد (سند صرف غير موزَّع). */}
+      {showSettleModal && invoice && (
+        <SettleFromOnAccountModal
+          kind="supplier"
+          partnerId={invoice.partner}
+          partnerLabel={invoice.partner_name || ""}
+          invoiceId={invoiceId}
+          invoiceLabel={`فاتورة ${invoice.invoice_number || invoiceId}`}
+          remaining={Number(invoice.remaining_balance ?? 0)}
+          onClose={() => setShowSettleModal(false)}
+          onSettled={async () => {
+            setShowSettleModal(false);
+            setSuccess("✅ تم تسديد الفاتورة من الرصيد على حساب المورد.");
+            await reload();
+          }}
+        />
+      )}
 
       {showReceive && (
         <ReceiveGoodsModal

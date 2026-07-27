@@ -11,6 +11,7 @@ import { AseelDocumentShell, AseelTab } from '../aseel';
 import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTable';
 import { openInNewTab } from '../../utils/openInNewTab';
 import { formatQuantity, formatMoney } from '../../utils/formatNumber';
+import { formatDateLocalized } from "../../utils/formatDate";
 
 interface ProductProfile {
   id: number;
@@ -132,7 +133,7 @@ export const ProductProfilePage: React.FC = () => {
   }, [id, tenantId]);
 
   const ledColumns: LedgerColumn<LedgerRow>[] = [
-    { key: 'date', header: 'التاريخ', render: (r) => r.date || '—' },
+    { key: 'date', header: 'التاريخ', render: (r) => formatDateLocalized(r.date) || '—' },
     { key: 'movement_type_label', header: 'النوع', render: (r) => ledgerTypeLabel(r) },
     { key: 'party', header: 'الطرف', render: (r) => r.party || '—' },
     {
@@ -162,7 +163,7 @@ export const ProductProfilePage: React.FC = () => {
     },
     { key: 'document_type', header: 'النوع', render: (r) => (r.document_type === 'SALES_INVOICE' ? 'بيع' : 'شراء') },
     { key: 'party', header: 'الطرف', render: (r) => r.party || '—' },
-    { key: 'date', header: 'التاريخ', render: (r) => r.date || '—' },
+    { key: 'date', header: 'التاريخ', render: (r) => formatDateLocalized(r.date) || '—' },
     { key: 'is_posted', header: 'الحالة', align: 'center', render: (r) => (r.is_posted ? 'مرحّلة' : 'مسودة') },
   ];
 

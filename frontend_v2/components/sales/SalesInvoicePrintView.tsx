@@ -3,6 +3,7 @@ import { useTenantSettings } from '../../hooks/useTenantSettings';
 import { Printer, X, FileText, Building2 } from 'lucide-react';
 import { formatMoney, formatQuantity } from '../../utils/formatNumber';
 import type { PartnerRow, ProductRow, DraftLine } from './SalesInvoiceEditor';
+import { formatDateValue } from "../../utils/formatDate";
 
 export interface SalesPrintData {
   invoiceNumber: string;
@@ -45,7 +46,7 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
 
     const formatDate = (dateString?: string) => {
         if (!dateString) return '-';
-        return new Date(dateString).toLocaleDateString('en-GB');
+        return formatDateValue(dateString);
     };
 
     const curr = data.currencyCode || 'ILS';

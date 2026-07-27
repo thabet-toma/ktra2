@@ -3,6 +3,7 @@ import React from "react";
 import { Submission } from "../../types";
 import { SubmissionItemGallery } from "./SubmissionItemGallery";
 import { StatusBadge } from "../TaskCard";
+import { formatDateValue } from "../../utils/formatDate";
 
 interface SubmissionHistoryListProps {
   submissions: Submission[];
@@ -74,7 +75,7 @@ const handleApprove = async (submissionId: string) => {
               <div>
                 <span className="text-xs font-bold text-[var(--color-text)]">
                   تسليم #{userSubmissions.length - idx} -{" "}
-                  {new Date(sub.createdAt).toLocaleDateString()}
+                  {formatDateValue(sub.createdAt)}
                 </span>
                 <StatusBadge status={submissionStatus} />
               </div>

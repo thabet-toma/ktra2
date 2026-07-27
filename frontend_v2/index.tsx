@@ -16,6 +16,7 @@ import { ThemeProvider, applyThemeOnBoot } from './contexts/ThemeContext';
 import { AppearanceProvider } from './contexts/AppearanceContext';
 import { SessionSettingsProvider } from './contexts/SessionSettingsContext';
 import { PriceVisibilityProvider } from './contexts/PriceVisibilityContext';
+import { PermissionsProvider } from './contexts/PermissionsContext';
 import { applySkinOnBoot } from './styles/skin';
 
 import './styles/index.css';
@@ -31,9 +32,11 @@ const ApplicationProviders: React.FC = () => (
     <AppearanceProvider>
       <SessionSettingsProvider>
         <PriceVisibilityProvider>
-          <ConfirmProvider>
-            <ToastProvider><App /></ToastProvider>
-          </ConfirmProvider>
+          <PermissionsProvider>
+            <ConfirmProvider>
+              <ToastProvider><App /></ToastProvider>
+            </ConfirmProvider>
+          </PermissionsProvider>
         </PriceVisibilityProvider>
       </SessionSettingsProvider>
     </AppearanceProvider>

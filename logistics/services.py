@@ -15,6 +15,253 @@ from core.payments import document_payment_summary
 DEC = Decimal("0.01")
 
 
+@transaction.atomic
+def convert_local_quotation_to_order(quotation, *, user=None):
+    """حوّل عرض شراء محلي مقبول إلى طلبية شراء واحدة قابلة لإعادة المحاولة."""
+    from accounting.services import next_document_number
+    from logistics.models import (
+        PurchaseOrder,
+        PurchaseOrderLine,
+        SupplierQuotation,
+    )
+
+    quotation = (
+        SupplierQuotation.objects.select_for_update()
+        .select_related('tenant', 'supplier', 'currency')
+        .prefetch_related('lines__product')
+        .get(pk=quotation.pk)
+    )
+    try:
+        return quotation.local_order, False
+    except PurchaseOrder.DoesNotExist:
+        pass
+
+    if quotation.scope != SupplierQuotation.SCOPE_LOCAL:
+        raise ValidationError('يمكن تحويل عروض الشراء المحلية فقط إلى طلبية شراء.')
+    if quotation.status != SupplierQuotation.STATUS_ACCEPTED:
+        raise ValidationError('يجب اعتماد عرض الشراء قبل تحويله إلى طلبية.')
+
+    lines = list(quotation.lines.all())
+    if not lines:
+        raise ValidationError('لا يمكن تحويل عرض سعر بلا أصناف.')
+    number = next_document_number(quotation.tenant_id, 'purchase_order')
+    order = PurchaseOrder.objects.create(
+        tenant=quotation.tenant,
+        order_number=f'PO-{number:04d}',
+        supplier=quotation.supplier,
+        quotation=quotation,
+        order_date=quotation.quotation_date,
+        expected_delivery_date=quotation.valid_until,
+        currency=quotation.currency,
+        exchange_rate=quotation.exchange_rate,
+        subtotal=quotation.subtotal,
+        discount_amount=quotation.discount_amount,
+        tax_rate=quotation.tax_rate,
+        tax_amount=quotation.tax_amount,
+        grand_total=quotation.grand_total,
+        shipping_cost=quotation.shipping_cost_estimate,
+        is_shipping_included=quotation.is_shipping_included,
+        shipping_method=quotation.shipping_method,
+        payment_method=quotation.payment_method,
+        delivery_days=quotation.delivery_days,
+        notes=quotation.notes,
+        created_by=user if user and getattr(user, 'is_authenticated', False) else None,
+    )
+    PurchaseOrderLine.objects.bulk_create([
+        PurchaseOrderLine(
+            tenant=quotation.tenant,
+            order=order,
+            product=line.product,
+            seq=line.seq,
+            name_snapshot=line.name_snapshot,
+            description_line=line.description_line,
+            quantity=line.quantity,
+            unit_price=line.unit_price,
+            line_total=line.line_total,
+        )
+        for line in lines
+    ])
+    quotation.status = SupplierQuotation.STATUS_CONVERTED
+    quotation.save(update_fields=['status', 'updated_at'])
+    return order, True
+
+
+@transaction.atomic
+def convert_purchase_order_to_invoice(order, *, user=None):
+    """أنشئ فاتورة شراء محلية مسودة؛ لا قيد ولا حركة مخزون قبل الترحيل/الاستلام."""
+    import re
+
+    from logistics.models import PurchaseInvoice, PurchaseInvoiceItem, PurchaseOrder
+
+    order = (
+        PurchaseOrder.objects.select_for_update()
+        .select_related('tenant', 'supplier', 'currency', 'invoice')
+        .prefetch_related('lines__product')
+        .get(pk=order.pk)
+    )
+    if order.invoice_id:
+        return order.invoice, False
+    if order.status != PurchaseOrder.STATUS_CONFIRMED:
+        raise ValidationError('يجب تأكيد طلبية الشراء قبل تحويلها إلى فاتورة.')
+
+    numbers = PurchaseInvoice.objects.filter(
+        tenant=order.tenant,
+        invoice_number__startswith='INV-',
+    ).values_list('invoice_number', flat=True)
+    last_number = max(
+        (
+            int(match.group(1))
+            for value in numbers
+            if (match := re.match(r'^INV-(\d+)$', str(value or '')))
+        ),
+        default=0,
+    )
+    invoice = PurchaseInvoice.objects.create(
+        tenant=order.tenant,
+        invoice_number=f'INV-{last_number + 1:04d}',
+        invoice_name=f'فاتورة من طلبية {order.order_number}',
+        invoice_date=order.order_date,
+        invoice_type=PurchaseInvoice.INVOICE_TYPE_LOCAL,
+        partner=order.supplier,
+        currency=order.currency,
+        exchange_rate=order.exchange_rate,
+        subtotal=order.subtotal,
+        discount_amount=order.discount_amount,
+        tax_rate=order.tax_rate,
+        tax_amount=order.tax_amount,
+        shipping_cost=order.shipping_cost,
+        shipping_included=order.is_shipping_included,
+        grand_total=order.grand_total,
+        status='draft',
+        receipt_status=PurchaseInvoice.RECEIPT_NOT,
+        notes=order.notes,
+        payment_type=PurchaseInvoice.PAYMENT_TYPE_CREDIT,
+        created_by=user if user and getattr(user, 'is_authenticated', False) else None,
+    )
+    PurchaseInvoiceItem.objects.bulk_create([
+        PurchaseInvoiceItem(
+            invoice=invoice,
+            product=line.product,
+            name=line.name_snapshot or str(line.product),
+            quantity=line.quantity,
+            unit_price=line.unit_price,
+            total_price=line.line_total,
+            seq=line.seq,
+            name_snapshot=line.name_snapshot,
+            description_line=line.description_line[:500],
+            line_currency=order.currency,
+            line_exchange_rate=order.exchange_rate,
+            is_taxable=bool(order.tax_rate),
+            vat_percent=order.tax_rate,
+        )
+        for line in order.lines.all()
+    ])
+    order.invoice = invoice
+    order.status = PurchaseOrder.STATUS_CONVERTED
+    order.save(update_fields=['invoice', 'status', 'updated_at'])
+    return invoice, True
+
+
+@transaction.atomic
+def convert_import_quotation_to_deal(quotation, *, user=None):
+    """حوّل عرض استيراد مقبول إلى طلبية الاستيراد القانونية (LogisticsDeal).
+
+    قفل صف العرض + OneToOne على المصدر يجعلان العملية ذرّية ومتكررة بأمان:
+    إعادة نفس الطلب ترجع الصفقة القائمة ولا تنشئ صفقة ثانية.
+    """
+    from accounting.services import next_deal_number
+    from logistics.models import (
+        LogisticsDeal,
+        LogisticsDealItem,
+        SupplierQuotation,
+    )
+
+    quotation = (
+        SupplierQuotation.objects.select_for_update()
+        .select_related('tenant', 'supplier', 'currency')
+        .prefetch_related('lines__product')
+        .get(pk=quotation.pk)
+    )
+    try:
+        return quotation.import_deal, False
+    except LogisticsDeal.DoesNotExist:
+        pass
+
+    if quotation.scope != SupplierQuotation.SCOPE_IMPORT:
+        raise ValidationError('يمكن تحويل عروض الاستيراد فقط إلى طلبية استيراد.')
+    if quotation.status != SupplierQuotation.STATUS_ACCEPTED:
+        raise ValidationError('يجب اعتماد عرض الاستيراد قبل تحويله إلى طلبية.')
+    if quotation.tax_rate or quotation.tax_amount:
+        raise ValidationError('عرض الاستيراد لا يجوز أن يتضمن ضريبة قبل التخليص.')
+    if quotation.supplier.tenant_id != quotation.tenant_id:
+        raise ValidationError('مورد عرض السعر لا يتبع الشركة الحالية.')
+
+    lines = list(quotation.lines.all())
+    if not lines:
+        raise ValidationError('لا يمكن تحويل عرض سعر بلا أصناف.')
+    for line in lines:
+        if line.tenant_id != quotation.tenant_id:
+            raise ValidationError('أحد بنود العرض لا يتبع الشركة الحالية.')
+        if line.product.tenant_id != quotation.tenant_id:
+            raise ValidationError('أحد أصناف العرض لا يتبع الشركة الحالية.')
+
+    ref_number = f'D-{next_deal_number(quotation.tenant_id):04d}'
+    supplier_name = quotation.supplier.legal_name or quotation.supplier.name
+    deal = LogisticsDeal.objects.create(
+        tenant=quotation.tenant,
+        source_quotation=quotation,
+        ref_number=ref_number,
+        partner=quotation.supplier,
+        order_date=quotation.quotation_date,
+        currency=quotation.currency,
+        currency_rate=quotation.exchange_rate,
+        status='Open',
+        stage=LogisticsDeal.STAGE_DRAFT,
+        notes=quotation.notes,
+        description=f'طلبية من عرض سعر {quotation.quotation_number}',
+        incoterms=quotation.incoterms,
+        shipping_method=quotation.shipping_method,
+        payment_method=quotation.payment_method,
+        production_days=quotation.production_days,
+        delivery_days=quotation.delivery_days,
+        total_cbm=quotation.total_cbm,
+        total_weight=quotation.total_weight_kg,
+        total_weight_kg=quotation.total_weight_kg,
+        shipping_cost_estimate=quotation.shipping_cost_estimate,
+        is_shipping_included=quotation.is_shipping_included,
+        discount_amount=quotation.discount_amount,
+        subtotal=quotation.subtotal,
+        tax_rate=Decimal('0'),
+        tax_amount=Decimal('0'),
+        total_amount=quotation.grand_total,
+        remaining_amount=quotation.grand_total,
+        price_offer_id=str(quotation.pk),
+        original_offer_number=quotation.quotation_number,
+        factory_name=supplier_name,
+        created_by=user if user and getattr(user, 'is_authenticated', False) else None,
+    )
+    LogisticsDealItem.objects.bulk_create([
+        LogisticsDealItem(
+            deal=deal,
+            product=line.product,
+            quantity=line.quantity,
+            unit_price=line.unit_price,
+            seq=line.seq,
+            name_snapshot=line.name_snapshot,
+            description_line=line.description_line[:500],
+            notes=line.description_line[:255] or None,
+            line_currency=quotation.currency,
+            line_exchange_rate=quotation.exchange_rate,
+            is_taxable=False,
+            vat_percent=Decimal('0'),
+        )
+        for line in lines
+    ])
+    quotation.status = SupplierQuotation.STATUS_CONVERTED
+    quotation.save(update_fields=['status', 'updated_at'])
+    return deal, True
+
+
 def purchase_invoice_payment_summary(invoice):
     """ملخص دفع فاتورة الشراء من السندات المرتبطة والمرحّلة فقط."""
     cached = getattr(invoice, "_payment_summary_cache", None)
@@ -25,14 +272,26 @@ def purchase_invoice_payment_summary(invoice):
         Decimal("0"),
     ).quantize(DEC)
     payable = (Decimal(str(invoice.grand_total or 0)) + fees_total).quantize(DEC)
+    # T-ONACC: السند الموزَّع يُحسب بمبالغ توزيعه على هذه الفاتورة فقط؛ والسند
+    # المرتبط بالحقل المفرد (السلوك القديم) يُحسب بكامل مبلغه — ولا يُجمع الاثنان
+    # لنفس السند فلا يتكرّر الاحتساب.
     linked_paid = sum(
         (
             Decimal(str(payment.amount or 0))
             for payment in invoice.supplier_payments.all()
-            if payment.is_posted
+            if payment.is_posted and not payment.allocations.all()
         ),
         Decimal("0"),
     )
+    allocated_paid = sum(
+        (
+            Decimal(str(alloc.amount_in_invoice_currency or alloc.amount or 0))
+            for alloc in invoice.payment_allocations.all()
+            if alloc.payment.is_posted
+        ),
+        Decimal("0"),
+    )
+    linked_paid += allocated_paid
     legacy_paid = sum(
         (
             Decimal(str(payment.amount or 0))
@@ -62,7 +321,7 @@ def annotate_purchase_invoice_payment_summary(queryset):
     )
     from django.db.models.functions import Coalesce, Greatest
     from logistics.models import PurchaseInvoiceFee, PurchaseInvoicePayment
-    from sales.models import SupplierPayment
+    from sales.models import SupplierPayment, SupplierPaymentAllocation
 
     money = DecimalField(max_digits=18, decimal_places=2)
 
@@ -76,11 +335,20 @@ def annotate_purchase_invoice_payment_summary(queryset):
         )
 
     fee_total = total_subquery(PurchaseInvoiceFee)
+    # T-ONACC: نفس قاعدة purchase_invoice_payment_summary — السند الموزَّع يُستثنى
+    # من الربط المفرد ويُحسب بمبالغ توزيعه وحدها (فلا يتكرّر الاحتساب).
     linked_paid = (
         SupplierPayment.objects
-        .filter(purchase_invoice_id=OuterRef("pk"), is_posted=True)
+        .filter(purchase_invoice_id=OuterRef("pk"), is_posted=True, allocations__isnull=True)
         .values("purchase_invoice_id")
         .annotate(total=Sum("amount"))
+        .values("total")[:1]
+    )
+    allocated_paid = (
+        SupplierPaymentAllocation.objects
+        .filter(invoice_id=OuterRef("pk"), payment__is_posted=True)
+        .values("invoice_id")
+        .annotate(total=Sum(Coalesce("amount_in_invoice_currency", "amount")))
         .values("total")[:1]
     )
     legacy_paid = total_subquery(PurchaseInvoicePayment, is_posted=True)
@@ -89,13 +357,15 @@ def annotate_purchase_invoice_payment_summary(queryset):
     queryset = queryset.annotate(
         list_fees_total=Coalesce(Subquery(fee_total, output_field=money), zero),
         list_linked_paid=Coalesce(Subquery(linked_paid, output_field=money), zero),
+        list_allocated_paid=Coalesce(Subquery(allocated_paid, output_field=money), zero),
         list_legacy_paid=Coalesce(Subquery(legacy_paid, output_field=money), zero),
     ).annotate(
         list_payable_total=ExpressionWrapper(
             F("grand_total") + F("list_fees_total"), output_field=money,
         ),
         list_recorded_paid=ExpressionWrapper(
-            F("list_linked_paid") + F("list_legacy_paid"), output_field=money,
+            F("list_linked_paid") + F("list_allocated_paid") + F("list_legacy_paid"),
+            output_field=money,
         ),
     ).annotate(
         list_effective_paid=Case(

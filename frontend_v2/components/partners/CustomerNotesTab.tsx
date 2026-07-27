@@ -1,15 +1,28 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Bell, Check, Loader2, Plus, Trash2, Undo2, User } from 'lucide-react';
 import {
   CustomerNote,
+  CustomerNotePriority,
   createCustomerNote,
   deleteCustomerNote,
   listCustomerNotes,
   updateCustomerNote,
 } from '../../services/customerNotesApi';
 import { runCustomerNoteReminders } from '../../services/customerNoteReminders';
+import { formatDateLocalized } from '../../utils/formatDate';
 import { useToast } from '../../contexts/ToastContext';
 import { useConfirm } from '../../contexts/ConfirmContext';
+
+/** شارة الأولوية — «عاجل» هي وحدها التي تُنبّه عند معاملات الطرف. */
+const PRIORITY_META: Record<CustomerNotePriority, { label: string; cls: string; rank: number }> = {
+  urgent: { label: 'عاجل', cls: 'bg-red-600 text-white', rank: 0 },
+  medium: { label: 'متوسط', cls: 'bg-amber-500 text-white', rank: 1 },
+  normal: { label: 'عادي', cls: 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)]', rank: 2 },
+};
+
+function priorityMeta(priority?: CustomerNotePriority) {
+  return PRIORITY_META[priority || 'normal'] ?? PRIORITY_META.normal;
+}
 
 /** فرق أيام التقويم بين اليوم وتاريخ (موجب = مستقبلي، سالب = فائت). */
 function daysUntil(iso: string): number {
@@ -45,10 +58,21 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState<{ title: string; body: string; remind_on: string }>({
-    title: '', body: '', remind_on: '',
+  const [form, setForm] = useState<{
+    title: string; body: string; remind_on: string; priority: CustomerNotePriority;
+  }>({
+    title: '', body: '', remind_on: '', priority: 'normal',
   });
   const focusRef = useRef<HTMLDivElement | null>(null);
+
+  // العاجل أولاً ثم المتوسط، والمنجز في الذيل — الترتيب داخل الأولوية يبقى الأحدث أولاً.
+  const orderedNotes = useMemo(
+    () => [...notes].sort((a, b) => {
+      if (a.is_done !== b.is_done) return a.is_done ? 1 : -1;
+      return priorityMeta(a.priority).rank - priorityMeta(b.priority).rank;
+    }),
+    [notes],
+  );
 
   const load = useCallback(() => {
     setLoading(true);
@@ -79,9 +103,10 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
         title,
         body: form.body.trim(),
         remind_on: form.remind_on || null,
+        priority: form.priority,
       });
       setNotes((prev) => [created, ...prev]);
-      setForm({ title: '', body: '', remind_on: '' });
+      setForm({ title: '', body: '', remind_on: '', priority: 'normal' });
       toast('أُضيفت الملاحظة.', 'success');
       // تذكير مستحق اليوم/فائت ⇒ ادفع إشعار الموقع فوراً (لا انتظار لإعادة التحميل).
       if (created.remind_on && !created.is_done && daysUntil(created.remind_on) <= 0) {
@@ -130,6 +155,19 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
             onChange={(e) => setForm({ ...form, title: e.target.value })}
           />
           <label className="flex items-center gap-1.5 text-xs text-[var(--aseel-ink-soft)]">
+            الأولوية
+            <select
+              className="aseel-input flex-1"
+              value={form.priority}
+              onChange={(e) => setForm({ ...form, priority: e.target.value as CustomerNotePriority })}
+              title="«عاجل» مع يوم تذكير ⇒ تنبيه لكل مستخدم عند أي معاملة لهذا الطرف"
+            >
+              <option value="normal">عادي</option>
+              <option value="medium">متوسط</option>
+              <option value="urgent">عاجل</option>
+            </select>
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-[var(--aseel-ink-soft)]">
             <Bell className="w-3.5 h-3.5" />
             <input
               type="date"
@@ -171,12 +209,13 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
         <div className="text-[var(--aseel-danger,#c00)] p-4">{error}</div>
       ) : notes.length === 0 ? (
         <div className="text-center text-[var(--aseel-ink-soft)] p-10">
-          لا توجد ملاحظات بعد لهذا الزبون. ابدأ بإضافة ملاحظة أو تذكير أعلاه.
+          لا توجد ملاحظات بعد لهذا الطرف. ابدأ بإضافة ملاحظة أو تذكير أعلاه.
         </div>
       ) : (
         <div className="space-y-2">
-          {notes.map((n) => {
+          {orderedNotes.map((n) => {
             const badge = noteBadge(n);
+            const prio = priorityMeta(n.priority);
             const isFocus = focusNoteId != null && String(n.id) === String(focusNoteId);
             return (
               <div
@@ -191,6 +230,16 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${prio.cls}`}
+                        title={
+                          n.priority === 'urgent'
+                            ? 'تظهر كتنبيه لكل مستخدم عند أي معاملة لهذا الطرف بعد حلول موعدها'
+                            : undefined
+                        }
+                      >
+                        {prio.label}
+                      </span>
                       <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${badge.cls}`}>
                         {badge.label}
                       </span>
@@ -203,10 +252,10 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
                     )}
                     <div className="flex items-center gap-3 mt-1.5 text-[10px] text-[var(--aseel-ink-soft)]">
                       {n.remind_on && (
-                        <span className="flex items-center gap-1"><Bell className="w-3 h-3" />{n.remind_on}</span>
+                        <span className="flex items-center gap-1"><Bell className="w-3 h-3" />{formatDateLocalized(n.remind_on)}</span>
                       )}
                       <span className="flex items-center gap-1"><User className="w-3 h-3" />{n.created_by_name || '—'}</span>
-                      <span>{new Date(n.created_at).toLocaleDateString('ar-EG')}</span>
+                      <span>{formatDateLocalized(n.created_at)}</span>
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">

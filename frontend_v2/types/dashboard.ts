@@ -24,6 +24,7 @@ export interface DashboardInvoiceSummary {
 
 export interface DashboardData {
   period: { from: string; to: string };
+  is_new_company: boolean;
   financials: {
     revenue: number;
     expenses: number;

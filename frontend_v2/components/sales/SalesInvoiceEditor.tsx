@@ -1,13 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  attachPaymentVoucher,
-  createCustomerPayment,
   createSalesInvoice,
   duplicateSalesInvoice,
   getCreditPreview,
   getCustomerPriceList,
   resolveSalePrice,
-  postCustomerPayment,
   getNextInvoiceNumber,
   getSalesInvoice,
   patchSalesInvoice,
@@ -19,10 +16,14 @@ import {
 } from "../../services/salesApi";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
 import { useConfirm } from "../../contexts/ConfirmContext";
+import { usePermissions } from "../../contexts/PermissionsContext";
 import { usePriceVisibility } from "../../contexts/PriceVisibilityContext";
 import { useStaleConfirm } from "../offline/StaleDataConfirm";
 import { DocumentPaymentsTab } from "../shared/DocumentPaymentsTab";
+import { SettleFromOnAccountModal } from "../shared/SettleFromOnAccountModal";
+import { NewPaymentModal } from "./SalesCustomerPaymentsPage";
 import { EntityActivityLog } from "../activity/EntityActivityLog";
+import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { AseelDatePicker } from "../ui/AseelDatePicker";
 
 import { ProductCardModal } from "../shared/ProductCardModal";
@@ -34,6 +35,7 @@ import { openInNewTab } from "../../utils/openInNewTab";
 import { clientLogger } from "../../services/logger";
 import { apiPostObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
+import { invoiceActionPermissions } from "../../utils/viewPermissions";
 import {
   isOfflineRecordForTenant,
   tenantScopedOfflineKey,
@@ -59,6 +61,7 @@ import {
 import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
 import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
 import { SalesInvoicePrintView } from "./SalesInvoicePrintView";
+import { formatDateLocalized } from "../../utils/formatDate";
 import {
   AseelDocumentShell,
   AseelDocumentView,
@@ -215,6 +218,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   initialCustomerId,
 }) => {
   const confirm = useConfirm();
+  const { can: canPerm } = usePermissions();
   // الربح الإجمالي يتبع زر العين (الخصوصية): يختفي حين تُخفى الأسعار/الأرباح.
   const { visible: profitVisible } = usePriceVisibility();
   const [draftId, setDraftId] = useState<number | null>(null);
@@ -238,22 +242,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [settlementInvoiceNo, setSettlementInvoiceNo] = useState<string>("");
   const [pricesIncludeTax, setPricesIncludeTax] = useState(false);
   const [discountPercent, setDiscountPercent] = useState<string>("0");
-  // ── M2-T3: Attached payment voucher (cash + cheques) ───────────────────
-  const [attachedCashAmount, setAttachedCashAmount] = useState<string>("0");
-  const [attachedCashAccountId, setAttachedCashAccountId] = useState<number | "">("");
-  const [attachedCheques, setAttachedCheques] = useState<
-    Array<{
-      id?: number;
-      cheque_number: string;
-      bank_name?: string;
-      amount: string;
-      due_date?: string | null;
-      issue_date?: string | null;
-      payee_name?: string;
-      notes?: string;
-      status?: string;
-    }>
-  >([]);
   const [activeTabKey, setActiveTabKey] = useState("notes");
   // ── M2-T4: Source discount overrides (null = use customer default) ─────
   const [sourceDiscountPctOverride, setSourceDiscountPctOverride] = useState<string>("");
@@ -281,6 +269,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [customerBalanceAfterInvoice, setCustomerBalanceAfterInvoice] = useState(0);
   const [paymentDetails, setPaymentDetails] = useState<SalesInvoiceDetail["payment_details"]>([]);
   const [creatingReceipt, setCreatingReceipt] = useState(false);
+  // T-ONACC: نافذة «تسديد» — تسدّد الفاتورة من رصيد العميل على الحساب أو تفتح سنداً جديداً.
+  const [showSettleModal, setShowSettleModal] = useState(false);
+  // T-ONEPAY: نافذة «سند قبض جديد» (نقد + شيكات) المفتوحة من داخل الفاتورة.
+  const [showNewVoucher, setShowNewVoucher] = useState(false);
   // P3-2-b wiring: offline status + stale-data confirm for line additions.
   const { online: networkOnline } = useOnlineStatus();
   const { confirm: confirmStale, modal: staleModal } = useStaleConfirm();
@@ -403,15 +395,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     [lineInputsForMath, taxRateMap, invoiceDiscount]
   );
 
-  // T-CASH2: في البيع النقدي «المبلغ نقداً» = إجمالي الفاتورة دائماً (للعرض فقط؛
-  // التسوية تتمّ خادمياً بالكامل بسند قبض مستقل عند الترحيل). يبقى الحقل مُعطَّلاً
-  // ومتزامناً مع الإجمالي. لا يلمس فواتير «الذمم» (قيمتها يدوية).
-  useEffect(() => {
-    if (invoiceStatus === "posted" || invType !== "cash") return;
-    const g = String(totals.grandTotal || 0);
-    setAttachedCashAmount((prev) => (prev === g ? prev : g));
-  }, [invType, totals.grandTotal, invoiceStatus]);
-
   /** حساب افتراضي لحساب الإيراد عند وصول قائمة الحسابات (أول Revenue). */
   useEffect(() => {
     if (revenueAccountId !== "") return;
@@ -461,14 +444,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     if (!cashboxAccounts.length) return;
     setCashAccountId(cashboxAccounts[0].id);
   }, [invType, cashboxAccounts, cashAccountId, salesSettings?.default_cash_account]);
-
-  // T-A4: صندوق الدفعة النقدية المرفقة يتبع «الصندوق الافتراضي» من إعدادات المبيعات
-  // تلقائياً — لا اختيار صندوق لكل فاتورة (أُزيل المنتقي من الشاشة).
-  useEffect(() => {
-    if (attachedCashAccountId !== "") return;
-    if (salesSettings?.default_cash_account) setAttachedCashAccountId(salesSettings.default_cash_account);
-    else if (cashboxAccounts.length) setAttachedCashAccountId(cashboxAccounts[0].id);
-  }, [attachedCashAccountId, salesSettings?.default_cash_account, cashboxAccounts]);
 
   /** معاينة القيد المحاسبي المباشرة — تطابق منطق post_sales_invoice في الخادم. */
   type PreviewLine = {
@@ -702,22 +677,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setSettlementInvoiceNo(d.settlement_invoice_no || "");
     setPricesIncludeTax(Boolean(d.prices_include_tax));
     setDiscountPercent(formatQuantity(d.discount_percent ?? 0, "0"));
-    // M2-T3
-    setAttachedCashAmount(formatQuantity(d.attached_cash_amount ?? 0, "0"));
-    setAttachedCashAccountId(d.attached_cash_account ?? "");
-    setAttachedCheques(
-      (d.cheques ?? []).map((c) => ({
-        id: c.id,
-        cheque_number: c.cheque_number,
-        bank_name: c.bank_name || "",
-        amount: c.amount,
-        due_date: c.due_date,
-        issue_date: c.issue_date,
-        payee_name: c.payee_name || "",
-        notes: c.notes || "",
-        status: c.status,
-      }))
-    );
     // M2-T4
     setSourceDiscountPctOverride(
       d.source_discount_percent_override == null
@@ -845,6 +804,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const isPosted = invoiceStatus === "posted";
   const readOnly = isPosted || viewMode;
+  const invoicePermissions = invoiceActionPermissions("sales", draftId == null, canPerm);
 
   const buildPayload = useCallback(() => {
     const body: Record<string, unknown> = {
@@ -1071,9 +1031,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     );
   };
 
-  const handleSaveDraft = async () => {
+  const handleSaveDraft = async (): Promise<{ id: number; posted: boolean } | undefined> => {
     setLocalErr(null);
     setMsg(null);
+    if (!invoicePermissions.canSave) {
+      setLocalErr("لا تملك صلاحية حفظ هذه الفاتورة.");
+      return;
+    }
     const v = validateClient();
     if (v) {
       setLocalErr(v);
@@ -1088,12 +1052,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     try {
       const payload = buildPayload();
       let activeDraftId = draftId;
+      let savedInvoice: SalesInvoiceDetail;
       if (draftId) {
         const updated = await patchSalesInvoice(draftId, payload);
+        savedInvoice = updated;
         applyDetail(updated);
         setMsg("تم حفظ المسودة.");
       } else {
-        const created = await createSalesInvoice(payload);
+        const created = await createSalesInvoice({ ...payload, auto_post: false });
+        savedInvoice = created;
         activeDraftId = created.id;
         setDraftId(created.id);
         applyDetail(created);
@@ -1106,38 +1073,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         }
       }
 
-      // Auto-save payment voucher — للفواتير الآجلة فقط. البيع النقدي يُسوّى
-      // خادمياً بالكامل (سند قبض تلقائي) فلا حاجة لسند نقدي مرفق (T-CASH2).
-      if (activeDraftId && invType !== "cash") {
-        try {
-          const updatedWithVoucher = await attachPaymentVoucher(activeDraftId, {
-            cash_amount: attachedCashAmount || "0",
-            cash_account_id:
-              attachedCashAccountId === ""
-                ? null
-                : Number(attachedCashAccountId),
-            cheques: attachedCheques.map((c) => ({
-              cheque_number: c.cheque_number,
-              amount: c.amount,
-              bank_name: c.bank_name || "",
-              due_date: c.due_date || null,
-              issue_date: c.issue_date || null,
-              payee_name: c.payee_name || "",
-              notes: c.notes || "",
-            })),
-          });
-          applyDetail(updatedWithVoucher);
-          setMsg((m) => (m ? m + " مع السند المالي المرفق." : "تم حفظ السند المالي."));
-        } catch (voucherErr) {
-          console.warn("Failed to auto-save payment voucher:", voucherErr);
-          setLocalErr("تم حفظ الفاتورة بنجاح، لكن فشل حفظ السند المالي: " + (voucherErr instanceof Error ? voucherErr.message : String(voucherErr)));
-        }
-      }
       dirtyRef.current = false;
       // M4: the draft is now persisted server-side — drop the local recovery copy.
       void clearLocalDraft();
       setRecoverableDraft(null);
       onInvoiceSaved();
+      return { id: activeDraftId as number, posted: savedInvoice.status === "posted" };
     } catch (e) {
       setLocalErr(e instanceof Error ? e.message : "فشل الحفظ");
     } finally {
@@ -1145,33 +1086,40 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     }
   };
 
-  const handlePost = async () => {
-    if (!draftId) {
+  /** يرحّل الفاتورة. `idOverride` لمن يحفظ ويرحّل في نفس النقرة (حالة الـid لم
+   *  تُحدَّث بعد). يُعيد true عند النجاح كي يتابع المتصل خطوته التالية. */
+  const handlePost = async (idOverride?: number) => {
+    if (!invoicePermissions.canPost) {
+      setLocalErr("لا تملك صلاحية ترحيل فاتورة البيع.");
+      return false;
+    }
+    const targetId = idOverride ?? draftId;
+    if (!targetId) {
       setLocalErr("احفظ المسودة أولاً ثم رحّل.");
-      return;
+      return false;
     }
     setLocalErr(null);
     setMsg(null);
     const v = validateClient();
     if (v) {
       setLocalErr(v);
-      return;
+      return false;
     }
     const lossErr = lossBlockMessage();
     if (lossErr) {
       setLocalErr(lossErr);
-      return;
+      return false;
     }
     if (!journalPreview.balanced || journalPreview.errors.length) {
       setLocalErr(
         "القيد غير صالح أو غير متوازن في المعاينة. صحّح الأخطاء المعروضة ثم أعد المحاولة."
       );
-      return;
+      return false;
     }
     setPosting(true);
     try {
-      if (dirtyRef.current) await patchSalesInvoice(draftId, buildPayload());
-      const posted = await postSalesInvoice(draftId);
+      if (dirtyRef.current) await patchSalesInvoice(targetId, buildPayload());
+      const posted = await postSalesInvoice(targetId);
       setInvoiceStatus(posted.status || "posted");
       setPostedJournalId(posted.journal ?? null);
       // T-CASH2: تسوية البيع النقدي تتمّ خادمياً ذرّياً مع الترحيل (سند قبض مستقل).
@@ -1183,8 +1131,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       void clearLocalDraft();
       setRecoverableDraft(null);
       onInvoiceSaved();
+      return true;
     } catch (e) {
       setLocalErr(e instanceof Error ? e.message : "فشل الترحيل");
+      return false;
     } finally {
       setPosting(false);
     }
@@ -1253,9 +1203,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setSettlementInvoiceNo("");
     setPricesIncludeTax(Boolean(salesSettings?.prices_include_tax));
     setDiscountPercent("0");
-    setAttachedCashAmount("0");
-    setAttachedCashAccountId("");
-    setAttachedCheques([]);
     setSourceDiscountPctOverride("");
     setSourceDiscountAmtOverride("");
     setMsg(null);
@@ -2019,53 +1966,54 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   gridColumns[6].render = renderTaxCell;
   gridColumns[8].render = renderDeleteCell;
 
-  // task18: تسجيل «سند قبض» على فاتورة مرحّلة (CustomerPayment مستقل مُخصَّص لها).
-  // يعالج بلاغ المالك: بعد الترحيل لا يمكن تحصيل فاتورة آجلة من داخل الشاشة.
+  // T-ONEPAY: مدخل واحد لتحصيل الفاتورة — نقداً و/أو شيكات في سند قبض واحد.
+  // كان هناك مدخلان يوهمان بالعمل: خانة «المبلغ نقداً» (كانت تُحفظ ولا تُرحَّل
+  // إطلاقاً) وزر ينقل إلى تبويب فارغ. الآن الطريق واحد: سند قبض حقيقي مرحَّل.
+  // الفاتورة يجب أن تكون مرحّلة قبل تخصيص السند لها (شرط الخادم)، فنحفظ ونرحّل
+  // ضمن نفس النقرة بعد تأكيد صريح.
   const remainingDue = Math.max(savedGrandTotal - paidAmount, 0);
-  const handleCreateReceipt = async () => {
-    if (!draftId || customerId === "") return;
-    if (remainingDue <= 0) {
+  const openReceiptFlow = async () => {
+    if (customerId === "") {
+      setLocalErr("اختر العميل أولاً.");
+      return;
+    }
+    if (isPosted && remainingDue <= 0) {
       setMsg("الفاتورة مسدَّدة بالكامل — لا متبقٍّ.");
       return;
     }
-    const cashAcc = salesSettings?.default_cash_account ?? cashboxAccounts[0]?.id;
-    if (!cashAcc) {
-      setLocalErr("لا يوجد حساب صندوق — عيّنه في إعدادات المبيعات.");
-      return;
-    }
-    const amtStr = window.prompt(
-      `مبلغ سند القبض (المتبقي على الفاتورة ${remainingDue.toFixed(2)}):`,
-      remainingDue.toFixed(2),
-    );
-    if (amtStr == null) return;
-    const amt = Number(amtStr);
-    if (!(amt > 0) || amt > remainingDue + 0.001) {
-      setLocalErr("مبلغ غير صالح (يجب أن يكون بين 0 والمتبقي).");
-      return;
-    }
-    setCreatingReceipt(true);
-    setLocalErr(null);
-    setMsg(null);
-    try {
-      const pay = await createCustomerPayment({
-        partner: Number(customerId),
-        payment_date: new Date().toISOString().slice(0, 10),
-        amount: amt,
-        currency: Number(currencyId),
-        exchange_rate: Number(exchangeRate) || 1,
-        cash_or_bank_account: Number(cashAcc),
-        notes: `سند قبض فاتورة ${invoiceNumber}`,
-        allocations: [{ invoice: draftId, amount: amt }],
+    if (!isPosted) {
+      const ok = await confirm({
+        title: "سند قبض",
+        message:
+          "لتسجيل دفعة (كاملة أو جزئية) تُحفظ الفاتورة وتُرحَّل أولاً، ثم يُفتح سند القبض بالمتبقي. متابعة؟",
+        confirmText: "حفظ وترحيل ثم متابعة",
       });
-      await postCustomerPayment(pay.id);
-      setMsg("تم تسجيل سند القبض وترحيله، وخُصِم من رصيد الفاتورة.");
-      await loadInvoice(draftId); // يحدّث amount_paid/payment_status
-      onInvoiceSaved();
-    } catch (e) {
-      setLocalErr(e instanceof Error ? e.message : "تعذّر تسجيل سند القبض");
-    } finally {
-      setCreatingReceipt(false);
+      if (!ok) return;
+      setCreatingReceipt(true);
+      try {
+        const saved = await handleSaveDraft();
+        if (!saved) return;
+        if (!saved.posted && !(await handlePost(saved.id))) return;
+        await loadInvoice(saved.id);
+      } finally {
+        setCreatingReceipt(false);
+      }
     }
+    setShowSettleModal(true);
+  };
+
+  const handleSaveAndPost = async () => {
+    clientLogger.info("invoice.save_and_post_requested", {
+      invoiceType: "sales",
+      existingInvoice: draftId != null,
+    });
+    const saved = await handleSaveDraft();
+    if (!saved) return;
+    if (!saved.posted && !(await handlePost(saved.id))) return;
+    clientLogger.info("invoice.save_and_post_completed", {
+      invoiceType: "sales",
+      invoiceId: saved.id,
+    });
   };
 
   const toolbarActions: AseelToolbarAction[] = [
@@ -2073,22 +2021,46 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     ...(onClose
       ? [{ key: "back", label: "الفواتير", icon: <ArrowRight />, onClick: onClose } as AseelToolbarAction]
       : []),
-    { key: "new", label: "إضافة", icon: <Plus />, onClick: guardedReset },
-    ...(viewMode && !isPosted ? [{
+    ...(canPerm("sales.invoice.create")
+      ? [{ key: "new", label: "إضافة", icon: <Plus />, onClick: guardedReset } as AseelToolbarAction]
+      : []),
+    ...(viewMode && !isPosted && invoicePermissions.canSave ? [{
       key: "edit",
       label: "تحرير",
       icon: <Pencil />,
       onClick: () => setViewMode(false),
       separatorBefore: true,
     } as AseelToolbarAction] : []),
-    {
+    ...(invoicePermissions.canSave ? [{
       key: "save",
       label: saving ? "...تخزين" : "تخزين",
       icon: saving ? <Loader2 className="animate-spin" /> : <Save />,
       onClick: !readOnly && !saving ? () => void handleSaveDraft() : undefined,
       disabled: readOnly || saving,
-    },
-    {
+    } as AseelToolbarAction] : []),
+    ...(invoicePermissions.canSaveAndPost ? [{
+      key: "save-and-post",
+      label: saving || posting ? "...حفظ وترحيل" : "حفظ وترحيل",
+      icon: saving || posting ? <Loader2 className="animate-spin" /> : <CheckCircle2 />,
+      onClick:
+        networkOnline &&
+        !readOnly &&
+        journalPreview.balanced &&
+        journalPreview.errors.length === 0 &&
+        !saving &&
+        !posting
+          ? () => void handleSaveAndPost()
+          : undefined,
+      disabled:
+        !networkOnline ||
+        readOnly ||
+        !journalPreview.balanced ||
+        journalPreview.errors.length > 0 ||
+        saving ||
+        posting,
+      separatorBefore: true,
+    } as AseelToolbarAction] : []),
+    ...(invoicePermissions.canPost ? [{
       key: "post",
       // P3-1-b: posting requires a server-side document number + journal
       // post — block visually when offline so the user is not misled.
@@ -2109,16 +2081,17 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         draftId == null ||
         !journalPreview.balanced ||
         journalPreview.errors.length > 0 ||
-        posting,
+      posting,
       separatorBefore: true,
-    },
-    {
+    } as AseelToolbarAction] : []),
+    // T-PERM: «تراجع عن الترحيل» يظهر فقط لمن يملك الصلاحية (الخادم يفرضها أيضاً).
+    ...(canPerm("sales.invoice.unpost") ? [{
       key: "unpost",
       label: posting ? "...تراجع" : "تراجع عن الترحيل",
       icon: posting ? <Loader2 className="animate-spin" /> : <Undo2 />,
       onClick: isPosted && !posting ? () => void handleUnpost() : undefined,
       disabled: !isPosted || posting,
-    },
+    } as AseelToolbarAction] : []),
     {
       key: "cancel",
       label: "إلغاء",
@@ -2127,26 +2100,24 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       disabled: isPosted,
       danger: true,
     },
-    {
-      // task18: على المسودة يفتح تبويب السند المرفق؛ على الفاتورة المرحّلة
-      // يُنشئ سند قبض مستقلاً ويُرحّله (تحصيل الآجل من داخل الشاشة).
+    ...(canPerm("sales.payment.create") && (isPosted || invoicePermissions.canSaveAndPost) ? [{
+      // T-ONEPAY: زر واحد للتحصيل في كل الحالات — على المسودة يحفظ ويرحّل ثم
+      // يفتح السند، وعلى المرحّلة يفتح النافذة الذكية (رصيد على الحساب أولاً،
+      // ثم سند جديد بنقد و/أو شيكات).
       key: "receipt",
-      label: isPosted
-        ? creatingReceipt
-          ? "...سند قبض"
-          : remainingDue > 0
-            ? "سند قبض"
-            : "مسدَّدة"
-        : "سند مالي",
+      label: creatingReceipt
+        ? "...سند قبض"
+        : isPosted && remainingDue <= 0
+          ? "مسدَّدة"
+          : "سند قبض",
       icon: creatingReceipt ? <Loader2 className="animate-spin" /> : <Receipt />,
-      onClick: isPosted
-        ? remainingDue > 0 && !creatingReceipt
-          ? () => void handleCreateReceipt()
-          : undefined
-        : () => setActiveTabKey("financial_movements"),
-      disabled: isPosted && (remainingDue <= 0 || creatingReceipt),
+      onClick:
+        !creatingReceipt && !(isPosted && remainingDue <= 0)
+          ? () => void openReceiptFlow()
+          : undefined,
+      disabled: creatingReceipt || (isPosted && remainingDue <= 0),
       separatorBefore: true,
-    },
+    } as AseelToolbarAction] : []),
     { key: "print", label: "طباعة", icon: <Printer />, onClick: () => setShowPrintView(true) },
   ];
 
@@ -2327,250 +2298,6 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     </div>
   );
 
-  const paymentsTab = (
-    <div className="aseel-legacy-tab space-y-4 p-4 bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)]">
-      {/* Cash */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-        <label className="aseel-field">
-          <span className="aseel-field-label">المبلغ نقدا</span>
-          <input
-            className="aseel-input"
-            disabled={readOnly || isPosted || invType === "cash"}
-            title={invType === "cash" ? "بيع نقدي — مدفوع بالكامل ويُسوّى تلقائياً عند الترحيل" : undefined}
-            data-aseel-key="1"
-            type="number"
-            min={0}
-            step={0.01}
-            value={attachedCashAmount}
-            onChange={(e) => {
-              setAttachedCashAmount(e.target.value);
-              markDirty();
-            }}
-          />
-        </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">حساب الصندوق</span>
-          {/* T-A4: الصندوق الافتراضي من الإعدادات (للعرض فقط) — لا اختيار لكل فاتورة. */}
-          <input
-            className="aseel-input"
-            readOnly
-            title="الصندوق الافتراضي مضبوط في إعدادات المبيعات"
-            value={(() => {
-              const a = attachedCashAccountId !== "" ? accountsById.get(Number(attachedCashAccountId)) : undefined;
-              return a ? `${a.code || ""} — ${a.name || ""}` : "الصندوق الافتراضي (من الإعدادات)";
-            })()}
-          />
-        </label>
-      </div>
-
-      {/* Cheques list */}
-      <div style={{ marginTop: 12 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            marginBottom: 4,
-          }}
-        >
-          <strong>الشيكات المرفقة</strong>
-          {!(readOnly || isPosted) && (
-            <button
-              type="button"
-              className="aseel-toolbtn"
-              onClick={() => {
-                setAttachedCheques((cs) => [
-                  ...cs,
-                  {
-                    cheque_number: "",
-                    bank_name: "",
-                    amount: "0.00",
-                    due_date: "",
-                    issue_date: "",
-                    status: "Draft",
-                  },
-                ]);
-                markDirty();
-              }}
-            >
-              <Plus /> إضافة شيك
-            </button>
-          )}
-        </div>
-        <table className="aseel-grid">
-          <thead>
-            <tr>
-              <th style={{ width: 110 }}>رقم الشيك</th>
-              <th>البنك</th>
-              <th style={{ width: 110 }}>المبلغ</th>
-              <th style={{ width: 130 }}>تاريخ الاستحقاق</th>
-              <th style={{ width: 110 }}>الحالة</th>
-              {!(readOnly || isPosted) && <th style={{ width: 36 }}></th>}
-            </tr>
-          </thead>
-          <tbody>
-            {attachedCheques.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={readOnly || isPosted ? 5 : 6}
-                  style={{ textAlign: "center", padding: 10 }}
-                >
-                  لا توجد شيكات مرفقة
-                </td>
-              </tr>
-            ) : (
-              attachedCheques.map((c, i) => (
-                <tr key={i}>
-                  <td>
-                    <input
-                      className="aseel-input"
-                      disabled={readOnly || isPosted}
-                      value={c.cheque_number}
-                      onChange={(e) => {
-                        setAttachedCheques((arr) =>
-                          arr.map((x, j) =>
-                            j === i
-                              ? { ...x, cheque_number: e.target.value }
-                              : x
-                          )
-                        );
-                        markDirty();
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      className="aseel-input"
-                      disabled={readOnly || isPosted}
-                      value={c.bank_name || ""}
-                      onChange={(e) => {
-                        setAttachedCheques((arr) =>
-                          arr.map((x, j) =>
-                            j === i
-                              ? { ...x, bank_name: e.target.value }
-                              : x
-                          )
-                        );
-                        markDirty();
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <input
-                      className="aseel-input"
-                      disabled={readOnly || isPosted}
-                      data-aseel-key="1"
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={c.amount}
-                      onChange={(e) => {
-                        setAttachedCheques((arr) =>
-                          arr.map((x, j) =>
-                            j === i
-                              ? { ...x, amount: e.target.value }
-                              : x
-                          )
-                        );
-                        markDirty();
-                      }}
-                    />
-                  </td>
-                  <td>
-                    <AseelDatePicker
-                      className="aseel-input"
-                      disabled={readOnly || isPosted}
-                      value={c.due_date || ""}
-                      onChange={(val) => {
-                        setAttachedCheques((arr) =>
-                          arr.map((x, j) =>
-                            j === i ? { ...x, due_date: val } : x
-                          )
-                        );
-                        markDirty();
-                      }}
-                    />
-                  </td>
-                  <td style={{ fontSize: "var(--aseel-fs-sm)" }}>
-                    {c.status || "Draft"}
-                  </td>
-                  {!(readOnly || isPosted) && (
-                    <td>
-                      <button
-                        type="button"
-                        className="aseel-iconbtn aseel-iconbtn--danger"
-                        onClick={() => {
-                          setAttachedCheques((arr) =>
-                            arr.filter((_, j) => j !== i)
-                          );
-                          markDirty();
-                        }}
-                        title="حذف"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Summary */}
-      <div
-        style={{
-          marginTop: 12,
-          padding: 6,
-          background: "var(--aseel-panel)",
-          border: "1px solid var(--aseel-border-soft)",
-          borderRadius: "var(--aseel-radius)",
-        }}
-      >
-        <div className="aseel-total-row">
-          <span>إجمالي الفاتورة</span>
-          <span className="aseel-total-value">
-            {fmt(totals.grandTotal)}
-          </span>
-        </div>
-        <div className="aseel-total-row">
-          <span>نقدي</span>
-          <span className="aseel-total-value">
-            {fmt(Number(attachedCashAmount) || 0)}
-          </span>
-        </div>
-        <div className="aseel-total-row">
-          <span>شيكات</span>
-          <span className="aseel-total-value">
-            {fmt(
-              attachedCheques.reduce(
-                (s, c) => s + (Number(c.amount) || 0),
-                0
-              )
-            )}
-          </span>
-        </div>
-        <div className="aseel-total-row aseel-total-row--grand">
-          <span>متبقي على ذمم العميل</span>
-          <span className="aseel-total-value">
-            {fmt(
-              Math.max(
-                0,
-                totals.grandTotal -
-                  (Number(attachedCashAmount) || 0) -
-                  attachedCheques.reduce(
-                    (s, c) => s + (Number(c.amount) || 0),
-                    0
-                  )
-              )
-            )}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-
   /* ───────────── واجهة العرض المستندية (وضع القراءة) ─────────────
      كان «وضع العرض» هو نموذج التحرير نفسه بحقول معطّلة، فيبدو صفوفاً من
      المربّعات الرمادية لا مستنداً. الآن عرض مستندي مخصّص، والتحرير يُفتح من
@@ -2700,7 +2427,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                   {paymentDetails.map((payment) => (
                     <tr key={payment.id} className="border-b border-[var(--color-border)]">
                       <td className="p-2">سند قبض #{payment.id}</td>
-                      <td className="p-2">{payment.payment_date}</td>
+                      <td className="p-2">{formatDateLocalized(payment.payment_date)}</td>
                       <td className="p-2">{money(Number(payment.allocated_amount))}</td>
                       <td className="p-2">{payment.is_posted ? "مرحّل" : "غير مرحّل"}</td>
                       <td className="p-2">{payment.journal ? `#${payment.journal}` : "—"}</td>
@@ -2734,8 +2461,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
         header={viewMode ? undefined : (
           <div className="bg-[var(--color-surface)] border-b border-[var(--color-border)] p-1.5 flex flex-col gap-1 w-full shadow-sm">
+            {/* ملاحظة عاجلة مستحقة على هذا العميل — تظهر لكل مستخدم قبل إتمام الفاتورة. */}
+            <PartnerNoteAlert partnerId={customerId === "" ? null : customerId} />
             <div className="flex flex-col xl:flex-row gap-2 items-start">
-              
+
               {/* Customer Section */}
               <div className="flex-1 flex flex-col gap-1 xl:border-l border-[var(--color-border)] pl-2 w-full">
                 <div className="flex items-center gap-1">
@@ -2760,15 +2489,21 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                       بطاقة
                     </button>
                   )}
-                  <select
-                    className="bg-[var(--color-surface-2)] border border-[var(--color-border)] text-xs rounded px-1 py-0.5 focus:ring-1 focus:ring-emerald-500 outline-none"
-                    disabled={readOnly}
-                    value={invType}
-                    onChange={(e) => { setInvType(e.target.value as "cash" | "credit"); markDirty(); }}
+                  {/* «مدفوعة» بدل قائمة نقدي/أجل — مربع اختيار: مؤشَّر = بيع مدفوع
+                      (نقدي، يُسوّى تلقائياً عند الترحيل)، فارغ = على ذمم العميل. */}
+                  <label
+                    className="flex items-center gap-1 text-xs text-[var(--color-text)] cursor-pointer select-none shrink-0"
+                    title="مؤشَّر = الفاتورة مدفوعة (تُسوّى تلقائياً عند الترحيل) · فارغ = على ذمم العميل"
                   >
-                    <option value="credit">أجل</option>
-                    <option value="cash">نقدي</option>
-                  </select>
+                    <input
+                      type="checkbox"
+                      className="w-3.5 h-3.5 accent-emerald-600"
+                      disabled={readOnly}
+                      checked={invType === "cash"}
+                      onChange={(e) => { setInvType(e.target.checked ? "cash" : "credit"); markDirty(); }}
+                    />
+                    مدفوعة
+                  </label>
                 </div>
 
                 {selectedCustomer && creditHint && (() => {
@@ -2780,7 +2515,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                   const ledgerAcct = selectedCustomer?.linked_account ?? null;
                   const canDrill = Boolean(onOpenGeneralLedger && ledgerAcct);
 
-                  const balAfterRaw = bal + totals.grandTotal - (Number(attachedCashAmount) || 0) - attachedCheques.reduce((s, c) => s + (Number(c.amount) || 0), 0);
+                  // الرصيد المتوقّع = الرصيد الحالي + الفاتورة − ما حُصِّل فعلاً
+                  // بسندات مرحّلة (لا وعود إدخال غير مُرحَّلة).
+                  const balAfterRaw = bal + totals.grandTotal - paidAmount;
                   const isDebtorAfter = balAfterRaw > 0.005;
                   const isCreditorAfter = balAfterRaw < -0.005;
                   const statusLabelAfter = isDebtorAfter ? "عليه" : isCreditorAfter ? "له" : "متوازن";
@@ -3040,71 +2777,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               <span className="aseel-total-value">{formatQuantity(totalQty)}</span>
             </div>
 
-            {/* F2: المدفوع نقداً وشيكات مباشرة تحت الإجمالي */}
+            {/* T-ONEPAY: المحصَّل = سندات قبض مرحّلة فقط (لا خانات إدخال هنا). */}
             <div className="aseel-total-row">
-              <span>مدفوع نقداً</span>
-              <span className="aseel-total-value">
-                {readOnly || isPosted || invType === "cash" ? (
-                  fmt(Number(attachedCashAmount) || 0)
-                ) : (
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    className="aseel-input aseel-total-input"
-                    value={attachedCashAmount}
-                    onChange={(e) => {
-                      setAttachedCashAmount(e.target.value);
-                      markDirty();
-                    }}
-                  />
-                )}
-              </span>
+              <span>المحصَّل</span>
+              <span className="aseel-total-value">{fmt(paidAmount)}</span>
             </div>
-            
-            <div className="aseel-total-row">
-              <span>مدفوع شيكات</span>
-              <span className="aseel-total-value">
-                {readOnly || isPosted ? (
-                  fmt(
-                    attachedCheques.reduce(
-                      (s, c) => s + (Number(c.amount) || 0),
-                      0
-                    )
-                  )
-                ) : (
-                  <button
-                    type="button"
-                    className="underline hover:no-underline text-left cursor-pointer"
-                    style={{ color: "var(--aseel-accent)", background: "none", border: "none", padding: 0, font: "inherit" }}
-                    onClick={() => setActiveTabKey("financial_movements")}
-                    title="تعديل الشيكات المرفقة"
-                  >
-                    {fmt(
-                      attachedCheques.reduce(
-                        (s, c) => s + (Number(c.amount) || 0),
-                        0
-                      )
-                    )}
-                  </button>
-                )}
-              </span>
-            </div>
-            
+
             <div className="aseel-total-row">
               <span>المتبقي على الحساب</span>
               <span className="aseel-total-value">
-                {fmt(
-                  Math.max(
-                    0,
-                    totals.grandTotal -
-                      (Number(attachedCashAmount) || 0) -
-                      attachedCheques.reduce(
-                        (s, c) => s + (Number(c.amount) || 0),
-                        0
-                      )
-                  )
-                )}
+                {fmt(isPosted ? remainingDue : totals.grandTotal - paidAmount)}
               </span>
             </div>
           </>
@@ -3155,41 +2837,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               </button>
             )}
 
-            {/* INLINE FOOTER: Payments, Notes, and GL Preview instead of Tabs */}
+            {/* INLINE FOOTER: الملاحظات + خلاصة التحصيل.
+                T-ONEPAY: لا إدخال نقدي/شيكات هنا — التحصيل كلّه من زر «سند قبض»
+                (نقد وشيكات في نافذة واحدة تُنشئ سنداً مرحّلاً حقيقياً). */}
             <div style={{ display: "flex", gap: "16px", background: "var(--aseel-panel)", padding: "8px", border: "1px solid var(--aseel-border)" }}>
-              {/* Cash & Notes Area */}
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "8px" }}>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <label className="aseel-field" style={{ flex: 1 }}>
-                    <span className="aseel-field-label">المبلغ نقداً</span>
-                    <input
-                      className="aseel-input"
-                      disabled={readOnly || isPosted || invType === "cash"}
-                      title={invType === "cash" ? "بيع نقدي — مدفوع بالكامل ويُسوّى تلقائياً عند الترحيل" : undefined}
-                      type="number"
-                      min={0}
-                      step={0.01}
-                      value={attachedCashAmount}
-                      onChange={(e) => {
-                        setAttachedCashAmount(e.target.value);
-                        markDirty();
-                      }}
-                    />
-                  </label>
-                  <label className="aseel-field" style={{ flex: 1 }}>
-                    <span className="aseel-field-label">حساب الصندوق</span>
-                    {/* T-A4: الصندوق الافتراضي من الإعدادات (للعرض فقط) — لا اختيار لكل فاتورة. */}
-                    <input
-                      className="aseel-input"
-                      readOnly
-                      title="الصندوق الافتراضي مضبوط في إعدادات المبيعات"
-                      value={(() => {
-                        const a = attachedCashAccountId !== "" ? accountsById.get(Number(attachedCashAccountId)) : undefined;
-                        return a ? `${a.code || ""} — ${a.name || ""}` : "الصندوق الافتراضي (من الإعدادات)";
-                      })()}
-                    />
-                  </label>
-                </div>
+              <div style={{ flex: 1 }}>
                 <label className="aseel-field">
                   <span className="aseel-field-label">الملاحظات</span>
                   <textarea
@@ -3205,56 +2857,29 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                 </label>
               </div>
 
-              {/* Cheques Area */}
-              <div style={{ flex: 1, borderRight: "1px solid var(--aseel-border)", paddingRight: "16px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                  <strong>الشيكات المرفقة ({attachedCheques.length})</strong>
-                  {!(readOnly || isPosted) && (
-                    <button
-                      type="button"
-                      className="aseel-toolbtn"
-                      onClick={() => {
-                        setAttachedCheques((cs) => [
-                          ...cs,
-                          { cheque_number: "", bank_name: "", amount: "0.00", status: "Draft" },
-                        ]);
-                        markDirty();
-                      }}
-                    >
-                      <Plus className="w-3 h-3" /> إضافة
-                    </button>
-                  )}
+              <div style={{ flex: 1, borderRight: "1px solid var(--aseel-border)", paddingRight: "16px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                <div className="aseel-total-row">
+                  <span>المحصَّل (سندات مرحّلة)</span>
+                  <span className="aseel-total-value">{fmt(paidAmount)}</span>
                 </div>
-                {attachedCheques.length === 0 ? (
-                  <div className="text-sm text-[var(--color-text-muted)] mt-2">لا توجد شيكات.</div>
-                ) : (
-                  <div style={{ maxHeight: "80px", overflowY: "auto" }}>
-                    {attachedCheques.map((c, i) => (
-                      <div key={i} style={{ display: "flex", gap: "4px", marginBottom: "4px" }}>
-                        <input
-                          className="aseel-input"
-                          placeholder="رقم الشيك"
-                          disabled={readOnly || isPosted}
-                          value={c.cheque_number}
-                          onChange={(e) => {
-                            setAttachedCheques((arr) => arr.map((x, j) => j === i ? { ...x, cheque_number: e.target.value } : x));
-                            markDirty();
-                          }}
-                        />
-                        <input
-                          className="aseel-input"
-                          placeholder="المبلغ"
-                          disabled={readOnly || isPosted}
-                          value={c.amount}
-                          onChange={(e) => {
-                            setAttachedCheques((arr) => arr.map((x, j) => j === i ? { ...x, amount: e.target.value } : x));
-                            markDirty();
-                          }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <div className="aseel-total-row">
+                  <span>المتبقي</span>
+                  <span className="aseel-total-value">{fmt(remainingDue)}</span>
+                </div>
+                <button
+                  type="button"
+                  className="aseel-toolbtn"
+                  disabled={readOnly || creatingReceipt || customerId === ""}
+                  onClick={() => void openReceiptFlow()}
+                  title="نقد و/أو شيكات في سند قبض واحد"
+                >
+                  <Receipt className="w-3 h-3" /> سند قبض
+                </button>
+                <span className="text-[11px] text-[var(--color-text-muted)]">
+                  {isPosted
+                    ? "يقبل مبلغاً جزئياً — ويُخصم من المتبقي فور الترحيل."
+                    : "الفاتورة تُحفظ وتُرحَّل أولاً ثم يُسجَّل السند."}
+                </span>
               </div>
             </div>
             {/* Warnings */}
@@ -3341,6 +2966,44 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       {/* Attached payment voucher modal removed - now a bottom tab */}
       {/* P3-2-b: stale-data confirmation portal for offline product picks */}
       {staleModal}
+      {/* T-ONACC: تسديد الفاتورة من رصيد العميل «على الحساب» أو بسند قبض جديد. */}
+      {showSettleModal && draftId && customerId !== "" && (
+        <SettleFromOnAccountModal
+          kind="customer"
+          partnerId={Number(customerId)}
+          partnerLabel={customers.find((c) => c.id === Number(customerId))?.name || ""}
+          invoiceId={draftId}
+          invoiceLabel={`فاتورة ${invoiceNumber}`}
+          remaining={remainingDue}
+          onClose={() => setShowSettleModal(false)}
+          onSettled={async () => {
+            setShowSettleModal(false);
+            setMsg("تم تسديد الفاتورة من رصيد العميل على الحساب.");
+            await loadInvoice(draftId);
+            onInvoiceSaved();
+          }}
+          onNewVoucher={() => {
+            setShowSettleModal(false);
+            setShowNewVoucher(true);
+          }}
+        />
+      )}
+      {/* T-ONEPAY: سند قبض جديد بنقد و/أو شيكات — مُوزَّع مسبقاً على هذه الفاتورة. */}
+      {showNewVoucher && draftId && customerId !== "" && (
+        <NewPaymentModal
+          initialPartnerId={Number(customerId)}
+          lockPartner
+          defaultCashAccountId={salesSettings?.default_cash_account ?? ""}
+          initialInvoice={{ id: draftId, number: invoiceNumber, remaining: remainingDue }}
+          onClose={() => setShowNewVoucher(false)}
+          onSaved={async () => {
+            setShowNewVoucher(false);
+            setMsg("تم تسجيل سند القبض، وخُصِم من رصيد الفاتورة.");
+            await loadInvoice(draftId);
+            onInvoiceSaved();
+          }}
+        />
+      )}
       {showPrintView && (
         <SalesInvoicePrintView
           data={{

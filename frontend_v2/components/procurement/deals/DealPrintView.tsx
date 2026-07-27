@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import { Deal, User, Supplier } from '../../../types';
 import { formatMoney } from '../../../utils/formatNumber';
 import { Printer, X, MapPin, Phone, Mail, FileText, Building2, Truck, Hash, Calendar, DollarSign, CreditCard, Edit, ExternalLink } from 'lucide-react';
+import { formatDateValue } from "../../../utils/formatDate";
 
 interface DealPrintViewProps {
     deal: Deal;
@@ -27,7 +28,7 @@ export const DealPrintView: React.FC<DealPrintViewProps> = ({ deal, currentUser,
 
     const formatDate = (dateString?: string) => {
         if (!dateString) return '-';
-        return new Date(dateString).toLocaleDateString('en-GB');
+        return formatDateValue(dateString);
     };
 
     const getSupplierAddress = () => {

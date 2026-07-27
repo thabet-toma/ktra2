@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Supplier, InvoiceItem } from '../../types';
 import { Package, ArrowRight, X, Image as ImageIcon, Calendar, DollarSign, Layers } from 'lucide-react';
+import { formatDateValue } from "../../utils/formatDate";
 
 interface SupplierRelatedItemsProps {
   supplier: Supplier;
@@ -68,7 +69,7 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
                    {row.totalSpent.toLocaleString()} $
                 </td>
                 <td className="px-6 py-4 aseel-text-soft dir-ltr text-right">
-                   {new Date(row.lastPurchaseDate).toLocaleDateString('en-GB')}
+                   {formatDateValue(row.lastPurchaseDate)}
                 </td>
               </tr>
             ))}
@@ -106,7 +107,7 @@ export const SupplierRelatedItems: React.FC<SupplierRelatedItemsProps> = ({ supp
                     <DetailItem icon={<Layers />} label="التصنيف" value={selectedItem.item.categoryName} />
                     <DetailItem icon={<Package />} label="الكمية الكلية من هذا المورد" value={selectedItem.totalQuantity} />
                     <DetailItem icon={<DollarSign />} label="إجمالي المدفوع للمورد" value={`${selectedItem.totalSpent.toLocaleString()} $`} />
-                    <DetailItem icon={<Calendar />} label="تاريخ آخر شراء" value={new Date(selectedItem.lastPurchaseDate).toLocaleDateString('en-GB')} />
+                    <DetailItem icon={<Calendar />} label="تاريخ آخر شراء" value={formatDateValue(selectedItem.lastPurchaseDate)} />
                 </div>
                 
                 {selectedItem.item.specifications && (

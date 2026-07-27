@@ -25,6 +25,7 @@ import {
   CheckCircle2,
   ExternalLink,
   Info,
+  Banknote,
 } from "lucide-react";
 import { ProductCardModal } from "../../shared/ProductCardModal";
 import { AseelDatePicker } from "../../ui/AseelDatePicker";
@@ -67,9 +68,11 @@ import {
 import { ItemsTableSection } from "@/components/forms/shared/ItemsTableSection";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
 import { PurchaseInvoiceAccountingPanel } from "./PurchaseInvoiceAccountingPanel";
+import { NewSupplierPaymentModal } from "../../sales/NewSupplierPaymentModal";
 import { InvoicePrintView } from "./InvoicePrintView";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import { EntityActivityLog } from "@/components/activity/EntityActivityLog";
+import { PartnerNoteAlert } from "@/components/partners/PartnerNoteAlert";
 import {
   AseelDocumentShell,
   AseelDocumentView,
@@ -88,7 +91,11 @@ import {
 } from "@/utils/invoiceConversionUtils";
 import { useToast } from "@/contexts/ToastContext";
 import { useConfirm } from "@/contexts/ConfirmContext";
+import { usePermissions } from "@/contexts/PermissionsContext";
+import { clientLogger } from "@/services/logger";
+import { invoiceActionPermissions } from "@/utils/viewPermissions";
 import { getPurchaseInvoiceFeeEditorState } from "./purchaseInvoiceFeeEditorState";
+import { formatDateLocalized } from "../../../utils/formatDate";
 
 interface InvoiceFormProps {
   invoice: Partial<Invoice> | null;
@@ -112,9 +119,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 }) => {
   const toast = useToast();
   const confirm = useConfirm();
+  const { can: canPerm } = usePermissions();
   const [formData, setFormData] = useState<Partial<Invoice>>(
     initialInvoice || {}
   );
+  const invoicePermissions = invoiceActionPermissions("purchase", !formData.id, canPerm);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [saving, setSaving] = useState(false);
   // M2: ترحيل/تراجع داخل المحرر — توحيداً مع شاشة المبيعات (شريط أدوات واحد).
@@ -155,6 +164,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
   const [showItemSearch, setShowItemSearch] = useState(false);
+  // T-ONEPAY: نافذة «سند صرف» (نقد + شيكات) المفتوحة من داخل فاتورة الشراء.
+  const [showSupplierVoucher, setShowSupplierVoucher] = useState(false);
   const [activeItemSearchIndex, setActiveItemSearchIndex] = useState<number | null>(null);
   // task18 DEF-B1/B3: إنشاء صنف جديد inline من خلية اسم الصنف (النص المكتوب يُمرَّر مسبقاً)
   const [inlineCreate, setInlineCreate] = useState<{ rowIndex: number; name: string } | null>(null);
@@ -443,6 +454,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   }, [dealInfo, installments, installmentPlanEnabled]);
 
   const handleSave = async () => {
+    if (!invoicePermissions.canSave) {
+      toast("لا تملك صلاحية حفظ هذه الفاتورة.", "error");
+      return;
+    }
     if (!formData.supplierId) {
       toast("الرجاء اختيار المورد", "error");
       return;
@@ -603,6 +618,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       if (onSave) onSave({ id: savedSqlId });
       toast("تم حفظ الفاتورة بنجاح", "success");
       dirtyRef.current = false;
+      return savedSqlId;
     } catch (error) {
       // console suppressed
       const msg =
@@ -616,10 +632,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   /** M2: إعادة تحميل الفاتورة من الخادم بعد ترحيل/تراجع لتحديث الحالة والقيد. */
-  const reloadInvoice = async () => {
-    if (!formData.id) return;
+  const reloadInvoice = async (idOverride?: string | number) => {
+    const targetId = idOverride ?? formData.id;
+    if (!targetId) return;
     try {
-      const loaded = await purchaseInvoiceApi.get(Number(formData.id));
+      const loaded = await purchaseInvoiceApi.get(Number(targetId));
       const mapped = mapPurchaseInvoiceDtoToInvoice(loaded);
       setFormData(mapped);
       setDealInfo(mapped.dealInfo || { createdBy: currentUser.id, createdAt: new Date().toISOString() });
@@ -629,19 +646,26 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   };
 
   // M2: ترحيل الفاتورة من شريط الأدوات (موحَّد مع شاشة المبيعات).
-  const handlePost = async () => {
-    if (!formData.id || posting) return;
+  const handlePost = async (idOverride?: string | number) => {
+    if (!invoicePermissions.canPost) {
+      setAccErr("لا تملك صلاحية ترحيل فاتورة الشراء.");
+      return false;
+    }
+    const targetId = idOverride ?? formData.id;
+    if (!targetId || posting) return false;
     setAccErr(null);
     setAccMsg(null);
     setPosting(true);
     try {
-      const res = await purchaseInvoiceApi.postToAccounting(Number(formData.id));
+      const res = await purchaseInvoiceApi.postToAccounting(Number(targetId));
       setAccMsg(res.message || `تم الترحيل — قيد محاسبي #${res.journal_id}`);
       setViewMode(true);
-      await reloadInvoice();
-      if (onSave) onSave({ id: String(formData.id) });
+      await reloadInvoice(targetId);
+      if (onSave) onSave({ id: String(targetId) });
+      return true;
     } catch (e) {
       setAccErr(e instanceof Error ? e.message : "تعذّر ترحيل الفاتورة");
+      return false;
     } finally {
       setPosting(false);
     }
@@ -684,9 +708,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     const pid = Number(productId);
     if (!pid) return 0;
     try {
-      // التعبئة دائماً بآخر سعر شراء (بغضّ النظر عن استراتيجية الإعدادات) — القائمة
-      // تعرض «أقل» و«آخر» معاً للاطلاع، لكن الحقل يُعبّأ بالأخير.
-      const r = await purchaseInvoiceApi.resolvePrice({ product: pid, strategy: "LAST_PURCHASE" });
+      // التعبئة دائماً بآخر سعر شراء **من مورد الفاتورة** (بغضّ النظر عن استراتيجية
+      // الإعدادات) — القائمة تعرض «أقل شراء» العام و«آخر شراء من المورد» معاً
+      // للاطلاع، لكن الحقل يُعبّأ بالأخير (وبأقل سعر عام إن لم يسبق شراء منه).
+      const r = await purchaseInvoiceApi.resolvePrice({
+        product: pid,
+        strategy: "LAST_PURCHASE",
+        supplier: formData.supplierId || null,
+      });
       return r.unit_price != null ? Number(r.unit_price) || 0 : 0;
     } catch (err) {
       console.error("resolvePrice failed", err);
@@ -1260,14 +1289,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   );
 
   /* task24: خريطة سعر الشراء المقترح (آخر/أقل شراء أو متوسط التكلفة) لكامل
-     الكتالوج — تُجلب دفعة واحدة لعرض السعر داخل خيارات المنتقي بلا نقر. */
+     الكتالوج — تُجلب دفعة واحدة لعرض السعر داخل خيارات المنتقي بلا نقر.
+     تُعاد الجلبة عند تغيّر المورد: «آخر شراء» يُحصر بمورد الفاتورة بينما «أقل
+     شراء» يبقى عاماً لكل الموردين. */
   const [purchasePriceMap, setPurchasePriceMap] = useState<
     Map<number, { price: string; label: string; prices?: any[] }>
   >(new Map());
   useEffect(() => {
     let cancelled = false;
     purchaseInvoiceApi
-      .priceList()
+      .priceList(formData.supplierId || null)
       .then((rows) => {
         if (cancelled) return;
         const m = new Map<number, { price: string; label: string; prices?: any[] }>();
@@ -1280,7 +1311,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       })
       .catch(() => { /* بلا تاريخ شراء — تُعرض الخيارات بلا سعر */ });
     return () => { cancelled = true; };
-  }, []);
+  }, [formData.supplierId]);
 
   /* task13 M5: منتقي مدمج في خلية اسم الصنف (يحل محل المودال كمسار أساسي) */
   const itemOptions = useMemo(
@@ -1409,6 +1440,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           )}
         </div>
       )}
+      {/* ملاحظة عاجلة مستحقة على هذا المورد — تظهر لكل مستخدم قبل إتمام الفاتورة. */}
+      <PartnerNoteAlert partnerId={formData.supplierId || null} className="mb-2" />
       {formData.supplierId && (
         <div
           className="aseel-banner"
@@ -1746,11 +1779,67 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   );
 
   const isPosted = Boolean(formData.isPosted);
-  const canPost = Boolean(formData.id) && !isPosted && !formData.isHistorical;
+  const canPostDocument = Boolean(formData.id) && !isPosted && !formData.isHistorical;
+
+  // T-ONEPAY (مرآة فاتورة البيع): مدخل واحد لدفع المورد — نقد و/أو شيكات في سند
+  // صرف واحد. التوزيع يلزمه فاتورة مرحّلة، فنحفظ ونرحّل ضمن نفس النقرة بتأكيد.
+  const supplierRemaining = Math.max(Number(formData.remainingBalance) || 0, 0);
+  const openSupplierVoucher = async () => {
+    if (!formData.supplierId) {
+      toast("اختر المورد أولاً.", "error");
+      return;
+    }
+    if (isPosted && supplierRemaining <= 0) {
+      toast("الفاتورة مسدَّدة بالكامل — لا متبقٍّ.", "info");
+      return;
+    }
+    if (!isPosted) {
+      if (!formData.id) {
+        toast("احفظ الفاتورة أولاً ثم سجّل سند الصرف.", "error");
+        return;
+      }
+      if (!(await confirm({
+        title: "سند صرف",
+        message:
+          "لتسجيل دفعة (كاملة أو جزئية) تُرحَّل الفاتورة أولاً، ثم يُفتح سند الصرف بالمتبقي. متابعة؟",
+        confirmText: "ترحيل ثم متابعة",
+      }))) return;
+      await handlePost();
+      if (!Boolean(formData.isPosted)) {
+        // handlePost يعرض سبب الفشل في شريط الرسائل — لا نفتح السند على فاتورة غير مرحّلة.
+        const refreshed = await purchaseInvoiceApi.get(Number(formData.id)).catch(() => null);
+        if (!refreshed?.is_posted) return;
+      }
+    }
+    setShowSupplierVoucher(true);
+  };
+
+  const handleSaveAndPost = async () => {
+    clientLogger.info("invoice.save_and_post_requested", {
+      invoiceType: "purchase",
+      existingInvoice: Boolean(formData.id),
+    });
+    const savedId = await handleSave();
+    if (!savedId || !(await handlePost(savedId))) return;
+    clientLogger.info("invoice.save_and_post_completed", {
+      invoiceType: "purchase",
+      invoiceId: savedId,
+    });
+  };
 
   const toolbarActions: AseelToolbarAction[] = [
-    { key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => { handleSave(); dirtyRef.current = false; } : undefined, disabled: saving || isPosted },
-    ...(viewMode && !formData.isHistorical ? [{
+    ...(invoicePermissions.canSave ? [{ key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => { handleSave(); dirtyRef.current = false; } : undefined, disabled: saving || isPosted } as AseelToolbarAction] : []),
+    ...(invoicePermissions.canSaveAndPost ? [{
+      key: "save-and-post",
+      label: saving || posting ? "...حفظ وترحيل" : "حفظ وترحيل",
+      icon: saving || posting ? <Loader2 className="animate-spin" /> : <CheckCircle2 />,
+      onClick: !saving && !posting && !isPosted && !formData.isHistorical
+        ? () => void handleSaveAndPost()
+        : undefined,
+      disabled: saving || posting || isPosted || Boolean(formData.isHistorical),
+      separatorBefore: true,
+    } as AseelToolbarAction] : []),
+    ...(viewMode && !formData.isHistorical && invoicePermissions.canSave ? [{
       key: "edit",
       label: "تحرير",
       icon: <Pencil />,
@@ -1765,15 +1854,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       },
       separatorBefore: true,
     } as AseelToolbarAction] : []),
-    { key: "new", label: "جديدة", icon: <Plus />, onClick: guardedNew, separatorBefore: true },
-    {
+    ...(canPerm("purchase.invoice.create")
+      ? [{ key: "new", label: "جديدة", icon: <Plus />, onClick: guardedNew, separatorBefore: true } as AseelToolbarAction]
+      : []),
+    ...(invoicePermissions.canPost ? [{
       key: "post",
       label: posting ? "...ترحيل" : "ترحيل",
       icon: posting ? <Loader2 className="animate-spin" /> : <Send />,
-      onClick: canPost && !posting ? () => void handlePost() : undefined,
-      disabled: !canPost || posting,
+      onClick: canPostDocument && !posting ? () => void handlePost() : undefined,
+      disabled: !canPostDocument || posting,
       separatorBefore: true,
-    },
+    } as AseelToolbarAction] : []),
     ...(!readOnly && formData.shipment && formData.id && formData.currency === "ILS" ? [{
       key: "recalculate",
       label: recalcBusy ? "..." : "إعادة حساب التكلفة",
@@ -1782,13 +1873,24 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       disabled: recalcBusy || formData.isPosted,
       separatorBefore: true,
     } as AseelToolbarAction] : []),
-    {
+    // T-PERM: «تراجع عن الترحيل» يظهر فقط لمن يملك الصلاحية (الخادم يفرضها أيضاً).
+    ...(canPerm("purchase.invoice.unpost") ? [{
       key: "unpost",
       label: posting ? "...تراجع" : "تراجع عن الترحيل",
       icon: posting ? <Loader2 className="animate-spin" /> : <Undo2 />,
       onClick: isPosted && !posting ? () => void handleUnpost() : undefined,
       disabled: !isPosted || posting,
-    },
+    } as AseelToolbarAction] : []),
+    ...(canPerm("purchase.payment.create") && (isPosted || invoicePermissions.canSaveAndPost) ? [{
+      // T-ONEPAY: «سند صرف» كمرآة «سند قبض» في فاتورة البيع — نقد و/أو شيكات.
+      key: "voucher",
+      label: isPosted && supplierRemaining <= 0 ? "مسدَّدة" : "سند صرف",
+      icon: <Banknote />,
+      onClick:
+        !(isPosted && supplierRemaining <= 0) ? () => void openSupplierVoucher() : undefined,
+      disabled: isPosted && supplierRemaining <= 0,
+      separatorBefore: true,
+    } as AseelToolbarAction] : []),
     { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => setShowPrintView(true), separatorBefore: true },
     { key: "cancel", label: "إلغاء", icon: <X />, onClick: guardedCancel, danger: true, separatorBefore: true },
   ];
@@ -1932,7 +2034,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             <AseelViewTable<NonNullable<Invoice["paymentDetails"]>[number]>
               columns={[
                 { key: "voucher", header: "السند", render: (p) => `${p.source === "supplier_payment" ? "سند صرف" : "دفعة فاتورة"} #${p.id}` },
-                { key: "date", header: "التاريخ", width: "110px", render: (p) => p.paymentDate },
+                { key: "date", header: "التاريخ", width: "110px", render: (p) => formatDateLocalized(p.paymentDate) },
                 { key: "account", header: "الصندوق/البنك", render: (p) => p.cashOrBankAccountName || "—" },
                 { key: "amount", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (p) => `${fmt(p.amount)} ${p.currencyCode}` },
                 { key: "status", header: "الحالة", width: "100px", render: (p) => p.isPosted ? "مرحّل" : "غير مرحّل" },
@@ -2479,6 +2581,27 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           currentUser={currentUser}
           supplier={selectedSupplier}
           onClose={() => setShowPrintView(false)}
+        />
+      )}
+      {/* T-ONEPAY: سند صرف بنقد و/أو شيكات، مربوط بهذه الفاتورة. */}
+      {showSupplierVoucher && formData.id && formData.supplierId && (
+        <NewSupplierPaymentModal
+          initialPartner={{
+            id: Number(formData.supplierId),
+            name: selectedSupplier?.name || selectedSupplier?.tradeName || "",
+          }}
+          lockPartner
+          initialInvoice={{
+            id: Number(formData.id),
+            number: formData.invoiceName || String(formData.id),
+            remaining: supplierRemaining,
+          }}
+          onClose={() => setShowSupplierVoucher(false)}
+          onSaved={async (posted) => {
+            setShowSupplierVoucher(false);
+            setAccMsg(posted ? "تم تسجيل سند الصرف وترحيله، وخُصِم من متبقي الفاتورة." : "حُفظ سند الصرف كمسودة.");
+            await reloadInvoice();
+          }}
         />
       )}
     </div>

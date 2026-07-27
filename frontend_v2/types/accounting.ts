@@ -54,6 +54,8 @@ export interface ChequeDto {
   id: number;
   cheque_number: string;
   bank_name?: string | null;
+  account_number?: string | null;
+  bank_branch?: string | null;
   amount: string;
   due_date?: string | null;
   issue_date?: string | null;

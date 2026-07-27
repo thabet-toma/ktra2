@@ -28,6 +28,30 @@ export interface ProductCostBreakdown {
   average_cost: string;
 }
 
+export interface WarehouseStockItem {
+  product_id: number;
+  sku: string;
+  name: string;
+  quantity: string;
+  avg_cost: string;
+  stock_value: string;
+}
+
+export interface WarehouseStockDetail {
+  warehouse: {
+    id: number;
+    name: string;
+    code?: string;
+    location?: string;
+    is_default?: boolean;
+    is_active?: boolean;
+  };
+  items: WarehouseStockItem[];
+  item_count: number;
+  total_value: string;
+  valuation_method: "moving_average_cost";
+}
+
 const headers = (): HeadersInit => {
   const token = localStorage.getItem("token");
   // task11 R2: الشركة النشطة + الفرع النشط مع كل طلب مخزون
@@ -132,6 +156,12 @@ export const inventoryApi = {
       ? `?${new URLSearchParams(params)}`
       : "";
     return fetch(`${INV}/warehouses/${q}`, { headers: headers() }).then(asList);
+  },
+
+  getWarehouseStock: async (id: number): Promise<WarehouseStockDetail> => {
+    const res = await fetch(`${INV}/warehouses/${id}/stock/`, { headers: headers() });
+    await handle(res, "getWarehouseStock");
+    return res.json();
   },
 
   createWarehouse: async (body: Record<string, unknown>) => {

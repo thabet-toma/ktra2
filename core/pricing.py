@@ -123,10 +123,15 @@ def resolve_purchase_price(
     tenant_id: int,
     product_id: int,
     strategy: str | None = None,
+    supplier_id: int | None = None,
     target_currency_id: int | None = None,
     target_exchange_rate: Decimal | str | float = Decimal("1"),
 ) -> dict:
     """Resolve a purchase unit price for a product per the active strategy.
+
+    `supplier_id` (اختياري): «آخر شراء» يُحصر بذلك المورد وحده — أما «أقل شراء»
+    فيبقى عاماً عبر كل الموردين. إن لم يسبق الشراء من هذا المورد يُرجَع أقل سعر
+    عام (مطابقةً لما تعرضه `purchase_price_list`).
 
     Fallback chain: posted-purchase history (per strategy) → product standard
     cost (`avg_cost`, base currency) → blank.
@@ -144,24 +149,19 @@ def resolve_purchase_price(
     ).select_related("invoice", "invoice__currency", "line_currency")
 
     chosen = None
+    strategy_used = strategy
     if strategy == PriceStrategy.LOWEST_PURCHASE:
-        # Compare on base currency so multi-currency history is fair (A2: all-time).
-        best_base: Decimal | None = None
-        for item in qs:
-            unit = _dec(item.unit_price)
-            if unit <= 0:
-                continue
-            src_rate = _src_purchase_rate(item)
-            base = unit * (src_rate if src_rate > 0 else Decimal("1"))
-            if best_base is None or base < best_base:
-                best_base = base
-                chosen = item
+        chosen = _lowest_purchase_item(qs)
     else:  # LAST_PURCHASE — most recent posted purchase invoice
-        chosen = (
-            qs.filter(unit_price__gt=0)
-            .order_by("-invoice__invoice_date", "-invoice_id", "-id")
-            .first()
-        )
+        last_qs = qs.filter(unit_price__gt=0)
+        if supplier_id:
+            last_qs = last_qs.filter(invoice__partner_id=supplier_id)
+        chosen = last_qs.order_by("-invoice__invoice_date", "-invoice_id", "-id").first()
+        if chosen is None and supplier_id:
+            # لم يسبق الشراء من هذا المورد → أقل سعر عام (كل الموردين).
+            chosen = _lowest_purchase_item(qs)
+            if chosen is not None:
+                strategy_used = PriceStrategy.LOWEST_PURCHASE
 
     if chosen is not None:
         src_rate = _src_purchase_rate(chosen)
@@ -171,7 +171,7 @@ def resolve_purchase_price(
         result = _resolved(
             price,
             strategy_requested=strategy,
-            strategy_used=strategy,
+            strategy_used=strategy_used,
             source={
                 "document_type": "PURCHASE_INVOICE",
                 "document_id": chosen.invoice_id,
@@ -182,8 +182,9 @@ def resolve_purchase_price(
             },
         )
         logger.info(
-            "price_resolve purchase tenant=%s product=%s strategy=%s -> %s (src_invoice=%s)",
-            tenant_id, product_id, strategy, result["unit_price"], chosen.invoice_id,
+            "price_resolve purchase tenant=%s product=%s strategy=%s supplier=%s used=%s -> %s (src_invoice=%s)",
+            tenant_id, product_id, strategy, supplier_id, strategy_used,
+            result["unit_price"], chosen.invoice_id,
         )
         return result
 
@@ -212,13 +213,18 @@ def resolve_purchase_price(
     return _blank(strategy, reason="no_history")
 
 
-def purchase_price_list(*, tenant_id: int, strategy: str | None = None) -> dict[int, dict]:
+def purchase_price_list(
+    *, tenant_id: int, strategy: str | None = None, supplier_id: int | None = None,
+) -> dict[int, dict]:
     """task24: سعر الشراء المقترح لكل المنتجات دفعة واحدة (لعرضه داخل خيارات
     منتقي الأصناف في فاتورة الشراء بلا نقر).
 
     يُرجع {product_id: {"unit_price", "source_type", "source_label", "prices"}}.
     `unit_price` هو **آخر** سعر شراء (وهو ما تُعبَّأ به الخلية)، و`prices` تعرض
     «آخر شراء» و«أقل شراء» معاً دائماً عند وجود تاريخ (بصرف النظر عن الاستراتيجية).
+    `supplier_id` (اختياري): «آخر شراء» يُحصر بذلك المورد وحده بوسم «آخر شراء من
+    المورد»، بينما «أقل شراء» يبقى عاماً عبر كل الموردين؛ وإن لم يسبق الشراء من
+    هذا المورد تُعبَّأ الخلية بأقل سعر عام.
     السعر أحادي العملة كما سُجِّل — تحويل العملة لكل سطر يبقى في `resolve_purchase_price`.
     السلسلة: تاريخ الشراء المرحَّل ← متوسط تكلفة المنتج ← لا شيء. (`strategy` يبقى
     للتوافق مع نداء الـ endpoint ولا يؤثّر على القيمة الأساسية هنا.)
@@ -243,14 +249,16 @@ def purchase_price_list(*, tenant_id: int, strategy: str | None = None) -> dict[
             "lowest": None,
         })
         
-        if cur["last"] is None:
+        if cur["last"] is None and (
+            not supplier_id or item.invoice.partner_id == supplier_id
+        ):
             cur["last"] = {
                 "unit_price": str(unit.quantize(_UNIT_Q)),
                 "source_type": "PURCHASE_INVOICE",
-                "source_label": "آخر شراء",
+                "source_label": "آخر شراء من المورد" if supplier_id else "آخر شراء",
                 "document_id": item.invoice_id,
             }
-            
+
         if cur["lowest"] is None or unit < _dec(cur["lowest"]["unit_price"]):
             cur["lowest"] = {
                 "unit_price": str(unit.quantize(_UNIT_Q)),
@@ -283,7 +291,12 @@ def purchase_price_list(*, tenant_id: int, strategy: str | None = None) -> dict[
         # القائمة تعرض «آخر شراء» و«أقل شراء» معاً دائماً عند وجود تاريخ شراء (بصرف
         # النظر عن الاستراتيجية) ليطّلع المستخدم على الاثنين؛ القيمة الأساسية
         # (unit_price) هي آخر سعر — وهي ما تُعبَّأ به الخلية عند الاختيار.
-        if data["lowest"] and data["lowest"] is not data["last"]:
+        # لا تكرار: إن كان «أقل شراء» هو نفسه سطر «آخر شراء» تُعرض رقاقة واحدة.
+        if data["lowest"] and not (
+            data["last"]
+            and data["last"]["document_id"] == data["lowest"]["document_id"]
+            and data["last"]["unit_price"] == data["lowest"]["unit_price"]
+        ):
             prices.append(data["lowest"])
 
         if prices:
@@ -295,10 +308,27 @@ def purchase_price_list(*, tenant_id: int, strategy: str | None = None) -> dict[
             }
 
     logger.info(
-        "price_list purchase tenant=%s -> %s products",
-        tenant_id, len(final_result),
+        "price_list purchase tenant=%s supplier=%s -> %s products",
+        tenant_id, supplier_id, len(final_result),
     )
     return final_result
+
+
+def _lowest_purchase_item(qs):
+    """أقل سعر شراء عبر **كل** الموردين. تُقارَن الأسعار بعملة الأساس ليكون
+    التاريخ متعدّد العملات عادلاً (A2: كل الفترات)."""
+    best_base: Decimal | None = None
+    chosen = None
+    for item in qs:
+        unit = _dec(item.unit_price)
+        if unit <= 0:
+            continue
+        src_rate = _src_purchase_rate(item)
+        base = unit * (src_rate if src_rate > 0 else Decimal("1"))
+        if best_base is None or base < best_base:
+            best_base = base
+            chosen = item
+    return chosen
 
 
 def _src_purchase_rate(item) -> Decimal:

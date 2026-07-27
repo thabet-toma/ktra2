@@ -21,6 +21,7 @@ import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { shipmentsService } from "@/services/shipmentsService";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { captureScrollPosition, restoreScrollPosition as applyScrollPosition, type ScrollPositionSnapshot } from "@/utils/scrollPosition";
+import { formatDateLocalized } from "../../utils/formatDate";
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => formatMoney(v, "—");
 
@@ -2246,7 +2247,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           <tbody>
             {clearancePayments.map((p) => (
               <tr key={p.id}>
-                <td style={{ padding: "2px 4px" }}>{p.payment_date || "—"}</td>
+                <td style={{ padding: "2px 4px" }}>{formatDateLocalized(p.payment_date) || "—"}</td>
                 <td style={{ padding: "2px 4px" }}>{p.payment_purpose || "—"}</td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(p.amount)}</td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.is_posted ? "✓" : "—"}</td>

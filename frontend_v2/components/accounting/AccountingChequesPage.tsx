@@ -9,6 +9,7 @@ import {
 import type { AseelToolbarAction, AseelTab, DenseColumn } from "../aseel";
 import { Plus, Save, X, ArrowRightLeft } from "lucide-react";
 import OfflineGuard from "../offline/OfflineGuard";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 const CHEQUE_STATUSES = [
   { v: "Draft", l: "مسودة" },
@@ -34,6 +35,8 @@ export const AccountingChequesPage: React.FC = () => {
   const [form, setForm] = useState({
     cheque_number: "",
     bank_name: "",
+    account_number: "",
+    bank_branch: "",
     amount: "",
     due_date: "",
     issue_date: new Date().toISOString().split("T")[0],
@@ -108,6 +111,8 @@ export const AccountingChequesPage: React.FC = () => {
       await accountingApi.createCheque({
         cheque_number: form.cheque_number.trim(),
         bank_name: form.bank_name || null,
+        account_number: form.account_number || null,
+        bank_branch: form.bank_branch || null,
         amount: form.amount || "0",
         due_date: form.due_date || null,
         issue_date: form.issue_date || null,
@@ -122,6 +127,8 @@ export const AccountingChequesPage: React.FC = () => {
       setForm({
         cheque_number: "",
         bank_name: "",
+        account_number: "",
+        bank_branch: "",
         amount: "",
         due_date: "",
         issue_date: new Date().toISOString().split("T")[0],
@@ -182,11 +189,12 @@ export const AccountingChequesPage: React.FC = () => {
 
   const columns: DenseColumn<ChequeDto>[] = [
     { key: "cheque_number", header: "رقم الشيك", width: "100px", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.cheque_number}</span> },
+    { key: "account_number", header: "رقم الحساب", width: "120px", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.account_number || "—"}</span> },
     { key: "bank_name", header: "البنك", width: "120px", render: (r) => r.bank_name || "—" },
-    { key: "branch_name", header: "الفرع", width: "100px", render: (r) => (r as ChequeDto & { branch_name?: string }).branch_name || "—" },
+    { key: "bank_branch", header: "الفرع", width: "100px", render: (r) => r.bank_branch || "—" },
     { key: "amount", header: "المبلغ", width: "110px", numeric: true, render: (r) => formatMoney(r.amount) },
-    { key: "due_date", header: "تاريخ الاستحقاق", width: "110px", render: (r) => r.due_date || "—" },
-    { key: "issue_date", header: "تاريخ الإصدار", width: "110px", render: (r) => r.issue_date || "—" },
+    { key: "due_date", header: "تاريخ الاستحقاق", width: "110px", render: (r) => formatDateLocalized(r.due_date) || "—" },
+    { key: "issue_date", header: "تاريخ الإصدار", width: "110px", render: (r) => formatDateLocalized(r.issue_date) || "—" },
     { key: "partner", header: "الشريك", width: "140px", render: (r) => getPartnerName(r.partner) },
     {
       key: "account", header: "الحساب", width: "110px",
@@ -325,6 +333,18 @@ export const AccountingChequesPage: React.FC = () => {
                 <label className="aseel-field-label">البنك</label>
                 <input className="aseel-input" value={form.bank_name}
                   onChange={(e) => setForm((f) => ({ ...f, bank_name: e.target.value }))} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                <div className="aseel-field">
+                  <label className="aseel-field-label">رقم الحساب</label>
+                  <input className="aseel-input" value={form.account_number}
+                    onChange={(e) => setForm((f) => ({ ...f, account_number: e.target.value }))} />
+                </div>
+                <div className="aseel-field">
+                  <label className="aseel-field-label">فرع البنك</label>
+                  <input className="aseel-input" value={form.bank_branch}
+                    onChange={(e) => setForm((f) => ({ ...f, bank_branch: e.target.value }))} />
+                </div>
               </div>
               <div className="aseel-field">
                 <label className="aseel-field-label">المبلغ</label>

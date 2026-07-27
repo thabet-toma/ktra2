@@ -12,6 +12,7 @@ import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTabl
 import { openInNewTab } from '../../utils/openInNewTab';
 import { productProfilePath } from '../../utils/entityLinks';
 import { formatQuantity, formatMoney } from '../../utils/formatNumber';
+import { formatDateLocalized } from "../../utils/formatDate";
 
 interface GroupMember {
   id: number;
@@ -124,7 +125,7 @@ export const GroupProfilePage: React.FC = () => {
   }, [ids]);
 
   const ledColumns: LedgerColumn<LedgerRow>[] = [
-    { key: 'date', header: 'التاريخ', render: (r) => r.date || '—' },
+    { key: 'date', header: 'التاريخ', render: (r) => formatDateLocalized(r.date) || '—' },
     { key: 'product_name', header: 'البراند', render: (r) => r.product_name || '—' },
     { key: 'movement_type_label', header: 'النوع', render: (r) => ledgerTypeLabel(r) },
     { key: 'party', header: 'الطرف', render: (r) => r.party || '—' },
@@ -150,7 +151,7 @@ export const GroupProfilePage: React.FC = () => {
     },
     { key: 'document_type', header: 'النوع', render: (r) => (r.document_type === 'SALES_INVOICE' ? 'بيع' : 'شراء') },
     { key: 'party', header: 'الطرف', render: (r) => r.party || '—' },
-    { key: 'date', header: 'التاريخ', render: (r) => r.date || '—' },
+    { key: 'date', header: 'التاريخ', render: (r) => formatDateLocalized(r.date) || '—' },
     { key: 'is_posted', header: 'الحالة', align: 'center', render: (r) => (r.is_posted ? 'مرحّلة' : 'مسودة') },
   ];
 

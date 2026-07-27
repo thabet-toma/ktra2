@@ -6,6 +6,7 @@ import { accountingApi, type CashBoxLedgerLink } from '../../services/accounting
 import { CreateCashBoxModal } from './modals/CreateCashBoxModal';
 import { EditCashBoxModal } from './modals/EditCashBoxModal';
 import { FundFxBoxModal } from './modals/FundFxBoxModal';
+import { formatDateValue } from "../../utils/formatDate";
 
 interface CashBoxListProps {
     onSelectCashBox: (cashBox: CashBox) => void;
@@ -134,7 +135,7 @@ export const CashBoxList: React.FC<CashBoxListProps> = ({ onSelectCashBox }) => 
                                 بلا حساب في الشجرة
                             </p>
                         )}
-                        <p className="text-sm text-[var(--color-text-muted)] mb-4">تم الإنشاء: {new Date(box.createdAt).toLocaleDateString('ar-EG')}</p>
+                        <p className="text-sm text-[var(--color-text-muted)] mb-4">تم الإنشاء: {formatDateValue(box.createdAt)}</p>
 
                         <div className="flex justify-between items-end border-t border-[var(--color-border)] pt-4">
                             <div>

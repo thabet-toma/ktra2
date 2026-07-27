@@ -18,7 +18,10 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from core import assistant_views, agent_db_view, dashboard_api, health, media_views, whatsapp_views
+from core import (
+    assistant_views, agent_db_view, dashboard_api, health, media_views,
+    permissions_api, whatsapp_views,
+)
 from core.activity_views import ActivityLogViewSet
 
 _activity_router = DefaultRouter()
@@ -45,6 +48,12 @@ urlpatterns = [
     path('api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>/', whatsapp_views.whatsapp_webhook),
     path('api/agent/query/', agent_db_view.agent_query),
     path('api/dashboard/', dashboard_api.trade_dashboard),
+    # T-PERM: محرّك الصلاحيات (صلاحياتي + مصفوفة الأدوار لكل شركة)
+    path('api/permissions/me/', permissions_api.my_permissions),
+    path('api/permissions/matrix/', permissions_api.permissions_matrix),
+    path('api/permissions/matrix/reset/', permissions_api.reset_permissions_matrix),
+    path('api/permissions/members/', permissions_api.permission_members),
+    path('api/permissions/member/', permissions_api.member_permissions),
     path('api/', include('partners.urls')),
     path('api/accounting/', include('accounting.urls')),
     path('api/inventory/', include('inventory.urls')),

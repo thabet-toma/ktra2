@@ -9,6 +9,7 @@ import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
 import { Search, ChevronRight, ChevronDown, Package, AlertCircle } from "lucide-react";
 import { Spinner } from "../ui";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 export const AccountingLandedCostPage: React.FC = () => {
   const today = new Date();
@@ -83,7 +84,7 @@ export const AccountingLandedCostPage: React.FC = () => {
       ),
     },
     { key: "shipment_number", header: "الشحنة", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.shipment_number}</span> },
-    { key: "arrival_date", header: "الوصول", render: (r) => r.arrival_date || "—" },
+    { key: "arrival_date", header: "الوصول", render: (r) => formatDateLocalized(r.arrival_date) || "—" },
     { key: "status", header: "الحالة", render: (r) => r.status },
     { key: "total_merchandise", header: "البضاعة", numeric: true, render: (r) => fmt(r.total_merchandise) },
     { key: "total_shipping_cost_usd", header: "شحن دولي (USD)", numeric: true, render: (r) => fmt(r.total_shipping_cost_usd) },

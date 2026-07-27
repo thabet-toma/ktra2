@@ -22,6 +22,8 @@ export interface SqlProduct {
   hs_code?: string | null;
   min_stock_level?: number | null;
   quantity_on_hand: number;
+  reserved_quantity?: number | string;
+  available_quantity?: number | string;
   avg_cost: number;
   /** W8: الوارد التراكمي (كل حركات IN) — من StockMovement. */
   purchased_qty?: string | null;

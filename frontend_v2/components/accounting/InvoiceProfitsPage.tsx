@@ -4,6 +4,7 @@ import { formatMoney } from "../../utils/formatNumber";
 import { AseelDocumentShell, AseelReportTable } from "../aseel";
 import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
 import { Search } from "lucide-react";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 /**
  * task18 DEF-C4: تقرير أرباح الفواتير — إيراد/تكلفة/ربح لكل فاتورة بيع مرحَّلة
@@ -62,7 +63,7 @@ export const InvoiceProfitsPage: React.FC = () => {
 
   const columns: ReportColumn<InvoiceProfitRow>[] = [
     { key: "invoice_number", header: "رقم الفاتورة", render: (r) => r.invoice_number },
-    { key: "invoice_date", header: "التاريخ", render: (r) => r.invoice_date || "—" },
+    { key: "invoice_date", header: "التاريخ", render: (r) => formatDateLocalized(r.invoice_date) || "—" },
     { key: "customer_name", header: "العميل", render: (r) => r.customer_name || "—" },
     { key: "revenue", header: "الإيراد", numeric: true, render: (r) => fmt(r.revenue) },
     { key: "cost", header: "التكلفة", numeric: true, render: (r) => fmt(r.cost) },

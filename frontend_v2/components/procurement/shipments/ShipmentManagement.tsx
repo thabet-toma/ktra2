@@ -16,6 +16,7 @@ import { openInNewTab } from '@/utils/openInNewTab';
 import { useConfirm } from '../../../contexts/ConfirmContext';
 import { useToast } from '../../../contexts/ToastContext';
 import { AseelErrorState } from '../../aseel';
+import { formatDateValue } from "../../../utils/formatDate";
 
 interface ShipmentManagementProps {
     currentUser: User;
@@ -50,7 +51,7 @@ const fmtAmt = (n: number | undefined) =>
 
 const fmtDate = (s: string | undefined) => {
     if (!s) return '—';
-    try { return new Date(s).toLocaleDateString('ar'); } catch { return s; }
+    return formatDateValue(s);
 };
 
 export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Supplier, Item } from '../../types';
 import { Building, Phone, ArrowRight, ShoppingCart, X, Mail, MapPin, Hash, Wallet, Globe } from 'lucide-react';
+import { formatDateValue } from "../../utils/formatDate";
 
 interface RelatedSuppliersProps {
   item: Item;
@@ -66,7 +67,7 @@ export const RelatedSuppliers: React.FC<RelatedSuppliersProps> = ({ item, data, 
                    <span className="font-bold aseel-text-ink dark:text-white">{totalQuantity}</span>
                 </td>
                 <td className="px-6 py-4 aseel-text-soft dir-ltr text-right">
-                   {new Date(lastPurchaseDate).toLocaleDateString('en-GB')}
+                   {formatDateValue(lastPurchaseDate)}
                 </td>
               </tr>
             ))}

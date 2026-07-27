@@ -8,11 +8,19 @@ import {
   itemsService,
   suppliersService,
   priceOffersService,
+  type PriceOfferScope,
 } from "../../services/firestoreService";
-import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
+import type { DenseColumn } from "../aseel/AseelDenseTable";
 import { PriceOfferForm } from "./price-offers/PriceOfferForm";
 import { StatusChangeModal } from "./price-offers/StatusChangeModal";
-import { Plus, RefreshCw } from "lucide-react";
+import { CommercialDocumentsList } from "../shared/CommercialDocumentsList";
+import {
+  cancelPurchaseOrder,
+  confirmPurchaseOrder,
+  convertPurchaseOrderToInvoice,
+  convertSupplierQuotationToImportDeal,
+  convertSupplierQuotationToPurchaseOrder,
+} from "../../services/procurementDocumentsApi";
 
 const STATUS_LABELS: Record<string, string> = {
   initial: "مسودة",
@@ -32,19 +40,27 @@ const STATUS_COLORS: Record<string, string> = {
 
 const fmtDate = (d: string | undefined) => {
   if (!d) return "—";
-  try { return new Date(d).toLocaleDateString("ar"); } catch { return d; }
+  return formatDateValue(d);
 };
 
 import { formatMoney } from "@/utils/formatNumber";
+import { formatDateValue } from "../../utils/formatDate";
 const fmtAmt = (n: number | undefined) => formatMoney(n);
 
-export const PriceOfferManagement: React.FC = () => {
+interface Props {
+  scope?: PriceOfferScope;
+}
+
+export const PriceOfferManagement: React.FC<Props> = (props) => {
+  const scope: PriceOfferScope = props.scope ?? "purchase";
   const [viewMode, setViewMode] = useState<"list" | "form">("list");
   const [offers, setOffers] = useState<PriceOffer[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<PriceOfferStatus | "all">("all");
@@ -59,19 +75,47 @@ export const PriceOfferManagement: React.FC = () => {
   const [newStatusTarget, setNewStatusTarget] = useState<PriceOfferStatus | null>(null);
 
   useEffect(() => {
-    const u1 = priceOffersService.subscribeToPriceOffers(setOffers);
-    const u2 = itemsService.subscribeToItems(setItems);
-    const u3 = suppliersService.subscribeToSuppliers(setSuppliers);
-    setLoading(false);
-    return () => { u1(); u2(); u3(); };
-  }, []);
+    setLoading(true);
+    setError(null);
+    let active = true;
+    const pending = new Set(["offers", "items", "suppliers"]);
+    const settle = (key: string) => {
+      pending.delete(key);
+      if (active && pending.size === 0) setLoading(false);
+    };
+    const fail = (key: string, message: string) => (cause: unknown) => {
+      if (active) {
+        setError(cause instanceof Error ? `${message}: ${cause.message}` : message);
+      }
+      settle(key);
+    };
+    const u1 = priceOffersService.subscribeToPriceOffers(
+      (rows) => { if (active) setOffers(rows); settle("offers"); },
+      scope,
+      fail("offers", "تعذّر تحميل العروض"),
+    );
+    const u2 = itemsService.subscribeToItems(
+      (rows) => { if (active) setItems(rows); settle("items"); },
+      fail("items", "تعذّر تحميل الأصناف"),
+    );
+    const u3 = suppliersService.subscribeToSuppliers(
+      (rows) => { if (active) setSuppliers(rows); settle("suppliers"); },
+      fail("suppliers", "تعذّر تحميل الموردين"),
+    );
+    return () => {
+      active = false;
+      u1();
+      u2();
+      u3();
+    };
+  }, [scope, reloadKey]);
 
   const filtered = useMemo(() => {
     const s = search.toLowerCase();
     return offers.filter((o) => {
       if (filterStatus !== "all" && o.status !== filterStatus) return false;
       if (s) {
-        const sup = suppliers.find((x) => x.id === o.supplierId)?.name || "";
+        const sup = suppliers.find((x) => x.id === o.supplierId)?.tradeName || "";
         return (
           sup.toLowerCase().includes(s) ||
           (o.offerNumber || "").toLowerCase().includes(s)
@@ -90,30 +134,52 @@ export const PriceOfferManagement: React.FC = () => {
     setViewMode("form");
   };
 
-  const openEdit = (offer: PriceOffer, readOnly = false) => {
-    setCurrentOffer(offer);
-    setIsReadOnly(readOnly);
-    setViewMode("form");
+  const openEdit = async (offer: PriceOffer, readOnly = false) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const detail = await priceOffersService.getPriceOfferById(offer.id, scope);
+      const resolved = detail || offer;
+      setCurrentOffer(resolved);
+      setIsReadOnly(
+        readOnly
+        || resolved.backendStatus === "converted"
+        || resolved.backendStatus === "confirmed"
+        || resolved.backendStatus === "cancelled"
+        || resolved.backendStatus === "invoiced"
+        || resolved.backendStatus === "closed"
+      );
+      setViewMode("form");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذّر فتح المستند");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSave = async (offerData: Partial<PriceOffer>) => {
     setSaving(true);
     try {
       if (offerData.id) {
-        await priceOffersService.updatePriceOfferInDb(offerData as PriceOffer);
+        const updatedOffer = offerData as PriceOffer;
+        const saved = await priceOffersService.updatePriceOfferInDb(updatedOffer, scope);
+        setOffers((prev) => prev.map((row) => row.id === updatedOffer.id ? saved : row));
       } else {
         const newOffer: PriceOffer = {
           ...(offerData as PriceOffer),
-          id: `offer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          offerNumber: offerData.offerNumber || await priceOffersService.getNextOfferNumber(),
+          id: "",
+          offerNumber: offerData.offerNumber || "",
           createdAt: offerData.createdAt || new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         };
-        await priceOffersService.addPriceOfferToDb(newOffer);
+        const saved = await priceOffersService.addPriceOfferToDb(newOffer, scope);
+        setOffers((prev) => [saved, ...prev]);
       }
+      setError(null);
       setViewMode("list");
-    } catch (e) {
-      // console suppressed
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "فشل حفظ المستند");
+      throw e;
     } finally {
       setSaving(false);
     }
@@ -122,19 +188,33 @@ export const PriceOfferManagement: React.FC = () => {
   const handleStatusChange = async (offerId: string, newStatus: PriceOfferStatus) => {
     const target = offers.find((o) => o.id === offerId);
     if (!target) { setStatusModalOpen(false); return; }
-    await priceOffersService.updatePriceOfferInDb({
+    const saved = await priceOffersService.updatePriceOfferInDb({
       ...target,
       status: newStatus,
       updatedAt: new Date().toISOString(),
-    });
+    }, scope);
+    setOffers((prev) => prev.map((row) => row.id === offerId ? saved : row));
     setStatusModalOpen(false);
+  };
+
+  const runLifecycleAction = async (action: () => Promise<unknown>) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await action();
+      setReloadKey((key) => key + 1);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذّر تنفيذ الإجراء");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const columns: DenseColumn<PriceOffer>[] = [
     { key: "offerNumber", header: "رقم العرض", width: "120px",
       render: (o) => <b>{o.offerNumber || o.id.slice(0, 8)}</b> },
     { key: "supplier", header: "المورد",
-      render: (o) => <>{suppliers.find((s) => s.id === o.supplierId)?.name || "—"}</> },
+      render: (o) => <>{suppliers.find((s) => s.id === o.supplierId)?.tradeName || "—"}</> },
     { key: "date", header: "التاريخ", width: "100px",
       render: (o) => <>{fmtDate(o.createdAt)}</> },
     { key: "items", header: "الأصناف", width: "70px", align: "center",
@@ -148,12 +228,59 @@ export const PriceOfferManagement: React.FC = () => {
         </span>
       )
     },
-    { key: "actions", header: "", width: "60px", align: "center",
+    { key: "actions", header: "إجراءات", width: "250px", align: "center",
       render: (o) => (
-        <button className="aseel-toolbtn" style={{ fontSize: "var(--aseel-fs-sm)", padding: "2px 6px" }}
-          onClick={(e) => { e.stopPropagation(); openEdit(o); }}>
-          تعديل
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-2 text-xs">
+          <button className="aseel-text-accent hover:underline"
+            onClick={(e) => { e.stopPropagation(); void openEdit(o); }}>
+            {o.backendStatus === "converted" ? "عرض" : "تعديل"}
+          </button>
+          {o.id.startsWith("quote-") && o.backendStatus === "accepted" && (
+            <button className="text-green-600 hover:underline" disabled={saving}
+              onClick={(e) => {
+                e.stopPropagation();
+                const id = Number(o.id.replace("quote-", ""));
+                void runLifecycleAction(() => scope === "import"
+                  ? convertSupplierQuotationToImportDeal(id)
+                  : convertSupplierQuotationToPurchaseOrder(id));
+              }}>
+              تحويل إلى طلبية
+            </button>
+          )}
+          {o.id.startsWith("order-") && o.backendStatus === "draft" && (
+            <button className="text-green-600 hover:underline" disabled={saving}
+              onClick={(e) => {
+                e.stopPropagation();
+                void runLifecycleAction(() => confirmPurchaseOrder(
+                  Number(o.id.replace("order-", "")),
+                ));
+              }}>
+              تأكيد
+            </button>
+          )}
+          {o.id.startsWith("order-") && o.backendStatus === "confirmed" && (
+            <>
+              <button className="text-blue-600 hover:underline" disabled={saving}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void runLifecycleAction(() => convertPurchaseOrderToInvoice(
+                    Number(o.id.replace("order-", "")),
+                  ));
+                }}>
+                تحويل لفاتورة
+              </button>
+              <button className="text-amber-600 hover:underline" disabled={saving}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void runLifecycleAction(() => cancelPurchaseOrder(
+                    Number(o.id.replace("order-", "")),
+                  ));
+                }}>
+                إلغاء
+              </button>
+            </>
+          )}
+        </div>
       )
     },
   ];
@@ -164,6 +291,7 @@ export const PriceOfferManagement: React.FC = () => {
         offer={currentOffer}
         items={items}
         suppliers={suppliers}
+        scope={scope}
         isReadOnly={isReadOnly}
         saving={saving}
         onSave={handleSave}
@@ -178,41 +306,31 @@ export const PriceOfferManagement: React.FC = () => {
   }
 
   return (
-    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>
-          عروض الأسعار
-        </strong>
-        <span className="aseel-status-item">الإجمالي: <b>{offers.length}</b></span>
-        <div style={{ flex: 1 }} />
-        <input className="aseel-input" style={{ width: 180 }}
-          placeholder="بحث بالمورد / رقم العرض…"
-          value={search} onChange={(e) => setSearch(e.target.value)} />
-        <select className="aseel-input" style={{ width: 160 }}
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value as PriceOfferStatus | "all")}>
-          <option value="all">كل الحالات</option>
-          {Object.entries(STATUS_LABELS).map(([k, v]) => (
-            <option key={k} value={k}>{v}</option>
-          ))}
-        </select>
-        <button className="aseel-toolbtn" title="تحديث">
-          <RefreshCw className="h-4 w-4" />
-        </button>
-        <button className="aseel-toolbtn" onClick={openNew} title="عرض جديد (Ctrl+Ins)">
-          <Plus className="h-4 w-4" /> عرض جديد
-        </button>
-      </div>
-
-      <AseelDenseTable<PriceOffer>
-        columns={columns}
+    <>
+      <CommercialDocumentsList<PriceOffer>
+        title={scope === "import" ? "عروض وطلبيات الاستيراد" : "عروض وطلبيات الشراء"}
+        state={scope === "import" ? "مستندات الاستيراد" : "مستندات الشراء"}
         rows={filtered}
-        getRowKey={(o) => o.id}
+        columns={columns}
+        getRowKey={(offer) => offer.id}
         loading={loading}
-        emptyHint="لا توجد عروض أسعار"
-        onRowDoubleClick={(o) => openEdit(o)}
+        error={error}
+        emptyHint="لا توجد عروض أو طلبيات"
+        countLabel={`${offers.length} مستند`}
+        searchValue={search}
+        searchPlaceholder="بحث بالمورد / رقم العرض…"
+        onSearchChange={setSearch}
+        statusValue={filterStatus}
+        statusOptions={[
+          { value: "all", label: "كل الحالات" },
+          ...Object.entries(STATUS_LABELS).map(([value, label]) => ({ value, label })),
+        ]}
+        onStatusChange={(value) => setFilterStatus(value as PriceOfferStatus | "all")}
+        onNew={openNew}
+        onReload={() => setReloadKey((key) => key + 1)}
+        newLabel="عرض / طلبية جديدة"
+        onRowDoubleClick={(offer) => void openEdit(offer)}
       />
-
       {statusModalOpen && targetStatusOffer && newStatusTarget && (
         <StatusChangeModal
           offer={targetStatusOffer}
@@ -221,6 +339,6 @@ export const PriceOfferManagement: React.FC = () => {
           onCancel={() => setStatusModalOpen(false)}
         />
       )}
-    </div>
+    </>
   );
 };

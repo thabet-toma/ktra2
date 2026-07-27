@@ -10,6 +10,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from core.access import require_perm, requires_perm
 from core.api_defaults import ApiAuthAndUser
 from partners.models import Partner
 from tenants.models import Tenant, Currency
@@ -122,6 +123,7 @@ class AccountViewSet(viewsets.ModelViewSet):
         )
 
     def perform_create(self, serializer):
+        require_perm(self.request, 'accounting.account.manage')
         tenant = get_tenant(self.request)
         if not tenant:
             raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
@@ -134,6 +136,15 @@ class AccountViewSet(viewsets.ModelViewSet):
             object_id=account.id,
             change_details=f"Account {account.name} created."
         )
+
+    def perform_update(self, serializer):
+        require_perm(self.request, 'accounting.account.manage')
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        require_perm(self.request, 'accounting.account.manage')
+        instance.delete()
+
 
 class CostCenterViewSet(viewsets.ModelViewSet):
     authentication_classes = ApiAuthAndUser["authentication_classes"]
@@ -312,6 +323,7 @@ class JournalViewSet(viewsets.ModelViewSet):
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], url_path='post')
+    @requires_perm('accounting.journal.post')
     def post_entry(self, request, pk=None):
         try:
             post_journal_entry(pk, user=request.user)
@@ -325,6 +337,7 @@ class JournalViewSet(viewsets.ModelViewSet):
             return Response({'error': 'حدث خطأ غير متوقع أثناء ترحيل القيد.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     @action(detail=True, methods=['post'], url_path='reverse')
+    @requires_perm('accounting.journal.unpost')
     def reverse_entry(self, request, pk=None):
         """
         قيد عكسي بنفس المبالغ مع تبديل مدين/دائن لكل سطر.
@@ -401,6 +414,7 @@ class JournalViewSet(viewsets.ModelViewSet):
             return Response({'error': 'حدث خطأ غير متوقع أثناء عكس القيد.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def update(self, request, *args, **kwargs):
+        require_perm(request, 'accounting.journal.create')
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
 
@@ -445,6 +459,7 @@ class JournalViewSet(viewsets.ModelViewSet):
             )
 
     def create(self, request, *args, **kwargs):
+        require_perm(request, 'accounting.journal.create')
         tenant = get_tenant(self.request)
         if not tenant:
             return Response({"error": "لا يوجد شركة محددة لهذا الطلب."}, status=status.HTTP_400_BAD_REQUEST)
@@ -1033,6 +1048,7 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
         })
 
     @action(detail=True, methods=["post"], url_path="fund-capital")
+    @requires_perm("finance.cashbox.manage")
     def fund_capital(self, request, pk=None):
         """إيداع عملة أجنبية من رأس المال — ينشئ طبقة FIFO + قيد."""
         from django.core.exceptions import ValidationError as DjangoValidationError
@@ -1049,6 +1065,7 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="transfer-from-ils")
+    @requires_perm("finance.cashbox.manage")
     def transfer_from_ils(self, request, pk=None):
         """تحويل من صندوق الشيقل لصندوق العملة الأجنبية بسعر صرف — ينشئ طبقة FIFO + قيد."""
         from django.core.exceptions import ValidationError as DjangoValidationError
@@ -1069,6 +1086,7 @@ class CashBoxLedgerViewSet(viewsets.ModelViewSet):
             status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["post"], url_path="deposit-journal")
+    @requires_perm("finance.cashbox.manage")
     def deposit_journal(self, request):
         """
         إيداع نقد في صندوق مربوط بـ GL: مدين حساب الصندوق | دائن رأس المال/مساهمات.
@@ -1416,6 +1434,7 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
         serializer.save(tenant=tenant)
 
     @action(detail=False, methods=['post'], url_path='create-year')
+    @requires_perm('accounting.period.manage')
     def create_year(self, request):
         year = request.data.get('year')
         if not year:
@@ -1431,6 +1450,7 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
         return Response(FiscalPeriodSerializer(period).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=['post'], url_path='close')
+    @requires_perm('accounting.period.manage')
     def close_period(self, request, pk=None):
         period = self.get_object()
         if period.is_closed:
@@ -1459,6 +1479,7 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
         return Response(resp)
 
     @action(detail=True, methods=['post'], url_path='reopen')
+    @requires_perm('accounting.period.manage')
     def reopen_period(self, request, pk=None):
         period = self.get_object()
         if not period.is_closed:
@@ -1477,6 +1498,7 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
         return Response(FiscalPeriodSerializer(period).data)
 
     @action(detail=False, methods=['post'], url_path='year-end-close')
+    @requires_perm('accounting.period.manage')
     def year_end_close_action(self, request):
         """إغلاق سنوي: ترحيل صافي P&L إلى أرباح محتجزة."""
         tenant = get_tenant(request)

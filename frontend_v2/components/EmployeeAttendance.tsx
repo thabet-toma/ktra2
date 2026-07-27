@@ -4,6 +4,7 @@ import { User, AttendanceSession } from '../types';
 import { attendanceService } from '../services/attendanceService';
 import { formatDistanceToNow } from 'date-fns';
 import { ar } from 'date-fns/locale';
+import { formatDateValue } from "../utils/formatDate";
 
 interface EmployeeAttendanceProps {
   currentUser: User;
@@ -170,7 +171,7 @@ export const EmployeeAttendance: React.FC<EmployeeAttendanceProps> = ({ currentU
           <div>
             <span className="font-semibold text-[var(--color-text-muted)]">تاريخ الجلسة:</span>
             <span className="mr-2 text-[var(--color-text)]">
-              {new Date(activeSession.startTime).toLocaleDateString('ar-EG')}
+              {formatDateValue(activeSession.startTime)}
             </span>
           </div>
           <div>

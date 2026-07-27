@@ -8,6 +8,7 @@ import {
 } from "../aseel";
 import type { AseelToolbarAction, AseelTab, ReportColumn } from "../aseel";
 import { Search } from "lucide-react";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 export const AccountingVatReportPage: React.FC = () => {
   const today = new Date();
@@ -58,7 +59,7 @@ export const AccountingVatReportPage: React.FC = () => {
     : allLines.filter((l) => l.vat_type === vatType);
 
   const columns: ReportColumn<VatReportLine & { vat_type: string }>[] = [
-    { key: "date", header: "التاريخ", render: (r) => r.date || "—" },
+    { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) || "—" },
     {
       key: "vat_type", header: "نوع",
       render: (r) => (

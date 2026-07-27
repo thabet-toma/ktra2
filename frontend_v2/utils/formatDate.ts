@@ -14,6 +14,28 @@ export function formatDateLocalized(iso: string | null | undefined): string {
   return `${d}/${mo}/${y}`;
 }
 
+/**
+ * أي قيمة تاريخ (ISO أو Date أو رقم زمني) بصيغة الموقع dd/MM/yyyy.
+ *
+ * تخدم المواضع التي كانت تستدعي `new Date(x).toLocaleDateString(...)` بلغات
+ * مختلفة (ar-EG / ar-SA / en-GB / ar) فتباينت الصيغة بين الشاشات. تقبل ما لا
+ * يقبله {@link formatDateLocalized} من أشكال (بيانات Firestore القديمة تحفظ
+ * التاريخ كـ Date أو رقم)، وتُعيد القيمة كما هي إن تعذّر تفسيرها.
+ */
+export function formatDateValue(
+  value: string | number | Date | null | undefined,
+): string {
+  if (value == null || value === "") return "";
+  if (typeof value === "string") {
+    const iso = formatDateLocalized(value);
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(iso)) return iso;
+  }
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return typeof value === "string" ? value : "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+}
+
 /** التاريخ الحالي بصيغة ISO المحلية (YYYY-MM-DD) — لا UTC (يتجنّب انزياح اليوم). */
 export function todayIso(): string {
   const now = new Date();

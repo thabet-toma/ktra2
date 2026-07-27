@@ -1,19 +1,27 @@
 /**
  * NewSupplierPaymentModal — «سند صرف» قابل لإعادة الاستخدام.
  *
- * مرآة {@link NewPaymentModal} (سند القبض للعميل): نموذج مشترك يُستهلك في صفحة
- * سندات صرف الموردين وفي بطاقة الشريك (كبسة سريعة على المورد). يحمّل حساباته
- * وعملاته ومورّديه ذاتياً؛ عند تثبيت المورد (`lockPartner`) يُعرَض اسمه فقط.
+ * توأم {@link NewPaymentModal} (سند القبض للعميل): الاثنان يُبنيان من نفس القطع
+ * المشتركة في {@link PaymentVoucherParts} (غلاف النافذة + حقول الدفع + شبكة
+ * الشيكات) فيخرجان بتصميم واحد. يحمّل حساباته وعملاته ومورّديه ذاتياً؛ عند تثبيت
+ * المورد (`lockPartner`) يُعرَض اسمه فقط.
  *
- * القيد المحاسبي: Dr ذمم المورد / Cr الصندوق/البنك — عبر
- * `purchaseInvoiceApi.addSupplierPayment` (نموذج مبسّط بمبلغ إجمالي؛ تفصيل
- * الشيكات/خصم المصدر في الواجهة لا يُحفَظ بعد، كما في الصفحة الأصلية).
+ * القيد المحاسبي: Dr ذمم المورد (المجموع) = Cr الصندوق/البنك (الجزء النقدي)
+ * + Cr «شيكات برسم الدفع» (جزء الشيكات) — الشيك الصادر التزام حتى يُصرف لا
+ * نقدٌ خرج من الصندوق. (خصم المصدر في الواجهة لا يُحفَظ بعد.)
  */
 import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
-import { formatMoney, formatNumber } from "@/utils/formatNumber";
-import { Plus, Save, X, Trash2 } from "lucide-react";
+import { getSalesSettings } from "../../services/salesApi";
+import { formatNumber } from "@/utils/formatNumber";
+import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
+import {
+  ChequeGrid,
+  PaymentFinanceFields,
+  PaymentVoucherModal,
+  type ChequeLine,
+} from "./PaymentVoucherParts";
 
 export type SupplierPaymentPartner = { id: number; name: string };
 /** صف الشريك كما يعيده lookup (يحمل النوع) — نفلتره على الموردين فقط. */
@@ -24,33 +32,22 @@ const isSupplierRow = (p: PartnerRow) =>
   String(p.partner_type || "").toLowerCase() === "supplier";
 type Currency = { CurrencyID: number; Code: string };
 
-interface ChequeLine {
-  cheque_number: string;
-  payee_name: string;
-  due_date: string;
-  amount: string;
-  bank_name: string;
-  branch: string;
-}
-
-const newChequeLine = (): ChequeLine => ({
-  cheque_number: "", payee_name: "", due_date: "", amount: "", bank_name: "", branch: "",
-});
-
-const fmt = (n: string | number) => formatMoney(n);
-
 interface Props {
   /** المورد المثبّت مسبقاً (من بطاقة الشريك مثلاً). */
   initialPartner?: SupplierPaymentPartner | null;
   /** يمنع تغيير المورد ويعرض اسمه فقط. */
   lockPartner?: boolean;
+  /** T-ONEPAY: فاتورة شراء يُربط بها السند عند الفتح من داخلها (المبلغ = متبقّيها). */
+  initialInvoice?: { id: number; number?: string; remaining: number } | null;
   onClose: () => void;
-  onSaved: () => void;
+  /** `posted` = هل رُحِّل السند فور الحفظ (T-AUTOPOST). */
+  onSaved: (posted: boolean) => void;
 }
 
 export const NewSupplierPaymentModal: React.FC<Props> = ({
   initialPartner,
   lockPartner = false,
+  initialInvoice,
   onClose,
   onSaved,
 }) => {
@@ -62,7 +59,9 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
 
   const [supplierId, setSupplierId] = useState<number | "">(initialPartner?.id ?? "");
   const [paymentDate, setPaymentDate] = useState(today);
-  const [cashAmount, setCashAmount] = useState("");
+  const [cashAmount, setCashAmount] = useState(
+    initialInvoice ? String(initialInvoice.remaining) : "",
+  );
   const [cashAccountId, setCashAccountId] = useState<number | "">("");
   const [currencyId, setCurrencyId] = useState<number | "">("");
   const [exchangeRate, setExchangeRate] = useState("1");
@@ -71,11 +70,12 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
   const [withholdingAmt, setWithholdingAmt] = useState("0");
   const [cheques, setCheques] = useState<ChequeLine[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  // T-AUTOPOST: إعداد الشركة «ترحيل السندات تلقائياً» (الافتراضي مُفعَّل).
+  const [autoPost, setAutoPost] = useState(true);
 
   const totalCheques = cheques.reduce((s, c) => s + (Number(c.amount) || 0), 0);
   const cashNum = Number(cashAmount) || 0;
   const computedTotal = cashNum + totalCheques;
-  const netAfterWh = Math.max(0, computedTotal - (Number(withholdingAmt) || 0));
 
   useEffect(() => {
     const pct = Number(withholdingPct) || 0;
@@ -93,10 +93,14 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
           ? Promise.resolve([initialPartner as PartnerRow])
           : (accountingApi.getPartners() as Promise<PartnerRow[]>),
       ];
-      const [accs, currs, parts] = await Promise.allSettled(tasks);
+      const [accs, currs, parts, settings] = await Promise.allSettled([
+        ...tasks,
+        getSalesSettings(),
+      ] as const);
       if (!alive) return;
       if (accs.status === "fulfilled") setAccounts(accs.value || []);
       if (currs.status === "fulfilled") setCurrencies(currs.value || []);
+      if (settings.status === "fulfilled") setAutoPost(!!settings.value?.auto_post_payments);
       if (parts.status === "fulfilled") {
         // المورد المثبّت مسبقاً يمرّ كما هو؛ وإلا نعرض الموردين فقط (لا العملاء).
         const list = parts.value || [];
@@ -106,7 +110,8 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
     return () => { alive = false; };
   }, [lockPartner, initialPartner]);
 
-  const submit = useCallback(async () => {
+  // T-AUTOPOST: الحفظ يُرحّل مباشرةً حسب إعداد الشركة، والزر الثانوي هو البديل الصريح.
+  const submit = useCallback(async (postNow: boolean) => {
     if (!supplierId || !cashAccountId || computedTotal <= 0) {
       setErr("المورد + الصندوق + مبلغ > 0");
       return;
@@ -114,187 +119,127 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
     setSubmitting(true);
     setErr(null);
     try {
-      await purchaseInvoiceApi.addSupplierPayment({
+      const saved = await purchaseInvoiceApi.addSupplierPayment({
         partner: Number(supplierId),
         payment_date: paymentDate,
         amount: String(computedTotal.toFixed(2)),
         currency: currencyId ? Number(currencyId) : null,
         cash_or_bank_account: Number(cashAccountId),
-        notes: notes || undefined,
+        notes: notes || (initialInvoice ? `سند صرف فاتورة ${initialInvoice.number || initialInvoice.id}` : undefined),
+        ...(initialInvoice ? { purchase_invoice: initialInvoice.id } : {}),
+        // T-ONEPAY: الشيكات جزء من مبلغ السند — تُرسَل ليُدائَن جزؤها على
+        // «شيكات برسم الدفع» لا على الصندوق، وتُنشأ شيكات صادرة حقيقية.
+        ...(cheques.length > 0
+          ? {
+              cheques: cheques.map((c) => ({
+                cheque_number: c.cheque_number,
+                amount: c.amount,
+                bank_name: c.bank_name || "",
+                account_number: c.account_number || "",
+                bank_branch: c.branch || "",
+                payee_name: c.payee_name || "",
+                due_date: c.due_date || null,
+                issue_date: c.issue_date || null,
+              })),
+            }
+          : {}),
+        auto_post: postNow,
       });
-      onSaved();
+      // فشل الترحيل التلقائي لا يُضيع السند — يبقى مسودة ونُظهر السبب.
+      if (saved?.auto_post_error) {
+        setErr(`حُفظ السند كمسودة — تعذّر الترحيل: ${saved.auto_post_error}`);
+        setSubmitting(false);
+        return;
+      }
+      onSaved(postNow);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل حفظ سند الصرف");
     } finally {
       setSubmitting(false);
     }
-  }, [supplierId, cashAccountId, computedTotal, paymentDate, currencyId, notes, onSaved]);
+  }, [supplierId, cashAccountId, computedTotal, paymentDate, currencyId, notes, cheques, initialInvoice, onSaved]);
 
   return (
-    <div
-      className="fixed inset-0 z-[60] bg-black/40"
-      style={{ display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    <PaymentVoucherModal
+      title="سند صرف جديد"
+      error={err}
+      submitting={submitting}
+      submitLabel={autoPost ? "حفظ وترحيل" : "حفظ"}
+      secondaryLabel={autoPost ? "حفظ كمسودة" : "حفظ وترحيل"}
+      onSecondary={() => void submit(!autoPost)}
+      onClose={onClose}
+      onSubmit={() => void submit(autoPost)}
     >
-      <div
-        dir="rtl"
-        style={{
-          background: "var(--aseel-surface, #fff)",
-          border: "1px solid var(--aseel-border, #c8b99a)",
-          borderRadius: "var(--aseel-radius, 6px)",
-          width: "100%", maxWidth: "780px", maxHeight: "90vh", overflow: "auto", padding: "16px",
-        }}
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", borderBottom: "1px solid var(--aseel-border)", paddingBottom: "8px" }}>
-          <h3 style={{ fontWeight: 600, fontSize: "14px" }}>سند صرف جديد</h3>
-          <button type="button" className="aseel-toolbtn" onClick={onClose}>
-            <X className="w-3 h-3" />
-          </button>
-        </div>
-
-        {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
-          <label className="aseel-field" style={{ gridColumn: "span 2" }}>
-            <span className="aseel-field-label">المورد *</span>
-            {lockPartner && initialPartner ? (
-              <input className="aseel-input" value={initialPartner.name} readOnly style={{ background: "var(--aseel-surface-2)" }} />
-            ) : (
-              <select className="aseel-input" value={supplierId} onChange={(e) => setSupplierId(e.target.value ? Number(e.target.value) : "")}>
-                <option value="">— اختر —</option>
-                {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            )}
-          </label>
-          <label className="aseel-field">
-            <span className="aseel-field-label">التاريخ</span>
-            <input type="date" className="aseel-input" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
-          </label>
-
-          <label className="aseel-field">
-            <span className="aseel-field-label">الصندوق / البنك *</span>
-            <select className="aseel-input" value={cashAccountId} onChange={(e) => setCashAccountId(e.target.value ? Number(e.target.value) : "")}>
-              <option value="">— اختر —</option>
-              {accounts.filter((a) => (a.account_type === "Asset") && /^110|صندوق|بنك|cash|bank/i.test(`${a.code} ${a.name}`)).map((a) => (
-                <option key={a.id} value={a.id}>{a.code} {a.name}</option>
-              ))}
-            </select>
-          </label>
-          <label className="aseel-field">
-            <span className="aseel-field-label">العملة</span>
-            <select className="aseel-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value ? Number(e.target.value) : "")}>
-              <option value="">—</option>
-              {currencies.map((c) => <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>)}
-            </select>
-          </label>
-          <label className="aseel-field">
-            <span className="aseel-field-label">سعر الصرف</span>
-            <input type="number" step="0.000001" className="aseel-input aseel-num" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
-          </label>
-        </div>
-
-        {/* الحقول المالية */}
-        <div style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.3)", borderRadius: "4px", padding: "8px", marginTop: "12px" }}>
-          <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--aseel-warn, #b06800)", marginBottom: "6px" }}>حقول الدفع</div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
-            <label className="aseel-field">
-              <span className="aseel-field-label">نقدا</span>
-              <input type="number" step="0.01" className="aseel-input aseel-num" value={cashAmount} onChange={(e) => setCashAmount(e.target.value)} />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">مجموع الشيكات (auto)</span>
-              <input type="text" readOnly className="aseel-input aseel-num" value={fmt(totalCheques)} style={{ background: "var(--aseel-surface-2)" }} />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">المجموع</span>
-              <input type="text" readOnly className="aseel-input aseel-num" value={fmt(computedTotal)} style={{ background: "var(--aseel-surface-2)", fontWeight: 700 }} />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">نسبة خصم المصدر %</span>
-              <input type="number" step="0.01" className="aseel-input aseel-num" value={withholdingPct} onChange={(e) => setWithholdingPct(e.target.value)} />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">مبلغ خصم المصدر</span>
-              <input type="number" step="0.01" className="aseel-input aseel-num" value={withholdingAmt} onChange={(e) => {
-                setWithholdingAmt(e.target.value);
-                if (computedTotal > 0) setWithholdingPct(formatNumber((Number(e.target.value) || 0) / computedTotal * 100, { maxDecimals: 2 }));
-              }} />
-            </label>
-            <label className="aseel-field">
-              <span className="aseel-field-label">صافي المستحق</span>
-              <input type="text" readOnly className="aseel-input aseel-num" value={fmt(netAfterWh)} style={{ background: "var(--aseel-ok-bg, #e3f6e9)", color: "var(--aseel-ok, #2d7d46)", fontWeight: 700 }} />
-            </label>
-          </div>
-        </div>
-
-        {/* شيكات */}
-        <div style={{ marginTop: "12px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-            <span style={{ fontWeight: 600, fontSize: "12px" }}>شيكات السند</span>
-            <button type="button" className="aseel-toolbtn" onClick={() => setCheques((cs) => [...cs, newChequeLine()])} style={{ fontSize: "11px" }}>
-              <Plus className="w-3 h-3" /> شيك
-            </button>
-          </div>
-          {cheques.length === 0 ? (
-            <div style={{ textAlign: "center", fontSize: "11px", padding: "12px", color: "var(--aseel-ink-soft)", border: "1px dashed var(--aseel-border)", borderRadius: "4px" }}>
-              لا شيكات — اضغط «شيك» للإضافة
-            </div>
+      {/* ملاحظة عاجلة مستحقة على هذا المورد — تظهر قبل إتمام السند. */}
+      <PartnerNoteAlert partnerId={supplierId === "" ? null : supplierId} className="mb-2" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+        <label className="aseel-field" style={{ gridColumn: "span 2" }}>
+          <span className="aseel-field-label">المورد *</span>
+          {lockPartner && initialPartner ? (
+            <input className="aseel-input" value={initialPartner.name} readOnly style={{ background: "var(--aseel-surface-2)" }} />
           ) : (
-            <table style={{ width: "100%", fontSize: "11px" }}>
-              <thead style={{ background: "var(--aseel-surface-2, #f4ede0)" }}>
-                <tr>
-                  <th style={{ padding: "4px" }}>#</th>
-                  <th style={{ padding: "4px" }}>رقم</th>
-                  <th style={{ padding: "4px" }}>المستفيد</th>
-                  <th style={{ padding: "4px" }}>الاستحقاق</th>
-                  <th style={{ padding: "4px" }}>المبلغ</th>
-                  <th style={{ padding: "4px" }}>البنك</th>
-                  <th style={{ padding: "4px" }}>الفرع</th>
-                  <th style={{ width: "30px" }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {cheques.map((c, i) => (
-                  <tr key={i} style={{ borderTop: "1px solid var(--aseel-border)" }}>
-                    <td style={{ padding: "2px", textAlign: "center" }}>{i + 1}</td>
-                    <td style={{ padding: "2px" }}><input className="aseel-input" style={{ fontSize: "11px" }} value={c.cheque_number} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, cheque_number: e.target.value } : x))} /></td>
-                    <td style={{ padding: "2px" }}><input className="aseel-input" style={{ fontSize: "11px" }} value={c.payee_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, payee_name: e.target.value } : x))} /></td>
-                    <td style={{ padding: "2px" }}><input type="date" className="aseel-input" style={{ fontSize: "11px" }} value={c.due_date} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, due_date: e.target.value } : x))} /></td>
-                    <td style={{ padding: "2px" }}><input type="number" step="0.01" className="aseel-input aseel-num" style={{ fontSize: "11px" }} value={c.amount} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, amount: e.target.value } : x))} /></td>
-                    <td style={{ padding: "2px" }}><input className="aseel-input" style={{ fontSize: "11px" }} value={c.bank_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, bank_name: e.target.value } : x))} /></td>
-                    <td style={{ padding: "2px" }}><input className="aseel-input" style={{ fontSize: "11px" }} value={c.branch} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, branch: e.target.value } : x))} /></td>
-                    <td style={{ padding: "2px", textAlign: "center" }}>
-                      <button type="button" onClick={() => setCheques((cs) => cs.filter((_, j) => j !== i))} style={{ color: "var(--aseel-err, #c0392b)" }}>
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <select className="aseel-input" value={supplierId} onChange={(e) => setSupplierId(e.target.value ? Number(e.target.value) : "")}>
+              <option value="">— اختر —</option>
+              {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
           )}
-        </div>
-
-        <label className="aseel-field" style={{ marginTop: "12px", display: "block" }}>
-          <span className="aseel-field-label">ملاحظات</span>
-          <textarea className="aseel-input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        </label>
+        <label className="aseel-field">
+          <span className="aseel-field-label">التاريخ</span>
+          <input type="date" className="aseel-input" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
         </label>
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
-          <button type="button" className="aseel-toolbtn" onClick={onClose}>إلغاء</button>
-          <button
-            type="button"
-            className="aseel-toolbtn"
-            disabled={submitting}
-            onClick={() => void submit()}
-            style={{ background: "var(--aseel-ok, #2d7d46)", color: "#fff" }}
-          >
-            <Save className="w-3 h-3" /> {submitting ? "..." : "حفظ السند"}
-          </button>
-        </div>
+        <label className="aseel-field">
+          <span className="aseel-field-label">الصندوق / البنك *</span>
+          <select className="aseel-input" value={cashAccountId} onChange={(e) => setCashAccountId(e.target.value ? Number(e.target.value) : "")}>
+            <option value="">— اختر —</option>
+            {accounts.filter((a) => (a.account_type === "Asset") && /^110|صندوق|بنك|cash|bank/i.test(`${a.code} ${a.name}`)).map((a) => (
+              <option key={a.id} value={a.id}>{a.code} {a.name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="aseel-field">
+          <span className="aseel-field-label">العملة</span>
+          <select className="aseel-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value ? Number(e.target.value) : "")}>
+            <option value="">—</option>
+            {currencies.map((c) => <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>)}
+          </select>
+        </label>
+        <label className="aseel-field">
+          <span className="aseel-field-label">سعر الصرف</span>
+          <input type="number" step="0.000001" className="aseel-input aseel-num" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
+        </label>
       </div>
-    </div>
+
+      <PaymentFinanceFields
+        cashAmount={cashAmount}
+        onCashAmount={setCashAmount}
+        totalCheques={totalCheques}
+        total={computedTotal}
+        withholdingPct={withholdingPct}
+        onWithholdingPct={setWithholdingPct}
+        withholdingAmt={withholdingAmt}
+        onWithholdingAmt={setWithholdingAmt}
+        netLabel="صافي المستحق"
+      />
+
+      <ChequeGrid
+        cheques={cheques}
+        onChange={setCheques}
+        onError={setErr}
+        newLineDefaults={{
+          payee_name:
+            partners.find((partner) => partner.id === supplierId)?.name
+            || initialPartner?.name
+            || "",
+        }}
+      />
+
+      <label className="aseel-field" style={{ marginTop: "12px", display: "block" }}>
+        <span className="aseel-field-label">ملاحظات</span>
+        <textarea className="aseel-input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </label>
+    </PaymentVoucherModal>
   );
 };
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User } from '../../types';
+import { formatDateValue } from "../../utils/formatDate";
 
 interface EmployeeDetailsModalProps {
     isOpen: boolean;
@@ -82,7 +83,7 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
                             </div>
                             <div>
                                 <span className="block text-[var(--color-text-muted)] mb-1">تاريخ التسجيل</span>
-                                <p className="text-[var(--color-text)] font-medium">{user.createdAt ? new Date(user.createdAt).toLocaleDateString() : '-'}</p>
+                                <p className="text-[var(--color-text)] font-medium">{user.createdAt ? formatDateValue(user.createdAt) : '-'}</p>
                             </div>
                         </div>
                     </div>

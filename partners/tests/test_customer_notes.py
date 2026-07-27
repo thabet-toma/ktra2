@@ -4,6 +4,7 @@
 - POST ينشئ ملاحظة مربوطة بالزبون والشركة مع created_by.
 - القائمة تُفلتَر بـ ?partner ولا تتسرّب بين الشركات.
 - reminders-due يُعيد فقط ملاحظة غير منجزة تاريخ تذكيرها ≤ اليوم.
+- alerts يُعيد «عاجل» غير المنجزة التي حلّ موعدها — لأي طرف (عميل أو مورد).
 """
 from datetime import date, timedelta
 
@@ -27,6 +28,7 @@ class CustomerNotesTest(APITestCase):
         UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant_b, role="manager")
         cls.cust_a = Partner.objects.create(tenant=cls.tenant_a, name="زبون A", partner_type="Customer")
         cls.cust_b = Partner.objects.create(tenant=cls.tenant_b, name="زبون B", partner_type="Customer")
+        cls.supp_a = Partner.objects.create(tenant=cls.tenant_a, name="مورد A", partner_type="Supplier")
 
     def setUp(self):
         self.client.force_authenticate(user=self.user)
@@ -69,3 +71,57 @@ class CustomerNotesTest(APITestCase):
         ids = [r["id"] for r in res.data]
         self.assertEqual(ids, [due.id])  # فقط المستحق غير المنجز
         self.assertEqual(res.data[0]["partner_name"], "زبون A")
+
+    def test_priority_defaults_to_normal_and_round_trips(self):
+        res = self.client.post(
+            "/api/customer-notes/", {"partner": self.cust_a.id, "title": "بلا أولوية"},
+            format="json", HTTP_X_TENANT_ID="1")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(res.data["priority"], "normal")
+        self.assertEqual(res.data["priority_display"], "عادي")
+
+        urgent = self.client.post(
+            "/api/customer-notes/",
+            {"partner": self.cust_a.id, "title": "عاجل جداً", "priority": "urgent"},
+            format="json", HTTP_X_TENANT_ID="1")
+        self.assertEqual(urgent.data["priority_display"], "عاجل")
+
+    def test_alerts_only_urgent_due_and_pending(self):
+        today = date.today()
+        hit = CustomerNote.objects.create(
+            tenant=self.tenant_a, partner=self.cust_a, title="عاجل متأخر",
+            priority="urgent", remind_on=today - timedelta(days=3))
+        CustomerNote.objects.create(  # عاجل لكن موعده لم يحن
+            tenant=self.tenant_a, partner=self.cust_a, title="عاجل قادم",
+            priority="urgent", remind_on=today + timedelta(days=1))
+        CustomerNote.objects.create(  # عاجل ومنجز
+            tenant=self.tenant_a, partner=self.cust_a, title="عاجل منجز",
+            priority="urgent", remind_on=today, is_done=True)
+        CustomerNote.objects.create(  # مستحق لكن أولويته عادية
+            tenant=self.tenant_a, partner=self.cust_a, title="عادي مستحق",
+            priority="normal", remind_on=today)
+
+        res = self.client.get(
+            f"/api/customer-notes/alerts/?partner={self.cust_a.id}", HTTP_X_TENANT_ID="1")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual([r["id"] for r in res.data], [hit.id])
+        self.assertEqual(res.data[0]["priority_display"], "عاجل")
+
+    def test_alerts_work_for_suppliers_too(self):
+        note = CustomerNote.objects.create(
+            tenant=self.tenant_a, partner=self.supp_a, title="لا تشترِ منه قبل التسوية",
+            priority="urgent", remind_on=date.today())
+        res = self.client.get(
+            f"/api/customer-notes/alerts/?partner={self.supp_a.id}", HTTP_X_TENANT_ID="1")
+        self.assertEqual([r["id"] for r in res.data], [note.id])
+
+    def test_alerts_require_partner_and_respect_tenant(self):
+        CustomerNote.objects.create(
+            tenant=self.tenant_b, partner=self.cust_b, title="عاجل B",
+            priority="urgent", remind_on=date.today())
+        self.assertEqual(self.client.get(
+            "/api/customer-notes/alerts/", HTTP_X_TENANT_ID="1").data, [])
+        # الطرف من شركة أخرى ⇒ لا تسرّب حتى بتمرير معرّفه.
+        self.assertEqual(self.client.get(
+            f"/api/customer-notes/alerts/?partner={self.cust_b.id}",
+            HTTP_X_TENANT_ID="1").data, [])

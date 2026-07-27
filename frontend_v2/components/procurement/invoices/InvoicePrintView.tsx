@@ -4,6 +4,7 @@ import { formatTaxPercentLabel } from '../../../utils/sqlMoneyRound';
 import { formatMoney, formatQuantity } from '../../../utils/formatNumber';
 import { useTenantSettings } from '../../../hooks/useTenantSettings';
 import { Printer, X, MapPin, Phone, Mail, FileText, Building2, Truck, Hash, Calendar, DollarSign, CreditCard, Edit, ExternalLink, Box } from 'lucide-react';
+import { formatDateValue } from "../../../utils/formatDate";
 
 interface InvoicePrintViewProps {
     invoice: Invoice;
@@ -29,7 +30,7 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
 
     const formatDate = (dateString?: string) => {
         if (!dateString) return '-';
-        return new Date(dateString).toLocaleDateString('en-GB');
+        return formatDateValue(dateString);
     };
 
     const printLanded = invoice.items.some(

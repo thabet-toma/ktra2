@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.db import transaction
 from rest_framework import serializers
 
+from accounting.models import Cheque
 from inventory.models import Product
 from partners.models import Partner
 from tenants.models import Currency
@@ -15,6 +16,8 @@ from .models import (
     PaymentAllocation,
     SalesInvoice,
     SalesInvoiceLine,
+    SalesOrder,
+    SalesOrderLine,
     SalesQuotation,
     SalesQuotationLine,
     SalesSettings,
@@ -198,6 +201,8 @@ class _AttachedChequeSerializer(serializers.Serializer):
     id = serializers.IntegerField()
     cheque_number = serializers.CharField()
     bank_name = serializers.CharField(allow_blank=True)
+    account_number = serializers.CharField(allow_blank=True, allow_null=True)
+    bank_branch = serializers.CharField(allow_blank=True, allow_null=True)
     amount = serializers.DecimalField(max_digits=18, decimal_places=2)
     due_date = serializers.DateField(allow_null=True)
     issue_date = serializers.DateField(allow_null=True)
@@ -520,24 +525,68 @@ class PaymentAllocationSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "amount_in_invoice_currency", "conversion_rate"]
 
 
+class _PaymentChequeInputSerializer(serializers.Serializer):
+    """شيك داخل سند القبض — مبلغه جزء من مبلغ السند لا إضافة عليه."""
+    cheque_number = serializers.CharField(max_length=50)
+    amount = serializers.DecimalField(max_digits=18, decimal_places=2, min_value=Decimal("0.01"))
+    bank_name = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    account_number = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+    bank_branch = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    due_date = serializers.DateField(required=False, allow_null=True)
+    issue_date = serializers.DateField(required=False, allow_null=True)
+    payee_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
+    notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+
 class CustomerPaymentSerializer(serializers.ModelSerializer):
     allocations = PaymentAllocationSerializer(many=True, required=False)
+    # الشيكات تُكتب مع إنشاء السند وتُقرأ من الشيكات المرتبطة به.
+    cheques = _PaymentChequeInputSerializer(many=True, required=False, write_only=True)
+    attached_cheques = _AttachedChequeSerializer(
+        many=True, read_only=True, source="cheques",
+    )
+    partner_name = serializers.CharField(source="partner.name", read_only=True)
+    allocated_amount = serializers.SerializerMethodField()
+    unallocated_amount = serializers.SerializerMethodField()
 
     def validate(self, attrs):
+        # T-ONACC: التوزيع اختياري وجزئي مسموح — الباقي يُسجَّل على حساب العميل.
+        # الممنوع فقط أن يتجاوز مجموع التوزيعات مبلغ السند.
         if self.instance is None and self.initial_data.get("allocations") is not None:
             data = self.initial_data.get("allocations") or []
             total = sum(Decimal(str(x.get("amount", 0))) for x in data)
-            if total != attrs["amount"]:
+            if total > attrs["amount"]:
                 raise serializers.ValidationError(
-                    {"allocations": "مجموع التوزيعات يجب أن يساوي مبلغ الدفعة."}
+                    {"allocations": "مجموع التوزيعات لا يجوز أن يتجاوز مبلغ الدفعة."}
                 )
+        cheques_total = sum(
+            (Decimal(str(c["amount"])) for c in attrs.get("cheques", [])),
+            Decimal("0"),
+        )
+        if cheques_total > attrs.get("amount", Decimal("0")):
+            raise serializers.ValidationError(
+                {"cheques": "مجموع الشيكات لا يجوز أن يتجاوز مبلغ السند."}
+            )
         return attrs
+
+    def _allocated(self, obj) -> Decimal:
+        # allocations مُحمَّلة مسبقاً (prefetch_related) — لا استعلام لكل صف.
+        return sum(
+            (Decimal(str(a.amount)) for a in obj.allocations.all()), Decimal("0")
+        )
+
+    def get_allocated_amount(self, obj) -> str:
+        return str(self._allocated(obj))
+
+    def get_unallocated_amount(self, obj) -> str:
+        return str(Decimal(str(obj.amount)) - self._allocated(obj))
 
     class Meta:
         model = CustomerPayment
         fields = [
             "id",
             "partner",
+            "partner_name",
             "payment_date",
             "amount",
             "currency",
@@ -547,15 +596,47 @@ class CustomerPaymentSerializer(serializers.ModelSerializer):
             "is_posted",
             "notes",
             "allocations",
+            "cheques",
+            "attached_cheques",
+            "allocated_amount",
+            "unallocated_amount",
             "created_at",
         ]
-        read_only_fields = ["id", "journal", "is_posted", "created_at"]
+        read_only_fields = [
+            "id",
+            "journal",
+            "is_posted",
+            "created_at",
+            "partner_name",
+            "attached_cheques",
+            "allocated_amount",
+            "unallocated_amount",
+        ]
 
     def create(self, validated_data):
         allocs = validated_data.pop("allocations", [])
+        cheques = validated_data.pop("cheques", [])
         pay = CustomerPayment.objects.create(**validated_data)
         for a in allocs:
             PaymentAllocation.objects.create(tenant=pay.tenant, payment=pay, **a)
+        for c in cheques:
+            Cheque.objects.create(
+                tenant=pay.tenant,
+                customer_payment=pay,
+                partner=pay.partner,
+                direction="Incoming",
+                status="Draft",  # يصير «برسم التحصيل» عند ترحيل السند
+                cheque_number=c["cheque_number"].strip(),
+                amount=c["amount"],
+                currency=pay.currency,
+                bank_name=c.get("bank_name") or "",
+                account_number=c.get("account_number") or "",
+                bank_branch=c.get("bank_branch") or "",
+                due_date=c.get("due_date") or None,
+                issue_date=c.get("issue_date") or None,
+                payee_name=c.get("payee_name") or "",
+                notes=c.get("notes") or "",
+            )
         return pay
 
 
@@ -615,9 +696,15 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "vat_input_account_name",
             "prices_include_tax",
             "auto_post_invoices",
+            "auto_post_payments",
             "show_journal_preview",
             "warn_on_duplicate_item",
             "block_loss_invoices",
+            "dormant_customer_days",
+            # T-ORDERS: صلاحية العرض، مدة حجز الطلبية، وإظهار زر الحذف.
+            "quotation_valid_days",
+            "order_reserve_days",
+            "allow_document_delete",
             "default_shipping_origin",
             "default_shipping_destination",
             "updated_at",
@@ -677,6 +764,234 @@ class SalesQuotationLineSerializer(serializers.ModelSerializer):
         return str(obj.product) if obj.product_id else None
 
 
+class SalesOrderLineSerializer(serializers.ModelSerializer):
+    id = serializers.IntegerField(required=False)
+    product_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = SalesOrderLine
+        fields = [
+            "id",
+            "product",
+            "product_name",
+            "quantity",
+            "unit_price",
+            "line_discount",
+            "tax_rate",
+            "line_total",
+        ]
+        read_only_fields = ["line_total"]
+
+    def get_product_name(self, obj):
+        return str(obj.product) if obj.product_id else None
+
+
+class SalesOrderSerializer(serializers.ModelSerializer):
+    """طلبية زبون — نفس عقد عرض السعر مع الحجز والعربون (T-ORDERS)."""
+
+    lines = SalesOrderLineSerializer(many=True)
+    customer_name = serializers.CharField(source="customer.name", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    invoice_number = serializers.CharField(
+        source="invoice.invoice_number", read_only=True, allow_null=True,
+    )
+    quotation_number = serializers.CharField(
+        source="quotation.quotation_number", read_only=True, allow_null=True,
+    )
+    remaining_amount = serializers.SerializerMethodField()
+    customer = serializers.PrimaryKeyRelatedField(queryset=Partner.objects.all())
+    order_number = serializers.CharField(required=False, allow_blank=True)
+    currency = serializers.PrimaryKeyRelatedField(
+        queryset=Currency.objects.all(), required=False, allow_null=True,
+    )
+
+    class Meta:
+        model = SalesOrder
+        fields = [
+            "id",
+            "order_number",
+            "customer",
+            "customer_name",
+            "order_date",
+            "delivery_date",
+            "reserved_until",
+            "status",
+            "status_display",
+            "currency",
+            "exchange_rate",
+            "subtotal",
+            "discount_amount",
+            "tax_amount",
+            "grand_total",
+            "deposit_amount",
+            "remaining_amount",
+            "quotation",
+            "quotation_number",
+            "invoice",
+            "invoice_number",
+            "notes",
+            "cancel_reason",
+            "lines",
+            "created_at",
+            "created_by",
+        ]
+        read_only_fields = [
+            "id",
+            "status",
+            "status_display",
+            "subtotal",
+            "tax_amount",
+            "grand_total",
+            "deposit_amount",
+            "remaining_amount",
+            "reserved_until",
+            "quotation_number",
+            "invoice",
+            "invoice_number",
+            "cancel_reason",
+            "created_at",
+            "created_by",
+        ]
+
+    def get_remaining_amount(self, obj) -> str:
+        return str(
+            (Decimal(str(obj.grand_total or 0)) - Decimal(str(obj.deposit_amount or 0)))
+            .quantize(Decimal("0.01"))
+        )
+
+    def validate(self, attrs):
+        from core.tenant_utils import get_tenant
+
+        request = self.context.get("request")
+        tenant = get_tenant(request) if request is not None else attrs.get("tenant")
+        if tenant is None:
+            raise serializers.ValidationError({"tenant": "لا توجد شركة محددة."})
+
+        customer = attrs.get("customer") or getattr(self.instance, "customer", None)
+        if customer and customer.tenant_id != tenant.TenantID:
+            raise serializers.ValidationError(
+                {"customer": "الزبون المختار لا يتبع الشركة الحالية."}
+            )
+        if customer and customer.partner_type != "Customer":
+            raise serializers.ValidationError({"customer": "يجب اختيار زبون."})
+
+        lines = attrs.get("lines")
+        if self.instance is None and not lines:
+            raise serializers.ValidationError({"lines": "أضف بنداً واحداً على الأقل."})
+        if lines is not None:
+            if self.instance is not None and self.instance.status != SalesOrder.STATUS_DRAFT:
+                raise serializers.ValidationError(
+                    {"lines": "لا يمكن تعديل بنود الطلبية بعد تأكيدها؛ ألغِها وأنشئ طلبية جديدة."}
+                )
+            if not lines:
+                raise serializers.ValidationError({"lines": "أضف بنداً واحداً على الأقل."})
+            for index, line in enumerate(lines, start=1):
+                product = line.get("product")
+                if product and product.tenant_id != tenant.TenantID:
+                    raise serializers.ValidationError({
+                        "lines": f"الصنف في السطر {index} لا يتبع الشركة الحالية."
+                    })
+                quantity = Decimal(str(line.get("quantity", 0) or 0))
+                unit_price = Decimal(str(line.get("unit_price", 0) or 0))
+                discount = Decimal(str(line.get("line_discount", 0) or 0))
+                if quantity <= 0:
+                    raise serializers.ValidationError({
+                        "lines": f"كمية السطر {index} يجب أن تكون أكبر من صفر."
+                    })
+                if unit_price < 0:
+                    raise serializers.ValidationError({
+                        "lines": f"سعر السطر {index} لا يمكن أن يكون سالباً."
+                    })
+                if discount < 0 or discount > quantity * unit_price:
+                    raise serializers.ValidationError({
+                        "lines": f"خصم السطر {index} غير صالح."
+                    })
+        return attrs
+
+    @staticmethod
+    def _prepare_lines(lines_data):
+        subtotal = Decimal("0")
+        tax_amount = Decimal("0")
+        for line in lines_data:
+            quantity = Decimal(str(line.get("quantity", 0)))
+            unit_price = Decimal(str(line.get("unit_price", 0)))
+            discount = Decimal(str(line.get("line_discount", 0)))
+            line["line_total"] = (quantity * unit_price - discount).quantize(Decimal("0.01"))
+            subtotal += line["line_total"]
+            tax_rate = line.get("tax_rate")
+            if tax_rate:
+                tax_amount += (
+                    line["line_total"] * Decimal(str(tax_rate.rate)) / Decimal("100")
+                ).quantize(Decimal("0.01"))
+        return subtotal.quantize(Decimal("0.01")), tax_amount.quantize(Decimal("0.01"))
+
+    @staticmethod
+    def _apply_totals(validated_data, subtotal, tax_amount):
+        validated_data["subtotal"] = subtotal
+        validated_data["tax_amount"] = tax_amount
+        validated_data["grand_total"] = (
+            subtotal
+            - Decimal(str(validated_data.get("discount_amount", 0) or 0))
+            + tax_amount
+        ).quantize(Decimal("0.01"))
+
+    def create(self, validated_data):
+        from .services import next_order_number
+
+        lines_data = validated_data.pop("lines")
+        tenant = validated_data["tenant"]
+        if not validated_data.get("order_number"):
+            validated_data["order_number"] = next_order_number(tenant.TenantID)
+        if not validated_data.get("currency"):
+            base = Currency.objects.filter(IsBaseCurrency=True).first()
+            if not base:
+                raise serializers.ValidationError(
+                    {"currency": "لا توجد عملة أساسية معرّفة. عيّن عملة أساسية أو اختر عملة."}
+                )
+            validated_data["currency"] = base
+        self._apply_totals(validated_data, *self._prepare_lines(lines_data))
+        with transaction.atomic():
+            order = SalesOrder.objects.create(**validated_data)
+            SalesOrderLine.objects.bulk_create([
+                SalesOrderLine(order=order, tenant=tenant, **line)
+                for line in lines_data
+            ])
+        return order
+
+    def update(self, instance, validated_data):
+        lines_data = validated_data.pop("lines", None)
+        tenant = instance.tenant
+        with transaction.atomic():
+            locked = SalesOrder.objects.select_for_update().get(pk=instance.pk)
+            if lines_data is not None:
+                if locked.status != SalesOrder.STATUS_DRAFT:
+                    raise serializers.ValidationError({
+                        "lines": "لا يمكن تعديل بنود الطلبية بعد تأكيدها."
+                    })
+                subtotal, tax_amount = self._prepare_lines(lines_data)
+                effective = {
+                    "discount_amount": validated_data.get(
+                        "discount_amount", locked.discount_amount),
+                }
+                self._apply_totals(effective, subtotal, tax_amount)
+                if effective["grand_total"] < locked.deposit_amount:
+                    raise serializers.ValidationError({
+                        "lines": "لا يمكن خفض إجمالي الطلبية عن العربون المقبوض."
+                    })
+                validated_data.update(effective)
+            for field, value in validated_data.items():
+                setattr(locked, field, value)
+            locked.save()
+            if lines_data is not None:
+                locked.lines.all().delete()
+                SalesOrderLine.objects.bulk_create([
+                    SalesOrderLine(order=locked, tenant=tenant, **line)
+                    for line in lines_data
+                ])
+            instance = locked
+        return instance
+
+
 class SalesQuotationSerializer(serializers.ModelSerializer):
     lines = SalesQuotationLineSerializer(many=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
@@ -727,6 +1042,102 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
             "invoice_number",
         ]
 
+    def validate(self, attrs):
+        from core.tenant_utils import get_tenant
+
+        request = self.context.get("request")
+        tenant = get_tenant(request) if request is not None else attrs.get("tenant")
+        if tenant is None:
+            raise serializers.ValidationError({"tenant": "لا توجد شركة محددة."})
+        customer = attrs.get("customer") or getattr(self.instance, "customer", None)
+        if customer and (
+            customer.tenant_id != tenant.TenantID or customer.partner_type != "Customer"
+        ):
+            raise serializers.ValidationError(
+                {"customer": "يجب اختيار زبون من الشركة الحالية."}
+            )
+        lines = attrs.get("lines")
+        if self.instance is None and not lines:
+            raise serializers.ValidationError({"lines": "أضف بنداً واحداً على الأقل."})
+        if lines is not None:
+            if self.instance is not None and self.instance.status in {
+                SalesQuotation.STATUS_CONVERTED,
+                SalesQuotation.STATUS_CANCELLED,
+                SalesQuotation.STATUS_REJECTED,
+                SalesQuotation.STATUS_EXPIRED,
+            }:
+                raise serializers.ValidationError(
+                    {"lines": "لا يمكن تعديل بنود عرض منتهٍ أو ملغى أو محوّل."}
+                )
+            if not lines:
+                raise serializers.ValidationError({"lines": "أضف بنداً واحداً على الأقل."})
+            for index, line in enumerate(lines, start=1):
+                product = line.get("product")
+                if product and product.tenant_id != tenant.TenantID:
+                    raise serializers.ValidationError({
+                        "lines": f"الصنف في السطر {index} لا يتبع الشركة الحالية."
+                    })
+                tax_rate = line.get("tax_rate")
+                if tax_rate and tax_rate.tenant_id != tenant.TenantID:
+                    raise serializers.ValidationError({
+                        "lines": f"الضريبة في السطر {index} لا تتبع الشركة الحالية."
+                    })
+                quantity = Decimal(str(line.get("quantity", 0) or 0))
+                unit_price = Decimal(str(line.get("unit_price", 0) or 0))
+                discount = Decimal(str(line.get("line_discount", 0) or 0))
+                if quantity <= 0 or unit_price < 0:
+                    raise serializers.ValidationError({
+                        "lines": f"كمية أو سعر السطر {index} غير صالح."
+                    })
+                if discount < 0 or discount > quantity * unit_price:
+                    raise serializers.ValidationError({
+                        "lines": f"خصم السطر {index} غير صالح."
+                    })
+        return attrs
+
+    @staticmethod
+    def _prepare_lines(lines_data):
+        subtotal = Decimal("0")
+        tax_amount = Decimal("0")
+        for line in lines_data:
+            quantity = Decimal(str(line.get("quantity", 0)))
+            unit_price = Decimal(str(line.get("unit_price", 0)))
+            discount = Decimal(str(line.get("line_discount", 0)))
+            line_total = (quantity * unit_price - discount).quantize(Decimal("0.01"))
+            line["line_total"] = line_total
+            subtotal += line_total
+            tax_rate = line.get("tax_rate")
+            if tax_rate:
+                tax_amount += (
+                    line_total * Decimal(str(tax_rate.rate)) / Decimal("100")
+                ).quantize(Decimal("0.01"))
+        return subtotal.quantize(Decimal("0.01")), tax_amount.quantize(Decimal("0.01"))
+
+    @staticmethod
+    def _apply_totals(validated_data, subtotal, tax_amount):
+        validated_data["subtotal"] = subtotal
+        validated_data["tax_amount"] = tax_amount
+        validated_data["grand_total"] = (
+            subtotal
+            + tax_amount
+            - Decimal(str(validated_data.get("discount_amount", 0) or 0))
+        ).quantize(Decimal("0.01"))
+
+    @staticmethod
+    def _sync_customer_prices(quotation, lines_data):
+        from .models import CustomerProductQuote
+
+        for line in lines_data:
+            product = line.get("product")
+            unit_price = Decimal(str(line.get("unit_price", 0) or 0))
+            if product and unit_price > 0:
+                CustomerProductQuote.objects.get_or_create(
+                    tenant=quotation.tenant,
+                    customer=quotation.customer,
+                    product=product,
+                    defaults={"unit_price": unit_price},
+                )
+
     def create(self, validated_data):
         lines_data = validated_data.pop("lines")
         tenant = validated_data["tenant"]
@@ -742,42 +1153,40 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
                     {"currency": "لا توجد عملة أساسية معرّفة. عيّن عملة أساسية أو اختر عملة."}
                 )
             validated_data["currency"] = base
-        subtotal = Decimal("0")
-        for ln in lines_data:
-            qty = Decimal(str(ln.get("quantity", 0)))
-            price = Decimal(str(ln.get("unit_price", 0)))
-            disc = Decimal(str(ln.get("line_discount", 0)))
-            ln_total = (qty * price * (1 - disc / 100)).quantize(Decimal("0.01"))
-            ln["line_total"] = ln_total
-            subtotal += ln_total
-        tax_amount = (subtotal * Decimal("0.17")).quantize(Decimal("0.01"))
-        grand_total = subtotal + tax_amount - Decimal(str(validated_data.get("discount_amount", 0)))
-        validated_data["subtotal"] = subtotal
-        validated_data["tax_amount"] = tax_amount
-        validated_data["grand_total"] = grand_total
-        quotation = SalesQuotation.objects.create(**validated_data)
-        for ln in lines_data:
-            SalesQuotationLine.objects.create(quotation=quotation, tenant=tenant, **ln)
-        # ربط واجهتَي «عرض السعر»: إن لم يكن للمنتج عرض سعر بكرت الزبون نملأه من هذا
-        # العرض (بلا كتابة فوق قيمة موجودة) — فيظهر السعر في خيارات فاتورة المبيعات
-        # وكرت الزبون. تُعيد استخدام نفس مخزن CustomerProductQuote (مصدر واحد، DRY).
-        from .models import CustomerProductQuote
-        for ln in lines_data:
-            prod = ln.get("product")
-            raw = ln.get("unit_price")
-            if not prod or raw in (None, ""):
-                continue
-            try:
-                price_dec = Decimal(str(raw))
-            except (TypeError, ValueError):
-                continue
-            if price_dec <= 0:
-                continue
-            CustomerProductQuote.objects.get_or_create(
-                tenant=tenant, customer=quotation.customer, product=prod,
-                defaults={"unit_price": price_dec},
-            )
+        self._apply_totals(validated_data, *self._prepare_lines(lines_data))
+        with transaction.atomic():
+            quotation = SalesQuotation.objects.create(**validated_data)
+            SalesQuotationLine.objects.bulk_create([
+                SalesQuotationLine(quotation=quotation, tenant=tenant, **line)
+                for line in lines_data
+            ])
+            self._sync_customer_prices(quotation, lines_data)
         return quotation
+
+    def update(self, instance, validated_data):
+        lines_data = validated_data.pop("lines", None)
+        with transaction.atomic():
+            locked = SalesQuotation.objects.select_for_update().get(pk=instance.pk)
+            if lines_data is not None:
+                subtotal, tax_amount = self._prepare_lines(lines_data)
+                effective = {
+                    "discount_amount": validated_data.get(
+                        "discount_amount", locked.discount_amount)
+                }
+                self._apply_totals(effective, subtotal, tax_amount)
+                validated_data.update(effective)
+            for field, value in validated_data.items():
+                setattr(locked, field, value)
+            locked.save()
+            if lines_data is not None:
+                locked.lines.all().delete()
+                SalesQuotationLine.objects.bulk_create([
+                    SalesQuotationLine(
+                        quotation=locked, tenant=locked.tenant, **line)
+                    for line in lines_data
+                ])
+                self._sync_customer_prices(locked, lines_data)
+        return locked
 
 
 class SalesQuotationListSerializer(serializers.ModelSerializer):

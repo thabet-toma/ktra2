@@ -185,6 +185,13 @@ class SalesSettings(models.Model):
         db_column="AutoPostInvoices",
         help_text="ترحيل تلقائي للفواتير بعد الحفظ",
     )
+    # T-AUTOPOST: السندات (قبض العميل + صرف المورد) تُرحَّل فور الحفظ افتراضياً —
+    # لا معنى لمسودة سند دفع (المال انتقل فعلاً). قابل للتعطيل من الإعدادات.
+    auto_post_payments = models.BooleanField(
+        default=True,
+        db_column="AutoPostPayments",
+        help_text="ترحيل تلقائي لسندات القبض والصرف بعد الحفظ",
+    )
     show_journal_preview = models.BooleanField(
         default=True,
         db_column="ShowJournalPreview",
@@ -201,6 +208,31 @@ class SalesSettings(models.Model):
         default=False,
         db_column="BlockLossInvoices",
         help_text="رفض حفظ/ترحيل فاتورة بيع فيها خسارة (سعر البيع أقل من التكلفة)",
+    )
+
+    # T-DORMANT: عتبة «العميل المختفي» — أيام صمت (بلا فاتورة بيع مرحّلة) يُطلق
+    # بعدها إشعار الموقع. 0 = تعطيل التنبيه.
+    dormant_customer_days = models.PositiveIntegerField(
+        default=30,
+        db_column="DormantCustomerDays",
+        help_text="عدد أيام توقّف العميل عن الشراء قبل إطلاق إشعار «عميل مختفٍ» (0 = تعطيل)",
+    )
+
+    # T-ORDERS: صلاحية عرض السعر ومدة حجز الطلبية (بالأيام) — لكل شركة.
+    quotation_valid_days = models.PositiveIntegerField(
+        default=14,
+        db_column="QuotationValidDays",
+        help_text="أيام صلاحية عرض السعر افتراضياً (0 = بلا تاريخ انتهاء)",
+    )
+    order_reserve_days = models.PositiveIntegerField(
+        default=7,
+        db_column="OrderReserveDays",
+        help_text="أيام حجز الكمية للطلبية المؤكَّدة قبل أن تعود متاحة (0 = بلا حجز)",
+    )
+    allow_document_delete = models.BooleanField(
+        default=True,
+        db_column="AllowDocumentDelete",
+        help_text="إظهار «حذف» للعروض والطلبيات (الإلغاء متاح دائماً ولا يحذف)",
     )
 
     default_shipping_origin = models.CharField(
@@ -598,6 +630,14 @@ class CustomerPayment(models.Model):
         related_name="customer_payments",
     )
     is_posted = models.BooleanField(default=False, db_column="IsPosted")
+    # T-ORDERS: عربون طلبية — سند «على الحساب» مربوط بطلبية الزبون.
+    sales_order = models.ForeignKey(
+        "SalesOrder",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="SalesOrderID",
+        related_name="deposits",
+    )
     notes = models.CharField(max_length=500, blank=True, default="", db_column="Notes")
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
 
@@ -651,6 +691,61 @@ class SupplierPayment(models.Model):
 
     def __str__(self):
         return f"SupplierPayment #{self.id} — {self.partner_id} ({self.amount})"
+
+
+class SupplierPaymentAllocation(models.Model):
+    """T-ONACC (المورد): توزيع سند صرف على فواتير شراء — مرآة `PaymentAllocation`.
+
+    سند واحد يُوزَّع بمبالغ جزئية على عدّة فواتير، والباقي يبقى «على الحساب»
+    (رصيد لنا عند المورد). السندات القديمة المرتبطة عبر الحقل المفرد
+    `SupplierPayment.purchase_invoice` تبقى تُحسب بكامل مبلغها على فاتورتها.
+    """
+    id = models.AutoField(primary_key=True, db_column="SupplierPaymentAllocationID")
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        db_column="TenantID",
+        to_field="TenantID",
+    )
+    payment = models.ForeignKey(
+        SupplierPayment,
+        on_delete=models.CASCADE,
+        db_column="PaymentID",
+        related_name="allocations",
+    )
+    invoice = models.ForeignKey(
+        'logistics.PurchaseInvoice',
+        on_delete=models.CASCADE,
+        db_column="PurchaseInvoiceID",
+        related_name="payment_allocations",
+    )
+    amount = models.DecimalField(max_digits=18, decimal_places=2, db_column="Amount")
+    amount_in_invoice_currency = models.DecimalField(
+        max_digits=18,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        db_column="AmountInInvoiceCurrency",
+        help_text="المبلغ محوّلاً لعملة الفاتورة. إذا كانت عملة السند = عملة الفاتورة يساوي amount.",
+    )
+    conversion_rate = models.DecimalField(
+        max_digits=18,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        db_column="ConversionRate",
+        help_text="سعر الصرف المستخدم لتحويل مبلغ السند لعملة الفاتورة",
+    )
+
+    class Meta:
+        db_table = "sales_module_supplier_payment_allocations"
+        managed = True
+        constraints = [
+            models.UniqueConstraint(
+                fields=["payment", "invoice"],
+                name="uniq_supplier_payment_invoice_allocation",
+            ),
+        ]
 
 
 class PaymentAllocation(models.Model):
@@ -711,6 +806,8 @@ class SalesQuotation(models.Model):
     STATUS_CONVERTED = "converted"
     STATUS_EXPIRED = "expired"
     STATUS_REJECTED = "rejected"
+    # T-ORDERS: «ملغى» بديل الحذف — يُبقي المستند وسجلّه.
+    STATUS_CANCELLED = "cancelled"
     STATUS_CHOICES = [
         (STATUS_DRAFT, "مسودة"),
         (STATUS_SENT, "أُرسل"),
@@ -718,6 +815,7 @@ class SalesQuotation(models.Model):
         (STATUS_CONVERTED, "محوّل"),
         (STATUS_EXPIRED, "منتهي الصلاحية"),
         (STATUS_REJECTED, "مرفوض"),
+        (STATUS_CANCELLED, "ملغى"),
     ]
 
     id = models.AutoField(primary_key=True, db_column="SalesQuotationID")
@@ -801,12 +899,17 @@ class SalesQuotation(models.Model):
         allowed = {
             # التحويل المباشر من مسودة مسموح — convert_quotation_to_invoice يقبل
             # المسودة أو المقبول، والواجهة تُظهر «تحويل» على المسودة.
-            self.STATUS_DRAFT: {self.STATUS_SENT, self.STATUS_EXPIRED, self.STATUS_CONVERTED},
-            self.STATUS_SENT: {self.STATUS_ACCEPTED, self.STATUS_REJECTED, self.STATUS_EXPIRED},
-            self.STATUS_ACCEPTED: {self.STATUS_CONVERTED, self.STATUS_EXPIRED},
+            # T-ORDERS: الإلغاء متاح من كل حالة حيّة (بديل الحذف).
+            self.STATUS_DRAFT: {self.STATUS_SENT, self.STATUS_EXPIRED, self.STATUS_CONVERTED,
+                                self.STATUS_CANCELLED},
+            self.STATUS_SENT: {self.STATUS_ACCEPTED, self.STATUS_REJECTED, self.STATUS_EXPIRED,
+                               self.STATUS_CANCELLED},
+            self.STATUS_ACCEPTED: {self.STATUS_CONVERTED, self.STATUS_EXPIRED,
+                                   self.STATUS_CANCELLED},
             self.STATUS_CONVERTED: set(),
             self.STATUS_EXPIRED: set(),
             self.STATUS_REJECTED: set(),
+            self.STATUS_CANCELLED: set(),
         }
         if new not in allowed.get(old, set()):
             # DjangoValidationError → DRF returns a clean 400 (not a 500 like
@@ -868,6 +971,168 @@ class SalesQuotationLine(models.Model):
 
     def __str__(self):
         return f"Line {self.id} quote={self.quotation_id}"
+
+
+class SalesOrder(models.Model):
+    """طلبية زبون — الحلقة بين عرض السعر والفاتورة (T-ORDERS).
+
+    قرارات تصميم مقصودة:
+    - **بلا قيد محاسبي**: تأكيد الطلبية التزام بالتوريد لا حدث مالي؛ القيد يبدأ
+      من الفاتورة. العربون وحده حدث مالي، وهو سند قبض مستقل مربوط بالطلبية.
+    - **الحجز مشتقّ لا مخزَّن**: الكمية المحجوزة تُحسب من الطلبيات المؤكَّدة التي
+      لم ينتهِ `reserved_until` (انظر `reserved_quantity_map`) — لا عمود ثانٍ
+      على المنتج يمكن أن ينحرف عن الواقع، والانتهاء يحرّر الكمية بلا مهمة خلفية.
+    - **الإلغاء لا يحذف**: `cancelled` حالة نهائية تُبقي المستند وتُفرِج عن حجزه.
+    """
+
+    STATUS_DRAFT = "draft"
+    STATUS_CONFIRMED = "confirmed"
+    STATUS_CONVERTED = "converted"
+    STATUS_CANCELLED = "cancelled"
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, "مسودة"),
+        (STATUS_CONFIRMED, "مؤكَّدة"),
+        (STATUS_CONVERTED, "محوّلة لفاتورة"),
+        (STATUS_CANCELLED, "ملغاة"),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column="SalesOrderID")
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        db_column="TenantID",
+        to_field="TenantID",
+    )
+    order_number = models.CharField(max_length=50, db_column="OrderNumber")
+    customer = models.ForeignKey(
+        Partner,
+        on_delete=models.PROTECT,
+        db_column="CustomerID",
+        related_name="sales_orders",
+    )
+    order_date = models.DateField(db_column="OrderDate")
+    delivery_date = models.DateField(null=True, blank=True, db_column="DeliveryDate")
+    reserved_until = models.DateField(
+        null=True, blank=True, db_column="ReservedUntil",
+        help_text="آخر يوم يحجز فيه هذا الطلب الكمية — بعده تعود متاحة تلقائياً",
+    )
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT, db_column="Status",
+    )
+    currency = models.ForeignKey(
+        Currency,
+        on_delete=models.PROTECT,
+        db_column="CurrencyID",
+        to_field="CurrencyID",
+    )
+    exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, default=1.0, db_column="ExchangeRate",
+    )
+    subtotal = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="Subtotal",
+    )
+    discount_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="DiscountAmount",
+    )
+    tax_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="TaxAmount",
+    )
+    grand_total = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="GrandTotal",
+    )
+    deposit_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="DepositAmount",
+        help_text="مجموع العربون المقبوض (سندات قبض مرتبطة بالطلبية)",
+    )
+    quotation = models.ForeignKey(
+        SalesQuotation,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="QuotationID",
+        related_name="orders",
+    )
+    invoice = models.ForeignKey(
+        "SalesInvoice",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="InvoiceID",
+        related_name="order_backref",
+    )
+    notes = models.TextField(null=True, blank=True, db_column="Notes")
+    cancel_reason = models.CharField(
+        max_length=250, blank=True, default="", db_column="CancelReason",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
+    updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="CreatedBy_UserID",
+        related_name="+",
+    )
+
+    class Meta:
+        db_table = "sales_module_orders"
+        managed = True
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "order_number"],
+                name="uniq_sales_order_number_per_tenant",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["tenant", "status", "order_date"], name="so_tenant_status_date"),
+            models.Index(fields=["tenant", "status", "reserved_until"], name="so_tenant_reserve"),
+            models.Index(fields=["customer"], name="so_customer"),
+        ]
+
+    def __str__(self):
+        return f"{self.order_number} — {self.customer_id}"
+
+
+class SalesOrderLine(models.Model):
+    id = models.AutoField(primary_key=True, db_column="SalesOrderLineID")
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        db_column="TenantID",
+        to_field="TenantID",
+    )
+    order = models.ForeignKey(
+        SalesOrder,
+        on_delete=models.CASCADE,
+        db_column="OrderID",
+        related_name="lines",
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.PROTECT,
+        db_column="ProductID",
+        related_name="sales_order_lines",
+    )
+    quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column="Quantity")
+    unit_price = models.DecimalField(max_digits=18, decimal_places=4, db_column="UnitPrice")
+    line_discount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="LineDiscount",
+    )
+    tax_rate = models.ForeignKey(
+        TaxRate,
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="TaxRateID",
+        related_name="sales_order_lines",
+    )
+    line_total = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="LineTotal",
+    )
+
+    class Meta:
+        db_table = "sales_module_order_lines"
+        managed = True
+
+    def __str__(self):
+        return f"Line {self.id} order={self.order_id}"
 
 
 class CreditDebitNote(models.Model):

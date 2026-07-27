@@ -16,6 +16,7 @@ import type { ShippingWorkflowStatus } from "@/types/deal";
 import { SHIPPING_WORKFLOW_LABELS } from "@/utils/shippingWorkflowLabels";
 import { useConfirm } from "@/contexts/ConfirmContext";
 import { formatMoney } from "@/utils/formatNumber";
+import { formatDateValue } from "../../../utils/formatDate";
 
 const WF_LABELS: Record<string, string> = SHIPPING_WORKFLOW_LABELS;
 
@@ -172,7 +173,7 @@ export const DealStageControl: React.FC<StageProps> = ({
         </div>
         <div className="text-xs text-[var(--color-text-muted)]">
           آخر تحديث:{" "}
-          {new Date(data.updatedAt || data.createdAt).toLocaleDateString("ar-EG")}
+          {formatDateValue(data.updatedAt || data.createdAt)}
         </div>
       </div>
       <p className="text-xs text-[var(--color-text-muted)] -mt-3">

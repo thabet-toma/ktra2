@@ -85,6 +85,13 @@ class TenantSettings(models.Model):
     fiscal_period_start = models.DateField(null=True, blank=True, db_column='FiscalPeriodStart')
     fiscal_period_end = models.DateField(null=True, blank=True, db_column='FiscalPeriodEnd')
 
+    # يوم بداية الدورة الشهرية المتكررة لملخص لوحة الأعمال.
+    dashboard_month_start_day = models.PositiveSmallIntegerField(
+        default=1, db_column='DashboardMonthStartDay',
+        validators=[MinValueValidator(1), MaxValueValidator(31)],
+        help_text="يوم بداية شهر ملخص الأعمال (1..31)",
+    )
+
     # حسابات افتراضية
     default_freight_credit_account = models.ForeignKey(
         'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
@@ -271,6 +278,9 @@ class UserCompanyMembership(models.Model):
     ROLE_CHOICES = [
         ('manager', 'مدير (Manager)'),
         ('accountant', 'محاسب (Accountant)'),
+        # T-PERM: دورا الموظف المتخصّص — لكلٍّ مصفوفة صلاحيات في core.access
+        ('sales', 'موظف مبيعات (Sales)'),
+        ('procurement', 'موظف مشتريات (Procurement)'),
         ('staff', 'موظف (Staff)'),
         ('viewer', 'مستعرض (Viewer)'),
     ]
@@ -292,3 +302,55 @@ class UserCompanyMembership(models.Model):
     def __str__(self):
         return f"{self.user.username} - {self.tenant.CompanyName} ({self.role})"
 
+
+
+class RolePermission(models.Model):
+    """T-PERM: تجاوز صلاحية لدور داخل شركة بعينها.
+
+    الافتراضات في `core.access.ROLE_DEFAULTS`؛ هذا الجدول يحمل الفروق فقط
+    (منح صريح allowed=True أو منع صريح allowed=False) كما يضبطها مدير الشركة من
+    شاشة الصلاحيات. غياب السطر = «كما هو الافتراضي» — فالاستعادة تعني الحذف.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='role_permissions',
+        db_column='TenantID')
+    role = models.CharField(
+        max_length=20, choices=UserCompanyMembership.ROLE_CHOICES, db_column='Role')
+    permission_key = models.CharField(max_length=64, db_column='PermissionKey')
+    allowed = models.BooleanField(default=True, db_column='Allowed')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+
+    class Meta:
+        db_table = 'tenant_role_permissions'
+        managed = True
+        unique_together = [['tenant', 'role', 'permission_key']]
+
+    def __str__(self):
+        state = 'منح' if self.allowed else 'منع'
+        return f"{self.tenant_id}/{self.role}/{self.permission_key} = {state}"
+
+
+class MemberPermission(models.Model):
+    """T-PERM (المرحلة 2): تجاوز صلاحية لعضو بعينه فوق دوره.
+
+    الترتيب: افتراضي الدور ← تجاوز الدور (RolePermission) ← هذا الجدول (الأعلى).
+    مثال: موظف مبيعات واحد يُمنح «التراجع عن ترحيل فاتورة بيع» دون زملائه.
+    حذف السطر = العودة لما يمليه الدور.
+    """
+
+    membership = models.ForeignKey(
+        UserCompanyMembership, on_delete=models.CASCADE,
+        related_name='permission_overrides', db_column='MembershipID')
+    permission_key = models.CharField(max_length=64, db_column='PermissionKey')
+    allowed = models.BooleanField(default=True, db_column='Allowed')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+
+    class Meta:
+        db_table = 'member_permissions'
+        managed = True
+        unique_together = [['membership', 'permission_key']]
+
+    def __str__(self):
+        state = 'منح' if self.allowed else 'منع'
+        return f"{self.membership_id}/{self.permission_key} = {state}"

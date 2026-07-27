@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { PriceOffer, Supplier, PriceOfferStatus } from '../../../types';
 import { formatMoney } from '../../../utils/formatNumber';
 import { StatusBadge } from './StatusBadge';
+import { formatDateValue } from "../../../utils/formatDate";
 import {
     FileText, Search, Plus, Calendar,
     Package, DollarSign, Edit2, Eye, CheckCircle, AlertCircle, Clock, MessageSquare,
@@ -214,11 +215,7 @@ export const PriceOfferList: React.FC<PriceOfferListProps> = ({
                         </thead>
                         <tbody className="divide-y divide-[var(--color-border)]">
                             {filteredOffers.map((offer) => {
-                                const formattedDate = new Date(offer.createdAt).toLocaleDateString('ar-EG', {
-                                    year: 'numeric',
-                                    month: 'short',
-                                    day: 'numeric'
-                                });
+                                const formattedDate = formatDateValue(offer.createdAt);
 
                                 return (
                                     <tr

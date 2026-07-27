@@ -13,7 +13,8 @@ const profile = {
 };
 
 const dashboard = {
-  period: { from: "2026-07-01", to: "2026-07-22" },
+  period: { from: "2026-07-20", to: "2026-07-26" },
+  is_new_company: false,
   financials: { revenue: 12000, expenses: 4500, net_profit: 7500 },
   sales_invoices: { total: 3, posted: 2, draft: 1, recent: [] },
   purchase_invoices: { total: 2, posted: 2, draft: 0, recent: [] },
@@ -62,6 +63,16 @@ async function mockCompany(page: Page, importEnabled: boolean) {
     if (url.pathname.endsWith("/tenants/companies/my-companies/")) {
       return route.fulfill({ contentType: "application/json", body: JSON.stringify([membership]) });
     }
+    if (url.pathname.endsWith("/permissions/me/")) {
+      return route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          role: "manager",
+          is_manager: true,
+          permissions: [],
+        }),
+      });
+    }
     if (url.pathname.endsWith("/dashboard/")) {
       const payload = importEnabled
         ? {
@@ -85,8 +96,11 @@ test("company without import sees the business dashboard and import deep links a
 
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByTestId("business-dashboard")).toBeVisible();
-  await expect(page.getByText("إيرادات الشهر")).toBeVisible();
-  await expect(page.getByText("مصروفات الشهر")).toBeVisible();
+  await expect(page.getByText("إيرادات الفترة")).toBeVisible();
+  await expect(page.getByText("مصروفات الفترة")).toBeVisible();
+  const periodSummary = page.getByText(/المؤشرات المالية والمبيعات والمشتريات من/);
+  await expect(periodSummary).toContainText("إلى");
+  await expect(periodSummary).toContainText("20/07/2026");
   await expect(page.getByText("صافي الربح")).toBeVisible();
   await expect(page.getByTestId("import-overview")).toHaveCount(0);
 

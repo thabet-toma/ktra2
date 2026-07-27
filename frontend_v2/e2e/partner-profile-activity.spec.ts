@@ -50,6 +50,17 @@ test("partner statement sorting and related activity use the partner scope", asy
       });
       return;
     }
+    if (url.pathname.endsWith("/permissions/me/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          role: "manager",
+          is_manager: true,
+          permissions: ["sales.customer.view", "purchase.supplier.view"],
+        }),
+      });
+      return;
+    }
     if (url.pathname.endsWith("/partners/7/")) {
       await route.fulfill({
         contentType: "application/json",
@@ -151,7 +162,7 @@ test("partner statement sorting and related activity use the partner scope", asy
   await expect(page).toHaveURL(/\/purchase-invoices\/8$/);
 });
 
-test("new customer receipt stays inside the customer profile and starts simple", async ({ page }) => {
+test("new customer receipt stays inside the profile and uses saved cheque defaults", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem("token", "partner-profile-token");
     localStorage.setItem("userId", "partner-profile-user");
@@ -196,6 +207,38 @@ test("new customer receipt stays inside the customer profile and starts simple",
           is_default: true,
           created_at: "2026-07-23T00:00:00Z",
         }]),
+      });
+      return;
+    }
+    if (url.pathname.endsWith("/permissions/me/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          role: "manager",
+          is_manager: true,
+          permissions: ["sales.customer.view", "sales.payment.create"],
+        }),
+      });
+      return;
+    }
+    if (url.pathname.endsWith("/partners/8/payment-defaults/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          partner_id: 8,
+          partner_name: "عميل الاختبار",
+          direction: "Incoming",
+          selected_bank_account: {
+            id: 19,
+            bank_name: "بنك القدس",
+            account_number: "123-456",
+            branch_name: "رام الله",
+            beneficiary_name: "عميل الاختبار",
+            currency: 1,
+            is_active: true,
+            is_default: true,
+          },
+        }),
       });
       return;
     }
@@ -286,31 +329,37 @@ test("new customer receipt stays inside the customer profile and starts simple",
   await page.getByRole("button", { name: "سند قبض جديد" }).click();
 
   await expect(page).toHaveURL(/\/partners\/8$/);
-  await expect(page.getByRole("heading", { name: "دفعة عميل جديدة" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "إعدادات متقدمة" })).toBeVisible();
-  await expect(page.getByText("سعر الصرف", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("tab", { name: "التوزيع" })).toHaveCount(0);
-  await expect(page.getByText("العميل *").locator("..").getByRole("combobox")).toBeDisabled();
-  await page.getByRole("button", { name: "إعدادات متقدمة" }).click();
-  await expect(page.getByText("سعر الصرف", { exact: true })).toBeVisible();
-  await expect(page.getByRole("tab", { name: "التوزيع" })).toBeVisible();
-  await page.getByRole("button", { name: "إخفاء الإعدادات المتقدمة" }).click();
+  await expect(page.getByRole("heading", { name: "سند قبض جديد" })).toBeVisible();
+  await expect(page.getByText("العميل *").locator("..").getByRole("textbox")).toHaveValue("عميل الاختبار");
 
-  await page.getByRole("button", { name: "إلغاء" }).click();
-  await expect(page.getByRole("heading", { name: "دفعة عميل جديدة" })).toHaveCount(0);
-  await expect(page).toHaveURL(/\/partners\/8$/);
-
-  await page.getByRole("button", { name: "سند قبض جديد" }).click();
-  await page.getByText("المبلغ *").locator("..").getByRole("spinbutton").fill("125");
-  await page.getByRole("button", { name: "حفظ" }).click();
+  await page.getByRole("button", { name: "شيك", exact: true }).click();
+  const chequeRow = page.locator("table tbody tr").last();
+  const chequeInputs = chequeRow.locator("input");
+  await expect(chequeInputs.nth(1)).toHaveValue("123-456");
+  await expect(chequeInputs.nth(2)).toHaveValue("عميل الاختبار");
+  await expect(chequeInputs.nth(5)).toHaveValue("بنك القدس");
+  await expect(chequeInputs.nth(6)).toHaveValue("رام الله");
+  await chequeInputs.nth(0).fill("CHK-125");
+  await chequeInputs.nth(3).fill("2026-08-20");
+  await chequeInputs.nth(4).fill("125");
+  await page.getByRole("button", { name: "حفظ", exact: true }).click();
 
   await expect.poll(() => createdPayment).not.toBeNull();
   expect(createdPayment).toMatchObject({
     partner: 8,
-    amount: "125",
+    amount: "125.00",
     cash_or_bank_account: 11,
+    cheques: [{
+      cheque_number: "CHK-125",
+      amount: "125",
+      bank_name: "بنك القدس",
+      account_number: "123-456",
+      bank_branch: "رام الله",
+      payee_name: "عميل الاختبار",
+      due_date: "2026-08-20",
+    }],
   });
   expect(createdPayment).not.toHaveProperty("allocations");
-  await expect(page.getByRole("heading", { name: "دفعة عميل جديدة" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "سند قبض جديد" })).toHaveCount(0);
   await expect(page).toHaveURL(/\/partners\/8$/);
 });

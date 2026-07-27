@@ -71,6 +71,7 @@ import { DealPrintView } from "./DealPrintView";
 import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
 import { mergeSupplier } from "@/utils/supplierList";
 import { BANK_SWIFT_IMAGE_REQUIRED } from "@/utils/dealPaymentFlow";
+import { formatDateLocalized } from "../../../utils/formatDate";
 
 type OperationalStatus =
   | "initial"
@@ -1094,7 +1095,7 @@ export const DealForm: React.FC<DealFormProps> = ({
                       { key: "no", header: "القسط", width: "70px", align: "center", render: (r) => `#${r.installmentNumber}` },
                       { key: "pct", header: "النسبة", width: "80px", align: "center", numeric: true, render: (r) => `${formatMoney(r.percentage)}%` },
                       { key: "amt", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => fmt(r.amount) },
-                      { key: "due", header: "الاستحقاق", width: "110px", align: "center", render: (r) => r.dueDate || "—" },
+                      { key: "due", header: "الاستحقاق", width: "110px", align: "center", render: (r) => formatDateLocalized(r.dueDate) || "—" },
                       { key: "st", header: "الحالة", width: "100px", align: "center", render: (r) => String(r.status) },
                     ]}
                     rows={dealInstallments}

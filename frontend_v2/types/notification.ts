@@ -6,6 +6,7 @@ export type NotificationType =
     | 'shipment_updated'
     | 'shipment_arrival_soon'
     | 'customer_note_reminder'
+    | 'customer_dormant'
     | 'general';
 
 export interface AppNotification {

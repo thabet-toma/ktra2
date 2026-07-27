@@ -28,6 +28,7 @@ export type AppView =
     | "items-categories"
     | "supplier-management"
     | "price-offers"
+    | "import-offers"
     | "deals-management"
     | "shipments-management"
     | "customs-clearance"
@@ -67,6 +68,7 @@ export type AppView =
     | "aseel-kit"
     | "aseel-sales"
     | "sales-quotations"
+    | "sales-orders"
     | "credit-debit-notes"
     | "sql-clearances"
     | "sql-purchase-invoices"
@@ -84,6 +86,8 @@ export type AppView =
     | "partner-profile"
     | "import-flow"
     | "activity-log"
+    | "permissions"
+    | "personal-expenses"
     | "about-us"
     | "contact";
 

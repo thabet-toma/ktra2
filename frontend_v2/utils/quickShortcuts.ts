@@ -10,20 +10,35 @@ import type { AppView } from "../types";
 const LS_KEY = "ktra:quickShortcuts";
 export const QUICK_SHORTCUTS_EVENT = "ktra:quick-shortcuts";
 
+export type ShortcutIconName =
+  | "home"
+  | "sales-invoice"
+  | "purchase-invoice"
+  | "quotation"
+  | "supplier-offer"
+  | "items"
+  | "suppliers"
+  | "customers"
+  | "stock-movements"
+  | "journal"
+  | "cashboxes"
+  | "reports"
+  | "zap";
+
 /** الشاشات المتاحة كاختصارات سريعة (مجموعة منتقاة من شاشات الشريط الجانبي). */
-export const SHORTCUTABLE_VIEWS: { view: AppView; label: string }[] = [
-  { view: "dashboard", label: "الرئيسية" },
-  { view: "sales-invoices", label: "فواتير المبيعات" },
-  { view: "purchase-invoices", label: "فواتير الشراء" },
-  { view: "sales-quotations", label: "عروض الأسعار" },
-  { view: "price-offers", label: "عروض الموردين" },
-  { view: "items-management", label: "الأصناف" },
-  { view: "supplier-management", label: "الموردون" },
-  { view: "sales-customers", label: "العملاء" },
-  { view: "stock-movements", label: "حركات المخزون" },
-  { view: "accounting-journals", label: "دفتر اليومية" },
-  { view: "cash-boxes", label: "الصناديق" },
-  { view: "reports", label: "التقارير" },
+export const SHORTCUTABLE_VIEWS: { view: AppView; label: string; icon: ShortcutIconName }[] = [
+  { view: "dashboard", label: "الرئيسية", icon: "home" },
+  { view: "sales-invoices", label: "فواتير المبيعات", icon: "sales-invoice" },
+  { view: "purchase-invoices", label: "فواتير الشراء", icon: "purchase-invoice" },
+  { view: "sales-quotations", label: "عروض الأسعار", icon: "quotation" },
+  { view: "price-offers", label: "عروض الموردين", icon: "supplier-offer" },
+  { view: "items-management", label: "الأصناف", icon: "items" },
+  { view: "supplier-management", label: "الموردون", icon: "suppliers" },
+  { view: "sales-customers", label: "العملاء", icon: "customers" },
+  { view: "stock-movements", label: "حركات المخزون", icon: "stock-movements" },
+  { view: "accounting-journals", label: "دفتر اليومية", icon: "journal" },
+  { view: "cash-boxes", label: "الصناديق", icon: "cashboxes" },
+  { view: "reports", label: "التقارير", icon: "reports" },
 ];
 
 const DEFAULT_SHORTCUTS: AppView[] = ["dashboard", "sales-invoices", "purchase-invoices"];
@@ -55,4 +70,8 @@ export function setQuickShortcuts(views: AppView[]): void {
 
 export function labelForShortcut(view: AppView): string {
   return SHORTCUTABLE_VIEWS.find((s) => s.view === view)?.label || view;
+}
+
+export function iconForShortcut(view: AppView): ShortcutIconName {
+  return SHORTCUTABLE_VIEWS.find((s) => s.view === view)?.icon || "zap";
 }

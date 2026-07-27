@@ -40,6 +40,8 @@ class TenantSettingsSerializer(serializers.ModelSerializer):
             "fiscal_period_label",
             "fiscal_period_start",
             "fiscal_period_end",
+            # دورة ملخص لوحة الأعمال
+            "dashboard_month_start_day",
             # حسابات افتراضية
             "default_freight_credit_account",
             # خيارات

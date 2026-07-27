@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Loader2, X, Banknote, ArrowRightLeft } from "lucide-react";
 import { accountingApi, type CashBoxLedgerLink } from "../../../services/accountingApi";
+import { formatDateLocalized } from "../../../utils/formatDate";
 
 interface Props {
   isOpen: boolean;
@@ -162,7 +163,7 @@ export const FundFxBoxModal: React.FC<Props> = ({ isOpen, ledger, ilsBoxes, onCl
               <tbody>
                 {lots.lots.map((l) => (
                   <tr key={l.id} className="border-t border-[var(--color-border)]">
-                    <td className="px-2 py-1.5">{l.lot_date}</td>
+                    <td className="px-2 py-1.5">{formatDateLocalized(l.lot_date)}</td>
                     <td className="px-2 py-1.5 font-mono">{l.remaining_fc} / {l.original_fc}</td>
                     <td className="px-2 py-1.5 font-mono">{l.rate}</td>
                     <td className="px-2 py-1.5">{l.source === "capital" ? "رأس المال" : "تحويل شيقل"}</td>

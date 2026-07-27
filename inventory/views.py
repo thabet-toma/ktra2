@@ -1,4 +1,5 @@
 import datetime
+import logging
 from decimal import Decimal
 
 from django.db import IntegrityError, transaction
@@ -19,12 +20,18 @@ from .serializers import (
 from .services import (
     generate_next_sku, record_stock_movement,
     post_warehouse_transfer, unpost_warehouse_transfer, post_stocktake,
+    warehouse_stock_summary,
 )
 from tenants.models import Tenant
+from core.access import requires_perm
+from core.activity import log_activity, log_view
 from core.tenant_utils import get_tenant
 # صيانة الأداء 2026-07: الكلاس انتقل إلى core/pagination.py ليصبح الافتراضي
 # العام في REST_FRAMEWORK — يبقى الاستيراد هنا لأي مرجع قائم.
 from core.pagination import OptionalPageNumberPagination
+
+logger = logging.getLogger(__name__)
+
 
 class CategoryViewSet(viewsets.ModelViewSet):
     queryset = ProductCategory.objects.all().order_by('name')
@@ -86,6 +93,14 @@ class ProductViewSet(viewsets.ModelViewSet):
         if self.action == 'list' and self.request.query_params.get('view') == 'lookup':
             return ProductLookupSerializer
         return ProductSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        tenant = self._get_tenant()
+        if tenant:
+            from sales.services import reserved_quantity_map
+            context['reserved_quantity_map'] = reserved_quantity_map(tenant.TenantID)
+        return context
 
     def get_queryset(self):
         # task11 M7: الأصناف كانت بلا فلترة tenant في القراءة —
@@ -457,11 +472,44 @@ class WarehouseViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         tenant = get_tenant(self.request)
+        old_name = serializer.instance.name
         if serializer.validated_data.get('is_default'):
             Warehouse.objects.filter(tenant=tenant, is_default=True).exclude(
                 pk=serializer.instance.pk
             ).update(is_default=False)
-        serializer.save()
+        warehouse = serializer.save()
+        logger.info(
+            "Warehouse updated tenant=%s warehouse=%s name_changed=%s",
+            tenant.pk, warehouse.pk, warehouse.name != old_name,
+        )
+        log_activity(
+            action='update',
+            entity_type='warehouse',
+            entity_id=warehouse.pk,
+            entity_label=warehouse.name,
+            description='تعديل المستودع',
+            metadata={'name_changed': warehouse.name != old_name},
+            request=self.request,
+        )
+
+    @action(detail=True, methods=['get'], url_path='stock')
+    @requires_perm('inventory.cost.view')
+    def stock(self, request, pk=None):
+        warehouse = self.get_object()
+        payload = warehouse_stock_summary(
+            tenant_id=warehouse.tenant_id,
+            warehouse_id=warehouse.id,
+        )
+        payload['warehouse'] = WarehouseSerializer(
+            warehouse, context=self.get_serializer_context(),
+        ).data
+        log_view(
+            entity_type='warehouse',
+            entity_id=warehouse.pk,
+            entity_label=warehouse.name,
+            request=request,
+        )
+        return Response(payload)
 
     def destroy(self, request, *args, **kwargs):
         # تعطيل لا حذف نهائي — المخزون قد يشير للمستودع (PROTECT)
@@ -627,6 +675,7 @@ class WarehouseTransferViewSet(viewsets.ModelViewSet):
         serializer.save(tenant=get_tenant(self.request))
 
     @action(detail=True, methods=['post'], url_path='post')
+    @requires_perm('inventory.doc.post')
     def post_doc(self, request, pk=None):
         transfer = self.get_object()
         try:
@@ -638,6 +687,7 @@ class WarehouseTransferViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(transfer).data)
 
     @action(detail=True, methods=['post'], url_path='unpost')
+    @requires_perm('inventory.doc.unpost')
     def unpost_doc(self, request, pk=None):
         transfer = self.get_object()
         try:

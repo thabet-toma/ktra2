@@ -15,10 +15,13 @@ import {
   Calculator, BookMarked, Scale, BookOpen, Banknote,
   CalendarDays, CalendarX, ArrowLeftRight, Boxes, BarChart3, Building2,
   ShoppingCart, Receipt, Ship, Truck, TrendingUp, ClipboardList,
-  ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home,
+  ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck, Wallet,
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
 import { useCompany } from "../contexts/CompanyContext";
+import { usePermissions } from "../contexts/PermissionsContext";
+import { groupVisible, visibleLinks } from "../utils/navAccess";
+import { permForView } from "../utils/viewPermissions";
 import { useTenantSettings } from "../hooks/useTenantSettings";
 
 
@@ -31,6 +34,8 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) => {
   // صلاحية الاستيراد للشركة النشطة (تتفاعل مع تبديل الشركة) — لا تعتمد على علم ثابت من تسجيل الدخول.
   const { canAccessImport } = useCompany();
+  // T-PERM: القائمة مشتقّة من الصلاحيات؛ ملخص الأعمال استثناء للمدير فقط.
+  const { can, isManager } = usePermissions();
   const { identity } = useTenantSettings();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -45,7 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const [accountingExpanded, setAccountingExpanded] = useState(false);
   const [userManagementExpanded, setUserManagementExpanded] = useState(false);
 
-  const accountingLinks: { view: AppView; label: string; icon: React.ReactNode }[] = [
+  const accountingLinks: { view: AppView; label: string; icon: React.ReactNode; perm?: string }[] = [
     { view: "accounting-coa", label: "شجرة الحسابات", icon: <BookMarked className="h-4 w-4" /> },
     { view: "accounting-journals", label: "دفتر اليومية (القيود)", icon: <FileText className="h-4 w-4" /> },
     { view: "accounting-cheques", label: "الشيكات", icon: <Banknote className="h-4 w-4" /> },
@@ -63,20 +68,22 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   ];
 
   const userManagementLinks = [
-    { view: "users" as AppView, label: "قائمة المستخدمين", icon: <UsersIcon className="h-5 w-5" />, roles: ['manager'] },
-    { view: "activity-log" as AppView, label: "سجل النشاط", icon: <History className="h-5 w-5" />, roles: ['manager'] },
-    { view: "attendance" as AppView, label: "الحضور والغياب", icon: <AttendanceIcon className="h-5 w-5" />, roles: ['manager', 'employee', 'procurement'] },
-    { view: "employee-notes" as AppView, label: "ملاحظات الموظفين", icon: <NoteIcon className="h-5 w-5" />, roles: ['manager'] },
-    { view: "points-management" as AppView, label: "إدارة النقاط", icon: <PointsIcon className="h-5 w-5" />, roles: ['manager'] },
+    { view: "users" as AppView, label: "قائمة المستخدمين", icon: <UsersIcon className="h-5 w-5" /> },
+    { view: "activity-log" as AppView, label: "سجل النشاط", icon: <History className="h-5 w-5" /> },
+    // T-PERM: مصفوفة (دور × صلاحية) — مدير الشركة فقط.
+    { view: "permissions" as AppView, label: "الصلاحيات والأدوار", icon: <ShieldCheck className="h-5 w-5" /> },
+    { view: "attendance" as AppView, label: "الحضور والغياب", icon: <AttendanceIcon className="h-5 w-5" /> },
+    { view: "employee-notes" as AppView, label: "ملاحظات الموظفين", icon: <NoteIcon className="h-5 w-5" /> },
+    { view: "points-management" as AppView, label: "إدارة النقاط", icon: <PointsIcon className="h-5 w-5" /> },
     { view: "points-history" as AppView, label: "سجل نقاطي", icon: <PointsIcon className="h-5 w-5" />, roles: ['employee', 'procurement', 'manager'] },
   ];
 
-  type NavLink = { view: AppView; label: string; icon: React.ReactNode; path?: string; newTab?: boolean; roles?: string[] };
+  type NavLink = { view: AppView; label: string; icon: React.ReactNode; path?: string; newTab?: boolean; roles?: string[]; perm?: string };
 
   // 2) المبيعات — إعدادات المبيعات آخراً (Section 9).
   const salesLinks: NavLink[] = [
     { view: "sales-invoices", label: "فواتير المبيعات", icon: <FileText className="h-4 w-4" /> },
-    { view: "sales-quotations", label: "العروض", icon: <FileText className="h-4 w-4" /> },
+    { view: "sales-quotations", label: "العروض والطلبيات", icon: <ClipboardList className="h-4 w-4" /> },
     { view: "credit-debit-notes", label: "الإشعارات المدينة/الدائنة", icon: <FileText className="h-4 w-4" /> },
     { view: "sales-return", label: "مرجع البيع", icon: <FileText className="h-4 w-4" /> },
     { view: "invoice-profits", label: "أرباح الفواتير", icon: <TrendingUp className="h-4 w-4" /> },
@@ -86,6 +93,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   // 3) العملاء
   const customersLinks: NavLink[] = [
     { view: "sales-customers", label: "العملاء", icon: <Users className="h-4 w-4" /> },
+    { view: "sql-partners", label: "دليل الأطراف", icon: <UsersIcon className="h-4 w-4" />, roles: ["manager", "procurement"] },
     { view: "sales-customer-payments", label: "دفعات العملاء", icon: <Banknote className="h-4 w-4" /> },
   ];
 
@@ -101,6 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
   // 5) الاستيراد
   const importLinks: NavLink[] = [
+    { view: "import-offers", label: "العروض والطلبيات", icon: <ClipboardList className="h-4 w-4" /> },
     { view: "international-invoices", label: "الفواتير الدولية", icon: <FileText className="h-4 w-4" /> },
     { view: "deals-management", label: "الصفقات", icon: <Handshake className="h-4 w-4" /> },
     { view: "shipments-management", label: "الشحنات", icon: <Ship className="h-4 w-4" /> },
@@ -153,10 +162,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
   const isViewActive = (view: string) => activeView === view;
 
-  // دالة للتحقق من صلاحيات المستخدم
-  const hasAccess = (requiredRole: string) => {
-    return user.role === requiredRole;
-  };
+  // T-PERM: صلاحية كل رابط من الخريطة الموحّدة (نفسها التي يحرس بها App.tsx
+  // الدخول المباشر بالرابط) — لا نسخة ثانية داخل القائمة.
+  const withPerms = <T extends { view: AppView; roles?: string[] }>(ls: T[]) =>
+    ls.map((l) => ({ ...l, key: String(l.view), perm: permForView(String(l.view)) }));
 
   const SidebarContent = (isMobile: boolean = false) => {
     const showText = !isCollapsed || isMobile;
@@ -185,7 +194,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
         </button>
         {expanded && showText && (
           <div className="mr-4 pr-4 border-r-2 border-[var(--color-border)] space-y-1 mt-1">
-            {links.filter((l) => !l.roles || l.roles.includes(user.role)).map((link) => (
+            {visibleLinks(withPerms(links), can, user.role).map((link) => (
               <button
                 key={link.view + (link.path || "")}
                 onClick={() => {
@@ -228,8 +237,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
         >
           <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; }`}</style>
 
-          {/* 1) الرئيسية */}
-          {hasAccess('manager') && (
+          {/* 1) الرئيسية — ملخص مؤشرات الشركة للمدير فقط (T-DASHPERIOD) */}
+          {isManager && (
             <button
               onClick={() => { setView("dashboard"); if (isMobile) setIsMobileMenuOpen(false); }}
               className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("dashboard") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
@@ -241,35 +250,35 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           )}
 
           {/* 2) المبيعات */}
-          {(user.role === 'manager' || user.role === 'procurement') &&
+          {groupVisible(withPerms(salesLinks), can, user.role) &&
             renderGroup("المبيعات", <ShoppingCart className="h-5 w-5 flex-shrink-0" />, salesExpanded, () => setSalesExpanded(!salesExpanded), salesLinks)}
 
           {/* 3) العملاء */}
-          {(user.role === 'manager' || user.role === 'procurement') &&
+          {groupVisible(withPerms(customersLinks), can, user.role) &&
             renderGroup("العملاء", <Users className="h-5 w-5 flex-shrink-0" />, customersExpanded, () => setCustomersExpanded(!customersExpanded), customersLinks)}
 
           {/* 4) المشتريات */}
-          {(user.role === 'manager' || user.role === 'procurement') &&
+          {groupVisible(withPerms(purchasesLinks), can, user.role) &&
             renderGroup("المشتريات", <ShoppingBag className="h-5 w-5 flex-shrink-0" />, purchasesExpanded, () => setPurchasesExpanded(!purchasesExpanded), purchasesLinks)}
 
           {/* 5) الاستيراد — مجموعة مستقلة عن المخزون. */}
-          {(user.role === 'manager' || user.role === 'procurement') && canAccessImport &&
+          {canAccessImport && groupVisible(withPerms(importLinks), can, user.role) &&
             renderGroup("الاستيراد", <Download className="h-5 w-5 flex-shrink-0" />, importExpanded, () => setImportExpanded(!importExpanded), importLinks)}
 
           {/* 6) المخزون */}
-          {(user.role === 'manager' || user.role === 'procurement') &&
+          {groupVisible(withPerms(inventoryLinks), can, user.role) &&
             renderGroup("المخزون", <Warehouse className="h-5 w-5 flex-shrink-0" />, inventoryExpanded, () => setInventoryExpanded(!inventoryExpanded), inventoryLinks)}
 
           {/* 7) المالية */}
-          {hasAccess('manager') &&
+          {groupVisible(withPerms(financeLinks), can, user.role) &&
             renderGroup("المالية", <Landmark className="h-5 w-5 flex-shrink-0" />, financeExpanded, () => setFinanceExpanded(!financeExpanded), financeLinks)}
 
           {/* المحاسبة — محفوظة للوصول الكامل للعمليات المحاسبية (خارج تبسيط Section 9، لا تُكسر ميزة) */}
-          {hasAccess('manager') &&
+          {groupVisible(withPerms(accountingLinks), can, user.role) &&
             renderGroup("المحاسبة", <Calculator className="h-5 w-5 flex-shrink-0" />, accountingExpanded, () => setAccountingExpanded(!accountingExpanded), accountingLinks)}
 
           {/* 8) التقارير — كل تقرير يفتح في تبويبه الخاص (G2) */}
-          {hasAccess('manager') &&
+          {groupVisible(withPerms(reportsLinks), can, user.role) &&
             renderGroup("التقارير", <ReportsIcon className="h-5 w-5 flex-shrink-0" />, reportsExpanded, () => setReportsExpanded(!reportsExpanded), reportsLinks)}
 
           <button
@@ -279,6 +288,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           >
             <GalleryIcon className="h-5 w-5 flex-shrink-0" />
             {showText && <span className="mr-3 text-right flex-1">صالة الصور</span>}
+          </button>
+
+          {/* مصاريف شخصية — دفتر جيب كل مستخدم، بلا صلاحية (يراه صاحبه فقط) */}
+          <button
+            onClick={() => { setView("personal-expenses"); if (isMobile) setIsMobileMenuOpen(false); }}
+            className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("personal-expenses") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+            title="مصاريفي الشخصية"
+          >
+            <Wallet className="h-5 w-5 flex-shrink-0" />
+            {showText && <span className="mr-3 text-right flex-1">مصاريفي الشخصية</span>}
           </button>
 
           <button
@@ -305,7 +324,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             </button>
             {userManagementExpanded && showText && (
               <div className="mr-3 pr-2 border-r border-[var(--color-border)] space-y-0.5 mt-0.5">
-                {userManagementLinks.filter(l => l.roles.includes(user.role)).map(link => (
+                {visibleLinks(withPerms(userManagementLinks), can, user.role).map(link => (
                   <button
                     key={link.view}
                     onClick={() => { setView(link.view); if (isMobile) setIsMobileMenuOpen(false); }}
@@ -340,12 +359,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
           {/* 8) إدارة المهام — في الأسفل تماماً (Section 9) */}
           <div className="mt-2 pt-2 border-t border-[var(--color-border)]">
             <button
-              onClick={() => { setView(user.role === 'manager' ? "task-management" : "tasks"); if (isMobile) setIsMobileMenuOpen(false); }}
+              onClick={() => { setView(can("hr.tasks.manage") ? "task-management" : "tasks"); if (isMobile) setIsMobileMenuOpen(false); }}
               className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("task-management") || isViewActive("tasks") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
               title="إدارة المهام"
             >
               <TasksIcon className="h-5 w-5 flex-shrink-0" />
-              {showText && <span className="mr-3 text-right flex-1 font-semibold">{user.role === 'manager' ? "إدارة المهام" : "مهامي"}</span>}
+              {showText && <span className="mr-3 text-right flex-1 font-semibold">{can("hr.tasks.manage") ? "إدارة المهام" : "مهامي"}</span>}
             </button>
           </div>
         </nav>

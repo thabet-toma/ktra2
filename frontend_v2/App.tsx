@@ -15,6 +15,7 @@ import {
   AppView,
 } from "./types";
 import { useOnlineStatus } from "./hooks/useOnlineStatus";
+import { useDocumentTitle } from "./hooks/useDocumentTitle";
 import { useAutoConnectionRecovery } from "./hooks/useAutoConnectionRecovery";
 import OfflineBanner from "./components/offline/OfflineBanner";
 import UpdatePrompt from "./components/offline/UpdatePrompt";
@@ -46,6 +47,8 @@ import {
 import { fetchUserProfile, logoutUser } from "./services/authService";
 import { useAuth } from "./contexts/AuthContext";
 import { useCompany } from "./contexts/CompanyContext";
+import { usePermissions } from "./contexts/PermissionsContext";
+import { permForView } from "./utils/viewPermissions";
 import { activeTasksService } from "./services/activeTasksService";
 import { autoDisableScheduler } from "./services/autoDisableScheduler";
 import { PublicNavbar } from "./components/layout/PublicNavbar";
@@ -86,7 +89,7 @@ const SupplierManagement = lazyPage(() => import("./components/suppliers/Supplie
 const ShipmentManagement = lazyPage(() => import("./components/procurement/shipments/ShipmentManagement").then((m) => ({ default: m.ShipmentManagement })));
 const AseelKitStory = lazyPage(() => import("./components/aseel/AseelKitStory").then((m) => ({ default: m.AseelKitStory })));
 const SalesInvoiceAseelStory = lazyPage(() => import("./components/sales/SalesInvoiceAseelStory").then((m) => ({ default: m.SalesInvoiceAseelStory })));
-const SalesQuotationsPage = lazyPage(() => import("./components/sales/SalesQuotationsPage").then((m) => ({ default: m.SalesQuotationsPage })));
+const SalesDocumentsPage = lazyPage(() => import("./components/sales/SalesQuotationsPage").then((m) => ({ default: m.SalesDocumentsPage })));
 const CreditDebitNotesPage = lazyPage(() => import("./components/sales/CreditDebitNotesPage").then((m) => ({ default: m.CreditDebitNotesPage })));
 const SalesReturnEditor = lazyPage(() => import("./components/sales/SalesReturnEditor").then((m) => ({ default: m.SalesReturnEditor })));
 const PurchaseReturnEditor = lazyPage(() => import("./components/sales/PurchaseReturnEditor").then((m) => ({ default: m.PurchaseReturnEditor })));
@@ -138,8 +141,12 @@ const SalesInvoicesPage = lazyPage(() => import("./components/sales/SalesInvoice
 const SalesCustomersPage = lazyPage(() => import("./components/sales/SalesCustomersPage").then((m) => ({ default: m.SalesCustomersPage })));
 const SalesCustomerPaymentsPage = lazyPage(() => import("./components/sales/SalesCustomerPaymentsPage"));
 const SalesSettingsPage = lazyPage(() => import("./components/sales/SalesSettingsPage"));
+// T-PERM: شاشة الصلاحيات (مصفوفة دور × صلاحية) — مدير الشركة فقط.
+const PermissionsPage = lazyPage(() => import("./components/settings/PermissionsPage"));
 const PurchaseSettingsPage = lazyPage(() => import("./components/procurement/PurchaseSettingsPage"));
 const LocalShippingPage = lazyPage(() => import("./components/logistics/LocalShippingPage"));
+// مصاريف شخصية — شاشة خاصة بالمستخدم، مفتوحة للجميع (العزل خادمي بالمستخدم).
+const PersonalExpensesPage = lazyPage(() => import("./components/personal/PersonalExpensesPage"));
 
 type SourcingView = "search" | "loading" | "results";
 type AuthView = "landing" | "login" | "signup";
@@ -161,8 +168,10 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "employee-notes": "/employee-notes",
   "points-management": "/points-management",
   "points-history": "/points-history",
+  "personal-expenses": "/personal-expenses",
   "sales-invoices": "/sales/invoices",
   "sales-quotations": "/sales/quotations",
+  "sales-orders": "/sales/orders",
   "credit-debit-notes": "/sales/credit-debit-notes",
   "sales-return": "/sales/returns",
   "purchase-return": "/purchase-returns",
@@ -171,15 +180,18 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "invoice-profits": "/sales/profits",
   "sales-customers": "/sales/customers",
   "sales-settings": "/sales/settings",
+  "permissions": "/permissions",
   "purchase-settings": "/purchase-settings",
   "purchase-invoices": "/purchase-invoices",
   "international-invoices": "/international-invoices",
   "old-invoices": "/old-invoices",
   "price-offers": "/price-offers",
+  "import-offers": "/import-offers",
   "deals-management": "/deals",
   "items-management": "/items",
   "items-categories": "/items/categories",
   "supplier-management": "/suppliers",
+  "sql-partners": "/partners-directory",
   "import-flow": "/import-flow",
   "shipments-management": "/shipments",
   "customs-clearance": "/clearance",
@@ -223,6 +235,7 @@ const PATH_TO_VIEW: Record<string, AppView> = Object.fromEntries(
 );
 
 const IMPORT_VIEWS = new Set<AppView>([
+  "import-offers",
   "deals-management",
   "shipments-management",
   "customs-clearance",
@@ -239,6 +252,15 @@ const App: React.FC = () => {
 
   const { currentUser, loading: authLoading, logout, updateUser } = useAuth();
   const { currentCompany, canAccessImport } = useCompany();
+  // T-PERM: صلاحيات الشركة النشطة — تُخفي ما لا يملكه المستخدم (الخادم يفرض).
+  const { can: canPerm, isManager } = usePermissions();
+  const canManagePermissions = canPerm("admin.permissions.manage");
+  // T-PERM: حارس الدخول المباشر بالرابط — نفس خريطة الشريط الجانبي، فلا يظهر
+  // رابطٌ يقود إلى لوحة التحكم. الشاشة بلا صلاحية في الخريطة مفتوحة للجميع.
+  const canView = (view: AppView): boolean => {
+    const perm = permForView(String(view));
+    return !perm || canPerm(perm);
+  };
 
   const [authView, setAuthView] = useState<AuthView>("landing");
   const [users, setUsers] = useState<User[]>([]);
@@ -249,6 +271,28 @@ const App: React.FC = () => {
   const [userTaskTime, setUserTaskTime] = useState(0);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [appView, setAppView] = useState<AppView>("dashboard");
+
+  // SEO: عنوان تبويب/فهرسة مختلف لكل شاشة عامة (غير مصادَق عليها) — index.html
+  // يحمل عنواناً افتراضياً واحداً لكل الموقع، وهذا يُخصّصه لكل صفحة يزورها زائر
+  // غير مسجَّل قبل تنفيذ React (Google يُفهرس ما بعد تنفيذ JS فيقرأ هذا).
+  useDocumentTitle(
+    currentUser
+      ? "K.T.R.A"
+      : appView === "about-us"
+      ? "من نحن — نظام K.T.R.A لإدارة الاستيراد والمبيعات والمخزون والمحاسبة"
+      : appView === "contact"
+      ? "تواصل معنا — نظام K.T.R.A"
+      : appView === "gallery"
+      ? "معرض الصور — نظام K.T.R.A"
+      : appView === "store"
+      ? "المتجر الإلكتروني — K.T.R.A"
+      : authView === "login"
+      ? "تسجيل الدخول — نظام K.T.R.A"
+      : authView === "signup"
+      ? "إنشاء حساب جديد — نظام K.T.R.A"
+      : "K.T.R.A — نظام متكامل لإدارة الاستيراد والمبيعات والمخزون والمحاسبة"
+  );
+
   /** مزامنة المسار مع الـ URL لكل شاشة مدعومة */
   const setViewAndSyncPath = useCallback(
     (view: AppView, targetId?: string) => {
@@ -476,7 +520,7 @@ const App: React.FC = () => {
     const params = new URLSearchParams(location.search);
     const idLegacy = params.get("id");
     const viewParam = params.get("view") as AppView | null;
-    const isImportPath = /^\/(deals|shipments|import-flow|clearance)(\/|$)/.test(path);
+    const isImportPath = /^\/(deals|shipments|import-flow|import-offers|clearance)(\/|$)/.test(path);
     if (!canAccessImport && (isImportPath || (viewParam && IMPORT_VIEWS.has(viewParam)))) {
       navigate("/dashboard", { replace: true });
       setAppView("dashboard");
@@ -628,6 +672,10 @@ const App: React.FC = () => {
       // تذكيرات ملاحظات الزبائن المستحقة اليوم — إشعار داخل الموقع.
       void import("./services/customerNoteReminders").then((m) =>
         m.runCustomerNoteReminders(currentUser.id)
+      );
+      // T-DORMANT: عملاء توقّفوا عن الشراء (عتبة إعدادات المبيعات) — إشعار «عميل مختفٍ».
+      void import("./services/customerDormancyAlerts").then((m) =>
+        m.runCustomerDormancyAlerts(currentUser.id)
       );
     };
     run();
@@ -1265,7 +1313,8 @@ const App: React.FC = () => {
 
     switch (appView) {
       case "dashboard":
-        if (currentUser!.role === "manager" || currentUser!.role === "procurement") {
+        // T-DASHPERIOD: مؤشرات الشركة المالية للمدير فقط، وإلا اللوحة الشخصية.
+        if (isManager) {
           return <TradeDashboard userName={currentUser!.name} onNavigate={setViewAndSyncPath} />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
@@ -1281,10 +1330,7 @@ const App: React.FC = () => {
         );
 
       case "task-management":
-        if (
-          currentUser!.role === "manager" ||
-          currentUser!.role === "procurement"
-        ) {
+        if (canPerm("hr.tasks.manage")) {
           return (
             <TaskManagement
               allTasks={tasks}
@@ -1326,6 +1372,10 @@ const App: React.FC = () => {
       case "points-history":
         return <PointsHistoryPage user={currentUser} />;
 
+      // مصاريف شخصية — بلا صلاحية في الخريطة: لكل مستخدم دفتره وحده.
+      case "personal-expenses":
+        return <PersonalExpensesPage />;
+
       case "points-management":
         if (currentUser!.role !== "manager")
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
@@ -1341,10 +1391,7 @@ const App: React.FC = () => {
         return <EmployeeAttendance currentUser={currentUser!} />;
 
       case "sales-invoices":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return (
             <SalesInvoicesPage
               onOpenGeneralLedger={(id) => {
@@ -1357,64 +1404,50 @@ const App: React.FC = () => {
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "sales-customer-payments":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return <SalesCustomerPaymentsPage />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
+      case "permissions":
+        // الإنفاذ خادمي؛ هنا إخفاء الشاشة عمّن لا يملك إدارتها.
+        if (canManagePermissions) {
+          return <PermissionsPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
       case "sales-settings":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return <SalesSettingsPage />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "purchase-settings":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return <PurchaseSettingsPage />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "sales-customers":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return <SalesCustomersPage />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "invoice-profits":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return <InvoiceProfitsPage />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "purchase-invoices":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return <PurchaseInvoice currentUser={currentUser!} />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "international-invoices":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return (
             <PurchaseInvoice
               currentUser={currentUser!}
@@ -1427,28 +1460,25 @@ const App: React.FC = () => {
 
       // ---------- New Case Added Here ----------
       case "old-invoices":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return <OldPurchaseInvoice />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "price-offers":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
-          return <PriceOfferManagement />;
+        if (canView(appView)) {
+          return <PriceOfferManagement scope="purchase" />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
+      case "import-offers":
+        if (canView(appView)) {
+          return <PriceOfferManagement scope="import" />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "deals-management":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return (
             <DealManagement
               currentUser={currentUser!}
@@ -1471,19 +1501,13 @@ const App: React.FC = () => {
 
       case "items-management":
       case "items-categories":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return <ItemsManagement user={currentUser!} initialTab={appView === "items-categories" ? "categories" : "products"} />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "supplier-management":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return (
             <SupplierManagement
               initialPartnerId={accountingSupplierPartnerId}
@@ -1494,10 +1518,7 @@ const App: React.FC = () => {
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "shipments-management":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return (
             <ShipmentManagement
               currentUser={currentUser!}
@@ -1529,25 +1550,19 @@ const App: React.FC = () => {
       }
 
       case "customs-clearance":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return <CustomsClearanceManagement currentUser={currentUser!} />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "local-shipping":
-        if (
-          currentUser!.role === "procurement" ||
-          currentUser!.role === "manager"
-        ) {
+        if (canView(appView)) {
           return <LocalShippingPage />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "cash-boxes":
-        if (currentUser!.role === "manager") {
+        if (canView(appView)) {
           return (
             <CashBoxList
               onSelectCashBox={(box) => {
@@ -1560,7 +1575,7 @@ const App: React.FC = () => {
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 
       case "cash-box-details":
-        if (currentUser!.role === "manager" && selectedCashBox) {
+        if (canPerm("finance.cashbox.manage") && selectedCashBox) {
           return (
             <CashBoxStatement
               cashBox={selectedCashBox}
@@ -1764,7 +1779,7 @@ const App: React.FC = () => {
         return <InventoryValuationPage />;
 
       case "property-rental":
-        if (currentUser!.role === "manager" || currentUser!.role === "procurement") {
+        if (canView(appView)) {
           return <PropertyRentalPage />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
@@ -1802,8 +1817,12 @@ const App: React.FC = () => {
       case "aseel-sales":
         return <SalesInvoiceAseelStory />;
 
+      case "sales-orders":
+        if (canView(appView)) return <SalesDocumentsPage initialTab="orders" />;
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
       case "sales-quotations":
-        return <SalesQuotationsPage />;
+        return <SalesDocumentsPage initialTab="quotations" />;
 
       case "credit-debit-notes":
         return <CreditDebitNotesPage />;

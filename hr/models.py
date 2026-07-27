@@ -76,6 +76,48 @@ class AttendanceRecord(models.Model):
     class Meta:
         unique_together = [['user', 'date']]
 
+class PersonalExpense(models.Model):
+    """مصروف شخصي — دفتر جيب المستخدم، لا دفاتر الشركة.
+
+    قرارات تصميم مقصودة (لا تُعكس بلا طلب المالك):
+    - **بلا ربط بشجرة الحسابات**: لا FK إلى Account ولا JournalHeader ولا ترحيل.
+      التسجيل هنا لا يُنتج قيداً ولا يظهر في أي تقرير مالي للشركة.
+    - **بلا tenant**: المصروف يتبع صاحبه لا الشركة النشطة، فلا يختفي عند تبديل
+      الشركة. العزل الوحيد المعتبر هو المستخدم.
+    """
+    CATEGORY_CHOICES = [
+        ('food', 'طعام وشراب'),
+        ('transport', 'مواصلات'),
+        ('bills', 'فواتير واشتراكات'),
+        ('health', 'صحة'),
+        ('shopping', 'تسوّق'),
+        ('family', 'أسرة وتعليم'),
+        ('entertainment', 'ترفيه'),
+        ('other', 'أخرى'),
+    ]
+
+    id = models.AutoField(primary_key=True)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='personal_expenses')
+    date = models.DateField()
+    title = models.CharField(max_length=200)
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default='other')
+    amount = models.DecimalField(max_digits=15, decimal_places=2)
+    is_paid = models.BooleanField(default=True)
+    notes = models.TextField(blank=True, default='')
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'hr_personal_expenses'
+        indexes = [
+            models.Index(fields=['user', '-date'], name='hrpe_user_date'),
+            models.Index(fields=['user', 'is_paid'], name='hrpe_user_paid'),
+        ]
+
+    def __str__(self):
+        return f"{self.title} - {self.amount}"
+
 class PointsHistory(models.Model):
     id = models.AutoField(primary_key=True)
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, default=1)

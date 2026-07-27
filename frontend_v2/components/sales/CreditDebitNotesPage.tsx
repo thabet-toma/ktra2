@@ -26,6 +26,7 @@ import {
   AseelTabs,
 } from "../aseel";
 import { RefreshCw } from "lucide-react";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 const tid = () => resolveTenantId();
 const BASE = "sales/credit-debit-notes";
@@ -295,7 +296,7 @@ export const CreditDebitNotesPage: React.FC = () => {
                     </span>
                   </td>
                   <td className="p-3">{n.customer_name || "-"}</td>
-                  <td className="p-3">{n.note_date}</td>
+                  <td className="p-3">{formatDateLocalized(n.note_date)}</td>
                   <td className="p-3">{Number(n.amount).toLocaleString()}</td>
                   <td className="p-3">
                     <span className={`px-2 py-0.5 rounded text-xs ${statusColor(n.status)}`}>

@@ -50,6 +50,21 @@ async function installMocks(page: Page) {
       });
       return;
     }
+    if (url.pathname.endsWith("/permissions/me/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          role: "manager",
+          is_manager: true,
+          permissions: [
+            "sales.invoice.view",
+            "purchase.invoice.view",
+            "import.deal.manage",
+          ],
+        }),
+      });
+      return;
+    }
     if (url.pathname.endsWith("/partners/lookup/")) {
       await route.fulfill({
         contentType: "application/json",

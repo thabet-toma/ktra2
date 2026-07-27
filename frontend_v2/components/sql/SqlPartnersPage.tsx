@@ -5,10 +5,11 @@ import React, { useEffect, useState, useRef } from 'react';
 import { apiGetPagedList } from '../../services/restApi';
 import { resolveTenantId } from '../../utils/tenantContext';
 import { SqlDataPageShell } from './SqlDataPageShell';
-import { Eye, RefreshCw } from 'lucide-react';
+import { Eye, Pencil, Plus, RefreshCw } from 'lucide-react';
 import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
 import { useNavigate } from 'react-router-dom';
+import { PartnerEditorModal, type PartnerType } from '../partners/PartnerEditorModal';
 
 type PartnerRow = {
     id: number;
@@ -28,6 +29,9 @@ export function SqlPartnersPage() {
     const [typeFilter, setTypeFilter] = useState<string>('all');
     const [page, setPage] = useState(1);
     const [total, setTotal] = useState(0);
+    const [reloadToken, setReloadToken] = useState(0);
+    const [editorOpen, setEditorOpen] = useState(false);
+    const [editingId, setEditingId] = useState<number | null>(null);
     const pageSize = 50;
     const searchInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -49,12 +53,16 @@ export function SqlPartnersPage() {
             .finally(() => mounted && setLoading(false));
         }, 250);
         return () => { mounted = false; window.clearTimeout(timer); };
-    }, [page, q, typeFilter]);
+    }, [page, q, reloadToken, typeFilter]);
 
     const partnerTypes = ['Customer', 'Supplier', 'FreightForwarder', 'CustomsBroker', 'LocalTransporter'];
 
     useAseelIndexKeymap(
-        { F6: () => searchInputRef.current?.focus(), Escape: () => { setQ(''); setTypeFilter('all'); } }
+        {
+            F6: () => searchInputRef.current?.focus(),
+            CtrlIns: () => { setEditingId(null); setEditorOpen(true); },
+            Escape: () => { setQ(''); setTypeFilter('all'); },
+        }
     );
 
     const columns: DenseColumn<PartnerRow>[] = [
@@ -64,11 +72,16 @@ export function SqlPartnersPage() {
         { key: 'phone', header: 'الهاتف', width: '120px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{r.phone || '—'}</span> },
         { key: 'email', header: 'البريد', render: r => <span style={{ fontSize: 'var(--aseel-fs-sm)' }}>{r.email || '—'}</span> },
         {
-            key: 'actions', header: '', width: '60px', align: 'center',
+            key: 'actions', header: '', width: '95px', align: 'center',
             render: r => (
-                <button className="aseel-toolbtn" style={{ padding: '2px 4px' }} onClick={e => { e.stopPropagation(); navigate(`/partners/${r.id}`); }} title="فتح ملف العميل/المورد">
-                    <Eye style={{ width: 13, height: 13 }} />
-                </button>
+                <div className="flex justify-center gap-1">
+                    <button className="aseel-toolbtn" style={{ padding: '2px 4px' }} onClick={e => { e.stopPropagation(); setEditingId(r.id); setEditorOpen(true); }} title="تعديل بطاقة الطرف">
+                        <Pencil style={{ width: 13, height: 13 }} />
+                    </button>
+                    <button className="aseel-toolbtn" style={{ padding: '2px 4px' }} onClick={e => { e.stopPropagation(); navigate(`/partners/${r.id}`); }} title="فتح ملف الطرف">
+                        <Eye style={{ width: 13, height: 13 }} />
+                    </button>
+                </div>
             ),
         },
     ];
@@ -80,6 +93,9 @@ export function SqlPartnersPage() {
                 subtitle="بيانات الموردين والشركاء من قاعدة البيانات."
                 actions={
                     <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="aseel-toolbtn" onClick={() => { setEditingId(null); setEditorOpen(true); }} title="إضافة طرف جديد (Ctrl+Ins)">
+                            <Plus style={{ width: 14, height: 14 }} /> طرف جديد
+                        </button>
                         <input
                             ref={searchInputRef}
                             value={q}
@@ -112,6 +128,16 @@ export function SqlPartnersPage() {
                     />
                 </div>
             </SqlDataPageShell>
+            <PartnerEditorModal
+                open={editorOpen}
+                partnerId={editingId}
+                initialType={typeFilter === 'all' ? 'Customer' : typeFilter as PartnerType}
+                onClose={() => setEditorOpen(false)}
+                onSaved={() => {
+                    setEditorOpen(false);
+                    setReloadToken((value) => value + 1);
+                }}
+            />
         </>
     );
 }

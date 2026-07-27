@@ -71,6 +71,7 @@ const TYPE_OPTIONS = [
 ];
 
 import { formatMoney } from "@/utils/formatNumber";
+import { formatDateLocalized } from "../../utils/formatDate";
 const fmtNum = (s: string | number | undefined | null) => formatMoney(s, "—");
 
 type SalesInvoicesPageProps = {
@@ -388,7 +389,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       header: "التاريخ",
       width: "100px",
       align: "center",
-      render: (r) => <span className="text-xs">{r.invoice_date || "—"}</span>,
+      render: (r) => <span className="text-xs">{formatDateLocalized(r.invoice_date) || "—"}</span>,
     },
     {
       key: "customer",

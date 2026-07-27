@@ -68,6 +68,7 @@ const STATUS_OPTIONS = [
 ];
 
 import { formatMoney } from "@/utils/formatNumber";
+import { formatDateLocalized } from "../../../utils/formatDate";
 const fmtNum = (s: string | number | undefined | null) => formatMoney(s, "—");
 
 export const InvoiceList: React.FC<InvoiceListProps> = ({
@@ -207,7 +208,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       header: "التاريخ",
       width: "110px",
       align: "center",
-      render: (r) => <span className="text-xs">{r.invoiceDate || (r.createdAt ? r.createdAt.slice(0, 10) : "—")}</span>,
+      render: (r) => <span className="text-xs">{formatDateLocalized(r.invoiceDate || r.createdAt) || "—"}</span>,
     },
     {
       key: "supplier",
