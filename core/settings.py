@@ -64,6 +64,14 @@ ALLOWED_HOSTS = [
     '127.0.0.1'
 ]
 
+# أضِف أي مضيف إضافي (مثل IP سيرفر تطوير) دون إعادة كتابة القائمة كاملة
+_allowed_hosts_extra = os.environ.get("DJANGO_ALLOWED_HOSTS", "").strip()
+if _allowed_hosts_extra:
+    ALLOWED_HOSTS += [
+        h.strip() for h in _allowed_hosts_extra.split(",")
+        if h.strip() and h.strip() not in ALLOWED_HOSTS
+    ]
+
 # G11: رؤوس أمان قياسية (SecurityMiddleware + XFrameOptionsMiddleware مُركّبان أصلاً).
 # الآمنة دائماً (رؤوس فقط، بلا تغيير سلوك) تُفعَّل دوماً. أمان HTTPS (HSTS + كوكيز آمنة)
 # يُفعَّل في الإنتاج فقط حيث ينتهي TLS، كي لا يكسر التطوير المحلي على http.
@@ -269,7 +277,7 @@ CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-branch-id",
 ]
 
-CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS) + ['https://api.smart.ktragroup.com']
+CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
 
 # المساعد الذكي (OpenClaw على سيرفر منفصل — ليس نفس خادم Django).
 # Django يتصل به عبر HTTP (صادر من هذا السيرفر)؛ على سيرفر OpenClaw يجب أن يكون المنفذ (مثل 18789)

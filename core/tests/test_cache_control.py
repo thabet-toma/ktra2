@@ -1,5 +1,5 @@
 """NoStoreAPIMiddleware: ردود الـ API تخرج بترويسة no-store (منع كاش المتصفح)."""
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 
 class NoStoreAPIMiddlewareTest(TestCase):
@@ -17,11 +17,22 @@ class NoStoreAPIMiddlewareTest(TestCase):
         self.assertIn("no-store", resp.headers.get("Cache-Control", ""))
 
 
+# أصل مثبّت للاختبار: قائمة الأصول الفعلية تأتي من DJANGO_CORS_ALLOWED_ORIGINS في
+# .env وتستبدل الافتراضية كلياً، فربط الاختبار بدومين نشر معيّن يجعله يفشل عند
+# تغيّر الدومين بدل أن يكشف حذف الترويستين — وهو الثابت المقصود اختباره.
+_PREFLIGHT_ORIGIN = "https://cors-preflight.test"
+
+
+@override_settings(
+    CORS_ALLOWED_ORIGINS=[_PREFLIGHT_ORIGIN],
+    CORS_ALLOWED_ORIGIN_REGEXES=[],
+    CORS_ALLOW_ALL_ORIGINS=False,
+)
 class CorsPreflightTest(TestCase):
     def test_active_branch_header_is_allowed(self):
         resp = self.client.options(
             "/api/health/",
-            HTTP_ORIGIN="https://smart.ktragroup.com",
+            HTTP_ORIGIN=_PREFLIGHT_ORIGIN,
             HTTP_ACCESS_CONTROL_REQUEST_METHOD="GET",
             HTTP_ACCESS_CONTROL_REQUEST_HEADERS="authorization,x-branch-id,x-tenant-id",
         )

@@ -5070,3 +5070,101 @@ test_quotation_*` + اختبار Ollama الحيّ — تأكّدت بإخفائ
   الترحيل ثم فتح `/products/:id` هو خطوة القبول المتبقية.
 - «فئات الأسعار الخمس» في تبويب الأسعار ما تزال معروضة بلا حفظ (N8-T9) — الآن
   تحتها حقل سعر بيع واحد حقيقي محفوظ، فبانر «لا تُحفَظ بعد» صار مقصوراً عليها.
+
+## [AUDIT — فواتير الشراء 500 على المستأجرين الكبار + فكّ اقتران اختبار CORS بالبيئة, 2026-07-29]
+**العطل المُبلَّغ:** شاشة «فواتير الشراء» تدور ثم تُظهر `Unexpected token '<', "<!DOCTYPE "...`
+على فرع «الجرابعه» فقط (كترا/النور سليمان). الرسالة عرَض لا سبب: الـAPI كان يردّ **500**
+بصفحة HTML فتنكسر قراءتها كـJSON.
+
+- **السبب الجذري:** في `PurchaseInvoiceViewSet.get_queryset` كان `Count('items')` يفرض
+  `GROUP BY`، وهذا **يمنع Django من تقليم التعليقات** في استعلام `COUNT(*)` الخاص بالترقيم،
+  فتُنفَّذ الـ5 correlated subqueries (`annotate_partner_posted_balance` +
+  `annotate_purchase_invoice_payment_summary`) **لكل صف**. عند 1241 فاتورة (الجرابعه) يتجاوز
+  الاستعلام `read_timeout: 30` في `core/settings.py` ⇒ `OperationalError (2013)`.
+  حجم البيانات هو الفارق: كترا 20 فاتورة · النور 23 · **الجرابعه 1241**.
+- **القياس المعزول (بيانات حقيقية):** كل تعليق وحده 0.07s · `items_count`+الرصيد 14.15s ·
+  `items_count`+ملخص الدفع **يفشل بعد 30s** · الرصيد+ملخص الدفع بلا `items_count` **0.03s**.
+- **الحل:** استبدال `Count('items')` بـ`Subquery` مكافئ (بلا `GROUP BY`) فيستعيد Django التقليم.
+  `COUNT` من فشل بعد 30s ⇒ **0.056s**؛ الطلب كاملاً ⇒ **200 في 0.28s**. قيم `items_count`
+  مطابقة للطريقة القديمة في كل الصفوف الـ1241.
+- **الشاشات الشقيقة سليمة** (`SalesInvoice`/`LogisticsDeal`): تستخدم نفس تعليقات الـSubquery
+  لكن **بلا** تعليق تجميعي ⇒ لا `GROUP BY` ⇒ التقليم يعمل. العطل كان محصوراً بفواتير الشراء.
+- **`core/tests/test_cache_control.py::CorsPreflightTest`** كان يفشل بشكل مستقل: يثبّت الأصل
+  `https://smart.ktragroup.com` بينما `DJANGO_CORS_ALLOWED_ORIGINS` في `.env` **تستبدل**
+  القائمة الافتراضية كلياً (لا تدمجها) والدومين الحالي `ktraerp.servebeer.com`. فالأصل القديم
+  غير مسموح ⇒ `CorsMiddleware` لا يعالج الـpreflight ⇒ لا ترويسات. الإعداد نفسه سليم:
+  preflight حيّ على الدومين الحقيقي يُرجع `x-tenant-id, x-branch-id` فعلاً. أُصلح الاختبار
+  بتثبيت أصل خاص به عبر `override_settings` (+ تصفير الregexes وALLOW_ALL) فصار يقيس الثابت
+  المقصود بلا اقتران ببيئة النشر.
+
+### مصائد مثبَّتة (لا تكررها)
+- **تعليق تجميعي واحد (`Count`/`Sum` على علاقة) يكفي لتفجير الترقيم**: يفرض `GROUP BY` فيبطل
+  تقليم Django لكل الـSubqueries في `COUNT(*)`. في أي قائمة تجمع تعليقات ثقيلة + عدّاً على
+  علاقة، **استخدم `Subquery` للعدّ**. لا يظهر العطل على بيانات صغيرة — يظهر عند نمو مستأجر واحد.
+- **اختبار CORS يجب ألا يستعمل دومين نشر**: `DJANGO_CORS_ALLOWED_ORIGINS` تستبدل ولا تُضيف،
+  فأي تغيير دومين يكسر الاختبار كذباً **وفي الوقت نفسه** يخفي حذف ترويسة حقيقية (فشل ثابت
+  بلا قيمة تشخيصية). ثبّت الأصل داخل الاختبار.
+- **`Unexpected token '<'` في الواجهة ليست عطل واجهة**: تعني ردّ HTML مكان JSON — اقرأ
+  `logs/gunicorn-access.log` بحثاً عن رمز الحالة الحقيقي قبل لمس أي كود واجهة.
+
+### [ORPHANS & PENDING]
+- `gunicorn` يعمل يدوياً بلا وحدة systemd (`--workers 3 --timeout 120`) — لا يعود بعد إقلاع
+  السيرفر. إعادة التحميل بلا انقطاع = `kill -HUP <master-pid>`.
+- `CSRF_TRUSTED_ORIGINS` لا يزال يذكر `https://api.smart.ktragroup.com` (دومين سابق) —
+  غير ضار لأن الأصل الحالي موحّد، لكنه بقايا تحتاج تنظيفاً عند تثبيت الدومين النهائي.
+
+## [AUDIT — فهرسة جوجل: توحيد الدومين + تقوية الكلمات المفتاحية + إغلاق DEBUG على الإنتاج, 2026-07-29]
+**الطلب:** ظهور الموقع في بحث جوجل بكلمات مفتاحية + «كل شهادات الأمان وموثق».
+
+- **الشهادات كانت سليمة أصلاً** (تحقُّق لا تعديل): Let's Encrypt لـ`ktraerp.servebeer.com`
+  سارية حتى 2026-10-26، `ssl_verify_result=0` (موثوقة بالكامل)، و`certbot.timer` نشط
+  و`renew --dry-run` ناجح. لا عمل مطلوب على TLS.
+- **السبب الجذري لغياب الموقع عن جوجل:** كل روابط SEO كانت تشير إلى `smart.ktragroup.com`
+  (`canonical` + `og:url` + `og:image` + `twitter:image` + JSON-LD + `sitemap.xml` +
+  توجيه `Sitemap:` في robots). وسم `canonical` تحديداً يأمر جوجل: «النسخة الرسمية على
+  الدومين الآخر» ⇒ يُسقِط `ktraerp.servebeer.com` من الفهرس كلياً. **نفس جذر عطل اختبار
+  CORS**: ترحيل دومين لم يُنشر على كل المواضع.
+- **الدومينان حيّان** (قرار المالك: الفهرسة على `ktraerp.servebeer.com`):
+  `smart.ktragroup.com` = 173.208.138.113 بشهادة wildkard وAPI حيّ · `ktraerp.servebeer.com`
+  = هذا السيرفر. وجودهما بنفس المحتوى = ازدواج محتوى؛ الحسم بـ`canonical` صريح.
+- **`/store` مسار ميت:** كتلة عرض المتجر **معلّقة** في `App.tsx` (~س1852)، فالمسار يعرض
+  `LandingPage` نفسها للزائر ⇒ محتوى مكرر على عنوان مختلف. أُزيل من `sitemap.xml` ونُقل إلى
+  `Disallow`. المسارات العامة المؤكَّدة بقراءة الكود: `/` · `/about-us` · `/contact` · `/gallery`
+  (الثلاثة الأخيرة لها فروع صريحة في كتلة `!currentUser`).
+- **`DEBUG=True` على الإنترنت المفتوح** (`.env`) — يكشف traceback كاملاً بالإعدادات والمسارات
+  والاستعلامات لأي زائر يُشغّل خطأً، **ويُعطِّل** كتلة الأمان كلها (HSTS + كوكيز آمنة) لأنها
+  خلف `IS_PRODUCTION`. صار `DJANGO_DEBUG=0` (404 صارت صفحة إنتاج بسيطة — مُتحقَّق حيّاً).
+- **بوابة أمان HTTPS هي `if not DEBUG:` لا `IS_PRODUCTION`** (`core/settings.py` ~س83) —
+  خلافاً لما توحي به التعليقات المجاورة. فإطفاء `DJANGO_DEBUG` وحده فعّل `SECURE_HSTS_SECONDS`
+  و`SESSION_COOKIE_SECURE` و`CSRF_COOKIE_SECURE` بلا لمس `DJANGO_ENV`. وتعمل خلف الوكيل رغم
+  أن `SECURE_PROXY_SSL_HEADER = None`، لأن **gunicorn** يترجم `X-Forwarded-Proto` إلى
+  `wsgi.url_scheme` (يثق بـ127.0.0.1 = nginx) فتصير `request.is_secure()` صحيحة.
+- **`DJANGO_ENV=production` يبقى غير قابل للتفعيل**: `OPENCLAW_BEARER_TOKEN` و
+  `CLOUDINARY_CLOUD_NAME/API_KEY/API_SECRET` معلَّمة `required_in_production=True` وغير
+  مهيّأة ⇒ `ImproperlyConfigured` عند الإقلاع. لا حاجة إليه لأمان HTTPS بعد ما سبق.
+- **حارس جديد `core/tests/test_seo_contract.py`** (6 اختبارات): يثبّت `SITE_ORIGIN` واحداً
+  ويرفض أي رابط SEO يخالفه، ويمنع تناقض sitemap/robots، ويؤكد وجود العنوان/الوصف/الكلمات
+  و`robots=index`. كُتب قبل الإصلاح وفشل 3 فشل حقيقي، ثم نجح بعده.
+- تحقّق: **المجموعة الكاملة 495 اختباراً ناجحة** · SEO الحيّ مُتحقَّق عبر الدومين العام
+  (canonical + robots + sitemap) · فواتير الشراء بعد إعادة التحميل 200 في 0.43s (لا انحدار).
+
+### مصائد مثبَّتة (لا تكررها)
+- **`canonical` خاطئ يُلغي الفهرسة كلياً** — أخطر من غياب الوسوم أصلاً: الموقع يبدو سليماً
+  تماماً في المتصفح بينما جوجل يُسقطه. أي تغيير دومين يجب أن يمر على السبعة مواضع
+  (canonical · og:url · og:image · twitter:image · JSON-LD url · sitemap · robots).
+- **`add_header` داخل `location` يُلغي الموروث من `server`** في nginx — تكرار الترويسات في
+  كل `location` مقصود لا سهو.
+- **ردود الواجهة لا تمر بوسيطات Django**: أي ترويسة أمان تُضاف في `settings.py` تغطي `/api/`
+  فقط؛ صفحات SPA تحتاج nginx.
+- **مسار في sitemap تمنعه robots** (أو مسار ميت) يهدر ميزانية الزحف — الحارس الجديد يرصده.
+
+### [ORPHANS & PENDING]
+- ~~ترويسات أمان الواجهة على nginx~~ **طُبِّقت**: `location /` يضيف HSTS + nosniff +
+  X-Frame-Options + Referrer-Policy (ردود SPA لا تمر بوسيطات Django). `location /api/`
+  تُرك **بلا** `add_header` عمداً — Django يتولاها، وأي إضافة تُنتج ترويسة مكرَّرة.
+- **importmap إلى `aistudiocdn.com` باقٍ في `index.html`** رغم أن Vite يحزم React في
+  `vendor-react` chunk ⇒ خامل عملياً (لا bare specifiers بعد الحزم) لكنه بقايا سقالة
+  AI Studio وتبعية طرف ثالث في الترويسة. يُحذف عند أول تنظيف للواجهة.
+- **`/store`** معطّل بكتلة معلّقة — إما يُفعَّل ويعود إلى sitemap، أو تُحذف الكتلة الميتة.
+- تفعيل `DJANGO_ENV=production` يحتاج تهيئة متغيرات Cloudinary/OpenClaw أو رفع
+  `required_in_production` عنها إن كانت الميزات غير مستخدمة.

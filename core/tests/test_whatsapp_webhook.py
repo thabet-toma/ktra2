@@ -203,6 +203,69 @@ def test_registered_number_gets_reply_scoped_to_its_own_company(env, client: Cli
 
 
 @override_settings(WHATSAPP_WEBHOOK_SECRET=SECRET)
+def test_chats_upsert_event_is_ignored_not_500(env, client: Client):
+    """
+    Evolution يبعث `chats.upsert` (وقائمة الدردشات في `data`) لا رسالة واحدة —
+    وكان فحص «upsert داخل اسم الحدث» يمرّره فينفجر `data.get` على list
+    (`AttributeError: 'list' object has no attribute 'get'`). 160 خطأ 500 في يوم
+    واحد على الإنتاج. الحدث الوحيد المقصود هو `messages.upsert`.
+    """
+    payload = {
+        "event": "chats.upsert",
+        "instance": "ktra-test",
+        "data": [{"remoteJid": "972500000001@s.whatsapp.net", "id": "CHAT1"}],
+    }
+    with patch("core.whatsapp_views._send_reply") as send, \
+         patch("core.ollama_assistant.chat") as chat:
+        resp = client.post(
+            WEBHOOK_PATH + "chats-upsert/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+    assert resp.status_code == 200
+    assert resp.json()["ignored"] == "event=chats.upsert"
+    chat.assert_not_called()
+    send.assert_not_called()
+
+
+@override_settings(WHATSAPP_WEBHOOK_SECRET=SECRET)
+def test_contacts_upsert_event_is_ignored(env, client: Client):
+    """نفس الفخ لأي حدث آخر يحمل كلمة upsert (contacts.upsert ترسل list أيضاً)."""
+    payload = {
+        "event": "contacts.upsert",
+        "instance": "ktra-test",
+        "data": [{"remoteJid": "972500000001@s.whatsapp.net", "pushName": "X"}],
+    }
+    with patch("core.whatsapp_views._send_reply") as send:
+        resp = client.post(
+            WEBHOOK_PATH, data=json.dumps(payload), content_type="application/json"
+        )
+    assert resp.status_code == 200
+    assert resp.json()["ignored"] == "event=contacts.upsert"
+    send.assert_not_called()
+
+
+@override_settings(WHATSAPP_WEBHOOK_SECRET=SECRET)
+def test_messages_upsert_with_list_data_is_ignored_not_500(env, client: Client):
+    """
+    حزام أمان ثانٍ: حتى لو جاء `messages.upsert` نفسه بـ`data` قائمةً (تغيّر في
+    نسخة Evolution)، لا ينهار الطلب.
+    """
+    payload = {
+        "event": "messages.upsert",
+        "instance": "ktra-test",
+        "data": [{"key": {"remoteJid": "972500000001@s.whatsapp.net"}}],
+    }
+    with patch("core.whatsapp_views._send_reply") as send:
+        resp = client.post(
+            WEBHOOK_PATH, data=json.dumps(payload), content_type="application/json"
+        )
+    assert resp.status_code == 200
+    assert resp.json()["ignored"] == "data not an object"
+    send.assert_not_called()
+
+
+@override_settings(WHATSAPP_WEBHOOK_SECRET=SECRET)
 def test_non_text_message_prompts_for_text(env, client: Client):
     payload = _upsert_payload(remote_jid="972500000001@s.whatsapp.net", text="")
     payload["data"]["message"] = {"audioMessage": {"seconds": 5}}

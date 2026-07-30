@@ -3,7 +3,6 @@ Allow: /
 Allow: /about-us
 Allow: /contact
 Allow: /gallery
-Allow: /store
 
 # مسارات التطبيق الداخلية (خلف تسجيل الدخول) — لا فائدة من فهرستها، ولزائر
 # غير مسجَّل تعرض صفحة الهبوط نفسها فتتكرر النتيجة على عناوين مختلفة.
@@ -48,5 +47,8 @@ Disallow: /sourcing
 Disallow: /group-constants
 Disallow: /aseel-kit
 Disallow: /aseel-sales
+# كتلة عرض المتجر معطّلة في App.tsx، فالمسار يعرض صفحة الهبوط نفسها ⇒ محتوى
+# مكرر على عنوان مختلف. يُعاد فتحه عند تفعيل الكتلة.
+Disallow: /store
 
-Sitemap: https://smart.ktragroup.com/sitemap.xml
+Sitemap: https://ktraerp.servebeer.com/sitemap.xml

@@ -102,10 +102,16 @@ def whatsapp_webhook(request, secret: str, event_suffix: str | None = None):
         return JsonResponse({"ignored": "invalid body"})
 
     event = str(payload.get("event") or "")
-    if "upsert" not in event.lower():
+    # الحدث المقصود هو messages.upsert وحده. فحص «upsert داخل الاسم» كان يمرّر
+    # chats.upsert وcontacts.upsert أيضاً، وهما يرسلان `data` **قائمةً** لا كائناً.
+    # Evolution يكتب الفاصل نقطةً أو شرطةً حسب الإعداد، فنوحّده قبل المقارنة.
+    if event.lower().replace("-", ".") != "messages.upsert":
         return JsonResponse({"ignored": f"event={event}"})
 
     data = payload.get("data") or {}
+    if not isinstance(data, dict):
+        # حزام أمان: نسخة من Evolution قد ترسل دفعة رسائل كقائمة
+        return JsonResponse({"ignored": "data not an object"})
     key = data.get("key") or {}
 
     if key.get("fromMe"):

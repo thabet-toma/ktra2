@@ -2631,7 +2631,22 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             qs, "partner_id", supplier=True, alias="supplier_balance",
         )
         if self.action == 'list':
-            qs = qs.annotate(items_count=Count('items'))
+            # عدّ البنود عبر Subquery لا Count('items'): الأخير يفرض GROUP BY فيمنع
+            # Django من تقليم التعليقات في استعلام COUNT الخاص بالترقيم، فيُنفَّذ كل
+            # subquery (الرصيد + ملخص الدفع) لكل صف — تجاوز 30s وقطع اتصال MySQL
+            # على المستأجرين ذوي الفواتير الكثيرة.
+            items_count = Coalesce(
+                Subquery(
+                    PurchaseInvoiceItem.objects
+                    .filter(invoice_id=OuterRef('pk'))
+                    .values('invoice_id')
+                    .annotate(n=Count('pk'))
+                    .values('n')[:1],
+                    output_field=IntegerField(),
+                ),
+                Value(0, output_field=IntegerField()),
+            )
+            qs = qs.annotate(items_count=items_count)
             qs = annotate_purchase_invoice_payment_summary(qs)
         else:
             qs = qs.prefetch_related(

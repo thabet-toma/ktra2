@@ -5,7 +5,7 @@ param(
     [int]$Port = 0,
     [string]$IdentityFile = "",
     [string]$HomeRoot = "",
-    [string]$ApiUrl = "https://api.smart.ktragroup.com",
+    [string]$ApiUrl = "https://smart.ktragroup.com",
     [switch]$SkipTests,
     [switch]$DryRun
 )
@@ -349,7 +349,7 @@ for _ in {1..12}; do
   sleep 2
 done
 [[ "$healthy" == "1" ]] || { echo "Local API health check failed." >&2; false; }
-curl -fsS --max-time 20 https://api.smart.ktragroup.com/api/health/ >/dev/null
+curl -fsS --max-time 20 https://smart.ktragroup.com/api/health/ >/dev/null
 curl -fsS --max-time 20 https://smart.ktragroup.com/ >/dev/null
 
 MUTATED=0
