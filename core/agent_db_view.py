@@ -48,25 +48,28 @@ def _validate_sql(sql: str) -> str | None:
     return None
 
 
-def agent_endpoint(view):
+def agent_endpoint(methods="POST, OPTIONS"):
     """مسارات الوكيل مفتوحة لأي دومين (Origin: *) — لأن الهوية هنا هي مفتاح
     X-Agent-Key لا مصدر الطلب، ولا تُستخدم كوكيز جلسة إطلاقاً فلا خطر CSRF.
     هذا لا يمسّ CORS لبقية المسارات (الواجهة تبقى على قائمتها المحددة)،
     ويشمل ردّ preflight لأن هيدر X-Agent-Key هيدر مخصص يستدعي OPTIONS مسبقاً.
     """
-    @wraps(view)
-    def _wrapped(request, *args, **kwargs):
-        if request.method == "OPTIONS":
-            response = Response(status=status.HTTP_200_OK)
-        else:
-            response = view(request, *args, **kwargs)
-        response["Access-Control-Allow-Origin"] = "*"
-        response["Access-Control-Allow-Methods"] = "POST, OPTIONS"
-        response["Access-Control-Allow-Headers"] = "Content-Type, X-Agent-Key"
-        response["Access-Control-Max-Age"] = "86400"
-        return response
+    def _decorator(view):
+        @wraps(view)
+        def _wrapped(request, *args, **kwargs):
+            if request.method == "OPTIONS":
+                response = Response(status=status.HTTP_200_OK)
+            else:
+                response = view(request, *args, **kwargs)
+            response["Access-Control-Allow-Origin"] = "*"
+            response["Access-Control-Allow-Methods"] = methods
+            response["Access-Control-Allow-Headers"] = "Content-Type, X-Agent-Key"
+            response["Access-Control-Max-Age"] = "86400"
+            return response
 
-    return _wrapped
+        return _wrapped
+
+    return _decorator
 
 
 def _check_agent_key(request):
@@ -84,7 +87,7 @@ def _check_agent_key(request):
 @api_view(["POST", "OPTIONS"])
 @authentication_classes([])
 @permission_classes([])
-@agent_endpoint
+@agent_endpoint()
 def agent_query(request):
     """
     POST /api/agent/query/
@@ -156,29 +159,50 @@ def _resolve_agent_tenant(tenant_id):
     return None, "حدّد الشركة عبر tenant_id في جسم الطلب."
 
 
-@api_view(["POST", "OPTIONS"])
+@api_view(["GET", "POST", "OPTIONS"])
 @authentication_classes([])
 @permission_classes([])
-@agent_endpoint
+@agent_endpoint("GET, POST, OPTIONS")
 def agent_create_draft_invoice(request):
     """
+    GET  /api/agent/invoices/draft/?tenant_id=1&customer=12&limit=50
+         يعرض المسوّدات (status=draft) فقط.
     POST /api/agent/invoices/draft/
     Headers: X-Agent-Key: <AGENT_DB_API_KEY>
     Body:    {"tenant_id": 1, "branch_id": 2, "customer": 12,
               "invoice_date": "2026-07-30", "currency": 1,
               "lines": [{"product": 345, "quantity": "2", "unit_price": "150.00"}]}
 
-    ينشئ فاتورة مبيعات **مسوّدة دائماً** — لا ترحيل تلقائي ولا قيود محاسبية،
-    لأن الترحيل يبقى قراراً بشرياً من الواجهة. الترقيم والضرائب وفحص المخزون
-    تمرّ عبر SalesInvoiceSerializer نفسه المستخدَم في الواجهة.
+    الإنشاء ينتج فاتورة مبيعات **مسوّدة دائماً** — لا ترحيل تلقائي ولا قيود
+    محاسبية، لأن الترحيل يبقى قراراً بشرياً من الواجهة. الترقيم والضرائب
+    وفحص المخزون تمرّ عبر SalesInvoiceSerializer نفسه المستخدَم في الواجهة.
     """
     unauthorized = _check_agent_key(request)
     if unauthorized is not None:
         return unauthorized
 
-    from core.activity import log_activity
-    from sales.serializers import SalesInvoiceSerializer
+    from sales.models import SalesInvoice
+    from sales.serializers import SalesInvoiceListSerializer, SalesInvoiceSerializer
     from tenants.models import Branch
+
+    if request.method == "GET":
+        tenant, err = _resolve_agent_tenant(request.query_params.get("tenant_id"))
+        if tenant is None:
+            return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
+        qs = SalesInvoice.objects.filter(
+            tenant_id=tenant.TenantID, status=SalesInvoice.STATUS_DRAFT,
+        ).select_related("customer", "currency").order_by("-id")
+        customer_id = request.query_params.get("customer")
+        if customer_id:
+            qs = qs.filter(customer_id=customer_id)
+        try:
+            limit = min(max(int(request.query_params.get("limit", MAX_ROWS)), 1), MAX_ROWS)
+        except (TypeError, ValueError):
+            limit = MAX_ROWS
+        rows = SalesInvoiceListSerializer(qs[:limit], many=True).data
+        return Response({"results": rows, "count": len(rows)})
+
+    from core.activity import log_activity
 
     payload = {k: v for k, v in (request.data or {}).items()
                if k not in {"tenant_id", "branch_id", "auto_post", "status"}}
@@ -221,3 +245,71 @@ def agent_create_draft_invoice(request):
         tenant.TenantID, invoice.invoice_number, invoice.grand_total,
     )
     return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "PATCH", "OPTIONS"])
+@authentication_classes([])
+@permission_classes([])
+@agent_endpoint("GET, PATCH, OPTIONS")
+def agent_draft_invoice_detail(request, pk):
+    """
+    GET   /api/agent/invoices/draft/<id>/?tenant_id=1   — عرض فاتورة واحدة.
+    PATCH /api/agent/invoices/draft/<id>/                — تعديل مسوّدة فقط.
+    Headers: X-Agent-Key: <AGENT_DB_API_KEY>
+
+    التعديل مرفوض إن كانت الفاتورة مرحّلة أو ملغاة (نفس قاعدة الواجهة) —
+    ولا يوجد مسار حذف إطلاقاً على واجهة الوكيل.
+    """
+    unauthorized = _check_agent_key(request)
+    if unauthorized is not None:
+        return unauthorized
+
+    from sales.models import SalesInvoice
+    from sales.serializers import SalesInvoiceSerializer
+
+    tenant_id = (
+        request.query_params.get("tenant_id")
+        if request.method == "GET"
+        else (request.data or {}).get("tenant_id")
+    )
+    tenant, err = _resolve_agent_tenant(tenant_id)
+    if tenant is None:
+        return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
+
+    invoice = SalesInvoice.objects.filter(pk=pk, tenant_id=tenant.TenantID).first()
+    if invoice is None:
+        return Response({"error": "الفاتورة غير موجودة."}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == "GET":
+        return Response(SalesInvoiceSerializer(invoice).data)
+
+    if invoice.status != SalesInvoice.STATUS_DRAFT:
+        return Response(
+            {"error": "لا يمكن تعديل فاتورة مرحّلة أو ملغاة عبر واجهة الوكيل."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    from core.activity import log_activity
+
+    payload = {k: v for k, v in (request.data or {}).items()
+               if k not in {"tenant_id", "branch_id", "auto_post", "status"}}
+    serializer = SalesInvoiceSerializer(invoice, data=payload, partial=True)
+    if not serializer.is_valid():
+        return Response(
+            {"error": "بيانات غير صالحة.", "details": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        invoice = serializer.save()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[AgentDraftInvoice] update failed: %s", exc)
+        return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    log_activity(
+        action="update", entity_type="sales_invoice", entity_id=invoice.id,
+        entity_label=invoice.invoice_number,
+        description="تعديل فاتورة مسوّدة عبر واجهة الوكيل",
+        partner_ids=[invoice.customer_id], tenant=tenant, request=request,
+    )
+    return Response(serializer.data)

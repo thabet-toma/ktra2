@@ -110,3 +110,59 @@ def test_unknown_tenant_is_rejected(env):
     )
     assert resp.status_code == 400
     assert SalesInvoice.objects.count() == 0
+
+
+def test_list_returns_only_drafts_for_tenant(env):
+    tenant, customer, product = env
+    client = APIClient()
+    client.post(URL, _body(customer, product, tenant_id=tenant.TenantID),
+                format="json", HTTP_X_AGENT_KEY=KEY)
+
+    resp = client.get(f"{URL}?tenant_id={tenant.TenantID}", HTTP_X_AGENT_KEY=KEY)
+    assert resp.status_code == 200, resp.data
+    assert resp.data["count"] == 1
+    assert resp.data["results"][0]["status"] == SalesInvoice.STATUS_DRAFT
+
+
+def test_detail_get_and_patch_draft(env):
+    tenant, customer, product = env
+    client = APIClient()
+    created = client.post(
+        URL, _body(customer, product, tenant_id=tenant.TenantID),
+        format="json", HTTP_X_AGENT_KEY=KEY,
+    ).data
+    detail_url = f"{URL}{created['id']}/"
+
+    got = client.get(f"{detail_url}?tenant_id={tenant.TenantID}", HTTP_X_AGENT_KEY=KEY)
+    assert got.status_code == 200
+    assert got.data["id"] == created["id"]
+
+    patched = client.patch(
+        detail_url, {"tenant_id": tenant.TenantID, "notes": "ملاحظة معدّلة"},
+        format="json", HTTP_X_AGENT_KEY=KEY,
+    )
+    assert patched.status_code == 200, patched.data
+    inv = SalesInvoice.objects.get(pk=created["id"])
+    assert inv.notes == "ملاحظة معدّلة"
+    assert inv.status == SalesInvoice.STATUS_DRAFT
+
+
+def test_cannot_patch_posted_invoice(env):
+    from sales.services import post_sales_invoice
+
+    tenant, customer, product = env
+    client = APIClient()
+    created = client.post(
+        URL, _body(customer, product, tenant_id=tenant.TenantID),
+        format="json", HTTP_X_AGENT_KEY=KEY,
+    ).data
+    inv = SalesInvoice.objects.get(pk=created["id"])
+    post_sales_invoice(inv, user=None)
+
+    resp = client.patch(
+        f"{URL}{inv.id}/", {"tenant_id": tenant.TenantID, "notes": "لن يُقبل"},
+        format="json", HTTP_X_AGENT_KEY=KEY,
+    )
+    assert resp.status_code == 400
+    inv.refresh_from_db()
+    assert inv.notes != "لن يُقبل"
