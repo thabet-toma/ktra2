@@ -47,6 +47,7 @@ urlpatterns = [
     path('api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>', whatsapp_views.whatsapp_webhook),
     path('api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>/', whatsapp_views.whatsapp_webhook),
     path('api/agent/query/', agent_db_view.agent_query),
+    path('api/agent/invoices/draft/', agent_db_view.agent_create_draft_invoice),
     path('api/dashboard/', dashboard_api.trade_dashboard),
     # T-PERM: محرّك الصلاحيات (صلاحياتي + مصفوفة الأدوار لكل شركة)
     path('api/permissions/me/', permissions_api.my_permissions),
