@@ -343,6 +343,8 @@ _REFERENCE_LABELS = {
     "CLEARANCE": "تخليص جمركي",
     "WAREHOUSE_TRANSFER": "تحويل مستودعي",
     "STOCKTAKE": "جرد",
+    "GOODS_RECEIPT": "سند استلام",
+    "DELIVERY_NOTE": "سند تسليم",
     "MANUAL": "حركة يدوية",
 }
 
@@ -735,12 +737,69 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
         net = Decimal(str(out_q)) - Decimal(str(ret_q))
         return (net / Decimal(divisor)).quantize(Decimal('0.01'))
 
+    # T-RESERVE: المحجوز بطلبيات الزبائن المؤكَّدة السارية — نفس مصدر جدول الأصناف
+    # (`ProductSerializer`) فلا رقمان لحقيقة واحدة، والمتاح = الرصيد − المحجوز.
+    from sales.services import reserved_quantity_map
+    reserved = Decimal(str(
+        reserved_quantity_map(tenant_id, [product_id]).get(product_id, 0)))
+
+    # كرت الصنف الاحترافي: سعر البيع (المحفوظ أو آخر سعر فعلي) مقابل التكلفة،
+    # فالربح والهامش يُشتقّان خادمياً — لا تحسبهما الواجهة فيختلف رقمان لحقيقة واحدة.
+    from sales.services import last_sale_price as _last_sale_price
+    from core.pricing import PriceStrategy, resolve_purchase_price
+
+    sale_price = Decimal(str(p.sale_price)) if p.sale_price is not None else None
+    last_sale = _last_sale_price(tenant_id=tenant_id, product_id=product_id)
+    last_sale_val = Decimal(last_sale['unit_price']) if last_sale['unit_price'] else None
+
+    last_purchase = resolve_purchase_price(
+        tenant_id=tenant_id, product_id=product_id, strategy=PriceStrategy.LAST_PURCHASE)
+    # الرجوع لمتوسط التكلفة ليس «آخر سعر شراء» — فبلا تاريخ شراء يبقى فارغاً.
+    last_purchase_val = (
+        Decimal(last_purchase['unit_price'])
+        if last_purchase['unit_price'] and last_purchase['strategy_used'] != PriceStrategy.DEFAULT
+        else None
+    )
+
+    if sale_price is not None:
+        effective_sale, sale_source = sale_price, 'product'
+    elif last_sale_val is not None:
+        effective_sale, sale_source = last_sale_val, 'last_invoice'
+    else:
+        effective_sale, sale_source = None, None
+
+    profit = (effective_sale - avg_cost) if effective_sale is not None else None
+    margin = (
+        (profit / effective_sale * 100).quantize(Decimal('0.01'))
+        if profit is not None and effective_sale else None
+    )
+
     return {
         'id': p.id,
         'sku': p.sku,
         'name': p.name_ar or p.name_en or p.sku,
+        'brand': (p.brand or '').strip() or None,
+        'uom': p.uom_legacy or None,
+        'barcode': p.barcode or None,
+        'is_service': p.is_service,
+        'min_stock_level': p.min_stock_level,
         'category': p.category.name if p.category_id else None,
+        'sale_price': str(sale_price) if sale_price is not None else None,
+        'last_sale_price': str(last_sale_val) if last_sale_val is not None else None,
+        'last_sale_invoice': last_sale['invoice_number'],
+        'last_sale_date': last_sale['invoice_date'],
+        'last_purchase_price': str(last_purchase_val) if last_purchase_val is not None else None,
+        'effective_sale_price': str(effective_sale) if effective_sale is not None else None,
+        'sale_price_source': sale_source,
+        'profit_per_unit': str(profit) if profit is not None else None,
+        'profit_margin_pct': str(margin) if margin is not None else None,
+        'sale_valuation': (
+            str((on_hand * effective_sale).quantize(Decimal('0.01')))
+            if effective_sale is not None else None
+        ),
         'quantity_on_hand': str(on_hand),
+        'reserved_quantity': str(reserved),
+        'available_quantity': str((on_hand - reserved).quantize(Decimal('0.0001'))),
         'avg_cost': str(avg_cost),
         'inventory_valuation': str((on_hand * avg_cost).quantize(Decimal('0.01'))),
         'purchased_qty': str(purchased['q'] or 0),

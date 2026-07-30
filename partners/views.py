@@ -15,7 +15,7 @@ from tenants.models import Currency, Tenant
 from .models import CustomerNote, Partner, PartnerBankAccount
 from .serializers import (
     CustomerNoteSerializer, PartnerBankAccountSerializer, PartnerListSerializer,
-    PartnerSerializer,
+    PartnerSerializer, find_partner_with_similar_bank_account, normalize_identifier,
 )
 
 logger = logging.getLogger(__name__)
@@ -191,6 +191,11 @@ class PartnerViewSet(viewsets.ModelViewSet):
         partner_type = self.request.query_params.get("partner_type")
         if partner_type:
             qs = qs.filter(partner_type=partner_type)
+        # T-IMPOFFER: فصل المورد الدولي عن المحلي. غير المصنَّف ('') يظهر في
+        # الجانبين — الفصل الجديد لا يُخفي مورداً قائماً عن شاشته المعتادة.
+        supplier_scope = self.request.query_params.get("supplier_scope", "").strip()
+        if supplier_scope:
+            qs = qs.filter(Q(supplier_scope=supplier_scope) | Q(supplier_scope=""))
         assigned_price_tier = self.request.query_params.get("assigned_price_tier")
         if assigned_price_tier:
             qs = qs.filter(assigned_price_tier=assigned_price_tier)
@@ -297,9 +302,26 @@ class PartnerViewSet(viewsets.ModelViewSet):
                 raise ValidationError({
                     "bank_accounts": "اسم البنك ورقم الحساب مطلوبان لكافة الحسابات المضافة.",
                 })
-            if account_number in seen_numbers:
+            # T-DUPID: المقارنة بالصورة المطبَّعة — «0012-300» و«0012300» رقم واحد.
+            normalized_number = normalize_identifier(account_number)
+            if normalized_number in seen_numbers:
                 raise ValidationError({"bank_accounts": "رقم الحساب البنكي مكرر في البطاقة."})
-            seen_numbers.add(account_number)
+            seen_numbers.add(normalized_number)
+            owner = find_partner_with_similar_bank_account(
+                getattr(tenant, "TenantID", None), account_number,
+                exclude_partner_id=partner.id,
+            )
+            if owner:
+                logger.info(
+                    "partner.duplicate_bank_account tenant=%s value=%r existing=%s",
+                    getattr(tenant, "TenantID", None), account_number, owner[0],
+                )
+                raise ValidationError({
+                    "bank_accounts": (
+                        f"رقم الحساب البنكي «{account_number}» مسجّل للطرف "
+                        f"«{owner[1]}» (#{owner[0]}) — لا يُقبل رقم مطابق أو شبيه."
+                    ),
+                })
             try:
                 curr_id = int(acc_data.get("currency"))
             except (ValueError, TypeError):

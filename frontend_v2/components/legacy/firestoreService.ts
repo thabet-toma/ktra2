@@ -1633,6 +1633,7 @@ export const suppliersService = {
       salesRepWechat: p?.sales_rep_wechat || "",
       salesRepPhone: p?.sales_rep_phone || "",
       type: suppliersService._mapPartnerTypeToSupplierType(p?.partner_type),
+      supplierScope: (p?.supplier_scope || "") as Supplier["supplierScope"],
       createdAt: p?.created_at || new Date().toISOString(),
       updatedAt: p?.updated_at || p?.created_at || new Date().toISOString(),
     };
@@ -1667,12 +1668,19 @@ export const suppliersService = {
   subscribeToSuppliers: (
     callback: (suppliers: Supplier[]) => void,
     onError?: (error: unknown) => void,
+    /**
+     * T-IMPOFFER: نطاق المورد. شاشة الاستيراد تطلب `international` وشاشة الشراء
+     * المحلي `local`؛ الخادم يُضيف غير المصنَّفين إلى الجانبين فلا يختفي مورد
+     * قائم. غياب النطاق = كل الموردين (السلوك السابق حرفياً).
+     */
+    scope?: "local" | "international",
   ) => {
     let alive = true;
     const load = async () => {
       try {
+        const scopeQuery = scope ? `&supplier_scope=${scope}` : "";
         const partners = await apiGetList<any>(
-          "partners/lookup/?limit=500&partner_type=Supplier",
+          `partners/lookup/?limit=500&partner_type=Supplier${scopeQuery}`,
           { tenantId: resolveTenantId() },
         );
         let mapped = partners.map((p: any) => suppliersService._mapPartnerToSupplier(p));
@@ -1960,6 +1968,13 @@ const quoteToUi = async (row: SupplierQuotationDto): Promise<PriceOffer> => ({
   items: (row.lines || []).map(lineToUi),
   status: quoteUiStatus(row.status),
   backendStatus: row.status,
+  // T-IMPOFFER: رقم الصفقة الناتجة يُعرض بجانب الحالة — «محوَّل» بلا رقم يبدو
+  // كأنه لم يحدث (نفس عيب طلبية الشراء المُصلَح في T-DOCBADGE).
+  linkedDocNumber: row.converted_deal?.ref_number || undefined,
+  alibabaLink: row.alibaba_link || "",
+  supplierContact: row.supplier_contact || "",
+  decisionReason: row.decision_reason || "",
+  attachments: row.attachments || [],
   internalNotes: row.notes || "",
   subtotal: Number(row.subtotal || 0),
   discountAmount: Number(row.discount_amount || 0),
@@ -1993,6 +2008,8 @@ const orderToUi = async (row: PurchaseOrderDto): Promise<PriceOffer> => ({
       ? "rejected"
       : "approved_for_shipping",
   backendStatus: row.status,
+  // فاتورة الشراء الناتجة عن التحويل — تُعرض بجانب الحالة في قائمة المستندات.
+  linkedDocNumber: row.invoice_number || undefined,
   internalNotes: row.notes || "",
   subtotal: Number(row.subtotal || 0),
   discountAmount: Number(row.discount_amount || 0),
@@ -2061,17 +2078,15 @@ export const priceOffersService = {
       inFlight = true;
       try {
         const procurementScope: ProcurementScope = scope === "import" ? "import" : "local";
+        // الصفقات لها شاشتها الخاصة («الصفقات») ولا تُعرض هنا — عروض وطلبيات
+        // الاستيراد تقتصر على عروض أسعار الموردين (لا نجلب logistics/deals/).
         const [quotes, orders] = await Promise.all([
           listSupplierQuotations(procurementScope),
-          scope === "import"
-            ? apiGetList<ImportDealDto>("logistics/deals/", { tenantId: resolveTenantId() })
-            : listPurchaseOrders(),
+          scope === "import" ? Promise.resolve([]) : listPurchaseOrders(),
         ]);
         const mapped = await Promise.all([
           ...quotes.map(quoteToUi),
-          ...(scope === "import"
-            ? (orders as ImportDealDto[]).map(dealToUi)
-            : (orders as PurchaseOrderDto[]).map(orderToUi)),
+          ...(scope === "import" ? [] : (orders as PurchaseOrderDto[]).map(orderToUi)),
         ]);
         mapped.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
         if (active) callback(mapped);
@@ -2163,6 +2178,10 @@ export const priceOffersService = {
       total_cbm: "0",
       total_weight_kg: String(offer.totalWeight || 0),
       notes: offer.internalNotes || "",
+      alibaba_link: offer.alibabaLink || "",
+      supplier_contact: offer.supplierContact || "",
+      decision_reason: offer.decisionReason || "",
+      attachments: offer.attachments || [],
       lines: uiLinesToApi(offer),
     });
     return quoteToUi(row);
@@ -2191,6 +2210,10 @@ export const priceOffersService = {
         production_days: Number(offer.productionDays || 0),
         delivery_days: Number(offer.deliveryDays || 0),
         notes: offer.internalNotes || "",
+        alibaba_link: offer.alibabaLink || "",
+        supplier_contact: offer.supplierContact || "",
+        decision_reason: offer.decisionReason || "",
+        attachments: offer.attachments || [],
         lines: uiLinesToApi(offer),
       });
       return quoteToUi(row);

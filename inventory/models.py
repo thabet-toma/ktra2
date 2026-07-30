@@ -100,6 +100,13 @@ class Product(models.Model):
         max_digits=18, decimal_places=4, default=0, db_column='AvgCost',
         help_text='Weighted average cost per unit (base currency)',
     )
+    # كرت الصنف: «سعر البيع» بجانب «سعر التكلفة» — سعر البيع الافتراضي المعتمد
+    # للصنف (بالعملة الأساسية). فارغ = لا سعر محفوظ، فتُظهر البطاقة آخر سعر بيع
+    # فعلي بدلاً منه. لا أثر محاسبي — مرجع تسعير يقترحه المستند.
+    sale_price = models.DecimalField(
+        max_digits=18, decimal_places=4, blank=True, null=True, db_column='SalePrice',
+        help_text='سعر البيع الافتراضي للوحدة (العملة الأساسية) — فارغ يعني الرجوع لآخر سعر بيع',
+    )
     # ── N8-T10: Account overrides (6 FKs) ──────────────────────
     sale_account_override = models.ForeignKey(
         'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
@@ -199,6 +206,9 @@ class StockMovement(models.Model):
         ('PURCHASE_INVOICE', 'فاتورة شراء'),
         ('WAREHOUSE_TRANSFER', 'تحويل مستودعي'),
         ('STOCKTAKE', 'جرد'),
+        # مستندا الاستلام/التسليم المستقلان (بلا فاتورة مرتبطة بعد).
+        ('GOODS_RECEIPT', 'سند استلام'),
+        ('DELIVERY_NOTE', 'سند تسليم'),
     ]
 
     id = models.AutoField(primary_key=True, db_column='MovementID')
@@ -231,7 +241,7 @@ class StockMovement(models.Model):
 
     # تقسيم المخزن: مصدر البضاعة محلي (فاتورة شراء عادية) أو دولي (مسار الاستيراد).
     IMPORT_REFERENCE_TYPES = ('SHIPMENT', 'DEAL', 'CLEARANCE')
-    LOCAL_REFERENCE_TYPES = ('PURCHASE_INVOICE',)
+    LOCAL_REFERENCE_TYPES = ('PURCHASE_INVOICE', 'GOODS_RECEIPT')
 
     class Meta:
         db_table = 'stock_movements'

@@ -151,7 +151,8 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
     setExpression((prev) => prev.slice(0, -1));
   };
 
-  const handleEvaluate = () => {
+  /** يحسب التعبير الحالي ويسجّله في الذاكرة — بلا إغلاق ولا تعبئة حقل. */
+  const evaluateCurrent = (): number | null => {
     try {
       const result = evaluateArithmeticExpression(expression);
       const rounded = Number(result.toFixed(4));
@@ -159,16 +160,23 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
       if (expression.trim() && expression.trim() !== String(rounded)) {
         pushHistory(expression.trim(), rounded);
       }
-      if (standalone) {
-        // حاسبة مستقلة: اعرض الناتج وأبقِ النافذة لمواصلة الحساب
-        setExpression(String(rounded));
-      } else {
-        // إيفكت: الحاسبة تطير (ببطء) نحو الحقل ثم يُملأ الناتج.
-        animateOut(() => onConfirm(rounded));
-      }
+      return rounded;
     } catch {
       alert("تعبير غير صالح");
+      return null;
     }
+  };
+
+  // «=» تحسب وتعرض الناتج فقط — الحاسبة تبقى مفتوحة لمواصلة الحساب.
+  const handleEvaluate = () => {
+    const rounded = evaluateCurrent();
+    if (rounded !== null) setExpression(String(rounded));
+  };
+
+  // «تسجيل» — الإجراء الوحيد الذي يعبّئ الحقل ويُغلق الحاسبة (يطير نحو الحقل إن وُجد).
+  const handleRecord = () => {
+    const rounded = evaluateCurrent();
+    if (rounded !== null) animateOut(() => onConfirm(rounded));
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -313,10 +321,19 @@ export const AseelCalculatorPopover: React.FC<AseelCalculatorPopoverProps> = ({
         <CalcButton onClick={() => handleKeyPress("1")}>1</CalcButton>
         <CalcButton onClick={() => handleKeyPress("2")}>2</CalcButton>
         <CalcButton onClick={() => handleKeyPress("3")}>3</CalcButton>
-        <CalcButton className="row-span-2 text-2xl font-extrabold" colorClass="bg-emerald-500/90 text-white border border-emerald-400/30 hover:bg-emerald-500 shadow-[0_0_18px_rgba(16,185,129,.45)]" onClick={handleEvaluate}>=</CalcButton>
+        <CalcButton className="text-2xl font-extrabold" colorClass={opBtn} onClick={handleEvaluate}>=</CalcButton>
 
         <CalcButton className="col-span-2" onClick={() => handleKeyPress("0")}>0</CalcButton>
         <CalcButton onClick={() => handleKeyPress(".")}>.</CalcButton>
+        {!standalone && (
+          <CalcButton
+            className="text-xs font-extrabold"
+            colorClass="bg-emerald-500/90 text-white border border-emerald-400/30 hover:bg-emerald-500 shadow-[0_0_18px_rgba(16,185,129,.45)]"
+            onClick={handleRecord}
+          >
+            تسجيل
+          </CalcButton>
+        )}
       </div>
     </div>
   );

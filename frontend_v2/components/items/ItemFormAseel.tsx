@@ -1,6 +1,10 @@
 /**
  * N5-T4 — ItemFormAseel (F6) — inside-out نمط Aseel مع 6 صفحات
  * المرجع: المخازن.txt:11-25، القالب: SalesInvoiceEditor.tsx
+ *
+ * كرت الصنف الموحّد: صار هذا المكوّن هو الكرت الوحيد — الإضافة والتعديل والعرض.
+ * تبويبات «نظرة عامة» و«الفواتير المرتبطة» و«حركة المخزون» تأتي من
+ * `useProductInsights` (كانت حبيسة صفحة `ProductProfilePage` المنفصلة).
  */
 import React, { useCallback, useEffect, useState } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
@@ -17,6 +21,9 @@ import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Info, Upload
 import { CategoryPicker } from "../inventory/CategoryPicker";
 import { ValuePicker } from "../inventory/ValuePicker";
 import { cloudinaryService } from "../../services/cloudinaryService";
+import { usePasteImageUpload } from "../../utils/clipboardImage";
+import { useProductInsights } from "./ProductInsightTabs";
+import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 
 const pendingN8 = (msg: string) => (
   <div className="aseel-banner" style={{
@@ -33,9 +40,16 @@ const pendingN8 = (msg: string) => (
 type Props = {
   productId: number | null;
   duplicateId?: number | null;
+  /** سجلّات التنقّل (Ctrl+PgUp/PgDn) — تُترك فارغة حين يُفتح الكرت بمساره المباشر. */
   products: SqlProduct[];
   onSaved: () => void;
   onCancel: () => void;
+  /** أزرار إضافية على الشريط (مثل «تكلفة المنتجات» حين يُفتح الكرت كصفحة). */
+  extraActions?: AseelToolbarAction[];
+  /** نصّ زر الإلغاء — «عودة» حين يكون الكرت صفحة قائمة بذاتها. */
+  cancelLabel?: string;
+  /** التبويب الابتدائي (روابط «ذكر لمنتج» تفتح حركة المخزون مباشرةً). */
+  initialTab?: string;
 };
 
 type PriceTier = { price: string; currency: string; tax_inclusive: boolean };
@@ -60,6 +74,8 @@ type FormState = {
   uom_primary: string; uom2: string; uom2_factor: string;
   uom3: string; uom3_factor: string;
   min_stock_level: string; max_stock_level: string; reorder_level: string;
+  /** سعر البيع الافتراضي المحفوظ على الصنف (بجانب سعر التكلفة المحسوب). */
+  sale_price: string;
   sale_tiers: PriceTier[];
   purchase_tiers: PriceTier[];
   sale_account: string; sale_return_account: string;
@@ -78,6 +94,7 @@ const blankForm = (): FormState => ({
   uom_primary: "عدد", uom2: "", uom2_factor: "1",
   uom3: "", uom3_factor: "1",
   min_stock_level: "", max_stock_level: "", reorder_level: "",
+  sale_price: "",
   sale_tiers: Array.from({ length: 5 }, blankTier),
   purchase_tiers: Array.from({ length: 5 }, blankTier),
   sale_account: "", sale_return_account: "",
@@ -102,9 +119,14 @@ const ITEM_TYPES = [
   { v: "composite", l: "تجميعي" },
 ];
 
-export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, products, onSaved, onCancel }) => {
+export const ItemFormAseel: React.FC<Props> = ({
+  productId, duplicateId, products, onSaved, onCancel, extraActions = [], cancelLabel = "إلغاء",
+  initialTab,
+}) => {
   const [form, setForm] = useState<FormState>(blankForm());
   const [currentId, setCurrentId] = useState<number | null>(productId);
+  // الجزء القرائي من الكرت (نظرة عامة/فواتير/حركة) — يتبع الصنف المعروض حالياً.
+  const insights = useProductInsights(currentId);
   // W10: صنف موجود (تعديل) — اسمه يُحرَّر مباشرةً بحقل نصّي بدل منتقي «اختر/أضف»
   // الذي كان يحبس الاسم في قائمة منسدلة (نقر «+» يمسح القيمة) فيبدو «غير قابل للتعديل».
   const isExistingProduct = productId != null;
@@ -114,10 +136,7 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
   const [lastKey, setLastKey] = useState("—");
   const [dsUploading, setDsUploading] = useState(false);
 
-  const handleDatasheetUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
+  const uploadDatasheetFile = async (file: File) => {
     setDsUploading(true); setErr(null); setMsg(null);
     try {
       const url = await cloudinaryService.uploadFile(file);
@@ -129,6 +148,16 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
       setDsUploading(false);
     }
   };
+
+  const handleDatasheetUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    await uploadDatasheetFile(file);
+  };
+
+  // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف.
+  usePasteImageUpload((files) => { void uploadDatasheetFile(files[0]); }, !dsUploading);
 
   const handleDatasheetRemove = async (index: number) => {
     const item = form.datasheets[index];
@@ -164,9 +193,12 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
       min_stock_level: p.min_stock_level != null ? String(p.min_stock_level) : "",
       max_stock_level: p.max_stock_level != null ? String(p.max_stock_level) : "",
       reorder_level: p.reorder_level != null ? String(p.reorder_level) : "",
+      sale_price: p.sale_price != null ? String(p.sale_price) : "",
       category: p.category ? Number(p.category) : null,
       category_name: String(p.category_name ?? ""),
-      item_type: String(p.item_type ?? "goods"),
+      // is_service هو حقل الخادم الفعلي (يوجّه الترحيل لحساب مبيعات الخدمات)؛
+      // «نوع الصنف» في الواجهة يُشتقّ منه لا من حقل item_type غير الموجود خادمياً.
+      item_type: p.is_service ? "service" : "goods",
       sale_tiers: (p.sale_tiers as PriceTier[] | undefined) ?? prev.sale_tiers,
       purchase_tiers: (p.purchase_tiers as PriceTier[] | undefined) ?? prev.purchase_tiers,
       sale_account: String(p.sale_account_override ?? ""),
@@ -220,7 +252,11 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
         name_en: form.name_en || null,
         brand: form.brand.trim(),
         min_stock_level: form.min_stock_level ? Number(form.min_stock_level) : null,
+        // سعر البيع: فارغ = لا سعر محفوظ (البطاقة ترجع لآخر سعر بيع فعلي).
+        sale_price: form.sale_price.trim() ? Number(form.sale_price) : null,
         category: categoryId,
+        // is_service: الحقل الفعلي الذي يقرأه الترحيل المحاسبي (مبيعات خدمات لا بضاعة).
+        is_service: form.item_type === "service",
         // روابط الداتا شيت — يلتقطها الخادم في _handle_attachments (خارج حقول الـserializer).
         datasheet_urls: form.datasheets.map((d) => d.url),
       };
@@ -242,6 +278,8 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
         const refreshed = await inventoryApi.getProduct(savedId) as Record<string, unknown>;
         patch("datasheets", extractDatasheets(refreshed));
       } catch { /* تجاهل */ }
+      // النظرة العامة تُقرأ من الخادم — أعِد تحميلها كي يظهر سعر البيع الجديد وربحه.
+      insights.reload();
       onSaved();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحفظ");
@@ -275,8 +313,12 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
     { key: "save", label: saving ? "...تخزين" : "تخزين (F12)",
       icon: saving ? <Loader2 className="animate-spin" /> : <Save />,
       onClick: !saving ? () => void handleSave() : undefined, disabled: saving },
-    { key: "cancel", label: "إلغاء", icon: <X />, onClick: onCancel, danger: true },
+    ...extraActions,
+    { key: "cancel", label: cancelLabel, icon: <X />, onClick: onCancel, danger: true },
   ];
+
+  // صنف جديد يفتح على حقول الإدخال؛ الصنف المحفوظ يفتح على نظرته العامة.
+  const openingTab = initialTab ?? (productId == null ? "general" : "overview");
 
   const banner = (err || msg) ? (
     <div className={`aseel-banner ${err ? "aseel-banner--err" : "aseel-banner--ok"}`}>
@@ -431,9 +473,39 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
     </div>
   );
 
+  // سعر البيع المحفوظ مقابل التكلفة المحسوبة — الربح والهامش يُحسبان فوراً أثناء
+  // الكتابة (معاينة فقط؛ القيمة المعتمدة بعد الحفظ تأتي من الخادم في «نظرة عامة»).
+  const avgCost = Number(insights.profile?.avg_cost ?? 0);
+  const salePriceNum = form.sale_price.trim() ? Number(form.sale_price) : null;
+  const previewProfit = salePriceNum != null && Number.isFinite(salePriceNum) ? salePriceNum - avgCost : null;
+  const previewMargin = previewProfit != null && salePriceNum ? (previewProfit / salePriceNum) * 100 : null;
+  const profitTone = previewProfit == null ? "var(--aseel-ink)"
+    : previewProfit < 0 ? "var(--aseel-danger,#c00)" : "var(--aseel-ok,#267346)";
+
   const tabPrices = (
     <div style={{ padding: "8px 4px" }}>
-      {pendingN8("هذه القيم تُعرَض ولكن لا تُحفَظ بعد — تَنتظر N8-T9 (ProductPriceTier migration).")}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 14 }}>
+        {fld("سعر البيع العام (يدوي)",
+          <input className="aseel-input aseel-input--hl" type="number" min="0" step="0.01"
+            value={form.sale_price} onChange={(e) => patch("sale_price", e.target.value)}
+            title="يُقترح في مستند البيع فقط للزبون الذي لا عرض سعر له ولا شراء سابق لهذا الصنف"
+            placeholder="للزبون بلا عرض ولا شراء سابق" />)}
+        {fld("سعر التكلفة (متوسط — محسوب)",
+          <input className="aseel-input" readOnly value={formatMoney(insights.profile?.avg_cost ?? "", "—")} />)}
+        {fld("الربح للوحدة",
+          <input className="aseel-input" readOnly style={{ color: profitTone, fontWeight: 600 }}
+            value={previewProfit != null ? formatMoney(previewProfit) : "—"} />)}
+        {fld("هامش الربح %",
+          <input className="aseel-input" readOnly style={{ color: profitTone }}
+            value={previewMargin != null ? `${formatMoney(previewMargin)}%` : "—"} />)}
+        {fld("آخر سعر بيع (فاتورة مرحّلة)",
+          <input className="aseel-input" readOnly
+            value={formatMoney(insights.profile?.last_sale_price ?? "", "—")} />)}
+        {fld("آخر سعر شراء (فاتورة مرحّلة)",
+          <input className="aseel-input" readOnly
+            value={formatMoney(insights.profile?.last_purchase_price ?? "", "—")} />)}
+      </div>
+      {pendingN8("فئات الأسعار الخمس تُعرَض ولكن لا تُحفَظ بعد — تَنتظر N8-T9 (ProductPriceTier migration).")}
       {tierTable(form.sale_tiers, "أسعار البيع (5 فئات)", (i, k, v) => {
         const next = [...form.sale_tiers];
         next[i] = { ...next[i], [k]: v };
@@ -537,8 +609,9 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
   return (
     <div dir="rtl">
       <AseelDocumentShell
-        title="كارت الصنف"
+        title="كرت الصنف"
         state={currentId ? `صنف #${currentId}` : "صنف جديد"}
+        initialTab={openingTab}
         nav={nav}
         actions={toolbarActions}
         header={
@@ -552,9 +625,18 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
             {fld("التصنيف", <input className="aseel-input" readOnly value={form.category_name || "—"} />)}
             {fld("نوع الصنف", <input className="aseel-input" readOnly
               value={ITEM_TYPES.find((t) => t.v === form.item_type)?.l ?? form.item_type} />)}
+            {/* الأرقام القيادية في شريط الرأس — تُرى قبل فتح أي تبويب. */}
+            {fld("سعر البيع", <input className="aseel-input" readOnly
+              value={formatMoney(insights.profile?.effective_sale_price ?? form.sale_price, "—")} />)}
+            {fld("سعر التكلفة", <input className="aseel-input" readOnly
+              value={formatMoney(insights.profile?.avg_cost ?? "", "—")} />)}
+            {fld("الرصيد", <input className="aseel-input" readOnly
+              value={formatQuantity(insights.profile?.quantity_on_hand ?? "", "—")} />)}
           </>
         }
         tabs={[
+          // النظرة العامة أولاً: فتح الكرت يعرض حالة الصنف كاملة قبل أي تحرير.
+          ...insights.tabs,
           { key: "general", label: "بيانات عامة", content: tabGeneral },
           { key: "balances", label: "الأرصدة والحركات", content: tabBalances },
           { key: "prices", label: "أسعار البيع والشراء", content: tabPrices },
@@ -563,14 +645,20 @@ export const ItemFormAseel: React.FC<Props> = ({ productId, duplicateId, product
           { key: "mfg", label: "معادلات التصنيع", content: tabManufacturing },
         ]}
         totals={
-          <div style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)", padding: "4px 0" }}>
-            سعر البيع فئة 1:{" "}
-            <b>{form.sale_tiers[0]?.price || "0"} {form.sale_tiers[0]?.currency || "ILS"}</b>
+          <div style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)", padding: "4px 0", display: "grid", gap: 2 }}>
+            <div>سعر البيع: <b style={{ color: "var(--aseel-ink)" }}>
+              {formatMoney(insights.profile?.effective_sale_price ?? form.sale_price, "—")}</b></div>
+            <div>سعر التكلفة: <b style={{ color: "var(--aseel-ink)" }}>
+              {formatMoney(insights.profile?.avg_cost ?? "", "—")}</b></div>
+            <div>الربح للوحدة: <b style={{ color: profitTone }}>
+              {formatMoney(insights.profile?.profit_per_unit ?? (previewProfit ?? ""), "—")}</b></div>
           </div>
         }
         status={
           <>
             <span className="aseel-status-item">رقم الصنف <b>{currentId ?? "—"}</b></span>
+            <span className="aseel-status-item">الرصيد <b>{formatQuantity(insights.profile?.quantity_on_hand ?? "", "—")}</b></span>
+            <span className="aseel-status-item">المتاح <b>{formatQuantity(insights.profile?.available_quantity ?? "", "—")}</b></span>
             <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
             <span className="aseel-status-item">آخر مفتاح <b>{lastKey}</b></span>
           </>

@@ -14,6 +14,7 @@ import {
   resetPermissionsMatrix,
   saveMemberPermissions,
   savePermissionsMatrix,
+  setMemberGrantAll,
   type PermissionMember,
   type PermissionsMatrix,
 } from "../../services/permissionsApi";
@@ -21,6 +22,7 @@ import { usePermissions } from "../../contexts/PermissionsContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { humanizeDrfError } from "../../utils/drfError";
+import { memberOverrideForCheckbox } from "../../utils/viewPermissions";
 import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
 
 type Draft = Record<string, Record<string, boolean>>;
@@ -77,21 +79,55 @@ export const PermissionsPage: React.FC = () => {
     }
   };
 
-  /** التجاوز الفردي ثلاثي الحالة: افتراضي الدور ← منح ← منع ← افتراضي. */
-  const cycleMemberOverride = async (m: PermissionMember, key: string) => {
-    const current = m.overrides[key];
-    const next: boolean | null =
-      current === undefined ? true : current === true ? false : null;
+  /**
+   * خانة اختيار للصلاحية الفردية: مؤشَّرة = ممنوحة فعلياً. ما وافق دوره لا
+   * يُخزَّن تجاوزاً (`memberOverrideForCheckbox` تُرجع null فيُحذف).
+   */
+  const toggleMemberPermission = async (
+    m: PermissionMember,
+    key: string,
+    nextChecked: boolean,
+  ) => {
+    const roleAllowed = !!data?.matrix[m.role]?.[key];
     setSaving(true);
     setErr(null);
     try {
       const updated = await saveMemberPermissions(m.membership_id, [
-        { permission_key: key, allowed: next },
+        { permission_key: key, allowed: memberOverrideForCheckbox(roleAllowed, nextChecked) },
       ]);
       setMembers((prev) =>
         prev.map((x) => (x.membership_id === updated.membership_id ? updated : x)),
       );
       reloadMyPermissions();
+    } catch (e) {
+      setErr(humanizeDrfError(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /** «كل الصلاحيات» لهذا العضو — وإزالتها تعيده لما يمليه دوره (تُستأذن). */
+  const toggleMemberGrantAll = async (m: PermissionMember, nextChecked: boolean) => {
+    if (!nextChecked) {
+      const ok = await confirm({
+        message: `إعادة ${m.name} إلى صلاحيات دوره؟ ستُحذف كل تخصيصاته الفردية.`,
+        confirmText: "إعادة للدور",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      const updated = await setMemberGrantAll(m.membership_id, nextChecked);
+      setMembers((prev) =>
+        prev.map((x) => (x.membership_id === updated.membership_id ? updated : x)),
+      );
+      reloadMyPermissions();
+      toast(
+        nextChecked ? `مُنح ${m.name} كل الصلاحيات.` : `أُعيد ${m.name} إلى صلاحيات دوره.`,
+        "success",
+      );
     } catch (e) {
       setErr(humanizeDrfError(e));
     } finally {
@@ -238,7 +274,11 @@ export const PermissionsPage: React.FC = () => {
                 <span className="text-[10px] mr-2 opacity-70">
                   {data.roles.find((r) => r.key === m.role)?.label || m.role}
                 </span>
-                {Object.keys(m.overrides).length > 0 && (
+                {m.grant_all ? (
+                  <span className="text-[10px] mr-2 text-[var(--color-primary)]">
+                    (كل الصلاحيات)
+                  </span>
+                ) : Object.keys(m.overrides).length > 0 && (
                   <span className="text-[10px] mr-2 text-[var(--color-primary)]">
                     ({Object.keys(m.overrides).length} مخصّص)
                   </span>
@@ -273,10 +313,19 @@ export const PermissionsPage: React.FC = () => {
                   <span className="text-xs text-[var(--color-text-muted)]">
                     تغيير الدور يبدّل القاعدة العامة؛ الاستثناءات أدناه تبقى كما هي.
                   </span>
+                  <label className="flex items-center gap-2 text-sm font-semibold mr-auto">
+                    <input
+                      type="checkbox"
+                      checked={m.grant_all}
+                      disabled={saving}
+                      onChange={(e) => void toggleMemberGrantAll(m, e.target.checked)}
+                    />
+                    كل الصلاحيات
+                  </label>
                 </div>
                 <p className="text-xs text-[var(--color-text-muted)]">
-                  انقر الحالة للتبديل: «افتراضي الدور» ← «ممنوح» ← «ممنوع» ← افتراضي.
-                  التخصيص هنا يعلو على الدور لهذا الموظف وحده.
+                  الخانة المؤشَّرة = الصلاحية ممنوحة لهذا الموظف. ما خالف دوره
+                  يُحفظ تخصيصاً له وحده (مُعلَّم بإطار)، وما وافقه يعود للدور.
                 </p>
                 {groups.map(([group, perms]) => (
                   <div key={group} className="rounded-lg border aseel-border-soft overflow-x-auto">
@@ -291,23 +340,20 @@ export const PermissionsPage: React.FC = () => {
                         {perms.map((p) => {
                           const ovr = m.overrides[p.key];
                           const effective = m.effective.includes(p.key);
-                          const label =
-                            ovr === undefined
-                              ? `افتراضي الدور (${effective ? "ممنوح" : "ممنوع"})`
-                              : ovr
-                                ? "ممنوح (مخصّص)"
-                                : "ممنوع (مخصّص)";
                           return (
                             <tr key={p.key} className="border-t aseel-border-soft">
                               <td className="p-2 text-right">{p.label}</td>
                               <td className="p-2 text-center">
-                                <button
+                                <input
+                                  type="checkbox"
+                                  checked={effective}
                                   disabled={saving}
-                                  onClick={() => void cycleMemberOverride(m, p.key)}
-                                  className={`text-xs px-2 py-1 rounded border ${ovr === undefined ? "aseel-border-soft text-[var(--color-text-muted)]" : "border-[var(--color-primary)] text-[var(--color-primary)] font-bold"}`}
-                                >
-                                  {label}
-                                </button>
+                                  onChange={(e) =>
+                                    void toggleMemberPermission(m, p.key, e.target.checked)
+                                  }
+                                  title={ovr === undefined ? "افتراضي الدور" : "مخصّص لهذا الموظف"}
+                                  style={ovr !== undefined ? { outline: "2px solid var(--color-primary)" } : undefined}
+                                />
                               </td>
                             </tr>
                           );

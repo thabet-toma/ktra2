@@ -94,6 +94,28 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
         max_digits=10, decimal_places=3, default=0, db_column='TotalWeightKg',
     )
     notes = models.TextField(blank=True, default='', db_column='Notes')
+    # ── T-IMPOFFER: مصدر العرض وقرار الملاءمة ──
+    # رابط علي بابا يُنقل إلى `LogisticsDeal.alibaba_link` عند التحويل، فمصدر
+    # التسعير يبقى موصولاً بالصفقة لا مقطوعاً عند حدود المستند.
+    alibaba_link = models.CharField(
+        max_length=500, blank=True, default='', db_column='AlibabaLink',
+        help_text='رابط المنتج/المورد على علي بابا أو منصّة المصدر',
+    )
+    supplier_contact = models.CharField(
+        max_length=100, blank=True, default='', db_column='SupplierContact',
+        help_text='رقم التواصل مع مندوب المورد لهذا العرض',
+    )
+    # سبب القرار: إلزامي عند «غير ملائم» (يُتحقَّق في المُسلسِل) — عرضٌ مرفوض
+    # بلا سبب لا يعلّم أحداً شيئاً عند مراجعته بعد شهر.
+    decision_reason = models.CharField(
+        max_length=500, blank=True, default='', db_column='DecisionReason',
+        help_text='سبب اعتبار العرض غير ملائم',
+    )
+    # ملفات العرض كما وصلت من المورد (PDF/صور) — روابط مستضافة، لا محتوى.
+    attachments = models.JSONField(
+        default=list, blank=True, db_column='Attachments',
+        help_text='[{name,url,type,size}] لملفات عرض السعر المرفوعة',
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
     updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
     created_by = models.ForeignKey(
@@ -1725,6 +1747,121 @@ class PurchaseInvoiceFee(models.Model):
         return f"{self.description}: {self.amount}"
 
 
+class GoodsReceipt(models.Model):
+    """إرسالية شراء — مستند استلام البضاعة من فاتورة شراء بعينها.
+
+    مستند مستقل بترقيمه وتاريخه، مربوط دائماً بفاتورة («الفاتورة المرتبطة»).
+    وجوده يجعل الاستلام حدثاً موثّقاً قابلاً للمراجعة بدل أثر مبعثر في المخزون:
+    - `receive_on_post` مفعّلاً ⇒ الترحيل يُنشئ إرسالية بكامل الكمية تلقائياً.
+    - معطّلاً ⇒ لكل استلام جزئي إرساليته ببنودها وكمياتها.
+    قيد الاستلام وحركات المخزون تبقى مرجعيّتها الفاتورة (كما كانت)، فيُنظّفها
+    إلغاء ترحيل الفاتورة كما هو؛ الإرسالية توثّق «ماذا استُلم ومتى».
+    """
+
+    id = models.AutoField(primary_key=True, db_column='GoodsReceiptID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='goods_receipts',
+    )
+    branch = models.ForeignKey(
+        'tenants.Branch', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='BranchID', related_name='goods_receipts',
+    )
+    receipt_number = models.CharField(max_length=50, db_column='ReceiptNumber')
+    invoice = models.ForeignKey(
+        PurchaseInvoice, on_delete=models.CASCADE, null=True, blank=True,
+        db_column='PurchaseInvoiceID', related_name='receipts',
+        help_text='الفاتورة المرتبطة — بنود الإرسالية تُختار من بنودها حصراً. '
+                  'فارغة = «سند استلام» مستقل (بضاعة وصلت بلا فاتورة بعد).',
+    )
+    # المورد: من الفاتورة حين تُربط، ويُدخَل يدوياً للسند المستقل.
+    partner = models.ForeignKey(
+        Partner, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='PartnerID', related_name='goods_receipts',
+    )
+    supplier_ref = models.CharField(
+        max_length=100, blank=True, default='', db_column='SupplierRef',
+        help_text='رقم/مرجع المورد لهذا الاستلام (بوليصة، إشعار تسليم…)',
+    )
+    receipt_date = models.DateField(db_column='ReceiptDate')
+    notes = models.CharField(max_length=500, blank=True, default='', db_column='Notes')
+    auto_created = models.BooleanField(
+        default=False, db_column='AutoCreated',
+        help_text='أُنشئت تلقائياً مع ترحيل الفاتورة (إعداد الاستلام مع الترحيل)',
+    )
+    journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='JournalID', related_name='goods_receipts',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy_UserID', related_name='goods_receipts',
+    )
+
+    class Meta:
+        db_table = 'purchase_module_goods_receipts'
+        managed = True
+        ordering = ['-receipt_date', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tenant', 'receipt_number'],
+                name='uniq_goods_receipt_number_per_tenant',
+            ),
+        ]
+
+    @property
+    def is_standalone(self) -> bool:
+        """سند استلام مستقل — بضاعة وصلت بلا فاتورة مرتبطة بعد."""
+        return self.invoice_id is None
+
+    def __str__(self):
+        return f"{self.receipt_number} — فاتورة {self.invoice_id or '—'}"
+
+
+class GoodsReceiptLine(models.Model):
+    id = models.AutoField(primary_key=True, db_column='GoodsReceiptLineID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='goods_receipt_lines',
+    )
+    receipt = models.ForeignKey(
+        GoodsReceipt, on_delete=models.CASCADE,
+        db_column='GoodsReceiptID', related_name='lines',
+    )
+    item = models.ForeignKey(
+        PurchaseInvoiceItem, on_delete=models.CASCADE, null=True, blank=True,
+        db_column='InvoiceItemID', related_name='receipt_lines',
+        help_text='بند الفاتورة المرتبطة — فارغ في سند الاستلام المستقل',
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT,
+        db_column='ProductID', related_name='goods_receipt_lines',
+    )
+    warehouse = models.ForeignKey(
+        'inventory.Warehouse', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='WarehouseID', related_name='goods_receipt_lines',
+    )
+    quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')
+    unit_price = models.DecimalField(
+        max_digits=18, decimal_places=4, default=0, db_column='UnitPrice',
+        help_text='تكلفة الوحدة — تُدخَل في السند المستقل، وتُشتق من الفاتورة عند ربطها',
+    )
+    # الحركة التي ولّدها هذا السطر — يجعل تعديل/إلغاء الإرسالية عكساً دقيقاً
+    # لأثرها وحدها دون المساس بإرساليات أخرى لنفس الفاتورة.
+    movement = models.ForeignKey(
+        'inventory.StockMovement', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='MovementID', related_name='goods_receipt_lines',
+    )
+
+    class Meta:
+        db_table = 'purchase_module_goods_receipt_lines'
+        managed = True
+
+    def __str__(self):
+        return f"GRLine {self.id} receipt={self.receipt_id}"
+
+
 class PurchaseSettings(models.Model):
     """FEAT-1: إعدادات مركزية لفواتير الشراء لكل شركة (Tenant).
 
@@ -1762,6 +1899,31 @@ class PurchaseSettings(models.Model):
         db_column="DefaultCashAccountID",
         related_name="purchase_settings_cash",
         help_text="حساب الصندوق الافتراضي للدفعات النقدية في فواتير الشراء",
+    )
+    # استلام البضاعة مع الترحيل: مفعّل = الترحيل يُدخِل كل البنود للمستودع
+    # الافتراضي فوراً (السلوك السابق). معطّل = الترحيل محاسبي فقط، والبضاعة
+    # تُستلَم لاحقاً ببنودها من نافذة «استلام البضاعة» (مرآة stock_on_post للبيع).
+    receive_on_post = models.BooleanField(
+        default=True,
+        db_column="ReceiveOnPost",
+        help_text="إدخال بضاعة الفاتورة للمستودع تلقائياً عند الترحيل",
+    )
+    # تسمية مستند الاستلام — لكل شركة عُرفها (إرسالية/إشعار استلام/مذكرة…).
+    receipt_doc_label = models.CharField(
+        max_length=50, default="إرسالية شراء", db_column="ReceiptDocLabel",
+        help_text="اسم مستند الاستلام المرتبط بفاتورة كما يظهر في الشاشات والطباعة",
+    )
+    standalone_receipt_label = models.CharField(
+        max_length=50, default="سند استلام", db_column="StandaloneReceiptLabel",
+        help_text="اسم مستند الاستلام بلا فاتورة مرتبطة",
+    )
+    allow_standalone_receipt = models.BooleanField(
+        default=True, db_column="AllowStandaloneReceipt",
+        help_text="السماح بإنشاء سند استلام بلا فاتورة مرتبطة (بضاعة وصلت قبل فاتورتها)",
+    )
+    allow_edit_receipt = models.BooleanField(
+        default=True, db_column="AllowEditReceipt",
+        help_text="السماح بتعديل/إلغاء الإرسالية بعد حفظها (يعكس أثرها ويعيد تطبيقه)",
     )
     updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
 

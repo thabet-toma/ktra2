@@ -83,7 +83,8 @@ class ProductViewSet(viewsets.ModelViewSet):
     pagination_class = OptionalPageNumberPagination
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ['sku', 'barcode', 'name_ar', 'name_en', 'brand', 'category__name']
-    ordering_fields = ['id', 'sku', 'name_ar', 'quantity_on_hand', 'avg_cost', 'min_stock_level', 'created_at']
+    ordering_fields = ['id', 'sku', 'name_ar', 'quantity_on_hand', 'avg_cost', 'sale_price',
+                       'min_stock_level', 'created_at']
     ordering = ['-id']
 
     def _get_tenant(self):
@@ -286,6 +287,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         tenant = self._get_tenant()
         instance = self.get_object()
+        old_sale_price = instance.sale_price
         serializer = self.get_serializer(instance, data=request.data, partial=kwargs.get('partial', False))
         serializer.is_valid(raise_exception=True)
         self._validate_category_tenant(serializer, tenant)
@@ -300,6 +302,12 @@ class ProductViewSet(viewsets.ModelViewSet):
             ).exclude(pk=instance.pk).exists():
                 raise serializers.ValidationError({'sku': 'رقم الصنف مستخدم مسبقاً لهذه الشركة.'})
         product = serializer.save()
+        # سعر البيع مرجع تسعير يقترحه كل مستند — تغييره يُسجَّل ليُقرأ أثره لاحقاً.
+        if 'sale_price' in serializer.validated_data and product.sale_price != old_sale_price:
+            logger.info(
+                'product sale_price changed tenant=%s product=%s %s -> %s',
+                getattr(tenant, 'TenantID', None), product.id, old_sale_price, product.sale_price,
+            )
         self._handle_attachments(product, request.data, tenant)
         return Response(self.get_serializer(product).data)
 

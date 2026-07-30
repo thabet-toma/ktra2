@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { User, Task, TaskCategory, TaskPriority, Category } from '../types';
 import { cloudinaryService } from '../services/cloudinaryService';
 import { getCategories } from '../services/firestoreService';
+import { usePasteImageUpload } from '../utils/clipboardImage';
 
 interface CreateTaskModalProps {
     isOpen: boolean;
@@ -75,16 +76,9 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
         }
     }, [isOpen, propCategories, category]);
 
-    if (!isOpen) return null;
-
-    // معالجة اختيار الصور
-    const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = e.target.files;
-        if (!files) return;
-
-        const newFiles = Array.from(files);
-        
-        // التحقق من عدد الصور
+    // معالجة إضافة صور (من اختيار ملف أو لصق من الحافظة) — يُبقي حد 10 صور نفسه.
+    const addImageFiles = (newFiles: File[]) => {
+        if (newFiles.length === 0) return;
         if (selectedImages.length + newFiles.length > 10) {
             alert('يمكنك رفع最多 10 صور فقط');
             return;
@@ -92,24 +86,34 @@ export const CreateTaskModal: React.FC<CreateTaskModalProps> = ({
 
         setSelectedImages(prev => [...prev, ...newFiles]);
 
-        // إنشاء معاينات للصور
         newFiles.forEach((file: File) => {
             const reader = new FileReader();
-            
+
             reader.onload = (event: ProgressEvent<FileReader>) => {
                 const target = event.target;
                 if (target && target.result && typeof target.result === 'string') {
                     setImagePreviews(prev => [...prev, target.result as string]);
                 }
             };
-            
+
             reader.onerror = () => {
                 // console suppressed
             };
-            
+
             reader.readAsDataURL(file);
         });
+    };
 
+    // لصق صورة من الحافظة (Ctrl+V) — قبل أي return مبكر (isOpen) للحفاظ على ترتيب الـ hooks.
+    usePasteImageUpload(addImageFiles, isOpen);
+
+    if (!isOpen) return null;
+
+    // معالجة اختيار الصور
+    const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files;
+        if (!files) return;
+        addImageFiles(Array.from(files));
         // إعادة تعيين حقل الإدخال
         if (fileInputRef.current) {
             fileInputRef.current.value = '';

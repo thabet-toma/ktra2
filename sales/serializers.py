@@ -13,6 +13,7 @@ from .models import (
     CreditDebitNote,
     CustomerPayment,
     DeliveryOrder,
+    DeliveryOrderLine,
     PaymentAllocation,
     SalesInvoice,
     SalesInvoiceLine,
@@ -109,6 +110,7 @@ class SalesInvoiceLineSerializer(serializers.ModelSerializer):
             "product",
             "product_name",
             "quantity",
+            "delivered_quantity",
             "unit_price",
             "line_discount",
             "tax_rate",
@@ -121,7 +123,7 @@ class SalesInvoiceLineSerializer(serializers.ModelSerializer):
             "extra_quantity",
             "line_tax_percent",
         ]
-        read_only_fields = ["line_total_excl_tax", "line_tax_amount"]
+        read_only_fields = ["line_total_excl_tax", "line_tax_amount", "delivered_quantity"]
 
     def get_product_name(self, obj):
         return str(obj.product) if obj.product_id else None
@@ -172,6 +174,9 @@ class SalesInvoiceListSerializer(
     _SalesInvoicePaymentSummarySerializer, serializers.ModelSerializer,
 ):
     customer_name = serializers.CharField(source="customer.name", read_only=True)
+    delivery_status_display = serializers.CharField(
+        source="get_delivery_status_display", read_only=True,
+    )
 
     class Meta:
         model = SalesInvoice
@@ -192,6 +197,8 @@ class SalesInvoiceListSerializer(
             "customer_balance",
             "currency",
             "stock_on_post",
+            "delivery_status",
+            "delivery_status_display",
             "book_number",
         ]
 
@@ -228,6 +235,9 @@ class SalesInvoiceSerializer(
     )
     original_invoice_number = serializers.CharField(
         source="original_invoice.invoice_number", read_only=True, allow_null=True,
+    )
+    delivery_status_display = serializers.CharField(
+        source="get_delivery_status_display", read_only=True,
     )
     customer = serializers.PrimaryKeyRelatedField(
         queryset=Partner.objects.all(), required=False, allow_null=True
@@ -294,6 +304,8 @@ class SalesInvoiceSerializer(
             "accounts_receivable_account",
             "journal",
             "stock_on_post",
+            "delivery_status",
+            "delivery_status_display",
             "notes",
             "lines",
             "created_at",
@@ -332,6 +344,8 @@ class SalesInvoiceSerializer(
             "journal",
             "customer_name",
             "original_invoice_number",
+            "delivery_status",  # مشتقّ من الكميات المسلَّمة — لا يُحرَّر يدوياً
+            "delivery_status_display",
             "cheques",  # mutated only via /payment-voucher endpoint
         ]
 
@@ -707,6 +721,11 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "allow_document_delete",
             "default_shipping_origin",
             "default_shipping_destination",
+            # مستند التسليم: تسميته، وسند التسليم المستقل، وصلاحية التعديل.
+            "delivery_doc_label",
+            "standalone_delivery_label",
+            "allow_standalone_delivery",
+            "allow_edit_delivery",
             "updated_at",
         ]
         read_only_fields = [
@@ -723,22 +742,115 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
         ]
 
 
-class DeliveryOrderSerializer(serializers.ModelSerializer):
-    invoice_number = serializers.CharField(source="invoice.invoice_number", read_only=True)
+class DeliveryOrderLineSerializer(serializers.ModelSerializer):
+    """بند إرسالية بيع — المفوتر والمسلَّم تراكمياً والباقي، لسياق المراجعة."""
+
+    product_name = serializers.SerializerMethodField(read_only=True)
+    ordered_quantity = serializers.SerializerMethodField()
+    delivered_total = serializers.SerializerMethodField()
+    remaining_quantity = serializers.SerializerMethodField()
+    warehouse_name = serializers.CharField(
+        source="warehouse.name", read_only=True, default=None,
+    )
+
+    class Meta:
+        model = DeliveryOrderLine
+        fields = [
+            "id", "invoice_line", "product", "product_name",
+            "ordered_quantity", "delivered_total", "remaining_quantity", "quantity",
+            "warehouse", "warehouse_name",
+        ]
+        read_only_fields = fields
+
+    def get_product_name(self, obj):
+        return str(obj.product) if obj.product_id else None
+
+    def get_ordered_quantity(self, obj):
+        # السند المستقل بلا سطر فاتورة ⇒ المفوتر = المسلَّم نفسه (لا باقي).
+        return str(obj.invoice_line.quantity if obj.invoice_line_id else obj.quantity)
+
+    def get_delivered_total(self, obj):
+        return str(
+            obj.invoice_line.delivered_quantity if obj.invoice_line_id else obj.quantity
+        )
+
+    def get_remaining_quantity(self, obj):
+        if not obj.invoice_line_id:
+            return "0"
+        ordered = Decimal(str(obj.invoice_line.quantity or 0))
+        delivered = Decimal(str(obj.invoice_line.delivered_quantity or 0))
+        return str(max(Decimal("0"), ordered - delivered))
+
+
+class DeliveryOrderListSerializer(serializers.ModelSerializer):
+    invoice_number = serializers.CharField(
+        source="invoice.invoice_number", read_only=True, default=None,
+    )
+    customer = serializers.SerializerMethodField()
+    customer_name = serializers.SerializerMethodField()
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    is_standalone = serializers.BooleanField(read_only=True)
+    doc_label = serializers.SerializerMethodField()
+    lines_count = serializers.SerializerMethodField()
+    total_quantity = serializers.SerializerMethodField()
+    total_remaining = serializers.SerializerMethodField()
 
     class Meta:
         model = DeliveryOrder
         fields = [
-            "id",
-            "tenant",
-            "invoice",
-            "invoice_number",
-            "status",
-            "notes",
-            "delivered_at",
-            "created_at",
+            "id", "delivery_number", "delivery_date", "invoice", "invoice_number",
+            "customer", "customer_name", "customer_ref", "is_standalone", "doc_label",
+            "status", "status_display", "auto_created", "notes",
+            "lines_count", "total_quantity", "total_remaining",
+            "delivered_at", "created_at",
         ]
-        read_only_fields = ["id", "tenant", "delivered_at", "created_at", "invoice_number"]
+        read_only_fields = fields
+
+    def _labels(self, obj):
+        cached = getattr(self, "_label_cache", None)
+        if cached is None:
+            from .services import get_or_create_sales_settings
+            ss = get_or_create_sales_settings(obj.tenant_id)
+            cached = (ss.delivery_doc_label, ss.standalone_delivery_label)
+            self._label_cache = cached
+        return cached
+
+    def get_doc_label(self, obj):
+        linked, standalone = self._labels(obj)
+        return standalone if obj.invoice_id is None else linked
+
+    def get_customer(self, obj):
+        return obj.partner_id or (obj.invoice.customer_id if obj.invoice_id else None)
+
+    def get_customer_name(self, obj):
+        if obj.partner_id:
+            return obj.partner.name
+        return obj.invoice.customer.name if obj.invoice_id else ""
+
+    def get_lines_count(self, obj):
+        return obj.lines.count()
+
+    def get_total_quantity(self, obj):
+        return str(sum((line.quantity for line in obj.lines.all()), Decimal("0")))
+
+    def get_total_remaining(self, obj):
+        """الباقي على الفاتورة المرتبطة بعد هذه الإرسالية (0 للسند المستقل)."""
+        if obj.invoice_id is None:
+            return "0"
+        total = Decimal("0")
+        for line in obj.invoice.lines.all():
+            ordered = Decimal(str(line.quantity or 0))
+            delivered = Decimal(str(line.delivered_quantity or 0))
+            total += max(Decimal("0"), ordered - delivered)
+        return str(total)
+
+
+class DeliveryOrderSerializer(DeliveryOrderListSerializer):
+    lines = DeliveryOrderLineSerializer(many=True, read_only=True)
+
+    class Meta(DeliveryOrderListSerializer.Meta):
+        fields = DeliveryOrderListSerializer.Meta.fields + ["tenant", "lines"]
+        read_only_fields = fields
 
 
 class SalesQuotationLineSerializer(serializers.ModelSerializer):
@@ -1191,6 +1303,10 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
 
 class SalesQuotationListSerializer(serializers.ModelSerializer):
     customer_name = serializers.CharField(source="customer.name", read_only=True)
+    # حالة العرض بالعربية كما في الطلبية — كرت الزبون كان يعرض المفتاح الخام.
+    status_display = serializers.CharField(
+        source="get_status_display", read_only=True,
+    )
 
     class Meta:
         model = SalesQuotation
@@ -1202,6 +1318,7 @@ class SalesQuotationListSerializer(serializers.ModelSerializer):
             "quotation_date",
             "valid_until",
             "status",
+            "status_display",
             "grand_total",
             "currency",
             "created_at",

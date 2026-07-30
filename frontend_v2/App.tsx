@@ -144,6 +144,8 @@ const SalesSettingsPage = lazyPage(() => import("./components/sales/SalesSetting
 // T-PERM: شاشة الصلاحيات (مصفوفة دور × صلاحية) — مدير الشركة فقط.
 const PermissionsPage = lazyPage(() => import("./components/settings/PermissionsPage"));
 const PurchaseSettingsPage = lazyPage(() => import("./components/procurement/PurchaseSettingsPage"));
+const GoodsReceiptsPage = lazyPage(() => import("./components/procurement/receipts/GoodsReceiptsPage"));
+const DeliveryNotesPage = lazyPage(() => import("./components/sales/DeliveryNotesPage"));
 const LocalShippingPage = lazyPage(() => import("./components/logistics/LocalShippingPage"));
 // مصاريف شخصية — شاشة خاصة بالمستخدم، مفتوحة للجميع (العزل خادمي بالمستخدم).
 const PersonalExpensesPage = lazyPage(() => import("./components/personal/PersonalExpensesPage"));
@@ -182,6 +184,8 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "sales-settings": "/sales/settings",
   "permissions": "/permissions",
   "purchase-settings": "/purchase-settings",
+  "purchase-receipts": "/purchase-receipts",
+  "sales-delivery-notes": "/sales/delivery-notes",
   "purchase-invoices": "/purchase-invoices",
   "international-invoices": "/international-invoices",
   "old-invoices": "/old-invoices",
@@ -561,6 +565,15 @@ const App: React.FC = () => {
     }
     if (path === "/purchase-invoices" || path.startsWith("/purchase-invoices/")) {
       setAppView("purchase-invoices");
+      return;
+    }
+    // إرساليات الشراء/البيع: المسار `/…/new?invoice=` يفتح محرّراً بفاتورة مربوطة.
+    if (path === "/purchase-receipts" || path.startsWith("/purchase-receipts/")) {
+      setAppView("purchase-receipts");
+      return;
+    }
+    if (path === "/sales/delivery-notes" || path.startsWith("/sales/delivery-notes/")) {
+      setAppView("sales-delivery-notes");
       return;
     }
     // task16 A8: قائمة فواتير المبيعات وتفصيل فاتورة واحدة مساران مستقلان.
@@ -1425,6 +1438,18 @@ const App: React.FC = () => {
       case "purchase-settings":
         if (canView(appView)) {
           return <PurchaseSettingsPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
+      case "purchase-receipts":
+        if (canView(appView)) {
+          return <GoodsReceiptsPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
+      case "sales-delivery-notes":
+        if (canView(appView)) {
+          return <DeliveryNotesPage />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 

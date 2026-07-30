@@ -60,10 +60,23 @@ export interface SupplierQuotationDto {
   total_cbm?: string;
   total_weight_kg?: string;
   notes?: string;
-  converted_deal?: number | null;
+  // ── T-IMPOFFER: مصدر العرض، قرار الملاءمة، وملفات المورد ──
+  alibaba_link?: string;
+  supplier_contact?: string;
+  decision_reason?: string;
+  attachments?: SupplierQuotationAttachmentDto[];
+  /** الصفقة الناتجة عن التحويل — كائن لا رقم، فرقم الصفقة يُعرض بجانب الحالة. */
+  converted_deal?: { id: number; ref_number: string; stage?: string | null } | null;
   created_at?: string;
   updated_at?: string;
   lines: SupplierQuotationLineDto[];
+}
+
+export interface SupplierQuotationAttachmentDto {
+  name: string;
+  url: string;
+  type?: string;
+  size?: number;
 }
 
 export type SupplierQuotationWrite = Omit<

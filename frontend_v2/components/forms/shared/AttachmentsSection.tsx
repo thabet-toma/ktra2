@@ -4,6 +4,7 @@ import {
   Trash2, Download, X, Upload, Loader2
 } from 'lucide-react';
 import { cloudinaryService } from '../../../services/cloudinaryService'; // تأكد من صحة المسار
+import { usePasteImageUpload } from '../../../utils/clipboardImage';
 
 interface AttachmentsProps {
   data: any; // Deal or PriceOffer data
@@ -26,19 +27,15 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
 
   // --- Handlers ---
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
+  const uploadImageFiles = async (files: File[]) => {
+    if (files.length === 0) return;
     setUploadingImages(true);
-
-    const files = Array.from(e.target.files);
     const newUrls: string[] = [];
-
     try {
       for (const file of files) {
-        const typedFile = file as File;
-        if (!typedFile.type.startsWith('image/')) continue;
+        if (!file.type.startsWith('image/')) continue;
         // ✅ نستخدم الدالة الجديدة التي تقبل أي ملف
-        const imageUrl = await cloudinaryService.uploadFile(typedFile);
+        const imageUrl = await cloudinaryService.uploadFile(file);
         if (imageUrl) newUrls.push(imageUrl);
       }
 
@@ -51,9 +48,17 @@ export const AttachmentsSection: React.FC<AttachmentsProps> = ({ data, setData, 
       alert("فشل رفع الصور");
     } finally {
       setUploadingImages(false);
-      e.target.value = '';
     }
   };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    await uploadImageFiles(Array.from(e.target.files));
+    e.target.value = '';
+  };
+
+  // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف — بلا تأثير على لصق النصوص العادي.
+  usePasteImageUpload((files) => { void uploadImageFiles(files); }, !readOnly);
 
   const handlePdfUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;

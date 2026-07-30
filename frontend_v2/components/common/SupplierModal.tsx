@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Supplier } from '../../types';
 import { suppliersService } from '../../services/firestoreService';
 import { cloudinaryService } from '../../services/cloudinaryService';
+import { usePasteImageUpload } from '../../utils/clipboardImage';
 import { LoadingSpinner } from '../LoadingSpinner';
 import {
     X, Save, Building, User, MapPin, Wallet, ImageIcon, ArrowRight, Tag, Edit2, AlertTriangle
@@ -57,6 +58,22 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
             setError(null);
         }
     }, [isOpen, editingSupplier]);
+
+    const uploadLogoFile = async (file: File) => {
+        setUploadingLogo(true);
+        try {
+            const url = await cloudinaryService.uploadImage(file);
+            setCurrentSupplier(prev => ({ ...prev, logoUrl: url }));
+        } catch (error) {
+            setError('فشل رفع الشعار');
+        } finally {
+            setUploadingLogo(false);
+        }
+    };
+
+    // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف — فقط والنافذة مفتوحة. يجب استدعاء
+    // الـ hook قبل أي return مبكر (isOpen) حفاظاً على ترتيب الـ hooks بين التصييرات.
+    usePasteImageUpload((files) => { void uploadLogoFile(files[0]); }, isOpen && !uploadingLogo);
 
     if (!isOpen) return null;
 
@@ -138,15 +155,7 @@ export const SupplierModal: React.FC<SupplierModalProps> = ({
     };
     const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files || e.target.files.length === 0) return;
-        setUploadingLogo(true);
-        try {
-            const url = await cloudinaryService.uploadImage(e.target.files[0]);
-            setCurrentSupplier(prev => ({ ...prev, logoUrl: url }));
-        } catch (error) {
-            setError('فشل رفع الشعار');
-        } finally {
-            setUploadingLogo(false);
-        }
+        await uploadLogoFile(e.target.files[0]);
     };
 
     return (

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
-import { resolveTenantId } from "../utils/tenantContext";
+import { pickActiveMembership, storedTenantId } from "../utils/tenantContext";
 import { apiGetObject, apiPostObject } from "../services/restApi";
 import { useAuth } from "./AuthContext";
 import { clientLogger } from "../services/logger";
@@ -31,6 +31,8 @@ interface CompanyContextType {
   canAccessImport: boolean;
   switchCompany: (companyId: number) => Promise<void>;
   createCompany: (name: string) => Promise<Tenant>;
+  /** T-IMPOFFER: الشركة التي تُفتح تلقائياً عند كل تسجيل دخول. */
+  setDefaultCompany: (companyId: number) => Promise<void>;
   refreshCompanies: () => Promise<void>;
 }
 
@@ -98,13 +100,14 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         return data;
       }
 
-      // Resolve active tenant
-      const activeTid = options?.preferredTenantId ?? resolveTenantId();
-      let activeMember = data.find((m) => m.tenant.TenantID === activeTid);
-      if (!activeMember && data.length > 0) {
-        const defaultMember = data.find((m) => m.is_default);
-        activeMember = defaultMember || data[0];
-      }
+      // Resolve active tenant. `storedTenantId` (not `resolveTenantId`) because
+      // the latter fabricates 1 when nothing is stored — that fabricated value
+      // was being honoured as an explicit choice, so a fresh login opened tenant
+      // 1 instead of the user's default company.
+      const activeMember = pickActiveMembership(
+        data,
+        options?.preferredTenantId ?? storedTenantId(),
+      );
 
       localStorage.setItem("tenantId", String(activeMember!.tenant.TenantID));
       setCurrentCompany(activeMember ? activeMember.tenant : null);
@@ -171,6 +174,24 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return confirmedMembership.tenant;
   };
 
+  /**
+   * T-IMPOFFER: تثبيت الشركة الافتراضية. النقطة النهائية كانت موجودة في الخادم
+   * (`tenants/companies/set-default/`) وبلا أي مستدعٍ في الواجهة، فلم يكن للمستخدم
+   * أي طريق ليقول «هذه شركتي التي تُفتح أول ما أدخل».
+   */
+  const setDefaultCompany = async (companyId: number) => {
+    await apiPostObject("tenants/companies/set-default/", {
+      company_id: companyId,
+    });
+    clientLogger.info("company.default_changed", { tenantId: companyId });
+    setCompanies((prev) =>
+      prev.map((membership) => ({
+        ...membership,
+        is_default: membership.tenant.TenantID === companyId,
+      })),
+    );
+  };
+
   // صلاحية الاستيراد للشركة النشطة (تتفاعل مع تبديل الشركة) — تفعيل الشركة شرطٌ للجميع.
   const activeMembership = currentCompany
     ? companies.find((m) => m.tenant.TenantID === currentCompany.TenantID)
@@ -194,6 +215,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
         error,
         switchCompany,
         createCompany,
+        setDefaultCompany,
         refreshCompanies: async () => { await fetchCompanies(); },
       }}
     >

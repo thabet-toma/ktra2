@@ -45,6 +45,11 @@ import {
   WalletCards,
   BarChart3,
   Zap,
+  Handshake,
+  Ship,
+  History,
+  Truck,
+  Package,
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -79,6 +84,14 @@ const SHORTCUT_ICONS: Record<ShortcutIconName, LucideIcon> = {
   journal: BookOpen,
   cashboxes: WalletCards,
   reports: BarChart3,
+  "import-offers": ClipboardList,
+  "international-invoices": FileText,
+  deals: Handshake,
+  shipments: Ship,
+  "old-invoices": History,
+  "local-shipping": Truck,
+  clearance: FileText,
+  "import-flow": Package,
   zap: Zap,
 };
 
@@ -95,6 +108,14 @@ const SHORTCUT_ICON_COLORS: Record<ShortcutIconName, string> = {
   journal: "text-fuchsia-600 dark:text-fuchsia-400",
   cashboxes: "text-green-600 dark:text-green-400",
   reports: "text-sky-600 dark:text-sky-400",
+  "import-offers": "text-lime-600 dark:text-lime-400",
+  "international-invoices": "text-purple-600 dark:text-purple-400",
+  deals: "text-pink-600 dark:text-pink-400",
+  shipments: "text-blue-500 dark:text-blue-300",
+  "old-invoices": "text-stone-600 dark:text-stone-400",
+  "local-shipping": "text-amber-500 dark:text-amber-300",
+  clearance: "text-red-600 dark:text-red-400",
+  "import-flow": "text-emerald-500 dark:text-emerald-300",
   zap: "text-slate-600 dark:text-slate-300",
 };
 

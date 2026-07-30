@@ -13,6 +13,19 @@ const NETWORK_HINT =
   "(مثلاً: python manage.py runserver 0.0.0.0:8000) وتأكد أن VITE_API_URL يطابق العنوان " +
   `(الحالي: ${String(API_BASE).replace(/\/+$/, "")})`;
 
+/** إعدادات الشراء لكل شركة (التسعير + الصندوق + الاستلام مع الترحيل). */
+export interface PurchaseSettingsDto {
+  purchase_default_price_strategy: string;
+  default_cash_account: number | null;
+  receive_on_post: boolean;
+  /** تسمية مستند الاستلام المرتبط بفاتورة (يحرّرها المستخدم). */
+  receipt_doc_label: string;
+  /** تسمية المستند بلا فاتورة مرتبطة. */
+  standalone_receipt_label: string;
+  allow_standalone_receipt: boolean;
+  allow_edit_receipt: boolean;
+}
+
 /** سند صرف مورد كما يعيده الخادم (مع التوزيع والمتبقّي «على الحساب»). */
 export interface SupplierPaymentDto {
   id: number;
@@ -447,7 +460,7 @@ export const purchaseInvoiceApi = {
   },
 
   /** FEAT-1: إعدادات الشراء (استراتيجية التسعير + T-A4: الصندوق الافتراضي). */
-  getSettings: async (): Promise<{ purchase_default_price_strategy: string; default_cash_account: number | null }> => {
+  getSettings: async (): Promise<PurchaseSettingsDto> => {
     const res = await safeFetch(`${API_BASE}/logistics/purchase-settings/current/`, {
       headers: headers(),
     });
@@ -455,10 +468,9 @@ export const purchaseInvoiceApi = {
     return res.json();
   },
 
-  updateSettings: async (body: {
-    purchase_default_price_strategy?: string;
-    default_cash_account?: number | null;
-  }): Promise<{ purchase_default_price_strategy: string; default_cash_account: number | null }> => {
+  updateSettings: async (
+    body: Partial<PurchaseSettingsDto>,
+  ): Promise<PurchaseSettingsDto> => {
     const res = await safeFetch(`${API_BASE}/logistics/purchase-settings/current/`, {
       method: "PATCH",
       headers: headers(),

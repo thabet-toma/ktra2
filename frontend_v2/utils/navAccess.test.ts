@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { visibleLinks, groupVisible, type NavAccessLink } from './navAccess.ts';
-import { invoiceActionPermissions } from './viewPermissions.ts';
+import { invoiceActionPermissions, memberOverrideForCheckbox } from './viewPermissions.ts';
 import { iconForShortcut, SHORTCUTABLE_VIEWS } from './quickShortcuts.ts';
 
 const links: NavAccessLink[] = [
@@ -71,6 +71,16 @@ test('حفظ وترحيل مسودة قائمة يحتاج التعديل وال
     canOf(['purchase.invoice.edit', 'purchase.invoice.post']),
   );
   assert.deepEqual(editor, { canSave: true, canPost: true, canSaveAndPost: true });
+});
+
+test('خانة صلاحية العضو تُخزَّن تجاوزاً فقط إن خالفت دوره', () => {
+  // الدور يمنع والمدير يؤشّر ⇒ منح صريح
+  assert.equal(memberOverrideForCheckbox(false, true), true);
+  // الدور يمنح والمدير يُزيل التأشير ⇒ منع صريح
+  assert.equal(memberOverrideForCheckbox(true, false), false);
+  // العودة لما يعطيه الدور ⇒ حذف التجاوز
+  assert.equal(memberOverrideForCheckbox(true, true), null);
+  assert.equal(memberOverrideForCheckbox(false, false), null);
 });
 
 test('كل اختصار في الشريط العلوي يملك رمزاً دلالياً', () => {

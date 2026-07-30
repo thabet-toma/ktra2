@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Submission, SubmissionItem } from "../../types";
 import { DeleteIcon } from "../icons/DeleteIcon";
 import { cloudinaryService } from "../../services/cloudinaryService";
+import { usePasteImageUpload } from "../../utils/clipboardImage";
 
 interface SubmissionFormProps {
   initialData?: Submission;
@@ -112,19 +113,15 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
   };
 
   // معالجة اختيار الصور
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
+  // معالجة إضافة صور (من اختيار ملف أو لصق من الحافظة) — يُبقي حد 3 صور والتحقق من النوع.
+  const addImageFiles = (newFiles: File[]) => {
+    if (newFiles.length === 0) return;
 
-    const newFiles = Array.from(files);
-
-    // التحقق من عدد الصور
     if (selectedImages.length + newFiles.length > 3) {
       alert("يمكنك رفع最多 3 صور فقط");
       return;
     }
 
-    // التحقق من أنواع الملفات
     const validFiles = newFiles.filter((file: File) => {
       const isValidType = file.type.startsWith("image/");
       if (!isValidType) {
@@ -135,7 +132,6 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
 
     setSelectedImages((prev) => [...prev, ...validFiles]);
 
-    // إنشاء معاينات للصور
     validFiles.forEach((file: File) => {
       const reader = new FileReader();
       reader.onload = (event: ProgressEvent<FileReader>) => {
@@ -147,8 +143,16 @@ const SubmissionForm: React.FC<SubmissionFormProps> = ({
       reader.readAsDataURL(file);
     });
 
-    // مسح الملف إذا كانت هناك صور
     setCurrentAttachment(null);
+  };
+
+  // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف.
+  usePasteImageUpload(addImageFiles);
+
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+    addImageFiles(Array.from(files));
 
     // إعادة تعيين حقل الإدخال
     const fileInput = document.getElementById(

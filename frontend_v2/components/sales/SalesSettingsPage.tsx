@@ -660,6 +660,52 @@ export const SalesSettingsPage: React.FC = () => {
         </FieldLabel>
       </Section>
 
+      {/* مستند التسليم: التسمية حرّة لكل شركة، والسند المستقل والتعديل اختياريان. */}
+      <Section
+        title="مستند التسليم (الإرسالية)"
+        description="سمِّ المستند كما تسميه شركتك — الاسم يظهر في الشاشات والطباعة. المستند المرتبط بفاتورة اسم، والمستند بلا فاتورة (بضاعة خرجت قبل فوترتها) اسم آخر."
+      >
+        <FieldLabel label="اسم المستند المرتبط بفاتورة">
+          <input
+            className={input}
+            value={settings.delivery_doc_label ?? ""}
+            placeholder="إرسالية بيع"
+            onChange={(e) => setField("delivery_doc_label", e.target.value)}
+          />
+        </FieldLabel>
+        <FieldLabel label="اسم المستند بلا فاتورة">
+          <input
+            className={input}
+            value={settings.standalone_delivery_label ?? ""}
+            placeholder="سند تسليم"
+            disabled={settings.allow_standalone_delivery === false}
+            onChange={(e) => setField("standalone_delivery_label", e.target.value)}
+          />
+        </FieldLabel>
+        <FieldLabel label="السماح بمستند تسليم بلا فاتورة مرتبطة">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-emerald-600"
+              checked={settings.allow_standalone_delivery !== false}
+              onChange={(e) => setField("allow_standalone_delivery", e.target.checked)}
+            />
+            <span>يُرحَّل مقابل «بضاعة مسلَّمة لم تُفوتَر» حتى تصدر الفاتورة</span>
+          </label>
+        </FieldLabel>
+        <FieldLabel label="السماح بتعديل/إلغاء الإرسالية">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-emerald-600"
+              checked={settings.allow_edit_delivery !== false}
+              onChange={(e) => setField("allow_edit_delivery", e.target.checked)}
+            />
+            <span>التعديل يعكس أثر الإرسالية القديم ويعيد تطبيقه</span>
+          </label>
+        </FieldLabel>
+      </Section>
+
       {/* T-S3: خريطة القيد المحاسبي لكل نوع فاتورة (صورة 6) + استعادة الافتراضي. */}
       <Section
         title="خريطة القيد المحاسبي (الحسابات الافتراضية لكل نوع)"

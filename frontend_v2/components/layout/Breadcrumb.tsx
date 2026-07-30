@@ -21,6 +21,8 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'sales-customers': 'العملاء',
   'sales-settings': 'إعدادات المبيعات',
   'purchase-settings': 'إعدادات الشراء',
+  'purchase-receipts': 'إرساليات الشراء',
+  'sales-delivery-notes': 'إرساليات البيع',
   'product-profile': 'بطاقة الصنف',
   'product-group': 'كرت مجمّع (براندات)',
   'purchase-invoices': 'فواتير الشراء',

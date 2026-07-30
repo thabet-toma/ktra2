@@ -32,6 +32,7 @@ import db from "../../services/offline/db";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
 import { formatMoney, formatQuantity, formatNumber } from "../../utils/formatNumber";
 import { openInNewTab } from "../../utils/openInNewTab";
+import { DeliverGoodsModal } from "./DeliverGoodsModal";
 import { clientLogger } from "../../services/logger";
 import { apiPostObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -57,6 +58,8 @@ import {
   ArrowRight,
   Undo2,
   Info,
+  Truck,
+  ClipboardList,
 } from "lucide-react";
 import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
 import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
@@ -82,6 +85,8 @@ export type ProductRow = {
   name_en?: string | null;
   quantity_on_hand: string;
   online_price?: string | null;
+  /** «سعر البيع» العام في كرت الصنف — يُقترح حين لا سعر خاص بهذا الزبون. */
+  sale_price?: string | null;
   avg_cost?: string | null;
 };
 
@@ -122,8 +127,9 @@ export type DraftLine = {
   /** FEAT-2 edit-protection: مضبوط عندما يحرّر المستخدم سعر السطر يدوياً.
    *  السعر المقترح لا يُدَس على سطر مَلموس عند تغيير العميل. */
   priceTouched?: boolean;
-  /** DEF-005: مصدر السعر المقترح للشارة — آخر فاتورة / عرض كرت الزبون / عرض واجهة العروض. */
-  priceSource?: "last_invoice" | "quote" | "sales_quote" | null;
+  /** DEF-005: مصدر السعر المقترح للشارة — آخر فاتورة / عرض كرت الزبون / عرض واجهة
+   *  العروض / «default» = السعر العام في كرت الصنف. */
+  priceSource?: "last_invoice" | "quote" | "sales_quote" | "default" | null;
   /** رابط فتح مصدر السعر عند النقر (عرض العروض أو تبويب عرض السعر بكرت الزبون). */
   priceSourceLink?: string | null;
 };
@@ -265,6 +271,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [paidAmount, setPaidAmount] = useState(0);
   const [savedGrandTotal, setSavedGrandTotal] = useState(0);
   const [paymentStatusDisplay, setPaymentStatusDisplay] = useState("غير مدفوعة");
+  // حالة تسليم البضاعة (تظهر للفاتورة التي لا تخصم المخزون عند الترحيل).
+  const [deliveryStatusDisplay, setDeliveryStatusDisplay] = useState("غير مسلَّمة");
+  const [deliveryStatus, setDeliveryStatus] = useState<string>("not_delivered");
   const [customerBalanceBeforeInvoice, setCustomerBalanceBeforeInvoice] = useState(0);
   const [customerBalanceAfterInvoice, setCustomerBalanceAfterInvoice] = useState(0);
   const [paymentDetails, setPaymentDetails] = useState<SalesInvoiceDetail["payment_details"]>([]);
@@ -289,6 +298,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
+  // نافذة تسليم البضاعة (تُنشئ إرسالية بالبنود المؤشَّرة).
+  const [showDeliver, setShowDeliver] = useState(false);
   const navLoadingRef = useRef(false);
 
   const dirtyRef = useRef(false);
@@ -664,6 +675,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setPaidAmount(Number((d as { amount_paid?: number | string }).amount_paid ?? 0));
     setSavedGrandTotal(Number((d as { grand_total?: number | string }).grand_total ?? 0));
     setPaymentStatusDisplay(d.payment_status_display || "غير مدفوعة");
+    setDeliveryStatusDisplay(d.delivery_status_display || "غير مسلَّمة");
+    setDeliveryStatus(d.delivery_status || "not_delivered");
     setCustomerBalanceBeforeInvoice(Number(d.customer_balance_before_invoice || 0));
     setCustomerBalanceAfterInvoice(Number(d.customer_balance_after_invoice || 0));
     setPaymentDetails(d.payment_details || []);
@@ -1173,6 +1186,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setPaidAmount(0);
     setSavedGrandTotal(0);
     setPaymentStatusDisplay("غير مدفوعة");
+    setDeliveryStatusDisplay("غير مسلَّمة");
+    setDeliveryStatus("not_delivered");
     setCustomerBalanceBeforeInvoice(0);
     setCustomerBalanceAfterInvoice(0);
     setPaymentDetails([]);
@@ -1345,6 +1360,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     if (docType === "SALES_INVOICE") return "last_invoice";
     if (docType === "SALES_QUOTATION") return "sales_quote";
     if (docType === "CUSTOMER_QUOTE") return "quote";
+    // سعر عام من كرت الصنف — أضعف المصادر (لا عرض لهذا الزبون ولا شراء سابق).
+    if (docType === "PRODUCT_SALE_PRICE") return "default";
     return null;
   };
   // رابط فتح مصدر السعر: عرض «واجهة العروض» أو تبويب «عرض السعر» بكرت الزبون.
@@ -1407,6 +1424,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     const price =
       opts?.unitPrice != null
         ? String(opts.unitPrice)
+        : pr?.sale_price != null && pr.sale_price !== ""
+        ? String(pr.sale_price)
         : pr?.online_price != null && pr.online_price !== ""
         ? String(pr.online_price)
         : "0";
@@ -1728,7 +1747,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   /* task24: خريطة سعر العميل (آخر بيع/عرض سعر) لكامل الكتالوج — تُجلب دفعة واحدة
      عند تغيّر العميل لعرض السعر داخل خيارات المنتقي بلا نقر. */
   const [customerPriceMap, setCustomerPriceMap] = useState<
-    Map<number, { price: string; source: "last_invoice" | "quote"; prices?: any[] }>
+    Map<number, { price: string; source: "last_invoice" | "quote" | "default"; prices?: any[] }>
   >(new Map());
   useEffect(() => {
     if (customerId === "" || !networkOnline) { setCustomerPriceMap(new Map()); return; }
@@ -1736,7 +1755,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     getCustomerPriceList(customerId)
       .then((rows) => {
         if (cancelled) return;
-        const m = new Map<number, { price: string; source: "last_invoice" | "quote"; prices?: any[] }>();
+        const m = new Map<number, { price: string; source: "last_invoice" | "quote" | "default"; prices?: any[] }>();
         for (const r of rows) {
           if (r.price != null && Number(r.price) > 0) {
             m.set(r.product_id, { price: r.price, source: r.source, prices: r.prices });
@@ -1761,17 +1780,21 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       let prices: any[] | undefined;
       if (cp) {
         price = formatMoney(Number(cp.price));
-        priceLabel = cp.source === "quote" ? "عرض سعر" : "آخر بيع";
+        priceLabel = cp.source === "quote" ? "عرض سعر" : cp.source === "default" ? "سعر عام" : "آخر بيع";
         prices = cp.prices?.map((pr: any) => ({
           label: pr.label,
           value: formatMoney(Number(pr.unit_price)),
           link: pr.document_id ? `/sales/invoices/${pr.document_id}` : undefined,
         }));
+      } else if (p.sale_price != null && p.sale_price !== "" && Number(p.sale_price) > 0) {
+        // بلا عميل مختار (أو بلا أي سعر خاص به): السعر العام من كرت الصنف.
+        price = formatMoney(Number(p.sale_price));
+        priceLabel = "سعر عام";
       } else if (p.online_price != null && p.online_price !== "" && Number(p.online_price) > 0) {
         price = formatMoney(Number(p.online_price));
         priceLabel = "افتراضي";
       } else {
-        // لا آخر بيع لهذا العميل ولا عرض سعر ولا سعر بيع افتراضي.
+        // لا آخر بيع لهذا العميل ولا عرض سعر ولا سعر عام.
         priceLabel = "بدون سعر";
       }
       return {
@@ -1818,6 +1841,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       {/* DEF-005: شارة مصدر السعر المقترح */}
       {row.priceSource === "last_invoice" && (
         <span className="aseel-price-badge aseel-price-badge--last" title="السعر من آخر فاتورة لهذا العميل">من آخر فاتورة</span>
+      )}
+      {row.priceSource === "default" && (
+        <span className="aseel-price-badge aseel-price-badge--general"
+          title="سعر عام من كرت الصنف — لا عرض لهذا الزبون ولا شراء سابق">سعر عام</span>
       )}
       {(row.priceSource === "quote" || row.priceSource === "sales_quote") && (() => {
         // sales_quote ⇒ عرض «واجهة العروض»؛ quote ⇒ عرض كرت الزبون (رابط احتياطي).
@@ -2016,6 +2043,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     });
   };
 
+  // فاتورة مرحّلة لا تخصم المخزون عند الترحيل ولم تُسلَّم كلها ⇒ مسارا التسليم.
+  const canDeliverGoods =
+    Boolean(draftId)
+    && isPosted
+    && !stockOnPost
+    && deliveryStatus !== "delivered";
+
   const toolbarActions: AseelToolbarAction[] = [
     // task16: زر صريح للعودة لقائمة الفواتير (إلى جانب ✕ إغلاق في الإطار)
     ...(onClose
@@ -2117,6 +2151,21 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           : undefined,
       disabled: creatingReceipt || (isPosted && remainingDue <= 0),
       separatorBefore: true,
+    } as AseelToolbarAction] : []),
+    // التسليم: نافذة سريعة تُنشئ إرسالية بالبنود المؤشَّرة، أو المحرّر الكامل
+    // في شاشة الإرساليات بالفاتورة نفسها مربوطةً مسبقاً (مرآة فاتورة الشراء).
+    ...(canDeliverGoods ? [{
+      key: "deliver",
+      label: "تسليم",
+      icon: <Truck />,
+      onClick: () => setShowDeliver(true),
+      separatorBefore: true,
+    } as AseelToolbarAction] : []),
+    ...(canDeliverGoods ? [{
+      key: "new-delivery-note",
+      label: "إرسالية جديدة",
+      icon: <ClipboardList />,
+      onClick: () => openInNewTab(`/sales/delivery-notes/new?invoice=${draftId}`),
     } as AseelToolbarAction] : []),
     { key: "print", label: "طباعة", icon: <Printer />, onClick: () => setShowPrintView(true) },
   ];
@@ -2288,7 +2337,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           }}
         />
         <span className="aseel-field-label" style={{ flex: "unset" }}>
-          خصم المخزون عند الترحيل (إن أُلغيَ يُرحَّل لاحقاً مع أمر التسليم)
+          خصم المخزون عند الترحيل (إن أُلغيَ يُخصم لاحقاً عند تسليم البنود)
         </span>
       </label>
       <p className="aseel-hint">
@@ -2322,6 +2371,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         { label: "المدفوع المرحّل", value: money(paidAmount), tone: "ok" },
         { label: "المتبقي", value: money(Math.max(savedGrandTotal - paidAmount, 0)), tone: "warn" },
         { label: "حالة الدفع", value: paymentStatusDisplay },
+        // التسليم بُعد مستقل — يُعرض فقط حين لا يُخصم المخزون مع الترحيل.
+        ...(isPosted && !stockOnPost
+          ? [{ label: "حالة التسليم", value: deliveryStatusDisplay }]
+          : []),
       ]}
       parties={[
         {
@@ -3026,6 +3079,19 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             paymentDetails: paymentDetails || [],
           }}
           onClose={() => setShowPrintView(false)}
+        />
+      )}
+      {/* تسليم سريع: يُنشئ إرسالية بالبنود المؤشَّرة (كلها افتراضياً). */}
+      {showDeliver && draftId != null && (
+        <DeliverGoodsModal
+          invoiceId={draftId}
+          invoiceNumber={invoiceNumber}
+          onClose={() => setShowDeliver(false)}
+          onDelivered={(message) => {
+            setShowDeliver(false);
+            setMsg(message);
+            void loadInvoice(draftId);
+          }}
         />
       )}
     </div>

@@ -25,6 +25,17 @@ class Partner(models.Model):
         ('FreightForwarder', 'FreightForwarder'),
         ('CustomsBroker', 'CustomsBroker'),
         ('LocalTransporter', 'LocalTransporter'),
+        ('Carrier', 'Carrier'),
+    ]
+
+    # T-IMPOFFER: فصل المورد الدولي عن المحلي. ليس نوعاً ثالثاً في PARTNER_TYPES
+    # عمداً — عشرات المواضع تفلتر partner_type='Supplier'، فتقسيم النوع نفسه
+    # كان سيُسقِط الموردين الدوليين من كل تلك الشاشات.
+    SUPPLIER_SCOPE_LOCAL = 'local'
+    SUPPLIER_SCOPE_INTERNATIONAL = 'international'
+    SUPPLIER_SCOPE_CHOICES = [
+        (SUPPLIER_SCOPE_LOCAL, 'مورد محلي'),
+        (SUPPLIER_SCOPE_INTERNATIONAL, 'مورد دولي (استيراد)'),
     ]
 
     id = models.AutoField(primary_key=True, db_column='PartnerID')
@@ -44,6 +55,13 @@ class Partner(models.Model):
     country = models.CharField(max_length=50, blank=True, null=True, db_column='Country')
     
     partner_type = models.CharField(max_length=50, choices=PARTNER_TYPES, db_column='Type', default='Customer')
+    # '' = غير مصنَّف: يظهر في قائمتي المورد المحلي والدولي كلتيهما حتى يُصنَّف،
+    # فالتصنيف الجديد لا يُخفي مورداً قائماً عن الشاشة التي كان يظهر فيها.
+    supplier_scope = models.CharField(
+        max_length=20, choices=SUPPLIER_SCOPE_CHOICES, blank=True, default='',
+        db_column='SupplierScope',
+        help_text='نطاق المورد: محلي أو دولي (استيراد). فارغ = غير مصنَّف.',
+    )
     tax_number = models.CharField(max_length=50, blank=True, null=True, db_column='TaxNumber')
     phone = models.CharField(max_length=20, blank=True, null=True, db_column='Phone')
     email = models.EmailField(max_length=100, blank=True, null=True, db_column='Email')

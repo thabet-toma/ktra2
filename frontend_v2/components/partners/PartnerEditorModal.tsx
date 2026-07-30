@@ -13,7 +13,8 @@ export type PartnerType =
   | "Supplier"
   | "FreightForwarder"
   | "CustomsBroker"
-  | "LocalTransporter";
+  | "LocalTransporter"
+  | "Carrier";
 
 export type PartnerEditorResult = {
   id: number;
@@ -21,7 +22,17 @@ export type PartnerEditorResult = {
   partner_type: PartnerType;
 };
 
+/** T-IMPOFFER: نطاق المورد. '' = غير مصنَّف (يظهر في الجانبين). */
+export type SupplierScope = "" | "local" | "international";
+
+export const SUPPLIER_SCOPES: Array<{ value: SupplierScope; label: string }> = [
+  { value: "", label: "غير مصنَّف (يظهر في الجانبين)" },
+  { value: "local", label: "مورد محلي" },
+  { value: "international", label: "مورد دولي (استيراد)" },
+];
+
 type PartnerDetail = PartnerEditorResult & {
+  supplier_scope?: SupplierScope | null;
   legal_name?: string | null;
   tax_number?: string | null;
   phone?: string | null;
@@ -54,12 +65,14 @@ const TYPES: Array<{ value: PartnerType; label: string }> = [
   { value: "FreightForwarder", label: "وكيل شحن" },
   { value: "CustomsBroker", label: "مخلّص جمركي" },
   { value: "LocalTransporter", label: "ناقل محلي" },
+  { value: "Carrier", label: "ناقل" },
 ];
 
 const emptyForm = (partnerType: PartnerType) => ({
   name: "",
   legal_name: "",
   partner_type: partnerType,
+  supplier_scope: "" as SupplierScope,
   tax_number: "",
   phone: "",
   email: "",
@@ -133,6 +146,7 @@ export const PartnerEditorModal: React.FC<{
             name: partner.name || "",
             legal_name: partner.legal_name || "",
             partner_type: fixedType || partner.partner_type,
+            supplier_scope: (partner.supplier_scope || "") as SupplierScope,
             tax_number: partner.tax_number || "",
             phone: partner.phone || "",
             email: partner.email || "",
@@ -220,6 +234,9 @@ export const PartnerEditorModal: React.FC<{
       end_of_dealing_date: form.end_of_dealing_date || null,
       assigned_price_tier: form.assigned_price_tier || null,
       partner_type: fixedType || form.partner_type,
+      // T-IMPOFFER: النطاق يخص المورد وحده — لا يُكتب لزبون أو ناقل.
+      supplier_scope:
+        (fixedType || form.partner_type) === "Supplier" ? form.supplier_scope : "",
       bank_accounts: effectiveBanks.map((bank) => ({
         ...(bank.id ? { id: bank.id } : {}),
         bank_name: bank.bank_name.trim(),
@@ -310,6 +327,22 @@ export const PartnerEditorModal: React.FC<{
                         }))}
                       >
                         {TYPES.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  {(fixedType || form.partner_type) === "Supplier" && (
+                    <label className="aseel-field">
+                      <span className="aseel-field-label">نطاق المورد</span>
+                      <select
+                        className="aseel-input"
+                        value={form.supplier_scope}
+                        onChange={(e) => setForm((current) => ({
+                          ...current, supplier_scope: e.target.value as SupplierScope,
+                        }))}
+                      >
+                        {SUPPLIER_SCOPES.map((scope) => (
+                          <option key={scope.value} value={scope.value}>{scope.label}</option>
+                        ))}
                       </select>
                     </label>
                   )}

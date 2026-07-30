@@ -29,6 +29,7 @@ import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized, todayIso } from "../../utils/formatDate";
+import { isReservationActive } from "../../utils/documentBadges";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { SalesProductPickerModal, type SalesProductPickerItem, formatProductPrimaryName } from "./SalesProductPickerModal";
@@ -385,8 +386,23 @@ export const SalesOrdersPage: React.FC = () => {
     { key: "customer", header: "الزبون", render: (order) => <>{order.customer_name || "—"}</> },
     { key: "date", header: "التاريخ", width: "110px",
       render: (order) => <>{formatDateLocalized(order.order_date)}</> },
-    { key: "reserve", header: "الحجز حتى", width: "120px",
-      render: (order) => <>{order.reserved_until ? formatDateLocalized(order.reserved_until) : "—"}</> },
+    // T-RESERVE: التاريخ وحده لا يقول إن كان الحجز سارياً (الملغاة/المحوَّلة/
+    // المنتهية تحمله أيضاً) — نفس قاعدة الخادم تُعرض صريحةً.
+    { key: "reserve", header: "الحجز", width: "150px",
+      render: (order) => (
+        isReservationActive(order.status, order.reserved_until, todayIso()) ? (
+          <span title="محجوز بطلبية مؤكَّدة سارية"
+            style={{ color: "var(--aseel-warn, #b06800)", fontWeight: 600 }}>
+            محجوز حتى {formatDateLocalized(order.reserved_until)}
+          </span>
+        ) : (
+          <span className="text-[var(--aseel-ink-soft)]">
+            {order.reserved_until
+              ? `انتهى الحجز (${formatDateLocalized(order.reserved_until)})`
+              : "بلا حجز"}
+          </span>
+        )
+      ) },
     { key: "total", header: "الإجمالي", width: "110px", numeric: true,
       render: (order) => <>{formatMoney(order.grand_total)}</> },
     { key: "deposit", header: "العربون", width: "110px", numeric: true,

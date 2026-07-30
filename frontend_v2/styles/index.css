@@ -31,9 +31,12 @@
   --color-text-muted: #64748b;
   --color-text-inverted: #ffffff;
 
-  /* ── Spacing (compact ERP density) ── */
-  --spacing-xs: 0.125rem;
-  --spacing-sm: 0.25rem;
+  /* ── Spacing (compact ERP density) ──
+     المفاتيح رقمية فقط: في Tailwind v4 يقتسم نطاق `spacing` مقاييسَ العرض، فـ
+     `--spacing-sm` كان يجعل `max-w-sm` = 0.25rem بدل 24rem ⇒ كل نافذة تستعمله
+     تنطوي إلى شريط رفيع (نافذة العربون: النص يتكسّر فيبدو السعر مشوَّهاً).
+     `--spacing-xs/sm` كانا بلا أي مستهلك، فأُسقطا. يحرسهما اختبار
+     `utils/documentBadges.test.ts`. */
   --spacing-1: 0.25rem;
   --spacing-2: 0.5rem;
   --spacing-3: 0.75rem;
@@ -1078,6 +1081,11 @@ tbody td {
 }
 :root[data-skin] .aseel-price-badge--last { background: var(--aseel-badge-last-bg); color: var(--aseel-badge-last-fg); }
 :root[data-skin] .aseel-price-badge--quote { background: var(--aseel-badge-quote-bg); color: var(--aseel-badge-quote-fg); }
+/* «سعر عام» من كرت الصنف — أضعف المصادر: يظهر حين لا عرض للزبون ولا شراء سابق. */
+:root[data-skin] .aseel-price-badge--general {
+  background: color-mix(in srgb, var(--aseel-ink-soft) 18%, transparent);
+  color: var(--aseel-ink-soft);
+}
 
 /* ── Status bar ── */
 :root[data-skin] .aseel-statusbar {

@@ -23,6 +23,14 @@ export type ShortcutIconName =
   | "journal"
   | "cashboxes"
   | "reports"
+  | "import-offers"
+  | "international-invoices"
+  | "deals"
+  | "shipments"
+  | "old-invoices"
+  | "local-shipping"
+  | "clearance"
+  | "import-flow"
   | "zap";
 
 /** الشاشات المتاحة كاختصارات سريعة (مجموعة منتقاة من شاشات الشريط الجانبي). */
@@ -39,6 +47,14 @@ export const SHORTCUTABLE_VIEWS: { view: AppView; label: string; icon: ShortcutI
   { view: "accounting-journals", label: "دفتر اليومية", icon: "journal" },
   { view: "cash-boxes", label: "الصناديق", icon: "cashboxes" },
   { view: "reports", label: "التقارير", icon: "reports" },
+  { view: "import-offers", label: "عروض وطلبيات الاستيراد", icon: "import-offers" },
+  { view: "international-invoices", label: "الفواتير الدولية", icon: "international-invoices" },
+  { view: "deals-management", label: "الصفقات", icon: "deals" },
+  { view: "shipments-management", label: "الشحنات", icon: "shipments" },
+  { view: "old-invoices", label: "أرشيف الفواتير", icon: "old-invoices" },
+  { view: "local-shipping", label: "النقل المحلي", icon: "local-shipping" },
+  { view: "customs-clearance", label: "التخليص الجمركي", icon: "clearance" },
+  { view: "import-flow", label: "رحلة الاستيراد", icon: "import-flow" },
 ];
 
 const DEFAULT_SHORTCUTS: AppView[] = ["dashboard", "sales-invoices", "purchase-invoices"];

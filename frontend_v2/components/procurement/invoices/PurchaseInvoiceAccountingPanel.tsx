@@ -919,7 +919,8 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
 
       {showReceive && (
         <ReceiveGoodsModal
-          invoice={invoice}
+          invoiceId={invoice.id as number}
+          invoiceNumber={invoice.invoice_number}
           onClose={() => setShowReceive(false)}
           onReceived={async () => {
             setShowReceive(false);

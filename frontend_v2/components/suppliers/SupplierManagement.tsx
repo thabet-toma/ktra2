@@ -7,12 +7,13 @@ import { accountingApi } from "../../services/accountingApi";
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { RefreshCw, Search, Plus, Pencil } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { PartnerEditorModal } from "../partners/PartnerEditorModal";
+import { PartnerEditorModal, type SupplierScope } from "../partners/PartnerEditorModal";
 
 type Partner = {
   id: number;
   name: string;
   partner_type: string;
+  supplier_scope?: SupplierScope | null;
   phone?: string | null;
   email?: string | null;
   address?: string | null;
@@ -35,6 +36,9 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  // T-IMPOFFER: فصل المورد الدولي عن المحلي. «غير مصنَّف» تبويب ظاهر كي يعرف
+  // المستخدم مَن بقي بلا تصنيف بدل أن يختفوا بين الجانبين.
+  const [scopeTab, setScopeTab] = useState<"all" | SupplierScope>("all");
   const [selected, setSelected] = useState<number | null>(initialPartnerId ?? null);
   const [showAddModal, setShowAddModal] = useState(false);
   // تعديل بيانات المورد من نفس الشاشة (كان لا يوجد أي مسار تعديل — الاسم/النقر المزدوج
@@ -68,6 +72,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
   useEffect(() => { load(); }, [load]);
 
   const filtered = partners.filter((p) => {
+    if (scopeTab !== "all" && (p.supplier_scope || "") !== scopeTab) return false;
     if (!search) return true;
     const s = search.toLowerCase();
     return (
@@ -76,6 +81,13 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
       (p.email || "").toLowerCase().includes(s)
     );
   });
+
+  const scopeTabs: Array<{ value: "all" | SupplierScope; label: string }> = [
+    { value: "all", label: "الكل" },
+    { value: "local", label: "محليون" },
+    { value: "international", label: "دوليون (استيراد)" },
+    { value: "", label: "غير مصنَّفين" },
+  ];
 
   const columns: DenseColumn<Partner>[] = [
     { key: "id", header: "#", width: "55px", align: "center", render: (p) => <>{p.id}</> },
@@ -95,6 +107,24 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
           {p.name}
         </button>
       ) },
+    { key: "scope", header: "النطاق", width: "95px", align: "center",
+      render: (p) => {
+        const scope = p.supplier_scope || "";
+        if (!scope) return <span className="text-[10px] aseel-text-soft">غير مصنَّف</span>;
+        const isIntl = scope === "international";
+        return (
+          <span style={{
+            fontSize: "10px",
+            fontWeight: 700,
+            padding: "1px 6px",
+            borderRadius: "4px",
+            color: isIntl ? "var(--aseel-accent, #2563eb)" : "#267346",
+            background: isIntl ? "rgba(37,99,235,0.10)" : "rgba(38,115,70,0.10)",
+          }}>
+            {isIntl ? "دولي" : "محلي"}
+          </span>
+        );
+      } },
     { key: "acct", header: "رقم الحساب", width: "110px",
       render: (p) => <>{p.linked_account_code || p.linked_account || "—"}</> },
     { key: "phone", header: "الهاتف", width: "130px", render: (p) => <>{p.phone || "—"}</> },
@@ -121,6 +151,21 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
           إدارة الموردين
         </strong>
         <span className="aseel-status-item">الإجمالي: <b>{partners.length}</b></span>
+        <div style={{ display: "flex", gap: 2 }}>
+          {scopeTabs.map((tab) => (
+            <button
+              key={tab.value || "unset"}
+              type="button"
+              className="aseel-toolbtn"
+              onClick={() => setScopeTab(tab.value)}
+              style={scopeTab === tab.value
+                ? { background: "var(--aseel-panel-hover)", fontWeight: 700 }
+                : undefined}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
         <div style={{ flex: 1 }} />
         <div style={{ position: "relative" }}>
           <Search style={{ position: "absolute", right: 6, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "var(--aseel-ink-soft)" }} />

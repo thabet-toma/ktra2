@@ -26,6 +26,7 @@ import {
 import { resolveTenantId } from "../../utils/tenantContext";
 import { getSalesSettings, updateSalesSettings, type SalesSettings } from "../../services/salesApi";
 import { cloudinaryService } from "../../services/cloudinaryService";
+import { usePasteImageUpload } from "../../utils/clipboardImage";
 import { Save, RefreshCw, Database, X, Upload } from "lucide-react";
 
 /** ── Types ───────────────────────────────────────────────────────────── */
@@ -124,6 +125,22 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
       setOfflineMessage(cachedMsg);
     }
   }, []);
+
+  const uploadLogoFile = async (file: File) => {
+    setUploadingLogo(true);
+    setLocalErr(null);
+    try {
+      const url = await cloudinaryService.uploadFile(file);
+      upd("logo_url", url);
+    } catch (err) {
+      setLocalErr(err instanceof Error ? err.message : "فشل رفع الشعار.");
+    } finally {
+      setUploadingLogo(false);
+    }
+  };
+
+  // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف.
+  usePasteImageUpload((files) => { void uploadLogoFile(files[0]); }, !uploadingLogo);
 
   /** Account helpers */
   const revenueAccounts = accounts.filter((a) => a.account_type === "Revenue");
@@ -301,17 +318,8 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
               onChange={async (e) => {
                 const file = e.target.files?.[0];
                 if (!file) return;
-                setUploadingLogo(true);
-                setLocalErr(null);
-                try {
-                  const url = await cloudinaryService.uploadFile(file);
-                  upd("logo_url", url);
-                } catch (err) {
-                  setLocalErr(err instanceof Error ? err.message : "فشل رفع الشعار.");
-                } finally {
-                  setUploadingLogo(false);
-                  e.target.value = "";
-                }
+                await uploadLogoFile(file);
+                e.target.value = "";
               }} />
           </label>
         </span>
