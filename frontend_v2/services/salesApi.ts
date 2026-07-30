@@ -13,6 +13,12 @@ import type { PagedList } from "./restApi";
 const tid = () => resolveTenantId();
 const BASE = "sales";
 
+/** حالة تسليم بضاعة الفاتورة للعميل (مرآة حالة الاستلام في الشراء). */
+export type DeliveryStatus =
+  | "not_delivered"
+  | "partially_delivered"
+  | "delivered";
+
 export type SalesInvoiceRow = {
   id: number;
   invoice_number: string;
@@ -30,6 +36,8 @@ export type SalesInvoiceRow = {
   customer_balance?: string;
   currency: number;
   stock_on_post?: boolean;
+  delivery_status?: DeliveryStatus;
+  delivery_status_display?: string;
   /** M2-T1: book number (0 = manual). */
   book_number?: number;
 };
@@ -64,6 +72,7 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
     product: number;
     product_name?: string | null;
     quantity: string;
+    delivered_quantity?: string;
     unit_price: string;
     line_discount: string;
     tax_rate: number | null;
@@ -185,6 +194,156 @@ export async function deliverOrder(deliveryOrderId: number): Promise<unknown> {
   );
 }
 
+/** بند فاتورة قابل للتسليم — المفوتر/المسلَّم/المتبقي (مصدره الخادم). */
+export type DeliveryLineRow = {
+  line_id: number;
+  product: number;
+  product_name: string;
+  quantity: string;
+  delivered_quantity: string;
+  remaining_quantity: string;
+};
+
+export type DeliveryLinesResponse = {
+  invoice_number: string;
+  delivery_status: DeliveryStatus;
+  delivery_status_display?: string;
+  stock_on_post: boolean;
+  lines: DeliveryLineRow[];
+};
+
+export async function getDeliveryLines(
+  invoiceId: number
+): Promise<DeliveryLinesResponse> {
+  return apiGetObject(`${BASE}/invoices/${invoiceId}/delivery-lines/`, {
+    tenantId: tid(),
+  });
+}
+
+/** إرسالية بيع كما يعيدها الخادم (مستند التسليم المرتبط بفاتورة). */
+export type DeliveryNoteLineDto = {
+  id: number;
+  invoice_line: number | null;
+  product: number;
+  product_name: string;
+  ordered_quantity: string;
+  delivered_total: string;
+  remaining_quantity: string;
+  quantity: string;
+  /** المستودع الذي خرجت منه البضاعة (مرآة سطر إرسالية الشراء). */
+  warehouse?: number | null;
+  warehouse_name?: string | null;
+};
+
+export type DeliveryNoteRow = {
+  id: number;
+  delivery_number: string;
+  delivery_date: string | null;
+  invoice: number | null;
+  invoice_number: string | null;
+  customer: number | null;
+  customer_name: string;
+  customer_ref: string;
+  is_standalone: boolean;
+  doc_label: string;
+  status: string;
+  status_display?: string;
+  auto_created: boolean;
+  notes: string;
+  lines_count: number;
+  total_quantity: string;
+  total_remaining: string;
+  delivered_at: string | null;
+  created_at: string;
+};
+
+export type DeliveryNoteDto = DeliveryNoteRow & { lines: DeliveryNoteLineDto[] };
+
+/** سطر باقٍ غير مسلَّم عبر كل الفواتير — تقرير الطباعة/PDF. */
+export type OutstandingDeliveryRow = {
+  invoice: number;
+  invoice_number: string;
+  invoice_date: string | null;
+  partner_name: string;
+  product: number;
+  product_name: string;
+  quantity: string;
+  delivered_quantity: string;
+  remaining_quantity: string;
+};
+
+/** بنود الحفظ: `line_id` للمرتبط بفاتورة، و`product_id` للسند المستقل. */
+export type DeliveryNoteSaveLine = {
+  line_id?: number;
+  product_id?: number;
+  quantity: number;
+  warehouse_id?: number;
+};
+
+export type DeliveryNoteSaveBody = {
+  invoice?: number | null;
+  partner?: number | null;
+  customer_ref?: string;
+  delivery_date?: string;
+  notes?: string;
+  lines: DeliveryNoteSaveLine[];
+};
+
+export async function listDeliveryNotes(
+  query?: Record<string, string | number | undefined>
+): Promise<DeliveryNoteRow[]> {
+  return apiGetList(`${BASE}/delivery-orders/`, { tenantId: tid(), query });
+}
+
+export async function getDeliveryNote(id: number): Promise<DeliveryNoteDto> {
+  return apiGetObject(`${BASE}/delivery-orders/${id}/`, { tenantId: tid() });
+}
+
+/** إنشاء إرسالية = تسليم البنود المحددة فعلياً (مخزون + قيد تكلفة). */
+export async function createDeliveryNote(
+  body: DeliveryNoteSaveBody
+): Promise<DeliveryNoteDto> {
+  return apiPostObject(`${BASE}/delivery-orders/`, body, { tenantId: tid() });
+}
+
+/** التعديل يعكس أثر الإرسالية القديم ويعيد تطبيق البنود الجديدة (على الخادم). */
+export async function updateDeliveryNote(
+  id: number,
+  body: DeliveryNoteSaveBody
+): Promise<DeliveryNoteDto> {
+  return apiPatchObject(`${BASE}/delivery-orders/${id}/`, body, { tenantId: tid() });
+}
+
+export async function deleteDeliveryNote(id: number): Promise<void> {
+  return apiDelete(`${BASE}/delivery-orders/${id}/`, { tenantId: tid() });
+}
+
+export async function getOutstandingDeliveryLines(): Promise<OutstandingDeliveryRow[]> {
+  const data = await apiGetObject<{ rows?: OutstandingDeliveryRow[] }>(
+    `${BASE}/delivery-orders/outstanding/`,
+    { tenantId: tid() }
+  );
+  return data?.rows || [];
+}
+
+/** تسليم بنود مختارة (إرسالية) — خصم مخزون + قيد تكلفة للمُسلَّم فقط. */
+export async function deliverInvoiceLines(
+  invoiceId: number,
+  lines: { line_id: number; quantity: number; warehouse_id?: number }[],
+  notes?: string
+): Promise<{
+  delivery_id: number;
+  delivery_status: DeliveryStatus;
+  delivery_status_display?: string;
+  lines_delivered: number;
+}> {
+  return apiPostObject(
+    `${BASE}/invoices/${invoiceId}/deliver/`,
+    { lines, notes: notes ?? "" },
+    { tenantId: tid() }
+  );
+}
+
 export type CreditPreviewResponse = {
   credit_limit: string | null;
   open_balance: string;
@@ -259,7 +418,8 @@ export type CustomerPriceRow = {
   sku: string | null;
   name: string;
   price: string | null;
-  source: "last_invoice" | "quote";
+  /** «default» = السعر العام في كرت الصنف (أضعف المصادر). */
+  source: "last_invoice" | "quote" | "default";
   source_label: string;
   editable: boolean;
   invoice_number: string | null;
@@ -497,6 +657,12 @@ export type SalesSettings = {
   allow_document_delete: boolean;
   default_shipping_origin: string;
   default_shipping_destination: string;
+  /** تسمية مستند التسليم المرتبط بفاتورة (يحرّرها المستخدم). */
+  delivery_doc_label: string;
+  /** تسمية المستند بلا فاتورة مرتبطة. */
+  standalone_delivery_label: string;
+  allow_standalone_delivery: boolean;
+  allow_edit_delivery: boolean;
   updated_at?: string;
 };
 
@@ -564,6 +730,7 @@ export type SalesQuotationRow = {
   quotation_date: string;
   valid_until?: string | null;
   status: string;
+  status_display?: string;
   grand_total: string;
   notes?: string;
 };

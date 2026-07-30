@@ -50,6 +50,8 @@ export type PermissionMember = {
   /** المفاتيح المتجاوَزة فردياً فقط (منح=true / منع=false). */
   overrides: Record<string, boolean>;
   effective: string[];
+  /** يملك كل مفاتيح الكتالوج فعلياً — مشتقّ على الخادم لا مخزَّن. */
+  grant_all: boolean;
 };
 
 export async function getPermissionMembers(): Promise<PermissionMember[]> {
@@ -79,6 +81,21 @@ export async function saveMemberPermissions(
   return apiPatchObject(
     "permissions/member/",
     { membership_id: membershipId, changes },
+    { tenantId: tid() },
+  );
+}
+
+/**
+ * منح العضو **كل** الصلاحيات بخانة واحدة، أو إعادته لما يمليه دوره (`false`
+ * يحذف كل تجاوزاته الفردية). الدور لا يتبدّل في الحالتين.
+ */
+export async function setMemberGrantAll(
+  membershipId: number,
+  grantAll: boolean,
+): Promise<PermissionMember> {
+  return apiPatchObject(
+    "permissions/member/",
+    { membership_id: membershipId, grant_all: grantAll },
     { tenantId: tid() },
   );
 }

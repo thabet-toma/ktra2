@@ -47,6 +47,8 @@ export type AppView =
     | "sales-customer-payments"
     | "sales-settings"
     | "purchase-settings"
+    | "purchase-receipts"
+    | "sales-delivery-notes"
     | "product-profile"
     | "product-group"
     | "local-shipping"

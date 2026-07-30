@@ -28,6 +28,7 @@ from .models import (
     CreditDebitNote,
     CustomerPayment,
     DeliveryOrder,
+    DeliveryOrderLine,
     PaymentAllocation,
     SalesInvoice,
     SalesInvoiceLine,
@@ -425,8 +426,13 @@ def _build_cogs_journal_line_dicts(
     invoice: SalesInvoice,
     lines: list[SalesInvoiceLine],
     products_by_id: dict[int, Product],
+    quantities: dict[int, Decimal] | None = None,
 ) -> list[dict]:
-    """Dr COGS / Cr Inventory — مبالغ من متوسط التكلفة قبل الصرف (نفس منطق حركة المخزون)."""
+    """Dr COGS / Cr Inventory — مبالغ من متوسط التكلفة قبل الصرف (نفس منطق حركة المخزون).
+
+    quantities: كمية بديلة لكل سطر (بمعرّف السطر) — يستعملها التسليم الجزئي كي
+    تكون التكلفة على المُسلَّم فعلاً لا على كامل السطر. None = كامل الكمية.
+    """
     # يعبّئ الحسابين الافتراضيين إن كانا فارغين بدل إسقاط الترحيل
     ss = get_or_create_sales_settings(invoice.tenant_id)
     fb_cogs = ss.default_cogs_account_id
@@ -437,7 +443,11 @@ def _build_cogs_journal_line_dicts(
         p = products_by_id[line.product_id]
         if getattr(p, 'is_service', False):
             continue
-        qty = Decimal(str(line.quantity))
+        qty = Decimal(str(
+            line.quantity if quantities is None else quantities.get(line.id, 0)
+        ))
+        if qty <= 0:
+            continue
         avg = Decimal(str(p.avg_cost))
         amt = (qty * avg).quantize(DEC)
         if amt <= 0:
@@ -1202,6 +1212,15 @@ def post_sales_invoice(
                     )
             else:
                 _post_stock_out_for_invoice(invoice, lines, user=user)
+            # البضاعة خرجت مع الترحيل ⇒ الفاتورة مسلَّمة بالكامل، وتُوثَّق
+            # بإرسالية تلقائية بكامل الكمية (مرآة إرسالية الشراء التلقائية).
+            for line in lines:
+                if getattr(line.product, "is_service", False):
+                    continue
+                line.delivered_quantity = line.quantity
+            SalesInvoiceLine.objects.bulk_update(lines, ["delivered_quantity"])
+            _create_auto_delivery_document(invoice, lines)
+        sync_invoice_delivery_status(invoice, lines)
 
         create_audit_log(
             tenant=invoice.tenant,
@@ -1283,58 +1302,565 @@ def issue_stock_from_invoice(invoice: SalesInvoice, *, user=None):
             raise ValidationError(f"خطأ في إذن الصرف لصنف {line.product.sku}: {e}")
 
 
-def deliver_delivery_order(delivery: DeliveryOrder, *, user=None) -> DeliveryOrder:
-    """تسليم أمر إخراج وخصم المخزون إذا كانت الفاتورة بدون خصم عند الترحيل + قيد COGS عندها فقط."""
-    inv = delivery.invoice
-    if delivery.status == DeliveryOrder.STATUS_DELIVERED:
-        raise ValidationError("تم التسليم مسبقاً.")
-    if inv.status != SalesInvoice.STATUS_POSTED:
+def _create_auto_delivery_document(
+    invoice: SalesInvoice, lines: list[SalesInvoiceLine],
+) -> DeliveryOrder | None:
+    """إرسالية تلقائية بكامل الكمية للفاتورة التي تخصم المخزون عند الترحيل.
+
+    توثيق فقط — لا حركة مخزون ولا قيد هنا (الترحيل أنجزهما)، فلا ازدواج.
+    """
+    goods = [l for l in lines if not getattr(l.product, "is_service", False)]
+    if not goods:
+        return None
+    from django.utils import timezone
+
+    delivery = DeliveryOrder.objects.create(
+        tenant=invoice.tenant,
+        branch=invoice.branch,
+        delivery_number=next_delivery_number(invoice.tenant_id, invoice.branch),
+        delivery_date=invoice.invoice_date,
+        invoice=invoice,
+        auto_created=True,
+        status=DeliveryOrder.STATUS_DELIVERED,
+        delivered_at=timezone.now(),
+        notes="إرسالية تلقائية مع ترحيل الفاتورة",
+    )
+    for line in goods:
+        DeliveryOrderLine.objects.create(
+            tenant=invoice.tenant,
+            delivery=delivery,
+            invoice_line=line,
+            product=line.product,
+            quantity=line.quantity,
+        )
+    return delivery
+
+
+def _resolve_delivery_warehouse(tenant_id: int, raw: dict):
+    """مستودع سطر الإرسالية — يُتحقَّق من تبعيته للشركة (مرآة استلام الشراء).
+
+    اختياري خلافاً للشراء: حركة الخروج عند ترحيل الفاتورة بلا مستودع أصلاً، وشركة
+    بلا مستودعات يجب أن تبقى قادرة على التسليم. المُرسَل يُعتمد ويُثبَّت على السطر.
+    """
+    from inventory.models import Warehouse
+
+    wh_id = raw.get("warehouse_id")
+    if not wh_id:
+        return None
+    wh = Warehouse.objects.filter(pk=wh_id, tenant_id=tenant_id).first()
+    if wh is None:
+        raise ValidationError(f"المستودع المحدد ({wh_id}) غير موجود في هذه الشركة.")
+    return wh
+
+
+def _delivery_movement_type(invoice: SalesInvoice) -> str:
+    """اتجاه حركة المخزون عند التسليم — نفس قاعدة الترحيل (نوع الفاتورة يحكمه)."""
+    kind = invoice.invoice_kind
+    if kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+        return "RETURN_IN"
+    if kind == SalesInvoice.INVOICE_KIND_PURCHASE_RETURN:
+        return "RETURN_OUT"
+    return "OUT"
+
+
+def sync_invoice_delivery_status(
+    invoice: SalesInvoice,
+    lines: list[SalesInvoiceLine] | None = None,
+    *,
+    save: bool = True,
+) -> str:
+    """يشتقّ حالة التسليم من الكميات المسلَّمة — مصدر حقيقة واحد لا حقل يدوي.
+
+    بنود الخدمات لا تُسلَّم مادياً فتُستثنى؛ فاتورة خدمات صرفة تُعدّ مسلَّمة.
+    """
+    if lines is None:
+        lines = list(invoice.lines.select_related("product"))
+    goods = [l for l in lines if not getattr(l.product, "is_service", False)]
+    if not goods:
+        new_status = SalesInvoice.DELIVERY_FULL
+    elif all(
+        Decimal(str(l.delivered_quantity or 0)) >= Decimal(str(l.quantity or 0))
+        for l in goods
+    ):
+        new_status = SalesInvoice.DELIVERY_FULL
+    elif any(Decimal(str(l.delivered_quantity or 0)) > 0 for l in goods):
+        new_status = SalesInvoice.DELIVERY_PARTIAL
+    else:
+        new_status = SalesInvoice.DELIVERY_NOT
+    if save and invoice.delivery_status != new_status:
+        invoice.delivery_status = new_status
+        invoice.save(update_fields=["delivery_status"])
+    else:
+        invoice.delivery_status = new_status
+    return new_status
+
+
+def next_delivery_number(tenant_id: int, branch=None) -> str:
+    """رقم إرسالية البيع التالي — عبر دفاتر الترقيم المركزية (DN-0001)."""
+    from accounting.services import next_document_number
+
+    seq = next_document_number(
+        tenant_id, "delivery_note", branch_id=branch.id if branch else None,
+    )
+    return f"DN-{seq:04d}"
+
+
+def deliver_invoice_lines(
+    invoice: SalesInvoice,
+    *,
+    lines,
+    user=None,
+    notes: str = "",
+    delivery: DeliveryOrder | None = None,
+    delivery_date=None,
+) -> DeliveryOrder:
+    """تسليم بنود فاتورة بيع للعميل (إرسالية) — خصم المخزون وقيد التكلفة للمُسلَّم فقط.
+
+    lines: قائمة [{'line_id': int, 'quantity': Decimal, 'warehouse_id': int|None}].
+    الكمية أكبر من المتبقي مرفوضة، فإعادة الإرسال لا تُكرّر الخصم. المستودع
+    اختياري ويُثبَّت على الحركة والسطر (مرآة استلام الشراء).
+
+    حصري للفواتير المرحّلة التي **لا** تخصم المخزون عند الترحيل — الفاتورة التي
+    تخصمه عند الترحيل سُلّمت بالكامل لحظتها (مرآة استلام فاتورة الشراء).
+
+    العملية ذرّية: حركات المخزون + قيد التكلفة + بنود الإرسالية معاً أو لا شيء.
+    """
+    if invoice.status != SalesInvoice.STATUS_POSTED:
         raise ValidationError("الفاتورة غير مرحّلة.")
+    if invoice.stock_on_post:
+        raise ValidationError(
+            "هذه الفاتورة تخصم المخزون عند الترحيل — بنودها مسلَّمة بالفعل."
+        )
+    if not lines:
+        raise ValidationError("حدّد البنود والكميات المراد تسليمها.")
+
+    mv_type = _delivery_movement_type(invoice)
+    is_return = invoice.invoice_kind in (
+        SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        SalesInvoice.INVOICE_KIND_PURCHASE_RETURN,
+    )
 
     with transaction.atomic():
-        lines = list(
-            inv.lines.select_related(
+        inv_lines = list(
+            invoice.lines.select_related(
                 "product",
                 "product__category",
                 "product__category__cogs_account",
                 "product__category__inventory_account",
             )
         )
-        products_by_id = _lock_products_for_lines(lines)
-        for line in lines:
+        products_by_id = _lock_products_for_lines(inv_lines)
+        for line in inv_lines:
             line.product = products_by_id[line.product_id]
+        lines_by_id = {l.id: l for l in inv_lines}
 
-        if not inv.stock_on_post:
-            _post_stock_out_for_invoice(inv, lines, user=user)
-            cogs_rows = _build_cogs_journal_line_dicts(inv, lines, products_by_id)
-            if cogs_rows:
-                post_journal(
-                    tenant_id=inv.tenant_id,
-                    transaction_date=inv.invoice_date,
-                    reference_type="SALES_DELIVERY_COGS",
-                    reference_id=inv.id,
-                    description=(f"تكلفة مبيعات عند التسليم — {inv.invoice_number}")[:500],
-                    lines_data=cogs_rows,
-                    currency=inv.currency,
-                    exchange_rate=inv.exchange_rate,
-                    user=user,
-                    branch_id=inv.branch_id,
+        delivered_now: dict[int, Decimal] = {}
+        warehouse_by_line: dict[int, object] = {}
+        for raw in lines:
+            line_id = raw.get("line_id")
+            line = lines_by_id.get(int(line_id)) if line_id is not None else None
+            if not line:
+                raise ValidationError(f"البند {line_id} لا ينتمي لهذه الفاتورة.")
+            try:
+                qty = Decimal(str(raw.get("quantity", 0)))
+            except Exception:
+                raise ValidationError(f"كمية غير صالحة للبند «{line.product}».")
+            if qty <= 0:
+                continue
+            if getattr(line.product, "is_service", False):
+                raise ValidationError(
+                    f"البند «{line.product}» خدمة — لا يُسلَّم من المخزن."
                 )
+            ordered = Decimal(str(line.quantity or 0))
+            already = Decimal(str(line.delivered_quantity or 0))
+            remaining = ordered - already
+            if qty > remaining:
+                raise ValidationError(
+                    f"البند «{line.product}»: الكمية المطلوب تسليمها ({qty}) "
+                    f"تتجاوز المتبقي ({remaining})."
+                )
+            delivered_now[line.id] = delivered_now.get(line.id, Decimal("0")) + qty
+            # سطر مُرسَل مرتين: الكميات تُجمع والمستودع الأخير المحدَّد هو المعتمد.
+            warehouse_by_line[line.id] = (
+                _resolve_delivery_warehouse(invoice.tenant_id, raw)
+                or warehouse_by_line.get(line.id)
+            )
+
+        if not delivered_now:
+            raise ValidationError("لا يوجد ما يُسلَّم — تحقق من الكميات.")
+
+        if delivery is None:
+            delivery = DeliveryOrder.objects.create(
+                tenant=invoice.tenant,
+                branch=invoice.branch,
+                delivery_number=next_delivery_number(invoice.tenant_id, invoice.branch),
+                delivery_date=delivery_date or invoice.invoice_date,
+                invoice=invoice,
+                notes=(notes or "")[:500],
+            )
+        elif delivery.status == DeliveryOrder.STATUS_DELIVERED:
+            raise ValidationError("تم تسليم هذه الإرسالية مسبقاً.")
+        elif not delivery.delivery_number:
+            # إرسالية قديمة أُنشئت قبل الترقيم — تُرقَّم عند تسليمها.
+            delivery.delivery_number = next_delivery_number(
+                invoice.tenant_id, invoice.branch,
+            )
+            delivery.delivery_date = delivery.delivery_date or invoice.invoice_date
+            delivery.save(update_fields=["delivery_number", "delivery_date"])
+
+        for line_id, qty in delivered_now.items():
+            line = lines_by_id[line_id]
+            warehouse = warehouse_by_line.get(line_id)
+            try:
+                movement = record_stock_movement(
+                    product=line.product,
+                    movement_type=mv_type,
+                    quantity=qty,
+                    reference_type="SALE",
+                    reference_id=invoice.id,
+                    partner=invoice.customer,
+                    movement_date=invoice.invoice_date,
+                    notes=(
+                        f"تسليم إرسالية {delivery.delivery_number or f'#{delivery.id}'} "
+                        f"— فاتورة {invoice.invoice_number}"
+                    ),
+                    tenant=invoice.tenant,
+                    branch=invoice.branch,
+                    warehouse=warehouse,
+                )
+            except ValidationError as e:
+                raise ValidationError(f"مخزون الصنف {line.product.sku}: {e}")
+            DeliveryOrderLine.objects.create(
+                tenant=invoice.tenant,
+                delivery=delivery,
+                invoice_line=line,
+                product=line.product,
+                warehouse=warehouse,
+                quantity=qty,
+                movement=movement,
+            )
+            line.delivered_quantity = (
+                Decimal(str(line.delivered_quantity or 0)) + qty
+            )
+            line.save(update_fields=["delivered_quantity"])
+
+        # قيد تكلفة المبيعات للكمية المسلَّمة في هذه الإرسالية وحدها.
+        cogs_rows = _build_cogs_journal_line_dicts(
+            invoice, inv_lines, products_by_id, quantities=delivered_now,
+        )
+        cogs_journal = None
+        if cogs_rows:
+            if is_return:
+                for row in cogs_rows:
+                    row["debit"], row["credit"] = row["credit"], row["debit"]
+            cogs_journal = post_journal(
+                tenant_id=invoice.tenant_id,
+                transaction_date=invoice.invoice_date,
+                reference_type="SALES_DELIVERY_COGS",
+                reference_id=invoice.id,
+                description=(
+                    f"تكلفة مبيعات عند التسليم — {invoice.invoice_number} "
+                    f"(إرسالية {delivery.delivery_number or f'#{delivery.id}'})"
+                )[:500],
+                lines_data=cogs_rows,
+                currency=invoice.currency,
+                exchange_rate=invoice.exchange_rate,
+                user=user,
+                branch_id=invoice.branch_id,
+                # كل إرسالية قيد تكلفة مستقل — بلا هذا يُعاد أول قيد للإرسالية الثانية.
+                idempotent=False,
+            )
 
         delivery.status = DeliveryOrder.STATUS_DELIVERED
         from django.utils import timezone
 
         delivery.delivered_at = timezone.now()
-        delivery.save(update_fields=["status", "delivered_at"])
+        delivery.journal = cogs_journal
+        delivery.save(update_fields=["status", "delivered_at", "journal"])
+
+        sync_invoice_delivery_status(invoice, inv_lines)
+
         create_audit_log(
-            tenant=inv.tenant,
+            tenant=invoice.tenant,
             user=user,
             action="UPDATE",
             model_name="DeliveryOrder",
             object_id=delivery.id,
-            change_details=f"Delivered DO for invoice {inv.invoice_number}",
+            change_details=(
+                f"Delivered {len(delivered_now)} line(s) for invoice "
+                f"{invoice.invoice_number} → {invoice.delivery_status}"
+            ),
         )
+
+    logger.info(
+        "Sales invoice #%s delivery #%s: %d line(s), delivery_status=%s",
+        invoice.id, delivery.id, len(delivered_now), invoice.delivery_status,
+    )
     return delivery
+
+
+def resolve_goods_delivered_unbilled_account(tenant_id: int) -> Account:
+    """حساب «بضاعة مسلَّمة لم تُفوتَر» (كود 1108) — مرآة وسيط الاستلام 2106.
+
+    يستقبل تكلفة البضاعة التي خرجت بسند تسليم مستقل قبل فوترتها، فحين تُفوتَر
+    لاحقاً يُدائنه قيدُ تكلفة الفاتورة فيُصفَّر. يُنشأ تلقائياً إن لم يوجد.
+    """
+    acc = Account.objects.filter(tenant_id=tenant_id, code="1108").first()
+    if acc:
+        return acc
+    parent = Account.objects.filter(tenant_id=tenant_id, code="11").first()
+    acc, _ = Account.objects.get_or_create(
+        tenant_id=tenant_id,
+        code="1108",
+        defaults={
+            "name": "بضاعة مسلَّمة لم تُفوتَر",
+            "account_type": "Asset",
+            "parent": parent,
+            "is_active": True,
+        },
+    )
+    return acc
+
+
+def create_standalone_delivery_note(
+    tenant, *, partner, lines, branch=None, user=None, delivery_date=None,
+    notes="", customer_ref="", delivery=None,
+):
+    """سند تسليم مستقل — بضاعة خرجت قبل فوترتها (مرآة سند الاستلام).
+
+    lines: [{'product_id': int, 'quantity': Decimal, 'warehouse_id': int|None}]
+    القيد: مدين «بضاعة مسلَّمة لم تُفوتَر» (1108) / دائن المخزون بمتوسط التكلفة —
+    لا إيراد هنا، الإيراد يأتي مع الفاتورة لاحقاً.
+    """
+    import datetime
+    from django.utils import timezone
+
+    if not lines:
+        raise ValidationError("حدّد الأصناف والكميات المسلَّمة.")
+    if partner is None:
+        raise ValidationError("حدّد العميل لسند التسليم المستقل.")
+
+    movement_date = delivery_date or datetime.date.today()
+    tenant_id = getattr(tenant, "TenantID", tenant)
+    products = {
+        p.id: p
+        for p in Product.objects.select_for_update()
+        .select_related("category", "category__inventory_account")
+        .filter(
+            tenant_id=tenant_id,
+            pk__in=[row.get("product_id") for row in lines if row.get("product_id")],
+        )
+    }
+
+    planned = []
+    for raw in lines:
+        product = products.get(int(raw.get("product_id") or 0))
+        if product is None:
+            raise ValidationError(f"الصنف {raw.get('product_id')} غير موجود في هذه الشركة.")
+        if getattr(product, "is_service", False):
+            raise ValidationError(f"الصنف «{product}» خدمة — لا يُسلَّم من المخزن.")
+        try:
+            qty = Decimal(str(raw.get("quantity", 0)))
+        except Exception:
+            raise ValidationError(f"كمية غير صالحة للصنف «{product}».")
+        if qty <= 0:
+            continue
+        planned.append({
+            "product": product,
+            "qty": qty,
+            "cost": (qty * Decimal(str(product.avg_cost or 0))).quantize(DEC),
+            "warehouse": _resolve_delivery_warehouse(tenant_id, raw),
+        })
+
+    if not planned:
+        raise ValidationError("لا يوجد ما يُسلَّم — تحقق من الكميات.")
+
+    total_cost = sum((p["cost"] for p in planned), Decimal("0"))
+
+    with transaction.atomic():
+        doc = delivery
+        if doc is None:
+            doc = DeliveryOrder.objects.create(
+                tenant=tenant,
+                branch=branch,
+                delivery_number=next_delivery_number(tenant_id, branch),
+                delivery_date=movement_date,
+                invoice=None,
+                partner=partner,
+                customer_ref=(customer_ref or "")[:100],
+                status=DeliveryOrder.STATUS_DELIVERED,
+                delivered_at=timezone.now(),
+                notes=(notes or "")[:500],
+            )
+        else:
+            doc.lines.all().delete()
+            doc.delivery_date = movement_date
+            doc.partner = partner
+            doc.customer_ref = (customer_ref or "")[:100]
+            doc.notes = (notes or "")[:500]
+            doc.save(update_fields=[
+                "delivery_date", "partner", "customer_ref", "notes",
+            ])
+
+        for p in planned:
+            try:
+                movement = record_stock_movement(
+                    product=p["product"],
+                    movement_type="OUT",
+                    quantity=p["qty"],
+                    reference_type="DELIVERY_NOTE",
+                    reference_id=doc.id,
+                    partner=partner,
+                    movement_date=movement_date,
+                    notes=f"سند تسليم {doc.delivery_number}",
+                    tenant=tenant,
+                    branch=branch,
+                    warehouse=p["warehouse"],
+                )
+            except ValidationError as e:
+                raise ValidationError(f"مخزون الصنف {p['product'].sku}: {e}")
+            DeliveryOrderLine.objects.create(
+                tenant=tenant,
+                delivery=doc,
+                invoice_line=None,
+                product=p["product"],
+                warehouse=p["warehouse"],
+                quantity=p["qty"],
+                movement=movement,
+            )
+
+        journal = None
+        if total_cost > 0:
+            ss = get_or_create_sales_settings(tenant_id)
+            clearing = resolve_goods_delivered_unbilled_account(tenant_id)
+            rows = []
+            for p in planned:
+                if p["cost"] <= 0:
+                    continue
+                cat = p["product"].category
+                inv_id = (
+                    cat.inventory_account_id
+                    if cat and cat.inventory_account_id
+                    else ss.default_inventory_account_id
+                )
+                if not inv_id:
+                    raise ValidationError(
+                        f"الصنف «{p['product']}»: عيّن حساب المخزون في فئة المنتج "
+                        "أو حساباً افتراضياً في إعدادات المبيعات."
+                    )
+                rows.append({
+                    "account": inv_id, "partner": None,
+                    "debit": Decimal("0"), "credit": p["cost"],
+                    "description": f"تخفيض مخزون — سند تسليم {doc.delivery_number}"[:500],
+                })
+            rows.insert(0, {
+                "account": clearing.id, "partner": None,
+                "debit": total_cost, "credit": Decimal("0"),
+                "description": f"بضاعة مسلَّمة لم تُفوتَر — {doc.delivery_number}"[:500],
+            })
+            journal = post_journal(
+                tenant_id=tenant_id,
+                transaction_date=movement_date,
+                reference_type="DELIVERY_NOTE",
+                reference_id=doc.id,
+                description=f"سند تسليم {doc.delivery_number} | {partner.name}"[:500],
+                lines_data=rows,
+                user=user,
+                branch_id=branch.id if branch else None,
+                idempotent=False,
+            )
+            doc.journal = journal
+            doc.save(update_fields=["journal"])
+
+    logger.info(
+        "Standalone delivery note %s: %d line(s), cost=%s, journal=%s",
+        doc.delivery_number, len(planned), total_cost, journal.id if journal else None,
+    )
+    return doc
+
+
+def void_delivery_note(delivery: DeliveryOrder, *, user=None) -> dict:
+    """يعكس أثر إرسالية بيع واحدة: حركاتها وقيدها وكمياتها المسلَّمة — دون غيرها.
+
+    التتبّع عبر `DeliveryOrderLine.movement`، فلا تُمسّ إرساليات أخرى لنفس الفاتورة.
+    """
+    from accounting.models import JournalHeader
+    from inventory.services import _recompute_product_stock
+
+    with transaction.atomic():
+        lines = list(delivery.lines.select_related("invoice_line", "product", "movement"))
+        movement_ids = [l.movement_id for l in lines if l.movement_id]
+        products = {l.product_id: l.product for l in lines if l.product_id}
+
+        if movement_ids:
+            StockMovement.objects.filter(pk__in=movement_ids).delete()
+        if delivery.journal_id:
+            JournalHeader.objects.filter(pk=delivery.journal_id).delete()
+
+        invoice = delivery.invoice
+        if invoice is not None:
+            for line in lines:
+                if line.invoice_line_id is None:
+                    continue
+                inv_line = line.invoice_line
+                inv_line.delivered_quantity = max(
+                    Decimal("0"),
+                    Decimal(str(inv_line.delivered_quantity or 0))
+                    - Decimal(str(line.quantity or 0)),
+                )
+                inv_line.save(update_fields=["delivered_quantity"])
+
+        number = delivery.delivery_number or f"#{delivery.id}"
+        delivery.delete()
+
+        for product in products.values():
+            _recompute_product_stock(product)
+
+        if invoice is not None:
+            sync_invoice_delivery_status(invoice)
+
+    logger.info(
+        "Delivery note %s voided: %d movement(s) reversed", number, len(movement_ids),
+    )
+    return {"movements_reversed": len(movement_ids)}
+
+
+def remaining_delivery_lines(invoice: SalesInvoice) -> list[dict]:
+    """بنود الفاتورة مع (المفوتر · المسلَّم · المتبقي) — يغذّي نافذة التسليم.
+
+    مصدر حقيقة واحد مع حارس التسليم، فلا تعرض الواجهة ما يرفضه الخادم.
+    """
+    rows: list[dict] = []
+    for line in invoice.lines.select_related("product"):
+        if getattr(line.product, "is_service", False):
+            continue
+        ordered = Decimal(str(line.quantity or 0))
+        delivered = Decimal(str(line.delivered_quantity or 0))
+        rows.append({
+            "line_id": line.id,
+            "product": line.product_id,
+            "product_name": str(line.product),
+            "quantity": ordered,
+            "delivered_quantity": delivered,
+            "remaining_quantity": max(Decimal("0"), ordered - delivered),
+        })
+    return rows
+
+
+def deliver_delivery_order(delivery: DeliveryOrder, *, user=None) -> DeliveryOrder:
+    """تسليم إرسالية قائمة بكامل المتبقي من بنود فاتورتها (المسار القديم).
+
+    يُفوِّض لـ`deliver_invoice_lines` كي لا يوجد منطق تسليم مكرّر.
+    """
+    inv = delivery.invoice
+    if delivery.status == DeliveryOrder.STATUS_DELIVERED:
+        raise ValidationError("تم التسليم مسبقاً.")
+    lines = [
+        {"line_id": r["line_id"], "quantity": r["remaining_quantity"]}
+        for r in remaining_delivery_lines(inv)
+        if r["remaining_quantity"] > 0
+    ]
+    return deliver_invoice_lines(inv, lines=lines, user=user, delivery=delivery)
 
 
 def _resolve_ar_account_for_partner(partner: Partner) -> Account:
@@ -2016,6 +2542,16 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
                 "document_id": q.id,
                 "invoice_number": None,
             })
+        # آخر مصدر: «سعر البيع» العام في كرت الصنف — يظهر فقط حين لا شراء سابق
+        # لهذا الزبون ولا عرض له. تبقى الخانة قابلة للتحرير لحفظ عرض خاص به.
+        if not prices and p.sale_price is not None and Decimal(str(p.sale_price)) > 0:
+            prices.append({
+                "label": "سعر عام (كرت الصنف)",
+                "unit_price": str(p.sale_price),
+                "source_type": "PRODUCT",
+                "document_id": None,
+                "invoice_number": None,
+            })
 
         if prices:
             rows.append({
@@ -2023,9 +2559,14 @@ def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:
                 "sku": p.sku,
                 "name": name,
                 "price": prices[0]["unit_price"],
-                "source": "last_invoice" if prices[0]["source_type"] == "SALES_INVOICE" else "quote",
+                "source": (
+                    "last_invoice" if prices[0]["source_type"] == "SALES_INVOICE"
+                    else "default" if prices[0]["source_type"] == "PRODUCT"
+                    else "quote"
+                ),
                 "source_label": prices[0]["label"],
-                "editable": prices[0]["source_type"] == "QUOTE",
+                # السعر العام ليس عرضاً للزبون — يبقى قابلاً للتحرير ليُحفظ عرضه الخاص.
+                "editable": prices[0]["source_type"] in ("QUOTE", "PRODUCT"),
                 "invoice_number": prices[0]["invoice_number"],
                 "prices": prices,
             })

@@ -74,6 +74,8 @@ class ProductSerializer(serializers.ModelSerializer):
             'is_serialized', 'is_service',
             'is_for_sale_online', 'online_price', 'online_description',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity', 'avg_cost',
+            # كرت الصنف: سعر البيع الافتراضي — قابل للتحرير بجانب التكلفة المحسوبة.
+            'sale_price',
             'purchased_qty', 'avg_monthly_sales',
             'stock_status', 'group_key', 'display_name', 'has_group',
             'created_at',

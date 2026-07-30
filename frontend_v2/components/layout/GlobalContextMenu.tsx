@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import {
@@ -19,6 +19,8 @@ import {
   HandCoins,
   Package,
   Coins,
+  Zap,
+  ChevronLeft,
 } from "lucide-react";
 import { AppView, User } from "../../types";
 import { clientLogger } from "../../services/logger";
@@ -55,7 +57,11 @@ interface Props {
 
 type MenuEntry =
   | { kind: "sep" }
-  | { kind: "item"; key: string; label: string; icon: React.ReactNode; onClick: () => void; danger?: boolean };
+  | { kind: "item"; key: string; label: string; icon: React.ReactNode; onClick: () => void; danger?: boolean }
+  | { kind: "submenu"; key: string; label: string; icon: React.ReactNode; children: MenuEntry[] };
+
+/** فرع مفتوح من القائمة (تفرّع واحد بمستوى واحد) — يُغلق مع القائمة الرئيسية. */
+type SubmenuState = { key: string; x: number; y: number; entries: MenuEntry[] };
 
 type MenuState = {
   x: number;
@@ -82,9 +88,12 @@ const ICON = "w-3.5 h-3.5";
 export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [calc, setCalc] = useState<CalcState | null>(null);
+  const [submenu, setSubmenu] = useState<SubmenuState | null>(null);
   const navigate = useNavigate();
+  const menuElRef = useRef<HTMLDivElement>(null);
+  const submenuElRef = useRef<HTMLDivElement>(null);
 
-  const close = useCallback(() => setMenu(null), []);
+  const close = useCallback(() => { setMenu(null); setSubmenu(null); }, []);
 
   useEffect(() => {
     const onContextMenu = (e: MouseEvent) => {
@@ -117,7 +126,12 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
 
   useEffect(() => {
     if (!menu) return;
-    const onScroll = () => close();
+    // تمرير داخل القائمة نفسها (أو فرعها) لا يُغلقها — فقط تمرير الصفحة خلفها.
+    const onScroll = (e: Event) => {
+      const t = e.target;
+      if (t instanceof Node && (menuElRef.current?.contains(t) || submenuElRef.current?.contains(t))) return;
+      close();
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
     window.addEventListener("click", close);
     window.addEventListener("scroll", onScroll, true);
@@ -291,13 +305,27 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
       ]
     : [];
 
-  // الترتيب: السياقي أولاً (حاسبة/حافظة ← شريك ← سريعة) والعامّ أخيراً (رجوع/الرئيسية/تحديث/طباعة).
+  // فروع (submenus) بمستوى واحد — تُبقي اللائحة الرئيسية قصيرة وتُفصّل الطويلة منها.
+  const partnerTopEntry: MenuEntry[] = menu.partner
+    ? [{
+        kind: "submenu",
+        key: "partner-actions",
+        label: `إجراءات الطرف: ${menu.partner.name || (menu.partner.kind === "customer" ? "العميل" : "المورد")}`,
+        icon: <UserRound className={ICON} />,
+        children: partnerEntries(menu.partner),
+      }]
+    : [];
+  const quickTopEntry: MenuEntry[] = quickEntries.length > 0
+    ? [{ kind: "submenu", key: "quick-actions", label: "إجراءات سريعة", icon: <Zap className={ICON} />, children: quickEntries }]
+    : [];
+
+  // الترتيب: السياقي أولاً (حاسبة/حافظة ← شريك ← صنف ← سريعة) والعامّ أخيراً (رجوع/الرئيسية/تحديث/طباعة).
   // نُدمج المجموعات غير الفارغة بفاصل بينها فقط — بلا فواصل بادئة/زائدة/مكرّرة.
   const groups: MenuEntry[][] = [
     editableEntries,
-    menu.partner ? partnerEntries(menu.partner) : [],
+    partnerTopEntry,
     menu.item ? itemEntries(menu.item) : [],
-    quickEntries,
+    quickTopEntry,
     pageActions,
   ].filter((g) => g.length > 0);
   const entries: MenuEntry[] = [];
@@ -306,9 +334,26 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
     entries.push(...group);
   });
 
+  const openSubmenu = (en: Extract<MenuEntry, { kind: "submenu" }>) => (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (submenu?.key === en.key) { setSubmenu(null); return; }
+    const r = e.currentTarget.getBoundingClientRect();
+    const openLeft = r.left - MENU_WIDTH - 4 >= 8;
+    const x = openLeft ? r.left - MENU_WIDTH - 4 : Math.min(r.right + 4, window.innerWidth - MENU_WIDTH - 8);
+    const y = Math.min(r.top, window.innerHeight - 8);
+    setSubmenu({ key: en.key, x: Math.max(8, x), y: Math.max(8, y), entries: en.children });
+  };
+
+  const menuItemStyle = (danger?: boolean): React.CSSProperties => ({
+    display: "flex", alignItems: "center", gap: 8, width: "100%",
+    height: ROW_H, padding: "0 10px", border: 0, background: "transparent",
+    cursor: "pointer", fontSize: 13, textAlign: "start", borderRadius: 5,
+    color: danger ? "#dc2626" : "#333426",
+  });
+
   return createPortal(
     <>
       <div
+        ref={menuElRef}
         dir="rtl"
         role="menu"
         style={{
@@ -324,18 +369,29 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
         {entries.map((en, i) =>
           en.kind === "sep" ? (
             <div key={`sep-${i}`} style={{ height: 1, background: "#e3e0d4", margin: "3px 6px" }} />
+          ) : en.kind === "submenu" ? (
+            <button
+              key={en.key}
+              type="button"
+              role="menuitem"
+              aria-haspopup="menu"
+              aria-expanded={submenu?.key === en.key}
+              onClick={openSubmenu(en)}
+              style={{ ...menuItemStyle(), background: submenu?.key === en.key ? "#eef2f7" : "transparent" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "#eef2f7"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = submenu?.key === en.key ? "#eef2f7" : "transparent"; }}
+            >
+              <span style={{ width: 16, display: "inline-flex", justifyContent: "center", color: "#5b6472" }}>{en.icon}</span>
+              <span style={{ flex: 1 }}>{en.label}</span>
+              <ChevronLeft className="w-3.5 h-3.5" style={{ color: "#8a93a0" }} />
+            </button>
           ) : (
             <button
               key={en.key}
               type="button"
               role="menuitem"
               onClick={en.onClick}
-              style={{
-                display: "flex", alignItems: "center", gap: 8, width: "100%",
-                height: ROW_H, padding: "0 10px", border: 0, background: "transparent",
-                cursor: "pointer", fontSize: 13, textAlign: "start", borderRadius: 5,
-                color: en.danger ? "#dc2626" : "#333426",
-              }}
+              style={menuItemStyle(en.danger)}
               onMouseEnter={(e) => { e.currentTarget.style.background = "#eef2f7"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
             >
@@ -345,6 +401,41 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
           ),
         )}
       </div>
+      {submenu && (
+        <div
+          ref={submenuElRef}
+          dir="rtl"
+          role="menu"
+          style={{
+            position: "fixed", left: submenu.x, top: submenu.y, zIndex: 100001,
+            minWidth: MENU_WIDTH, maxHeight: "80vh", overflowY: "auto",
+            background: "#ffffff", border: "1px solid #b9c4cf", borderRadius: 6,
+            boxShadow: "0 6px 20px rgba(0,0,0,.18)", padding: 3,
+            fontFamily: "inherit", fontSize: 13, color: "#333426",
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
+        >
+          {submenu.entries.map((en, i) =>
+            en.kind === "sep" ? (
+              <div key={`sub-sep-${i}`} style={{ height: 1, background: "#e3e0d4", margin: "3px 6px" }} />
+            ) : en.kind === "item" ? (
+              <button
+                key={en.key}
+                type="button"
+                role="menuitem"
+                onClick={en.onClick}
+                style={menuItemStyle(en.danger)}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "#eef2f7"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+              >
+                <span style={{ width: 16, display: "inline-flex", justifyContent: "center", color: "#5b6472" }}>{en.icon}</span>
+                <span>{en.label}</span>
+              </button>
+            ) : null,
+          )}
+        </div>
+      )}
       {calc && (
         <AseelCalculatorPopover
           initialValue={calc.seed}

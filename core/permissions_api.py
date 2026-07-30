@@ -131,6 +131,7 @@ def _member_payload(membership) -> dict:
         if o.permission_key in permission_keys()
     }
     user = membership.user
+    effective = user_permissions(user, membership.tenant)
     return {
         "membership_id": membership.id,
         "user_id": membership.user_id,
@@ -138,7 +139,10 @@ def _member_payload(membership) -> dict:
         "email": user.email or "",
         "role": membership.role,
         "overrides": overrides,
-        "effective": sorted(user_permissions(user, membership.tenant)),
+        "effective": sorted(effective),
+        # T-PERMBOX: خانة «كل الصلاحيات» — مشتقّة لا مخزَّنة، فلا تكذب إن تغيّر
+        # الكتالوج أو نُزعت صلاحية واحدة بعد المنح الشامل.
+        "grant_all": permission_keys() <= effective,
     }
 
 
@@ -163,6 +167,10 @@ def member_permissions(request):
 
     body: {"membership_id": n, "changes": [{"permission_key": k, "allowed": true|false|null}]}
     `allowed=null` يحذف التجاوز فيعود العضو لما يمليه دوره.
+
+    أو: {"membership_id": n, "grant_all": true|false} — منح شامل لهذا العضو
+    (true) أو إعادته لما يمليه دوره بحذف كل تجاوزاته (false). وجود `grant_all`
+    يحكم الطلب وحده، فلا يُخلط مع `changes` في نداء واحد.
     """
     tenant = get_tenant(request)
     require_perm(request, "admin.permissions.manage", tenant=tenant)
@@ -183,10 +191,28 @@ def member_permissions(request):
             {"membership_id": "لا تُعدَّل صلاحيات المدير — مالك الشركة يملك كل شيء."}
         )
 
+    valid_keys = permission_keys()
+    grant_all = request.data.get("grant_all")
+    if grant_all is not None:
+        if grant_all:
+            # منحٌ صريح لكل مفتاح — لا اعتماد على دوره، فيبقى شاملاً ولو تبدّل.
+            for key in sorted(valid_keys):
+                MemberPermission.objects.update_or_create(
+                    membership=membership, permission_key=key,
+                    defaults={"allowed": True},
+                )
+        else:
+            MemberPermission.objects.filter(membership=membership).delete()
+        logger.info(
+            "member_permissions grant_all=%s tenant=%s membership=%s by_user=%s",
+            bool(grant_all), getattr(tenant, "TenantID", None), membership.id,
+            getattr(request.user, "pk", None),
+        )
+        return Response(_member_payload(membership))
+
     changes = request.data.get("changes")
     if not isinstance(changes, list):
         raise DRFValidationError({"changes": "قائمة التغييرات مطلوبة."})
-    valid_keys = permission_keys()
     for ch in changes:
         key = str((ch or {}).get("permission_key") or "").strip()
         if key not in valid_keys:

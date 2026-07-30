@@ -271,6 +271,9 @@ export interface Invoice {
     remainingBalance?: number;
     paymentStatus?: 'paid' | 'partially_paid' | 'unpaid';
     paymentStatusDisplay?: string;
+    /** حالة استلام البضاعة للمخزن — مستقلة عن الحالة المالية. */
+    receiptStatus?: 'not_received' | 'partially_received' | 'received';
+    receiptStatusDisplay?: string;
     partnerBalance?: number;
     partnerBalanceBeforeInvoice?: number;
     partnerBalanceAfterInvoice?: number;

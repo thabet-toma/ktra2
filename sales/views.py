@@ -28,6 +28,7 @@ from .models import (
 from .serializers import (
     CreditDebitNoteSerializer,
     CustomerPaymentSerializer,
+    DeliveryOrderListSerializer,
     DeliveryOrderSerializer,
     SalesInvoiceListSerializer,
     SalesInvoiceSerializer,
@@ -52,6 +53,7 @@ from .services import (
     customer_price_list,
     save_customer_quotes,
     deliver_delivery_order,
+    deliver_invoice_lines,
     get_or_create_sales_settings,
     invoice_profits,
     last_sale_price,
@@ -60,6 +62,7 @@ from .services import (
     post_customer_payment,
     post_sales_invoice,
     recalculate_invoice_amounts,
+    remaining_delivery_lines,
     suggest_fifo_allocations,
 )
 
@@ -268,7 +271,14 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 invoice.status = SalesInvoice.STATUS_DRAFT
                 invoice.journal = None
                 invoice.amount_paid = Decimal("0")
-                invoice.save(update_fields=["status", "journal", "amount_paid"])
+                invoice.delivery_status = SalesInvoice.DELIVERY_NOT
+                invoice.save(update_fields=[
+                    "status", "journal", "amount_paid", "delivery_status",
+                ])
+                # حركات المخزون عُكِست أعلاه ⇒ تُصفَّر الكميات المسلَّمة وتُحذف
+                # الإرساليات المبنية عليها (تُعاد بالتسليم بعد إعادة الترحيل).
+                invoice.lines.update(delivered_quantity=0)
+                invoice.delivery_orders.all().delete()
                 # إعادة الشيكات المرفقة إلى مسودة (عكس ترقيتها عند الترحيل)
                 from accounting.models import Cheque
                 Cheque.objects.filter(
@@ -545,28 +555,292 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         )
         return Response(DeliveryOrderSerializer(do).data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["get"], url_path="delivery-lines")
+    def delivery_lines(self, request, pk=None):
+        """بنود الفاتورة القابلة للتسليم (المفوتر/المسلَّم/المتبقي) — تغذّي نافذة التسليم."""
+        invoice = self.get_object()
+        return Response({
+            "invoice_number": invoice.invoice_number,
+            "delivery_status": invoice.delivery_status,
+            "delivery_status_display": invoice.get_delivery_status_display(),
+            "stock_on_post": invoice.stock_on_post,
+            "lines": [
+                {k: (str(v) if isinstance(v, Decimal) else v) for k, v in row.items()}
+                for row in remaining_delivery_lines(invoice)
+            ],
+        })
+
+    @action(detail=True, methods=["post"], url_path="deliver")
+    @requires_perm("sales.invoice.post")
+    def deliver(self, request, pk=None):
+        """تسليم بنود مختارة من الفاتورة (إرسالية) — خصم مخزون + قيد تكلفة للمُسلَّم.
+
+        Body: { "lines": [ { "line_id": int, "quantity": number }, ... ], "notes": str }
+        """
+        invoice = self.get_object()
+        lines = request.data.get("lines")
+        if not isinstance(lines, list):
+            return Response(
+                {"error": "أرسل قائمة البنود المراد تسليمها."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            delivery = deliver_invoice_lines(
+                invoice,
+                lines=lines,
+                user=request.user,
+                notes=str(request.data.get("notes", "") or "")[:500],
+            )
+        except ValidationError as e:
+            msg = "؛ ".join(e.messages) if hasattr(e, "messages") else str(e)
+            return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("sales invoice deliver failed pk=%s", invoice.pk)
+            return Response(
+                {"error": "حدث خطأ غير متوقع أثناء التسليم."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        invoice.refresh_from_db()
+        log_activity(
+            action="deliver", entity_type="sales_invoice", entity_id=invoice.id,
+            entity_label=invoice.invoice_number, description="تسليم بضاعة فاتورة مبيعات",
+            partner_ids=[invoice.customer_id],
+            request=request,
+        )
+        return Response({
+            "delivery_id": delivery.id,
+            "delivery_status": invoice.delivery_status,
+            "delivery_status_display": invoice.get_delivery_status_display(),
+            "lines_delivered": delivery.lines.count(),
+        })
+
 
 class DeliveryOrderViewSet(viewsets.ModelViewSet):
+    """إرساليات البيع — مستند تسليم البضاعة المرتبط بفاتورة.
+
+    الإنشاء **هو** فعل التسليم: يمرّ عبر `deliver_invoice_lines` نفسه الذي
+    يستدعيه زر «تسليم» داخل قائمة الفواتير، فلا مساران لإخراج البضاعة.
+    مرآة `GoodsReceiptViewSet` في الشراء.
+    """
+
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
 
-    queryset = DeliveryOrder.objects.all().select_related("invoice", "tenant")
+    queryset = DeliveryOrder.objects.all().select_related(
+        "invoice", "invoice__customer", "tenant",
+    ).prefetch_related("lines__product", "lines__invoice_line", "lines__warehouse")
     serializer_class = DeliveryOrderSerializer
-    http_method_names = ["get", "post", "patch", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
 
-    def perform_create(self, serializer):
-        tenant = get_tenant(self.request)
-        if not tenant:
-            from rest_framework.exceptions import ValidationError as DRFValidationError
-            raise DRFValidationError({"tenant": "لا يوجد شركة محددة لهذا الطلب."})
-        serializer.save(tenant=tenant)
+    def get_serializer_class(self):
+        if self.action == "list":
+            return DeliveryOrderListSerializer
+        return DeliveryOrderSerializer
 
     def get_queryset(self):
         qs = super().get_queryset()
         tenant = get_tenant(self.request)
         if tenant:
             qs = qs.filter(tenant_id=tenant.TenantID)
+        invoice_id = self.request.query_params.get("invoice")
+        if invoice_id:
+            qs = qs.filter(invoice_id=invoice_id)
+        kind = self.request.query_params.get("kind")
+        if kind == "linked":
+            qs = qs.filter(invoice__isnull=False)
+        elif kind == "standalone":
+            qs = qs.filter(invoice__isnull=True)
+        search = (self.request.query_params.get("search") or "").strip()
+        if search:
+            qs = qs.filter(
+                models.Q(delivery_number__icontains=search)
+                | models.Q(customer_ref__icontains=search)
+                | models.Q(invoice__invoice_number__icontains=search)
+                | models.Q(invoice__customer__name__icontains=search)
+                | models.Q(partner__name__icontains=search)
+            )
         return qs.order_by("-id")
+
+    def _apply(self, request, *, existing=None):
+        """المسار الموحّد للإنشاء والتعديل — التسليم فعل واحد مهما كان مدخله.
+
+        Body: { "invoice": int|null, "partner": int, "customer_ref": str,
+                "delivery_date": "YYYY-MM-DD", "notes": str,
+                "lines": [ { "line_id"?, "product_id"?, "quantity" } ] }
+        بلا `invoice` ⇒ «سند تسليم» مستقل (يتطلب `partner`).
+        """
+        from partners.models import Partner
+        from .services import (
+            create_standalone_delivery_note, get_or_create_sales_settings,
+            void_delivery_note,
+        )
+
+        require_perm(request, "sales.invoice.post")
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response(
+                {"error": "لا يوجد شركة (tenant)."}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        ss = get_or_create_sales_settings(tenant)
+        lines = request.data.get("lines")
+        if not isinstance(lines, list):
+            return Response(
+                {"error": "أرسل قائمة البنود المراد تسليمها."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        invoice_id = request.data.get("invoice") or None
+        invoice = None
+        if invoice_id:
+            invoice = SalesInvoice.objects.filter(pk=invoice_id, tenant=tenant).first()
+            if not invoice:
+                return Response(
+                    {"error": "الفاتورة المرتبطة غير موجودة."},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        elif not ss.allow_standalone_delivery:
+            return Response(
+                {"error": "اختر الفاتورة المرتبطة — سند التسليم المستقل معطّل من إعدادات المبيعات."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        partner = None
+        if request.data.get("partner"):
+            partner = Partner.objects.filter(
+                pk=request.data.get("partner"), tenant=tenant,
+            ).first()
+            if partner is None:
+                return Response(
+                    {"error": "العميل غير موجود."}, status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        notes = str(request.data.get("notes", "") or "")[:500]
+        customer_ref = str(request.data.get("customer_ref", "") or "")[:100]
+        delivery_date = request.data.get("delivery_date") or None
+
+        try:
+            with transaction.atomic():
+                # التعديل = عكس أثر الإرسالية القديمة ثم تطبيق الجديد ذرّياً.
+                if existing is not None:
+                    void_delivery_note(existing, user=request.user)
+                if invoice is not None:
+                    delivery = deliver_invoice_lines(
+                        invoice, lines=lines, user=request.user, notes=notes,
+                        delivery_date=delivery_date,
+                    )
+                    if customer_ref:
+                        delivery.customer_ref = customer_ref
+                        delivery.save(update_fields=["customer_ref"])
+                else:
+                    delivery = create_standalone_delivery_note(
+                        tenant, partner=partner, lines=lines,
+                        branch=get_branch(request, tenant), user=request.user,
+                        delivery_date=delivery_date, notes=notes,
+                        customer_ref=customer_ref,
+                    )
+        except ValidationError as e:
+            msg = "؛ ".join(e.messages) if hasattr(e, "messages") else str(e)
+            return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("delivery note save failed")
+            return Response(
+                {"error": "حدث خطأ غير متوقع أثناء حفظ الإرسالية."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+        log_activity(
+            action="update" if existing is not None else "create",
+            entity_type="sales_delivery_note", entity_id=delivery.id,
+            entity_label=delivery.delivery_number,
+            description="تعديل إرسالية بيع" if existing is not None else "إنشاء إرسالية بيع",
+            partner_ids=[invoice.customer_id] if invoice else (
+                [partner.id] if partner else []),
+            request=request,
+        )
+        return Response(
+            DeliveryOrderSerializer(delivery).data,
+            status=status.HTTP_200_OK if existing is not None else status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=["get"], url_path="outstanding")
+    def outstanding(self, request):
+        """البواقي غير المسلَّمة عبر كل فواتير البيع المرحّلة — تقرير قابل للطباعة.
+
+        مصدر واحد للشاشة وللطباعة/PDF، فلا يُحتسب الباقي مرتين بطريقتين.
+        """
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"rows": []})
+        invoices = (
+            SalesInvoice.objects.filter(
+                tenant=tenant, status=SalesInvoice.STATUS_POSTED, stock_on_post=False,
+            )
+            .exclude(delivery_status=SalesInvoice.DELIVERY_FULL)
+            .select_related("customer")
+            .prefetch_related("lines__product")
+        )
+        rows = []
+        for inv in invoices:
+            for line in inv.lines.all():
+                if getattr(line.product, "is_service", False):
+                    continue
+                ordered = Decimal(str(line.quantity or 0))
+                delivered = Decimal(str(line.delivered_quantity or 0))
+                remaining = ordered - delivered
+                if remaining <= 0:
+                    continue
+                rows.append({
+                    "invoice": inv.id,
+                    "invoice_number": inv.invoice_number,
+                    "invoice_date": inv.invoice_date,
+                    "partner_name": inv.customer.name if inv.customer_id else "",
+                    "product": line.product_id,
+                    "product_name": str(line.product),
+                    "quantity": str(ordered),
+                    "delivered_quantity": str(delivered),
+                    "remaining_quantity": str(remaining),
+                })
+        return Response({"count": len(rows), "rows": rows})
+
+    def create(self, request, *args, **kwargs):
+        return self._apply(request)
+
+    def update(self, request, *args, **kwargs):
+        """تعديل الإرسالية: عكس أثرها القديم وإعادة تطبيق البنود الجديدة."""
+        from .services import get_or_create_sales_settings
+
+        delivery = self.get_object()
+        if not get_or_create_sales_settings(get_tenant(request)).allow_edit_delivery:
+            return Response(
+                {"error": "تعديل الإرسالية معطّل من إعدادات المبيعات."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return self._apply(request, existing=delivery)
+
+    def partial_update(self, request, *args, **kwargs):
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        """إلغاء الإرسالية = عكس حركاتها وقيدها وكمياتها المسلَّمة."""
+        from .services import get_or_create_sales_settings, void_delivery_note
+
+        require_perm(request, "sales.invoice.post")
+        delivery = self.get_object()
+        if not get_or_create_sales_settings(get_tenant(request)).allow_edit_delivery:
+            return Response(
+                {"error": "حذف الإرسالية معطّل من إعدادات المبيعات."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        number = delivery.delivery_number or f"#{delivery.id}"
+        try:
+            result = void_delivery_note(delivery, user=request.user)
+        except ValidationError as e:
+            msg = "؛ ".join(e.messages) if hasattr(e, "messages") else str(e)
+            return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
+        log_activity(
+            action="delete", entity_type="sales_delivery_note", entity_id=0,
+            entity_label=number, description="إلغاء إرسالية بيع", request=request,
+        )
+        return Response({"message": "تم إلغاء الإرسالية وعكس أثرها.", **result})
 
     @action(detail=True, methods=["post"], url_path="deliver")
     def deliver(self, request, pk=None):

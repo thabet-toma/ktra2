@@ -62,6 +62,8 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     remainingBalance: Number(dto.remaining_balance || 0),
     paymentStatus: dto.payment_status || "unpaid",
     paymentStatusDisplay: dto.payment_status_display || "غير مدفوعة",
+    receiptStatus: dto.receipt_status || "not_received",
+    receiptStatusDisplay: dto.receipt_status_display || undefined,
     partnerBalance: Number(dto.supplier_balance_current || 0),
     partnerBalanceBeforeInvoice: Number(dto.supplier_balance_before_invoice || 0),
     partnerBalanceAfterInvoice: Number(dto.supplier_balance_after_invoice || 0),

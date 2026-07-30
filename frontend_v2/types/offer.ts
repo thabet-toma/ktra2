@@ -9,6 +9,14 @@ export interface PriceOfferItem extends InvoiceItem {
 
 export type PriceOfferType = 'incoming_offer' | 'outgoing_offer' | 'incoming_order' | 'outgoing_order';
 
+/** T-IMPOFFER: ملف عرض السعر كما وصل من المورد (رابط مستضاف، لا محتوى). */
+export interface PriceOfferAttachment {
+    name: string;
+    url: string;
+    type?: string;
+    size?: number;
+}
+
 export interface PriceOffer {
     id: string;
     offerNumber: string;
@@ -36,6 +44,17 @@ export interface PriceOffer {
     status: PriceOfferStatus;
     /** الحالة الأصلية في API SQL؛ تستخدم لقفل المستندات المحوّلة/المؤكدة. */
     backendStatus?: string;
+    /** رقم المستند الناتج عن التحويل (فاتورة الشراء / الطلبية / الصفقة) — يُعرض
+     *  بجانب الحالة كي يظهر أثر «تحويل» بدل أن يبدو كأنه لم يحدث. */
+    linkedDocNumber?: string;
+    /** T-IMPOFFER: مصدر التسعير — يُنقل إلى الصفقة عند التحويل. */
+    alibabaLink?: string;
+    /** T-IMPOFFER: رقم التواصل مع مندوب المورد لهذا العرض. */
+    supplierContact?: string;
+    /** T-IMPOFFER: سبب اعتبار العرض «غير ملائم» — إلزامي عند الرفض. */
+    decisionReason?: string;
+    /** T-IMPOFFER: ملفات العرض المرفوعة (PDF/صور). */
+    attachments?: PriceOfferAttachment[];
     internalNotes?: string;
     subtotal: number;
     discountAmount: number;

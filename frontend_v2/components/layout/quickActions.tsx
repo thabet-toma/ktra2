@@ -119,5 +119,41 @@ export function buildQuickActionGroups(
 
 /** يُرشّح المجموعات على `show` ويحذف الفارغة — سلوك عرض مشترك. */
 export function visibleQuickActionGroups(groups: QuickAction[][]): QuickAction[][] {
-  return groups.map((g) => g.filter((a) => a.show)).filter((g) => g.length > 0);
+  return applySavedOrder(groups.map((g) => g.filter((a) => a.show)).filter((g) => g.length > 0));
+}
+
+/**
+ * ترتيب أيقونات الإجراءات السريعة القابل للسحب — محفوظ محلياً (لكل متصفح)
+ * ومصدر واحد يخدم شريط الإجراءات ({@link GlobalActionBar}) وقائمة زر الفأرة
+ * اليمنى ({@link GlobalContextMenu}) معاً عبر {@link visibleQuickActionGroups}.
+ */
+const ORDER_KEY = "ktra:quickActionsOrder";
+
+export function getQuickActionsOrder(): string[] {
+  try {
+    const raw = localStorage.getItem(ORDER_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((k): k is string => typeof k === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+export function setQuickActionsOrder(order: string[]): void {
+  try {
+    localStorage.setItem(ORDER_KEY, JSON.stringify(order));
+  } catch {
+    /* تجاهل أخطاء التخزين */
+  }
+}
+
+/** يرتّب كل مجموعة حسب ترتيب المستخدم المحفوظ؛ المفاتيح غير المحفوظة تبقى بترتيبها الأصلي في النهاية. */
+function applySavedOrder(groups: QuickAction[][]): QuickAction[][] {
+  const order = getQuickActionsOrder();
+  if (order.length === 0) return groups;
+  const rank = new Map(order.map((k, i) => [k, i]));
+  return groups.map((g) =>
+    [...g].sort((a, b) => (rank.get(a.key) ?? Number.MAX_SAFE_INTEGER) - (rank.get(b.key) ?? Number.MAX_SAFE_INTEGER)),
+  );
 }

@@ -15,13 +15,13 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   listSalesInvoicesPage,
   postSalesInvoice,
-  createDeliveryOrder,
-  deliverOrder,
   deleteSalesInvoice,
   getSalesSettings,
+  type DeliveryStatus,
   type SalesInvoiceRow,
   type SalesSettings,
 } from "../../services/salesApi";
+import { DeliverGoodsModal } from "./DeliverGoodsModal";
 import { apiGetList } from "../../services/restApi";
 import {
   Loader2,
@@ -31,6 +31,7 @@ import {
   Trash2,
   Plus,
   Printer,
+  FileText,
 } from "lucide-react";
 import { SalesInvoiceEditor, type PartnerRow, type ProductRow } from "./SalesInvoiceEditor";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -70,6 +71,13 @@ const TYPE_OPTIONS = [
   { v: "credit", l: "آجل" },
 ];
 
+/** شارات حالة التسليم — نفس ألوان الحالات في باقي الشاشات. */
+const DELIVERY_BADGE: Record<DeliveryStatus, { label: string; color: string }> = {
+  not_delivered: { label: "غير مسلَّمة", color: "var(--aseel-warn, #b06800)" },
+  partially_delivered: { label: "مسلَّمة جزئياً", color: "var(--aseel-accent, #2563eb)" },
+  delivered: { label: "مسلَّمة", color: "var(--aseel-ok, #2d7d46)" },
+};
+
 import { formatMoney } from "@/utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
 const fmtNum = (s: string | number | undefined | null) => formatMoney(s, "—");
@@ -108,6 +116,8 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
 
   const [draftToEditId, setDraftToEditId] = useState<number | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
+  // الفاتورة المفتوحة في نافذة التسليم (إرسالية) — null = مغلقة.
+  const [deliverFor, setDeliverFor] = useState<ExtRow | null>(null);
 
   // filters
   const [search, setSearch] = useState("");
@@ -321,21 +331,11 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     }
   };
 
-  const handleDelivery = async (invoiceId: number, deliverNow = false) => {
+  const handleDelivered = async (message: string) => {
+    setDeliverFor(null);
     setErr(null);
-    setMsg(null);
-    try {
-      const created = await createDeliveryOrder(invoiceId);
-      if (deliverNow && created && typeof created.id === "number") {
-        await deliverOrder(created.id);
-        setMsg(`أمر إخراج #${created.id} — تسليم + COGS`);
-      } else {
-        setMsg(`أمر إخراج #${created.id} (قيد التنفيذ)`);
-      }
-      await loadRows();
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل أمر الإخراج");
-    }
+    setMsg(message);
+    await loadRows();
   };
 
   const handleDeleteDraft = async (id: number) => {
@@ -441,6 +441,27 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       ),
     },
     {
+      key: "delivery_status",
+      header: "التسليم",
+      width: "100px",
+      align: "center",
+      render: (r) => {
+        const st = (r.delivery_status || "not_delivered") as DeliveryStatus;
+        return (
+          <span
+            style={{
+              fontSize: "11px",
+              fontWeight: 600,
+              color: DELIVERY_BADGE[st].color,
+            }}
+            title="حالة تسليم البضاعة للعميل"
+          >
+            {r.delivery_status_display || DELIVERY_BADGE[st].label}
+          </span>
+        );
+      },
+    },
+    {
       key: "grand_total",
       header: "الإجمالي",
       width: "110px",
@@ -536,32 +557,29 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
               </button>
             </>
           )}
-          {r.status === "posted" && (
+          {r.status === "posted" && !r.stock_on_post && r.delivery_status !== "delivered" && (
             <>
-              {!r.stock_on_post && (
-                <button
-                  type="button"
-                  className="aseel-toolbtn"
-                  style={{ fontSize: "10px", padding: "2px 6px" }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (window.confirm("تسليم الآن؟ خصم مخزون + قيد COGS.")) {
-                      handleDelivery(r.id, true);
-                    }
-                  }}
-                  title="تسليم"
-                >
-                  <Truck className="w-3 h-3" /> تسليم
-                </button>
-              )}
               <button
                 type="button"
                 className="aseel-toolbtn"
                 style={{ fontSize: "10px", padding: "2px 6px" }}
-                onClick={(e) => { e.stopPropagation(); handleDelivery(r.id, false); }}
-                title="أمر إخراج"
+                onClick={(e) => { e.stopPropagation(); setDeliverFor(r); }}
+                title="تسليم سريع (اختيار البنود)"
               >
-                <Truck className="w-3 h-3" />
+                <Truck className="w-3 h-3" /> تسليم
+              </button>
+              {/* المحرّر الكامل في شاشة الإرساليات بهذه الفاتورة مربوطةً مسبقاً. */}
+              <button
+                type="button"
+                className="aseel-toolbtn"
+                style={{ fontSize: "10px", padding: "2px 6px" }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate(`/sales/delivery-notes/new?invoice=${r.id}`);
+                }}
+                title="إرسالية جديدة"
+              >
+                <FileText className="w-3 h-3" />
               </button>
             </>
           )}
@@ -719,6 +737,14 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
             initialCustomerId={new URLSearchParams(location.search).get("customer_id") ? Number(new URLSearchParams(location.search).get("customer_id")) : undefined}
           />
         </div>
+      )}
+      {deliverFor && (
+        <DeliverGoodsModal
+          invoiceId={deliverFor.id}
+          invoiceNumber={deliverFor.invoice_number}
+          onClose={() => setDeliverFor(null)}
+          onDelivered={handleDelivered}
+        />
       )}
     </div>
   );

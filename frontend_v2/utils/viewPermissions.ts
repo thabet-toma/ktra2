@@ -15,6 +15,7 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "sales-orders": "sales.quotation.manage",
   "credit-debit-notes": "sales.invoice.view",
   "sales-return": "sales.invoice.view",
+  "sales-delivery-notes": "sales.invoice.view",
   "invoice-profits": "inventory.cost.view",
   "sales-settings": "sales.settings.manage",
   "aseel-sales": "sales.invoice.view",
@@ -26,6 +27,7 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "purchase-invoices": "purchase.invoice.view",
   "price-offers": "purchase.invoice.view",
   "purchase-return": "purchase.invoice.view",
+  "purchase-receipts": "purchase.invoice.view",
   "supplier-payments": "purchase.payment.create",
   "purchase-settings": "purchase.settings.manage",
   "supplier-management": "purchase.supplier.view",
@@ -103,3 +105,15 @@ export const invoiceActionPermissions = (
   const canPost = can(`${scope}.invoice.post`);
   return { canSave, canPost, canSaveAndPost: canSave && canPost };
 };
+
+/**
+ * T-PERMBOX: تحويل نقرة **خانة اختيار** واحدة إلى تجاوز فردي للعضو.
+ *
+ * الخانة تعرض الحالة الفعلية (مؤشَّرة = ممنوحة)، والمخزون ثلاثيّ: منح، منع، أو
+ * لا شيء (يتبع الدور). فإن ساوى المطلوبُ ما يعطيه الدور أصلاً نُرجع `null`
+ * فيُحذف التجاوز — فلا نُخزّن صفّاً يساوي الافتراضي (نفس قاعدة تبويب الأدوار).
+ */
+export const memberOverrideForCheckbox = (
+  roleAllowed: boolean,
+  nextChecked: boolean,
+): boolean | null => (nextChecked === roleAllowed ? null : nextChecked);

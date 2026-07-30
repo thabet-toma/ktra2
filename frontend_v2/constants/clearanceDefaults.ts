@@ -13,7 +13,7 @@ export type ClearanceLine = {
 };
 
 /** بنود تكلفة التخليص القديمة (JSONField — backwards compat). */
-export type ClearanceCostLine = { label: string; amount: number };
+export type ClearanceCostLine = { label: string; amount: number; type?: string };
 
 export const DEFAULT_CLEARANCE_COST_LINES: ClearanceCostLine[] = [
   { label: "ضريبة القيمة المضافة", amount: 0 },

@@ -26,6 +26,7 @@ def _expected_parent_code_for_partner_type(partner_type: str) -> str | None:
         "FreightForwarder": "2106",  # ذمم وكلاء الشحن
         "CustomsBroker": "2107",     # ذمم المخلصين الجمركيين
         "LocalTransporter": "2108",  # ذمم النقل المحلي
+        "Carrier": "2109",           # ذمم الناقلين
     }.get(partner_type)
 
 @receiver(post_save, sender=Partner)

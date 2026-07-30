@@ -44,6 +44,7 @@ COA_DATA = [
     ('2106', 'ذمم وكلاء الشحن (Freight Forwarders Payable)', 'Liability', '21'),
     ('2107', 'ذمم المخلصين الجمركيين (Customs Brokers Payable)', 'Liability', '21'),
     ('2108', 'ذمم النقل المحلي (Local Transporters Payable)', 'Liability', '21'),
+    ('2109', 'ذمم الناقلين (Carriers Payable)', 'Liability', '21'),
     ('22', 'الالتزامات غير المتداولة (Non-current Liabilities)', 'Liability', '2'),
     ('2201', 'قروض طويلة الأجل (Long-term Loans)', 'Liability', '22'),
 
@@ -82,12 +83,12 @@ def ensure_operational_accounts(tenant) -> list[str]:
     """task13 M2 — يضمن وجود الحسابات التشغيلية في شجرة قائمة (idempotent).
 
     الشركات المبذورة قبل task13 تنقصها حسابات تتوقعها مسارات الترحيل:
-    1107 شيكات برسم التحصيل، 1110 صناديق النقدية، 2106-2108 ذمم شركاء
+    1107 شيكات برسم التحصيل، 1110 صناديق النقدية، 2106-2109 ذمم شركاء
     اللوجستيات. لا يُنشأ حساب إذا غاب أبوه (شجرة غير معيارية) — لا دمج أعمى.
     يعيد قائمة الأكواد المُنشأة.
     """
     needed = [row for row in COA_DATA if row[0] in
-              ("1107", "1110", "2106", "2107", "2108")]
+              ("1107", "1110", "2106", "2107", "2108", "2109")]
     created = []
     for code, acc_name, acc_type, parent_code in needed:
         if Account.objects.filter(tenant=tenant, code=code).exists():

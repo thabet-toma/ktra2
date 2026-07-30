@@ -26,6 +26,8 @@ import {
   ExternalLink,
   Info,
   Banknote,
+  PackageCheck,
+  Truck,
 } from "lucide-react";
 import { ProductCardModal } from "../../shared/ProductCardModal";
 import { AseelDatePicker } from "../../ui/AseelDatePicker";
@@ -68,6 +70,7 @@ import {
 import { ItemsTableSection } from "@/components/forms/shared/ItemsTableSection";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
 import { PurchaseInvoiceAccountingPanel } from "./PurchaseInvoiceAccountingPanel";
+import { ReceiveGoodsModal } from "./ReceiveGoodsModal";
 import { NewSupplierPaymentModal } from "../../sales/NewSupplierPaymentModal";
 import { InvoicePrintView } from "./InvoicePrintView";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
@@ -163,6 +166,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [cardSuggestedPrice, setCardSuggestedPrice] = useState<number | null>(null);
   const [showAddSupplierModal, setShowAddSupplierModal] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
+  // نافذة استلام البضاعة (تُنشئ إرسالية بالبنود المؤشَّرة).
+  const [showReceive, setShowReceive] = useState(false);
   const [showItemSearch, setShowItemSearch] = useState(false);
   // T-ONEPAY: نافذة «سند صرف» (نقد + شيكات) المفتوحة من داخل فاتورة الشراء.
   const [showSupplierVoucher, setShowSupplierVoucher] = useState(false);
@@ -1827,6 +1832,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     });
   };
 
+  // فاتورة محلية مرحّلة لم تُستلَم بضاعتها كلها ⇒ يظهر مسارا الاستلام.
+  const canReceiveGoods =
+    Boolean(formData.id)
+    && isPosted
+    && !formData.isReturn
+    && formData.invoiceType !== "international"
+    && !formData.shipment
+    && !formData.dealId
+    && !formData.clearanceId
+    && formData.receiptStatus !== "received";
+
   const toolbarActions: AseelToolbarAction[] = [
     ...(invoicePermissions.canSave ? [{ key: "save", label: saving ? "...تخزين" : "تخزين (F12)", icon: saving ? <Loader2 className="animate-spin" /> : <Save />, onClick: !saving && !isPosted ? () => { handleSave(); dirtyRef.current = false; } : undefined, disabled: saving || isPosted } as AseelToolbarAction] : []),
     ...(invoicePermissions.canSaveAndPost ? [{
@@ -1890,6 +1906,21 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         !(isPosted && supplierRemaining <= 0) ? () => void openSupplierVoucher() : undefined,
       disabled: isPosted && supplierRemaining <= 0,
       separatorBefore: true,
+    } as AseelToolbarAction] : []),
+    // الاستلام: نافذة سريعة تُنشئ إرسالية بالبنود المؤشَّرة، أو المحرّر الكامل
+    // في شاشة الإرساليات بالفاتورة نفسها مربوطةً مسبقاً.
+    ...(canReceiveGoods ? [{
+      key: "receive",
+      label: "استلام",
+      icon: <PackageCheck />,
+      onClick: () => setShowReceive(true),
+      separatorBefore: true,
+    } as AseelToolbarAction] : []),
+    ...(canReceiveGoods ? [{
+      key: "new-receipt",
+      label: "إرسالية جديدة",
+      icon: <Truck />,
+      onClick: () => openInNewTab(`/purchase-receipts/new?invoice=${formData.id}`),
     } as AseelToolbarAction] : []),
     { key: "print", label: "طباعة (F2)", icon: <Printer />, onClick: () => setShowPrintView(true), separatorBefore: true },
     { key: "cancel", label: "إلغاء", icon: <X />, onClick: guardedCancel, danger: true, separatorBefore: true },
@@ -2581,6 +2612,19 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           currentUser={currentUser}
           supplier={selectedSupplier}
           onClose={() => setShowPrintView(false)}
+        />
+      )}
+      {/* استلام سريع: يُنشئ إرسالية بالبنود المؤشَّرة (كلها افتراضياً). */}
+      {showReceive && formData.id && (
+        <ReceiveGoodsModal
+          invoiceId={Number(formData.id)}
+          invoiceNumber={formData.invoiceNumber}
+          onClose={() => setShowReceive(false)}
+          onReceived={() => {
+            setShowReceive(false);
+            toast("تم استلام البضاعة وإنشاء الإرسالية.", "success");
+            void reloadInvoice();
+          }}
         />
       )}
       {/* T-ONEPAY: سند صرف بنقد و/أو شيكات، مربوط بهذه الفاتورة. */}

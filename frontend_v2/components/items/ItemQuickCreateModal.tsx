@@ -16,6 +16,8 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
   const [nameAr, setNameAr] = useState(initialName || "");
   const [nameEn, setNameEn] = useState("");
   const [uom, setUom] = useState("عدد");
+  const [salePrice, setSalePrice] = useState("");
+  const [isService, setIsService] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,6 +37,9 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
         name_ar: nameAr,
         name_en: nameEn || null,
         uom_primary: uom,
+        is_service: isService,
+        // سعر البيع الافتراضي — نفس حقل كرت الصنف (فارغ = يتبع آخر سعر بيع).
+        sale_price: salePrice.trim() ? Number(salePrice) : null,
       };
       if (categoryId != null && categoryId !== "") payload.category = categoryId;
       const created = await inventoryApi.createProduct(payload);
@@ -92,6 +97,28 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
               onChange={(e) => setUom(e.target.value)}
             />
           </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1 text-[var(--color-text)]">سعر البيع (اختياري)</label>
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="اتركه فارغاً ليتبع آخر سعر بيع"
+              className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] focus:ring-2 focus:ring-emerald-500"
+              value={salePrice}
+              onChange={(e) => setSalePrice(e.target.value)}
+            />
+          </div>
+
+          <label className="flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
+            <input
+              type="checkbox"
+              checked={isService}
+              onChange={(e) => setIsService(e.target.checked)}
+            />
+            بند خدمة (لا يُخصم من المخزون — يُسجَّل كإيرادات خدمات)
+          </label>
         </div>
 
         <div className="px-5 py-4 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] flex justify-end gap-2">

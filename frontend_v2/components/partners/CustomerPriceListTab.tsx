@@ -119,8 +119,15 @@ export const CustomerPriceListTab: React.FC<Props> = ({ customerId }) => {
                   </td>
                   <td>
                     <span
-                      className={`aseel-price-badge ${r.source === 'last_invoice' ? 'aseel-price-badge--last' : 'aseel-price-badge--quote'}`}
-                      title={r.invoice_number ? `فاتورة ${r.invoice_number}` : undefined}
+                      className={`aseel-price-badge ${
+                        r.source === 'last_invoice' ? 'aseel-price-badge--last'
+                        : r.source === 'default' ? 'aseel-price-badge--general'
+                        : 'aseel-price-badge--quote'}`}
+                      title={
+                        r.invoice_number ? `فاتورة ${r.invoice_number}`
+                        : r.source === 'default'
+                          ? 'سعر عام من كرت الصنف — لا عرض لهذا الزبون ولا شراء سابق. اكتب سعراً هنا ليصير عرضه الخاص.'
+                          : undefined}
                     >{r.source_label}</span>
                   </td>
                 </tr>

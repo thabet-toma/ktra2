@@ -343,3 +343,16 @@ class ProductApiTest(APITestCase):
         assert res.status_code in (200, 202), res.content[:300]
         p = Product.objects.get(pk=pid)
         assert p.name_ar == "الاسم الجديد"
+
+    # ── كرت الصنف: «سعر البيع» يُحفظ من نفس نموذج الكرت (لا شاشة منفصلة) ──
+    def test_sale_price_round_trips_through_api(self):
+        self._auth()
+        created = self._post({"name_ar": "صنف بسعر بيع", "sale_price": "150.5"}).json()
+        assert created["sale_price"] == "150.5000"
+        res = self.client.patch(
+            f"{PRODUCTS_URL}{created['id']}/", {"sale_price": "175"},
+            format="json", HTTP_X_TENANT_ID=self._tenant_id,
+        )
+        assert res.status_code in (200, 202), res.content[:300]
+        from decimal import Decimal
+        assert Product.objects.get(pk=created["id"]).sale_price == Decimal("175")

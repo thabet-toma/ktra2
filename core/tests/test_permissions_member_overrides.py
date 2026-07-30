@@ -6,7 +6,7 @@
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
-from core.access import user_has_perm, user_permissions
+from core.access import permission_keys, user_has_perm, user_permissions
 from tenants.models import MemberPermission, RolePermission, UserCompanyMembership
 from tenants.services import create_company
 
@@ -115,6 +115,81 @@ class MemberPermissionsApiTest(APITestCase):
                 {"permission_key": "sales.invoice.unpost", "allowed": True}]},
             format="json", **self._as(self.boss))
         assert res.status_code == 400, res.content
+
+
+class MemberGrantAllTest(APITestCase):
+    """T-PERMBOX: خانة «كل الصلاحيات» لعضو بعينه — منح شامل بلا تبديل دوره."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.boss = User.objects.create_user(username="mall-boss", password="x")
+        cls.seller = User.objects.create_user(username="mall-seller", password="x")
+        cls.tenant = create_company("شركة منح الكل", cls.boss)
+        cls.m = UserCompanyMembership.objects.create(
+            user=cls.seller, tenant=cls.tenant, role="sales")
+
+    def _as(self, user):
+        self.client.force_authenticate(user=user)
+        return {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def test_grant_all_gives_the_member_every_permission(self):
+        res = self.client.put(
+            "/api/permissions/member/",
+            {"membership_id": self.m.id, "grant_all": True},
+            format="json", **self._as(self.boss))
+        assert res.status_code == 200, res.content
+        body = res.json()
+        assert body["grant_all"] is True
+        assert set(body["effective"]) == set(permission_keys())
+        assert user_permissions(self.seller, self.tenant) == permission_keys()
+        # الدور لم يتبدّل — المنح فرديّ لا ترقية دور
+        self.m.refresh_from_db()
+        assert self.m.role == "sales"
+
+    def test_clearing_grant_all_returns_the_member_to_role_defaults(self):
+        h = self._as(self.boss)
+        self.client.put(
+            "/api/permissions/member/",
+            {"membership_id": self.m.id, "grant_all": True},
+            format="json", **h)
+        res = self.client.put(
+            "/api/permissions/member/",
+            {"membership_id": self.m.id, "grant_all": False},
+            format="json", **h)
+        assert res.status_code == 200, res.content
+        body = res.json()
+        assert body["grant_all"] is False
+        assert body["overrides"] == {}
+        assert MemberPermission.objects.filter(membership=self.m).count() == 0
+        assert not user_has_perm(self.seller, self.tenant, "sales.invoice.unpost")
+
+    def test_members_listing_reports_grant_all_state(self):
+        h = self._as(self.boss)
+        rows = {r["membership_id"]: r for r in self.client.get(
+            "/api/permissions/members/", **h).json()}
+        assert rows[self.m.id]["grant_all"] is False
+        self.client.put(
+            "/api/permissions/member/",
+            {"membership_id": self.m.id, "grant_all": True},
+            format="json", **h)
+        rows = {r["membership_id"]: r for r in self.client.get(
+            "/api/permissions/members/", **h).json()}
+        assert rows[self.m.id]["grant_all"] is True
+
+    def test_grant_all_is_rejected_for_a_manager_membership(self):
+        boss_m = UserCompanyMembership.objects.get(user=self.boss, tenant=self.tenant)
+        res = self.client.put(
+            "/api/permissions/member/",
+            {"membership_id": boss_m.id, "grant_all": True},
+            format="json", **self._as(self.boss))
+        assert res.status_code == 400, res.content
+
+    def test_grant_all_is_manager_only(self):
+        res = self.client.put(
+            "/api/permissions/member/",
+            {"membership_id": self.m.id, "grant_all": True},
+            format="json", **self._as(self.seller))
+        assert res.status_code == 403, res.content
 
 
 class MemberOverrideEnforcementTest(APITestCase):

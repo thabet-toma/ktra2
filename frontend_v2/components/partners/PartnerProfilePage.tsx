@@ -2,7 +2,8 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { apiGetObject } from '../../services/restApi';
 import { formatMoney } from '../../utils/formatNumber';
-import { formatDateLocalized } from '../../utils/formatDate';
+import { formatDateLocalized, todayIso } from '../../utils/formatDate';
+import { isReservationActive } from '../../utils/documentBadges';
 import { resolveTenantId } from '../../utils/tenantContext';
 import { AseelDocumentShell, AseelTab } from '../aseel';
 import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTable';
@@ -10,6 +11,7 @@ import { PaymentStatusBadge, type InvoicePaymentStatus } from '../shared/Payment
 import { CustomerPriceListTab } from './CustomerPriceListTab';
 import { CustomerNotesTab } from './CustomerNotesTab';
 import { StatementDetailsModal } from './StatementDetailsModal';
+import { PartnerNoteAlert } from './PartnerNoteAlert';
 import { EntityActivityLog } from '../activity/EntityActivityLog';
 import {
   referenceTypeLabel, clarifyStatementDescription, statementToneRowClass,
@@ -639,7 +641,7 @@ export const PartnerProfilePage: React.FC = () => {
                           <td className="p-1">{formatDateLocalized(q.quotation_date)}</td>
                           <td className="p-1">{formatDateLocalized(q.valid_until) || '—'}</td>
                           <td className="p-1 text-left">{formatMoney(q.grand_total)}</td>
-                          <td className="p-1 text-center">{q.status}</td>
+                          <td className="p-1 text-center">{q.status_display || q.status}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -657,7 +659,7 @@ export const PartnerProfilePage: React.FC = () => {
                       <tr>
                         <th className="p-1 text-right">الرقم</th>
                         <th className="p-1 text-right">التاريخ</th>
-                        <th className="p-1 text-right">الحجز حتى</th>
+                        <th className="p-1 text-right">الحجز</th>
                         <th className="p-1 text-left">الإجمالي</th>
                         <th className="p-1 text-left">العربون</th>
                         <th className="p-1 text-center">الحالة</th>
@@ -668,7 +670,21 @@ export const PartnerProfilePage: React.FC = () => {
                         <tr key={o.id} className="border-t border-[var(--aseel-border)]">
                           <td className="p-1">{o.order_number}</td>
                           <td className="p-1">{formatDateLocalized(o.order_date)}</td>
-                          <td className="p-1">{formatDateLocalized(o.reserved_until) || '—'}</td>
+                          {/* T-RESERVE: التاريخ وحده كان يُقرأ «محجوز» على طلبية
+                              ملغاة/محوَّلة أو انتهت مدّتها — الآن الحالة صريحة. */}
+                          <td className="p-1">
+                            {isReservationActive(o.status, o.reserved_until, todayIso()) ? (
+                              <span style={{ color: 'var(--aseel-warn, #b06800)', fontWeight: 600 }}>
+                                محجوز حتى {formatDateLocalized(o.reserved_until)}
+                              </span>
+                            ) : (
+                              <span className="text-[var(--aseel-ink-soft)]">
+                                {o.reserved_until
+                                  ? `انتهى الحجز (${formatDateLocalized(o.reserved_until)})`
+                                  : 'بلا حجز'}
+                              </span>
+                            )}
+                          </td>
                           <td className="p-1 text-left">{formatMoney(o.grand_total)}</td>
                           <td className="p-1 text-left">{formatMoney(o.deposit_amount)}</td>
                           <td className="p-1 text-center">{o.status_display || o.status}</td>
@@ -718,6 +734,7 @@ export const PartnerProfilePage: React.FC = () => {
 
   return (
     <div className="min-h-[calc(100vh-5rem)]">
+      <PartnerNoteAlert partnerId={id} className="mb-2" />
       <AseelDocumentShell
         title={partner ? `كشف حساب: ${partner.name}` : 'جاري التحميل...'}
         actions={[

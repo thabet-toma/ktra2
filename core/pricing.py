@@ -482,9 +482,35 @@ def resolve_sales_price(
             )
             return result
 
-    # Fallback #2: product default selling price (sale tier #1). Only when the
-    # tier currency reconciles to the target (no rate available to convert).
-    product = Product.objects.filter(id=product_id, tenant_id=tenant_id).only("id", "online_price").first()
+    # Fallback #2: «سعر البيع» العام في كرت الصنف — سعر يُدخله المالك يدوياً ولا
+    # يظهر إلا هنا: لا آخر بيع لهذا الزبون ولا عرض سعر له. مخزَّن بالعملة الأساسية
+    # (كـ avg_cost) فيُحوَّل بسعر صرف المستند، وبأساس غير شامل للضريبة.
+    product = (
+        Product.objects.filter(id=product_id, tenant_id=tenant_id)
+        .only("id", "online_price", "sale_price").first()
+    )
+    if product and _dec(product.sale_price) > 0:
+        price = _convert_currency(
+            _dec(product.sale_price), source_rate=Decimal("1"), target_rate=target_rate
+        )
+        price = _convert_tax_basis(
+            price, source_inclusive=False, target_inclusive=bool(target_tax_inclusive),
+            tax_percent=_ZERO,
+        )
+        result = _resolved(
+            price,
+            strategy_requested=PriceStrategy.LAST_SALE_TO_CUSTOMER,
+            strategy_used=PriceStrategy.DEFAULT,
+            source={"document_type": "PRODUCT_SALE_PRICE", "document_id": product_id},
+        )
+        logger.info(
+            "price_resolve sales tenant=%s product=%s customer=%s fallback=product_sale_price -> %s",
+            tenant_id, product_id, customer_id, result["unit_price"],
+        )
+        return result
+
+    # Fallback #3: product default selling price (sale tier #1) — بيانات مستوردة
+    # قديمة. Only when the tier currency reconciles to the target (no rate to convert).
     if product:
         tier = (
             ProductPriceTier.objects.filter(

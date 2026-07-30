@@ -25,6 +25,18 @@ import { formatDateLocalized } from "../../utils/formatDate";
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => formatMoney(v, "—");
 
+/** أسماء افتراضية لأنواع بنود التخليص — تُقترَح كـ«بيان» عند اختيار النوع لبند بلا بيان. */
+const CLEARANCE_LINE_TYPE_LABELS: Record<string, string> = {
+  vat: "ضريبة القيمة المضافة",
+  declaration_fee: "رسوم البيان",
+  terminal: "محطة الشحن",
+  permits: "تصاريح",
+  broker_commission: "عمولة المخلص",
+  customs_system: "نظام الجمارك",
+  "شحن محلي": "شحن محلي",
+  other: "أخرى",
+};
+
 // G6: تحقّق حقلي — عند تمرير `error` يُحاط الحقل بإطار أحمر وتظهر الرسالة أسفله.
 const fld = (label: string, node: React.ReactNode, error?: string | null) => (
   <label
@@ -339,7 +351,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   // الناقلون المحليون (بدل إدخال «رقم الناقل» يدوياً)
   const [carriers, setCarriers] = useState<Array<{ id: number; name: string; partner_type?: string }>>([]);
   // إنشاء سريع لوكيل شحن / مخلص جمركي — الحقلان كانا readOnly بلا أي مسار إنشاء (ج7)
-  const [quickAddType, setQuickAddType] = useState<null | "FreightForwarder" | "CustomsBroker">(null);
+  const [quickAddType, setQuickAddType] = useState<null | "FreightForwarder" | "CustomsBroker" | "LocalTransporter">(null);
   const [quickAddName, setQuickAddName] = useState("");
   const scrollPositionRef = React.useRef<ScrollPositionSnapshot | null>(null);
   // Empty nav (single-record view) — shell expects a nav prop but we don't browse here yet.
@@ -585,6 +597,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         cost_lines: (f.lines || []).map((l) => ({
           label: l.description,
           amount: (l.debit || 0) - (l.credit || 0),
+          type: l.line_type,
         })),
       });
       setClearance(patched);
@@ -882,10 +895,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setCarriers((prev) => [...prev, row]);
       if (quickAddType === "FreightForwarder") {
         setSF({ shipping_agent: created.id, agent_name: row.name } as Partial<ShipmentApiRow>);
+      } else if (quickAddType === "LocalTransporter") {
+        setLocalForm((prev) => (prev ? { ...prev, carrier: created.id } : prev));
       } else {
         setCF({ customs_broker: created.id, broker_name: row.name } as Partial<ClearanceRow>);
       }
-      toast(`تمت إضافة ${quickAddType === "FreightForwarder" ? "وكيل الشحن" : "المخلِّص"} «${row.name}» واختياره`, "success");
+      const typeLabel = quickAddType === "FreightForwarder" ? "وكيل الشحن" : quickAddType === "LocalTransporter" ? "الناقل المحلي" : "المخلِّص";
+      toast(`تمت إضافة ${typeLabel} «${row.name}» واختياره`, "success");
       setQuickAddType(null);
       setQuickAddName("");
     } catch (e) {
@@ -1823,7 +1839,18 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           {(clearanceForm.lines || []).map((l, i) => (
             <tr key={l.id ?? i}>
               <td style={{ padding: "2px 4px" }}>
-                <select className="aseel-input" value={l.line_type} onChange={(e) => updateClearanceLine(i, { line_type: e.target.value })}>
+                <select
+                  className="aseel-input"
+                  value={l.line_type}
+                  onChange={(e) => {
+                    const nextType = e.target.value;
+                    // بند بلا بيان بعد: اقترح اسماً افتراضياً من النوع (يبقى قابلاً للتعديل).
+                    const nextDescription = l.description.trim()
+                      ? l.description
+                      : (CLEARANCE_LINE_TYPE_LABELS[nextType] || l.description);
+                    updateClearanceLine(i, { line_type: nextType, description: nextDescription });
+                  }}
+                >
                   <option value="vat">ضريبة القيمة المضافة</option>
                   <option value="declaration_fee">رسوم البيان</option>
                   <option value="terminal">محطة الشحن</option>
@@ -1973,14 +2000,23 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           </h5>
           <div className="mb-1 grid grid-cols-1 gap-x-2 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
             {fld("الناقل", carriers.length > 0 ? (
-              <select className="aseel-input" value={localForm.carrier ? String(localForm.carrier) : ""} onChange={(e) => setLF({ carrier: Number(e.target.value) || 0 })}>
-                <option value="">— اختر الناقل —</option>
-                {carriers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}{c.partner_type === "LocalTransporter" ? " (ناقل محلي)" : c.partner_type === "FreightForwarder" ? " (وكيل شحن)" : ""}
-                  </option>
-                ))}
-              </select>
+              <span style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <select className="aseel-input" value={localForm.carrier ? String(localForm.carrier) : ""} onChange={(e) => setLF({ carrier: Number(e.target.value) || 0 })}>
+                  <option value="">— اختر الناقل المحلي —</option>
+                  {carriers.filter((c) => c.partner_type === "LocalTransporter").map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                  {/* الناقل المحفوظ سابقاً قد يكون من نوع مختلف (بيانات قديمة) — أبقِه ظاهراً كي لا يُفقَد. */}
+                  {localForm.carrier &&
+                    !carriers.some((c) => c.partner_type === "LocalTransporter" && c.id === localForm.carrier) &&
+                    carriers.some((c) => c.id === localForm.carrier) && (
+                      <option value={String(localForm.carrier)}>
+                        {carriers.find((c) => c.id === localForm.carrier)?.name}
+                      </option>
+                    )}
+                </select>
+                <button type="button" className="aseel-ellipsis" title="إضافة ناقل محلي جديد" onClick={() => { setQuickAddType("LocalTransporter"); setQuickAddName(""); }}>+</button>
+              </span>
             ) : (
               <input className="aseel-input" type="number" placeholder="رقم الناقل (لم تُحمَّل قائمة الشركاء)" value={localForm.carrier ?? ""} onChange={(e) => setLF({ carrier: Number(e.target.value) })} />
             ))}
@@ -2536,7 +2572,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         >
           <div style={{ background: "var(--aseel-panel, #fff)", borderRadius: 8, padding: 16, minWidth: 320, boxShadow: "0 8px 30px rgba(0,0,0,0.25)" }}>
             <h3 style={{ fontWeight: 700, marginBottom: 8 }}>
-              {quickAddType === "FreightForwarder" ? "إضافة وكيل شحن جديد" : "إضافة مخلِّص جمركي جديد"}
+              {quickAddType === "FreightForwarder" ? "إضافة وكيل شحن جديد" : quickAddType === "LocalTransporter" ? "إضافة ناقل محلي جديد" : "إضافة مخلِّص جمركي جديد"}
             </h3>
             <input
               className="aseel-input"

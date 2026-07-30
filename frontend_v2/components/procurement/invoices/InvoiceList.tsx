@@ -19,6 +19,7 @@ import {
   Eye,
   ArrowRightLeft,
   ScrollText,
+  Truck,
 } from "lucide-react";
 import {
   AseelDocumentShell,
@@ -66,6 +67,16 @@ const STATUS_OPTIONS = [
   { v: "posted", l: "مرحَّلة" },
   { v: "draft", l: "مسودة" },
 ];
+
+/** شارات حالة استلام البضاعة — مرآة شارات التسليم في قائمة المبيعات. */
+const RECEIPT_BADGE: Record<
+  NonNullable<Invoice["receiptStatus"]>,
+  { label: string; color: string }
+> = {
+  not_received: { label: "غير مستلمة", color: "var(--aseel-warn, #b06800)" },
+  partially_received: { label: "مستلمة جزئياً", color: "var(--aseel-accent, #2563eb)" },
+  received: { label: "مستلمة", color: "var(--aseel-ok, #2d7d46)" },
+};
 
 import { formatMoney } from "@/utils/formatNumber";
 import { formatDateLocalized } from "../../../utils/formatDate";
@@ -267,6 +278,23 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       ),
     },
     {
+      key: "receiptStatus",
+      header: "الاستلام",
+      width: "100px",
+      align: "center",
+      render: (r) => {
+        const st = r.receiptStatus || "not_received";
+        return (
+          <span
+            style={{ fontSize: "11px", fontWeight: 600, color: RECEIPT_BADGE[st].color }}
+            title="حالة استلام البضاعة للمخزن"
+          >
+            {r.receiptStatusDisplay || RECEIPT_BADGE[st].label}
+          </span>
+        );
+      },
+    },
+    {
       key: "grandTotal",
       header: "الإجمالي",
       width: "120px",
@@ -335,6 +363,22 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           >
             <Printer className="w-3 h-3" />
           </button>
+          {/* استلام: يفتح محرّر إرسالية بهذه الفاتورة مربوطةً مسبقاً. */}
+          {r.isPosted && !r.isReturn && r.invoiceType !== "international"
+            && r.receiptStatus !== "received" && (
+            <button
+              type="button"
+              className="aseel-toolbtn"
+              style={{ fontSize: "10px", padding: "2px 6px" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/purchase-receipts/new?invoice=${r.id}`);
+              }}
+              title="استلام البضاعة (إرسالية)"
+            >
+              <Truck className="w-3 h-3" /> استلام
+            </button>
+          )}
           <button
             type="button"
             className="aseel-toolbtn"

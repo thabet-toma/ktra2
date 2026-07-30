@@ -25,6 +25,50 @@ export function resolveTenantId(): number {
 }
 
 /**
+ * T-IMPOFFER — الشركة المخزَّنة صراحةً في هذا المتصفح، أو null إن لم توجد.
+ *
+ * `resolveTenantId` تُلفِّق الرقم 1 عند غياب التخزين (لتمرير رأس X-Tenant-Id)،
+ * وهذا التلفيق كان يُقرأ كأنه **اختيار المستخدم**: بعد أول تسجيل دخول (والخروج
+ * يمحو المفتاح) تُفتَح الشركة رقم 1 إن كان المستخدم عضواً فيها، فلا تُفتح
+ * شركته الافتراضية أبداً. من يحتاج «هل اختار المستخدم شركة؟» يسأل هذه لا تلك.
+ */
+export function storedTenantId(): number | null {
+  try {
+    const raw = localStorage.getItem("tenantId");
+    if (raw == null) return null;
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+export interface TenantMembershipLike {
+  tenant: { TenantID: number };
+  is_default?: boolean;
+}
+
+/**
+ * T-IMPOFFER — الشركة التي تُفتح عند الدخول.
+ *
+ * الأولوية: اختيار صريح مخزَّن في هذا المتصفح ← الشركة الافتراضية للمستخدم ←
+ * أول شركة. دالة نقيّة كي تُختبر بلا متصفح.
+ */
+export function pickActiveMembership<T extends TenantMembershipLike>(
+  memberships: T[],
+  explicitTenantId: number | null,
+): T | null {
+  if (memberships.length === 0) return null;
+  if (explicitTenantId != null) {
+    const chosen = memberships.find(
+      (m) => m.tenant.TenantID === explicitTenantId,
+    );
+    if (chosen) return chosen;
+  }
+  return memberships.find((m) => m.is_default) || memberships[0];
+}
+
+/**
  * task11 M4 — الفرع النشط. null = «كل الفروع» (مستوى الشركة).
  * يُخزن في localStorage.branchId ويُمسح تلقائياً عند تبديل الشركة.
  */

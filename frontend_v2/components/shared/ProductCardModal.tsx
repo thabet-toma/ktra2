@@ -5,8 +5,8 @@
  *   2) أيقونة (i) في قائمة بحث المنتجات (القائمة المنسدلة).
  *   3) أيقونة (i) بجانب منتج مختار على سطر فاتورة.
  * يقرأ نفس نقطة بيانات بطاقة الصنف (`inventory/products/{id}/profile/`) التي
- * تستهلكها صفحة `ProductProfilePage`. عرض الأسعار بمنزلتين عشريتين (DEF-003) —
- * تنسيق عرض فقط، لا يمسّ الدقّة المخزّنة.
+ * يستهلكها الكرت الكامل، ويعرض نفس «النظرة العامة» (`ProductOverview`) — مصدر
+ * عرض واحد للصنف، والنسخة المختصرة هنا تُحيل للكرت الكامل للتحرير.
  */
 import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
@@ -14,46 +14,14 @@ import { X, ExternalLink, Check } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { apiGetObject } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
-import { formatQuantity, formatMoney } from "../../utils/formatNumber";
 import { productProfilePath } from "../../utils/entityLinks";
-import { LedgerTable, DocRefCell, type LedgerColumn } from "./LedgerTable";
-import { formatDateLocalized } from "../../utils/formatDate";
-
-interface ProductProfile {
-  id: number;
-  sku: string;
-  name: string;
-  category: string | null;
-  quantity_on_hand: string;
-  avg_cost: string;
-  inventory_valuation: string;
-  purchased_qty: string;
-  purchased_value: string;
-  sold_qty: string;
-  sold_value: string;
-}
-
-
-/** صف حركة المخزون (دفتر الرصيد الجاري) — يُعرض داخل البطاقة لاستغلال المساحة. */
-interface LedgerRow {
-  id: number;
-  date: string | null;
-  movement_type_label: string;
-  reference_type: string | null;
-  reference_id: number | null;
-  party: string | null;
-  warehouse: string | null;
-  qty_in: string;
-  qty_out: string;
-  running_balance: string;
-}
-
-/** نوع الحركة المعروض — مشتقّ من نوع المستند المرجعي (مطابق لـ ProductProfilePage). */
-const ledgerTypeLabel = (r: LedgerRow): string => {
-  if (r.reference_type === "PURCHASE_INVOICE") return "مشتريات";
-  if (r.reference_type === "SALE") return "مبيعات";
-  return r.movement_type_label;
-};
+import { LedgerTable } from "./LedgerTable";
+import {
+  ProductOverview,
+  ledgerColumns,
+  type LedgerRow,
+  type ProductProfileData,
+} from "../items/ProductInsightTabs";
 
 /** DEF-005 / T-R2: مصدر السعر المقترح للشارة داخل البطاقة. */
 export type ProductCardPriceSource = "last_invoice" | "quote" | "default" | null;
@@ -84,7 +52,7 @@ const PRICE_SOURCE_LABEL: Record<NonNullable<ProductCardPriceSource>, string> = 
 
 export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfirm, confirmLabel = "موافق", productName, addMode = false, suggestedPrice, priceSource = null }) => {
   const navigate = useNavigate();
-  const [profile, setProfile] = useState<ProductProfile | null>(null);
+  const [profile, setProfile] = useState<ProductProfileData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // حركة المخزون داخل البطاقة (آخر الحركات) — تُعرض في وضع العرض فقط (لا الإضافة).
@@ -107,7 +75,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
     let cancelled = false;
     setLoading(true);
     setError(null);
-    apiGetObject<ProductProfile>(`inventory/products/${productId}/profile/`, {
+    apiGetObject<ProductProfileData>(`inventory/products/${productId}/profile/`, {
       tenantId: resolveTenantId(),
     })
       .then((p) => { if (!cancelled) setProfile(p); })
@@ -143,31 +111,8 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
 
   const title = profile?.name || productName || null;
 
-  const Kpi: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
-    <div className="p-2 border border-[var(--aseel-border)] rounded">
-      <div className="text-xs text-[var(--aseel-ink-soft)]">{label}</div>
-      <div className="text-base font-bold text-[var(--aseel-ink)]">{value}</div>
-    </div>
-  );
-
-  // أعمدة حركة المخزون المعروضة داخل البطاقة (مختصرة — نفس دفتر ProductProfilePage).
-  const ledColumns: LedgerColumn<LedgerRow>[] = [
-    { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) || "—" },
-    { key: "type", header: "النوع", render: (r) => ledgerTypeLabel(r) },
-    {
-      key: "ref", header: "المستند",
-      render: (r) => (
-        <DocRefCell
-          referenceType={r.reference_type}
-          referenceId={r.reference_id}
-          label={r.reference_id != null ? `${r.reference_type || ""} #${r.reference_id}` : "—"}
-        />
-      ),
-    },
-    { key: "qty_in", header: "وارد", align: "center", render: (r) => (Number(r.qty_in) ? formatQuantity(r.qty_in) : "—") },
-    { key: "qty_out", header: "صادر", align: "center", render: (r) => (Number(r.qty_out) ? formatQuantity(r.qty_out) : "—") },
-    { key: "bal", header: "الرصيد", align: "center", render: (r) => <b>{formatQuantity(r.running_balance)}</b> },
-  ];
+  // أعمدة حركة المخزون المعروضة داخل البطاقة (مختصرة — بلا طرف/مستودع).
+  const ledColumns = ledgerColumns();
 
   return createPortal(
     // البطاقة تُحقن في <body> عبر بورتال، خارج شجرة `.aseel-doc`.
@@ -192,16 +137,7 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
               تعذّر تحميل تفاصيل البطاقة. يمكنك المتابعة وإضافة الصنف للفاتورة.
             </div>
           ) : profile ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              <Kpi label="SKU" value={profile.sku || "—"} />
-              <Kpi label="التصنيف" value={profile.category || "—"} />
-              <Kpi label="المخزون الحالي" value={formatQuantity(profile.quantity_on_hand, "—")} />
-              <Kpi label="متوسط التكلفة" value={formatMoney(profile.avg_cost, "—")} />
-              <Kpi label="تقييم المخزون" value={formatMoney(profile.inventory_valuation, "—")} />
-              <Kpi label="إجمالي المشتراة (كمية)" value={formatQuantity(profile.purchased_qty, "—")} />
-              <Kpi label="إجمالي المباعة (كمية)" value={formatQuantity(profile.sold_qty, "—")} />
-              <Kpi label="إجمالي المباعة (قيمة)" value={formatMoney(profile.sold_value, "—")} />
-            </div>
+            <ProductOverview profile={profile} />
           ) : null}
 
           {/* حركة المخزون داخل البطاقة — تملأ المساحة في وضع العرض (لا الإضافة). */}
@@ -269,9 +205,9 @@ export const ProductCardModal: React.FC<Props> = ({ productId, onClose, onConfir
             type="button"
             className="aseel-toolbtn"
             onClick={() => { onClose(); navigate(productProfilePath(productId)); }}
-            title="فتح بطاقة الصنف الكاملة (حركة المخزون)"
+            title="فتح كرت الصنف الكامل (عرض وتعديل)"
           >
-            <ExternalLink className="w-4 h-4" /> البطاقة الكاملة
+            <ExternalLink className="w-4 h-4" /> الكرت الكامل
           </button>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button type="button" className="aseel-toolbtn" onClick={onClose}>إغلاق</button>

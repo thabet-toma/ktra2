@@ -130,3 +130,60 @@ class SalesPriceEndpointTest(APITestCase):
             **self._auth())
         assert res.status_code == 200, res.content
         assert Decimal(res.json()["unit_price"]) == Decimal("77.0000")
+
+
+def test_product_sale_price_is_last_resort_only(env):
+    """«سعر البيع» في كرت الصنف سعر عام يُدخل يدوياً — لا يظهر إلا حين لا عرض
+    لهذا الزبون ولا شراء سابق له. آخر سعر باعه الزبون يبقى الأعلى أولوية."""
+    tenant, ils, _usd, c1, c2, product = env
+    product.sale_price = Decimal("250")
+    product.save(update_fields=["sale_price"])
+
+    # زبون بلا تاريخ ولا عرض → السعر العام
+    data = resolve_sales_price(
+        tenant_id=tenant.TenantID, product_id=product.id, customer_id=c1.id,
+        target_currency_id=ils.CurrencyID)
+    assert Decimal(data["unit_price"]) == Decimal("250.0000")
+    assert data["strategy_used"] == PriceStrategy.DEFAULT
+    assert data["source"]["document_type"] == "PRODUCT_SALE_PRICE"
+
+    # الزبون نفسه بعد أن اشترى بـ100 → آخر سعره هو الظاهر، لا السعر العام
+    _post(tenant, ils, c1, product, number="S-9", date="2026-06-20", price=100)
+    data = resolve_sales_price(
+        tenant_id=tenant.TenantID, product_id=product.id, customer_id=c1.id,
+        target_currency_id=ils.CurrencyID)
+    assert Decimal(data["unit_price"]) == Decimal("100.0000")
+    assert data["strategy_used"] == PriceStrategy.LAST_SALE_TO_CUSTOMER
+
+
+def test_customer_quote_beats_product_sale_price(env):
+    """عرض السعر المحفوظ للزبون أولى من السعر العام في كرت الصنف."""
+    from sales.models import CustomerProductQuote
+
+    tenant, ils, _usd, c1, _c2, product = env
+    product.sale_price = Decimal("250")
+    product.save(update_fields=["sale_price"])
+    CustomerProductQuote.objects.create(
+        tenant=tenant, customer=c1, product=product, unit_price=Decimal("180"))
+
+    data = resolve_sales_price(
+        tenant_id=tenant.TenantID, product_id=product.id, customer_id=c1.id,
+        target_currency_id=ils.CurrencyID)
+    assert Decimal(data["unit_price"]) == Decimal("180.0000")
+    assert data["source"]["document_type"] == "CUSTOMER_QUOTE"
+
+
+def test_price_list_shows_product_sale_price_when_customer_has_nothing(env):
+    """قائمة أسعار الزبون: الصنف بلا تاريخ ولا عرض يظهر بالسعر العام موسوماً
+    بمصدره — وتبقى الخانة قابلة للتحرير لحفظ عرض خاص بالزبون."""
+    from sales.services import customer_price_list
+
+    tenant, _ils, _usd, c1, _c2, product = env
+    product.sale_price = Decimal("250")
+    product.save(update_fields=["sale_price"])
+
+    row = next(r for r in customer_price_list(
+        tenant_id=tenant.TenantID, customer_id=c1.id) if r["product_id"] == product.id)
+    assert row["source"] == "default"
+    assert Decimal(row["price"]) == Decimal("250")
+    assert row["editable"] is True

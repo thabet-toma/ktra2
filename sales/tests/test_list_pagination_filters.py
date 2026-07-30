@@ -242,6 +242,8 @@ class SalesListPaginationFilterTest(APITestCase):
         self.assertLessEqual(len(payload["results"]), 3)
         self.assertEqual(payload["count"], 4)
         self.assertTrue(all(row["status"] == "sent" for row in payload["results"]))
+        # كرت الزبون كان يعرض المفتاح الخام («sent») — الحالة تأتي معرَّبة كالطلبية.
+        self.assertTrue(all(row["status_display"] == "أُرسل" for row in payload["results"]))
 
     @staticmethod
     def _result_ids(response):

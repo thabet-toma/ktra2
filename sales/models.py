@@ -210,6 +210,24 @@ class SalesSettings(models.Model):
         help_text="رفض حفظ/ترحيل فاتورة بيع فيها خسارة (سعر البيع أقل من التكلفة)",
     )
 
+    # تسمية مستند التسليم — لكل شركة عُرفها (إرسالية/إذن تسليم/بوليصة…).
+    delivery_doc_label = models.CharField(
+        max_length=50, default="إرسالية بيع", db_column="DeliveryDocLabel",
+        help_text="اسم مستند التسليم المرتبط بفاتورة كما يظهر في الشاشات والطباعة",
+    )
+    standalone_delivery_label = models.CharField(
+        max_length=50, default="سند تسليم", db_column="StandaloneDeliveryLabel",
+        help_text="اسم مستند التسليم بلا فاتورة مرتبطة",
+    )
+    allow_standalone_delivery = models.BooleanField(
+        default=True, db_column="AllowStandaloneDelivery",
+        help_text="السماح بإنشاء سند تسليم بلا فاتورة مرتبطة (بضاعة خرجت قبل فوترتها)",
+    )
+    allow_edit_delivery = models.BooleanField(
+        default=True, db_column="AllowEditDelivery",
+        help_text="السماح بتعديل/إلغاء الإرسالية بعد حفظها (يعكس أثرها ويعيد تطبيقه)",
+    )
+
     # T-DORMANT: عتبة «العميل المختفي» — أيام صمت (بلا فاتورة بيع مرحّلة) يُطلق
     # بعدها إشعار الموقع. 0 = تعطيل التنبيه.
     dormant_customer_days = models.PositiveIntegerField(
@@ -398,6 +416,25 @@ class SalesInvoice(models.Model):
         help_text="إذا عطّل: لا يُخصم المخزون عند الترحيل بل عند تسليم أمر الإخراج",
     )
 
+    # حالة تسليم البضاعة للعميل — بُعد مستقل عن الحالة المالية (status أعلاه)،
+    # مرآة PurchaseInvoice.receipt_status للجانب البيعي. تُشتقّ من
+    # delivered_quantity لكل بند (لا تُحرَّر يدوياً).
+    DELIVERY_NOT = "not_delivered"
+    DELIVERY_PARTIAL = "partially_delivered"
+    DELIVERY_FULL = "delivered"
+    DELIVERY_STATUS_CHOICES = [
+        (DELIVERY_NOT, "غير مسلَّمة"),
+        (DELIVERY_PARTIAL, "مسلَّمة جزئياً"),
+        (DELIVERY_FULL, "مسلَّمة"),
+    ]
+    delivery_status = models.CharField(
+        max_length=20,
+        choices=DELIVERY_STATUS_CHOICES,
+        default=DELIVERY_NOT,
+        db_column="DeliveryStatus",
+        help_text="هل خرجت بنود الفاتورة للعميل فعلياً؟",
+    )
+
     book_number = models.PositiveIntegerField(
         default=0,
         db_column="BookNumber",
@@ -515,6 +552,10 @@ class SalesInvoiceLine(models.Model):
         related_name="sales_invoice_lines",
     )
     quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column="Quantity")
+    delivered_quantity = models.DecimalField(
+        max_digits=18, decimal_places=4, default=0, db_column="DeliveredQuantity",
+        help_text="الكمية المسلَّمة فعلياً للعميل من هذا البند",
+    )
     unit_price = models.DecimalField(max_digits=18, decimal_places=4, db_column="UnitPrice")
     line_discount = models.DecimalField(
         max_digits=18, decimal_places=2, default=0, db_column="LineDiscount"
@@ -571,22 +612,120 @@ class DeliveryOrder(models.Model):
         db_column="TenantID",
         to_field="TenantID",
     )
+    branch = models.ForeignKey(
+        'tenants.Branch', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='BranchID', related_name='delivery_orders',
+    )
+    # إرسالية بيع: مستند مستقل بترقيمه وتاريخه، مربوط دائماً بفاتورة.
+    delivery_number = models.CharField(
+        max_length=50, blank=True, default="", db_column="DeliveryNumber",
+    )
+    delivery_date = models.DateField(null=True, blank=True, db_column="DeliveryDate")
     invoice = models.ForeignKey(
         SalesInvoice,
         on_delete=models.CASCADE,
+        null=True,
+        blank=True,
         db_column="InvoiceID",
         related_name="delivery_orders",
+        help_text="الفاتورة المرتبطة — بنود الإرسالية تُختار من بنودها حصراً. "
+                  "فارغة = «سند تسليم» مستقل (بضاعة خرجت بلا فاتورة بعد).",
+    )
+    # العميل: من الفاتورة حين تُربط، ويُدخَل يدوياً للسند المستقل.
+    partner = models.ForeignKey(
+        Partner,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        db_column="PartnerID",
+        related_name="delivery_orders",
+    )
+    customer_ref = models.CharField(
+        max_length=100, blank=True, default="", db_column="CustomerRef",
+        help_text="رقم/مرجع العميل لهذا التسليم (طلب شراء، إشعار استلام…)",
+    )
+    auto_created = models.BooleanField(
+        default=False, db_column="AutoCreated",
+        help_text="أُنشئت تلقائياً مع ترحيل الفاتورة (خصم المخزون عند الترحيل)",
     )
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING, db_column="Status"
     )
     notes = models.CharField(max_length=500, blank=True, default="", db_column="Notes")
+    # قيد هذه الإرسالية وحدها (تكلفة المبيعات/الوسيط) — يجعل إلغاءها عكساً دقيقاً.
+    journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column="JournalID", related_name="delivery_orders",
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
     delivered_at = models.DateTimeField(null=True, blank=True, db_column="DeliveredAt")
 
     class Meta:
         db_table = "sales_module_delivery_orders"
         managed = True
+        ordering = ["-id"]
+
+    @property
+    def is_standalone(self) -> bool:
+        """سند تسليم مستقل — بضاعة خرجت بلا فاتورة مرتبطة بعد."""
+        return self.invoice_id is None
+
+
+class DeliveryOrderLine(models.Model):
+    """بند إرسالية: الكمية المسلَّمة فعلياً من سطر فاتورة بعينه.
+
+    وجودها يجعل التسليم الجزئي ممكناً — الإرسالية الواحدة تسلّم جزءاً من بنود
+    الفاتورة، ويتراكم المسلَّم في SalesInvoiceLine.delivered_quantity.
+    """
+
+    id = models.AutoField(primary_key=True, db_column="DeliveryOrderLineID")
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        db_column="TenantID",
+        to_field="TenantID",
+    )
+    delivery = models.ForeignKey(
+        DeliveryOrder,
+        on_delete=models.CASCADE,
+        db_column="DeliveryOrderID",
+        related_name="lines",
+    )
+    invoice_line = models.ForeignKey(
+        SalesInvoiceLine,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        db_column="SalesInvoiceLineID",
+        related_name="delivery_lines",
+        help_text="سطر الفاتورة المرتبطة — فارغ في سند التسليم المستقل",
+    )
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.PROTECT,
+        db_column="ProductID",
+        related_name="delivery_order_lines",
+    )
+    # المستودع الذي خرجت منه البضاعة (مرآة GoodsReceiptLine.warehouse في الشراء).
+    # فارغ = بلا تخصيص مستودع (الإرساليات القديمة، والخصم مع ترحيل الفاتورة).
+    warehouse = models.ForeignKey(
+        'inventory.Warehouse', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='WarehouseID', related_name='delivery_order_lines',
+    )
+    quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column="Quantity")
+    # الحركة التي ولّدها هذا السطر — يجعل تعديل/إلغاء الإرسالية عكساً دقيقاً
+    # لأثرها وحدها دون المساس بإرساليات أخرى لنفس الفاتورة.
+    movement = models.ForeignKey(
+        'inventory.StockMovement', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='MovementID', related_name='delivery_order_lines',
+    )
+
+    class Meta:
+        db_table = "sales_module_delivery_order_lines"
+        managed = True
+
+    def __str__(self):
+        return f"DOLine {self.id} do={self.delivery_id}"
 
 
 class CustomerPayment(models.Model):

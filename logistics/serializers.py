@@ -214,6 +214,8 @@ from .models import (
     PurchaseInvoiceItem,
     PurchaseInvoiceFee,
     PurchaseSettings,
+    GoodsReceipt,
+    GoodsReceiptLine,
     LocalShipment,
     LocalShipmentPayment,
 )
@@ -255,6 +257,7 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
             'shipping_cost_estimate', 'is_shipping_included', 'incoterms',
             'shipping_method', 'payment_method', 'production_days',
             'delivery_days', 'total_cbm', 'total_weight_kg', 'notes',
+            'alibaba_link', 'supplier_contact', 'decision_reason', 'attachments',
             'lines', 'converted_deal', 'created_at', 'updated_at',
         ]
         read_only_fields = [
@@ -299,6 +302,33 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'status': 'حالة converted تُعيّن فقط بواسطة عملية التحويل.',
             })
+
+        # T-IMPOFFER: «غير ملائم» يلزمه سبب — في نطاق **الاستيراد** وحده، حيث
+        # القرار مطلبٌ صريح للمالك. عرض الشراء المحلي يبقى كما كان (سبب اختياري)
+        # فلا يتغيّر سلوك شاشة قائمة لم يُطلب تغييرها.
+        # و«ملائم» يمحو سبباً قديماً كي لا يبقى عرضٌ مقبول حاملاً سبب رفض سابق.
+        reason = attrs.get(
+            'decision_reason', getattr(instance, 'decision_reason', ''),
+        )
+        if status_value == SupplierQuotation.STATUS_REJECTED:
+            if scope == SupplierQuotation.SCOPE_IMPORT and not str(reason or '').strip():
+                raise serializers.ValidationError({
+                    'decision_reason': 'اذكر سبب اعتبار العرض غير ملائم.',
+                })
+        elif str(reason or '').strip():
+            attrs['decision_reason'] = ''
+
+        attachments = attrs.get('attachments')
+        if attachments is not None:
+            if not isinstance(attachments, list):
+                raise serializers.ValidationError({
+                    'attachments': 'المرفقات يجب أن تكون قائمة ملفات.',
+                })
+            for entry in attachments:
+                if not isinstance(entry, dict) or not str(entry.get('url') or '').strip():
+                    raise serializers.ValidationError({
+                        'attachments': 'كل مرفق يجب أن يحمل رابط ملف (url).',
+                    })
 
         quotation_date = attrs.get(
             'quotation_date', getattr(instance, 'quotation_date', None),
@@ -1094,6 +1124,7 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
             {
                 "label": (r.get("description") or ""),
                 "amount": float((r.get("debit") or 0)) - float((r.get("credit") or 0)),
+                "type": r.get("line_type") or "other",
             }
             for r in rows
         ]
@@ -1200,18 +1231,24 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
             return self._default_cost_lines()
         if not isinstance(value, list):
             raise serializers.ValidationError("cost_lines يجب أن تكون قائمة")
+        valid_types = {c[0] for c in LogisticsClearanceLine.LINE_TYPE_CHOICES}
         out = []
         for row in value:
             if not isinstance(row, dict):
                 continue
             label = str(row.get("label") or "").strip()
-            if not label:
-                continue
+            line_type = str(row.get("type") or "").strip()
+            if line_type not in valid_types:
+                line_type = ""
             try:
                 amt = float(row.get("amount", 0) or 0)
             except (TypeError, ValueError):
                 amt = 0.0
-            out.append({"label": label[:220], "amount": round(amt, 2)})
+            # بند بلا بيان ولا نوع صريح ولا مبلغ = صف فارغ فعلاً — لا معنى لحفظه.
+            # لكن بند اختير له نوع أو له مبلغ لا يُسقَط لمجرد أن «البيان» بقي فارغاً.
+            if not label and not line_type and amt == 0:
+                continue
+            out.append({"label": label[:220], "amount": round(amt, 2), "type": line_type})
         return out if out else self._default_cost_lines()
 
     def validate(self, attrs):
@@ -1234,6 +1271,7 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
     }
 
     def _sync_lines_from_cost_lines(self, instance, cost_lines):
+        valid_types = {c[0] for c in LogisticsClearanceLine.LINE_TYPE_CHOICES}
         instance.lines.all().delete()
         for idx, item in enumerate(cost_lines):
             label = str(item.get('label', '') or '')
@@ -1244,7 +1282,11 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
                 amount = 0
             debit = abs(amount) if amount > 0 else 0
             credit = abs(amount) if amount < 0 else 0
-            line_type = self.LABEL_TO_LINE_TYPE.get(label, 'other')
+            # النوع الصريح الوارد من الواجهة (اختيار المستخدم) له الأولوية؛ التخمين من
+            # البيان (LABEL_TO_LINE_TYPE) للتوافق مع طلبات قديمة لا ترسل نوعاً.
+            line_type = str(item.get('type') or '').strip()
+            if line_type not in valid_types:
+                line_type = self.LABEL_TO_LINE_TYPE.get(label, 'other')
             instance.lines.create(
                 seq=idx + 1,
                 line_type=line_type,
@@ -1977,8 +2019,116 @@ class PurchaseSettingsSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = PurchaseSettings
-        fields = ['id', 'purchase_default_price_strategy', 'default_cash_account', 'updated_at']
+        fields = ['id', 'purchase_default_price_strategy', 'default_cash_account',
+                  'receive_on_post', 'receipt_doc_label', 'standalone_receipt_label',
+                  'allow_standalone_receipt', 'allow_edit_receipt', 'updated_at']
         read_only_fields = ['id', 'updated_at']
+
+
+class GoodsReceiptLineSerializer(serializers.ModelSerializer):
+    """بند إرسالية شراء — المفوتر والمستلَم تراكمياً والباقي، لسياق المراجعة."""
+
+    product_name = serializers.SerializerMethodField(read_only=True)
+    item_name = serializers.CharField(source='item.name', read_only=True, default=None)
+    ordered_quantity = serializers.SerializerMethodField()
+    received_total = serializers.SerializerMethodField()
+    remaining_quantity = serializers.SerializerMethodField()
+    warehouse_name = serializers.CharField(
+        source='warehouse.name', read_only=True, default=None,
+    )
+
+    class Meta:
+        model = GoodsReceiptLine
+        fields = [
+            'id', 'item', 'item_name', 'product', 'product_name',
+            'ordered_quantity', 'received_total', 'remaining_quantity',
+            'quantity', 'unit_price', 'warehouse', 'warehouse_name',
+        ]
+        read_only_fields = fields
+
+    def get_product_name(self, obj):
+        return str(obj.product) if obj.product_id else None
+
+    def get_ordered_quantity(self, obj):
+        # السند المستقل بلا بند فاتورة ⇒ المفوتر = المستلَم نفسه (لا باقي).
+        return str(obj.item.quantity if obj.item_id else obj.quantity)
+
+    def get_received_total(self, obj):
+        return str(obj.item.received_quantity if obj.item_id else obj.quantity)
+
+    def get_remaining_quantity(self, obj):
+        if not obj.item_id:
+            return '0'
+        ordered = Decimal(str(obj.item.quantity or 0))
+        received = Decimal(str(obj.item.received_quantity or 0))
+        return str(max(Decimal('0'), ordered - received))
+
+
+class GoodsReceiptListSerializer(serializers.ModelSerializer):
+    invoice_number = serializers.CharField(
+        source='invoice.invoice_number', read_only=True, default=None,
+    )
+    partner_name = serializers.SerializerMethodField()
+    is_standalone = serializers.BooleanField(read_only=True)
+    doc_label = serializers.SerializerMethodField()
+    lines_count = serializers.SerializerMethodField()
+    total_quantity = serializers.SerializerMethodField()
+    total_remaining = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GoodsReceipt
+        fields = [
+            'id', 'receipt_number', 'receipt_date', 'invoice', 'invoice_number',
+            'partner', 'partner_name', 'supplier_ref', 'is_standalone', 'doc_label',
+            'auto_created', 'journal', 'notes',
+            'lines_count', 'total_quantity', 'total_remaining', 'created_at',
+        ]
+        read_only_fields = fields
+
+    def _labels(self, obj):
+        cached = getattr(self, '_label_cache', None)
+        if cached is None:
+            from logistics.services import get_or_create_purchase_settings
+            ps = get_or_create_purchase_settings(obj.tenant_id)
+            cached = (ps.receipt_doc_label, ps.standalone_receipt_label)
+            self._label_cache = cached
+        return cached
+
+    def get_doc_label(self, obj):
+        linked, standalone = self._labels(obj)
+        return standalone if obj.invoice_id is None else linked
+
+    def get_partner_name(self, obj):
+        if obj.partner_id:
+            return obj.partner.name
+        return obj.invoice.partner.name if obj.invoice_id else ''
+
+    def get_lines_count(self, obj):
+        return obj.lines.count()
+
+    def get_total_quantity(self, obj):
+        return str(sum((line.quantity for line in obj.lines.all()), Decimal('0')))
+
+    def get_total_remaining(self, obj):
+        """الباقي على الفاتورة المرتبطة بعد هذه الإرسالية (0 للسند المستقل)."""
+        if obj.invoice_id is None:
+            return '0'
+        total = Decimal('0')
+        for item in obj.invoice.items.all():
+            if not item.product_id:
+                continue
+            ordered = Decimal(str(item.quantity or 0))
+            received = Decimal(str(item.received_quantity or 0))
+            total += max(Decimal('0'), ordered - received)
+        return str(total)
+
+
+class GoodsReceiptSerializer(GoodsReceiptListSerializer):
+    lines = GoodsReceiptLineSerializer(many=True, read_only=True)
+
+    class Meta(GoodsReceiptListSerializer.Meta):
+        fields = GoodsReceiptListSerializer.Meta.fields + ['lines']
+        read_only_fields = fields
 
 
 class SupplierPaymentAllocationSerializer(serializers.ModelSerializer):
