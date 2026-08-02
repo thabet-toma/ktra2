@@ -59,6 +59,8 @@ urlpatterns = [
     path('api/agent/products/', agent_db_view.agent_products),
     path('api/dashboard/', dashboard_api.trade_dashboard),
     path('api/platform/dashboard/', platform_admin_api.platform_dashboard),
+    path('api/platform/super-admins/', platform_admin_api.platform_super_admins),
+    path('api/platform/super-admins/<int:pk>/', platform_admin_api.platform_super_admin_detail),
     path('api/platform/', include(_platform_router.urls)),
     # T-PERM: محرّك الصلاحيات (صلاحياتي + مصفوفة الأدوار لكل شركة)
     path('api/permissions/me/', permissions_api.my_permissions),

@@ -6,10 +6,14 @@
  * `hr.PersonalExpenseViewSet` يفرض العزل بـ user=request.user.
  *
  * حالة الدفع «مدفوعة» مربع اختيار (لا قائمة نقدي/آجل) — نفس اصطلاح الفواتير.
+ *
+ * الأوراق تبويبات بأسلوب إكسل: نقرة تختار، نقرتان تعيدان التسمية، و«+» تضيف؛
+ * والفئات كتالوج المستخدم نفسه — يعيد تسميتها ويضيف إليها من لوح التوزيع.
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Wallet, Plus, Trash2, RefreshCw, ChevronRight, ChevronLeft, Loader2, Pencil, X, Check,
+  Settings2,
 } from "lucide-react";
 import { formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized, todayIso } from "../../utils/formatDate";
@@ -22,18 +26,30 @@ import {
   createPersonalExpense,
   updatePersonalExpense,
   deletePersonalExpense,
-  PERSONAL_EXPENSE_CATEGORIES,
+  listPersonalExpenseSheets,
+  createPersonalExpenseSheet,
+  renamePersonalExpenseSheet,
+  deletePersonalExpenseSheet,
+  listPersonalExpenseCategories,
+  createPersonalExpenseCategory,
+  renamePersonalExpenseCategory,
+  deletePersonalExpenseCategory,
   type PersonalExpense,
   type PersonalExpenseCategory,
+  type PersonalExpenseCategoryKey,
+  type PersonalExpenseSheet,
   type PersonalExpenseSummary,
 } from "../../services/personalExpensesApi";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 
+const messageOf = (cause: unknown, fallback: string) =>
+  cause instanceof Error ? cause.message : fallback;
+
 const EMPTY_DRAFT = {
   date: todayIso(),
   title: "",
-  category: "other" as PersonalExpenseCategory,
+  category: "other" as PersonalExpenseCategoryKey,
   amount: "",
   is_paid: true,
   notes: "",
@@ -44,8 +60,18 @@ export const PersonalExpensesPage: React.FC = () => {
   const confirm = useConfirm();
 
   const [month, setMonth] = useState(() => monthKeyOf(todayIso()));
-  const [category, setCategory] = useState<PersonalExpenseCategory | "">("");
+  const [category, setCategory] = useState<PersonalExpenseCategoryKey | "">("");
   const [paidFilter, setPaidFilter] = useState<"" | "true" | "false">("");
+
+  const [sheets, setSheets] = useState<PersonalExpenseSheet[]>([]);
+  const [activeSheetId, setActiveSheetId] = useState<number | null>(null);
+  const [renamingSheetId, setRenamingSheetId] = useState<number | null>(null);
+  const [sheetNameDraft, setSheetNameDraft] = useState("");
+
+  const [categories, setCategories] = useState<PersonalExpenseCategory[]>([]);
+  const [managingCategories, setManagingCategories] = useState(false);
+  const [categoryDrafts, setCategoryDrafts] = useState<Record<number, string>>({});
+  const [newCategory, setNewCategory] = useState("");
 
   const [rows, setRows] = useState<PersonalExpense[]>([]);
   const [summary, setSummary] = useState<PersonalExpenseSummary | null>(null);
@@ -57,11 +83,12 @@ export const PersonalExpensesPage: React.FC = () => {
   const [editingId, setEditingId] = useState<number | null>(null);
 
   const filters = useMemo(
-    () => ({ month, category, is_paid: paidFilter }),
-    [month, category, paidFilter],
+    () => ({ sheet: activeSheetId, month, category, is_paid: paidFilter }),
+    [activeSheetId, month, category, paidFilter],
   );
 
   const load = useCallback(async () => {
+    if (!activeSheetId) return;
     setLoading(true);
     setErr(null);
     try {
@@ -72,18 +99,48 @@ export const PersonalExpensesPage: React.FC = () => {
       setRows(list);
       setSummary(sum);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "تعذر تحميل المصاريف");
+      setErr(messageOf(e, "تعذر تحميل المصاريف"));
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [activeSheetId, filters]);
+
+  const loadCategories = useCallback(async () => {
+    try {
+      const catalog = await listPersonalExpenseCategories();
+      setCategories(catalog);
+      setDraft((current) =>
+        catalog.some((c) => c.key === current.category) || !catalog.length
+          ? current
+          : { ...current, category: catalog[0].key },
+      );
+    } catch (e) {
+      setErr(messageOf(e, "تعذر تحميل الفئات"));
+    }
+  }, []);
+
+  // الأوراق والفئات يزرعهما الخادم عند أول قائمة — نطلبهما مرة عند الفتح.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const list = await listPersonalExpenseSheets();
+        setSheets(list);
+        setActiveSheetId((current) =>
+          current && list.some((s) => s.id === current) ? current : list[0]?.id ?? null,
+        );
+      } catch (e) {
+        setErr(messageOf(e, "تعذر تحميل الأوراق"));
+      }
+    })();
+    void loadCategories();
+  }, [loadCategories]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   const resetDraft = () => {
-    setDraft({ ...EMPTY_DRAFT, date: todayIso() });
+    setDraft({ ...EMPTY_DRAFT, date: todayIso(), category: categories[0]?.key ?? "other" });
     setEditingId(null);
   };
 
@@ -105,16 +162,17 @@ export const PersonalExpensesPage: React.FC = () => {
         notes: draft.notes.trim(),
       };
       if (editingId) {
+        // بلا `sheet` — التعديل لا ينقل المصروف عن ورقته.
         await updatePersonalExpense(editingId, payload);
         toast("تم تعديل المصروف", "success");
       } else {
-        await createPersonalExpense(payload);
+        await createPersonalExpense({ ...payload, sheet: activeSheetId });
         toast("تم تسجيل المصروف", "success");
       }
       resetDraft();
       await load();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "تعذر الحفظ");
+      setErr(messageOf(e, "تعذر الحفظ"));
     } finally {
       setBusy(false);
     }
@@ -138,7 +196,7 @@ export const PersonalExpensesPage: React.FC = () => {
       await updatePersonalExpense(row.id, { is_paid: !row.is_paid });
       await load();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "تعذر التحديث");
+      setErr(messageOf(e, "تعذر التحديث"));
     } finally {
       setBusy(false);
     }
@@ -159,9 +217,122 @@ export const PersonalExpensesPage: React.FC = () => {
       toast("تم الحذف", "success");
       await load();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : "تعذر الحذف");
+      setErr(messageOf(e, "تعذر الحذف"));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /* — الأوراق — */
+
+  const addSheet = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const used = new Set(sheets.map((s) => s.name));
+      let index = sheets.length + 1;
+      while (used.has(`الورقة ${index}`)) index += 1;
+      const sheet = await createPersonalExpenseSheet(`الورقة ${index}`);
+      setSheets([...sheets, sheet]);
+      setActiveSheetId(sheet.id);
+      setRenamingSheetId(sheet.id);
+      setSheetNameDraft(sheet.name);
+    } catch (e) {
+      setErr(messageOf(e, "تعذر إضافة الورقة"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startRenameSheet = (sheet: PersonalExpenseSheet) => {
+    setRenamingSheetId(sheet.id);
+    setSheetNameDraft(sheet.name);
+  };
+
+  const commitRenameSheet = async () => {
+    const target = sheets.find((s) => s.id === renamingSheetId);
+    const name = sheetNameDraft.trim();
+    setRenamingSheetId(null);
+    if (!target || !name || name === target.name) return;
+    setErr(null);
+    try {
+      const updated = await renamePersonalExpenseSheet(target.id, name);
+      setSheets(sheets.map((s) => (s.id === updated.id ? updated : s)));
+    } catch (e) {
+      setErr(messageOf(e, "تعذر تغيير اسم الورقة"));
+    }
+  };
+
+  const removeSheet = async (sheet: PersonalExpenseSheet) => {
+    const ok = await confirm({
+      title: "حذف ورقة",
+      message: `سيُحذف «${sheet.name}» وكل المصاريف المسجّلة فيه نهائياً.`,
+      confirmText: "حذف",
+      danger: true,
+    });
+    if (!ok) return;
+    setErr(null);
+    try {
+      await deletePersonalExpenseSheet(sheet.id);
+      const rest = sheets.filter((s) => s.id !== sheet.id);
+      setSheets(rest);
+      if (activeSheetId === sheet.id) setActiveSheetId(rest[0]?.id ?? null);
+      toast("تم حذف الورقة", "success");
+    } catch (e) {
+      setErr(messageOf(e, "تعذر حذف الورقة"));
+    }
+  };
+
+  /* — الفئات — */
+
+  const commitCategoryLabel = async (row: PersonalExpenseCategory) => {
+    const label = (categoryDrafts[row.id] ?? row.label).trim();
+    setCategoryDrafts((current) => {
+      const rest = { ...current };
+      delete rest[row.id];
+      return rest;
+    });
+    if (!label || label === row.label) return;
+    setErr(null);
+    try {
+      const updated = await renamePersonalExpenseCategory(row.id, label);
+      setCategories(categories.map((c) => (c.id === updated.id ? updated : c)));
+      await load();
+    } catch (e) {
+      setErr(messageOf(e, "تعذر تغيير اسم الفئة"));
+    }
+  };
+
+  const addCategory = async () => {
+    const label = newCategory.trim();
+    if (!label) return;
+    setErr(null);
+    try {
+      const created = await createPersonalExpenseCategory(label);
+      setCategories([...categories, created]);
+      setNewCategory("");
+    } catch (e) {
+      setErr(messageOf(e, "تعذر إضافة الفئة"));
+    }
+  };
+
+  const removeCategory = async (row: PersonalExpenseCategory) => {
+    const ok = await confirm({
+      title: "حذف فئة",
+      message: `ستُحذف الفئة «${row.label}» من كتالوجك.`,
+      confirmText: "حذف",
+      danger: true,
+    });
+    if (!ok) return;
+    setErr(null);
+    try {
+      await deletePersonalExpenseCategory(row.id);
+      const rest = categories.filter((c) => c.id !== row.id);
+      setCategories(rest);
+      if (category === row.key) setCategory("");
+      if (draft.category === row.key) setDraft({ ...draft, category: rest[0]?.key ?? "other" });
+    } catch (e) {
+      setErr(messageOf(e, "تعذر حذف الفئة"));
     }
   };
 
@@ -212,6 +383,67 @@ export const PersonalExpensesPage: React.FC = () => {
         </div>
       </div>
 
+      {/* أوراق الدفتر — تبويبات بأسلوب إكسل */}
+      <div className="flex items-center gap-1 overflow-x-auto border-b border-[var(--color-border)]">
+        {sheets.map((sheet) => {
+          const active = sheet.id === activeSheetId;
+          return (
+            <div
+              key={sheet.id}
+              className={`flex items-center gap-0.5 rounded-t-lg border border-b-0 px-1 whitespace-nowrap ${
+                active
+                  ? "border-[var(--color-border)] bg-[var(--color-surface)]"
+                  : "border-transparent bg-[var(--color-surface-2)]"
+              }`}
+            >
+              {renamingSheetId === sheet.id ? (
+                <input
+                  autoFocus
+                  className="h-8 w-28 px-2 rounded border border-[var(--color-border)] bg-[var(--color-surface)] text-sm text-[var(--color-text)] outline-none"
+                  value={sheetNameDraft}
+                  onChange={(e) => setSheetNameDraft(e.target.value)}
+                  onBlur={() => void commitRenameSheet()}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void commitRenameSheet();
+                    if (e.key === "Escape") setRenamingSheetId(null);
+                  }}
+                />
+              ) : (
+                <button
+                  onClick={() => setActiveSheetId(sheet.id)}
+                  onDoubleClick={() => startRenameSheet(sheet)}
+                  className={`h-9 px-3 text-sm ${
+                    active
+                      ? "font-bold text-[var(--color-text)]"
+                      : "text-[var(--color-text-muted)]"
+                  }`}
+                  title="نقرة للفتح، نقرتان لإعادة التسمية"
+                >
+                  {sheet.name}
+                </button>
+              )}
+              {active && sheets.length > 1 && renamingSheetId !== sheet.id && (
+                <button
+                  onClick={() => void removeSheet(sheet)}
+                  className="p-1 rounded text-[var(--color-text-muted)] hover:text-red-600"
+                  title="حذف الورقة"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          );
+        })}
+        <button
+          onClick={() => void addSheet()}
+          disabled={busy}
+          className="p-2 rounded-lg text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)] disabled:opacity-60"
+          title="ورقة جديدة"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
+
       {err && (
         <div className="p-2.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] text-sm text-red-600 dark:text-red-400">
           {err}
@@ -260,11 +492,11 @@ export const PersonalExpensesPage: React.FC = () => {
           <select
             className={inputClass}
             value={draft.category}
-            onChange={(e) => setDraft({ ...draft, category: e.target.value as PersonalExpenseCategory })}
+            onChange={(e) => setDraft({ ...draft, category: e.target.value })}
             title="الفئة"
           >
-            {PERSONAL_EXPENSE_CATEGORIES.map((c) => (
-              <option key={c.value} value={c.value}>{c.label}</option>
+            {categories.map((c) => (
+              <option key={c.key} value={c.key}>{c.label}</option>
             ))}
           </select>
           <input
@@ -318,12 +550,12 @@ export const PersonalExpensesPage: React.FC = () => {
             <select
               className={`${inputClass} h-9 text-sm`}
               value={category}
-              onChange={(e) => setCategory(e.target.value as PersonalExpenseCategory | "")}
+              onChange={(e) => setCategory(e.target.value)}
               title="تصفية بالفئة"
             >
               <option value="">كل الفئات</option>
-              {PERSONAL_EXPENSE_CATEGORIES.map((c) => (
-                <option key={c.value} value={c.value}>{c.label}</option>
+              {categories.map((c) => (
+                <option key={c.key} value={c.key}>{c.label}</option>
               ))}
             </select>
             <select
@@ -413,10 +645,63 @@ export const PersonalExpensesPage: React.FC = () => {
           </div>
         </div>
 
-        {/* توزيع الفئات */}
+        {/* توزيع الفئات / إدارتها */}
         <div className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-3 space-y-2">
-          <div className="text-sm font-bold text-[var(--color-text)]">توزيع الفئات</div>
-          {summary?.by_category.length ? (
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-bold text-[var(--color-text)]">
+              {managingCategories ? "إدارة الفئات" : "توزيع الفئات"}
+            </div>
+            <button
+              onClick={() => setManagingCategories(!managingCategories)}
+              className="p-1.5 rounded text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
+              title={managingCategories ? "عرض التوزيع" : "تعديل أسماء الفئات وإضافة فئة"}
+            >
+              {managingCategories ? <Check className="w-4 h-4" /> : <Settings2 className="w-4 h-4" />}
+            </button>
+          </div>
+
+          {managingCategories ? (
+            <div className="space-y-1.5">
+              {categories.map((c) => (
+                <div key={c.id} className="flex items-center gap-1">
+                  <input
+                    className="h-9 flex-1 min-w-0 px-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-sm text-[var(--color-text)] outline-none focus:ring-1 focus:ring-emerald-500"
+                    value={categoryDrafts[c.id] ?? c.label}
+                    onChange={(e) => setCategoryDrafts({ ...categoryDrafts, [c.id]: e.target.value })}
+                    onBlur={() => void commitCategoryLabel(c)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    }}
+                  />
+                  <button
+                    onClick={() => void removeCategory(c)}
+                    className="p-1.5 rounded text-red-600 hover:bg-[var(--color-surface-2)]"
+                    title="حذف الفئة"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))}
+              <div className="flex items-center gap-1 pt-1 border-t border-[var(--color-border)]">
+                <input
+                  className="h-9 flex-1 min-w-0 px-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-sm text-[var(--color-text)] outline-none focus:ring-1 focus:ring-emerald-500"
+                  placeholder="فئة جديدة"
+                  value={newCategory}
+                  onChange={(e) => setNewCategory(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void addCategory();
+                  }}
+                />
+                <button
+                  onClick={() => void addCategory()}
+                  className="p-1.5 rounded text-[var(--color-primary)] hover:bg-[var(--color-surface-2)]"
+                  title="إضافة فئة"
+                >
+                  <Plus className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          ) : summary?.by_category.length ? (
             summary.by_category.map((c) => (
               <div key={c.category} className="space-y-1">
                 <div className="flex items-center justify-between text-xs text-[var(--color-text-muted)]">
@@ -434,6 +719,7 @@ export const PersonalExpensesPage: React.FC = () => {
           ) : (
             <div className="text-xs text-[var(--color-text-muted)]">لا بيانات لهذا الشهر.</div>
           )}
+
           <div className="pt-2 mt-1 border-t border-[var(--color-border)] flex items-center gap-1.5 text-[11px] text-[var(--color-text-muted)]">
             <Check className="w-3 h-3" />
             هذه الشاشة مستقلة عن المحاسبة — لا تُنشئ قيوداً ولا تمسّ شجرة الحسابات.

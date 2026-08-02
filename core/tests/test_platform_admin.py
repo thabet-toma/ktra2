@@ -93,6 +93,92 @@ class PlatformAdminApiTest(APITestCase):
         deleted = self.client.delete(f"/api/platform/development-notes/{note_id}/")
         self.assertEqual(deleted.status_code, 204, deleted.content)
 
+    def test_company_manager_cannot_list_or_grant_super_admin(self):
+        self.client.force_authenticate(self.company_manager)
+        listed = self.client.get("/api/platform/super-admins/")
+        granted = self.client.post(
+            "/api/platform/super-admins/",
+            {"identifier": "company-manager"}, format="json",
+        )
+        self.assertEqual(listed.status_code, 403)
+        self.assertEqual(granted.status_code, 403)
+        self.company_manager.refresh_from_db()
+        self.assertFalse(self.company_manager.is_superuser)
+
+    def test_super_admin_grants_and_revokes_another_super_admin(self):
+        self.client.force_authenticate(self.superuser)
+
+        granted = self.client.post(
+            "/api/platform/super-admins/",
+            {"identifier": "company-manager"}, format="json",
+        )
+        self.assertEqual(granted.status_code, 201, granted.content)
+        self.assertEqual(granted.data["username"], "company-manager")
+        self.assertTrue(granted.data["removable"])
+        self.company_manager.refresh_from_db()
+        self.assertTrue(self.company_manager.is_superuser)
+
+        # المرقّى الجديد يصل لوحة المنصة فعلاً — لا علم بلا وصول.
+        self.client.force_authenticate(self.company_manager)
+        self.assertEqual(self.client.get("/api/platform/dashboard/").status_code, 200)
+
+        self.client.force_authenticate(self.superuser)
+        listed = self.client.get("/api/platform/super-admins/")
+        self.assertEqual(listed.status_code, 200, listed.content)
+        self.assertIn("company-manager", [row["username"] for row in listed.data])
+
+        revoked = self.client.delete(
+            f"/api/platform/super-admins/{self.company_manager.pk}/")
+        self.assertEqual(revoked.status_code, 204, revoked.content)
+        self.company_manager.refresh_from_db()
+        self.assertFalse(self.company_manager.is_superuser)
+
+    def test_grant_rejects_unknown_identifier_and_existing_super_admin(self):
+        self.client.force_authenticate(self.superuser)
+        unknown = self.client.post(
+            "/api/platform/super-admins/", {"identifier": "لا-أحد"}, format="json")
+        already = self.client.post(
+            "/api/platform/super-admins/", {"identifier": "platform-root"}, format="json")
+        empty = self.client.post("/api/platform/super-admins/", {}, format="json")
+        self.assertEqual(unknown.status_code, 404)
+        self.assertEqual(already.status_code, 400)
+        self.assertEqual(empty.status_code, 400)
+
+    def test_grant_accepts_email_as_identifier(self):
+        self.client.force_authenticate(self.superuser)
+        response = self.client.post(
+            "/api/platform/super-admins/",
+            {"identifier": "platform@example.com"}, format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        self.configured_admin.refresh_from_db()
+        self.assertTrue(self.configured_admin.is_superuser)
+
+    def test_revoke_refuses_self_and_settings_configured_admin(self):
+        self.client.force_authenticate(self.superuser)
+        myself = self.client.delete(f"/api/platform/super-admins/{self.superuser.pk}/")
+        self.assertEqual(myself.status_code, 400)
+        self.superuser.refresh_from_db()
+        self.assertTrue(self.superuser.is_superuser)
+
+        self.configured_admin.is_superuser = True
+        self.configured_admin.save(update_fields=["is_superuser"])
+        with self.settings(SUPER_ADMIN_EMAILS=["platform@example.com"]):
+            blocked = self.client.delete(
+                f"/api/platform/super-admins/{self.configured_admin.pk}/")
+        self.assertEqual(blocked.status_code, 400)
+        self.configured_admin.refresh_from_db()
+        self.assertTrue(self.configured_admin.is_superuser)
+
+    @override_settings(SUPER_ADMIN_EMAILS=["platform@example.com"])
+    def test_list_includes_settings_configured_admin_as_unremovable(self):
+        self.client.force_authenticate(self.superuser)
+        rows = {row["username"]: row for row in self.client.get(
+            "/api/platform/super-admins/").data}
+        self.assertEqual(rows["configured-admin"]["source"], "settings")
+        self.assertFalse(rows["configured-admin"]["removable"])
+        self.assertEqual(rows["platform-root"]["source"], "flag")
+
     def test_development_note_rejects_unknown_status_and_priority(self):
         self.client.force_authenticate(self.superuser)
         response = self.client.post(
