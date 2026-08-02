@@ -9,11 +9,12 @@ export default defineConfig(() => {
       server: {
         port: 3000,
         host: '0.0.0.0',
+        allowedHosts: ['ktra-pro.tech', 'www.ktra-pro.tech', '187.124.164.58', 'localhost'],
       },
       preview: {
         port: 3000,
         host: '0.0.0.0',
-        allowedHosts: ['ktraerp.servebeer.com', '191.218.164.145', 'localhost'],
+        allowedHosts: ['ktra-pro.tech', 'www.ktra-pro.tech', '187.124.164.58', 'localhost'],
       },
       plugins: [
         react(),
