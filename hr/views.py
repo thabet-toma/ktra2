@@ -8,10 +8,14 @@ from rest_framework.authentication import SessionAuthentication, TokenAuthentica
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from .models import Task, TaskSubmission, AttendanceRecord, PointsHistory, PersonalExpense
+from .models import (
+    Task, TaskSubmission, AttendanceRecord, PointsHistory, PersonalExpense,
+    PersonalExpenseCategory, PersonalExpenseSheet,
+)
 from .serializers import (
     TaskSerializer, TaskSubmissionSerializer, AttendanceRecordSerializer,
     PointsHistorySerializer, PersonalExpenseSerializer,
+    PersonalExpenseCategorySerializer, PersonalExpenseSheetSerializer,
 )
 from core.mixins import BaseTenantViewSet
 from core.tenant_utils import get_tenant
@@ -64,6 +68,94 @@ def _month_bounds(month: str):
     return first, last
 
 
+class PersonalExpenseOwnedViewSet(viewsets.ModelViewSet):
+    """أساس مشترك لبيانات الدفتر الشخصي: مصادقة، عزل بالمستخدم، ومالك من الطلب."""
+    authentication_classes = [TokenAuthentication, SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+    model = None
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return self.model.objects.none()
+        return self.model.objects.filter(user=user)
+
+    def perform_create(self, serializer):
+        return serializer.save(user=self.request.user)
+
+
+class PersonalExpenseSheetViewSet(PersonalExpenseOwnedViewSet):
+    """أوراق المصاريف — تبويبات بأسلوب إكسل، لكل مستخدم أوراقه وحده."""
+    serializer_class = PersonalExpenseSheetSerializer
+    model = PersonalExpenseSheet
+
+    def list(self, request, *args, **kwargs):
+        # لا دفتر بلا ورقة: أول زيارة تزرع «الورقة 1» لصاحب الطلب.
+        PersonalExpenseSheet.ensure_default(request.user)
+        return super().list(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        last = self.get_queryset().order_by('-position').first()
+        sheet = serializer.save(
+            user=self.request.user,
+            position=(last.position + 1) if last else 0,
+        )
+        logger.info('personal_expense_sheet.create id=%s user=%s', sheet.id, self.request.user.pk)
+
+    def perform_update(self, serializer):
+        sheet = serializer.save()
+        logger.info('personal_expense_sheet.update id=%s user=%s', sheet.id, self.request.user.pk)
+
+    def destroy(self, request, *args, **kwargs):
+        sheet = self.get_object()
+        if self.get_queryset().count() <= 1:
+            return Response(
+                {'detail': 'لا يمكن حذف الورقة الوحيدة — أعد تسميتها بدلاً من حذفها.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        sheet_id = sheet.id
+        sheet.delete()  # يحذف مصاريف الورقة معها (CASCADE)
+        logger.info('personal_expense_sheet.delete id=%s user=%s', sheet_id, request.user.pk)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class PersonalExpenseCategoryViewSet(PersonalExpenseOwnedViewSet):
+    """كتالوج فئات المستخدم — إضافة وإعادة تسمية؛ المفتاح خادمي لا يُعدَّل."""
+    serializer_class = PersonalExpenseCategorySerializer
+    model = PersonalExpenseCategory
+
+    def list(self, request, *args, **kwargs):
+        PersonalExpenseCategory.ensure_defaults(request.user)
+        return super().list(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        PersonalExpenseCategory.ensure_defaults(self.request.user)
+        last = self.get_queryset().order_by('-position').first()
+        category = serializer.save(
+            user=self.request.user,
+            key=PersonalExpenseCategory.next_key(self.request.user),
+            position=(last.position + 1) if last else 0,
+        )
+        logger.info('personal_expense_category.create id=%s user=%s', category.id, self.request.user.pk)
+
+    def perform_update(self, serializer):
+        category = serializer.save()
+        logger.info('personal_expense_category.update id=%s user=%s', category.id, self.request.user.pk)
+
+    def destroy(self, request, *args, **kwargs):
+        category = self.get_object()
+        in_use = PersonalExpense.objects.filter(user=request.user, category=category.key).exists()
+        if in_use:
+            return Response(
+                {'detail': 'الفئة مستعملة في مصاريف مسجّلة — انقل مصاريفها أولاً.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        category_id = category.id
+        category.delete()
+        logger.info('personal_expense_category.delete id=%s user=%s', category_id, request.user.pk)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 class PersonalExpenseViewSet(viewsets.ModelViewSet):
     """مصاريف المستخدم الشخصية — معزولة عنه وحده، بلا أي أثر محاسبي.
 
@@ -71,7 +163,7 @@ class PersonalExpenseViewSet(viewsets.ModelViewSet):
       حذف لمصاريف غيره، ومدير الشركة ليس استثناءً (لذا 404 لا 403).
     - **بلا TenantRolePermission**: هذه ليست دفاتر الشركة، فقيد «مستعرض قراءة
       فقط» لا محل له هنا — لكل مستخدم مصادَق عليه دفتره.
-    - الفلاتر: `?month=YYYY-MM` أو `?from=&?to=` · `?category=` · `?is_paid=`.
+    - الفلاتر: `?sheet=` · `?month=YYYY-MM` أو `?from=&?to=` · `?category=` · `?is_paid=`.
     """
     authentication_classes = [TokenAuthentication, SessionAuthentication]
     permission_classes = [IsAuthenticated]
@@ -84,6 +176,8 @@ class PersonalExpenseViewSet(viewsets.ModelViewSet):
         qs = PersonalExpense.objects.filter(user=user).order_by('-date', '-id')
 
         params = self.request.query_params
+        if str(params.get('sheet') or '').isdigit():
+            qs = qs.filter(sheet_id=params['sheet'])
         month = params.get('month')
         if month:
             bounds = _month_bounds(month)
@@ -101,7 +195,9 @@ class PersonalExpenseViewSet(viewsets.ModelViewSet):
         return qs
 
     def perform_create(self, serializer):
-        expense = serializer.save(user=self.request.user)
+        # مصروف بلا ورقة يسكن الورقة الأولى — لا صفوف يتيمة خارج التبويبات.
+        sheet = serializer.validated_data.get('sheet') or PersonalExpenseSheet.ensure_default(self.request.user)
+        expense = serializer.save(user=self.request.user, sheet=sheet)
         # بلا عنوان ولا مبلغ — دفتر شخصي، السجل للتتبّع لا للمحتوى.
         logger.info('personal_expense.create id=%s user=%s', expense.id, self.request.user.pk)
 
@@ -125,7 +221,7 @@ class PersonalExpenseViewSet(viewsets.ModelViewSet):
 
         paid = qs.filter(is_paid=True).aggregate(s=Sum('amount'))['s']
         unpaid = qs.filter(is_paid=False).aggregate(s=Sum('amount'))['s']
-        labels = dict(PersonalExpense.CATEGORY_CHOICES)
+        labels = PersonalExpenseCategory.label_map(request.user.pk)
         by_category = [
             {
                 'category': row['category'],

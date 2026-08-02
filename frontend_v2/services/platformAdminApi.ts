@@ -24,6 +24,17 @@ export interface PlatformDashboardData {
   company_rows: PlatformCompanyRow[];
 }
 
+export interface PlatformSuperAdmin {
+  id: number;
+  username: string;
+  email: string;
+  full_name: string;
+  is_active: boolean;
+  /** مصدر الصلاحية: علم على الحساب يُسحب من هنا، أو بريد مُهيّأ في إعدادات المنصة. */
+  source: "flag" | "settings";
+  removable: boolean;
+}
+
 export type DevelopmentNoteStatus = "todo" | "in_progress" | "done";
 export type DevelopmentNotePriority = "low" | "medium" | "high";
 
@@ -51,6 +62,16 @@ export type DevelopmentNoteWrite = Pick<
 
 export const getPlatformDashboard = () =>
   apiGetObject<PlatformDashboardData>("platform/dashboard/");
+
+export const listSuperAdmins = () =>
+  apiGetObject<PlatformSuperAdmin[]>("platform/super-admins/");
+
+/** ترقية مستخدم مسجَّل (باسمه أو بريده) — لا تُنشئ حساباً ولا تمسّ كلمة سر. */
+export const grantSuperAdmin = (identifier: string) =>
+  apiPostObject<PlatformSuperAdmin>("platform/super-admins/", { identifier });
+
+export const revokeSuperAdmin = (id: number) =>
+  apiDelete(`platform/super-admins/${id}/`);
 
 export const listDevelopmentNotes = () =>
   apiGetObject<DevelopmentNote[]>("platform/development-notes/");

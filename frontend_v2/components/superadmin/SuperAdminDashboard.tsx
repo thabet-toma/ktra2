@@ -1,10 +1,15 @@
 import React, { useEffect, useState } from "react";
 import {
   Building2, CheckCircle2, CirclePause, ClipboardList, RefreshCw,
-  ShieldCheck, Users,
+  ShieldCheck, Trash2, UserPlus, Users,
 } from "lucide-react";
 
-import { getPlatformDashboard, type PlatformDashboardData } from "../../services/platformAdminApi";
+import {
+  getPlatformDashboard, grantSuperAdmin, listSuperAdmins, revokeSuperAdmin,
+  type PlatformDashboardData, type PlatformSuperAdmin,
+} from "../../services/platformAdminApi";
+import { useConfirm } from "../../contexts/ConfirmContext";
+import { useToast } from "../../contexts/ToastContext";
 import type { AppView } from "../../types";
 
 
@@ -19,13 +24,25 @@ const statusLabel = (status: string) => ({
 }[status] || status);
 
 export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
+  const toast = useToast();
+  const confirm = useConfirm();
   const [data, setData] = useState<PlatformDashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [admins, setAdmins] = useState<PlatformSuperAdmin[]>([]);
+  const [identifier, setIdentifier] = useState("");
+  const [granting, setGranting] = useState(false);
+
+  const loadAdmins = () => {
+    listSuperAdmins()
+      .then(setAdmins)
+      .catch((cause) => setError(cause instanceof Error ? cause.message : "تعذّر تحميل قائمة السوبر أدمن"));
+  };
 
   const load = () => {
     setLoading(true);
     setError(null);
+    loadAdmins();
     getPlatformDashboard()
       .then(setData)
       .catch((cause) => setError(cause instanceof Error ? cause.message : "تعذّر تحميل لوحة المنصة"))
@@ -33,6 +50,41 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
   };
 
   useEffect(load, []);
+
+  const grant = async () => {
+    const value = identifier.trim();
+    if (!value) return;
+    setGranting(true);
+    setError(null);
+    try {
+      const added = await grantSuperAdmin(value);
+      setAdmins((current) => [...current.filter((row) => row.id !== added.id), added]);
+      setIdentifier("");
+      toast(`صار «${added.full_name}» سوبر أدمن`, "success");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذّرت الترقية");
+    } finally {
+      setGranting(false);
+    }
+  };
+
+  const revoke = async (admin: PlatformSuperAdmin) => {
+    const ok = await confirm({
+      title: "سحب صلاحية السوبر أدمن",
+      message: `سيفقد «${admin.full_name}» الوصول إلى إدارة المنصة. الحساب وعضويات الشركات تبقى كما هي.`,
+      confirmText: "سحب",
+      danger: true,
+    });
+    if (!ok) return;
+    setError(null);
+    try {
+      await revokeSuperAdmin(admin.id);
+      setAdmins((current) => current.filter((row) => row.id !== admin.id));
+      toast("تم سحب الصلاحية", "success");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذّر سحب الصلاحية");
+    }
+  };
 
   if (loading && !data) {
     return <div className="p-8 text-center aseel-text-soft" role="status">جارٍ تحميل لوحة المنصة…</div>;
@@ -85,6 +137,48 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
             <div><p className="text-xs aseel-text-soft">{label}</p><p className="text-2xl font-bold text-[var(--color-text)]">{value}</p></div>
           </article>
         ))}
+      </section>
+
+      <section aria-label="سوبر أدمن المنصة" className="mt-5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-3">
+          <div>
+            <h2 className="font-bold text-[var(--color-text)]">سوبر أدمن المنصة</h2>
+            <p className="text-xs aseel-text-soft">ترقية مستخدم مسجَّل باسمه أو بريده — بلا إنشاء حساب ولا كلمة سر</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <label htmlFor="super-admin-identifier" className="sr-only">اسم المستخدم أو البريد</label>
+            <input
+              id="super-admin-identifier"
+              className="aseel-input h-9 w-56"
+              placeholder="اسم المستخدم أو البريد"
+              value={identifier}
+              onChange={(event) => setIdentifier(event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") void grant(); }}
+            />
+            <button type="button" onClick={() => void grant()} disabled={granting || !identifier.trim()} className="aseel-btn aseel-btn--primary">
+              <UserPlus className="h-4 w-4" aria-hidden="true" /> ترقية
+            </button>
+          </div>
+        </div>
+        <ul className="divide-y divide-[var(--color-border)]">
+          {admins.length === 0 ? (
+            <li className="px-4 py-6 text-center aseel-text-soft">لا سوبر أدمن مسجَّل بعد</li>
+          ) : admins.map((admin) => (
+            <li key={admin.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+              <div>
+                <p className="font-semibold text-[var(--color-text)]">{admin.full_name}</p>
+                <p className="text-xs aseel-text-soft">{admin.username}{admin.email ? ` · ${admin.email}` : ""}</p>
+              </div>
+              {admin.removable ? (
+                <button type="button" onClick={() => void revoke(admin)} className="aseel-iconbtn text-red-600" title="سحب الصلاحية" aria-label={`سحب صلاحية ${admin.full_name}`}>
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              ) : (
+                <span className="text-xs aseel-text-soft">مثبَّت في إعدادات المنصة</span>
+              )}
+            </li>
+          ))}
+        </ul>
       </section>
 
       <section className="mt-5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
