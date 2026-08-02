@@ -10,7 +10,11 @@ export type CustomerNotePriority = 'urgent' | 'medium' | 'normal';
 
 export interface CustomerNote {
   id: number;
-  partner: number;
+  partner: number | null;
+  target_type: string;
+  target_id: string;
+  target_label: string;
+  target_path: string;
   title: string;
   body: string;
   remind_on: string | null;
@@ -37,8 +41,19 @@ export interface CustomerNoteReminder {
   id: number;
   title: string;
   remind_on: string;
-  partner_id: number;
+  partner_id: number | null;
   partner_name: string;
+  target_type?: string;
+  target_id?: string;
+  target_label?: string;
+  target_path?: string;
+}
+
+export interface CustomerNoteTargetInput {
+  target_type: string;
+  target_id: string;
+  target_label: string;
+  target_path: string;
 }
 
 export function listCustomerNotes(partnerId: number | string): Promise<CustomerNote[]> {
@@ -48,8 +63,19 @@ export function listCustomerNotes(partnerId: number | string): Promise<CustomerN
   });
 }
 
+export function listTargetNotes(target: CustomerNoteTargetInput): Promise<CustomerNote[]> {
+  return apiGetList<CustomerNote>('customer-notes/', {
+    tenantId: resolveTenantId(),
+    query: { target_type: target.target_type, target_id: target.target_id },
+  });
+}
+
 export function createCustomerNote(input: {
-  partner: number;
+  partner?: number | null;
+  target_type?: string;
+  target_id?: string;
+  target_label?: string;
+  target_path?: string;
   title: string;
   body?: string;
   remind_on?: string | null;

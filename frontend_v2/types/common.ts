@@ -9,6 +9,8 @@ export type Theme = 'light' | 'dark';
 
 export type AppView =
     | "dashboard"
+    | "super-admin"
+    | "development-notes"
     | "tasks"
     | "task-management"
     | "users"
@@ -85,6 +87,7 @@ export type AppView =
     | "purchase-return"
     | "supplier-payments"
     | "invoice-profits"
+    | "reserved-stock"
     | "partner-profile"
     | "import-flow"
     | "activity-log"

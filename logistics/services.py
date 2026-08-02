@@ -89,26 +89,14 @@ def convert_local_quotation_to_order(quotation, *, user=None):
     return order, True
 
 
-@transaction.atomic
-def convert_purchase_order_to_invoice(order, *, user=None):
-    """أنشئ فاتورة شراء محلية مسودة؛ لا قيد ولا حركة مخزون قبل الترحيل/الاستلام."""
+def _next_purchase_invoice_number(tenant) -> str:
+    """أعلى رقم INV-#### مستعمل لهذه الشركة + 1 — الترقيم لا يعتمد على العدّ."""
     import re
 
-    from logistics.models import PurchaseInvoice, PurchaseInvoiceItem, PurchaseOrder
-
-    order = (
-        PurchaseOrder.objects.select_for_update()
-        .select_related('tenant', 'supplier', 'currency', 'invoice')
-        .prefetch_related('lines__product')
-        .get(pk=order.pk)
-    )
-    if order.invoice_id:
-        return order.invoice, False
-    if order.status != PurchaseOrder.STATUS_CONFIRMED:
-        raise ValidationError('يجب تأكيد طلبية الشراء قبل تحويلها إلى فاتورة.')
+    from logistics.models import PurchaseInvoice
 
     numbers = PurchaseInvoice.objects.filter(
-        tenant=order.tenant,
+        tenant=tenant,
         invoice_number__startswith='INV-',
     ).values_list('invoice_number', flat=True)
     last_number = max(
@@ -119,27 +107,42 @@ def convert_purchase_order_to_invoice(order, *, user=None):
         ),
         default=0,
     )
+    return f'INV-{last_number + 1:04d}'
+
+
+def _draft_purchase_invoice_from_document(
+    source, *, lines, invoice_name, invoice_date, supplier, shipping_cost,
+    user=None, **extra_fields,
+):
+    """فاتورة شراء محلية **مسودة** من مستند سابق (طلبية أو عرض سعر).
+
+    مصدر واحد للطريقين: لا قيد ولا حركة مخزون قبل الترحيل/الاستلام، ونفس عقد
+    البنود والضريبة في الحالتين — فلا تختلف فاتورةٌ عن أخرى بحسب طريق وصولها.
+    """
+    from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
+
     invoice = PurchaseInvoice.objects.create(
-        tenant=order.tenant,
-        invoice_number=f'INV-{last_number + 1:04d}',
-        invoice_name=f'فاتورة من طلبية {order.order_number}',
-        invoice_date=order.order_date,
+        tenant=source.tenant,
+        invoice_number=_next_purchase_invoice_number(source.tenant),
+        invoice_name=invoice_name,
+        invoice_date=invoice_date,
         invoice_type=PurchaseInvoice.INVOICE_TYPE_LOCAL,
-        partner=order.supplier,
-        currency=order.currency,
-        exchange_rate=order.exchange_rate,
-        subtotal=order.subtotal,
-        discount_amount=order.discount_amount,
-        tax_rate=order.tax_rate,
-        tax_amount=order.tax_amount,
-        shipping_cost=order.shipping_cost,
-        shipping_included=order.is_shipping_included,
-        grand_total=order.grand_total,
+        partner=supplier,
+        currency=source.currency,
+        exchange_rate=source.exchange_rate,
+        subtotal=source.subtotal,
+        discount_amount=source.discount_amount,
+        tax_rate=source.tax_rate,
+        tax_amount=source.tax_amount,
+        shipping_cost=shipping_cost,
+        shipping_included=source.is_shipping_included,
+        grand_total=source.grand_total,
         status='draft',
         receipt_status=PurchaseInvoice.RECEIPT_NOT,
-        notes=order.notes,
+        notes=source.notes,
         payment_type=PurchaseInvoice.PAYMENT_TYPE_CREDIT,
         created_by=user if user and getattr(user, 'is_authenticated', False) else None,
+        **extra_fields,
     )
     PurchaseInvoiceItem.objects.bulk_create([
         PurchaseInvoiceItem(
@@ -152,16 +155,106 @@ def convert_purchase_order_to_invoice(order, *, user=None):
             seq=line.seq,
             name_snapshot=line.name_snapshot,
             description_line=line.description_line[:500],
-            line_currency=order.currency,
-            line_exchange_rate=order.exchange_rate,
-            is_taxable=bool(order.tax_rate),
-            vat_percent=order.tax_rate,
+            line_currency=source.currency,
+            line_exchange_rate=source.exchange_rate,
+            is_taxable=bool(source.tax_rate),
+            vat_percent=source.tax_rate,
         )
-        for line in order.lines.all()
+        for line in lines
     ])
+    return invoice
+
+
+@transaction.atomic
+def convert_purchase_order_to_invoice(order, *, user=None):
+    """أنشئ فاتورة شراء محلية مسودة؛ لا قيد ولا حركة مخزون قبل الترحيل/الاستلام."""
+    from logistics.models import PurchaseOrder
+
+    order = (
+        PurchaseOrder.objects.select_for_update()
+        .select_related('tenant', 'supplier', 'currency', 'invoice')
+        .prefetch_related('lines__product')
+        .get(pk=order.pk)
+    )
+    if order.invoice_id:
+        return order.invoice, False
+    if order.status != PurchaseOrder.STATUS_CONFIRMED:
+        raise ValidationError('يجب تأكيد طلبية الشراء قبل تحويلها إلى فاتورة.')
+
+    invoice = _draft_purchase_invoice_from_document(
+        order,
+        lines=order.lines.all(),
+        invoice_name=f'فاتورة من طلبية {order.order_number}',
+        invoice_date=order.order_date,
+        supplier=order.supplier,
+        shipping_cost=order.shipping_cost,
+        user=user,
+    )
     order.invoice = invoice
     order.status = PurchaseOrder.STATUS_CONVERTED
     order.save(update_fields=['invoice', 'status', 'updated_at'])
+    logger.info(
+        'purchase_order.to_invoice order=%s invoice=%s tenant=%s',
+        order.pk, invoice.pk, order.tenant_id,
+    )
+    return invoice, True
+
+
+@transaction.atomic
+def convert_local_quotation_to_invoice(quotation, *, user=None):
+    """عرض شراء محلي مقبول → فاتورة شراء مسودة **مباشرةً** (بلا طلبية وسيطة).
+
+    الطريق الثاني إلى جانب `convert_local_quotation_to_order`: المشتري الذي
+    وصلته البضاعة مع العرض لا يلزمه اختلاق طلبية ليصل إلى فاتورة. قفل صف العرض
+    + OneToOne على المصدر يجعلان العملية ذرّية ومتكررة بأمان.
+    """
+    from logistics.models import PurchaseInvoice, PurchaseOrder, SupplierQuotation
+
+    quotation = (
+        SupplierQuotation.objects.select_for_update()
+        .select_related('tenant', 'supplier', 'currency')
+        .prefetch_related('lines__product')
+        .get(pk=quotation.pk)
+    )
+    try:
+        return quotation.local_invoice, False
+    except PurchaseInvoice.DoesNotExist:
+        pass
+
+    if quotation.scope != SupplierQuotation.SCOPE_LOCAL:
+        raise ValidationError('يمكن تحويل عروض الشراء المحلية فقط إلى فاتورة شراء.')
+    if quotation.status != SupplierQuotation.STATUS_ACCEPTED:
+        raise ValidationError('يجب اعتماد عرض الشراء قبل تحويله إلى فاتورة.')
+    try:
+        existing_order = quotation.local_order
+    except PurchaseOrder.DoesNotExist:
+        existing_order = None
+    if existing_order is not None:
+        raise ValidationError(
+            f'عرض السعر {quotation.quotation_number} محوَّل إلى طلبية '
+            f'{existing_order.order_number} — حوّل الطلبية إلى فاتورة.'
+        )
+
+    lines = list(quotation.lines.all())
+    if not lines:
+        raise ValidationError('لا يمكن تحويل عرض سعر بلا أصناف.')
+
+    invoice = _draft_purchase_invoice_from_document(
+        quotation,
+        lines=lines,
+        invoice_name=f'فاتورة من عرض سعر {quotation.quotation_number}',
+        invoice_date=quotation.quotation_date,
+        supplier=quotation.supplier,
+        shipping_cost=quotation.shipping_cost_estimate,
+        user=user,
+        source_quotation=quotation,
+    )
+    quotation.status = SupplierQuotation.STATUS_CONVERTED
+    quotation.save(update_fields=['status', 'updated_at'])
+    logger.info(
+        'supplier_quotation.to_invoice quotation=%s invoice=%s tenant=%s',
+        quotation.pk, invoice.pk, quotation.tenant_id,
+    )
     return invoice, True
 
 

@@ -261,7 +261,8 @@ export const SalesQuotationsPage: React.FC = () => {
       // (getAccounts) بدل الأصناف — يُصحَّح إلى أصناف المخزون (inventory/products).
       const tenantId = resolveTenantId();
       const [parts, prods] = await Promise.all([
-        accountingApi.getPartners() as Promise<Partner[]>,
+        // T-PARTYPURE: عرض سعر بيع = زبائن فقط.
+        accountingApi.getPartners("Customer") as Promise<Partner[]>,
         apiGetList<SqlProduct & { sale_price?: string; selling_price?: string }>(
           "inventory/products/",
           { tenantId }

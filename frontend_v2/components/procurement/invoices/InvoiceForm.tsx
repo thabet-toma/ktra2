@@ -2248,6 +2248,31 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               value={formData.dealNumber}
             />
           )}
+          {/* T-PLINEAGE: الفاتورة كانت صامتة عن أصلها — الآن تقول من أين جاءت
+              وتفتح المستند الأب (والجدّ إن كانت الطلبية نفسها وليدة عرض). */}
+          {formData.sourceDocument && fld(
+            formData.sourceDocument.kind === "order" ? "أُنشئت من طلبية شراء" : "أُنشئت من عرض سعر",
+            <div className="flex flex-col gap-1">
+              <button
+                type="button"
+                data-testid="open-source-document"
+                className="inline-flex h-8 w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-3 text-xs font-bold text-white shadow-sm transition-colors hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1"
+                title={`فتح المستند المصدر ${formData.sourceDocument.number}`}
+                onClick={() => openInNewTab(
+                  `/price-offers?doc=${formData.sourceDocument!.kind === "order" ? "order" : "quote"}-${formData.sourceDocument!.id}`
+                )}
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                <span>فتح المستند المصدر</span>
+                <b dir="ltr">{formData.sourceDocument.number}</b>
+              </button>
+              {formData.sourceDocument.originNumber && (
+                <span className="text-[10px] text-[var(--aseel-ink-soft)]">
+                  الطلبية نفسها من عرض السعر {formData.sourceDocument.originNumber}
+                </span>
+              )}
+            </div>
+          )}
           {shipmentLinkId && fld(
             "الشحنة المرتبطة",
             <div className="flex items-center">

@@ -27,15 +27,22 @@ export async function runCustomerNoteReminders(userId: string): Promise<void> {
     } catch {
       /* خاصية خاصة */
     }
+    const partnerTarget = r.partner_id != null;
     await notificationsService.addNotification({
       userId: "all_managers",
-      title: `تذكير زبون: ${r.partner_name}`,
+      title: partnerTarget
+        ? `تذكير طرف: ${r.partner_name}`
+        : `تذكير: ${r.target_label || "المنصة"}`,
       message: r.title,
-      type: "customer_note_reminder",
-      targetView: "partner-profile",
-      targetId: String(r.partner_id),
-      targetTab: "customer_notes",
-      targetSecondaryId: String(r.id),
+      type: partnerTarget ? "customer_note_reminder" : "platform_note_reminder",
+      ...(partnerTarget
+        ? {
+            targetView: "partner-profile" as const,
+            targetId: String(r.partner_id),
+            targetTab: "customer_notes",
+            targetSecondaryId: String(r.id),
+          }
+        : { targetPath: r.target_path || "/dashboard" }),
     });
     try {
       localStorage.setItem(dedupe, "1");

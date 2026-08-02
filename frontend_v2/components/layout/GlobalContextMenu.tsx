@@ -21,7 +21,10 @@ import {
   Coins,
   Zap,
   ChevronLeft,
+  BookOpen,
+  ClipboardList,
 } from "lucide-react";
+import { partnerActionGroups, type PartnerActionIcon } from "../../utils/partnerActions";
 import { AppView, User } from "../../types";
 import { clientLogger } from "../../services/logger";
 import { buildQuickActionGroups, visibleQuickActionGroups, QuickAction } from "./quickActions";
@@ -252,22 +255,40 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
     navigate(`/partners/${p.id}`);
   };
 
-  const partnerEntries = (p: PartnerContext): MenuEntry[] => {
-    if (p.kind === "customer") {
-      return [
-        { kind: "item", key: "p-card", label: `بطاقة: ${p.name || "العميل"}`, icon: <UserRound className={ICON} />, onClick: goUrl(`/partners/${p.id}`) },
-        { kind: "item", key: "p-invoice", label: "فاتورة مبيعات", icon: <FilePlus2 className={ICON} />, onClick: goUrl(`/sales/invoices/new?customer_id=${p.id}`) },
-        { kind: "item", key: "p-receipt", label: "سند قبض", icon: <ReceiptText className={ICON} />, onClick: run(() => openPartnerModal(p, "receipt")) },
-        { kind: "item", key: "p-quote", label: "عرض سعر", icon: <FileText className={ICON} />, onClick: goUrl(`/sales/quotations?action=new&customer_id=${p.id}`) },
-        { kind: "item", key: "p-statement", label: "كشف حساب", icon: <FileText className={ICON} />, onClick: goUrl(`/partners/${p.id}`) },
-      ];
+  /** أيقونة الإجراء من مفتاحه — الطبقة المشتركة نقيّة بلا React فتُعيد مفاتيح. */
+  const actionIcon = (icon: PartnerActionIcon): React.ReactNode => {
+    switch (icon) {
+      case "card": return <UserRound className={ICON} />;
+      case "statement": return <FileText className={ICON} />;
+      case "ledger": return <BookOpen className={ICON} />;
+      case "invoice": return <FilePlus2 className={ICON} />;
+      case "quotation": return <FileText className={ICON} />;
+      case "order": return <ClipboardList className={ICON} />;
+      case "receipt": return <ReceiptText className={ICON} />;
+      case "payment": return <HandCoins className={ICON} />;
+      default: return <ShoppingCart className={ICON} />;
     }
-    return [
-      { kind: "item", key: "p-card", label: `بطاقة: ${p.name || "المورد"}`, icon: <UserRound className={ICON} />, onClick: goUrl(`/partners/${p.id}`) },
-      { kind: "item", key: "p-purchase", label: "فاتورة شراء", icon: <ShoppingCart className={ICON} />, onClick: goUrl(`/purchase-invoices/new`) },
-      { kind: "item", key: "p-payment", label: "سند صرف", icon: <HandCoins className={ICON} />, onClick: run(() => openPartnerModal(p, "payment")) },
-      { kind: "item", key: "p-statement", label: "كشف حساب", icon: <FileText className={ICON} />, onClick: goUrl(`/partners/${p.id}`) },
-    ];
+  };
+
+  // T-COAMENU: الإجراءات من `utils/partnerActions` — نفس المصدر الذي تستهلكه
+  // شجرة الحسابات، فلا تفترق قائمتان على نفس الطرف.
+  const partnerEntries = (p: PartnerContext): MenuEntry[] => {
+    const entries: MenuEntry[] = [];
+    partnerActionGroups({ id: p.id, name: p.name, kind: p.kind }).forEach((group, gi) => {
+      if (gi > 0) entries.push({ kind: "sep" });
+      group.actions.forEach((action) => {
+        entries.push({
+          kind: "item",
+          key: `p-${action.key}`,
+          label: action.label,
+          icon: actionIcon(action.icon),
+          onClick: action.bridge
+            ? run(() => openPartnerModal(p, action.bridge!))
+            : goUrl(action.href || `/partners/${p.id}`),
+        });
+      });
+    });
+    return entries;
   };
 
   // ————— إجراءات الصنف (بطاقة الصنف + تكلفته — روابط موجودة أصلاً) —————

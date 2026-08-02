@@ -5,7 +5,7 @@
  */
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { PriceOffer, PriceOfferItem, PriceOfferStatus, PriceOfferType, Supplier, Item } from "../../../types";
-import type { PriceOfferAttachment } from "../../../types/offer";
+import type { PriceOfferAttachment, PriceOfferNote } from "../../../types/offer";
 import type { PriceOfferScope } from "../../../services/firestoreService";
 import {
   AseelAutocomplete,
@@ -15,8 +15,9 @@ import {
 } from "../../aseel";
 import {
   Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Search, Info,
-  FileText, Upload, Link2,
+  FileText, Upload, Link2, Plus,
 } from "lucide-react";
+import { formatDateValue } from "../../../utils/formatDate";
 import { ItemSearchModal, productToItem } from "./ItemSearchModal";
 import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
 import { ProductCardModal } from "../../shared/ProductCardModal";
@@ -48,6 +49,23 @@ const IMPORT_STATUS_LABELS: Record<string, string> = {
   under_discussion: "قيد المناقشة", approved_for_shipping: "ملائم", rejected: "غير ملائم",
 };
 
+/**
+ * T-OFFERSTATE: حالتان لا تكفيهما التسمية — «غير ملائم» تلزمها **لماذا**،
+ * و«بانتظار معلومات» تلزمها **بانتظار ماذا**. نفس قاعدة الخادم
+ * (`SupplierQuotationSerializer.validate`) كي لا تختلف الواجهة عنه.
+ */
+const STATUS_NEEDS_DETAIL: PriceOfferStatus[] = ["rejected", "pending_info"];
+
+const STATUS_DETAIL_LABEL: Partial<Record<PriceOfferStatus, string>> = {
+  rejected: "سبب عدم الملاءمة",
+  pending_info: "بانتظار ماذا؟",
+};
+
+const STATUS_DETAIL_PLACEHOLDER: Partial<Record<PriceOfferStatus, string>> = {
+  rejected: "مثال: السعر أعلى من السوق بـ20% / مدة التسليم 90 يوماً",
+  pending_info: "مثال: بانتظار شهادة المنشأ / عيّنة من المصنع / سعر الشحن",
+};
+
 type LineItem = PriceOfferItem & { key: string };
 const newLineKey = () => `ln-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 const blankLine = (): LineItem => ({
@@ -68,7 +86,6 @@ interface Props {
   saving?: boolean;
   onSave: (offer: Partial<PriceOffer>) => void | Promise<void>;
   onCancel: () => void;
-  onStatusChangeRequest?: (offer: Partial<PriceOffer>, newStatus: PriceOfferStatus) => void;
 }
 
 import { formatMoney, formatNumber } from "@/utils/formatNumber";
@@ -76,9 +93,11 @@ const fmt = (n: number) => formatMoney(n);
 
 export const PriceOfferForm: React.FC<Props> = ({
   offer, items, suppliers, isReadOnly = false, saving = false,
-  scope = "purchase", onSave, onCancel, onStatusChangeRequest,
+  scope = "purchase", onSave, onCancel,
 }) => {
   const [offerNumber, setOfferNumber] = useState(offer.offerNumber || "");
+  const [orderName, setOrderName] = useState(offer.orderName || "");
+  const [orderDescription, setOrderDescription] = useState(offer.orderDescription || "");
   const [supplierId, setSupplierId] = useState(offer.supplierId || "");
   const [factoryName, setFactoryName] = useState(offer.factoryName || "");
   const [offerDate, setOfferDate] = useState(
@@ -103,6 +122,9 @@ export const PriceOfferForm: React.FC<Props> = ({
   const [uploading, setUploading] = useState(false);
   const [previewFile, setPreviewFile] = useState<PriceOfferAttachment | null>(null);
   const [internalNotes, setInternalNotes] = useState(offer.internalNotes || "");
+  // T-OFFERSTATE: دفتر ملاحظات مؤرَّخ — ملاحظة واحدة تُدهس لا تكفي متابعةَ مورد.
+  const [notesLog, setNotesLog] = useState<PriceOfferNote[]>(offer.notesLog || []);
+  const [newNote, setNewNote] = useState("");
   const [taxRate, setTaxRate] = useState(String(offer.taxRate ?? 0));
   const [discountAmount, setDiscountAmount] = useState(String(offer.discountAmount ?? 0));
   const [lines, setLines] = useState<LineItem[]>(() =>
@@ -123,6 +145,8 @@ export const PriceOfferForm: React.FC<Props> = ({
   // إعادة تحميل عند تغيير offer prop
   useEffect(() => {
     setOfferNumber(offer.offerNumber || "");
+    setOrderName(offer.orderName || "");
+    setOrderDescription(offer.orderDescription || "");
     setSupplierId(offer.supplierId || "");
     setFactoryName(offer.factoryName || "");
     setOfferDate(offer.offerDate || new Date().toISOString().slice(0, 10));
@@ -140,6 +164,8 @@ export const PriceOfferForm: React.FC<Props> = ({
     setSupplierContact(offer.supplierContact || "");
     setDecisionReason(offer.decisionReason || "");
     setAttachments(offer.attachments || []);
+    setNotesLog(offer.notesLog || []);
+    setNewNote("");
     setInternalNotes(offer.internalNotes || "");
     setTaxRate(String(offer.taxRate ?? 0));
     setDiscountAmount(String(offer.discountAmount ?? 0));
@@ -168,6 +194,8 @@ export const PriceOfferForm: React.FC<Props> = ({
   const buildPayload = useCallback((): Partial<PriceOffer> => ({
     ...offer,
     offerNumber,
+    orderName: orderName.trim(),
+    orderDescription: orderDescription.trim(),
     supplierId,
     factoryName: selectedSupplier?.tradeName || factoryName,
     offerType,
@@ -182,8 +210,11 @@ export const PriceOfferForm: React.FC<Props> = ({
     shippingIncluded,
     alibabaLink: alibabaLink.trim(),
     supplierContact: supplierContact.trim(),
-    decisionReason: status === "rejected" ? decisionReason.trim() : "",
+    // T-OFFERSTATE: التفصيل يلزم حالتين — «غير ملائم» (لماذا) و«بانتظار معلومات»
+    // (بانتظار ماذا)؛ وما عداهما يُمحى كي لا يبقى تفصيل حالة سابقة معلّقاً.
+    decisionReason: STATUS_NEEDS_DETAIL.includes(status) ? decisionReason.trim() : "",
     attachments,
+    notesLog,
     deliveryDays: deliveryDays ? Number(deliveryDays) : undefined,
     internalNotes,
     taxRate: Number(taxRate) || 0,
@@ -207,7 +238,7 @@ export const PriceOfferForm: React.FC<Props> = ({
     updatedAt: new Date().toISOString(),
     createdAt: offer.createdAt || new Date().toISOString(),
     createdBy: offer.createdBy || "user",
-  }), [offer, offerNumber, supplierId, factoryName, selectedSupplier, supplierAddress, offerType, offerDate, validUntil,
+  }), [offer, offerNumber, orderName, orderDescription, supplierId, factoryName, selectedSupplier, supplierAddress, offerType, offerDate, validUntil,
     currency, exchangeRate, status, shippingMethod, paymentMethod, shippingCost, shippingIncluded,
     alibabaLink, supplierContact, decisionReason, attachments,
     deliveryDays, internalNotes, taxRate, discountAmount, subtotal, tax, grandTotal, lines]);
@@ -221,8 +252,11 @@ export const PriceOfferForm: React.FC<Props> = ({
     // T-IMPOFFER: «غير ملائم» بلا سبب لا يُحفظ في نطاق الاستيراد — الخادم يرفضه
     // أيضاً، والتحقّق هنا يوفّر رحلة شبكة ويضع الرسالة قرب الحقل. الشراء المحلي
     // لم يُطلب تغييره فيبقى السبب اختيارياً فيه.
-    if (scope === "import" && status === "rejected" && !decisionReason.trim()) {
-      setErr("اذكر سبب اعتبار العرض غير ملائم.");
+    // T-OFFERSTATE: و«بانتظار معلومات» تلزمها كتابة ما يُنتظَر — نفس القاعدة.
+    if (scope === "import" && needsDetail && !decisionReason.trim()) {
+      setErr(status === "rejected"
+        ? "اذكر سبب اعتبار العرض غير ملائم."
+        : "اذكر ما تنتظره من المورد.");
       return;
     }
     setErr(null); setMsg(null);
@@ -402,12 +436,71 @@ export const PriceOfferForm: React.FC<Props> = ({
     </div>
   ) : null;
 
+  /**
+   * T-OFFERSTATE: الملاحظات كانت مربّعاً واحداً قصيراً يُدهس عند كل تعديل.
+   * الآن: ملاحظة عامة أطول + **دفتر ملاحظات مؤرَّخ** يُضاف إليه بلا حدّ —
+   * متابعة المورد سلسلةُ أحداث لا سطرٌ أخير.
+   */
+  const addNote = () => {
+    const text = newNote.trim();
+    if (!text) return;
+    // بلا تاريخ هنا: الخادم يختمه عند الحفظ (ساعة المتصفح ليست مصدراً موثوقاً).
+    setNotesLog((current) => [...current, { text }]);
+    setNewNote("");
+  };
+
   const notesTab = (
-    <div className="px-1 py-2">
-      <textarea className="aseel-input w-full" rows={4}
-        disabled={isReadOnly} value={internalNotes}
-        onChange={(e) => setInternalNotes(e.target.value)}
-        placeholder="ملاحظات داخلية…" />
+    <div className="space-y-3 px-1 py-2">
+      <label className="aseel-field">
+        <span className="aseel-field-label">ملاحظة عامة على العرض</span>
+        <textarea className="aseel-input w-full" rows={6}
+          disabled={isReadOnly} value={internalNotes}
+          onChange={(e) => setInternalNotes(e.target.value)}
+          placeholder="ملاحظات داخلية…" />
+      </label>
+
+      <div className="space-y-2">
+        <span className="aseel-field-label">
+          دفتر الملاحظات {notesLog.length > 0 && `(${notesLog.length})`}
+        </span>
+        {!isReadOnly && (
+          <div className="flex items-start gap-2">
+            <textarea className="aseel-input w-full" rows={3}
+              value={newNote} onChange={(e) => setNewNote(e.target.value)}
+              placeholder="أضف ملاحظة جديدة… (تُحفظ بتاريخها)" />
+            <button type="button" className="aseel-btn shrink-0"
+              disabled={!newNote.trim()} onClick={addNote}
+              title="إضافة ملاحظة مؤرَّخة">
+              <Plus className="h-4 w-4" /> إضافة
+            </button>
+          </div>
+        )}
+        {notesLog.length === 0 ? (
+          <p className="aseel-hint">لا ملاحظات بعد — أضف ملاحظة لتبقى مؤرَّخة في سجل العرض.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {notesLog.map((note, index) => (
+              <li key={`${note.at || "new"}-${index}`}
+                className="flex items-start justify-between gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1.5">
+                <div className="min-w-0 flex-1">
+                  <div className="whitespace-pre-wrap break-words text-xs aseel-text-ink">{note.text}</div>
+                  <div className="mt-0.5 text-[10px] aseel-text-soft">
+                    {note.at ? formatDateValue(note.at) : "ستُؤرَّخ عند الحفظ"}
+                    {note.by ? ` · ${note.by}` : ""}
+                  </div>
+                </div>
+                {!isReadOnly && (
+                  <button type="button" className="aseel-iconbtn aseel-iconbtn--danger"
+                    onClick={() => setNotesLog((current) => current.filter((_, i) => i !== index))}
+                    title="حذف الملاحظة">
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 
@@ -525,7 +618,12 @@ export const PriceOfferForm: React.FC<Props> = ({
     </div>
   );
 
-  /** T-IMPOFFER: قرار الملاءمة وسببه — يُقرأ داخل العرض لا في القائمة وحدها. */
+  /**
+   * T-IMPOFFER: حالة العرض وتفصيلها — تُقرأ داخل العرض لا في القائمة وحدها.
+   * T-OFFERSTATE: صارت «الحالة» لا «القرار»: الانتظار والمناقشة حالتان قبل أي
+   * قرار، و«بانتظار معلومات» تلزمها كتابة ما يُنتظَر كي يظهر في القائمة.
+   */
+  const needsDetail = STATUS_NEEDS_DETAIL.includes(status);
   const decisionTab = (
     <div className="space-y-2 px-1 py-2">
       <p className="aseel-hint">
@@ -533,16 +631,21 @@ export const PriceOfferForm: React.FC<Props> = ({
           ? "هذا العرض غير ملائم — سيظهر مشطوباً في القائمة."
           : status === "approved_for_shipping"
             ? "هذا العرض ملائم — يمكن تحويله إلى صفقة استيراد من قائمة العروض."
-            : "لم يُتَّخذ قرار الملاءمة بعد."}
+            : status === "pending_info"
+              ? "العرض موقوف بانتظار معلومات — اكتب ما تنتظره ليظهر بجانب الحالة في القائمة."
+              : status === "under_discussion"
+                ? "العرض قيد المناقشة مع المورد — لم يُتَّخذ قرار بعد."
+                : "لم تُحدَّد حالة العرض بعد."}
       </p>
       <label className="aseel-field">
         <span className="aseel-field-label">
-          سبب عدم الملاءمة {status === "rejected" ? "*" : ""}
+          {STATUS_DETAIL_LABEL[status] || "تفصيل الحالة"} {needsDetail ? "*" : ""}
         </span>
-        <textarea className="aseel-input w-full" rows={3}
-          disabled={isReadOnly || status !== "rejected"}
+        <textarea className="aseel-input w-full" rows={4}
+          disabled={isReadOnly || !needsDetail}
           value={decisionReason} onChange={(e) => setDecisionReason(e.target.value)}
-          placeholder="مثال: السعر أعلى من السوق بـ20% / مدة التسليم 90 يوماً" />
+          placeholder={STATUS_DETAIL_PLACEHOLDER[status]
+            || "يُكتب عند «غير ملائم» أو «بانتظار معلومات»"} />
       </label>
     </div>
   );
@@ -555,6 +658,20 @@ export const PriceOfferForm: React.FC<Props> = ({
       label: "رقم العرض",
       control: <input className="aseel-input aseel-input--hl" disabled={isReadOnly}
         value={offerNumber} onChange={(e) => setOfferNumber(e.target.value)} placeholder="تلقائي" />,
+    },
+    {
+      key: "orderName",
+      label: "اسم الطلبية",
+      control: <input className="aseel-input" disabled={isReadOnly}
+        value={orderName} onChange={(e) => setOrderName(e.target.value)}
+        maxLength={200} placeholder="مثال: طلبية أثاث مكتبي" />,
+    },
+    {
+      key: "orderDescription",
+      label: "وصف الطلبية",
+      control: <textarea className="aseel-input min-h-16 resize-y" disabled={isReadOnly}
+        value={orderDescription} onChange={(e) => setOrderDescription(e.target.value)}
+        placeholder="وصف مختصر يوضح محتوى الطلبية والغرض منها" />,
     },
     {
       key: "date",
@@ -620,7 +737,8 @@ export const PriceOfferForm: React.FC<Props> = ({
     },
     {
       key: "status",
-      label: scope === "import" ? "قرار الملاءمة" : "الحالة",
+      // T-OFFERSTATE: «الحالة» لا «القرار» — الانتظار والمناقشة حالتان قبل القرار.
+      label: "الحالة",
       control: (
         <select className="aseel-input" disabled={isReadOnly}
           value={status} onChange={(e) => setStatus(e.target.value as PriceOfferStatus)}>
@@ -655,7 +773,7 @@ export const PriceOfferForm: React.FC<Props> = ({
           label: attachments.length ? `الملفات (${attachments.length})` : "الملفات",
           content: attachmentsTab,
         },
-        { key: "decision", label: "قرار الملاءمة", content: decisionTab },
+        { key: "decision", label: "الحالة", content: decisionTab },
       ]}
       totals={
         <>

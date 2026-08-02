@@ -2,6 +2,8 @@ export interface AccountingLinkedPartner {
   id: number;
   trade_name: string;
   legal_name: string | null;
+  /** T-COAMENU: يقود إجراءات كبسة اليمين (عميل ⇒ بيع، مورد ⇒ شراء). */
+  partner_type?: string;
 }
 
 export interface AccountingAccount {

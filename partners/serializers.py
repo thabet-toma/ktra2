@@ -64,7 +64,7 @@ def find_partner_with_similar_bank_account(
 
 
 class CustomerNoteSerializer(serializers.ModelSerializer):
-    """ملاحظة/تذكير على بطاقة الزبون (CRM)."""
+    """ملاحظة/تذكير على طرف أو هدف عام داخل المنصة."""
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
     priority_display = serializers.CharField(source='get_priority_display', read_only=True)
 
@@ -72,6 +72,7 @@ class CustomerNoteSerializer(serializers.ModelSerializer):
         model = CustomerNote
         fields = [
             'id', 'partner', 'title', 'body', 'remind_on', 'is_done',
+            'target_type', 'target_id', 'target_label', 'target_path',
             'priority', 'priority_display',
             'created_by', 'created_by_name', 'created_at', 'updated_at',
         ]
@@ -79,6 +80,42 @@ class CustomerNoteSerializer(serializers.ModelSerializer):
             'id', 'created_by', 'created_by_name', 'priority_display',
             'created_at', 'updated_at',
         ]
+        extra_kwargs = {
+            'partner': {'required': False, 'allow_null': True},
+        }
+
+    def validate_target_path(self, value):
+        value = str(value or '').strip()
+        if value and (
+            not value.startswith('/') or value.startswith('//') or '\\' in value
+            or any(ord(char) < 32 for char in value)
+        ):
+            raise serializers.ValidationError('مسار الهدف يجب أن يكون رابطاً داخلياً يبدأ بـ /.')
+        return value
+
+    def validate(self, attrs):
+        request = self.context.get('request')
+        tenant = get_tenant(request) if request is not None else None
+        instance = self.instance
+        partner = attrs.get('partner', getattr(instance, 'partner', None))
+        if partner is not None and tenant is not None and partner.tenant_id != tenant.TenantID:
+            raise serializers.ValidationError({'partner': 'الطرف لا يتبع الشركة المحددة.'})
+
+        target_fields = ('target_type', 'target_id', 'target_label', 'target_path')
+        target = {
+            field: str(attrs.get(field, getattr(instance, field, '')) or '').strip()
+            for field in target_fields
+        }
+        for field, value in target.items():
+            if field in attrs:
+                attrs[field] = value
+        if partner is None:
+            missing = [field for field, value in target.items() if not value]
+            if missing:
+                raise serializers.ValidationError({
+                    field: 'هذا الحقل مطلوب للملاحظة العامة.' for field in missing
+                })
+        return attrs
 
 class PartnerBankAccountSerializer(serializers.ModelSerializer):
     class Meta:

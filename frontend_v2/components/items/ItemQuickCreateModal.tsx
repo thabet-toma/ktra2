@@ -10,14 +10,16 @@ export type ItemQuickCreateModalProps = {
   initialName?: string;
   /** task18: إنشاء الصنف تحت فئة محددة (من الشجرة) — يُرسَل كـ category. */
   categoryId?: string | number | null;
+  /** T-SERVICELINE: فتح النافذة على «بند خدمة» (مدخل «إضافة خدمة» من الفاتورة). */
+  initialIsService?: boolean;
 };
 
-export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOpen, onClose, onSaved, initialName, categoryId }) => {
+export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOpen, onClose, onSaved, initialName, categoryId, initialIsService = false }) => {
   const [nameAr, setNameAr] = useState(initialName || "");
   const [nameEn, setNameEn] = useState("");
   const [uom, setUom] = useState("عدد");
   const [salePrice, setSalePrice] = useState("");
-  const [isService, setIsService] = useState(false);
+  const [isService, setIsService] = useState(initialIsService);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

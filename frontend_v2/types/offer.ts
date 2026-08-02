@@ -17,9 +17,19 @@ export interface PriceOfferAttachment {
     size?: number;
 }
 
+/** T-OFFERSTATE: ملاحظة مؤرَّخة على العرض — `at`/`by` يُختمان في الخادم. */
+export interface PriceOfferNote {
+    text: string;
+    at?: string;
+    by?: string;
+}
+
 export interface PriceOffer {
     id: string;
     offerNumber: string;
+    /** اسم ووصف الطلبية اللذان يعرّفان الغرض منها في القائمة والبحث. */
+    orderName?: string;
+    orderDescription?: string;
     supplierId: string;
     factoryName?: string;
     offerType?: PriceOfferType;
@@ -47,6 +57,9 @@ export interface PriceOffer {
     /** رقم المستند الناتج عن التحويل (فاتورة الشراء / الطلبية / الصفقة) — يُعرض
      *  بجانب الحالة كي يظهر أثر «تحويل» بدل أن يبدو كأنه لم يحدث. */
     linkedDocNumber?: string;
+    /** T-PLINEAGE: نوع المستند الناتج ومعرّفه — الرقم وحده لا يُفتح بنقرة. */
+    linkedDocKind?: "invoice" | "order" | "deal";
+    linkedDocId?: number;
     /** T-IMPOFFER: مصدر التسعير — يُنقل إلى الصفقة عند التحويل. */
     alibabaLink?: string;
     /** T-IMPOFFER: رقم التواصل مع مندوب المورد لهذا العرض. */
@@ -55,6 +68,8 @@ export interface PriceOffer {
     decisionReason?: string;
     /** T-IMPOFFER: ملفات العرض المرفوعة (PDF/صور). */
     attachments?: PriceOfferAttachment[];
+    /** T-OFFERSTATE: دفتر ملاحظات مؤرَّخ (بدل ملاحظة واحدة تُدهس عند كل تعديل). */
+    notesLog?: PriceOfferNote[];
     internalNotes?: string;
     subtotal: number;
     discountAmount: number;

@@ -82,7 +82,7 @@ class AccountViewSet(viewsets.ModelViewSet):
             Prefetch(
                 "linked_partners",
                 queryset=Partner.objects.filter(tenant=tenant).only(
-                    "id", "name", "legal_name", "linked_account_id",
+                    "id", "name", "legal_name", "partner_type", "linked_account_id",
                 ),
                 to_attr="_api_linked_partners",
             )

@@ -25,6 +25,8 @@ import { GlobalActionBar } from './GlobalActionBar';
 import { GlobalContextMenu } from './GlobalContextMenu';
 import { NotificationCenter } from '../notifications/NotificationCenter';
 import { WhatsNewButton } from './WhatsNewButton';
+import { CustomerNotesTab } from '../partners/CustomerNotesTab';
+import { platformNoteTarget, type PlatformNoteTarget } from '../../utils/entityLinks';
 import {
   User as UserIcon,
   Calendar,
@@ -50,6 +52,7 @@ import {
   History,
   Truck,
   Package,
+  NotebookPen,
   type LucideIcon,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
@@ -128,6 +131,17 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 }) => {
   const { logout } = useAuth();
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
+  const [notesTarget, setNotesTarget] = useState<PlatformNoteTarget | null>(null);
+
+  const openPlatformNotes = () => {
+    const heading = document.querySelector<HTMLElement>('main h1, main h2, main h3')
+      ?.textContent?.trim();
+    setNotesTarget(platformNoteTarget(
+      window.location.pathname,
+      window.location.search,
+      heading || document.title || 'الصفحة الحالية',
+    ));
+  };
   // task16 D14: اختصارات الوصول السريع (قابلة للتهيئة من الإعدادات)
   const [shortcuts, setShortcuts] = useState<AppView[]>(() => getQuickShortcuts());
   useEffect(() => {
@@ -197,6 +211,15 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           <GlobalSearch userRole={user.role} onNavigate={onNavigate} />
           {/* ما الجديد — لوحة تشرح آخر التحديثات */}
           <WhatsNewButton />
+          <button
+            type="button"
+            onClick={openPlatformNotes}
+            className="flex items-center justify-center rounded-md p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
+            title="ملاحظة / تذكير على الصفحة الحالية"
+            aria-label="ملاحظة أو تذكير على الصفحة الحالية"
+          >
+            <NotebookPen className="h-4 w-4" />
+          </button>
           {/* إشعارات الموقع (الجرس) — تذكيرات الزبائن/الشحنات */}
           <NotificationCenter currentUserId={user.id} onNavigate={onNavigate} />
           {/* ثوابت المجموعة — زر مرئي بديل للمفتاح F11 */}
@@ -284,6 +307,40 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
 
       {/* قائمة زر الفأرة اليمنى العامّة — تعمل في كامل الموقع (تُستثنى الحقول والقوائم الموضعية) */}
       <GlobalContextMenu user={user} onNavigate={onNavigate} />
+      {notesTarget && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 p-3"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setNotesTarget(null);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="platform-notes-title"
+            className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] shadow-xl"
+          >
+            <header className="flex items-center justify-between border-b border-[var(--color-border)] px-4 py-3">
+              <div>
+                <h2 id="platform-notes-title" className="text-sm font-bold">ملاحظات وتذكيرات الصفحة</h2>
+                <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">{notesTarget.target_label}</p>
+              </div>
+              <button
+                type="button"
+                autoFocus
+                className="aseel-toolbtn"
+                onClick={() => setNotesTarget(null)}
+                aria-label="إغلاق ملاحظات الصفحة"
+              >
+                إغلاق
+              </button>
+            </header>
+            <div className="overflow-y-auto">
+              <CustomerNotesTab target={notesTarget} />
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 };

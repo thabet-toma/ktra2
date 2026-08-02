@@ -15,6 +15,9 @@ export type ProcurementScope = "local" | "import";
 export type SupplierQuotationStatus =
   | "draft"
   | "sent"
+  /** T-OFFERSTATE: حالتان حقيقيتان بعد أن كانتا تُسقَطان على `sent`. */
+  | "pending_info"
+  | "under_discussion"
   | "accepted"
   | "rejected"
   | "expired"
@@ -37,6 +40,8 @@ export interface SupplierQuotationDto {
   id: number;
   scope: ProcurementScope;
   quotation_number: string;
+  order_name?: string;
+  order_description?: string;
   supplier: number;
   supplier_name?: string;
   quotation_date: string;
@@ -65,8 +70,13 @@ export interface SupplierQuotationDto {
   supplier_contact?: string;
   decision_reason?: string;
   attachments?: SupplierQuotationAttachmentDto[];
+  /** T-OFFERSTATE: دفتر ملاحظات مؤرَّخ — التاريخ والكاتب يُختمان في الخادم. */
+  notes_log?: SupplierQuotationNoteDto[];
   /** الصفقة الناتجة عن التحويل — كائن لا رقم، فرقم الصفقة يُعرض بجانب الحالة. */
   converted_deal?: { id: number; ref_number: string; stage?: string | null } | null;
+  /** T-PLINEAGE: المستند الناتج محلياً — طلبية أو فاتورة، بالرقم والمعرّف. */
+  converted_order?: { id: number; order_number: string; status?: string } | null;
+  converted_invoice?: { id: number; invoice_number: string; status?: string } | null;
   created_at?: string;
   updated_at?: string;
   lines: SupplierQuotationLineDto[];
@@ -79,6 +89,13 @@ export interface SupplierQuotationAttachmentDto {
   size?: number;
 }
 
+export interface SupplierQuotationNoteDto {
+  text: string;
+  /** ISO — يُختم في الخادم؛ ساعة المتصفح ليست مصدراً موثوقاً. */
+  at?: string;
+  by?: string;
+}
+
 export type SupplierQuotationWrite = Omit<
   SupplierQuotationDto,
   | "id"
@@ -88,6 +105,8 @@ export type SupplierQuotationWrite = Omit<
   | "tax_amount"
   | "grand_total"
   | "converted_deal"
+  | "converted_order"
+  | "converted_invoice"
   | "created_at"
   | "updated_at"
 > & {
@@ -285,6 +304,19 @@ export async function convertSupplierQuotationToPurchaseOrder(
 }> {
   return apiPostObject(
     `${BASE}/supplier-quotations/${id}/convert-to-purchase-order/`,
+    {},
+    { tenantId: tenantId() },
+  );
+}
+
+/** T-PLINEAGE: عرض شراء محلي مقبول ← فاتورة شراء مسودة مباشرةً (بلا طلبية). */
+export async function convertSupplierQuotationToPurchaseInvoice(id: number): Promise<{
+  status: "converted";
+  created: boolean;
+  invoice: { id: number; invoice_number: string };
+}> {
+  return apiPostObject(
+    `${BASE}/supplier-quotations/${id}/convert-to-purchase-invoice/`,
     {},
     { tenantId: tenantId() },
   );

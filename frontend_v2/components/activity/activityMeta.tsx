@@ -46,6 +46,7 @@ export const ENTITY_LABELS: Record<string, string> = {
   customer_payment: "سند قبض",
   supplier_payment: "سند صرف",
   partner: "جهة",
+  product: "منتج",
   session: "جلسة",
 };
 

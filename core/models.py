@@ -93,6 +93,46 @@ class AssistantLesson(models.Model):
         return self.text[:80]
 
 
+class DevelopmentNote(models.Model):
+    """ملاحظة تطوير منصّية عالمية لا تتبع شركة بعينها."""
+
+    STATUS_CHOICES = [
+        ('todo', 'قيد الانتظار'),
+        ('in_progress', 'قيد التنفيذ'),
+        ('done', 'مكتملة'),
+    ]
+    PRIORITY_CHOICES = [
+        ('low', 'منخفضة'),
+        ('medium', 'متوسطة'),
+        ('high', 'عالية'),
+    ]
+
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, default='')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='todo')
+    priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')
+    assignee = models.CharField(max_length=150, blank=True, default='')
+    due_date = models.DateField(null=True, blank=True)
+    position = models.PositiveIntegerField(default=0)
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='created_development_notes',
+    )
+    updated_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='updated_development_notes',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'development_notes'
+        ordering = ['position', '-updated_at', '-id']
+
+    def __str__(self):
+        return self.title
+
+
 class ActivityLogPartner(models.Model):
     """يربط حدث النشاط الواحد بكل الجهات المتأثرة دون نسخ الحدث."""
 

@@ -252,6 +252,13 @@ class SalesSettings(models.Model):
         db_column="AllowDocumentDelete",
         help_text="إظهار «حذف» للعروض والطلبيات (الإلغاء متاح دائماً ولا يحذف)",
     )
+    # T-RESERVEGUARD: الحجز كان عرضاً بلا أثر — فاتورة لزبون آخر كانت تُرحَّل
+    # وتخصم الكمية المحجوزة. مُفعَّل افتراضياً لأن الحجز وعدٌ للزبون صاحبه.
+    block_reserved_stock_sale = models.BooleanField(
+        default=True,
+        db_column="BlockReservedStockSale",
+        help_text="رفض ترحيل فاتورة تستهلك كمية محجوزة لطلبية زبون آخر",
+    )
 
     default_shipping_origin = models.CharField(
         max_length=200, blank=True, default="", db_column="DefaultShippingOrigin"

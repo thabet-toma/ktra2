@@ -25,6 +25,7 @@ router.register(r"customer-price-list", CustomerPriceListViewSet, basename="cust
 
 report_list = SalesReportViewSet.as_view({"get": "aging"})
 report_dormant = SalesReportViewSet.as_view({"get": "dormant_customers_report"})
+report_reserved = SalesReportViewSet.as_view({"get": "reserved_stock_report"})
 
 urlpatterns = [
     path("", include(router.urls)),
@@ -33,5 +34,10 @@ urlpatterns = [
         "reports/dormant-customers/",
         report_dormant,
         name="sales-reports-dormant-customers",
+    ),
+    path(
+        "reports/reserved-stock/",
+        report_reserved,
+        name="sales-reports-reserved-stock",
     ),
 ]

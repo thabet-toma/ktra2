@@ -9,7 +9,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Trash2, Save, Loader2, X, CheckCircle, Banknote, FileText,
+  Trash2, Save, Loader2, X, CheckCircle, Banknote, FileText, ExternalLink,
 } from "lucide-react";
 import {
   listSalesOrders,
@@ -29,6 +29,7 @@ import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized, todayIso } from "../../utils/formatDate";
+import { openInNewTab } from "../../utils/openInNewTab";
 import { isReservationActive } from "../../utils/documentBadges";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
@@ -117,7 +118,8 @@ export const SalesOrdersPage: React.FC = () => {
       try {
         const tenantId = resolveTenantId();
         const [parts, prods, accs, settings] = await Promise.all([
-          accountingApi.getPartners() as Promise<Partner[]>,
+          // T-PARTYPURE: طلبية بيع = زبائن فقط — كانت القائمة تعرض الموردين معهم.
+          accountingApi.getPartners("Customer") as Promise<Partner[]>,
           apiGetList<any>("inventory/products/", { tenantId }),
           accountingApi.getAccounts() as Promise<Account[]>,
           getSalesSettings().catch(() => null),
@@ -182,6 +184,19 @@ export const SalesOrdersPage: React.FC = () => {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
     }
   };
+
+  // T-SLINEAGE: `?open=12` يفتح الطلبية نفسها — رابط الفاتورة إلى مصدرها يجب أن
+  // يصل إلى المستند لا إلى قائمة يبحث فيها المستخدم عنه. نفس عقد شاشة العروض.
+  const [pendingDocId, setPendingDocId] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get("open"),
+  );
+  useEffect(() => {
+    if (!pendingDocId || loading) return;
+    const target = orders.find((order) => String(order.id) === pendingDocId);
+    if (!target) return;
+    setPendingDocId(null);
+    void openOrder(target.id);
+  }, [pendingDocId, loading, orders]);
 
   const formTotal = useMemo(
     () => formLines.reduce(
@@ -347,6 +362,26 @@ export const SalesOrdersPage: React.FC = () => {
         value={selectedOrder?.status_display || selectedOrder?.status || "مسودة"} />,
     },
   ];
+  // الطلبية المحوَّلة تفتح فاتورتها من داخلها أيضاً — لا من القائمة وحدها.
+  if (selectedOrder?.invoice) {
+    headerFields.push({
+      key: "invoice",
+      label: "الفاتورة الناتجة",
+      control: (
+        <button
+          type="button"
+          data-testid="open-order-invoice"
+          className="inline-flex h-8 w-full items-center justify-center gap-2 rounded-md bg-blue-600 px-3 text-xs font-bold text-white shadow-sm transition-colors hover:bg-blue-700"
+          title={`فتح الفاتورة ${selectedOrder.invoice_number || `#${selectedOrder.invoice}`}`}
+          onClick={() => openInNewTab(`/sales/invoices/${selectedOrder.invoice}`)}
+        >
+          <ExternalLink className="h-3.5 w-3.5" />
+          <span>فتح الفاتورة</span>
+          <b dir="ltr">{selectedOrder.invoice_number || `#${selectedOrder.invoice}`}</b>
+        </button>
+      ),
+    });
+  }
   const editorColumns: CommercialLineColumn<LineState>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
     {
@@ -412,11 +447,28 @@ export const SalesOrdersPage: React.FC = () => {
     {
       key: "status",
       header: "الحالة",
-      width: "110px",
+      width: "150px",
+      // «محوّلة لفاتورة» بلا رقم الفاتورة ولا رابطها تُلزم المستخدم بالبحث عنها
+      // في شاشة أخرى — الرقم هنا زرٌّ يفتحها (نفس نمط مستندات الشراء).
       render: (order) => (
-        <span className={`rounded px-2 py-0.5 text-xs ${STATUS_TONE[order.status] || ""}`}>
-          {order.status_display || order.status}
-        </span>
+        <div className="flex flex-col leading-tight">
+          <span className={`self-start rounded px-2 py-0.5 text-xs ${STATUS_TONE[order.status] || ""}`}>
+            {order.status_display || order.status}
+          </span>
+          {order.invoice && (
+            <button
+              type="button"
+              className="aseel-text-accent mt-0.5 text-right text-[10px] hover:underline"
+              title={`فتح الفاتورة ${order.invoice_number || `#${order.invoice}`}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                openInNewTab(`/sales/invoices/${order.invoice}`);
+              }}
+            >
+              ← {order.invoice_number || `#${order.invoice}`}
+            </button>
+          )}
+        </div>
       ),
     },
     {

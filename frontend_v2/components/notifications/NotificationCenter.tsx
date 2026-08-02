@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { AppNotification, AppView } from '../../types';
 import { notificationsService } from '../../services/notificationsService';
 import { Bell, Check, ExternalLink, Inbox, X } from 'lucide-react';
+import { isSafeInternalPath } from '../../utils/entityLinks';
 
 interface NotificationCenterProps {
     currentUserId: string;
@@ -38,6 +39,12 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentU
     const handleNotificationClick = async (notification: AppNotification) => {
         if (!notification.isRead) {
             await notificationsService.markAsRead(notification.id);
+        }
+
+        if (notification.targetPath && isSafeInternalPath(notification.targetPath)) {
+            setIsOpen(false);
+            window.location.assign(notification.targetPath);
+            return;
         }
 
         if (notification.targetView) {
@@ -122,7 +129,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentU
                                             <p className="text-xs text-[var(--color-text-muted)] line-clamp-2 mb-2">
                                                 {n.message}
                                             </p>
-                                            {n.targetView && (
+                                            {(n.targetView || n.targetPath) && (
                                                 <div className="flex items-center gap-1 text-[10px] text-[var(--color-primary)] font-medium">
                                                     <ExternalLink className="w-3 h-3" />
                                                     عرض التفاصيل

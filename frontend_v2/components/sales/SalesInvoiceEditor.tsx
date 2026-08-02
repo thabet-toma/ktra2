@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   createSalesInvoice,
+  createCustomerPayment,
   duplicateSalesInvoice,
   getCreditPreview,
   getCustomerPriceList,
@@ -21,7 +22,6 @@ import { usePriceVisibility } from "../../contexts/PriceVisibilityContext";
 import { useStaleConfirm } from "../offline/StaleDataConfirm";
 import { DocumentPaymentsTab } from "../shared/DocumentPaymentsTab";
 import { SettleFromOnAccountModal } from "../shared/SettleFromOnAccountModal";
-import { NewPaymentModal } from "./SalesCustomerPaymentsPage";
 import { EntityActivityLog } from "../activity/EntityActivityLog";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { AseelDatePicker } from "../ui/AseelDatePicker";
@@ -32,6 +32,7 @@ import db from "../../services/offline/db";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
 import { formatMoney, formatQuantity, formatNumber } from "../../utils/formatNumber";
 import { openInNewTab } from "../../utils/openInNewTab";
+import { entityPathForReference } from "../../utils/entityLinks";
 import { DeliverGoodsModal } from "./DeliverGoodsModal";
 import { clientLogger } from "../../services/logger";
 import { apiPostObject } from "../../services/restApi";
@@ -60,7 +61,11 @@ import {
   Info,
   Truck,
   ClipboardList,
+  ExternalLink,
+  Wrench,
 } from "lucide-react";
+import { eventBus } from "../../utils/eventBus";
+import { ItemQuickCreateModal } from "../items/ItemQuickCreateModal";
 import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
 import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
 import { SalesInvoicePrintView } from "./SalesInvoicePrintView";
@@ -88,6 +93,8 @@ export type ProductRow = {
   /** «سعر البيع» العام في كرت الصنف — يُقترح حين لا سعر خاص بهذا الزبون. */
   sale_price?: string | null;
   avg_cost?: string | null;
+  /** T-SERVICELINE: خدمة لا بضاعة — بلا مخزون، وإيرادها على حساب الخدمات. */
+  is_service?: boolean;
 };
 
 export type PartnerRow = {
@@ -208,7 +215,7 @@ const isRevenueAccount = (a: AccountRow): boolean => {
 };
 
 export const SalesInvoiceEditor: React.FC<Props> = ({
-  products,
+  products: productsProp,
   partners,
   currencies,
   accounts,
@@ -277,11 +284,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [customerBalanceBeforeInvoice, setCustomerBalanceBeforeInvoice] = useState(0);
   const [customerBalanceAfterInvoice, setCustomerBalanceAfterInvoice] = useState(0);
   const [paymentDetails, setPaymentDetails] = useState<SalesInvoiceDetail["payment_details"]>([]);
+  // T-SLINEAGE: المستند الأب (طلبية/عرض) — يُعرض في بيانات المستند برابط يفتحه.
+  const [sourceDocument, setSourceDocument] =
+    useState<SalesInvoiceDetail["source_document"]>(null);
   const [creatingReceipt, setCreatingReceipt] = useState(false);
   // T-ONACC: نافذة «تسديد» — تسدّد الفاتورة من رصيد العميل على الحساب أو تفتح سنداً جديداً.
   const [showSettleModal, setShowSettleModal] = useState(false);
-  // T-ONEPAY: نافذة «سند قبض جديد» (نقد + شيكات) المفتوحة من داخل الفاتورة.
-  const [showNewVoucher, setShowNewVoucher] = useState(false);
   // P3-2-b wiring: offline status + stale-data confirm for line additions.
   const { online: networkOnline } = useOnlineStatus();
   const { confirm: confirmStale, modal: staleModal } = useStaleConfirm();
@@ -300,11 +308,22 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [showPrintView, setShowPrintView] = useState(false);
   // نافذة تسليم البضاعة (تُنشئ إرسالية بالبنود المؤشَّرة).
   const [showDeliver, setShowDeliver] = useState(false);
+  // T-SERVICELINE: نافذة «إضافة خدمة» — تُنشئ الخدمة وتضعها في سطر الفاتورة.
+  const [showServiceModal, setShowServiceModal] = useState(false);
   const navLoadingRef = useRef(false);
 
   const dirtyRef = useRef(false);
 
   const customers = useMemo(() => partners.filter((p) => p.partner_type === "Customer"), [partners]);
+
+  // T-SERVICELINE: الخدمة المُنشأة من داخل الفاتورة تُستعمل فوراً — قائمة الأصناف
+  // تصل عبر الخصائص من الشاشة الأم، فننتظر تحديثها ونعرض المُضاف محلياً حتى يصل.
+  const [extraProducts, setExtraProducts] = useState<ProductRow[]>([]);
+  const products = useMemo(() => {
+    if (extraProducts.length === 0) return productsProp;
+    const known = new Set(productsProp.map((p) => p.id));
+    return [...productsProp, ...extraProducts.filter((p) => !known.has(p.id))];
+  }, [productsProp, extraProducts]);
 
   const productsById = useMemo(() => {
     const m = new Map<number, ProductRow>();
@@ -680,6 +699,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setCustomerBalanceBeforeInvoice(Number(d.customer_balance_before_invoice || 0));
     setCustomerBalanceAfterInvoice(Number(d.customer_balance_after_invoice || 0));
     setPaymentDetails(d.payment_details || []);
+    setSourceDocument(d.source_document ?? null);
     setProductPickerLineKey(null);
     setTaxEditKey(null);
     setTaxPercentDraft({});
@@ -1191,6 +1211,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setCustomerBalanceBeforeInvoice(0);
     setCustomerBalanceAfterInvoice(0);
     setPaymentDetails([]);
+    setSourceDocument(null);
     // تطبيق العميل الافتراضي من الإعدادات
     setCustomerId(salesSettings?.default_customer ?? "");
     setInvDate(new Date().toISOString().slice(0, 10));
@@ -1800,7 +1821,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       return {
         id: p.id,
         label: formatProductPrimaryName(p),
-        sub: `المتاح: ${fmt(Number(p.quantity_on_hand || 0))}`,
+        // T-SERVICELINE: «المتاح: 0» على خدمة معلومة كاذبة — الخدمة بلا مخزون.
+        sub: p.is_service ? "خدمة — بلا مخزون" : `المتاح: ${fmt(Number(p.quantity_on_hand || 0))}`,
         price,
         priceLabel,
         prices,
@@ -2167,6 +2189,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       icon: <ClipboardList />,
       onClick: () => openInNewTab(`/sales/delivery-notes/new?invoice=${draftId}`),
     } as AseelToolbarAction] : []),
+    // T-SERVICELINE: «بدي أضيف خدمة» — إنشاؤها من داخل الفاتورة ثم وضعها في
+    // السطر مباشرةً، بدل الخروج إلى شاشة الأصناف والعودة.
+    ...(readOnly ? [] : [{
+      key: "add-service",
+      label: "إضافة خدمة",
+      icon: <Wrench />,
+      onClick: () => setShowServiceModal(true),
+      separatorBefore: true,
+    } as AseelToolbarAction]),
     { key: "print", label: "طباعة", icon: <Printer />, onClick: () => setShowPrintView(true) },
   ];
 
@@ -2356,6 +2387,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const money = (n: number) => `${fmt(n)}${currencyCode ? ` ${currencyCode}` : ""}`;
   const filledLines = lines.filter((l) => l.product !== "");
 
+  /**
+   * مسار المستند الأب. لا مسار بمعرّف للطلبية/العرض (شاشة تبويبات واحدة)، فيُمرَّر
+   * `?open=` لتفتح الشاشة المستند نفسه لا القائمة — نفس عقد شاشة عروض البيع.
+   */
+  const sourceDocumentPath = (
+    source: NonNullable<SalesInvoiceDetail["source_document"]>,
+  ) => (source.kind === "order"
+    ? `/sales/orders?open=${source.id}`
+    : `/sales/quotations?open=${source.id}`);
+
   const documentView = (
     <AseelDocumentView<DraftLine>
       title="فاتورة مبيعات"
@@ -2393,6 +2434,24 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         { label: "العملة", value: currencyCode || "—" },
         ...(postedJournalId != null
           ? [{ label: "قيد اليومية", value: `#${postedJournalId}` }]
+          : []),
+        // T-SLINEAGE: الفاتورة تقول من أين جاءت، والرقم يفتح مستنده الأب.
+        ...(sourceDocument
+          ? [{
+            label: sourceDocument.kind === "order" ? "أُنشئت من طلبية" : "أُنشئت من عرض سعر",
+            value: (
+              <button
+                type="button"
+                data-testid="open-invoice-source"
+                className="aseel-text-accent inline-flex items-center gap-1 hover:underline"
+                title={`فتح المستند المصدر ${sourceDocument.number}`}
+                onClick={() => openInNewTab(sourceDocumentPath(sourceDocument))}
+              >
+                <ExternalLink className="h-3 w-3" />
+                <b dir="ltr">{sourceDocument.number}</b>
+              </button>
+            ),
+          }]
           : []),
       ]}
       columns={[
@@ -2474,6 +2533,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                     <th className="p-2 text-right">المبلغ المخصص</th>
                     <th className="p-2 text-right">الحالة</th>
                     <th className="p-2 text-right">قيد اليومية</th>
+                    <th className="p-2 text-center">طباعة</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2484,6 +2544,20 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                       <td className="p-2">{money(Number(payment.allocated_amount))}</td>
                       <td className="p-2">{payment.is_posted ? "مرحّل" : "غير مرحّل"}</td>
                       <td className="p-2">{payment.journal ? `#${payment.journal}` : "—"}</td>
+                      <td className="p-2 text-center">
+                        <button
+                          type="button"
+                          className="aseel-toolbtn"
+                          aria-label={`طباعة سند القبض #${payment.id}`}
+                          title={`طباعة سند القبض #${payment.id}`}
+                          onClick={() => {
+                            const path = entityPathForReference("CUSTOMER_PAYMENT", payment.id);
+                            if (path) openInNewTab(path);
+                          }}
+                        >
+                          <Printer className="h-3 w-3" />
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -2993,6 +3067,25 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         />
       )}
 
+      {/* T-SERVICELINE: إنشاء خدمة من داخل الفاتورة ثم وضعها في السطر مباشرةً.
+          إيرادها يُقيَّد على حساب «إيرادات الخدمات» (يحلّه الخادم عند الترحيل). */}
+      {showServiceModal && (
+        <ItemQuickCreateModal
+          isOpen={showServiceModal}
+          initialIsService
+          onClose={() => setShowServiceModal(false)}
+          onSaved={(created: ProductRow) => {
+            setShowServiceModal(false);
+            if (!created?.id) return;
+            setExtraProducts((prev) => [...prev, created]);
+            // الشاشة الأم تحمل قائمة الأصناف — نُعلمها كي تُحدّثها من الخادم.
+            try { eventBus.publish("products", resolveTenantId()); } catch { /* غير حرج */ }
+            // نفس المدخل الموحّد الذي تستعمله الشجرة وبطاقة الصنف.
+            insertProductIntoInvoice(created.id);
+          }}
+        />
+      )}
+
       {/* فهرس الأصناف */}
       <SalesProductPickerModal
         isOpen={productPickerLineKey !== null}
@@ -3035,25 +3128,28 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             await loadInvoice(draftId);
             onInvoiceSaved();
           }}
-          onNewVoucher={() => {
-            setShowSettleModal(false);
-            setShowNewVoucher(true);
-          }}
-        />
-      )}
-      {/* T-ONEPAY: سند قبض جديد بنقد و/أو شيكات — مُوزَّع مسبقاً على هذه الفاتورة. */}
-      {showNewVoucher && draftId && customerId !== "" && (
-        <NewPaymentModal
-          initialPartnerId={Number(customerId)}
-          lockPartner
-          defaultCashAccountId={salesSettings?.default_cash_account ?? ""}
-          initialInvoice={{ id: draftId, number: invoiceNumber, remaining: remainingDue }}
-          onClose={() => setShowNewVoucher(false)}
-          onSaved={async () => {
-            setShowNewVoucher(false);
-            setMsg("تم تسجيل سند القبض، وخُصِم من رصيد الفاتورة.");
-            await loadInvoice(draftId);
-            onInvoiceSaved();
+          quickReceipt={{
+            accounts: cashboxAccounts,
+            defaultAccountId: salesSettings?.default_cash_account ?? cashboxAccounts[0]?.id ?? null,
+            onReceive: async (amount, accountId) => {
+              if (currencyId === "") throw new Error("عملة الفاتورة غير محددة.");
+              const saved = await createCustomerPayment({
+                partner: Number(customerId),
+                payment_date: new Date().toISOString().slice(0, 10),
+                amount: amount.toFixed(2),
+                currency: Number(currencyId),
+                exchange_rate: exchangeRate,
+                cash_or_bank_account: accountId,
+                allocations: [{ invoice: draftId, amount: amount.toFixed(2) }],
+                auto_post: true,
+              });
+              if (saved.auto_post_error) {
+                throw new Error(`حُفظ السند كمسودة — تعذّر الترحيل: ${saved.auto_post_error}`);
+              }
+              setMsg("تم استلام الدفعة وترحيل سند القبض وربطه بالفاتورة.");
+              await loadInvoice(draftId);
+              onInvoiceSaved();
+            },
           }}
         />
       )}

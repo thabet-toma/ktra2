@@ -263,6 +263,15 @@ export interface Invoice {
     /** رقم الفاتورة الأصلية المرتبطة بالمرجع (W7a). */
     originalInvoiceId?: string;
     originalInvoiceNumber?: string;
+    /** T-PLINEAGE: المستند الذي وُلدت منه الفاتورة (عرض سعر أو طلبية شراء). */
+    sourceDocument?: {
+        kind: 'order' | 'quotation';
+        id: number;
+        number: string;
+        originKind?: 'quotation' | null;
+        originId?: number | null;
+        originNumber?: string | null;
+    };
     /** ضرائب ورسوم إضافية مهيكلة تُرحّل فوق إجمالي الفاتورة الأساسي. */
     fees?: PurchaseInvoiceFeeLine[];
     feesTotal?: number;

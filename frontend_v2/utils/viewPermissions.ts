@@ -17,6 +17,7 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "sales-return": "sales.invoice.view",
   "sales-delivery-notes": "sales.invoice.view",
   "invoice-profits": "inventory.cost.view",
+  "reserved-stock": "sales.quotation.manage",
   "sales-settings": "sales.settings.manage",
   "aseel-sales": "sales.invoice.view",
   // العملاء

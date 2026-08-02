@@ -1,0 +1,129 @@
+/**
+ * T-COAMENU — إجراءات الطرف: **مصدر واحد** تستهلكه كل قائمة يمين في الموقع.
+ *
+ * كانت إجراءات الشريك مكتوبةً داخل `layout/GlobalContextMenu` وحده، فشجرة
+ * الحسابات (حيث كل حساب ذمم هو طرف) لم يكن لها منها شيء — كبسة اليمين عليها
+ * تعرض إجراءات الحساب فقط. هذه الطبقة نقيّة (بلا React ولا DOM) فتُختبر بـNode
+ * وتُعرض في أي قائمة: الشجرة، القائمة العامّة، وأي شاشة لاحقة.
+ *
+ * الإجراء إمّا **رابط** (`href`) يُفتح كما هو، أو **جسر** (`bridge`) يفتح مودالاً
+ * في كرت الطرف عبر `sessionStorage` (نمط `ktra_partner_action` القائم).
+ */
+
+export type PartnerKind = "customer" | "supplier";
+
+export interface PartnerActionTarget {
+  id: string;
+  name: string;
+  kind: PartnerKind;
+}
+
+export type PartnerActionIcon =
+  | "card"
+  | "statement"
+  | "ledger"
+  | "invoice"
+  | "quotation"
+  | "order"
+  | "receipt"
+  | "payment"
+  | "list";
+
+export interface PartnerAction {
+  key: string;
+  label: string;
+  icon: PartnerActionIcon;
+  /** وجهة الإجراء — رابط داخلي مُعبَّأ بمعرّف الطرف. */
+  href?: string;
+  /** إجراء يفتح مودالاً في كرت الطرف بدل رابط مستقل. */
+  bridge?: "receipt" | "payment";
+}
+
+export interface PartnerActionGroup {
+  title: string;
+  actions: PartnerAction[];
+}
+
+/**
+ * نوع الطرف في الخادم ← جانب المستندات. أطراف الشحن (وكيل/مخلّص/ناقل) تُعامَل
+ * معاملة المورد: تُشترى منها خدمات وتُصرف لها سندات — لا فواتير بيع.
+ */
+export function partnerKindFromType(
+  partnerType: string | null | undefined,
+): PartnerKind | null {
+  switch (String(partnerType || "")) {
+    case "Customer":
+      return "customer";
+    case "Supplier":
+    case "FreightForwarder":
+    case "CustomsBroker":
+    case "LocalTransporter":
+    case "Carrier":
+      return "supplier";
+    default:
+      return null;
+  }
+}
+
+/** إجراءات الطرف مجمَّعة بعناوين — قائمة مسطّحة طويلة لا تُقرأ. */
+export function partnerActionGroups(
+  target: PartnerActionTarget,
+): PartnerActionGroup[] {
+  const id = encodeURIComponent(target.id);
+  const named = (base: string) => (target.name ? `${base}: ${target.name}` : base);
+
+  if (target.kind === "customer") {
+    return [
+      {
+        title: "الطرف",
+        actions: [
+          { key: "card", label: named("بطاقة العميل"), icon: "card", href: `/partners/${id}` },
+          { key: "statement", label: "كشف حساب", icon: "statement", href: `/partners/${id}?tab=statement` },
+          { key: "ledger", label: "حركات الحساب", icon: "ledger", href: `/partners/${id}?tab=ledger` },
+        ],
+      },
+      {
+        title: "إنشاء مستند",
+        actions: [
+          { key: "sales-invoice", label: "فاتورة مبيعات", icon: "invoice", href: `/sales/invoices/new?customer_id=${id}` },
+          { key: "sales-quotation", label: "عرض سعر", icon: "quotation", href: `/sales/quotations?action=new&customer_id=${id}` },
+          { key: "sales-order", label: "طلبية زبون", icon: "order", href: `/sales/orders?action=new&customer_id=${id}` },
+          { key: "receipt", label: "سند قبض", icon: "receipt", bridge: "receipt" },
+        ],
+      },
+      {
+        title: "مستنداته",
+        actions: [
+          { key: "sales-invoices", label: "فواتيره", icon: "list", href: `/sales/invoices?customer=${id}` },
+          { key: "sales-payments", label: "سندات قبضه", icon: "list", href: `/sales/customer-payments?partner=${id}` },
+        ],
+      },
+    ];
+  }
+
+  return [
+    {
+      title: "الطرف",
+      actions: [
+        { key: "card", label: named("بطاقة المورد"), icon: "card", href: `/partners/${id}` },
+        { key: "statement", label: "كشف حساب", icon: "statement", href: `/partners/${id}?tab=statement` },
+        { key: "ledger", label: "حركات الحساب", icon: "ledger", href: `/partners/${id}?tab=ledger` },
+      ],
+    },
+    {
+      title: "إنشاء مستند",
+      actions: [
+        { key: "purchase-invoice", label: "فاتورة شراء", icon: "invoice", href: "/purchase-invoices/new" },
+        { key: "purchase-offer", label: "عرض سعر شراء", icon: "quotation", href: "/price-offers" },
+        { key: "payment", label: "سند صرف", icon: "payment", bridge: "payment" },
+      ],
+    },
+    {
+      title: "مستنداته",
+      actions: [
+        { key: "purchase-invoices", label: "فواتيره", icon: "list", href: `/purchase-invoices?partner=${id}` },
+        { key: "supplier-payments", label: "سندات صرفه", icon: "list", href: `/supplier-payments?partner=${id}` },
+      ],
+    },
+  ];
+}

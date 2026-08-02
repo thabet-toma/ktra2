@@ -12,21 +12,22 @@ import {
 } from "../../services/firestoreService";
 import type { DenseColumn } from "../aseel/AseelDenseTable";
 import { PriceOfferForm } from "./price-offers/PriceOfferForm";
-import { StatusChangeModal } from "./price-offers/StatusChangeModal";
 import { CommercialDocumentsList } from "../shared/CommercialDocumentsList";
 import { FilePreviewModal } from "../shared/FilePreviewModal";
-import { Paperclip } from "lucide-react";
+import { ImageIcon, Paperclip } from "lucide-react";
 import type { PriceOfferAttachment } from "../../types/offer";
 import {
   cancelPurchaseOrder,
   confirmPurchaseOrder,
   convertPurchaseOrderToInvoice,
   convertSupplierQuotationToImportDeal,
+  convertSupplierQuotationToPurchaseInvoice,
   convertSupplierQuotationToPurchaseOrder,
 } from "../../services/procurementDocumentsApi";
+import { ConvertTargetDialog, type ConvertTarget } from "../sales/ConvertTargetDialog";
+import { openInNewTab } from "../../utils/openInNewTab";
 import { useToast } from "../../contexts/ToastContext";
 import {
-  PROCUREMENT_KIND_LABELS,
   canConvertImportOffer,
   isOfferStruckThrough,
   procurementDocKind,
@@ -94,9 +95,8 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
   const [isReadOnly, setIsReadOnly] = useState(false);
   // T-IMPOFFER: معاينة ملف العرض من القائمة نفسها — بلا فتح المستند.
   const [previewFile, setPreviewFile] = useState<PriceOfferAttachment | null>(null);
-  const [statusModalOpen, setStatusModalOpen] = useState(false);
-  const [targetStatusOffer, setTargetStatusOffer] = useState<PriceOffer | null>(null);
-  const [newStatusTarget, setNewStatusTarget] = useState<PriceOfferStatus | null>(null);
+  // T-PLINEAGE: العرض المحلي له وجهتان (طلبية / فاتورة) — الاختيار داخل الموقع.
+  const [convertOffer, setConvertOffer] = useState<PriceOffer | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -137,6 +137,25 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
     };
   }, [scope, reloadKey]);
 
+  // T-PLINEAGE: `?doc=quote-12` يفتح المستند مباشرةً — رابط الفاتورة إلى مصدرها
+  // يجب أن يصل إلى المستند نفسه لا إلى قائمة يبحث فيها المستخدم عنه.
+  const [pendingDocId, setPendingDocId] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get("doc"),
+  );
+  const syncOpenDocumentPath = (documentId?: string) => {
+    const url = new URL(window.location.href);
+    if (documentId) url.searchParams.set("doc", documentId);
+    else url.searchParams.delete("doc");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+  useEffect(() => {
+    if (!pendingDocId || loading) return;
+    const target = offers.find((offer) => offer.id === pendingDocId);
+    if (!target) return;
+    setPendingDocId(null);
+    void openEdit(target);
+  }, [pendingDocId, loading, offers]);
+
   const filtered = useMemo(() => {
     const s = search.toLowerCase();
     return offers.filter((o) => {
@@ -145,7 +164,9 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
         const sup = suppliers.find((x) => x.id === o.supplierId)?.tradeName || "";
         return (
           sup.toLowerCase().includes(s) ||
-          (o.offerNumber || "").toLowerCase().includes(s)
+          (o.offerNumber || "").toLowerCase().includes(s) ||
+          (o.orderName || "").toLowerCase().includes(s) ||
+          (o.orderDescription || "").toLowerCase().includes(s)
         );
       }
       return true;
@@ -153,6 +174,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
   }, [offers, suppliers, search, filterStatus]);
 
   const openNew = () => {
+    syncOpenDocumentPath();
     setCurrentOffer({
       status: "initial", items: [], subtotal: 0, discountAmount: 0,
       taxRate: 0, taxAmount: 0, grandTotal: 0, internalNotes: "",
@@ -177,6 +199,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
         || resolved.backendStatus === "closed"
       );
       setViewMode("form");
+      syncOpenDocumentPath(resolved.id);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذّر فتح المستند");
     } finally {
@@ -204,24 +227,13 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
       }
       setError(null);
       setViewMode("list");
+      syncOpenDocumentPath();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "فشل حفظ المستند");
       throw e;
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleStatusChange = async (offerId: string, newStatus: PriceOfferStatus) => {
-    const target = offers.find((o) => o.id === offerId);
-    if (!target) { setStatusModalOpen(false); return; }
-    const saved = await priceOffersService.updatePriceOfferInDb({
-      ...target,
-      status: newStatus,
-      updatedAt: new Date().toISOString(),
-    }, scope);
-    setOffers((prev) => prev.map((row) => row.id === offerId ? saved : row));
-    setStatusModalOpen(false);
   };
 
   /**
@@ -250,35 +262,77 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
     }
   };
 
+  /** مسار المستند الناتج — الرقم بلا رابط يُلزم المستخدم بالبحث عنه يدوياً. */
+  const linkedDocPath = (offer: PriceOffer): string | null => {
+    if (!offer.linkedDocId) return null;
+    if (offer.linkedDocKind === "invoice") return `/purchase-invoices/${offer.linkedDocId}`;
+    if (offer.linkedDocKind === "deal") return `/deals/${offer.linkedDocId}`;
+    return null;
+  };
+
+  /** تحويل العرض المحلي إلى الوجهة المختارة (طلبية تسبق التسليم، فاتورة تُثبت الذمّة). */
+  const convertLocalOffer = (offer: PriceOffer, target: ConvertTarget) => {
+    const id = Number(offer.id.replace("quote-", ""));
+    setConvertOffer(null);
+    void runLifecycleAction(
+      () => target === "invoice"
+        ? convertSupplierQuotationToPurchaseInvoice(id)
+        : convertSupplierQuotationToPurchaseOrder(id),
+      (result) => {
+        const payload = result as {
+          order?: { order_number?: string };
+          invoice?: { invoice_number?: string };
+        };
+        return target === "invoice"
+          ? `تم تحويل العرض إلى فاتورة شراء ${payload?.invoice?.invoice_number || ""}`.trim()
+          : `تم تحويل العرض إلى طلبية شراء ${payload?.order?.order_number || ""}`.trim();
+      },
+    );
+  };
+
   const columns: DenseColumn<PriceOffer>[] = [
     // T-IMPOFFER: «وإذا غير ملائم يكون معلَّم على أنه مشطوب» — الشطب على رقم
     // المستند نفسه فيُقرأ القرار من مسح الصفوف بلا فتح أي عرض.
-    { key: "offerNumber", header: "رقم المستند", width: "120px",
-      render: (o) => (
-        <b style={isOfferStruckThrough(o.backendStatus)
-          ? { textDecoration: "line-through", opacity: 0.6 }
-          : undefined}>
-          {o.offerNumber || o.id.slice(0, 8)}
-        </b>
-      ) },
-    // النوعان كانا في قائمة واحدة بلا ما يميّزهما: «عرض سعر مورد» و«طلبية شراء».
-    { key: "kind", header: "النوع", width: "100px", align: "center",
+    { key: "offerNumber", header: "رقم المستند", width: "150px",
       render: (o) => {
-        const kind = procurementDocKind(o.id, scope);
-        const isOrder = kind === "order";
+        const firstImage = (o.attachments || []).find((file) =>
+          (file.type || "").toLowerCase().startsWith("image/")
+          || /\.(png|jpe?g|webp|gif)(?:\?.*)?$/i.test(file.url || ""),
+        );
         return (
-          <span style={{
-            fontSize: "10px",
-            fontWeight: 700,
-            padding: "1px 6px",
-            borderRadius: "4px",
-            color: isOrder ? "#b04a00" : "var(--aseel-accent, #2563eb)",
-            background: isOrder ? "rgba(176,74,0,0.12)" : "rgba(37,99,235,0.10)",
-          }}>
-            {PROCUREMENT_KIND_LABELS[kind]}
-          </span>
+          <div className="flex items-center gap-2">
+            {firstImage ? (
+              <button type="button" className="shrink-0" title={`عرض «${firstImage.name || "الصورة"}»`}
+                onClick={(e) => { e.stopPropagation(); setPreviewFile(firstImage); }}>
+                <img src={firstImage.url} alt="" className="h-9 w-9 rounded border border-[var(--color-border)] object-cover" />
+              </button>
+            ) : (
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-dashed border-[var(--color-border)] aseel-text-soft"
+                title="لا توجد صورة توضيحية">
+                <ImageIcon className="h-4 w-4" aria-hidden="true" />
+              </span>
+            )}
+            <b style={isOfferStruckThrough(o.backendStatus)
+              ? { textDecoration: "line-through", opacity: 0.6 }
+              : undefined}>
+              {o.offerNumber || o.id.slice(0, 8)}
+            </b>
+          </div>
         );
       } },
+    { key: "orderSummary", header: "اسم ووصف الطلبية", width: "240px",
+      render: (o) => (
+        <div className="min-w-0 leading-tight">
+          <div className="truncate font-semibold text-[var(--color-text)]" title={o.orderName || ""}>
+            {o.orderName || "—"}
+          </div>
+          {o.orderDescription && (
+            <div className="mt-0.5 line-clamp-2 text-[10px] aseel-text-soft" title={o.orderDescription}>
+              {o.orderDescription}
+            </div>
+          )}
+        </div>
+      ) },
     { key: "supplier", header: "المورد",
       render: (o) => (
         <span style={isOfferStruckThrough(o.backendStatus)
@@ -312,7 +366,9 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
       render: (o) => <>{fmtAmt(o.grandTotal)}</> },
     // الحالة من حالة الخادم الحقيقية لا من قاموس العرض القديم: «مؤكَّدة» و«محوَّلة
     // إلى فاتورة» كانتا تظهران «معتمد للشحن» كلتاهما، والمستند المرتبط لا يظهر.
-    { key: "status", header: scope === "import" ? "قرار الملاءمة" : "الحالة", width: "190px",
+    // T-OFFERSTATE: العمود «الحالة» في الجانبين — «القرار» يفترض أن كل صف حُسم،
+    // بينما «بانتظار معلومات» و«قيد المناقشة» حالتان قبل أي قرار.
+    { key: "status", header: "الحالة", width: "190px",
       render: (o) => {
         const kind = procurementDocKind(o.id, scope);
         return (
@@ -321,12 +377,25 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
               {procurementStatusLabel(kind, o.backendStatus, statusLabels[o.status])}
             </span>
             {o.linkedDocNumber && (
-              <span className="text-[10px] aseel-text-soft">← {o.linkedDocNumber}</span>
+              linkedDocPath(o) ? (
+                <button
+                  type="button"
+                  className="aseel-text-accent text-[10px] text-right hover:underline"
+                  title={`فتح ${o.linkedDocNumber}`}
+                  onClick={(e) => { e.stopPropagation(); openInNewTab(linkedDocPath(o)!); }}
+                >
+                  ← {o.linkedDocNumber}
+                </button>
+              ) : (
+                <span className="text-[10px] aseel-text-soft">← {o.linkedDocNumber}</span>
+              )
             )}
-            {/* السبب بجانب القرار: «غير ملائم» بلا سبب لا يعلّم أحداً شيئاً. */}
-            {isOfferStruckThrough(o.backendStatus) && o.decisionReason && (
+            {/* التفصيل بجانب الحالة: «غير ملائم» بلا سبب — أو «بانتظار معلومات»
+                بلا ما يُنتظَر — لا يعلّم أحداً شيئاً عند مسح القائمة. */}
+            {o.decisionReason && (
               <span className="text-[10px] aseel-text-soft" title={o.decisionReason}>
-                السبب: {o.decisionReason}
+                {o.backendStatus === "pending_info" ? "بانتظار: " : "السبب: "}
+                {o.decisionReason}
               </span>
             )}
           </div>
@@ -344,25 +413,22 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
             <button className="text-green-600 hover:underline" disabled={saving}
               onClick={(e) => {
                 e.stopPropagation();
-                const id = Number(o.id.replace("quote-", ""));
-                void runLifecycleAction(
-                  () => scope === "import"
-                    ? convertSupplierQuotationToImportDeal(id)
-                    : convertSupplierQuotationToPurchaseOrder(id),
-                  (result) => {
-                    const payload = result as {
-                      deal?: { ref_number?: string };
-                      order?: { order_number?: string };
-                    };
-                    const number = payload?.order?.order_number
-                      || payload?.deal?.ref_number || "";
-                    return scope === "import"
-                      ? `تم تحويل العرض إلى صفقة استيراد ${number}`.trim()
-                      : `تم تحويل العرض إلى طلبية شراء ${number}`.trim();
-                  },
-                );
+                // الاستيراد وجهته واحدة (الصفقة هي الطلبية التشغيلية)، والشراء
+                // المحلي وجهتان فيُسأل عنهما بدل فرض المرور بطلبية.
+                if (scope === "import") {
+                  void runLifecycleAction(
+                    () => convertSupplierQuotationToImportDeal(
+                      Number(o.id.replace("quote-", "")),
+                    ),
+                    (result) => `تم تحويل العرض إلى صفقة استيراد ${
+                      (result as { deal?: { ref_number?: string } })?.deal?.ref_number || ""
+                    }`.trim(),
+                  );
+                  return;
+                }
+                setConvertOffer(o);
               }}>
-              {scope === "import" ? "تحويل إلى صفقة" : "تحويل إلى طلبية"}
+              {scope === "import" ? "تحويل إلى صفقة" : "تحويل…"}
             </button>
           )}
           {/* T-IMPOFFER: العرض غير الملائم لا يُحوَّل — نقول ذلك بدل إخفاء الزر بصمت. */}
@@ -436,11 +502,9 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
         isReadOnly={isReadOnly}
         saving={saving}
         onSave={handleSave}
-        onCancel={() => setViewMode("list")}
-        onStatusChangeRequest={(offer, newStatus) => {
-          setTargetStatusOffer(offer as PriceOffer);
-          setNewStatusTarget(newStatus as PriceOfferStatus);
-          setStatusModalOpen(true);
+        onCancel={() => {
+          setViewMode("list");
+          syncOpenDocumentPath();
         }}
       />
     );
@@ -459,11 +523,11 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
         emptyHint="لا توجد عروض أو طلبيات"
         countLabel={`${offers.length} مستند`}
         searchValue={search}
-        searchPlaceholder="بحث بالمورد / رقم العرض…"
+        searchPlaceholder="بحث بالرقم / اسم أو وصف الطلبية / المورد…"
         onSearchChange={setSearch}
         statusValue={filterStatus}
         statusOptions={[
-          { value: "all", label: scope === "import" ? "كل القرارات" : "كل الحالات" },
+          { value: "all", label: "كل الحالات" },
           ...Object.entries(statusLabels).map(([value, label]) => ({ value, label })),
         ]}
         onStatusChange={(value) => setFilterStatus(value as PriceOfferStatus | "all")}
@@ -473,12 +537,14 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
         onRowDoubleClick={(offer) => void openEdit(offer)}
       />
       <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
-      {statusModalOpen && targetStatusOffer && newStatusTarget && (
-        <StatusChangeModal
-          offer={targetStatusOffer}
-          newStatus={newStatusTarget}
-          onConfirm={(id, status) => void handleStatusChange(id, status as PriceOfferStatus)}
-          onCancel={() => setStatusModalOpen(false)}
+      {convertOffer && (
+        <ConvertTargetDialog
+          title={`تحويل عرض السعر ${convertOffer.offerNumber || ""}`.trim()}
+          hint="اختر الوجهة — الطلبية التزام شراء يسبق التسليم، والفاتورة تُثبت الذمّة للمورد."
+          orderDescription="طلبية شراء للمورد تُؤكَّد ثم تُحوَّل إلى فاتورة — بلا قيد محاسبي."
+          invoiceDescription="فاتورة شراء مسودة مباشرةً — تُثبت ذمّة المورد عند ترحيلها."
+          onPick={(target) => convertLocalOffer(convertOffer, target)}
+          onClose={() => setConvertOffer(null)}
         />
       )}
     </>

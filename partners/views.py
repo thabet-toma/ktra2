@@ -470,7 +470,7 @@ class PartnerViewSet(viewsets.ModelViewSet):
 
 
 class CustomerNoteViewSet(viewsets.ModelViewSet):
-    """ملاحظات/تذكيرات بطاقة الزبون (CRM) — CRUD مُنطاق بالشركة.
+    """ملاحظات/تذكيرات الأطراف والأهداف العامة — CRUD مُنطاق بالشركة.
 
     قائمة مفلترة بـ ?partner=<id>. تذكيرات مستحقة عبر reminders-due/ لمولّد
     إشعارات الموقع (يُنشئ إشعاراً عند حلول يوم التذكير).
@@ -487,6 +487,12 @@ class CustomerNoteViewSet(viewsets.ModelViewSet):
         partner_id = self.request.query_params.get('partner')
         if partner_id:
             qs = qs.filter(partner_id=partner_id)
+        target_type = self.request.query_params.get('target_type')
+        target_id = self.request.query_params.get('target_id')
+        if target_type:
+            qs = qs.filter(target_type=target_type)
+        if target_id:
+            qs = qs.filter(target_id=target_id)
         return qs
 
     @action(detail=False, methods=["get"], url_path="alerts")
@@ -528,8 +534,9 @@ class CustomerNoteViewSet(viewsets.ModelViewSet):
             created_by=self.request.user if self.request.user.is_authenticated else None,
         )
         logger.info(
-            'customer_note.create id=%s partner=%s tenant=%s remind_on=%s',
-            note.id, note.partner_id, tenant.TenantID, note.remind_on,
+            'customer_note.create id=%s partner=%s target=%s:%s tenant=%s remind_on=%s',
+            note.id, note.partner_id, note.target_type, note.target_id,
+            tenant.TenantID, note.remind_on,
         )
 
     @action(detail=False, methods=["get"], url_path="reminders-due")
@@ -549,7 +556,13 @@ class CustomerNoteViewSet(viewsets.ModelViewSet):
                 'title': n.title,
                 'remind_on': n.remind_on.isoformat(),
                 'partner_id': n.partner_id,
-                'partner_name': n.partner.name,
+                'partner_name': n.partner.name if n.partner else '',
+                'target_type': n.target_type,
+                'target_id': n.target_id,
+                'target_label': n.target_label or (n.partner.name if n.partner else ''),
+                'target_path': n.target_path or (
+                    f'/partners/{n.partner_id}?tab=customer_notes' if n.partner_id else ''
+                ),
             }
             for n in qs
         ])

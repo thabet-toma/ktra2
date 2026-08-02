@@ -76,6 +76,7 @@ from .domain.stages import derive_stage
 from .services import (
     annotate_purchase_invoice_payment_summary,
     attach_pi_payment_voucher,
+    convert_local_quotation_to_invoice,
     convert_local_quotation_to_order,
     convert_import_quotation_to_deal,
     convert_purchase_order_to_invoice,
@@ -107,6 +108,8 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
         if search:
             qs = qs.filter(
                 Q(quotation_number__icontains=search)
+                | Q(order_name__icontains=search)
+                | Q(order_description__icontains=search)
                 | Q(supplier__name__icontains=search)
                 | Q(supplier__legal_name__icontains=search)
                 | Q(lines__name_snapshot__icontains=search)
@@ -145,13 +148,18 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
         quotation = serializer.save()
         # T-IMPOFFER: قرار الملاءمة حدث تجاري لا تحريرٌ عابر — يُسجَّل بسببه كي
         # يُقرأ لاحقاً «لماذا رُفض هذا المورد» من سجل النشاط لا من الذاكرة.
-        if quotation.status != previous_status and quotation.status in (
-            SupplierQuotation.STATUS_ACCEPTED, SupplierQuotation.STATUS_REJECTED,
-        ):
-            suitable = quotation.status == SupplierQuotation.STATUS_ACCEPTED
-            label = 'ملائم' if suitable else 'غير ملائم'
+        # T-OFFERSTATE: حالتا الانتظار والمناقشة تُسجَّلان أيضاً — «بانتظار ماذا»
+        # سؤالٌ يُسأل بعد أسبوعين، فيجب أن يبقى له أثر لا ذاكرة.
+        status_labels = {
+            SupplierQuotation.STATUS_ACCEPTED: 'ملائم',
+            SupplierQuotation.STATUS_REJECTED: 'غير ملائم',
+            SupplierQuotation.STATUS_PENDING_INFO: 'بانتظار معلومات',
+            SupplierQuotation.STATUS_UNDER_DISCUSSION: 'قيد المناقشة',
+        }
+        if quotation.status != previous_status and quotation.status in status_labels:
+            label = status_labels[quotation.status]
             logger.info(
-                'supplier_quotation.decision id=%s scope=%s status=%s reason=%r',
+                'supplier_quotation.status id=%s scope=%s status=%s reason=%r',
                 quotation.pk, quotation.scope, quotation.status,
                 quotation.decision_reason,
             )
@@ -161,7 +169,7 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
                 entity_id=quotation.pk,
                 entity_label=quotation.quotation_number,
                 description=(
-                    f'قرار عرض السعر: {label}'
+                    f'حالة عرض السعر: {label}'
                     + (f' — {quotation.decision_reason}' if quotation.decision_reason else '')
                 ),
                 request=self.request,
@@ -240,6 +248,43 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
                 'order': PurchaseOrderSerializer(
                     order, context={'request': request},
                 ).data,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=['post'], url_path='convert-to-purchase-invoice')
+    def convert_to_purchase_invoice(self, request, pk=None):
+        """T-PLINEAGE: عرض شراء محلي مقبول → فاتورة شراء مسودة مباشرةً."""
+        quotation = self.get_object()
+        try:
+            invoice, created = convert_local_quotation_to_invoice(
+                quotation,
+                user=request.user,
+            )
+        except DjangoValidationError as exc:
+            detail = getattr(exc, 'message_dict', None) or getattr(
+                exc, 'messages', None,
+            ) or [str(exc)]
+            raise ValidationError(detail)
+        if created:
+            log_activity(
+                action='convert',
+                entity_type='supplier_quotation',
+                entity_id=quotation.id,
+                entity_label=quotation.quotation_number,
+                description=f'تحويل عرض السعر إلى فاتورة شراء {invoice.invoice_number}',
+                request=request,
+                partner_ids=[invoice.partner_id],
+                metadata={'purchase_invoice_id': invoice.id},
+            )
+        return Response(
+            {
+                'status': 'converted',
+                'created': created,
+                'invoice': {
+                    'id': invoice.id,
+                    'invoice_number': invoice.invoice_number,
+                },
             },
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )

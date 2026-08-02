@@ -138,7 +138,8 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     try {
       const [pays, parts, accs, currs, ag, pSettings, sSettings] = await Promise.all([
         listCustomerPayments(),
-        accountingApi.getPartners() as Promise<Partner[]>,
+        // T-PARTYPURE: سند قبض من زبون — قائمة الأطراف زبائن فقط.
+        accountingApi.getPartners("Customer") as Promise<Partner[]>,
         accountingApi.getAccounts() as Promise<Account[]>,
         accountingApi.getCurrencies() as Promise<Currency[]>,
         getAgingReport(),
@@ -562,7 +563,7 @@ export const NewPaymentModal: React.FC<{
         ? Promise.resolve(providedPartners)
         : lockPartner && initialPartner
           ? Promise.resolve([initialPartner])
-          : accountingApi.getPartners() as Promise<Partner[]>,
+          : accountingApi.getPartners("Customer") as Promise<Partner[]>,
       providedAccounts !== undefined
         ? Promise.resolve(providedAccounts)
         : accountingApi.getAccounts() as Promise<Account[]>,

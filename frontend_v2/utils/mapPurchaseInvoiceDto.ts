@@ -105,6 +105,15 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     isReturn: Boolean(dto.is_return),
     originalInvoiceId: dto.original_invoice != null ? String(dto.original_invoice) : undefined,
     originalInvoiceNumber: dto.original_invoice_number || undefined,
+    // T-PLINEAGE: من أين جاءت الفاتورة — عرض سعر أو طلبية، مع جدّها إن وُجد.
+    sourceDocument: dto.source_document ? {
+      kind: dto.source_document.kind,
+      id: dto.source_document.id,
+      number: dto.source_document.number,
+      originKind: dto.source_document.origin_kind ?? null,
+      originId: dto.source_document.origin_id ?? null,
+      originNumber: dto.source_document.origin_number ?? null,
+    } : undefined,
     // W7c: مرفقات الفاتورة (صور + PDF) — يستهلكها AttachmentsSection المشترك.
     quoteImages: dto.quote_images || [],
     quotePdfs: dto.quote_pdfs || [],

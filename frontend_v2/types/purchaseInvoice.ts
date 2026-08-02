@@ -95,6 +95,15 @@ export interface PurchaseInvoiceDto {
   shipment_number?: string | null;
   shipment_name?: string | null;
   clearance?: number | null;
+  /** T-PLINEAGE: المستند الذي وُلدت منه الفاتورة (عرض سعر أو طلبية شراء). */
+  source_document?: {
+    kind: "order" | "quotation";
+    id: number;
+    number: string;
+    origin_kind?: "quotation" | null;
+    origin_id?: number | null;
+    origin_number?: string | null;
+  } | null;
   currency?: number | null;
   currency_code?: string | null;
   exchange_rate?: number;

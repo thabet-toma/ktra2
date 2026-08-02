@@ -134,7 +134,8 @@ export const CreditDebitNotesPage: React.FC = () => {
     try {
       const [ns, parts] = await Promise.all([
         apiGetList<NoteRow>(BASE, { tenantId: tid() }),
-        accountingApi.getPartners() as Promise<Partner[]>,
+        // T-PARTYPURE: الإشعار المدين/الدائن على حساب زبون — لا موردين في القائمة.
+        accountingApi.getPartners("Customer") as Promise<Partner[]>,
       ]);
       setNotes(ns || []);
       setPartners(parts || []);
