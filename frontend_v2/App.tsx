@@ -74,6 +74,8 @@ const TaskDetailsModal = lazyPage(() => import("./components/TaskDetailsModal").
 const GroupConstantsPage = lazyPage(() => import("./components/settings/GroupConstantsPage").then((m) => ({ default: m.GroupConstantsPage })));
 const Dashboard = lazyPage(() => import("./components/Dashboard").then((m) => ({ default: m.Dashboard })));
 const TradeDashboard = lazyPage(() => import("./components/dashboard/TradeDashboard").then((m) => ({ default: m.TradeDashboard })));
+const SuperAdminDashboard = lazyPage(() => import("./components/superadmin/SuperAdminDashboard").then((m) => ({ default: m.SuperAdminDashboard })));
+const DevelopmentNotesPage = lazyPage(() => import("./components/superadmin/DevelopmentNotesPage").then((m) => ({ default: m.DevelopmentNotesPage })));
 const TaskManagement = lazyPage(() => import("./components/TaskManagement").then((m) => ({ default: m.TaskManagement })));
 const UserManagement = lazyPage(() => import("./components/UserManagement").then((m) => ({ default: m.UserManagement })));
 const ActivityLogPage = lazyPage(() => import("./components/ActivityLogPage").then((m) => ({ default: m.ActivityLogPage })));
@@ -118,6 +120,7 @@ const ExchangeRatesPage = lazyPage(() => import("./components/accounting/Exchang
 const BalanceSheetPage = lazyPage(() => import("./components/accounting/BalanceSheetPage").then((m) => ({ default: m.BalanceSheetPage })));
 const IncomeStatementPage = lazyPage(() => import("./components/accounting/IncomeStatementPage").then((m) => ({ default: m.IncomeStatementPage })));
 const InvoiceProfitsPage = lazyPage(() => import("./components/accounting/InvoiceProfitsPage").then((m) => ({ default: m.InvoiceProfitsPage })));
+const ReservedStockReportPage = lazyPage(() => import("./components/sales/ReservedStockReportPage").then((m) => ({ default: m.ReservedStockReportPage })));
 const VatStatementsPage = lazyPage(() => import("./components/accounting/VatStatementsPage").then((m) => ({ default: m.VatStatementsPage })));
 const YearEndClosePage = lazyPage(() => import("./components/accounting/YearEndClosePage").then((m) => ({ default: m.YearEndClosePage })));
 const SqlProductsPage = lazyPage(() => import("./components/sql/SqlProductsPage").then((m) => ({ default: m.SqlProductsPage })));
@@ -162,6 +165,8 @@ type AuthView = "landing" | "login" | "signup";
  */
 const VIEW_PATHS: Partial<Record<AppView, string>> = {
   dashboard: "/dashboard",
+  "super-admin": "/super-admin",
+  "development-notes": "/super-admin/development-notes",
   tasks: "/tasks",
   "task-management": "/task-management",
   "smart-assistant": "/assistant",
@@ -180,6 +185,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "sales-customer-payments": "/sales/customer-payments",
   "supplier-payments": "/supplier-payments",
   "invoice-profits": "/sales/profits",
+  "reserved-stock": "/sales/reserved-stock",
   "sales-customers": "/sales/customers",
   "sales-settings": "/sales/settings",
   "permissions": "/permissions",
@@ -606,6 +612,14 @@ const App: React.FC = () => {
     // task14 M1: بقية الصفحات — مطابقة مباشرة من جدول المسارات
     const mappedView = PATH_TO_VIEW[path];
     if (mappedView) {
+      if (
+        (mappedView === "super-admin" || mappedView === "development-notes")
+        && !currentUser.isSuperAdmin
+      ) {
+        setAppView("dashboard");
+        navigate("/dashboard", { replace: true });
+        return;
+      }
       setAppView(mappedView);
       return;
     }
@@ -621,7 +635,8 @@ const App: React.FC = () => {
     const params = new URLSearchParams(location.search);
     if (params.get("view")) return;
     const roleDefault: AppView =
-      currentUser.role === "manager" ? "dashboard" : "tasks";
+      currentUser.isSuperAdmin ? "super-admin"
+        : currentUser.role === "manager" ? "dashboard" : "tasks";
     setAppView(roleDefault);
   }, [currentUser]);
 
@@ -682,7 +697,7 @@ const App: React.FC = () => {
       void import("./services/shipmentArrivalReminders").then((m) =>
         m.runShipmentArrivalReminders(currentUser.id)
       );
-      // تذكيرات ملاحظات الزبائن المستحقة اليوم — إشعار داخل الموقع.
+      // تذكيرات الملاحظات المستحقة اليوم — للأطراف أو لأي صفحة/سجل في المنصة.
       void import("./services/customerNoteReminders").then((m) =>
         m.runCustomerNoteReminders(currentUser.id)
       );
@@ -1325,6 +1340,18 @@ const App: React.FC = () => {
     }
 
     switch (appView) {
+      case "super-admin":
+        if (!currentUser!.isSuperAdmin) {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <SuperAdminDashboard onNavigate={setViewAndSyncPath} />;
+
+      case "development-notes":
+        if (!currentUser!.isSuperAdmin) {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <DevelopmentNotesPage />;
+
       case "dashboard":
         // T-DASHPERIOD: مؤشرات الشركة المالية للمدير فقط، وإلا اللوحة الشخصية.
         if (isManager) {
@@ -1462,6 +1489,12 @@ const App: React.FC = () => {
       case "invoice-profits":
         if (canView(appView)) {
           return <InvoiceProfitsPage />;
+        }
+        return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+
+      case "reserved-stock":
+        if (canView(appView)) {
+          return <ReservedStockReportPage />;
         }
         return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
 

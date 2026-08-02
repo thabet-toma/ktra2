@@ -165,6 +165,7 @@ export const SalesSettingsPage: React.FC = () => {
         quotation_valid_days: rest.quotation_valid_days,
         order_reserve_days: rest.order_reserve_days,
         allow_document_delete: rest.allow_document_delete,
+        block_reserved_stock_sale: rest.block_reserved_stock_sale,
         default_shipping_origin: rest.default_shipping_origin,
         default_shipping_destination: rest.default_shipping_destination,
       };
@@ -656,6 +657,18 @@ export const SalesSettingsPage: React.FC = () => {
               onChange={(e) => setField("allow_document_delete", e.target.checked)}
             />
             <span>عند الإطفاء يبقى «إلغاء» فقط (لا يحذف المستند)</span>
+          </label>
+        </FieldLabel>
+        {/* T-RESERVEGUARD: الحجز كان عرضاً بلا أثر — فاتورة لزبون آخر كانت تسحبه. */}
+        <FieldLabel label="بيع الكمية المحجوزة لطلبية زبون آخر">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-emerald-600"
+              checked={settings.block_reserved_stock_sale !== false}
+              onChange={(e) => setField("block_reserved_stock_sale", e.target.checked)}
+            />
+            <span>منع ترحيل فاتورة تسحب كمية محجوزة (يظهر المحجوز في «تقرير المحجوزات»)</span>
           </label>
         </FieldLabel>
       </Section>

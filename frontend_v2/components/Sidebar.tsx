@@ -16,6 +16,7 @@ import {
   CalendarDays, CalendarX, ArrowLeftRight, Boxes, BarChart3, Building2,
   ShoppingCart, Receipt, Ship, Truck, TrendingUp, ClipboardList,
   ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck, Wallet,
+  Gauge, TableProperties,
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
 import { useCompany } from "../contexts/CompanyContext";
@@ -49,6 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const [reportsExpanded, setReportsExpanded] = useState(false);
   const [accountingExpanded, setAccountingExpanded] = useState(false);
   const [userManagementExpanded, setUserManagementExpanded] = useState(false);
+  const [platformExpanded, setPlatformExpanded] = useState(true);
 
   const accountingLinks: { view: AppView; label: string; icon: React.ReactNode; perm?: string }[] = [
     { view: "accounting-coa", label: "شجرة الحسابات", icon: <BookMarked className="h-4 w-4" /> },
@@ -88,6 +90,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "sales-delivery-notes", label: "إرساليات البيع", icon: <Truck className="h-4 w-4" /> },
     { view: "sales-return", label: "مرجع البيع", icon: <FileText className="h-4 w-4" /> },
     { view: "invoice-profits", label: "أرباح الفواتير", icon: <TrendingUp className="h-4 w-4" /> },
+    { view: "reserved-stock", label: "تقرير المحجوزات", icon: <ClipboardList className="h-4 w-4" /> },
     { view: "sales-settings", label: "إعدادات المبيعات", icon: <SettingsIcon className="h-4 w-4" /> },
   ];
 
@@ -239,6 +242,30 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
         >
           <style>{`.scrollbar-hide::-webkit-scrollbar { display: none; }`}</style>
 
+          {user.isSuperAdmin && (
+            <div className="mb-2 rounded-lg border border-blue-200 bg-blue-50/70 p-1 dark:border-blue-900 dark:bg-blue-950/20">
+              <button type="button"
+                onClick={() => { if (isCollapsed && !isMobile) setIsCollapsed(false); setPlatformExpanded(!platformExpanded); }}
+                className="flex w-full items-center justify-between rounded-md p-2 text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"
+                aria-expanded={platformExpanded}>
+                <span className="flex items-center gap-2"><ShieldCheck className="h-5 w-5" />{showText && <span className="font-bold">إدارة المنصة</span>}</span>
+                {showText && (platformExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />)}
+              </button>
+              {platformExpanded && showText && (
+                <div className="mt-1 space-y-1 border-r border-blue-200 pr-3 dark:border-blue-900">
+                  <button type="button" onClick={() => { setView("super-admin"); if (isMobile) setIsMobileMenuOpen(false); }}
+                    className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("super-admin") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
+                    <Gauge className="h-4 w-4" /> لوحة السوبر أدمن
+                  </button>
+                  <button type="button" onClick={() => { setView("development-notes"); if (isMobile) setIsMobileMenuOpen(false); }}
+                    className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("development-notes") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
+                    <TableProperties className="h-4 w-4" /> ملاحظات التطوير
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 1) الرئيسية — ملخص مؤشرات الشركة للمدير فقط (T-DASHPERIOD) */}
           {isManager && (
             <button
@@ -380,7 +407,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             {showText && (
               <div className="mr-3 overflow-hidden">
                 <p className="text-sm font-bold text-[var(--color-text)] truncate">{user.name}</p>
-                <p className="text-[10px] text-[var(--color-primary)] font-medium uppercase tracking-wider">{user.role}</p>
+                <p className="text-[10px] text-[var(--color-primary)] font-medium tracking-wider">
+                  {user.isSuperAdmin ? "سوبر أدمن المنصة" : user.role}
+                </p>
               </div>
             )}
           </div>

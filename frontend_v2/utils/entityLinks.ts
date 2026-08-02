@@ -41,6 +41,37 @@ export function entityPathForReference(
   return null;
 }
 
+export interface PlatformNoteTarget {
+  target_type: string;
+  target_id: string;
+  target_label: string;
+  target_path: string;
+}
+
+/** رابط داخلي آمن للتنقّل من إشعار؛ يُعاد فحصه أمامياً حتى لو عُدّلت بيانات الإشعار. */
+export function isSafeInternalPath(path: string): boolean {
+  return path.startsWith('/')
+    && !path.startsWith('//')
+    && !path.includes('\\')
+    && !Array.from(path).some((char) => char.charCodeAt(0) < 32);
+}
+
+/** هدف افتراضي لملاحظة عامة: الصفحة الحالية كاملةً، بما فيها معرّف السجل في query. */
+export function platformNoteTarget(
+  pathname: string,
+  search: string,
+  label: string,
+): PlatformNoteTarget {
+  const candidate = `${pathname || '/'}${search || ''}`;
+  const targetPath = isSafeInternalPath(candidate) ? candidate : '/dashboard';
+  return {
+    target_type: 'page',
+    target_id: targetPath,
+    target_label: label.trim() || 'الصفحة الحالية',
+    target_path: targetPath,
+  };
+}
+
 /**
  * كشف الحساب: تسمية عربية واضحة لنوع الحركة بدل رمز `reference_type` الإنجليزي الخام
  * (SALES_INVOICE / CUSTOMER_PAYMENT …). مصدر حقيقة واحد يخدم كشف الحساب ونافذة التفاصيل.

@@ -116,7 +116,7 @@ class Partner(models.Model):
 
 
 class CustomerNote(models.Model):
-    """ملاحظة/تذكير على بطاقة الزبون — نمط علاقات زبائن (CRM).
+    """ملاحظة/تذكير على طرف أو أي سجل/صفحة داخل المنصة.
 
     remind_on (اختياري): عند حلول هذا اليوم (أو تجاوزه) يظهر تذكير في إشعارات
     الموقع لملاحظة غير منجزة. is_done: عند إنجازها يتوقف التذكير.
@@ -137,7 +137,20 @@ class CustomerNote(models.Model):
     tenant = models.ForeignKey(
         Tenant, on_delete=models.CASCADE, related_name='customer_notes', db_column='TenantID')
     partner = models.ForeignKey(
-        Partner, on_delete=models.CASCADE, related_name='notes', db_column='PartnerID')
+        Partner, on_delete=models.CASCADE, related_name='notes', db_column='PartnerID',
+        null=True, blank=True)
+    target_type = models.CharField(
+        max_length=50, blank=True, default='', db_column='TargetType',
+        help_text='نوع الهدف العام، مثل supplier_quotation أو page')
+    target_id = models.CharField(
+        max_length=100, blank=True, default='', db_column='TargetID',
+        help_text='معرّف ثابت للهدف داخل نوعه')
+    target_label = models.CharField(
+        max_length=200, blank=True, default='', db_column='TargetLabel',
+        help_text='اسم الهدف كما يظهر في التذكير')
+    target_path = models.CharField(
+        max_length=500, blank=True, default='', db_column='TargetPath',
+        help_text='مسار داخلي يبدأ بـ / للعودة إلى الهدف')
     title = models.CharField(max_length=200, db_column='Title')
     body = models.TextField(blank=True, default='', db_column='Body')
     remind_on = models.DateField(
@@ -161,10 +174,11 @@ class CustomerNote(models.Model):
             models.Index(fields=['tenant', 'partner', '-created_at'], name='pcn_tenant_partner_created'),
             models.Index(fields=['tenant', 'is_done', 'remind_on'], name='pcn_tenant_done_remind'),
             models.Index(fields=['tenant', 'partner', 'priority', 'is_done'], name='pcn_tenant_partner_prio'),
+            models.Index(fields=['tenant', 'target_type', 'target_id'], name='pcn_tenant_target'),
         ]
 
     def __str__(self):
-        return f"{self.title} — {self.partner_id}"
+        return f"{self.title} — {self.partner_id or self.target_id}"
 
 
 class PartnerBankAccount(models.Model):

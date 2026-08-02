@@ -6,8 +6,10 @@ import {
   createCustomerNote,
   deleteCustomerNote,
   listCustomerNotes,
+  listTargetNotes,
   updateCustomerNote,
 } from '../../services/customerNotesApi';
+import type { PlatformNoteTarget } from '../../utils/entityLinks';
 import { runCustomerNoteReminders } from '../../services/customerNoteReminders';
 import { formatDateLocalized } from '../../utils/formatDate';
 import { useToast } from '../../contexts/ToastContext';
@@ -46,12 +48,14 @@ function noteBadge(n: CustomerNote): { label: string; cls: string } {
 }
 
 export interface CustomerNotesTabProps {
-  customerId: string;
+  customerId?: string;
+  /** هدف عام داخل المنصة؛ يُستخدم عندما لا تكون الملاحظة مرتبطة بطرف. */
+  target?: PlatformNoteTarget;
   /** معرّف ملاحظة لتحديدها/التمرير إليها (عند الوصول من إشعار تذكير). */
   focusNoteId?: string | null;
 }
 
-export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, focusNoteId }) => {
+export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, target, focusNoteId }) => {
   const toast = useToast();
   const confirm = useConfirm();
   const [notes, setNotes] = useState<CustomerNote[]>([]);
@@ -76,11 +80,16 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
 
   const load = useCallback(() => {
     setLoading(true);
-    listCustomerNotes(customerId)
+    const request = customerId
+      ? listCustomerNotes(customerId)
+      : target
+        ? listTargetNotes(target)
+        : Promise.resolve([]);
+    request
       .then((rows) => { setNotes(rows); setError(null); })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false));
-  }, [customerId]);
+  }, [customerId, target?.target_id, target?.target_type]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -99,7 +108,9 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
     setSaving(true);
     try {
       const created = await createCustomerNote({
-        partner: Number(customerId),
+        ...(customerId
+          ? { partner: Number(customerId) }
+          : target || {}),
         title,
         body: form.body.trim(),
         remind_on: form.remind_on || null,
@@ -209,7 +220,7 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
         <div className="text-[var(--aseel-danger,#c00)] p-4">{error}</div>
       ) : notes.length === 0 ? (
         <div className="text-center text-[var(--aseel-ink-soft)] p-10">
-          لا توجد ملاحظات بعد لهذا الطرف. ابدأ بإضافة ملاحظة أو تذكير أعلاه.
+          لا توجد ملاحظات بعد {customerId ? 'لهذا الطرف' : 'لهذا الهدف'}. ابدأ بإضافة ملاحظة أو تذكير أعلاه.
         </div>
       ) : (
         <div className="space-y-2">

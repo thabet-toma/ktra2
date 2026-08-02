@@ -17,6 +17,11 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
 
     STATUS_DRAFT = 'draft'
     STATUS_SENT = 'sent'
+    # T-OFFERSTATE: «بانتظار معلومات» و«قيد المناقشة» كانتا حالتين في الواجهة
+    # تُسقَطان كلتاهما على `sent` — فما يختاره المستخدم داخل العرض لا يظهر في
+    # القائمة. صارتا حالتين حقيقيتين كي تكون الحالة المعروضة هي المخزَّنة.
+    STATUS_PENDING_INFO = 'pending_info'
+    STATUS_UNDER_DISCUSSION = 'under_discussion'
     STATUS_ACCEPTED = 'accepted'
     STATUS_REJECTED = 'rejected'
     STATUS_EXPIRED = 'expired'
@@ -25,6 +30,8 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
     STATUS_CHOICES = [
         (STATUS_DRAFT, 'Draft'),
         (STATUS_SENT, 'Sent'),
+        (STATUS_PENDING_INFO, 'Pending info'),
+        (STATUS_UNDER_DISCUSSION, 'Under discussion'),
         (STATUS_ACCEPTED, 'Accepted'),
         (STATUS_REJECTED, 'Rejected'),
         (STATUS_EXPIRED, 'Expired'),
@@ -93,6 +100,12 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
     total_weight_kg = models.DecimalField(
         max_digits=10, decimal_places=3, default=0, db_column='TotalWeightKg',
     )
+    order_name = models.CharField(
+        max_length=200, blank=True, default='', db_column='OrderName',
+    )
+    order_description = models.TextField(
+        blank=True, default='', db_column='OrderDescription',
+    )
     notes = models.TextField(blank=True, default='', db_column='Notes')
     # ── T-IMPOFFER: مصدر العرض وقرار الملاءمة ──
     # رابط علي بابا يُنقل إلى `LogisticsDeal.alibaba_link` عند التحويل، فمصدر
@@ -105,16 +118,23 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
         max_length=100, blank=True, default='', db_column='SupplierContact',
         help_text='رقم التواصل مع مندوب المورد لهذا العرض',
     )
-    # سبب القرار: إلزامي عند «غير ملائم» (يُتحقَّق في المُسلسِل) — عرضٌ مرفوض
-    # بلا سبب لا يعلّم أحداً شيئاً عند مراجعته بعد شهر.
+    # تفصيل الحالة: إلزامي عند «غير ملائم» (لماذا) وعند «بانتظار معلومات»
+    # (بانتظار ماذا) — يُتحقَّق في المُسلسِل. حالةٌ بلا تفصيلها لا تعلّم أحداً
+    # شيئاً عند مراجعتها بعد شهر.
     decision_reason = models.CharField(
         max_length=500, blank=True, default='', db_column='DecisionReason',
-        help_text='سبب اعتبار العرض غير ملائم',
+        help_text='تفصيل الحالة: سبب عدم الملاءمة أو ما يُنتظَر وصوله',
     )
     # ملفات العرض كما وصلت من المورد (PDF/صور) — روابط مستضافة، لا محتوى.
     attachments = models.JSONField(
         default=list, blank=True, db_column='Attachments',
         help_text='[{name,url,type,size}] لملفات عرض السعر المرفوعة',
+    )
+    # T-OFFERSTATE: دفتر ملاحظات مؤرَّخ بدل `notes` النص الواحد الذي يُدهس عند كل
+    # تعديل. نفس نمط `attachments` (JSON على المستند) — والتاريخ يُختم في الخادم.
+    notes_log = models.JSONField(
+        default=list, blank=True, db_column='NotesLog',
+        help_text='[{text,at,by}] ملاحظات العرض المؤرَّخة، الأقدم أولاً',
     )
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
     updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
@@ -1434,6 +1454,12 @@ class PurchaseInvoice(models.Model):
         blank=True,
         db_column='ClearanceID',
         related_name='purchase_invoices',
+    )
+    # T-PLINEAGE: الفاتورة المولودة من عرض سعر مباشرةً (بلا طلبية وسيطة). النسب
+    # عبر الطلبية يبقى على `PurchaseOrder.invoice` — لكل طريق رابطه.
+    source_quotation = models.OneToOneField(
+        SupplierQuotation, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='SourceSupplierQuotationID', related_name='local_invoice',
     )
 
     currency = models.ForeignKey(

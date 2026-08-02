@@ -10,8 +10,40 @@
                  description='ترحيل فاتورة مبيعات')
 """
 import logging
+from datetime import date, datetime
+from decimal import Decimal
 
 logger = logging.getLogger("core.activity")
+
+
+def _activity_value(value) -> str:
+    """حوّل قيمة حقل إلى تمثيل ثابت وآمن للتخزين في JSON."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "نعم" if value else "لا"
+    if isinstance(value, Decimal):
+        return format(value, "f")
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return str(value)
+
+
+def build_activity_changes(*, before: dict, after: dict, labels: dict) -> list[dict]:
+    """أنشئ فروقات حقول مقروءة مع تجاهل القيم التي لم تتغيّر فعلياً."""
+    changes = []
+    for field, label in labels.items():
+        old_value = _activity_value(before.get(field))
+        new_value = _activity_value(after.get(field))
+        if old_value == new_value:
+            continue
+        changes.append({
+            "field": field,
+            "label": label,
+            "old": old_value,
+            "new": new_value,
+        })
+    return changes
 
 
 def _client_ip(request) -> str | None:

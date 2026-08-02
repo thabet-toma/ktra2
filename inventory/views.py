@@ -24,7 +24,7 @@ from .services import (
 )
 from tenants.models import Tenant
 from core.access import requires_perm
-from core.activity import log_activity, log_view
+from core.activity import build_activity_changes, log_activity, log_view
 from core.tenant_utils import get_tenant
 # صيانة الأداء 2026-07: الكلاس انتقل إلى core/pagination.py ليصبح الافتراضي
 # العام في REST_FRAMEWORK — يبقى الاستيراد هنا لأي مرجع قائم.
@@ -86,6 +86,28 @@ class ProductViewSet(viewsets.ModelViewSet):
     ordering_fields = ['id', 'sku', 'name_ar', 'quantity_on_hand', 'avg_cost', 'sale_price',
                        'min_stock_level', 'created_at']
     ordering = ['-id']
+
+    activity_field_labels = {
+        'name_ar': 'اسم المنتج',
+        'name_en': 'اسم المنتج بالإنجليزية',
+        'sku': 'رقم الصنف',
+        'barcode': 'الباركود',
+        'variant_group': 'المجموعة',
+        'brand': 'البراند',
+        'category': 'التصنيف',
+        'uom': 'وحدة القياس',
+        'weight_kg': 'الوزن',
+        'volume_cbm': 'الحجم',
+        'hs_code': 'رمز HS',
+        'min_stock_level': 'حد المخزون الأدنى',
+        'allow_negative_stock': 'السماح بالمخزون السالب',
+        'is_serialized': 'التتبع التسلسلي',
+        'is_service': 'نوع الخدمة',
+        'is_for_sale_online': 'البيع عبر الإنترنت',
+        'online_price': 'سعر الإنترنت',
+        'online_description': 'وصف الإنترنت',
+        'sale_price': 'سعر البيع',
+    }
 
     def _get_tenant(self):
         return get_tenant(self.request)
@@ -282,16 +304,29 @@ class ProductViewSet(viewsets.ModelViewSet):
                 raise serializers.ValidationError({'sku': 'تعذّر توليد رقم صنف — أعد المحاولة.'})
 
         self._handle_attachments(product, request.data, tenant)
+        product_label = product.name_ar or product.name_en or product.sku
+        log_activity(
+            action='create',
+            entity_type='product',
+            entity_id=product.id,
+            entity_label=product_label,
+            description=f'أضاف المنتج «{product_label}»',
+            request=request,
+        )
         return Response(self.get_serializer(product).data, status=status.HTTP_201_CREATED)
 
     def update(self, request, *args, **kwargs):
         tenant = self._get_tenant()
         instance = self.get_object()
-        old_sale_price = instance.sale_price
         serializer = self.get_serializer(instance, data=request.data, partial=kwargs.get('partial', False))
         serializer.is_valid(raise_exception=True)
         self._validate_category_tenant(serializer, tenant)
         self._auto_create_group_category(serializer, tenant)
+        tracked_labels = {
+            field: label for field, label in self.activity_field_labels.items()
+            if field in serializer.validated_data
+        }
+        before = {field: getattr(instance, field) for field in tracked_labels}
         # task14 M2: SKU فارغ في التعديل = «أبقِ الرقم الحالي» — لا تمسحه
         new_sku = (serializer.validated_data.get('sku') or '').strip()
         if 'sku' in serializer.validated_data:
@@ -302,13 +337,38 @@ class ProductViewSet(viewsets.ModelViewSet):
             ).exclude(pk=instance.pk).exists():
                 raise serializers.ValidationError({'sku': 'رقم الصنف مستخدم مسبقاً لهذه الشركة.'})
         product = serializer.save()
-        # سعر البيع مرجع تسعير يقترحه كل مستند — تغييره يُسجَّل ليُقرأ أثره لاحقاً.
-        if 'sale_price' in serializer.validated_data and product.sale_price != old_sale_price:
-            logger.info(
-                'product sale_price changed tenant=%s product=%s %s -> %s',
-                getattr(tenant, 'TenantID', None), product.id, old_sale_price, product.sale_price,
-            )
         self._handle_attachments(product, request.data, tenant)
+        changes = build_activity_changes(
+            before=before,
+            after={field: getattr(product, field) for field in tracked_labels},
+            labels=tracked_labels,
+        )
+        if changes:
+            product_label = product.name_ar or product.name_en or product.sku
+            if len(changes) == 1 and changes[0]['field'] == 'name_ar':
+                change = changes[0]
+                description = f'غيّر اسم المنتج من «{change["old"]}» إلى «{change["new"]}»'
+            elif len(changes) == 1 and changes[0]['field'] == 'sale_price':
+                change = changes[0]
+                description = (
+                    f'عدّل سعر البيع للمنتج «{product_label}» '
+                    f'من {change["old"]} إلى {change["new"]}'
+                )
+            else:
+                details = '؛ '.join(
+                    f'{change["label"]} من «{change["old"]}» إلى «{change["new"]}»'
+                    for change in changes
+                )
+                description = f'عدّل المنتج «{product_label}»: {details}'
+            log_activity(
+                action='update',
+                entity_type='product',
+                entity_id=product.id,
+                entity_label=product_label,
+                description=description,
+                metadata={'changes': changes},
+                request=request,
+            )
         return Response(self.get_serializer(product).data)
 
     @action(detail=True, methods=['delete'], url_path='datasheets/(?P<att_id>[0-9]+)')

@@ -5,6 +5,8 @@ import { useNavigate } from 'react-router-dom';
 
 export const VIEW_LABELS: Record<AppView, string> = {
   dashboard: 'الرئيسية',
+  'super-admin': 'لوحة تحكم السوبر أدمن',
+  'development-notes': 'ملاحظات التطوير',
   tasks: 'مهامي',
   'task-management': 'إدارة المهام',
   users: 'قائمة المستخدمين',
@@ -58,6 +60,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'purchase-return': 'مرجع الشراء',
   'supplier-payments': 'سندات الصرف للموردين',
   'invoice-profits': 'أرباح الفواتير',
+  'reserved-stock': 'تقرير المحجوزات',
   'partner-profile': 'ملف الشريك',
   'stock-levels': 'أرصدة المخزون',
   'stock-movements': 'حركات المخزون',

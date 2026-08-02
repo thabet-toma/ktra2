@@ -4,6 +4,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from django.db import transaction
 from django.db.models import Sum
+from django.utils import timezone
 from rest_framework import serializers
 
 from sales.models import SupplierPayment, SupplierPaymentAllocation
@@ -245,6 +246,10 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     scope_display = serializers.CharField(source='get_scope_display', read_only=True)
     converted_deal = serializers.SerializerMethodField()
+    # T-PLINEAGE: المستند الناتج عن التحويل بالاسم والمعرّف — «محوَّل» بلا وجهة
+    # لا يقود إلى شيء، والواجهة تحتاج المعرّف لفتحه بنقرة.
+    converted_order = serializers.SerializerMethodField()
+    converted_invoice = serializers.SerializerMethodField()
 
     class Meta:
         model = SupplierQuotation
@@ -256,13 +261,16 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
             'discount_amount', 'tax_rate', 'tax_amount', 'grand_total',
             'shipping_cost_estimate', 'is_shipping_included', 'incoterms',
             'shipping_method', 'payment_method', 'production_days',
-            'delivery_days', 'total_cbm', 'total_weight_kg', 'notes',
+            'delivery_days', 'total_cbm', 'total_weight_kg',
+            'order_name', 'order_description', 'notes',
             'alibaba_link', 'supplier_contact', 'decision_reason', 'attachments',
-            'lines', 'converted_deal', 'created_at', 'updated_at',
+            'notes_log',
+            'lines', 'converted_deal', 'converted_order', 'converted_invoice',
+            'created_at', 'updated_at',
         ]
         read_only_fields = [
             'id', 'subtotal', 'tax_amount', 'grand_total', 'converted_deal',
-            'created_at', 'updated_at',
+            'converted_order', 'converted_invoice', 'created_at', 'updated_at',
         ]
         extra_kwargs = {
             'quotation_number': {'required': False, 'allow_blank': True},
@@ -274,6 +282,76 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
         except LogisticsDeal.DoesNotExist:
             return None
         return {'id': deal.id, 'ref_number': deal.ref_number, 'stage': deal.stage}
+
+    def get_converted_order(self, obj):
+        try:
+            order = obj.local_order
+        except PurchaseOrder.DoesNotExist:
+            return None
+        return {'id': order.id, 'order_number': order.order_number, 'status': order.status}
+
+    def get_converted_invoice(self, obj):
+        """الفاتورة الناتجة — مباشرةً من العرض أو عبر الطلبية التي وُلدت منه."""
+        try:
+            invoice = obj.local_invoice
+        except PurchaseInvoice.DoesNotExist:
+            invoice = None
+        if invoice is None:
+            try:
+                invoice = obj.local_order.invoice
+            except PurchaseOrder.DoesNotExist:
+                invoice = None
+        if invoice is None:
+            return None
+        return {
+            'id': invoice.id,
+            'invoice_number': invoice.invoice_number,
+            'status': invoice.status,
+        }
+
+    def _stamp_notes_log(self, notes_log, instance):
+        """T-OFFERSTATE: ختم تاريخ كل ملاحظة **في الخادم**.
+
+        ساعة المتصفح ليست مصدراً موثوقاً لتاريخ ملاحظة تُقرأ بعد أشهر. الملاحظة
+        التي وصلت بتاريخ سابق تحتفظ به (إعادة حفظ النموذج لا تُعيد تأريخ القديم)،
+        والجديدة تُختم بوقت الخادم وباسم كاتبها.
+        """
+        if not isinstance(notes_log, list):
+            raise serializers.ValidationError({
+                'notes_log': 'الملاحظات يجب أن تكون قائمة.',
+            })
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        author = (
+            user.get_username()
+            if user is not None and getattr(user, 'is_authenticated', False)
+            else ''
+        )
+        now = timezone.now().isoformat()
+        known_dates = {
+            str(entry.get('at') or '')
+            for entry in (getattr(instance, 'notes_log', None) or [])
+            if isinstance(entry, dict)
+        }
+        stamped = []
+        for entry in notes_log:
+            if not isinstance(entry, dict):
+                raise serializers.ValidationError({
+                    'notes_log': 'كل ملاحظة يجب أن تكون كائناً يحمل نصاً.',
+                })
+            text = str(entry.get('text') or '').strip()
+            if not text:
+                raise serializers.ValidationError({
+                    'notes_log': 'الملاحظة الفارغة لا تُحفظ.',
+                })
+            at = str(entry.get('at') or '')
+            keep_original = at in known_dates and at != ''
+            stamped.append({
+                'text': text,
+                'at': at if keep_original else now,
+                'by': str(entry.get('by') or '') if keep_original else author,
+            })
+        return stamped
 
     def validate(self, attrs):
         tenant = get_tenant(self.context.get('request'))
@@ -306,17 +384,29 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
         # T-IMPOFFER: «غير ملائم» يلزمه سبب — في نطاق **الاستيراد** وحده، حيث
         # القرار مطلبٌ صريح للمالك. عرض الشراء المحلي يبقى كما كان (سبب اختياري)
         # فلا يتغيّر سلوك شاشة قائمة لم يُطلب تغييرها.
-        # و«ملائم» يمحو سبباً قديماً كي لا يبقى عرضٌ مقبول حاملاً سبب رفض سابق.
+        # T-OFFERSTATE: و«بانتظار معلومات» يلزمها **بانتظار ماذا** — حالة انتظار
+        # بلا مُنتظَر لا تقول شيئاً لمن يفتح القائمة بعد أسبوع.
+        # وأي حالة أخرى تمحو التفصيل القديم كي لا يبقى عرضٌ مقبول حاملاً سبب رفض.
         reason = attrs.get(
             'decision_reason', getattr(instance, 'decision_reason', ''),
         )
-        if status_value == SupplierQuotation.STATUS_REJECTED:
+        if status_value in (
+            SupplierQuotation.STATUS_REJECTED, SupplierQuotation.STATUS_PENDING_INFO,
+        ):
             if scope == SupplierQuotation.SCOPE_IMPORT and not str(reason or '').strip():
                 raise serializers.ValidationError({
-                    'decision_reason': 'اذكر سبب اعتبار العرض غير ملائم.',
+                    'decision_reason': (
+                        'اذكر سبب اعتبار العرض غير ملائم.'
+                        if status_value == SupplierQuotation.STATUS_REJECTED
+                        else 'اذكر ما يُنتظَر وصوله من المورد.'
+                    ),
                 })
         elif str(reason or '').strip():
             attrs['decision_reason'] = ''
+
+        notes_log = attrs.get('notes_log')
+        if notes_log is not None:
+            attrs['notes_log'] = self._stamp_notes_log(notes_log, instance)
 
         attachments = attrs.get('attachments')
         if attachments is not None:
@@ -1514,6 +1604,9 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     receipt_status_display = serializers.CharField(source='get_receipt_status_display', read_only=True)
     is_local = serializers.SerializerMethodField()
+    # T-PLINEAGE: المستند الذي وُلدت منه الفاتورة (عرض سعر أو طلبية) — الفاتورة
+    # كانت صامتة عن أصلها، فلا سبيل للرجوع إلى العرض الذي سعّرها.
+    source_document = serializers.SerializerMethodField()
     # W7a: رقم الفاتورة الأصلية — لعرض رابط «الفاتورة الأصلية #» في مستند المرجع.
     original_invoice_number = serializers.CharField(
         source='original_invoice.invoice_number', read_only=True, default=None,
@@ -1576,6 +1669,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             # firestore_id: dropped in P-K-3 (migration 0042).
             'status', 'status_display', 'notes',
             'receipt_status', 'receipt_status_display', 'is_local',
+            'source_document',
             'amount_paid', 'remaining_balance', 'payment_status', 'payment_status_display',
             'supplier_balance_current', 'supplier_balance_before_invoice',
             'supplier_balance_after_invoice', 'payment_details',
@@ -1592,6 +1686,35 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     def get_is_local(self, obj):
         """فاتورة محلية = غير مستوردة (بلا صفقة/شحنة/تخليص) — قابلة للاستلام للمخزن."""
         return not (obj.deal_id or obj.shipment_id or obj.clearance_id)
+
+    def get_source_document(self, obj):
+        """المستند الأب: طلبية شراء أو عرض سعر محوَّل مباشرةً — بالرقم والمعرّف.
+
+        الطلبية المولودة من عرض تحمل جدّها في `origin_*`، فيصل المستخدم إلى
+        العرض الذي بدأ السلسلة بنقرة واحدة بدل تتبّعه يدوياً.
+        """
+        order = getattr(obj, 'source_purchase_order', None)
+        if order is not None:
+            return {
+                'kind': 'order',
+                'id': order.id,
+                'number': order.order_number,
+                'origin_kind': 'quotation' if order.quotation_id else None,
+                'origin_id': order.quotation_id,
+                'origin_number': (
+                    order.quotation.quotation_number if order.quotation_id else None
+                ),
+            }
+        if obj.source_quotation_id:
+            return {
+                'kind': 'quotation',
+                'id': obj.source_quotation_id,
+                'number': obj.source_quotation.quotation_number,
+                'origin_kind': None,
+                'origin_id': None,
+                'origin_number': None,
+            }
+        return None
 
     def get_quote_images(self, obj):
         return read_document_images(obj.tenant_id, 'purchase_invoices', obj.id)

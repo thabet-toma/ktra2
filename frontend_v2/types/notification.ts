@@ -6,6 +6,7 @@ export type NotificationType =
     | 'shipment_updated'
     | 'shipment_arrival_soon'
     | 'customer_note_reminder'
+    | 'platform_note_reminder'
     | 'customer_dormant'
     | 'general';
 
@@ -17,6 +18,8 @@ export interface AppNotification {
     type: NotificationType;
     targetId?: string;
     targetView?: AppView;
+    /** مسار داخلي مباشر للهدف العام؛ يبقى targetView للتوافق مع الإشعارات القديمة. */
+    targetPath?: string;
     /** تبويب هدف داخل الوجهة (مثلاً «customer_notes» في بطاقة الزبون). */
     targetTab?: string;
     /** معرّف ثانوي (مثلاً معرّف الملاحظة) لتحديد العنصر داخل التبويب. */

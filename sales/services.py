@@ -345,8 +345,55 @@ def _resolve_ar_account(invoice: SalesInvoice) -> Account:
     )
 
 
+def resolve_service_revenue_account(tenant_id: int) -> Account:
+    """T-SERVICELINE: حساب «إيرادات الخدمات» — يُطابَق من الشجرة أو يُنشأ ويُثبَّت.
+
+    كان بيع الخدمة يرتدّ إلى حساب إيراد **البضائع** متى كان الإعداد فارغاً (وهو
+    حاله في كل شركة لم تُضبط يدوياً)، فيضيع الفصل الذي هو غرض بند الخدمة أصلاً.
+    التثبيت على الإعدادات يمنع إنشاء حساب ثانٍ في المرة التالية.
+    """
+    ss = get_or_create_sales_settings(tenant_id)
+    if ss.default_revenue_account_service_id:
+        return ss.default_revenue_account_service
+
+    account = resolve_default_account(
+        tenant_id, ["4102", "42"], "Revenue", "خدمات", allow_any_of_type=False
+    )
+    if account is None:
+        parent = (
+            Account.objects.filter(
+                tenant_id=tenant_id, account_type="Revenue", is_active=True,
+            )
+            .order_by("code")
+            .first()
+        )
+        # get_or_create على (الشركة، الكود): كودٌ معطَّل بنفس الرقم موجود أصلاً
+        # يُعاد استعماله بدل أن يصطدم بقيد التفرّد.
+        account, created = Account.objects.get_or_create(
+            tenant_id=tenant_id,
+            code="4102",
+            defaults={
+                "name": "إيرادات الخدمات",
+                "account_type": "Revenue",
+                "is_active": True,
+                "parent": parent.parent if parent else None,
+            },
+        )
+        if created:
+            logger.info(
+                "sales.service_revenue_account.created tenant=%s account=%s",
+                tenant_id, account.pk,
+            )
+    ss.default_revenue_account_service = account
+    ss.save(update_fields=["default_revenue_account_service"])
+    return account
+
+
 def _default_revenue_account(tenant_id: int, *, is_service: bool = False) -> Account:
     """يفضّل الحساب من إعدادات المبيعات (منتج/خدمة)، ثم أول حساب إيرادات نشط."""
+    # T-SERVICELINE: الخدمة لها حسابها دائماً — لا ارتداد إلى إيراد البضائع.
+    if is_service:
+        return resolve_service_revenue_account(tenant_id)
     ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
     if ss:
         if is_service and ss.default_revenue_account_service_id:
@@ -950,6 +997,10 @@ def post_sales_invoice(
 
         # منع فاتورة الخسارة (إعداد اختياري، على مستوى السطر) — بعد قفل الأصناف والإجماليات.
         guard_loss_invoice(invoice, lines, products_by_id)
+
+        # T-RESERVEGUARD: الكمية المحجوزة لطلبية زبون آخر ليست متاحة للبيع —
+        # يُفحص بعد قفل الأصناف كي لا تسبق فاتورتان بعضهما على نفس الحجز.
+        guard_reserved_stock(invoice, lines, products_by_id)
 
         journal_lines: list[dict] = []
 
@@ -2760,15 +2811,9 @@ def document_delete_allowed(tenant_id: int) -> bool:
     return True if ss is None else bool(ss.allow_document_delete)
 
 
-def reserved_quantity_map(tenant_id: int, product_ids=None) -> dict:
-    """الكمية المحجوزة لكل صنف = بنود طلبيات مؤكَّدة لم ينتهِ حجزها.
-
-    مشتقّة بالكامل من الطلبيات (لا عمود على المنتج): الانتهاء يحرّر الكمية من
-    تلقاء نفسه بلا مهمة خلفية، والإلغاء/التحويل يخرجان من الحالة المؤكَّدة.
-    """
+def _active_reservation_lines(tenant_id: int, product_ids=None):
+    """بنود الحجز السارية — تعريف واحد يخدم الخريطة والحارس والتقرير معاً."""
     from datetime import date as _date
-
-    from django.db.models import Sum
 
     from .models import SalesOrder, SalesOrderLine
 
@@ -2779,8 +2824,145 @@ def reserved_quantity_map(tenant_id: int, product_ids=None) -> dict:
     )
     if product_ids is not None:
         qs = qs.filter(product_id__in=list(product_ids))
+    return qs
+
+
+def reserved_quantity_map(
+    tenant_id: int, product_ids=None, *, exclude_customer_id: int | None = None,
+) -> dict:
+    """الكمية المحجوزة لكل صنف = بنود طلبيات مؤكَّدة لم ينتهِ حجزها.
+
+    مشتقّة بالكامل من الطلبيات (لا عمود على المنتج): الانتهاء يحرّر الكمية من
+    تلقاء نفسه بلا مهمة خلفية، والإلغاء/التحويل يخرجان من الحالة المؤكَّدة.
+
+    `exclude_customer_id`: يتجاهل حجوزات زبون بعينه — حجزُه لا يمنعه هو.
+    """
+    from django.db.models import Sum
+
+    qs = _active_reservation_lines(tenant_id, product_ids)
+    if exclude_customer_id is not None:
+        qs = qs.exclude(order__customer_id=exclude_customer_id)
     rows = qs.values("product_id").annotate(total=Sum("quantity"))
     return {r["product_id"]: r["total"] for r in rows if r["total"]}
+
+
+def reserved_stock_rows(tenant_id: int, *, product_id=None, customer_id=None) -> list[dict]:
+    """«تقرير المحجوزات»: سطر لكل بند طلبية مؤكَّدة ما زال حجزه سارياً.
+
+    يقرأ من نفس مصدر `reserved_quantity_map` كي لا ينحرف التقرير عن الحارس:
+    ما يمنعه الترحيل هو بعينه ما يظهر هنا.
+    """
+    from datetime import date as _date
+
+    qs = (
+        _active_reservation_lines(tenant_id, [product_id] if product_id else None)
+        .select_related("order", "order__customer", "product")
+        .order_by("order__reserved_until", "order__order_number", "id")
+    )
+    if customer_id:
+        qs = qs.filter(order__customer_id=customer_id)
+    lines = list(qs)
+    reserved_totals = reserved_quantity_map(
+        tenant_id, product_ids={line.product_id for line in lines} or None)
+    today = _date.today()
+    rows = []
+    for line in lines:
+        product = line.product
+        on_hand = Decimal(str(product.quantity_on_hand or 0))
+        reserved_total = Decimal(str(reserved_totals.get(line.product_id, 0)))
+        rows.append({
+            "order_id": line.order_id,
+            "order_number": line.order.order_number,
+            "order_date": line.order.order_date,
+            "reserved_until": line.order.reserved_until,
+            "days_left": (line.order.reserved_until - today).days
+            if line.order.reserved_until else None,
+            "customer_id": line.order.customer_id,
+            "customer_name": line.order.customer.name,
+            "product_id": line.product_id,
+            "product_sku": product.sku,
+            "product_name": product.name_ar or product.name_en or product.sku,
+            "quantity": str(line.quantity),
+            "unit_price": str(line.unit_price),
+            "line_total": str(line.line_total),
+            "quantity_on_hand": str(on_hand),
+            "reserved_quantity": str(reserved_total),
+            "available_quantity": str(on_hand - reserved_total),
+        })
+    return rows
+
+
+def guard_reserved_stock(
+    invoice: SalesInvoice,
+    lines: list[SalesInvoiceLine],
+    products_by_id: dict[int, Product],
+) -> None:
+    """T-RESERVEGUARD: يمنع ترحيل فاتورة تسحب كمية محجوزة لطلبية **زبون آخر**.
+
+    الحجز كان عرضاً بلا أثر: تُحجز الكمية بطلبية مؤكَّدة، ثم تُرحَّل فاتورة لزبون
+    ثانٍ فتخصمها ويبقى صاحب الطلبية بوعدٍ لا رصيد له. الحارس هنا يقارن كمية
+    الفاتورة بالمتاح **بعد** حجوزات الآخرين، ويسمّي الطلبيات الحاجزة.
+
+    مُعفى منه: المراجيع، الخدمات، الأصناف التي تسمح بالسالب، وفاتورة صاحب الحجز
+    نفسه. ويتوقف كلياً عند إطفاء `block_reserved_stock_sale`.
+    """
+    from collections import defaultdict
+
+    kind = invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE
+    if kind != SalesInvoice.INVOICE_KIND_SALE or not invoice.stock_on_post:
+        return
+    ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
+    if ss is not None and not ss.block_reserved_stock_sale:
+        return
+
+    requested = defaultdict(lambda: Decimal("0"))
+    for line in lines:
+        product = products_by_id.get(line.product_id) or line.product
+        if getattr(product, "is_service", False) or getattr(product, "allow_negative_stock", False):
+            continue
+        requested[line.product_id] += Decimal(str(line.quantity or 0))
+    if not requested:
+        return
+
+    others = reserved_quantity_map(
+        invoice.tenant_id,
+        product_ids=requested.keys(),
+        exclude_customer_id=invoice.customer_id,
+    )
+    if not others:
+        return
+
+    shortages = []
+    for product_id, quantity in requested.items():
+        reserved = Decimal(str(others.get(product_id, 0)))
+        if not reserved:
+            continue
+        product = products_by_id.get(product_id)
+        available = Decimal(str(product.quantity_on_hand or 0)) - reserved
+        if quantity <= available:
+            continue
+        blocking = _active_reservation_lines(invoice.tenant_id, [product_id]).exclude(
+            order__customer_id=invoice.customer_id
+        ).select_related("order", "order__customer")
+        holders = "، ".join(
+            f"{line.order.order_number} ({line.order.customer.name})" for line in blocking
+        )
+        shortages.append(
+            f"«{product.name_ar or product.name_en or product.sku}»: المطلوب {quantity} "
+            f"والمتاح بعد الحجز {available} — محجوز بـ{holders}"
+        )
+    if not shortages:
+        return
+
+    logger.warning(
+        "Blocked invoice %s over reserved stock — %s",
+        invoice.invoice_number, "؛ ".join(shortages),
+    )
+    raise ValidationError(
+        "لا يمكن ترحيل الفاتورة: الكمية محجوزة لطلبية زبون آخر. "
+        + "؛ ".join(shortages)
+        + ". ألغِ الحجز أو عدّل الكمية أو أطفئ «منع بيع الكمية المحجوزة» من إعدادات المبيعات."
+    )
 
 
 def _recalculate_order_totals(order) -> None:

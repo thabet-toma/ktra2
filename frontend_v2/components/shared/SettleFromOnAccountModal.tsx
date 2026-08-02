@@ -9,6 +9,7 @@
  * (الذمم عُولجت وقت ترحيل السند).
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Banknote, Check, WalletCards } from "lucide-react";
 import { formatMoney } from "@/utils/formatNumber";
 import { PaymentVoucherModal } from "../sales/PaymentVoucherParts";
 import {
@@ -26,6 +27,12 @@ type OnAccountVoucher = {
   unallocated: number;
 };
 
+type QuickReceiptConfig = {
+  accounts: Array<{ id: number; code?: string | null; name?: string | null }>;
+  defaultAccountId?: number | null;
+  onReceive: (amount: number, accountId: number) => Promise<void>;
+};
+
 interface Props {
   kind: "customer" | "supplier";
   partnerId: number;
@@ -39,6 +46,8 @@ interface Props {
   onSettled: () => void;
   /** فتح نموذج سند جديد للمتبقّي (زر ثانوي). */
   onNewVoucher?: () => void;
+  /** تحصيل سريع داخل النافذة نفسها، دون فتح نموذج سند ثانٍ. */
+  quickReceipt?: QuickReceiptConfig;
 }
 
 export const SettleFromOnAccountModal: React.FC<Props> = ({
@@ -51,14 +60,32 @@ export const SettleFromOnAccountModal: React.FC<Props> = ({
   onClose,
   onSettled,
   onNewVoucher,
+  quickReceipt,
 }) => {
   const isCustomer = kind === "customer";
   const voucherWord = isCustomer ? "سند قبض" : "سند صرف";
   const [vouchers, setVouchers] = useState<OnAccountVoucher[]>([]);
   const [amounts, setAmounts] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [submittingAction, setSubmittingAction] = useState<"receipt" | "balance" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [receiptAmount, setReceiptAmount] = useState(remaining.toFixed(2));
+  const [balanceAmount, setBalanceAmount] = useState("0.00");
+  const [receiptAccountId, setReceiptAccountId] = useState<number | "">(
+    quickReceipt?.defaultAccountId ?? quickReceipt?.accounts[0]?.id ?? "",
+  );
+
+  useEffect(() => {
+    setReceiptAmount(remaining.toFixed(2));
+  }, [remaining]);
+
+  useEffect(() => {
+    if (!quickReceipt) return;
+    const currentIsValid = quickReceipt.accounts.some((account) => account.id === receiptAccountId);
+    if (!currentIsValid) {
+      setReceiptAccountId(quickReceipt.defaultAccountId ?? quickReceipt.accounts[0]?.id ?? "");
+    }
+  }, [quickReceipt, receiptAccountId]);
 
   useEffect(() => {
     let alive = true;
@@ -85,7 +112,11 @@ export const SettleFromOnAccountModal: React.FC<Props> = ({
     load
       .then((rows) => {
         if (!alive) return;
-        setVouchers(rows.filter((r) => r.is_posted && r.unallocated > 0.009));
+        const available = rows.filter((r) => r.is_posted && r.unallocated > 0.009);
+        setVouchers(available);
+        setBalanceAmount(
+          Math.min(remaining, available.reduce((sum, row) => sum + row.unallocated, 0)).toFixed(2),
+        );
         setError(null);
       })
       .catch((e: unknown) => {
@@ -93,7 +124,7 @@ export const SettleFromOnAccountModal: React.FC<Props> = ({
       })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
-  }, [isCustomer, partnerId]);
+  }, [isCustomer, partnerId, remaining]);
 
   const totalOnAccount = useMemo(
     () => vouchers.reduce((s, v) => s + v.unallocated, 0),
@@ -120,9 +151,35 @@ export const SettleFromOnAccountModal: React.FC<Props> = ({
   const totalSettle = rows.reduce((s, r) => s + r.amount, 0);
   const canSubmit = rows.length > 0 && totalSettle <= remaining + 0.01;
 
+  const requestedBalanceAmount = Number(balanceAmount);
+  const quickBalanceRows = useMemo(() => {
+    if (!Number.isFinite(requestedBalanceAmount) || requestedBalanceAmount <= 0) return [];
+    let left = requestedBalanceAmount;
+    return vouchers
+      .map((voucher) => {
+        const amount = Math.min(voucher.unallocated, Math.max(0, left));
+        left -= amount;
+        return { v: voucher, amount };
+      })
+      .filter((row) => row.amount > 0.009);
+  }, [requestedBalanceAmount, vouchers]);
+
+  const canQuickBalance = quickBalanceRows.length > 0
+    && requestedBalanceAmount <= remaining + 0.01
+    && requestedBalanceAmount <= totalOnAccount + 0.01;
+  const requestedReceiptAmount = Number(receiptAmount);
+  const canQuickReceipt = Boolean(
+    quickReceipt
+      && Number.isFinite(requestedReceiptAmount)
+      && requestedReceiptAmount > 0
+      && requestedReceiptAmount <= remaining + 0.01
+      && receiptAccountId !== ""
+      && quickReceipt.accounts.some((account) => account.id === receiptAccountId),
+  );
+
   const submit = async () => {
     setError(null);
-    setSubmitting(true);
+    setSubmittingAction("balance");
     try {
       for (const r of rows) {
         const payload = [{ invoice: invoiceId, amount: r.amount.toFixed(2) }];
@@ -136,7 +193,48 @@ export const SettleFromOnAccountModal: React.FC<Props> = ({
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "فشل التسديد من الرصيد");
     } finally {
-      setSubmitting(false);
+      setSubmittingAction(null);
+    }
+  };
+
+  const submitQuickBalance = async () => {
+    if (!canQuickBalance) {
+      setError("أدخل مبلغاً أكبر من صفر ولا يتجاوز المتبقّي أو الرصيد المتاح.");
+      return;
+    }
+    setError(null);
+    setSubmittingAction("balance");
+    try {
+      for (const row of quickBalanceRows) {
+        const payload = [{ invoice: invoiceId, amount: row.amount.toFixed(2) }];
+        if (isCustomer) {
+          await allocateCustomerPayment(row.v.id, payload);
+        } else {
+          await purchaseInvoiceApi.allocateSupplierPayment(row.v.id, payload);
+        }
+      }
+      onSettled();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "فشل التسديد من الرصيد");
+    } finally {
+      setSubmittingAction(null);
+    }
+  };
+
+  const submitQuickReceipt = async () => {
+    if (!quickReceipt || !canQuickReceipt || receiptAccountId === "") {
+      setError("أدخل مبلغاً صحيحاً واختر حساب الصندوق أو البنك.");
+      return;
+    }
+    setError(null);
+    setSubmittingAction("receipt");
+    try {
+      await quickReceipt.onReceive(requestedReceiptAmount, receiptAccountId);
+      onClose();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "فشل استلام الدفعة");
+    } finally {
+      setSubmittingAction(null);
     }
   };
 
@@ -144,34 +242,130 @@ export const SettleFromOnAccountModal: React.FC<Props> = ({
     <PaymentVoucherModal
       title={`تسديد ${invoiceLabel} — ${partnerLabel}`}
       error={error}
-      submitting={submitting}
+      submitting={submittingAction !== null}
       disabled={!canSubmit}
       submitLabel="سدّد من الرصيد"
-      secondaryLabel={onNewVoucher ? `${voucherWord} جديد` : undefined}
-      onSecondary={onNewVoucher}
+      secondaryLabel={!quickReceipt && onNewVoucher ? `${voucherWord} جديد` : undefined}
+      secondaryDisabled={false}
+      onSecondary={!quickReceipt ? onNewVoucher : undefined}
+      hideActions={Boolean(quickReceipt)}
       onClose={onClose}
       onSubmit={() => void submit()}
     >
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
-        <label className="aseel-field">
-          <span className="aseel-field-label">المتبقّي على الفاتورة</span>
-          <input readOnly className="aseel-input aseel-num" value={formatMoney(remaining)}
-            style={{ background: "var(--aseel-surface-2)", fontWeight: 700 }} />
-        </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">الرصيد على الحساب</span>
-          <input readOnly className="aseel-input aseel-num" value={formatMoney(totalOnAccount)}
-            style={{ background: "var(--aseel-surface-2)", color: "var(--aseel-warn, #b06800)", fontWeight: 700 }} />
-        </label>
-        <label className="aseel-field">
-          <span className="aseel-field-label">يبقى بعد التسديد</span>
-          <input readOnly className="aseel-input aseel-num"
-            value={formatMoney(Math.max(0, remaining - totalSettle))}
-            style={{ background: "var(--aseel-ok-bg, #e3f6e9)", color: "var(--aseel-ok, #2d7d46)", fontWeight: 700 }} />
-        </label>
-      </div>
+      <dl className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <div className="rounded border border-[var(--aseel-border)] bg-[var(--aseel-surface-2)] px-3 py-2">
+          <dt className="text-xs font-medium text-[var(--aseel-ink-soft)]">المتبقّي على الفاتورة</dt>
+          <dd className="mt-1 text-lg font-bold tabular-nums text-[var(--aseel-ink)]">{formatMoney(remaining)}</dd>
+        </div>
+        <div className="rounded border border-[var(--aseel-border)] bg-[var(--aseel-surface-2)] px-3 py-2">
+          <dt className="text-xs font-medium text-[var(--aseel-ink-soft)]">الرصيد على الحساب</dt>
+          <dd className="mt-1 text-lg font-bold tabular-nums text-[var(--aseel-warn)]">{formatMoney(totalOnAccount)}</dd>
+        </div>
+        <div className="rounded border border-[var(--aseel-border)] bg-[var(--aseel-ok-bg)] px-3 py-2">
+          <dt className="text-xs font-medium text-[var(--aseel-ink-soft)]">يبقى بعد التسديد</dt>
+          <dd className="mt-1 text-lg font-bold tabular-nums text-[var(--aseel-ok)]">
+            {formatMoney(Math.max(0, remaining - totalSettle))}
+          </dd>
+        </div>
+      </dl>
 
-      <div style={{ marginTop: "12px" }}>
+      {quickReceipt && (
+        <div className="mt-3 grid grid-cols-1 gap-3">
+          <section className="rounded border border-[var(--aseel-border)] bg-[var(--aseel-surface)] p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-[var(--aseel-ok-bg)] text-[var(--aseel-ok)]">
+                <Banknote className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <h4 className="text-base font-semibold text-balance">استلم دفعة الآن</h4>
+                <p className="mt-0.5 text-xs text-pretty text-[var(--aseel-ink-soft)]">
+                  ينشئ سند قبض مرحّلاً ويربطه بهذه الفاتورة فوراً.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(150px,0.85fr)_minmax(200px,1.15fr)_auto]">
+              <label className="flex min-w-0 flex-col gap-1.5">
+                <span className="text-xs font-medium text-[var(--aseel-ink-soft)]">مبلغ الدفعة الآن</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  max={remaining}
+                  step="0.01"
+                  className="aseel-input aseel-num !h-10 !w-full !flex-none !px-3 text-sm tabular-nums"
+                  value={receiptAmount}
+                  onChange={(event) => setReceiptAmount(event.target.value)}
+                />
+              </label>
+              <label className="flex min-w-0 flex-col gap-1.5">
+                <span className="text-xs font-medium text-[var(--aseel-ink-soft)]">الصندوق أو البنك</span>
+                <select
+                  className="aseel-input !h-10 !w-full !flex-none !px-3 text-sm"
+                  value={receiptAccountId}
+                  onChange={(event) => setReceiptAccountId(event.target.value ? Number(event.target.value) : "")}
+                >
+                  <option value="">اختر الحساب</option>
+                  {quickReceipt.accounts.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {[account.code, account.name].filter(Boolean).join(" — ")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="aseel-toolbtn !h-10 min-w-[150px] justify-center !border-transparent !bg-[var(--aseel-ok)] !px-4 font-semibold !text-white transition-transform active:scale-[0.96]"
+                disabled={!canQuickReceipt || submittingAction !== null}
+                onClick={() => void submitQuickReceipt()}
+              >
+                <Check className="h-4 w-4" aria-hidden="true" />
+                {submittingAction === "receipt" ? "جاري الاستلام…" : "استلم دفعة الآن"}
+              </button>
+            </div>
+            {quickReceipt.accounts.length === 0 && (
+              <p className="mt-2 text-xs text-[var(--aseel-err)]">لا يوجد حساب صندوق أو بنك صالح للتحصيل.</p>
+            )}
+          </section>
+
+          <section className="rounded border border-[var(--aseel-border)] bg-[var(--aseel-surface)] p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded bg-[var(--aseel-surface-2)] text-[var(--aseel-warn)]">
+                <WalletCards className="h-5 w-5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <h4 className="text-base font-semibold text-balance">سدّد من رصيد العميل</h4>
+                <p className="mt-0.5 text-xs text-pretty text-[var(--aseel-ink-soft)]">
+                  المتاح {formatMoney(totalOnAccount)} — يوزّع المبلغ تلقائياً على سندات الرصيد.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(220px,1fr)_auto]">
+              <label className="flex min-w-0 flex-col gap-1.5">
+                <span className="text-xs font-medium text-[var(--aseel-ink-soft)]">المبلغ من الرصيد</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  max={Math.min(remaining, totalOnAccount)}
+                  step="0.01"
+                  className="aseel-input aseel-num !h-10 !w-full !flex-none !px-3 text-sm tabular-nums"
+                  value={balanceAmount}
+                  disabled={loading || totalOnAccount <= 0.009}
+                  onChange={(event) => setBalanceAmount(event.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="aseel-toolbtn !h-10 min-w-[150px] justify-center !border-[var(--aseel-border)] !bg-[var(--aseel-surface-2)] !px-4 font-semibold transition-transform active:scale-[0.96]"
+                disabled={!canQuickBalance || submittingAction !== null}
+                onClick={() => void submitQuickBalance()}
+              >
+                {submittingAction === "balance" ? "جاري التسديد…" : "سدّد من الرصيد"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {!quickReceipt && <div style={{ marginTop: "12px" }}>
         <div style={{ fontWeight: 600, fontSize: "12px", marginBottom: "6px" }}>
           سندات {isCustomer ? "القبض" : "الصرف"} غير الموزَّعة
         </div>
@@ -212,7 +406,7 @@ export const SettleFromOnAccountModal: React.FC<Props> = ({
             </tbody>
           </table>
         )}
-      </div>
+      </div>}
 
       <div style={{ fontSize: "11px", marginTop: "8px", color: "var(--aseel-ink-soft)" }}>
         التسديد من الرصيد = ربط السند بهذه الفاتورة، بلا قيد محاسبي جديد

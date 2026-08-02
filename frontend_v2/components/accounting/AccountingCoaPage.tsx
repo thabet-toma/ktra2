@@ -20,7 +20,21 @@ import {
   ExternalLink,
   Factory,
   RefreshCw,
+  UserRound,
+  FilePlus2,
+  ReceiptText,
+  HandCoins,
+  ClipboardList,
+  FileText,
 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import {
+  partnerActionGroups,
+  partnerKindFromType,
+  type PartnerAction,
+  type PartnerActionIcon,
+} from "../../utils/partnerActions";
+import { clientLogger } from "../../services/logger";
 
 const TYPE_LETTER: Record<string, string> = {
   Asset: "أ",
@@ -37,6 +51,28 @@ const ACCOUNT_TYPES = [
   { v: "Revenue", l: "إيرادات" },
   { v: "Expense", l: "مصروفات" },
 ];
+
+// T-COAMENU: قائمة يمين مجمَّعة بعناوين — سطور متجاورة بلا عناوين لا تُقرأ.
+const MENU_ITEM =
+  "flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]";
+const MENU_GROUP_TITLE =
+  "px-3 pt-2 pb-1 text-[10px] font-bold text-[var(--color-text-muted)]";
+
+/** أيقونة الإجراء من مفتاحه — الطبقة المشتركة نقيّة بلا React فتُعيد مفاتيح. */
+const PartnerActionIconView: React.FC<{ icon: PartnerActionIcon }> = ({ icon }) => {
+  const cls = "h-4 w-4";
+  switch (icon) {
+    case "card": return <UserRound className={cls} />;
+    case "statement": return <FileText className={cls} />;
+    case "ledger": return <BookOpen className={cls} />;
+    case "invoice": return <FilePlus2 className={cls} />;
+    case "quotation": return <FileText className={cls} />;
+    case "order": return <ClipboardList className={cls} />;
+    case "receipt": return <ReceiptText className={cls} />;
+    case "payment": return <HandCoins className={cls} />;
+    default: return <ExternalLink className={cls} />;
+  }
+};
 
 function buildTree(accounts: AccountingAccount[]) {
   const byParent = new Map<number | null, AccountingAccount[]>();
@@ -333,6 +369,35 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
 
   // N3-T3: keyboard-selected account for drill-to-ledger via F2
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const navigate = useNavigate();
+
+  /**
+   * T-COAMENU: إجراءات الطرف المرتبط بالحساب — من نفس مصدر القائمة العامّة.
+   * الحساب بلا طرف (أو بنوع غير معروف) يبقى بإجراءات الحساب وحدها.
+   */
+  const partnerMenuGroups = (account: AccountingAccount) => {
+    const lp = account.linked_partner;
+    const kind = partnerKindFromType(lp?.partner_type);
+    if (!lp || !kind) return [];
+    return partnerActionGroups({
+      id: String(lp.id),
+      name: lp.trade_name || lp.legal_name || "",
+      kind,
+    });
+  };
+
+  const runPartnerAction = (account: AccountingAccount, action: PartnerAction) => {
+    const lp = account.linked_partner;
+    if (!lp) return;
+    clientLogger.info("app.coa_partner_action");
+    if (action.bridge) {
+      // جسر الجلسة نفسه الذي تستعمله القائمة العامّة (ktra_partner_action).
+      try { sessionStorage.setItem("ktra_partner_action", action.bridge); } catch { /* وضع خاص */ }
+      navigate(`/partners/${lp.id}`);
+      return;
+    }
+    if (action.href) navigate(action.href);
+  };
 
   useEffect(() => {
     if (!rowMenu) return;
@@ -582,42 +647,52 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
       {rowMenu && (
         <div
           ref={rowMenuRef}
-          className="fixed z-[70] min-w-[200px] rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-lg)] dark:border-[var(--color-border)] dark:bg-[var(--color-surface-2)]"
+          className="fixed z-[70] max-h-[70vh] min-w-[230px] overflow-y-auto rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] py-1 shadow-[var(--shadow-lg)] dark:border-[var(--color-border)] dark:bg-[var(--color-surface-2)]"
           style={{
             top: Math.min(rowMenu.anchor.bottom + 4, window.innerHeight - 200),
-            left: Math.min(rowMenu.anchor.left, window.innerWidth - 220),
+            left: Math.min(rowMenu.anchor.left, window.innerWidth - 250),
           }}
         >
+          <div className={MENU_GROUP_TITLE}>الحساب</div>
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
+            className={MENU_ITEM}
             onClick={() => { openCreate(rowMenu.account); setRowMenu(null); }}
           >
             <Plus className="h-4 w-4" />إنشاء حساب فرعي
           </button>
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
+            className={MENU_ITEM}
             onClick={() => { openEdit(rowMenu.account); setRowMenu(null); }}
           >
             <Pencil className="h-4 w-4" />تعديل الحساب
           </button>
           <button
             type="button"
-            className="flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
+            className={MENU_ITEM}
             onClick={() => { onOpenGeneralLedger?.(rowMenu.account.id); setRowMenu(null); }}
           >
             <BookOpen className="h-4 w-4" />الأستاذ العام
           </button>
-          {rowMenu.account.linked_partner && (
-            <button
-              type="button"
-              className="flex w-full items-center gap-2 px-3 py-2 text-right text-[var(--font-size-sm)] hover:bg-[var(--color-surface-2)] dark:hover:bg-[var(--color-surface-3)]"
-              onClick={() => { onOpenSupplier?.(rowMenu.account.linked_partner!.id); setRowMenu(null); }}
-            >
-              <ExternalLink className="h-4 w-4" />بطاقة المورد
-            </button>
-          )}
+          {/* T-COAMENU: حساب الذمم هو طرفٌ فعلاً — فتُعرض إجراءاته كاملةً من
+              نفس مصدر القائمة العامّة (utils/partnerActions)، مجمَّعةً بعناوين. */}
+          {partnerMenuGroups(rowMenu.account).map((group) => (
+            <div key={group.title}>
+              <div className={MENU_GROUP_TITLE}>{group.title}</div>
+              {group.actions.map((action) => (
+                <button
+                  key={action.key}
+                  type="button"
+                  className={MENU_ITEM}
+                  onClick={() => { runPartnerAction(rowMenu.account, action); setRowMenu(null); }}
+                >
+                  <PartnerActionIconView icon={action.icon} />
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          ))}
         </div>
       )}
 

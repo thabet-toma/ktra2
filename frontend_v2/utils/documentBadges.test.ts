@@ -57,6 +57,25 @@ test('عرض الاستيراد يُقرأ بلغة الملاءمة لا بلغ
   assert.equal(procurementStatusLabel('order', 'converted'), 'محوَّلة إلى فاتورة');
 });
 
+/**
+ * T-OFFERSTATE: «بانتظار معلومات» و«قيد المناقشة» كانتا تُسقَطان على `sent`،
+ * فتقرأ القائمة «مُرسَل للمورد» مهما اخترتَ داخل العرض. الحالة المعروضة يجب أن
+ * تكون هي المخزَّنة — وهما ليستا قراراً بعد (لا ملائم ولا غير ملائم).
+ */
+test('حالتا الانتظار والمناقشة تُعرضان باسميهما لا كـ«مُرسَل للمورد»', () => {
+  assert.equal(procurementStatusLabel('import_quotation', 'pending_info'), 'بانتظار معلومات');
+  assert.equal(procurementStatusLabel('import_quotation', 'under_discussion'), 'قيد المناقشة');
+  assert.equal(procurementStatusLabel('quotation', 'pending_info'), 'بانتظار معلومات');
+  assert.equal(procurementStatusLabel('quotation', 'under_discussion'), 'قيد المناقشة');
+
+  assert.equal(offerSuitability('pending_info'), 'undecided');
+  assert.equal(offerSuitability('under_discussion'), 'undecided');
+  assert.equal(isOfferStruckThrough('pending_info'), false);
+  assert.equal(isProcurementDocClosed('pending_info'), false);
+  // الانتظار ليس قبولاً — لا يُحوَّل إلى صفقة.
+  assert.equal(canConvertImportOffer('pending_info'), false);
+});
+
 test('الشطب علامة «غير ملائم» لا علامة انتهاء دورة', () => {
   assert.equal(offerSuitability('rejected'), 'unsuitable');
   assert.equal(offerSuitability('expired'), 'unsuitable');

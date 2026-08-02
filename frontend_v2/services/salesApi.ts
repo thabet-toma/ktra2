@@ -58,6 +58,15 @@ export type AttachedCheque = {
 };
 
 export type SalesInvoiceDetail = SalesInvoiceRow & {
+  /** T-SLINEAGE: المستند الذي وُلدت منه الفاتورة (طلبية زبون أو عرض سعر). */
+  source_document?: {
+    kind: "order" | "quotation";
+    id: number;
+    number: string;
+    origin_kind?: "quotation" | null;
+    origin_id?: number | null;
+    origin_number?: string | null;
+  } | null;
   exchange_rate: string;
   subtotal_excl_tax: string;
   invoice_discount: string;
@@ -655,6 +664,8 @@ export type SalesSettings = {
   order_reserve_days: number;
   /** T-ORDERS: إظهار «حذف» للعروض والطلبيات (الإلغاء متاح دائماً). */
   allow_document_delete: boolean;
+  /** T-RESERVEGUARD: رفض ترحيل فاتورة تسحب كمية محجوزة لطلبية زبون آخر (مُفعَّل افتراضياً). */
+  block_reserved_stock_sale: boolean;
   default_shipping_origin: string;
   default_shipping_destination: string;
   /** تسمية مستند التسليم المرتبط بفاتورة (يحرّرها المستخدم). */
@@ -717,6 +728,40 @@ export type DormantCustomerRow = {
 export async function getDormantCustomers(days?: number): Promise<DormantCustomerRow[]> {
   const qs = days != null ? `?days=${days}` : "";
   return apiGetList(`${BASE}/reports/dormant-customers/${qs}`, { tenantId: tid() });
+}
+
+/**
+ * T-RESERVEGUARD: «تقرير المحجوزات» — بنود الطلبيات المؤكَّدة التي ما زال حجزها
+ * سارياً. نفس مصدر الحارس الذي يرفض بيع الكمية المحجوزة لزبون آخر.
+ */
+export type ReservedStockRow = {
+  order_id: number;
+  order_number: string;
+  order_date: string | null;
+  reserved_until: string | null;
+  days_left: number | null;
+  customer_id: number;
+  customer_name: string;
+  product_id: number;
+  product_sku: string;
+  product_name: string;
+  quantity: string;
+  unit_price: string;
+  line_total: string;
+  quantity_on_hand: string;
+  reserved_quantity: string;
+  available_quantity: string;
+};
+
+export async function getReservedStock(params?: {
+  product?: number;
+  customer?: number;
+}): Promise<ReservedStockRow[]> {
+  const q = new URLSearchParams();
+  if (params?.product != null) q.set("product", String(params.product));
+  if (params?.customer != null) q.set("customer", String(params.customer));
+  const qs = q.toString();
+  return apiGetList(`${BASE}/reports/reserved-stock/${qs ? `?${qs}` : ""}`, { tenantId: tid() });
 }
 
 // -------------------------------------------------------------

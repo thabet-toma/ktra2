@@ -15,6 +15,9 @@ interface Props {
   title?: string;
   /** وصف مختصر يظهر أعلى الخيارين (اختياري). */
   hint?: string;
+  /** أثر كل وجهة — يختلف بين البيع والشراء، فلا يُثبَّت نص البيع للطرفين. */
+  orderDescription?: string;
+  invoiceDescription?: string;
   onPick: (target: ConvertTarget) => void;
   onClose: () => void;
 }
@@ -22,6 +25,8 @@ interface Props {
 export const ConvertTargetDialog: React.FC<Props> = ({
   title = "تحويل المستند",
   hint = "اختر الوجهة — الطلبية تحجز الكمية للزبون، والفاتورة تُثبت البيع محاسبياً.",
+  orderDescription = "تحجز الكمية للزبون مدةً محدودة، وتقبل عربوناً — بلا قيد محاسبي.",
+  invoiceDescription = "مستند بيع مباشر — يُثبت الذمّة عند ترحيله.",
   onPick,
   onClose,
 }) => (
@@ -56,7 +61,7 @@ export const ConvertTargetDialog: React.FC<Props> = ({
           <span>
             <span className="block font-semibold text-[var(--color-text)]">طلبية</span>
             <span className="block text-[11px] text-[var(--color-text-muted)]">
-              تحجز الكمية للزبون مدةً محدودة، وتقبل عربوناً — بلا قيد محاسبي.
+              {orderDescription}
             </span>
           </span>
         </button>
@@ -70,7 +75,7 @@ export const ConvertTargetDialog: React.FC<Props> = ({
           <span>
             <span className="block font-semibold text-[var(--color-text)]">فاتورة</span>
             <span className="block text-[11px] text-[var(--color-text-muted)]">
-              مستند بيع مباشر — يُثبت الذمّة عند ترحيله.
+              {invoiceDescription}
             </span>
           </span>
         </button>

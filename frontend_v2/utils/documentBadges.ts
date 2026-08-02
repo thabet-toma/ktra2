@@ -26,6 +26,10 @@ export const PROCUREMENT_KIND_LABELS: Record<ProcurementDocKind, string> = {
 const QUOTATION_STATUS_LABELS: Record<string, string> = {
   draft: "مسودة",
   sent: "مُرسَل للمورد",
+  // T-OFFERSTATE: حالتان حقيقيتان في الخادم بعد أن كانتا تُسقَطان على `sent` —
+  // فما يُختار داخل العرض هو ما يُقرأ في القائمة.
+  pending_info: "بانتظار معلومات",
+  under_discussion: "قيد المناقشة",
   accepted: "مقبول",
   rejected: "مرفوض",
   expired: "منتهي الصلاحية",
@@ -50,6 +54,8 @@ const ORDER_STATUS_LABELS: Record<string, string> = {
 const IMPORT_QUOTATION_STATUS_LABELS: Record<string, string> = {
   draft: "مسودة",
   sent: "مُرسَل للمورد",
+  pending_info: "بانتظار معلومات",
+  under_discussion: "قيد المناقشة",
   accepted: "ملائم",
   rejected: "غير ملائم",
   expired: "منتهي الصلاحية",

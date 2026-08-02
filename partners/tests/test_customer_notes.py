@@ -125,3 +125,50 @@ class CustomerNotesTest(APITestCase):
         self.assertEqual(self.client.get(
             f"/api/customer-notes/alerts/?partner={self.cust_b.id}",
             HTTP_X_TENANT_ID="1").data, [])
+
+    def test_platform_note_round_trips_and_due_reminder_keeps_internal_target(self):
+        payload = {
+            "target_type": "supplier_quotation",
+            "target_id": "quote-12",
+            "target_label": "عرض استيراد SQ-12",
+            "target_path": "/import-price-offers?doc=quote-12",
+            "title": "العرض بدو مناقشة",
+            "remind_on": str(date.today()),
+            "priority": "medium",
+        }
+        created = self.client.post(
+            "/api/customer-notes/", payload, format="json", HTTP_X_TENANT_ID="1")
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.data)
+        self.assertIsNone(created.data["partner"])
+
+        listed = self.client.get(
+            "/api/customer-notes/?target_type=supplier_quotation&target_id=quote-12",
+            HTTP_X_TENANT_ID="1")
+        self.assertEqual([row["id"] for row in listed.data], [created.data["id"]])
+
+        due = self.client.get(
+            "/api/customer-notes/reminders-due/", HTTP_X_TENANT_ID="1")
+        reminder = next(row for row in due.data if row["id"] == created.data["id"])
+        self.assertEqual(reminder["target_label"], "عرض استيراد SQ-12")
+        self.assertEqual(reminder["target_path"], "/import-price-offers?doc=quote-12")
+        self.assertIsNone(reminder["partner_id"])
+
+    def test_note_target_and_partner_are_validated_inside_tenant_boundary(self):
+        cross_tenant = self.client.post(
+            "/api/customer-notes/",
+            {"partner": self.cust_b.id, "title": "تسريب"},
+            format="json", HTTP_X_TENANT_ID="1")
+        self.assertEqual(cross_tenant.status_code, status.HTTP_400_BAD_REQUEST)
+
+        unsafe_path = self.client.post(
+            "/api/customer-notes/",
+            {
+                "target_type": "page",
+                "target_id": "x",
+                "target_label": "رابط خارجي",
+                "target_path": "https://example.com/phish",
+                "title": "غير آمن",
+            },
+            format="json", HTTP_X_TENANT_ID="1")
+        self.assertEqual(unsafe_path.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("target_path", unsafe_path.data)

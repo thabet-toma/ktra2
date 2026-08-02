@@ -93,6 +93,56 @@ class ImportQuotationSuitabilityTest(APITestCase):
         self.assertEqual(fetched.data['attachments'][0]['url'],
                          'https://cdn.example/offer.pdf')
 
+    def test_order_name_description_and_multiple_attachments_round_trip_in_order(self):
+        attachments = [
+            {'name': 'terms.pdf', 'url': 'https://cdn.example/terms.pdf',
+             'type': 'application/pdf', 'size': 1200},
+            {'name': 'front.jpg', 'url': 'https://cdn.example/front.jpg',
+             'type': 'image/jpeg', 'size': 2400},
+            {'name': 'side.png', 'url': 'https://cdn.example/side.png',
+             'type': 'image/png', 'size': 1800},
+        ]
+        created = self.create_quote(
+            order_name='طلبية أثاث مكتبي',
+            order_description='مكاتب من خشب زان مع خزائن جانبية',
+            attachments=attachments,
+        )
+
+        self.assertEqual(created.data['order_name'], 'طلبية أثاث مكتبي')
+        self.assertEqual(
+            created.data['order_description'],
+            'مكاتب من خشب زان مع خزائن جانبية',
+        )
+        self.assertEqual(
+            [item['url'] for item in created.data['attachments']],
+            [item['url'] for item in attachments],
+        )
+
+    def test_list_search_matches_order_name_and_description(self):
+        first = self.create_quote(
+            order_name='طلبية أثاث مكتبي',
+            order_description='مكاتب من خشب زان',
+        )
+        self.create_quote(
+            order_name='طلبية إنارة',
+            order_description='مصابيح سقفية',
+        )
+
+        by_name = self.client.get(
+            '/api/logistics/supplier-quotations/?scope=import&search=أثاث',
+        )
+        self.assertEqual(by_name.status_code, 200, by_name.content)
+        self.assertEqual([row['id'] for row in by_name.data], [first.data['id']])
+
+        by_description = self.client.get(
+            '/api/logistics/supplier-quotations/?scope=import&search=خشب زان',
+        )
+        self.assertEqual(by_description.status_code, 200, by_description.content)
+        self.assertEqual(
+            [row['id'] for row in by_description.data],
+            [first.data['id']],
+        )
+
     def test_shipping_estimate_is_added_to_grand_total(self):
         created = self.create_quote()
         # 10 × 20 = 200 بنوداً + 150 شحناً غير مشمول

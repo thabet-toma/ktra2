@@ -253,6 +253,35 @@ class SalesInvoiceSerializer(
     payment_details = _SalesInvoicePaymentDetailSerializer(
         source="payment_allocations", many=True, read_only=True,
     )
+    # T-SLINEAGE: المستند الذي وُلدت منه الفاتورة (طلبية أو عرض سعر) — الرابطان
+    # كانا في القاعدة (`SalesOrder.invoice` / `SalesQuotation.invoice`) ومقطوعين
+    # عن الواجهة من جهة الفاتورة، فلا سبيل للرجوع منها إلى أصلها.
+    source_document = serializers.SerializerMethodField()
+
+    def get_source_document(self, obj):
+        order = obj.order_backref.select_related("quotation").first()
+        if order is not None:
+            return {
+                "kind": "order",
+                "id": order.pk,
+                "number": order.order_number,
+                "origin_kind": "quotation" if order.quotation_id else None,
+                "origin_id": order.quotation_id,
+                "origin_number": (
+                    order.quotation.quotation_number if order.quotation_id else None
+                ),
+            }
+        quotation = obj.quotation_backref.first()
+        if quotation is not None:
+            return {
+                "kind": "quotation",
+                "id": quotation.pk,
+                "number": quotation.quotation_number,
+                "origin_kind": None,
+                "origin_id": None,
+                "origin_number": None,
+            }
+        return None
 
     def _balance_summary(self, obj):
         summary = self._payment_summary(obj)
@@ -306,6 +335,7 @@ class SalesInvoiceSerializer(
             "stock_on_post",
             "delivery_status",
             "delivery_status_display",
+            "source_document",
             "notes",
             "lines",
             "created_at",
@@ -719,6 +749,8 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "quotation_valid_days",
             "order_reserve_days",
             "allow_document_delete",
+            # T-RESERVEGUARD: منع بيع الكمية المحجوزة لطلبية زبون آخر.
+            "block_reserved_stock_sale",
             "default_shipping_origin",
             "default_shipping_destination",
             # مستند التسليم: تسميته، وسند التسليم المستقل، وصلاحية التعديل.

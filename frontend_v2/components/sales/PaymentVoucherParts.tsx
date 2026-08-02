@@ -49,13 +49,18 @@ export const PaymentVoucherModal: React.FC<{
   submitLabel?: string;
   secondaryLabel?: string;
   onSecondary?: () => void;
+  /** عند الإغفال يتبع الزر الثانوي حالة الزر الأساسي كما كان سابقاً. */
+  secondaryDisabled?: boolean;
   disabled?: boolean;
+  /** يخفي شريط الأزرار عندما يقدّم جسم النافذة إجراءات سياقية كاملة. */
+  hideActions?: boolean;
   onClose: () => void;
   onSubmit: () => void;
   children: React.ReactNode;
 }> = ({
   title, error, submitting = false, submitLabel = "حفظ السند",
-  secondaryLabel, onSecondary, disabled = false, onClose, onSubmit, children,
+  secondaryLabel, onSecondary, secondaryDisabled, disabled = false,
+  hideActions = false, onClose, onSubmit, children,
 }) => (
   <div
     className="fixed inset-0 z-[60] bg-black/40"
@@ -75,7 +80,7 @@ export const PaymentVoucherModal: React.FC<{
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", borderBottom: "1px solid var(--aseel-border)", paddingBottom: "8px" }}>
         <h3 style={{ fontWeight: 600, fontSize: "14px" }}>{title}</h3>
-        <button type="button" className="aseel-toolbtn" onClick={onClose}>
+        <button type="button" className="aseel-toolbtn" onClick={onClose} aria-label="إغلاق نافذة السند">
           <X className="w-3 h-3" />
         </button>
       </div>
@@ -84,15 +89,15 @@ export const PaymentVoucherModal: React.FC<{
 
       {children}
 
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
+      {!hideActions && <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
         <button type="button" className="aseel-toolbtn" onClick={onClose}>إلغاء</button>
         {secondaryLabel && onSecondary && (
           <button
             type="button"
             className="aseel-toolbtn"
-            disabled={submitting || disabled}
+            disabled={submitting || (secondaryDisabled ?? disabled)}
             onClick={onSecondary}
-            style={{ opacity: submitting || disabled ? 0.5 : 1 }}
+            style={{ opacity: submitting || (secondaryDisabled ?? disabled) ? 0.5 : 1 }}
           >
             {secondaryLabel}
           </button>
@@ -106,7 +111,7 @@ export const PaymentVoucherModal: React.FC<{
         >
           <Save className="w-3 h-3" /> {submitting ? "..." : submitLabel}
         </button>
-      </div>
+      </div>}
     </div>
   </div>
 );

@@ -25,13 +25,16 @@ class AccountSerializer(serializers.ModelSerializer):
             # توافق مع استخدام AccountSerializer منفرداً خارج AccountViewSet.
             p = Partner.objects.filter(
                 tenant_id=obj.tenant_id, linked_account_id=obj.id,
-            ).only('id', 'name', 'legal_name').first()
+            ).only('id', 'name', 'legal_name', 'partner_type').first()
         if not p:
             return None
         return {
             'id': p.id,
             'trade_name': p.name or '',
             'legal_name': p.legal_name or '',
+            # T-COAMENU: النوع يقود إجراءات كبسة اليمين على الحساب — بدونه لا
+            # تعرف الشجرة أتقترح فاتورة مبيعات وسند قبض أم فاتورة شراء وسند صرف.
+            'partner_type': p.partner_type or '',
         }
 
 class CostCenterSerializer(serializers.ModelSerializer):

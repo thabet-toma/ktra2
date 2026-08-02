@@ -1909,9 +1909,14 @@ const currencyId = async (code?: string) => {
   );
 };
 
+// T-OFFERSTATE: «بانتظار معلومات» و«قيد المناقشة» صارتا حالتين حقيقيتين في
+// الخادم، فالخريطة تعبر الطرفين بلا فقد. `sent` يبقى مقروءاً كـ«بانتظار
+// معلومات» للسجلات القديمة التي حُفظت قبل الفصل.
 const quoteUiStatus = (status: string): PriceOfferStatus => ({
   draft: "initial",
   sent: "pending_info",
+  pending_info: "pending_info",
+  under_discussion: "under_discussion",
   accepted: "approved_for_shipping",
   rejected: "rejected",
   expired: "rejected",
@@ -1921,8 +1926,8 @@ const quoteUiStatus = (status: string): PriceOfferStatus => ({
 
 const quoteApiStatus = (status: PriceOfferStatus): SupplierQuotationStatus => ({
   initial: "draft",
-  pending_info: "sent",
-  under_discussion: "sent",
+  pending_info: "pending_info",
+  under_discussion: "under_discussion",
   approved_for_shipping: "accepted",
   rejected: "rejected",
 }[status] as SupplierQuotationStatus);
@@ -1952,6 +1957,8 @@ const lineToUi = (line: {
 const quoteToUi = async (row: SupplierQuotationDto): Promise<PriceOffer> => ({
   id: `quote-${row.id}`,
   offerNumber: row.quotation_number,
+  orderName: row.order_name || "",
+  orderDescription: row.order_description || "",
   supplierId: String(row.supplier),
   factoryName: row.supplier_name || "",
   offerType: "incoming_offer",
@@ -1970,11 +1977,28 @@ const quoteToUi = async (row: SupplierQuotationDto): Promise<PriceOffer> => ({
   backendStatus: row.status,
   // T-IMPOFFER: رقم الصفقة الناتجة يُعرض بجانب الحالة — «محوَّل» بلا رقم يبدو
   // كأنه لم يحدث (نفس عيب طلبية الشراء المُصلَح في T-DOCBADGE).
-  linkedDocNumber: row.converted_deal?.ref_number || undefined,
+  // T-PLINEAGE: وللشراء المحلي وجهتان — فاتورة مباشرة أو طلبية — ومعرّف الوجهة
+  // يجعل الرقم رابطاً يُفتح لا نصاً معلَّقاً.
+  linkedDocNumber: row.converted_deal?.ref_number
+    || row.converted_invoice?.invoice_number
+    || row.converted_order?.order_number
+    || undefined,
+  linkedDocKind: row.converted_deal
+    ? "deal"
+    : row.converted_invoice
+      ? "invoice"
+      : row.converted_order
+        ? "order"
+        : undefined,
+  linkedDocId: row.converted_deal?.id
+    ?? row.converted_invoice?.id
+    ?? row.converted_order?.id
+    ?? undefined,
   alibabaLink: row.alibaba_link || "",
   supplierContact: row.supplier_contact || "",
   decisionReason: row.decision_reason || "",
   attachments: row.attachments || [],
+  notesLog: row.notes_log || [],
   internalNotes: row.notes || "",
   subtotal: Number(row.subtotal || 0),
   discountAmount: Number(row.discount_amount || 0),
@@ -2010,6 +2034,8 @@ const orderToUi = async (row: PurchaseOrderDto): Promise<PriceOffer> => ({
   backendStatus: row.status,
   // فاتورة الشراء الناتجة عن التحويل — تُعرض بجانب الحالة في قائمة المستندات.
   linkedDocNumber: row.invoice_number || undefined,
+  linkedDocKind: row.invoice ? "invoice" : undefined,
+  linkedDocId: row.invoice ?? undefined,
   internalNotes: row.notes || "",
   subtotal: Number(row.subtotal || 0),
   discountAmount: Number(row.discount_amount || 0),
@@ -2159,6 +2185,8 @@ export const priceOffersService = {
     }
     const row = await createSupplierQuotation({
       quotation_number: offer.offerNumber || undefined,
+      order_name: offer.orderName || "",
+      order_description: offer.orderDescription || "",
       scope: scope === "import" ? "import" : "local",
       supplier: Number(offer.supplierId),
       quotation_date: offer.offerDate || new Date().toISOString().slice(0, 10),
@@ -2182,6 +2210,7 @@ export const priceOffersService = {
       supplier_contact: offer.supplierContact || "",
       decision_reason: offer.decisionReason || "",
       attachments: offer.attachments || [],
+      notes_log: offer.notesLog || [],
       lines: uiLinesToApi(offer),
     });
     return quoteToUi(row);
@@ -2195,6 +2224,8 @@ export const priceOffersService = {
     if (parsed.kind === "quote") {
       const row = await updateSupplierQuotation(parsed.id, {
         quotation_number: offer.offerNumber || undefined,
+        order_name: offer.orderName || "",
+        order_description: offer.orderDescription || "",
         supplier: Number(offer.supplierId),
         quotation_date: offer.offerDate,
         valid_until: offer.validUntil || null,
@@ -2214,6 +2245,7 @@ export const priceOffersService = {
         supplier_contact: offer.supplierContact || "",
         decision_reason: offer.decisionReason || "",
         attachments: offer.attachments || [],
+        notes_log: offer.notesLog || [],
         lines: uiLinesToApi(offer),
       });
       return quoteToUi(row);

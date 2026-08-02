@@ -1140,6 +1140,28 @@ class SalesReportViewSet(viewsets.ViewSet):
             )
         return Response(rows)
 
+    @action(detail=False, methods=["get"], url_path="reserved-stock")
+    def reserved_stock_report(self, request):
+        """T-RESERVEGUARD: «تقرير المحجوزات» — كل بند طلبية مؤكَّدة حجزه ساري.
+
+        نفس مصدر الحارس الذي يمنع بيع الكمية المحجوزة، فلا يختلف ما يُرى عمّا
+        يُمنَع. الفلترة الاختيارية: ?product= و?customer=.
+        """
+        from sales.services import reserved_stock_rows
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response([])
+        product = request.query_params.get("product")
+        customer = request.query_params.get("customer")
+        return Response(
+            reserved_stock_rows(
+                tenant.TenantID,
+                product_id=int(product) if product and str(product).isdigit() else None,
+                customer_id=int(customer) if customer and str(customer).isdigit() else None,
+            )
+        )
+
     @action(detail=False, methods=["get"], url_path="dormant-customers")
     def dormant_customers_report(self, request):
         """T-DORMANT: عملاء توقّفوا عن الشراء منذ عتبة الإعدادات — يستهلكها مولّد
@@ -1277,7 +1299,10 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
 
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
-    queryset = SalesOrder.objects.all().select_related("customer", "currency", "tenant")
+    # `invoice` ضمن الـselect_related: رقم الفاتورة الناتجة يُعرض في كل صف من
+    # قائمة الطلبيات (رابط فتحها)، فبدونه استعلام لكل صف.
+    queryset = SalesOrder.objects.all().select_related(
+        "customer", "currency", "tenant", "invoice")
     serializer_class = SalesOrderSerializer
 
     def get_queryset(self):

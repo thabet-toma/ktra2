@@ -84,7 +84,8 @@ export function SqlDealsPage() {
     }, []);
 
     useEffect(() => {
-        apiGetList<PartnerOption>('partners/lookup/?limit=500', { tenantId: resolveTenantId() }).then(setPartners).catch(() => setPartners([]));
+        // T-PARTYPURE: طرف الصفقة مورد — القائمة كانت تعرض العملاء أيضاً.
+        apiGetList<PartnerOption>('partners/lookup/?limit=500&partner_type=Supplier', { tenantId: resolveTenantId() }).then(setPartners).catch(() => setPartners([]));
     }, []);
 
     const filtered = useMemo(() => {

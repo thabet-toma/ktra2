@@ -169,12 +169,19 @@ export const accountingApi = {
   // cache_meta. When it's down, we serve the last known snapshot so dropdowns
   // and pickers keep working offline. Read errors here are non-fatal — the
   // caller still gets [] if nothing has ever been cached.
-  getPartners: async () => {
+  //
+  // T-PARTYPURE: `partnerType` يفلتر على الخادم — شاشة الزبائن لا تعرض موردين
+  // وبالعكس. الفلترة هنا لا في كل شاشة، فلا تتكرر القاعدة ولا تُنسى في واحدة.
+  getPartners: async (partnerType?: string) => {
     const db = (await import("./offline/db")).default;
     const tenantId = resolveTenantId();
-    const cacheMetaKey = tenantScopedOfflineKey(tenantId, "partners:list");
+    const cacheMetaKey = tenantScopedOfflineKey(
+      tenantId, partnerType ? `partners:list:${partnerType}` : "partners:list");
     try {
-      const data = await fetch(`${API_BASE}/partners/lookup/?limit=500`, { headers: headers() }).then(asList);
+      const query = partnerType
+        ? `?limit=500&partner_type=${encodeURIComponent(partnerType)}`
+        : "?limit=500";
+      const data = await fetch(`${API_BASE}/partners/lookup/${query}`, { headers: headers() }).then(asList);
       try {
         const now = new Date().toISOString();
         for (const p of data as Array<Record<string, unknown>>) {
@@ -196,7 +203,9 @@ export const accountingApi = {
       // Network failed — fall back to the last cached snapshot.
       try {
         const cached = await db.partners.where("tenant_id").equals(tenantId).toArray();
-        return cached.map((c) => JSON.parse(c.data));
+        return cached
+          .filter((c) => !partnerType || c.partner_type === partnerType)
+          .map((c) => JSON.parse(c.data));
       } catch {
         return [];
       }
