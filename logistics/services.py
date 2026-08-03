@@ -15,6 +15,9 @@ from core.payments import document_payment_summary
 
 logger = logging.getLogger(__name__)
 
+GR_IR_ACCOUNT_CODE = "2110"
+GR_IR_ACCOUNT_NAME = "بضاعة مُستلَمة لم تُفوتَر (GR/IR Clearing)"
+
 DEC = Decimal("0.01")
 
 
@@ -661,26 +664,39 @@ def _resolve_vat_input_account(tenant) -> Account:
 
 
 def _resolve_gr_ir_account(tenant) -> Account:
-    """الحساب الوسيط «بضاعة مُستلَمة لم تُفوتَر» (GR/IR Clearing، كود 2106).
+    """الحساب الوسيط «بضاعة مُستلَمة لم تُفوتَر» (GR/IR Clearing، كود 2110).
 
     يفصل حدث استلام البضاعة عن الالتزام للمورّد: قيد الاستلام يدائنه، وقيد
     الفاتورة يدينه — فيُصفَّر عندما يُنشآن معاً. يُنشأ تلقائياً للمستأجرين الذين
     لم تُبذَر شجرتهم بعد (لا يتطلب إعادة seed).
     """
-    acc = Account.objects.filter(tenant=tenant, code="2106").first()
+    acc = Account.objects.filter(tenant=tenant, code=GR_IR_ACCOUNT_CODE).first()
     if acc:
+        if acc.name != GR_IR_ACCOUNT_NAME or acc.account_type != "Liability":
+            logger.error(
+                "GR/IR account code collision: tenant=%s code=%s account=%s name=%r type=%s",
+                tenant.TenantID, GR_IR_ACCOUNT_CODE, acc.id, acc.name, acc.account_type,
+            )
+            raise ValidationError(
+                f"رمز حساب وسيط الاستلام {GR_IR_ACCOUNT_CODE} مستخدم لحساب آخر."
+            )
         return acc
     parent = Account.objects.filter(tenant=tenant, code="21").first()
-    acc, _ = Account.objects.get_or_create(
+    acc, created = Account.objects.get_or_create(
         tenant=tenant,
-        code="2106",
+        code=GR_IR_ACCOUNT_CODE,
         defaults={
-            "name": "بضاعة مُستلَمة لم تُفوتَر (GR/IR Clearing)",
+            "name": GR_IR_ACCOUNT_NAME,
             "account_type": "Liability",
             "parent": parent,
             "is_active": True,
         },
     )
+    if created:
+        logger.info(
+            "Created GR/IR clearing account: tenant=%s account=%s code=%s",
+            tenant.TenantID, acc.id, GR_IR_ACCOUNT_CODE,
+        )
     return acc
 
 
@@ -728,7 +744,9 @@ def open_goods_clearing(invoice):
     from django.db.models import Sum
     from accounting.models import JournalLine
 
-    acc = Account.objects.filter(tenant=invoice.tenant, code='2106').first()
+    acc = Account.objects.filter(
+        tenant=invoice.tenant, code=GR_IR_ACCOUNT_CODE,
+    ).first()
     if acc is None:
         return None, Decimal('0'), Decimal('0')
     rows = JournalLine.objects.filter(
@@ -1106,7 +1124,7 @@ def create_standalone_goods_receipt(
     lines: [{'product_id': int, 'quantity': Decimal, 'unit_price': Decimal,
              'warehouse_id': int}]
 
-    القيد: مدين المخزون / دائن «بضاعة مُستلَمة لم تُفوتَر» (2106) — فحين تصل
+    القيد: مدين المخزون / دائن «بضاعة مُستلَمة لم تُفوتَر» (2110) — فحين تصل
     الفاتورة لاحقاً يُدين قيدُها الوسيطَ نفسه فيُصفَّر. بلا أسعار (استلام كمية
     فقط) ينعكس على المخزن دون قيد، كاستلام الفاتورة صفرية القيمة.
     """

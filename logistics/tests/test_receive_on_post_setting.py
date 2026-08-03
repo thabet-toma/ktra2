@@ -14,6 +14,7 @@ from accounting.models import Account, JournalHeader, JournalLine
 from accounting.services import create_fiscal_year
 from inventory.models import Product, StockMovement, Warehouse
 from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
+from logistics.services import GR_IR_ACCOUNT_CODE
 from logistics.services import get_or_create_purchase_settings
 from partners.models import Partner
 from tenants.models import Currency
@@ -62,7 +63,7 @@ class ReceiveOnPostSettingTest(APITestCase):
         return inv, item
 
     def _grir_account(self):
-        return Account.objects.get(tenant=self.tenant, code="2106")
+        return Account.objects.get(tenant=self.tenant, code=GR_IR_ACCOUNT_CODE)
 
     def _grir_net(self, invoice):
         agg = JournalLine.objects.filter(
