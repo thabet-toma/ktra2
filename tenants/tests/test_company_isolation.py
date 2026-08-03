@@ -7,6 +7,7 @@ from rest_framework.test import APITestCase
 from tenants.models import Tenant, UserCompanyMembership, TenantBook
 from accounting.models import Account, Currency
 from sales.models import SalesInvoice
+from core.access import user_has_perm
 
 class CompanyIsolationTest(APITestCase):
     @classmethod
@@ -112,6 +113,40 @@ class SignupOnboardingJourneyTest(APITestCase):
     login_url = "/api/hr/auth/login/"
     companies_url = "/api/tenants/companies/"
     my_companies_url = "/api/tenants/companies/my-companies/"
+
+    def test_new_user_sees_example_company_with_invoice_creation_access(self):
+        example = Tenant.objects.create(
+            CompanyName="الزهور",
+            SubscriptionPlan="Enterprise",
+            Status="Active",
+            is_example=True,
+        )
+        user = User.objects.create_user(username="new-user", password="123456")
+        self.client.force_authenticate(user=user)
+
+        response = self.client.get(self.my_companies_url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["tenant"]["CompanyName"], "الزهور")
+        self.assertTrue(response.data[0]["tenant"]["is_example"])
+        self.assertEqual(response.data[0]["role"], "staff")
+        membership = UserCompanyMembership.objects.get(user=user, tenant=example)
+        self.assertTrue(membership.is_example_access)
+        self.assertTrue(user_has_perm(user, example, "sales.invoice.create"))
+        self.assertTrue(user_has_perm(user, example, "purchase.invoice.create"))
+
+        created = self.client.post(
+            self.companies_url,
+            {"CompanyName": "شركة المستخدم الحقيقية"},
+            format="json",
+        )
+        self.assertEqual(created.status_code, status.HTTP_201_CREATED, created.content)
+        real_membership = UserCompanyMembership.objects.get(
+            user=user, tenant_id=created.data["TenantID"],
+        )
+        self.assertEqual(real_membership.role, "manager")
+        self.assertTrue(real_membership.is_default)
 
     def test_signup_login_and_first_company_bootstrap(self):
         signup = self.client.post(

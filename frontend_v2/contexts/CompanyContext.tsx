@@ -11,6 +11,7 @@ export type Tenant = {
   Status: string;
   CreatedAt: string;
   import_enabled?: boolean;
+  is_example?: boolean;
 };
 
 export type CompanyMembership = {

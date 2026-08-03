@@ -40,7 +40,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
   const [detail, setDetail] = useState<PlatformCompanyDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [form, setForm] = useState<Required<PlatformCompanyPatch>>({
+  const [form, setForm] = useState<Required<Omit<PlatformCompanyPatch, "is_example">>>({
     name: "", plan: "Basic", status: "Trial", import_enabled: false,
   });
   const [saving, setSaving] = useState(false);

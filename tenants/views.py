@@ -231,7 +231,11 @@ class TenantViewSet(viewsets.ModelViewSet):
         memberships yet may create their first company. Superusers always may."""
         if user.is_superuser:
             return True
-        memberships = UserCompanyMembership.objects.filter(user=user)
+        # عضوية شركة المثال وصول عام، ولا تُحسب كشركة يملكها المستخدم؛ وإلا
+        # تمنعه من إنشاء شركته الحقيقية الأولى.
+        memberships = UserCompanyMembership.objects.filter(
+            user=user, is_example_access=False,
+        )
         if not memberships.exists():
             return True  # bootstrapping the first company
         return memberships.filter(role="manager").exists()
@@ -399,6 +403,8 @@ class TenantViewSet(viewsets.ModelViewSet):
         user = request.user
         if not user or not user.is_authenticated:
             return Response([])
+        from .services import ensure_example_company_access
+        ensure_example_company_access(user)
         qs = UserCompanyMembership.objects.filter(user=user).select_related("tenant").order_by("tenant__CompanyName")
         return Response(UserCompanyMembershipSerializer(qs, many=True).data)
 

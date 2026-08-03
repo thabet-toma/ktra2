@@ -38,6 +38,8 @@ class Tenant(models.Model):
     # فقط لكل شركة. الشركة غير المفعّلة لا يرى أعضاؤها قائمة الاستيراد ولا قسم
     # «تكاليف الاستيراد» في شجرة الحسابات.
     import_enabled = models.BooleanField(default=False, db_column='ImportEnabled')
+    # شركة مشتركة للتجربة؛ تعيينها من لوحة السوبر أدمن يمنح الجميع عضوية staff.
+    is_example = models.BooleanField(default=False, db_column='IsExample')
 
     class Meta:
         db_table = 'tenants'
@@ -292,6 +294,8 @@ class UserCompanyMembership(models.Model):
     # منح هذا العضو صلاحية وحدة الاستيراد — يضبطه مدير الشركة، وفعّال فقط ضمن
     # شركة مفعّل لديها الاستيراد. المدير يملكها ضمناً.
     can_access_import = models.BooleanField(default=False, db_column='CanAccessImport')
+    # عضوية أنشأها تعيين «شركة المثال» وليست دعوة أصلية من مدير الشركة.
+    is_example_access = models.BooleanField(default=False, db_column='IsExampleAccess')
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
 
     class Meta:

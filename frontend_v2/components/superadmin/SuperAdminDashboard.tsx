@@ -6,6 +6,7 @@ import {
 
 import {
   getPlatformDashboard, grantSuperAdmin, listSuperAdmins, revokeSuperAdmin,
+  updatePlatformCompany,
   type PlatformDashboardData, type PlatformSuperAdmin,
 } from "../../services/platformAdminApi";
 import {
@@ -31,6 +32,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
   const [admins, setAdmins] = useState<PlatformSuperAdmin[]>([]);
   const [identifier, setIdentifier] = useState("");
   const [granting, setGranting] = useState(false);
+  const [assigningExample, setAssigningExample] = useState(false);
   /** الشركة المفتوحة في لوحة التحكم (خطة/حالة/استيراد/أعضاء) */
   const [managedCompanyId, setManagedCompanyId] = useState<number | null>(null);
 
@@ -84,6 +86,28 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
       toast("تم سحب الصلاحية", "success");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "تعذّر سحب الصلاحية");
+    }
+  };
+
+  const assignExampleCompany = async (value: string) => {
+    const current = data?.company_rows.find((company) => company.is_example);
+    const nextId = value ? Number(value) : null;
+    if ((current?.id ?? null) === nextId) return;
+    setAssigningExample(true);
+    setError(null);
+    try {
+      if (nextId !== null) {
+        await updatePlatformCompany(nextId, { is_example: true });
+        toast("تم تعيين شركة المثال وإتاحتها لكل المستخدمين", "success");
+      } else if (current) {
+        await updatePlatformCompany(current.id, { is_example: false });
+        toast("تم إلغاء تعيين شركة المثال", "success");
+      }
+      load();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "تعذّر تعيين شركة المثال");
+    } finally {
+      setAssigningExample(false);
     }
   };
 
@@ -185,7 +209,24 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
       <section className="mt-5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-3">
           <div><h2 className="font-bold text-[var(--color-text)]">الشركات</h2><p className="text-xs aseel-text-soft">{data.memberships} عضوية عبر المنصة · «تحكم» يفتح إعدادات الشركة وأعضاءها</p></div>
-          <span className="text-xs aseel-text-soft">تجريبية: {data.companies.trial} · مستخدمون: {data.users.total}</span>
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label htmlFor="platform-example-company" className="mb-1 block text-xs font-bold text-[var(--color-text)]">تعيين الشركة المثال</label>
+              <select
+                id="platform-example-company"
+                className="aseel-input h-9 min-w-56"
+                value={data.company_rows.find((company) => company.is_example)?.id ?? ""}
+                disabled={assigningExample}
+                onChange={(event) => void assignExampleCompany(event.target.value)}
+              >
+                <option value="">بدون شركة مثال</option>
+                {data.company_rows.map((company) => (
+                  <option key={company.id} value={company.id}>{company.name}</option>
+                ))}
+              </select>
+            </div>
+            <span className="pb-2 text-xs aseel-text-soft">تجريبية: {data.companies.trial} · مستخدمون: {data.users.total}</span>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[860px] text-sm">
@@ -200,7 +241,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
                 <tr><td colSpan={7} className="px-3 py-10 text-center aseel-text-soft">لا توجد شركات بعد</td></tr>
               ) : data.company_rows.map((company) => (
                 <tr key={company.id} className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-2)]">
-                  <td className="px-3 py-2 font-semibold text-[var(--color-text)]">{company.name}</td>
+                  <td className="px-3 py-2 font-semibold text-[var(--color-text)]">{company.name}{company.is_example ? " (مثال)" : ""}</td>
                   <td className="px-3 py-2">{COMPANY_PLAN_LABELS[company.plan] || company.plan}</td>
                   <td className="px-3 py-2">{statusLabel(company.status)}</td>
                   <td className="px-3 py-2 text-center">{company.member_count}</td>

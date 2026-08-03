@@ -256,6 +256,69 @@ class PlatformCompanyControlTest(APITestCase):
         self.assertEqual(self.company.Status, "Suspended")
         self.assertTrue(self.company.import_enabled)
 
+    def test_super_admin_assigns_exactly_one_example_company_with_staff_access_for_all(self):
+        other = Tenant.objects.create(
+            CompanyName="شركة المثال الثانية", SubscriptionPlan="Basic", Status="Active",
+        )
+
+        assigned = self.client.patch(
+            f"/api/platform/companies/{self.company.pk}/",
+            {"is_example": True},
+            format="json",
+        )
+
+        self.assertEqual(assigned.status_code, 200, assigned.content)
+        self.assertTrue(assigned.data["is_example"])
+        self.company.refresh_from_db()
+        self.assertTrue(self.company.is_example)
+        for user in (self.superuser, self.outsider):
+            membership = UserCompanyMembership.objects.get(user=user, tenant=self.company)
+            self.assertEqual(membership.role, "staff")
+            self.assertTrue(membership.is_example_access)
+        self.mgr_membership.refresh_from_db()
+        self.assertFalse(self.mgr_membership.is_example_access)
+
+        moved = self.client.patch(
+            f"/api/platform/companies/{other.pk}/",
+            {"is_example": True},
+            format="json",
+        )
+
+        self.assertEqual(moved.status_code, 200, moved.content)
+        self.company.refresh_from_db()
+        other.refresh_from_db()
+        self.assertFalse(self.company.is_example)
+        self.assertTrue(other.is_example)
+        self.assertFalse(UserCompanyMembership.objects.filter(
+            user=self.outsider, tenant=self.company,
+        ).exists())
+        self.assertTrue(UserCompanyMembership.objects.filter(
+            user=self.outsider, tenant=other, role="staff", is_example_access=True,
+        ).exists())
+        self.assertTrue(UserCompanyMembership.objects.filter(
+            pk=self.mgr_membership.pk,
+        ).exists())
+
+        dashboard = self.client.get("/api/platform/dashboard/")
+        rows = {row["id"]: row for row in dashboard.data["company_rows"]}
+        self.assertFalse(rows[self.company.pk]["is_example"])
+        self.assertTrue(rows[other.pk]["is_example"])
+
+        cleared = self.client.patch(
+            f"/api/platform/companies/{other.pk}/",
+            {"is_example": False},
+            format="json",
+        )
+        self.assertEqual(cleared.status_code, 200, cleared.content)
+        self.assertFalse(cleared.data["is_example"])
+        self.assertFalse(Tenant.objects.filter(is_example=True).exists())
+        self.assertFalse(UserCompanyMembership.objects.filter(
+            is_example_access=True,
+        ).exists())
+        self.assertTrue(UserCompanyMembership.objects.filter(
+            pk=self.mgr_membership.pk,
+        ).exists())
+
     def test_edit_rejects_unknown_status_plan_and_empty_name(self):
         bad_status = self.client.patch(
             f"/api/platform/companies/{self.company.pk}/", {"status": "Deleted"}, format="json")
