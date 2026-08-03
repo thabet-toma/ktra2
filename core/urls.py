@@ -56,6 +56,11 @@ urlpatterns = [
     path('api/platform/dashboard/', platform_admin_api.platform_dashboard),
     path('api/platform/super-admins/', platform_admin_api.platform_super_admins),
     path('api/platform/super-admins/<int:pk>/', platform_admin_api.platform_super_admin_detail),
+    path('api/platform/companies/<int:pk>/', platform_admin_api.platform_company_detail),
+    path('api/platform/companies/<int:pk>/members/', platform_admin_api.platform_company_members),
+    path('api/platform/companies/<int:pk>/members/<int:membership_id>/',
+         platform_admin_api.platform_company_member_detail),
+    path('api/platform/users/<int:pk>/set-active/', platform_admin_api.platform_user_set_active),
     path('api/platform/', include(_platform_router.urls)),
     # T-PERM: محرّك الصلاحيات (صلاحياتي + مصفوفة الأدوار لكل شركة)
     path('api/permissions/me/', permissions_api.my_permissions),

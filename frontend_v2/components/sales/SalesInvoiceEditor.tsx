@@ -5,6 +5,7 @@ import {
   duplicateSalesInvoice,
   getCreditPreview,
   getCustomerPriceList,
+  getReservedStock,
   resolveSalePrice,
   getNextInvoiceNumber,
   getSalesInvoice,
@@ -12,6 +13,7 @@ import {
   postSalesInvoice,
   unpostSalesInvoice,
   type CreditPreviewResponse,
+  type ReservedStockRow,
   type SalesInvoiceDetail,
   type SalesInvoiceRow,
 } from "../../services/salesApi";
@@ -30,6 +32,11 @@ import { ProductCardModal } from "../shared/ProductCardModal";
 import { Item } from "../../types";
 import db from "../../services/offline/db";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
+import {
+  availableForSale,
+  buildReservationIndex,
+  reservedSaleWarnings,
+} from "../../utils/reservedStock";
 import { formatMoney, formatQuantity, formatNumber } from "../../utils/formatNumber";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { entityPathForReference } from "../../utils/entityLinks";
@@ -330,6 +337,51 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     products.forEach((p) => m.set(p.id, p));
     return m;
   }, [products]);
+
+  /* T-RESERVEVIS: الحجوزات السارية — نفس صفوف «تقرير المحجوزات» التي يحرسها
+     الخادم، فما يُعرض على السطر هو بعينه ما سيُقاس عليه الترحيل. تُجلب مرة عند
+     الفتح: الحجز لا يتغيّر أثناء تحرير الفاتورة. */
+  const [reservationRows, setReservationRows] = useState<ReservedStockRow[]>([]);
+  useEffect(() => {
+    if (!networkOnline) { setReservationRows([]); return; }
+    let cancelled = false;
+    getReservedStock()
+      .then((rows) => { if (!cancelled) setReservationRows(rows); })
+      .catch(() => { if (!cancelled) setReservationRows([]); });
+    return () => { cancelled = true; };
+  }, [networkOnline]);
+
+  // حجز زبون الفاتورة نفسه لا يُطرح من متاحه — نفس استثناء الحارس.
+  const reservationIndex = useMemo(
+    () => buildReservationIndex(reservationRows, customerId === "" ? null : Number(customerId)),
+    [reservationRows, customerId],
+  );
+  /** هل لأيّ صنف على الفاتورة حجزٌ يزاحمها؟ بلا حجز يبقى «الرصيد» وحده. */
+  const anyLineReserved = useMemo(
+    () => lines.some((l) => l.product !== ""
+      && (reservationIndex.get(Number(l.product))?.reserved ?? 0) > 0),
+    [lines, reservationIndex],
+  );
+
+  /** تنبيه بيع المحجوز — يسمّي الطلبية وصاحبها قبل أن يرفض الخادم الترحيل. */
+  const reservedWarnings = useMemo(() => {
+    if (invoiceStatus === "posted" || !stockOnPost) return [];
+    return reservedSaleWarnings(
+      lines
+        .filter((l) => l.product !== "")
+        .map((l) => {
+          const pr = productsById.get(Number(l.product));
+          return {
+            productId: Number(l.product),
+            quantity: l.quantity,
+            onHand: pr?.quantity_on_hand ?? 0,
+            name: pr ? (pr.name_ar || pr.name_en || pr.sku) : `#${l.product}`,
+            exempt: !pr || !!pr.is_service,
+          };
+        }),
+      reservationIndex,
+    );
+  }, [lines, productsById, reservationIndex, stockOnPost, invoiceStatus]);
 
   // M3: selling below available stock is ALLOWED — but we surface a
   // non-blocking warning so the user is aware the stock will go negative.
@@ -1719,11 +1771,47 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   // W4: إجمالي الكميات (مجموع كميات البنود) بجانب الإجماليات المالية.
   const totalQty = lines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
 
-  /* ───────────── أعمدة جدول البنود (AseelGrid) ───────────── */
+  /* ───────────── أعمدة جدول البنود (AseelGrid) ─────────────
+     T-RESERVEVIS: «المتاح» وحده كان يعرض الرصيد الكامل فيبدو الصنف المحجوز حراً.
+     صار الرصيد صريحاً، ويظهر معه عمودا «محجوز/المتاح للبيع» فقط حين يوجد حجز
+     يزاحم هذه الفاتورة — لا أعمدة فارغة على فاتورة بلا حجز. */
   const gridColumns: AseelGridColumn<DraftLine>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
     { key: "product", header: "بيان الصنف", width: "30%" },
-    { key: "avail", header: "المتاح", width: "70px", align: "center", readOnly: true },
+    { key: "avail", header: "الرصيد", width: "70px", align: "center", readOnly: true },
+    ...(anyLineReserved ? [
+      {
+        key: "reserved", header: "محجوز", width: "70px", align: "center" as const, readOnly: true,
+        render: (row: DraftLine) => {
+          const entry = row.product ? reservationIndex.get(Number(row.product)) : undefined;
+          if (!entry || entry.reserved <= 0) return <span>—</span>;
+          return (
+            <span
+              style={{ color: "var(--aseel-warn, #b06800)", fontWeight: 600 }}
+              title={`محجوز بطلبيات: ${entry.holders.map((h) => `${h.orderNumber} (${h.customerName})`).join("، ")}`}
+            >{fmt(entry.reserved)}</span>
+          );
+        },
+      },
+      {
+        key: "available_for_sale", header: "المتاح للبيع", width: "86px",
+        align: "center" as const, readOnly: true,
+        render: (row: DraftLine) => {
+          const pr = row.product ? productsById.get(Number(row.product)) : undefined;
+          if (!pr) return <span>—</span>;
+          const entry = reservationIndex.get(Number(row.product));
+          const available = availableForSale(pr.quantity_on_hand, entry);
+          return (
+            <span
+              style={available < 0
+                ? { color: "var(--aseel-danger, #c00)", fontWeight: 700 }
+                : undefined}
+              title="الرصيد بعد حجوزات الزبائن الآخرين"
+            >{fmt(available)}</span>
+          );
+        },
+      },
+    ] : []),
     { key: "quantity", header: "الكمية", width: "84px", align: "center", type: "number" },
     { key: "unit_price", header: "سعر الوحدة", width: "100px", align: "center", type: "number" },
     { key: "line_discount", header: "خصم سطر", width: "84px", align: "center", type: "number" },
@@ -1822,13 +1910,22 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         id: p.id,
         label: formatProductPrimaryName(p),
         // T-SERVICELINE: «المتاح: 0» على خدمة معلومة كاذبة — الخدمة بلا مخزون.
-        sub: p.is_service ? "خدمة — بلا مخزون" : `المتاح: ${fmt(Number(p.quantity_on_hand || 0))}`,
+        // T-RESERVEVIS: والمحجوز يُذكر في الخيار نفسه — «المتاح» كان يعرض الرصيد.
+        sub: p.is_service
+          ? "خدمة — بلا مخزون"
+          : (() => {
+            const reserved = reservationIndex.get(p.id)?.reserved ?? 0;
+            const onHand = Number(p.quantity_on_hand || 0);
+            return reserved > 0
+              ? `الرصيد: ${fmt(onHand)} · محجوز: ${fmt(reserved)} · المتاح للبيع: ${fmt(onHand - reserved)}`
+              : `الرصيد: ${fmt(onHand)}`;
+          })(),
         price,
         priceLabel,
         prices,
       };
     }),
-    [products, customerPriceMap],
+    [products, customerPriceMap, reservationIndex],
   );
 
   const renderProductCell = (row: DraftLine, ri: number) => {
@@ -2009,11 +2106,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       </button>
     );
 
-  // حقن الأعمدة المخصّصة (تستخدم render)
-  gridColumns[1].render = renderProductCell;
-  gridColumns[4].render = renderUnitPriceCell;
-  gridColumns[6].render = renderTaxCell;
-  gridColumns[8].render = renderDeleteCell;
+  // حقن الأعمدة المخصّصة (تستخدم render) — بالمفتاح لا بالترتيب: أعمدة الحجز
+  // تظهر وتختفي بحسب وجود حجز، فالفهرس الثابت كان سيحقن العمود الخطأ.
+  const injectRender = (key: string, render: AseelGridColumn<DraftLine>["render"]) => {
+    const column = gridColumns.find((c) => c.key === key);
+    if (column) column.render = render;
+  };
+  injectRender("product", renderProductCell);
+  injectRender("unit_price", renderUnitPriceCell);
+  injectRender("tax", renderTaxCell);
+  injectRender("del", renderDeleteCell);
 
   // T-ONEPAY: مدخل واحد لتحصيل الفاتورة — نقداً و/أو شيكات في سند قبض واحد.
   // كان هناك مدخلان يوهمان بالعمل: خانة «المبلغ نقداً» (كانت تُحفظ ولا تُرحَّل
@@ -2232,6 +2334,29 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             .map((w) => `«${w.name}» (المطلوب ${w.qty} / المتوفر ${w.available})`)
             .join("، ")}
           . البيع مسموح ويمكنك المتابعة.
+        </span>
+      </div>
+    ) : null;
+
+  /* T-RESERVEVIS: تنبيه بيع المحجوز — الخادم يرفض ترحيل هذه الفاتورة (إن كان
+     «منع بيع الكمية المحجوزة» مُفعَّلاً)، فيُقال ذلك هنا قبل الضغط على ترحيل
+     مع تسمية الطلبية الحاجزة وصاحبها. */
+  const reservedWarningBanner =
+    reservedWarnings.length > 0 ? (
+      <div
+        className="aseel-banner"
+        role="alert"
+        data-testid="reserved-stock-warning"
+        style={{ backgroundColor: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5" }}
+      >
+        <AlertCircle className="h-4 w-4 shrink-0" />
+        <span>
+          تنبيه: تبيع كمية محجوزة لطلبية زبون آخر —{" "}
+          {reservedWarnings
+            .map((w) => `«${w.name}» (المطلوب ${fmt(w.quantity)} / المتاح للبيع ${fmt(w.available)}`
+              + ` / محجوز ${fmt(w.reserved)} بـ${w.holders.join("، ")})`)
+            .join("، ")}
+          . ألغِ الحجز من «تقرير المحجوزات» أو عدّل الكمية — وإلا رُفض الترحيل.
         </span>
       </div>
     ) : null;
@@ -2942,6 +3067,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         }
       >
         {banner}
+        {reservedWarningBanner}
         {stockWarningBanner}
         {restoreBanner}
         {/* وضع القراءة: مستند مُنسَّق بدل شبكة الإدخال المعطّلة. */}

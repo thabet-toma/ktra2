@@ -2846,11 +2846,16 @@ def reserved_quantity_map(
     return {r["product_id"]: r["total"] for r in rows if r["total"]}
 
 
-def reserved_stock_rows(tenant_id: int, *, product_id=None, customer_id=None) -> list[dict]:
+def reserved_stock_rows(
+    tenant_id: int, *, product_id=None, customer_id=None, date_from=None, date_to=None,
+) -> list[dict]:
     """«تقرير المحجوزات»: سطر لكل بند طلبية مؤكَّدة ما زال حجزه سارياً.
 
     يقرأ من نفس مصدر `reserved_quantity_map` كي لا ينحرف التقرير عن الحارس:
     ما يمنعه الترحيل هو بعينه ما يظهر هنا.
+
+    `date_from`/`date_to`: نافذة **«الحجز حتى»** — «ما ينتهي هذا الأسبوع» سؤال
+    تشغيلي لا يُجاب بقراءة كل الصفوف بالعين.
     """
     from datetime import date as _date
 
@@ -2861,6 +2866,10 @@ def reserved_stock_rows(tenant_id: int, *, product_id=None, customer_id=None) ->
     )
     if customer_id:
         qs = qs.filter(order__customer_id=customer_id)
+    if date_from:
+        qs = qs.filter(order__reserved_until__gte=date_from)
+    if date_to:
+        qs = qs.filter(order__reserved_until__lte=date_to)
     lines = list(qs)
     reserved_totals = reserved_quantity_map(
         tenant_id, product_ids={line.product_id for line in lines} or None)
@@ -2889,6 +2898,10 @@ def reserved_stock_rows(tenant_id: int, *, product_id=None, customer_id=None) ->
             "reserved_quantity": str(reserved_total),
             "available_quantity": str(on_hand - reserved_total),
         })
+    logger.debug(
+        "reserved_stock.report tenant=%s rows=%s product=%s customer=%s window=%s..%s",
+        tenant_id, len(rows), product_id, customer_id, date_from, date_to,
+    )
     return rows
 
 

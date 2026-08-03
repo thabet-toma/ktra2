@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import {
-  Building2, CheckCircle2, CirclePause, ClipboardList, RefreshCw,
+  Building2, CheckCircle2, CirclePause, ClipboardList, RefreshCw, Settings2,
   ShieldCheck, Trash2, UserPlus, Users,
 } from "lucide-react";
 
@@ -8,6 +8,9 @@ import {
   getPlatformDashboard, grantSuperAdmin, listSuperAdmins, revokeSuperAdmin,
   type PlatformDashboardData, type PlatformSuperAdmin,
 } from "../../services/platformAdminApi";
+import {
+  COMPANY_PLAN_LABELS, COMPANY_STATUS_LABELS, PlatformCompanyPanel,
+} from "./PlatformCompanyPanel";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import type { AppView } from "../../types";
@@ -17,11 +20,7 @@ interface Props {
   onNavigate: (view: AppView) => void;
 }
 
-const statusLabel = (status: string) => ({
-  Active: "فعالة",
-  Trial: "تجريبية",
-  Suspended: "موقوفة",
-}[status] || status);
+const statusLabel = (status: string) => COMPANY_STATUS_LABELS[status] || status;
 
 export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
   const toast = useToast();
@@ -32,6 +31,8 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
   const [admins, setAdmins] = useState<PlatformSuperAdmin[]>([]);
   const [identifier, setIdentifier] = useState("");
   const [granting, setGranting] = useState(false);
+  /** الشركة المفتوحة في لوحة التحكم (خطة/حالة/استيراد/أعضاء) */
+  const [managedCompanyId, setManagedCompanyId] = useState<number | null>(null);
 
   const loadAdmins = () => {
     listSuperAdmins()
@@ -183,32 +184,53 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
 
       <section className="mt-5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-3">
-          <div><h2 className="font-bold text-[var(--color-text)]">الشركات</h2><p className="text-xs aseel-text-soft">{data.memberships} عضوية عبر المنصة</p></div>
+          <div><h2 className="font-bold text-[var(--color-text)]">الشركات</h2><p className="text-xs aseel-text-soft">{data.memberships} عضوية عبر المنصة · «تحكم» يفتح إعدادات الشركة وأعضاءها</p></div>
           <span className="text-xs aseel-text-soft">تجريبية: {data.companies.trial} · مستخدمون: {data.users.total}</span>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[860px] text-sm">
             <thead className="bg-[var(--color-surface-2)] aseel-text-soft"><tr>
               <th className="px-3 py-2 text-right">الشركة</th><th className="px-3 py-2 text-right">الخطة</th>
               <th className="px-3 py-2 text-right">الحالة</th><th className="px-3 py-2 text-center">الأعضاء</th>
               <th className="px-3 py-2 text-center">الاستيراد</th><th className="px-3 py-2 text-right">تاريخ الإنشاء</th>
+              <th className="px-3 py-2 text-center">تحكم</th>
             </tr></thead>
             <tbody>
               {data.company_rows.length === 0 ? (
-                <tr><td colSpan={6} className="px-3 py-10 text-center aseel-text-soft">لا توجد شركات بعد</td></tr>
+                <tr><td colSpan={7} className="px-3 py-10 text-center aseel-text-soft">لا توجد شركات بعد</td></tr>
               ) : data.company_rows.map((company) => (
                 <tr key={company.id} className="border-t border-[var(--color-border)] hover:bg-[var(--color-surface-2)]">
                   <td className="px-3 py-2 font-semibold text-[var(--color-text)]">{company.name}</td>
-                  <td className="px-3 py-2">{company.plan}</td><td className="px-3 py-2">{statusLabel(company.status)}</td>
+                  <td className="px-3 py-2">{COMPANY_PLAN_LABELS[company.plan] || company.plan}</td>
+                  <td className="px-3 py-2">{statusLabel(company.status)}</td>
                   <td className="px-3 py-2 text-center">{company.member_count}</td>
                   <td className="px-3 py-2 text-center">{company.import_enabled ? "مفعّل" : "غير مفعّل"}</td>
                   <td className="px-3 py-2 whitespace-nowrap">{new Date(company.created_at).toLocaleDateString("ar-EG")}</td>
+                  <td className="px-3 py-2 text-center">
+                    <button
+                      type="button"
+                      onClick={() => setManagedCompanyId(company.id)}
+                      className="aseel-btn"
+                      title={`تحكم بـ${company.name}`}
+                      aria-label={`تحكم بـ${company.name}`}
+                    >
+                      <Settings2 className="h-4 w-4" aria-hidden="true" /> تحكم
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       </section>
+
+      {managedCompanyId !== null && (
+        <PlatformCompanyPanel
+          companyId={managedCompanyId}
+          onClose={() => setManagedCompanyId(null)}
+          onChanged={load}
+        />
+      )}
     </main>
   );
 };

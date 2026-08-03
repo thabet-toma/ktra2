@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Loader2, Save, Trash2, UserPlus, X } from "lucide-react";
 import { apiGetObject, apiPatchObject, apiPostObject } from "../../services/restApi";
 import type { Tenant, CompanyMembership } from "../../contexts/CompanyContext";
-import { useAuth } from "../../contexts/AuthContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 
 /** task12 M4 — إدارة الشركة: إعادة التسمية + الأعضاء والأدوار.
@@ -45,9 +44,9 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
   const myRole = activeMembership?.role || "staff";
 
   const isManager = myRole === "manager";
-  const { currentUser } = useAuth();
   const confirm = useConfirm();
-  const isSuperAdmin = !!currentUser?.isSuperAdmin;
+  // تفعيل وحدة الاستيراد للشركة صار في لوحة تحكم السوبر أدمن (PlatformCompanyPanel)؛
+  // هنا يبقى توزيعها على الأعضاء — وهي مهمة مدير الشركة.
   const importEnabled = !!tenant?.import_enabled;
   const showImportCol = isManager && importEnabled;
   const [name, setName] = useState(tenant?.CompanyName || "");
@@ -138,13 +137,6 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
       }
     });
 
-  const handleToggleCompanyImport = (next: boolean) =>
-    run(async () => {
-      await apiPostObject(`${base}/set-import-enabled/`, { import_enabled: next });
-      await onChanged();
-      await loadMembers();
-    }, next ? "تم تفعيل وحدة الاستيراد لهذه الشركة." : "تم تعطيل وحدة الاستيراد لهذه الشركة.");
-
   const handleToggleMemberImport = (m: MemberRow, next: boolean) =>
     run(async () => {
       setBusyId(m.membership_id);
@@ -224,23 +216,6 @@ export const CompanyManagementModal: React.FC<Props> = ({ isOpen, onClose, membe
           </div>
           {!isManager && <p className="text-[11px] opacity-60 mt-1">تعديل الاسم متاح لمدير الشركة فقط.</p>}
         </div>
-
-        {/* وحدة الاستيراد — سوبر أدمن المنصة فقط */}
-        {isSuperAdmin && (
-          <div className="mb-6 p-3 rounded-lg border border-[var(--aseel-border,#ddd)] bg-[var(--aseel-panel,#fafafa)]">
-            <label className="flex items-center gap-2 text-sm font-bold cursor-pointer" style={{ color: "var(--aseel-ink)" }}>
-              <input
-                type="checkbox"
-                checked={importEnabled}
-                onChange={(e) => void handleToggleCompanyImport(e.target.checked)}
-              />
-              تفعيل وحدة الاستيراد لهذه الشركة (سوبر أدمن)
-            </label>
-            <p className="text-[11px] opacity-60 mt-1">
-              عند التعطيل، لا يرى أعضاء الشركة قائمة الاستيراد ولا قسم «تكاليف الاستيراد» في شجرة الحسابات. مدير الشركة يمنح الصلاحية لكل موظف بعد التفعيل.
-            </p>
-          </div>
-        )}
 
         {/* الأعضاء */}
         <div>

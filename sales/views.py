@@ -1145,8 +1145,11 @@ class SalesReportViewSet(viewsets.ViewSet):
         """T-RESERVEGUARD: «تقرير المحجوزات» — كل بند طلبية مؤكَّدة حجزه ساري.
 
         نفس مصدر الحارس الذي يمنع بيع الكمية المحجوزة، فلا يختلف ما يُرى عمّا
-        يُمنَع. الفلترة الاختيارية: ?product= و?customer=.
+        يُمنَع. الفلترة الاختيارية: ?product= و?customer= و?from=/?to= (نافذة
+        «الحجز حتى»).
         """
+        from django.utils.dateparse import parse_date
+
         from sales.services import reserved_stock_rows
 
         tenant = get_tenant(request)
@@ -1159,6 +1162,8 @@ class SalesReportViewSet(viewsets.ViewSet):
                 tenant.TenantID,
                 product_id=int(product) if product and str(product).isdigit() else None,
                 customer_id=int(customer) if customer and str(customer).isdigit() else None,
+                date_from=parse_date(request.query_params.get("from") or ""),
+                date_to=parse_date(request.query_params.get("to") or ""),
             )
         )
 
