@@ -124,7 +124,8 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
     }
     if (url.pathname.endsWith("/platform/development-notes/") && request.method() === "GET") {
       return route.fulfill({ contentType: "application/json", body: JSON.stringify([{
-        id: 1, title: "تحسين شاشة الجرد", description: "إضافة فلتر للمستودع",
+        id: 1, title: "تحسين شاشة الجرد",
+        description: "إضافة فلتر للمستودع مع إظهار كامل تفاصيل الملاحظة الطويلة للمحاسب والمخلّص دون قص النص أو إخفاء بقيته داخل سطرين فقط.\nويظهر هذا السطر الثاني كاملاً أيضاً.",
         status: "in_progress", priority: "high", assignee: "فريق الواجهة",
         due_date: "2026-08-10", position: 0, created_by: 1,
         created_by_name: "سوبر أدمن", updated_by: 1, updated_by_name: "سوبر أدمن",
@@ -169,6 +170,13 @@ test("super admin gets a separate platform dashboard and development notes sheet
   await page.getByRole("button", { name: /ملاحظات التطوير/ }).first().click();
   await expect(page).toHaveURL(/\/super-admin\/development-notes$/);
   await expect(page.getByRole("heading", { name: "ملاحظات التطوير" })).toBeVisible();
+  const description = page.getByLabel("وصف الملاحظة 1");
+  await expect.poll(() => description.evaluate((element) => (
+    element.scrollHeight <= element.clientHeight + 1
+  ))).toBe(true);
+  await expect(page.locator('input[type="date"]')).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "حفظ تحسين شاشة الجرد" })).toBeInViewport();
+  await expect(page.getByRole("button", { name: "إضافة" })).toBeInViewport();
   await expect(page.locator('input[value="تحسين شاشة الجرد"]')).toBeVisible();
   await page.getByLabel("عنوان ملاحظة جديدة").fill("إضافة تقرير هامش الربح");
   await page.getByRole("button", { name: "إضافة", exact: true }).click();

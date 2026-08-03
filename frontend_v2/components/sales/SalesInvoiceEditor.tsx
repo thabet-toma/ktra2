@@ -36,6 +36,7 @@ import {
   availableForSale,
   buildReservationIndex,
   reservedSaleWarnings,
+  totalReserved,
 } from "../../utils/reservedStock";
 import { formatMoney, formatQuantity, formatNumber } from "../../utils/formatNumber";
 import { openInNewTab } from "../../utils/openInNewTab";
@@ -356,10 +357,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     () => buildReservationIndex(reservationRows, customerId === "" ? null : Number(customerId)),
     [reservationRows, customerId],
   );
-  /** هل لأيّ صنف على الفاتورة حجزٌ يزاحمها؟ بلا حجز يبقى «الرصيد» وحده. */
+  /** هل لأيّ صنف على الفاتورة حجزٌ سارٍ؟ بلا حجز يبقى «الرصيد» وحده. */
   const anyLineReserved = useMemo(
     () => lines.some((l) => l.product !== ""
-      && (reservationIndex.get(Number(l.product))?.reserved ?? 0) > 0),
+      && totalReserved(reservationIndex.get(Number(l.product))) > 0),
     [lines, reservationIndex],
   );
 
@@ -1784,12 +1785,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         key: "reserved", header: "محجوز", width: "70px", align: "center" as const, readOnly: true,
         render: (row: DraftLine) => {
           const entry = row.product ? reservationIndex.get(Number(row.product)) : undefined;
-          if (!entry || entry.reserved <= 0) return <span>—</span>;
+          const reserved = totalReserved(entry);
+          if (!entry || reserved <= 0) return <span>—</span>;
+          const holders = [...entry.holders, ...entry.ownHolders];
           return (
             <span
               style={{ color: "var(--aseel-warn, #b06800)", fontWeight: 600 }}
-              title={`محجوز بطلبيات: ${entry.holders.map((h) => `${h.orderNumber} (${h.customerName})`).join("، ")}`}
-            >{fmt(entry.reserved)}</span>
+              title={`محجوز بطلبيات: ${holders.map((h) => `${h.orderNumber} (${h.customerName})`).join("، ")}`}
+            >{fmt(reserved)}</span>
           );
         },
       },
@@ -1914,10 +1917,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         sub: p.is_service
           ? "خدمة — بلا مخزون"
           : (() => {
-            const reserved = reservationIndex.get(p.id)?.reserved ?? 0;
+            const entry = reservationIndex.get(p.id);
+            const reserved = totalReserved(entry);
             const onHand = Number(p.quantity_on_hand || 0);
             return reserved > 0
-              ? `الرصيد: ${fmt(onHand)} · محجوز: ${fmt(reserved)} · المتاح للبيع: ${fmt(onHand - reserved)}`
+              ? `الرصيد: ${fmt(onHand)} · محجوز: ${fmt(reserved)} · المتاح للبيع: ${fmt(availableForSale(onHand, entry))}`
               : `الرصيد: ${fmt(onHand)}`;
           })(),
         price,
@@ -2356,7 +2360,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             .map((w) => `«${w.name}» (المطلوب ${fmt(w.quantity)} / المتاح للبيع ${fmt(w.available)}`
               + ` / محجوز ${fmt(w.reserved)} بـ${w.holders.join("، ")})`)
             .join("، ")}
-          . ألغِ الحجز من «تقرير المحجوزات» أو عدّل الكمية — وإلا رُفض الترحيل.
+          {salesSettings?.block_reserved_stock_sale === false
+            ? ". هذا تحذير فقط حسب إعدادات المبيعات الحالية، ويمكنك المتابعة."
+            : ". ألغِ الحجز من «تقرير المحجوزات» أو عدّل الكمية — وإلا رُفض الترحيل."}
         </span>
       </div>
     ) : null;

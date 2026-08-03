@@ -6,6 +6,7 @@ import {
 import { clientLogger } from "../../services/logger";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { eventBus } from "../../utils/eventBus";
+import { AseelDateInput } from "../aseel/AseelDateInput";
 import type { PartnerBankAccount } from "../../utils/partnerChequeDefaults";
 
 export type PartnerType =
@@ -107,6 +108,7 @@ export const PartnerEditorModal: React.FC<{
   partnerId?: number | null;
   fixedType?: PartnerType;
   initialType?: PartnerType;
+  embedded?: boolean;
   onClose: () => void;
   onSaved: (partner: PartnerEditorResult) => void;
 }> = ({
@@ -114,6 +116,7 @@ export const PartnerEditorModal: React.FC<{
   partnerId,
   fixedType,
   initialType = "Customer",
+  embedded = false,
   onClose,
   onSaved,
 }) => {
@@ -291,12 +294,12 @@ export const PartnerEditorModal: React.FC<{
 
   return (
     <div
-      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"
+      className={embedded ? "w-full" : "fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4"}
       dir="rtl"
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onMouseDown={(e) => { if (!embedded && e.target === e.currentTarget) onClose(); }}
     >
-      <div className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <div className={embedded ? "w-full rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]" : "max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl"}>
+        <div className={`${embedded ? "" : "sticky top-0 z-10 "}flex items-center justify-between border-b border-[var(--color-border)] bg-[var(--color-surface)] p-4`}>
           <div className="flex items-center gap-2">
             <Building2 className="h-5 w-5 text-blue-600" />
             <div>
@@ -304,7 +307,7 @@ export const PartnerEditorModal: React.FC<{
               <p className="text-xs text-[var(--color-text-muted)]">بيانات موحّدة تُستخدم في الفواتير والسندات والشيكات</p>
             </div>
           </div>
-          <button type="button" className="aseel-toolbtn" onClick={onClose}><X className="h-4 w-4" /></button>
+          {!embedded && <button type="button" className="aseel-toolbtn" onClick={onClose}><X className="h-4 w-4" /></button>}
         </div>
 
         <div className="space-y-5 p-4">
@@ -384,12 +387,11 @@ export const PartnerEditorModal: React.FC<{
                   </label>
                   <label className="aseel-field">
                     <span className="aseel-field-label">نهاية التعامل</span>
-                    <input
+                    <AseelDateInput
                       className="aseel-input"
-                      type="date"
                       value={form.end_of_dealing_date}
-                      onChange={(e) => setForm((current) => ({
-                        ...current, end_of_dealing_date: e.target.value,
+                      onChange={(value) => setForm((current) => ({
+                        ...current, end_of_dealing_date: value,
                       }))}
                     />
                   </label>
@@ -506,8 +508,8 @@ export const PartnerEditorModal: React.FC<{
           )}
         </div>
 
-        <div className="sticky bottom-0 flex justify-end gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-          <button type="button" className="aseel-toolbtn" onClick={onClose}>إلغاء</button>
+        <div className={`${embedded ? "" : "sticky bottom-0 "}flex justify-end gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] p-4`}>
+          <button type="button" className="aseel-toolbtn" onClick={onClose}>{embedded ? "العودة للتفاصيل" : "إلغاء"}</button>
           <button type="button" className="aseel-toolbtn bg-blue-600 text-white" disabled={loading || saving} onClick={() => void save()}>
             <Save className="h-4 w-4" /> {saving ? "جاري الحفظ…" : "حفظ البطاقة"}
           </button>

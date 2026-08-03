@@ -4,6 +4,7 @@ import {
   availableForSale,
   buildReservationIndex,
   reservedSaleWarnings,
+  totalReserved,
   type ReservationHold,
 } from './reservedStock.ts';
 
@@ -33,6 +34,8 @@ test('حجز الزبون نفسه لا يُطرح من متاحه — حجزُ�
   const entry = index.get(100)!;
   assert.equal(entry.reserved, 0);
   assert.equal(entry.ownReserved, 8);
+  assert.equal(totalReserved(entry), 8, 'يبقى الحجز ظاهراً في خانة «محجوز»');
+  assert.deepEqual(entry.ownHolders.map((h) => h.orderNumber), ['SO-1']);
   assert.equal(availableForSale('10', entry), 10);
 });
 

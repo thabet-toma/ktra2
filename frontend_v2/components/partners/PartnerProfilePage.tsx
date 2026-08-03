@@ -12,6 +12,7 @@ import { CustomerPriceListTab } from './CustomerPriceListTab';
 import { CustomerNotesTab } from './CustomerNotesTab';
 import { StatementDetailsModal } from './StatementDetailsModal';
 import { PartnerNoteAlert } from './PartnerNoteAlert';
+import { PartnerEditorModal } from './PartnerEditorModal';
 import { EntityActivityLog } from '../activity/EntityActivityLog';
 import {
   referenceTypeLabel, clarifyStatementDescription, statementToneRowClass,
@@ -153,6 +154,7 @@ export const PartnerProfilePage: React.FC = () => {
   // نيّة مؤجّلة من قائمة زر اليمين العامّة (سند قبض/صرف) — تُطبَّق بعد تحميل الشريك.
   const [pendingCtxAction, setPendingCtxAction] = useState<string | null>(null);
   const [activityRefreshKey, setActivityRefreshKey] = useState(0);
+  const [profileRefreshKey, setProfileRefreshKey] = useState(0);
   // T-ONACC: سندات قبض هذا العميل التي بقي فيها رصيد «على الحساب» غير موزَّع —
   // تُتيح التوزيع على الفواتير من داخل البطاقة بلا الذهاب لصفحة الدفعات.
   const [onAccountPayments, setOnAccountPayments] = useState<OnAccountVoucherRow[]>([]);
@@ -183,7 +185,7 @@ export const PartnerProfilePage: React.FC = () => {
       })
       .catch((err) => setError(err instanceof Error ? err.message : String(err)))
       .finally(() => setLoading(false));
-  }, [id, tenantId]);
+  }, [id, profileRefreshKey, tenantId]);
 
   // T-ORDERS: عروض هذا الزبون وطلبياته (تاب «العروض والطلبيات» في كرته).
   useEffect(() => {
@@ -507,6 +509,27 @@ export const PartnerProfilePage: React.FC = () => {
         </div>
       ),
     },
+    ...(id && partner
+      ? [{
+          key: 'edit',
+          label: 'تعديل البطاقة',
+          content: (
+            <div className="p-4">
+              <PartnerEditorModal
+                open
+                embedded
+                partnerId={Number(id)}
+                onClose={() => setActiveTabKey('details')}
+                onSaved={() => {
+                  setProfileRefreshKey((current) => current + 1);
+                  setActivityRefreshKey((current) => current + 1);
+                  setActiveTabKey('details');
+                }}
+              />
+            </div>
+          ),
+        } as AseelTab]
+      : []),
     {
       key: 'statement',
       label: 'كشف الحساب',
