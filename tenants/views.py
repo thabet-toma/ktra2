@@ -273,17 +273,8 @@ class TenantViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _member_payload(m):
-        return {
-            "membership_id": m.id,
-            "user_id": m.user_id,
-            "username": m.user.username,
-            "email": m.user.email or "",
-            "full_name": (f"{m.user.first_name} {m.user.last_name}").strip(),
-            "role": m.role,
-            "is_default": m.is_default,
-            "can_access_import": m.can_access_import,
-            "created_at": m.created_at,
-        }
+        from .services import member_payload
+        return member_payload(m)
 
     @action(detail=True, methods=["get", "post"], url_path="members")
     def members(self, request, pk=None):
@@ -330,10 +321,8 @@ class TenantViewSet(viewsets.ModelViewSet):
 
     @staticmethod
     def _assert_not_last_manager(tenant, membership):
-        if membership.role != "manager":
-            return
-        others = UserCompanyMembership.objects.filter(tenant=tenant, role="manager").exclude(id=membership.id)
-        if not others.exists():
+        from .services import is_last_manager
+        if is_last_manager(tenant, membership):
             raise DRFValidationError({"detail": "لا يمكن إزالة/تخفيض آخر مدير في الشركة."})
 
     @action(detail=True, methods=["post"], url_path="members/change-role")

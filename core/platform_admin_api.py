@@ -167,6 +167,21 @@ def platform_super_admin_detail(request, pk):
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+def _company_payload(tenant, member_count=None):
+    return {
+        'id': tenant.TenantID,
+        'name': tenant.CompanyName,
+        'plan': tenant.SubscriptionPlan,
+        'status': tenant.Status,
+        'import_enabled': tenant.import_enabled,
+        'member_count': (
+            member_count if member_count is not None
+            else UserCompanyMembership.objects.filter(tenant=tenant).count()
+        ),
+        'created_at': tenant.CreatedAt,
+    }
+
+
 @api_view(['GET'])
 @authentication_classes([TokenAuthentication, SessionAuthentication])
 @permission_classes([IsPlatformAdmin])
@@ -174,16 +189,7 @@ def platform_dashboard(request):
     """مؤشرات تشغيل المنصة بلا بيانات مالية داخلية للشركات."""
     companies = Tenant.objects.annotate(member_count=Count('memberships')).order_by('-CreatedAt')
     company_rows = [
-        {
-            'id': tenant.TenantID,
-            'name': tenant.CompanyName,
-            'plan': tenant.SubscriptionPlan,
-            'status': tenant.Status,
-            'import_enabled': tenant.import_enabled,
-            'member_count': tenant.member_count,
-            'created_at': tenant.CreatedAt,
-        }
-        for tenant in companies
+        _company_payload(tenant, tenant.member_count) for tenant in companies
     ]
     status_counts = {
         row['Status']: row['count']
@@ -209,3 +215,196 @@ def platform_dashboard(request):
         'plan_distribution': plan_counts,
         'company_rows': company_rows,
     })
+
+
+# ── تحكم السوبر أدمن بالشركات وأعضائها ──
+# السوبر أدمن يدير أي شركة دون أن يكون عضواً فيها؛ مسارات tenants تبقى للمدير
+# داخل شركته (require_perm)، وهذه المسارات محروسة بـ IsPlatformAdmin وحده.
+
+_BOOL_FIELD = serializers.BooleanField()
+
+
+def _member_rows(tenant):
+    from tenants.services import member_payload
+
+    qs = (
+        UserCompanyMembership.objects
+        .filter(tenant=tenant)
+        .select_related('user')
+        .order_by('user__username')
+    )
+    return [member_payload(m) for m in qs]
+
+
+def _valid_roles():
+    return {role for role, _ in UserCompanyMembership.ROLE_CHOICES}
+
+
+def _apply_company_changes(tenant, data):
+    """يطبّق الحقول المُرسلة فقط ويعيد أسماء أعمدة الحفظ، أو يرفع 400."""
+    changed = []
+    if 'name' in data:
+        name = str(data.get('name') or '').strip()
+        if not name:
+            raise serializers.ValidationError({'name': 'اسم الشركة مطلوب.'})
+        tenant.CompanyName = name
+        changed.append('CompanyName')
+    if 'plan' in data:
+        plan = str(data.get('plan') or '').strip()
+        if plan not in {p for p, _ in Tenant.SUBSCRIPTION_PLANS}:
+            raise serializers.ValidationError({'plan': 'خطة اشتراك غير معروفة.'})
+        tenant.SubscriptionPlan = plan
+        changed.append('SubscriptionPlan')
+    if 'status' in data:
+        state = str(data.get('status') or '').strip()
+        if state not in {s for s, _ in Tenant.STATUS_CHOICES}:
+            raise serializers.ValidationError({'status': 'حالة شركة غير معروفة.'})
+        tenant.Status = state
+        changed.append('Status')
+    if 'import_enabled' in data:
+        tenant.import_enabled = _BOOL_FIELD.to_internal_value(data.get('import_enabled'))
+        changed.append('import_enabled')
+    return changed
+
+
+@api_view(['GET', 'PATCH'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_company_detail(request, pk):
+    """كرت الشركة في لوحة المنصة: بياناتها وأعضاؤها، وتعديل الاسم/الخطة/الحالة/الاستيراد."""
+    tenant = Tenant.objects.filter(pk=pk).first()
+    if tenant is None:
+        return Response({'detail': 'الشركة غير موجودة.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'PATCH':
+        changed = _apply_company_changes(tenant, request.data)
+        if changed:
+            tenant.save(update_fields=changed)
+            logger.info('platform company updated tenant=%s fields=%s by_user=%s',
+                        tenant.pk, ','.join(changed), request.user.pk)
+        return Response(_company_payload(tenant))
+
+    return Response({**_company_payload(tenant), 'members': _member_rows(tenant)})
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_company_members(request, pk):
+    """أعضاء الشركة — عرض وإضافة. POST: {"identifier": "...", "role": "..."}"""
+    from tenants.services import member_payload
+
+    tenant = Tenant.objects.filter(pk=pk).first()
+    if tenant is None:
+        return Response({'detail': 'الشركة غير موجودة.'}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == 'GET':
+        return Response(_member_rows(tenant))
+
+    identifier = str(request.data.get('identifier') or '').strip()
+    role = str(request.data.get('role') or 'staff').strip()
+    if not identifier:
+        return Response({'detail': 'اكتب اسم المستخدم أو بريده.'}, status=status.HTTP_400_BAD_REQUEST)
+    if role not in _valid_roles():
+        return Response({'role': 'دور غير معروف.'}, status=status.HTTP_400_BAD_REQUEST)
+    target = User.objects.filter(
+        Q(username__iexact=identifier) | Q(email__iexact=identifier)).first()
+    if target is None:
+        return Response(
+            {'detail': 'لا يوجد مستخدم بهذا الاسم أو البريد. يجب أن يسجّل حسابه أولاً.'},
+            status=status.HTTP_404_NOT_FOUND,
+        )
+    membership, created = UserCompanyMembership.objects.get_or_create(
+        user=target, tenant=tenant, defaults={'role': role})
+    if not created:
+        return Response(
+            {'detail': 'المستخدم عضو في هذه الشركة بالفعل.'}, status=status.HTTP_400_BAD_REQUEST)
+    logger.info('platform member added tenant=%s user=%s role=%s by_user=%s',
+                tenant.pk, target.pk, role, request.user.pk)
+    return Response(member_payload(membership), status=status.HTTP_201_CREATED)
+
+
+@api_view(['PATCH', 'DELETE'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_company_member_detail(request, pk, membership_id):
+    """تعديل عضوية (الدور/صلاحية الاستيراد) أو إخراج العضو من الشركة."""
+    from tenants.services import is_last_manager, member_payload
+
+    membership = (
+        UserCompanyMembership.objects
+        .filter(pk=membership_id, tenant_id=pk)
+        .select_related('user', 'tenant')
+        .first()
+    )
+    if membership is None:
+        return Response({'detail': 'العضوية غير موجودة في هذه الشركة.'}, status=status.HTTP_404_NOT_FOUND)
+    tenant = membership.tenant
+
+    if request.method == 'DELETE':
+        if is_last_manager(tenant, membership):
+            return Response(
+                {'detail': 'لا يمكن إخراج آخر مدير في الشركة — عيّن مديراً آخر أولاً.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user_id = membership.user_id
+        membership.delete()
+        logger.info('platform member removed tenant=%s user=%s by_user=%s',
+                    tenant.pk, user_id, request.user.pk)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    changed = []
+    if 'role' in request.data:
+        role = str(request.data.get('role') or '').strip()
+        if role not in _valid_roles():
+            return Response({'role': 'دور غير معروف.'}, status=status.HTTP_400_BAD_REQUEST)
+        if role != 'manager' and is_last_manager(tenant, membership):
+            return Response(
+                {'detail': 'لا يمكن تخفيض آخر مدير في الشركة — عيّن مديراً آخر أولاً.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        membership.role = role
+        changed.append('role')
+    if 'can_access_import' in request.data:
+        if not tenant.import_enabled:
+            return Response(
+                {'detail': 'فعّل وحدة الاستيراد للشركة أولاً ثم امنحها للأعضاء.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        membership.can_access_import = _BOOL_FIELD.to_internal_value(
+            request.data.get('can_access_import'))
+        changed.append('can_access_import')
+    if changed:
+        membership.save(update_fields=changed)
+        logger.info('platform membership updated id=%s fields=%s by_user=%s',
+                    membership.pk, ','.join(changed), request.user.pk)
+    return Response(member_payload(membership))
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_user_set_active(request, pk):
+    """إيقاف/تفعيل حساب مستخدم على مستوى المنصة — الحساب الموقوف يُمنع من الدخول.
+
+    body: {"is_active": true|false}. لا يمسّ العضويات ولا البيانات.
+    """
+    target = User.objects.filter(pk=pk).first()
+    if target is None:
+        return Response({'detail': 'المستخدم غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+    is_active = _BOOL_FIELD.to_internal_value(request.data.get('is_active'))
+    if not is_active:
+        if target.pk == request.user.pk:
+            return Response(
+                {'detail': 'لا توقف حسابك — اطلب ذلك من سوبر أدمن آخر.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if (target.email or '').strip().lower() in super_admin_emails():
+            return Response(
+                {'detail': 'حساب سوبر أدمن مُهيّأ في إعدادات المنصة — لا يُوقف من هنا.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+    target.is_active = is_active
+    target.save(update_fields=['is_active'])
+    logger.info('platform user active=%s user=%s by_user=%s',
+                is_active, target.pk, request.user.pk)
+    return Response({'id': target.pk, 'username': target.username, 'is_active': target.is_active})

@@ -24,6 +24,31 @@ export interface PlatformDashboardData {
   company_rows: PlatformCompanyRow[];
 }
 
+export interface PlatformCompanyMember {
+  membership_id: number;
+  user_id: number;
+  username: string;
+  email: string;
+  full_name: string;
+  role: string;
+  is_default: boolean;
+  can_access_import: boolean;
+  /** حساب المنصة — الموقوف يُمنع من تسجيل الدخول كلياً. */
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface PlatformCompanyDetail extends PlatformCompanyRow {
+  members: PlatformCompanyMember[];
+}
+
+export interface PlatformCompanyPatch {
+  name?: string;
+  plan?: string;
+  status?: string;
+  import_enabled?: boolean;
+}
+
 export interface PlatformSuperAdmin {
   id: number;
   username: string;
@@ -72,6 +97,32 @@ export const grantSuperAdmin = (identifier: string) =>
 
 export const revokeSuperAdmin = (id: number) =>
   apiDelete(`platform/super-admins/${id}/`);
+
+/** كرت الشركة في لوحة المنصة — بياناتها وأعضاؤها في نداء واحد. */
+export const getPlatformCompany = (id: number) =>
+  apiGetObject<PlatformCompanyDetail>(`platform/companies/${id}/`);
+
+export const updatePlatformCompany = (id: number, patch: PlatformCompanyPatch) =>
+  apiPatchObject<PlatformCompanyRow>(`platform/companies/${id}/`, { ...patch });
+
+export const addPlatformCompanyMember = (id: number, identifier: string, role: string) =>
+  apiPostObject<PlatformCompanyMember>(`platform/companies/${id}/members/`, { identifier, role });
+
+export const updatePlatformCompanyMember = (
+  id: number,
+  membershipId: number,
+  patch: { role?: string; can_access_import?: boolean },
+) =>
+  apiPatchObject<PlatformCompanyMember>(
+    `platform/companies/${id}/members/${membershipId}/`, { ...patch });
+
+export const removePlatformCompanyMember = (id: number, membershipId: number) =>
+  apiDelete(`platform/companies/${id}/members/${membershipId}/`);
+
+/** إيقاف/تفعيل حساب على مستوى المنصة — لا يمسّ العضويات ولا البيانات. */
+export const setPlatformUserActive = (userId: number, isActive: boolean) =>
+  apiPostObject<{ id: number; username: string; is_active: boolean }>(
+    `platform/users/${userId}/set-active/`, { is_active: isActive });
 
 export const listDevelopmentNotes = () =>
   apiGetObject<DevelopmentNote[]>("platform/development-notes/");

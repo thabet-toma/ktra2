@@ -162,6 +162,24 @@ def test_reserved_stock_report_skips_expired_reservations(env):
     assert reserved_stock_rows(tenant.TenantID) == []
 
 
+def test_reserved_stock_report_filters_by_reservation_end_date(env):
+    """التقرير بلا فلترة زمنية يخلط ما ينتهي غداً بما ينتهي بعد شهر — فلترة
+    «الحجز حتى» تحصر النافذة على نفس مصدر الحارس بلا نسخة ثانية منه."""
+    tenant, holder, other, product = env
+    soon = _order(tenant, holder, product, qty="2", number="SO-RSV-SOON",
+                  reserved_until=date.today() + timedelta(days=1))
+    later = _order(tenant, other, product, qty="3", number="SO-RSV-LATER",
+                   reserved_until=date.today() + timedelta(days=30))
+
+    within = reserved_stock_rows(
+        tenant.TenantID, date_to=date.today() + timedelta(days=7))
+    assert [r["order_number"] for r in within] == [soon.order_number]
+
+    beyond = reserved_stock_rows(
+        tenant.TenantID, date_from=date.today() + timedelta(days=7))
+    assert [r["order_number"] for r in beyond] == [later.order_number]
+
+
 def test_reserved_stock_report_endpoint(env, client):
     tenant, holder, _other, product = env
     _order(tenant, holder, product, qty="8")
@@ -175,3 +193,19 @@ def test_reserved_stock_report_endpoint(env, client):
     payload = response.json()
     assert [r["order_number"] for r in payload] == ["SO-RSV-1"]
     assert payload[0]["customer_name"] == "صاحب الطلبية"
+
+
+def test_reserved_stock_report_endpoint_accepts_a_date_window(env, client):
+    tenant, holder, other, product = env
+    _order(tenant, holder, product, qty="2", number="SO-RSV-SOON",
+           reserved_until=date.today() + timedelta(days=1))
+    _order(tenant, other, product, qty="3", number="SO-RSV-LATER",
+           reserved_until=date.today() + timedelta(days=30))
+    client.force_login(User.objects.get(username="reserveguard"))
+    response = client.get(
+        "/api/sales/reports/reserved-stock/",
+        {"to": (date.today() + timedelta(days=7)).isoformat()},
+        HTTP_X_TENANT_ID=str(tenant.TenantID),
+    )
+    assert response.status_code == 200
+    assert [r["order_number"] for r in response.json()] == ["SO-RSV-SOON"]

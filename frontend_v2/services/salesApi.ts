@@ -756,10 +756,15 @@ export type ReservedStockRow = {
 export async function getReservedStock(params?: {
   product?: number;
   customer?: number;
+  /** نافذة «الحجز حتى» (ISO) — ما ينتهي داخل مدّة بعينها. */
+  from?: string;
+  to?: string;
 }): Promise<ReservedStockRow[]> {
   const q = new URLSearchParams();
   if (params?.product != null) q.set("product", String(params.product));
   if (params?.customer != null) q.set("customer", String(params.customer));
+  if (params?.from) q.set("from", params.from);
+  if (params?.to) q.set("to", params.to);
   const qs = q.toString();
   return apiGetList(`${BASE}/reports/reserved-stock/${qs ? `?${qs}` : ""}`, { tenantId: tid() });
 }

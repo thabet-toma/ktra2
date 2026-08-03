@@ -124,6 +124,17 @@ def _validate_user_tenant_access(request, tenant: Tenant) -> None:
         )
         raise PermissionDenied("ليس لديك صلاحية الوصول لهذه الشركة.")
 
+    # شركة أوقفتها إدارة المنصة — الإيقاف حالة نافذة لا وسماً في اللوحة.
+    # السوبر أدمن يبقى قادراً على الدخول ليصلح/يعيد التفعيل.
+    if (tenant.Status or '').strip().lower() == 'suspended':
+        from core.import_access import is_super_admin
+        if not is_super_admin(user):
+            logger.warning(
+                "tenant %s is suspended — access denied for user=%s", tenant.TenantID, user)
+            raise PermissionDenied(
+                "هذه الشركة موقوفة من إدارة المنصة. تواصل مع الدعم لإعادة تفعيلها."
+            )
+
 
 def _get_client_ip(request) -> str:
     """Extract client IP for security logging."""

@@ -217,6 +217,34 @@ def create_company(name: str, creator_user) -> Tenant:
         return tenant
 
 
+def member_payload(m: UserCompanyMembership) -> dict:
+    """تمثيل عضوية موحّد — تستهلكه إدارة الشركة (المدير) ولوحة المنصة (السوبر أدمن)."""
+    return {
+        "membership_id": m.id,
+        "user_id": m.user_id,
+        "username": m.user.username,
+        "email": m.user.email or "",
+        "full_name": (f"{m.user.first_name} {m.user.last_name}").strip(),
+        "role": m.role,
+        "is_default": m.is_default,
+        "can_access_import": m.can_access_import,
+        "is_active": m.user.is_active,
+        "created_at": m.created_at,
+    }
+
+
+def is_last_manager(tenant: Tenant, membership: UserCompanyMembership) -> bool:
+    """هل هذه العضوية آخر مدير في الشركة؟ (كل طبقة ترفع خطأها الخاص)."""
+    if membership.role != "manager":
+        return False
+    return not (
+        UserCompanyMembership.objects
+        .filter(tenant=tenant, role="manager")
+        .exclude(id=membership.id)
+        .exists()
+    )
+
+
 def create_branch(tenant: Tenant, name: str, code: str) -> Branch:
     """task11 M4 — إنشاء فرع تحت شركة أم.
 

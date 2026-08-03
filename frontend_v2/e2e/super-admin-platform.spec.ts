@@ -32,7 +32,28 @@ const companyDashboard = {
   alerts: [],
 };
 
+const companyMembers = [
+  {
+    membership_id: 7, user_id: 70, username: "mgr", email: "mgr@example.test",
+    full_name: "مدير الشركة", role: "manager", is_default: true,
+    can_access_import: true, is_active: true, created_at: "2026-07-22T00:00:00Z",
+  },
+  {
+    membership_id: 8, user_id: 80, username: "sami", email: "sami@example.test",
+    full_name: "سامي", role: "staff", is_default: false,
+    can_access_import: false, is_active: true, created_at: "2026-07-22T00:00:00Z",
+  },
+];
+
 async function installMocks(page: Page, isSuperAdmin: boolean) {
+  /** آخر أجسام الطلبات — تثبت أن أزرار اللوحة تصل الخادم فعلاً */
+  const calls: Record<string, any> = {};
+  const company = {
+    id: 42, name: "شركة الاختبار", plan: "Enterprise", status: "Active",
+    import_enabled: true, member_count: 2, created_at: "2026-07-22T00:00:00Z",
+    members: companyMembers.map((member) => ({ ...member })),
+  };
+
   await page.addInitScript(() => {
     localStorage.setItem("token", "platform-e2e-token");
     localStorage.setItem("userId", "platform-e2e-user");
@@ -78,6 +99,27 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
         }],
       }) });
     }
+    if (/\/platform\/companies\/\d+\/members\/\d+\/$/.test(url.pathname)) {
+      calls.memberPatch = request.postDataJSON?.() ?? JSON.parse(request.postData() || "{}");
+      const member = company.members.find((row) => url.pathname.includes(`/${row.membership_id}/`));
+      Object.assign(member!, calls.memberPatch);
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(member) });
+    }
+    if (/\/platform\/companies\/\d+\/$/.test(url.pathname)) {
+      if (request.method() === "PATCH") {
+        calls.companyPatch = JSON.parse(request.postData() || "{}");
+        Object.assign(company, calls.companyPatch);
+      }
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify(company) });
+    }
+    if (/\/platform\/users\/\d+\/set-active\/$/.test(url.pathname)) {
+      calls.setActive = { path: url.pathname, ...JSON.parse(request.postData() || "{}") };
+      const member = company.members.find((row) => url.pathname.includes(`/${row.user_id}/`));
+      member!.is_active = calls.setActive.is_active;
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({
+        id: member!.user_id, username: member!.username, is_active: member!.is_active,
+      }) });
+    }
     if (url.pathname.endsWith("/platform/development-notes/") && request.method() === "GET") {
       return route.fulfill({ contentType: "application/json", body: JSON.stringify([{
         id: 1, title: "تحسين شاشة الجرد", description: "إضافة فلتر للمستودع",
@@ -100,6 +142,8 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
     }
     return route.fulfill({ contentType: "application/json", body: "[]" });
   });
+
+  return calls;
 }
 
 test("super admin gets a separate platform dashboard and development notes sheet", async ({ page }) => {
@@ -111,6 +155,15 @@ test("super admin gets a separate platform dashboard and development notes sheet
   await expect(page.getByText("شركة الاختبار").last()).toBeVisible();
   await expect(page.getByRole("button", { name: "إدارة المنصة" })).toBeVisible();
 
+  // سكرولر الصفحة لا يتجاوز الشاشة — كان min-height بـ 100vh يقصّ أسفل اللوحة
+  // فلا تُرى آخر الشركات مهما سكرلت.
+  const overflowBelowViewport = await page.evaluate(() => {
+    const main = document.querySelector("main.app-content");
+    return main ? main.getBoundingClientRect().bottom - window.innerHeight : null;
+  });
+  expect(overflowBelowViewport).not.toBeNull();
+  expect(overflowBelowViewport as number).toBeLessThanOrEqual(1);
+
   await page.getByRole("button", { name: /ملاحظات التطوير/ }).first().click();
   await expect(page).toHaveURL(/\/super-admin\/development-notes$/);
   await expect(page.getByRole("heading", { name: "ملاحظات التطوير" })).toBeVisible();
@@ -118,6 +171,30 @@ test("super admin gets a separate platform dashboard and development notes sheet
   await page.getByLabel("عنوان ملاحظة جديدة").fill("إضافة تقرير هامش الربح");
   await page.getByRole("button", { name: "إضافة", exact: true }).click();
   await expect(page.locator('input[value="إضافة تقرير هامش الربح"]')).toBeVisible();
+});
+
+test("super admin controls a company and its members from the platform panel", async ({ page }) => {
+  const calls = await installMocks(page, true);
+  await page.goto("/super-admin");
+
+  await page.getByRole("button", { name: "تحكم بـشركة الاختبار" }).click();
+  await expect(page.getByRole("heading", { name: /تحكم المنصة بالشركة/ })).toBeVisible();
+
+  // إعدادات الشركة: الحالة/الخطة/الاستيراد تُحفظ من هنا لا من نافذة المدير
+  await page.getByLabel("حالة الشركة").selectOption("Suspended");
+  await page.getByRole("button", { name: "حفظ" }).click();
+  await expect.poll(() => calls.companyPatch?.status).toBe("Suspended");
+  await expect(page.getByLabel("حالة الشركة")).toHaveValue("Suspended");
+
+  // دور عضو
+  await page.getByLabel("دور sami").selectOption("accountant");
+  await expect.poll(() => calls.memberPatch?.role).toBe("accountant");
+
+  // إيقاف حساب العضو — بتأكيد صريح
+  await page.getByRole("button", { name: "إيقاف حساب sami" }).click();
+  await page.getByRole("button", { name: "إيقاف الحساب" }).click();
+  await expect.poll(() => calls.setActive?.is_active).toBe(false);
+  await expect(page.getByRole("button", { name: "تفعيل حساب sami" })).toBeVisible();
 });
 
 test("company manager cannot see or open platform administration", async ({ page }) => {
