@@ -4,6 +4,9 @@ import { useTenantSettings } from "../../hooks/useTenantSettings";
 import { Building, Plus, ChevronDown, Check, Loader2, Settings2, Star } from "lucide-react";
 import { CompanyManagementModal, ROLE_LABELS } from "./CompanyManagementModal";
 
+const companyLabel = (tenant: Tenant) =>
+  `${tenant.CompanyName}${tenant.is_example ? " (مثال)" : ""}`;
+
 export const CompanySwitcher: React.FC = () => {
   const { companies, currentCompany, switchCompany, createCompany, setDefaultCompany, loading, refreshCompanies } = useCompany();
   const { identity } = useTenantSettings();
@@ -93,7 +96,7 @@ export const CompanySwitcher: React.FC = () => {
         ) : (
           <Building className="w-4 h-4 opacity-70" />
         )}
-        <span>{currentCompany?.CompanyName || "اختر الشركة"}</span>
+        <span>{currentCompany ? companyLabel(currentCompany) : "اختر الشركة"}</span>
         <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
       </button>
 
@@ -118,7 +121,7 @@ export const CompanySwitcher: React.FC = () => {
                   >
                     <div className="flex flex-col">
                       <span style={{ color: isActive ? "var(--aseel-accent)" : "var(--aseel-ink)" }}>
-                        {membership.tenant.CompanyName}
+                        {companyLabel(membership.tenant)}
                       </span>
                       <span className="text-[11px] opacity-60">
                         الدور: {ROLE_LABELS[membership.role] || membership.role}

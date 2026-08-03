@@ -11,6 +11,7 @@ export interface PlatformCompanyRow {
   plan: string;
   status: "Active" | "Trial" | "Suspended" | string;
   import_enabled: boolean;
+  is_example: boolean;
   member_count: number;
   created_at: string;
 }
@@ -47,6 +48,7 @@ export interface PlatformCompanyPatch {
   plan?: string;
   status?: string;
   import_enabled?: boolean;
+  is_example?: boolean;
 }
 
 export interface PlatformSuperAdmin {

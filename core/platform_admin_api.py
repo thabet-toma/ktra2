@@ -2,6 +2,7 @@
 import logging
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Count, Q
 from rest_framework import serializers, status, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
@@ -174,6 +175,7 @@ def _company_payload(tenant, member_count=None):
         'plan': tenant.SubscriptionPlan,
         'status': tenant.Status,
         'import_enabled': tenant.import_enabled,
+        'is_example': tenant.is_example,
         'member_count': (
             member_count if member_count is not None
             else UserCompanyMembership.objects.filter(tenant=tenant).count()
@@ -277,11 +279,23 @@ def platform_company_detail(request, pk):
         return Response({'detail': 'الشركة غير موجودة.'}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == 'PATCH':
-        changed = _apply_company_changes(tenant, request.data)
-        if changed:
-            tenant.save(update_fields=changed)
-            logger.info('platform company updated tenant=%s fields=%s by_user=%s',
-                        tenant.pk, ','.join(changed), request.user.pk)
+        with transaction.atomic():
+            changed = _apply_company_changes(tenant, request.data)
+            if changed:
+                tenant.save(update_fields=changed)
+            if 'is_example' in request.data:
+                from tenants.services import set_example_company
+
+                requested = _BOOL_FIELD.to_internal_value(request.data.get('is_example'))
+                if requested:
+                    set_example_company(tenant)
+                elif tenant.is_example:
+                    set_example_company(None)
+                    tenant.is_example = False
+                changed.append('is_example')
+            if changed:
+                logger.info('platform company updated tenant=%s fields=%s by_user=%s',
+                            tenant.pk, ','.join(changed), request.user.pk)
         return Response(_company_payload(tenant))
 
     return Response({**_company_payload(tenant), 'members': _member_rows(tenant)})

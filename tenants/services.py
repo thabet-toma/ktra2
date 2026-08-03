@@ -1,4 +1,5 @@
 import logging
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.core.exceptions import ValidationError
 from tenants.models import Branch, Tenant, TenantSettings, TenantBook, UserCompanyMembership
@@ -201,7 +202,9 @@ def create_company(name: str, creator_user) -> Tenant:
 
         # 5. Create UserCompanyMembership
         # If this is the user's only company, make it the default
-        is_first = not UserCompanyMembership.objects.filter(user=creator_user).exists()
+        is_first = not UserCompanyMembership.objects.filter(
+            user=creator_user, is_example_access=False,
+        ).exists()
         UserCompanyMembership.objects.create(
             user=creator_user,
             tenant=tenant,
@@ -215,6 +218,59 @@ def create_company(name: str, creator_user) -> Tenant:
 
         logger.info("Successfully booted new company '%s' (ID: %d) for user %s", tenant.CompanyName, tenant.TenantID, creator_user.username)
         return tenant
+
+
+def set_example_company(tenant: Tenant | None) -> None:
+    """يعيّن شركة المثال الوحيدة ويزامن عضويات الوصول التلقائية بأمان."""
+    user_model = get_user_model()
+    with transaction.atomic():
+        # التعيين نادر ومنصة-فقط؛ قفل صفوف الشركات كلها يمنع طلبين متزامنين من
+        # تعيين شركتين عندما لا تكون هناك شركة مثال سابقة لقفلها.
+        list(Tenant.objects.select_for_update().values_list("pk", flat=True))
+        Tenant.objects.filter(is_example=True).exclude(
+            pk=getattr(tenant, "pk", None)
+        ).update(is_example=False)
+        UserCompanyMembership.objects.filter(is_example_access=True).delete()
+
+        if tenant is None:
+            logger.info("Example company cleared")
+            return
+
+        if not tenant.is_example:
+            tenant.is_example = True
+            tenant.save(update_fields=["is_example"])
+
+        existing_user_ids = set(
+            UserCompanyMembership.objects.filter(tenant=tenant)
+            .values_list("user_id", flat=True)
+        )
+        UserCompanyMembership.objects.bulk_create([
+            UserCompanyMembership(
+                user_id=user_id,
+                tenant=tenant,
+                role="staff",
+                is_example_access=True,
+            )
+            for user_id in user_model.objects.exclude(pk__in=existing_user_ids)
+            .values_list("pk", flat=True)
+        ])
+        logger.info("Example company assigned tenant=%s", tenant.pk)
+
+
+def ensure_example_company_access(user) -> None:
+    """يلحق المستخدمين الذين سُجّلوا بعد التعيين بشركة المثال عند أول تحميل."""
+    if user is None or not getattr(user, "is_authenticated", False):
+        return
+    example = Tenant.objects.filter(is_example=True).first()
+    if example is None:
+        return
+    _, created = UserCompanyMembership.objects.get_or_create(
+        user=user,
+        tenant=example,
+        defaults={"role": "staff", "is_example_access": True},
+    )
+    if created:
+        logger.info("Example company access granted tenant=%s user=%s", example.pk, user.pk)
 
 
 def member_payload(m: UserCompanyMembership) -> dict:

@@ -11,6 +11,7 @@ const membership = {
     Status: "Active",
     CreatedAt: "2026-07-22T00:00:00Z",
     import_enabled: true,
+    is_example: false,
   },
   role: "manager",
   is_default: true,
@@ -50,7 +51,7 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
   const calls: Record<string, any> = {};
   const company = {
     id: 42, name: "شركة الاختبار", plan: "Enterprise", status: "Active",
-    import_enabled: true, member_count: 2, created_at: "2026-07-22T00:00:00Z",
+    import_enabled: true, is_example: false, member_count: 2, created_at: "2026-07-22T00:00:00Z",
     members: companyMembers.map((member) => ({ ...member })),
   };
 
@@ -95,7 +96,8 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
         plan_distribution: { Enterprise: 3 },
         company_rows: [{
           id: 42, name: "شركة الاختبار", plan: "Enterprise", status: "Active",
-          import_enabled: true, member_count: 4, created_at: "2026-07-22T00:00:00Z",
+          import_enabled: true, is_example: company.is_example,
+          member_count: 4, created_at: "2026-07-22T00:00:00Z",
         }],
       }) });
     }
@@ -195,6 +197,17 @@ test("super admin controls a company and its members from the platform panel", a
   await page.getByRole("button", { name: "إيقاف الحساب" }).click();
   await expect.poll(() => calls.setActive?.is_active).toBe(false);
   await expect(page.getByRole("button", { name: "تفعيل حساب sami" })).toBeVisible();
+});
+
+test("super admin assigns the example company and sees its label", async ({ page }) => {
+  const calls = await installMocks(page, true);
+  await page.goto("/super-admin");
+
+  await page.getByLabel("تعيين الشركة المثال").selectOption("42");
+
+  await expect.poll(() => calls.companyPatch?.is_example).toBe(true);
+  await expect(page.getByLabel("تعيين الشركة المثال")).toHaveValue("42");
+  await expect(page.getByText("شركة الاختبار (مثال)", { exact: true })).toBeVisible();
 });
 
 test("company manager cannot see or open platform administration", async ({ page }) => {
