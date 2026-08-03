@@ -9,6 +9,8 @@ export type Theme = 'light' | 'dark';
 
 export type AppView =
     | "dashboard"
+    | "super-admin"
+    | "development-notes"
     | "tasks"
     | "task-management"
     | "users"
@@ -28,6 +30,7 @@ export type AppView =
     | "items-categories"
     | "supplier-management"
     | "price-offers"
+    | "import-offers"
     | "deals-management"
     | "shipments-management"
     | "customs-clearance"
@@ -46,6 +49,8 @@ export type AppView =
     | "sales-customer-payments"
     | "sales-settings"
     | "purchase-settings"
+    | "purchase-receipts"
+    | "sales-delivery-notes"
     | "product-profile"
     | "product-group"
     | "local-shipping"
@@ -67,6 +72,7 @@ export type AppView =
     | "aseel-kit"
     | "aseel-sales"
     | "sales-quotations"
+    | "sales-orders"
     | "credit-debit-notes"
     | "sql-clearances"
     | "sql-purchase-invoices"
@@ -81,9 +87,12 @@ export type AppView =
     | "purchase-return"
     | "supplier-payments"
     | "invoice-profits"
+    | "reserved-stock"
     | "partner-profile"
     | "import-flow"
     | "activity-log"
+    | "permissions"
+    | "personal-expenses"
     | "about-us"
     | "contact";
 

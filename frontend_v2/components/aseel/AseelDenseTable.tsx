@@ -183,7 +183,7 @@ export function AseelDenseTable<T extends Record<string, any>>({
       <table className="aseel-grid" data-variant="list">
         <thead>
           <tr>
-            {selectable && <th style={{ width: '32px' }}></th>}
+            {selectable && <th className="aseel-print-hidden" style={{ width: '32px' }}></th>}
             {columns.map((col) => (
               <th
                 key={col.key}
@@ -192,7 +192,10 @@ export function AseelDenseTable<T extends Record<string, any>>({
                   textAlign: getAlign(col) as any,
                   position: resizable ? 'relative' : undefined,
                 }}
-                className={col.sortable && onSort ? 'aseel-sortable' : ''}
+                className={[
+                  col.sortable && onSort ? 'aseel-sortable' : '',
+                  col.key === 'actions' ? 'aseel-print-hidden' : '',
+                ].filter(Boolean).join(' ')}
                 onClick={() => handleSort(col)}
               >
                 {col.header}
@@ -250,7 +253,7 @@ export function AseelDenseTable<T extends Record<string, any>>({
                 onMouseLeave={() => setHoveredKey(null)}
               >
                 {selectable && (
-                  <td>
+                  <td className="aseel-print-hidden">
                     <input
                       type="radio"
                       checked={isSelected}
@@ -262,7 +265,10 @@ export function AseelDenseTable<T extends Record<string, any>>({
                   <td
                     key={col.key}
                     style={{ textAlign: getAlign(col) as any }}
-                    className={col.numeric ? 'aseel-num' : ''}
+                    className={[
+                      col.numeric ? 'aseel-num' : '',
+                      col.key === 'actions' ? 'aseel-print-hidden' : '',
+                    ].filter(Boolean).join(' ')}
                   >
                     {col.render ? col.render(row, idx) : String((row as any)[col.key] ?? '')}
                   </td>

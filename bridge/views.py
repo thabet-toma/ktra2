@@ -372,6 +372,16 @@ class MapperView(View):
         if not segments:
             return JsonResponse({'detail': 'Not found'}, status=404)
 
+        # The legacy users mirror is platform-global. Never expose its
+        # collection to company users, and only allow a user to read their own
+        # mirror document. Company member discovery belongs to the tenant-
+        # scoped /companies/{id}/members endpoint.
+        if segments[0] == 'users' and not request.user.is_superuser:
+            if len(segments) == 1:
+                return JsonResponse({'detail': 'Forbidden'}, status=403)
+            if len(segments) == 2 and segments[1] != str(request.user.pk):
+                return JsonResponse({'detail': 'Not found'}, status=404)
+
         if len(segments) % 2 == 1:
             rows = _list_under_prefix('/'.join(segments), request, tenant)
             return JsonResponse(rows, safe=False)

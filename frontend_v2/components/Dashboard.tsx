@@ -8,6 +8,7 @@ import { QuickActions } from './dashboard/QuickActions';
 import { TasksDistributionChart } from './dashboard/TasksDistributionChart';
 import { useTenantSettings } from '../hooks/useTenantSettings';
 import { useCompany } from '../contexts/CompanyContext';
+import { formatDateValue } from "../utils/formatDate";
 
 interface DashboardProps {
     tasks: Task[];
@@ -31,7 +32,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tasks, users, onNavigate, 
     const completionRate = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
 
     return (
-        <div dir="rtl" data-skin="aseel" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10, padding: '8px 12px' }}>
+        <div dir="rtl" style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: 10, padding: '8px 12px' }}>
             {/* شريط KPI */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingBottom: 6, borderBottom: '1px solid var(--aseel-border)' }}>
                 <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>
@@ -86,7 +87,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ tasks, users, onNavigate, 
                         {tasks.slice(0, 5).map(task => (
                             <div key={task.id} style={{ padding: '4px 10px', borderBottom: '1px solid var(--aseel-border)', fontSize: 'var(--aseel-fs-sm, 11px)' }}>
                                 <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--aseel-ink)' }}>{task.title}</div>
-                                <div style={{ color: 'var(--aseel-ink-soft)', fontSize: '10px' }}>{new Date(task.updatedAt).toLocaleDateString('ar-EG')}</div>
+                                <div style={{ color: 'var(--aseel-ink-soft)', fontSize: '10px' }}>{formatDateValue(task.updatedAt)}</div>
                             </div>
                         ))}
                         {tasks.length === 0 && (

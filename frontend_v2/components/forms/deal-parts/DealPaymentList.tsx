@@ -4,6 +4,7 @@ import { dealsService } from "@/services/dealsService";
 import { formatMoney } from "@/utils/formatNumber";
 import { useToast } from "@/contexts/ToastContext";
 import { useConfirm } from "@/contexts/ConfirmContext";
+import { formatDateValue } from "../../../utils/formatDate";
 import {
   Clock,
   Trash2,
@@ -173,13 +174,13 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
   if (payments.length === 0) {
     return (
       <div className="text-center py-8">
-        <div className="w-16 h-16 bg-gray-100 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
-          <Clock className="w-8 h-8 text-gray-400" />
+        <div className="w-16 h-16 bg-[var(--color-surface-3)] rounded-full flex items-center justify-center mx-auto mb-4">
+          <Clock className="w-8 h-8 text-[var(--color-text-muted)]" />
         </div>
-        <p className="text-gray-600 dark:text-gray-400">
+        <p className="text-[var(--color-text-muted)]">
           لم يتم تسجيل أي مدفوعات بعد
         </p>
-        <p className="text-sm text-gray-500 dark:text-gray-500 mt-1">
+        <p className="text-sm text-[var(--color-text-muted)] mt-1">
           ابدأ بدفع أول دفعة من جدول الدفعات أعلاه
         </p>
       </div>
@@ -188,7 +189,7 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
 
   return (
     <div className="space-y-3">
-      <h4 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
+      <h4 className="font-bold text-[var(--color-text)] flex items-center gap-2">
         <Receipt className="w-4 h-4" />
         سجل المدفوعات
         <span className="text-xs font-normal aseel-text-soft">
@@ -236,7 +237,7 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
               <th className={`${cellCls} font-medium`}>إجراءات</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+          <tbody className="divide-y divide-[var(--color-border)]">
             {payments.map((payment) => {
               const jid =
                 payment.journalId != null && payment.journalId !== ""
@@ -263,7 +264,7 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
                     {payment.type}
                     {dupN > 1 && (
                       <span
-                        className="mr-2 inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        className="mr-2 inline-flex items-center gap-1 rounded bg-[var(--color-surface-3)] px-1.5 py-0.5 text-[10px] text-[var(--color-text)]"
                         title={`يوجد ${dupN} سجلات بنفس القسط والمبلغ — راجع التكرار قبل الترحيل.`}
                       >
                         <AlertTriangle className="w-3 h-3" /> مكرر ×{dupN}
@@ -272,7 +273,7 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
                   </td>
                   <td className={`${cellCls} font-mono text-xs`}>
                     {payment.paymentDate
-                      ? new Date(payment.paymentDate).toLocaleDateString("en-GB")
+                      ? formatDateValue(payment.paymentDate)
                       : "—"}
                   </td>
                   <td className={`${cellCls} font-mono font-bold`}>

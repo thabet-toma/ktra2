@@ -1,0 +1,313 @@
+"""T-PERM — محرّك الصلاحيات: مصدر حقيقة واحد للمن-يقدر-يفعل-ماذا.
+
+قبل هذه الطبقة كان الإنفاذ مبعثراً: «مستعرض قراءة فقط» (core.permissions) +
+فحوص `user_is_admin` متفرّقة + صلاحية الاستيراد (core.import_access) + شروط
+`role === 'manager'` في الواجهة. لا مكان واحد يجيب: «مَن يتراجع عن الترحيل؟»
+
+النموذج (كما في الأنظمة الاحترافية):
+    كتالوج صلاحيات مُسمّاة  →  مصفوفة افتراضية لكل دور  →  تجاوزات لكل شركة
+
+- `PERMISSIONS`: الكتالوج (مفتاح + تسمية عربية + مجموعة) — تغذّي شاشة الصلاحيات.
+- `ROLE_DEFAULTS`: ما يملكه كل دور افتراضياً («*» = كل شيء، للمدير).
+- `tenants.RolePermission`: تجاوز لكل (شركة، دور، مفتاح) — منح أو منع صريح،
+  يُحرّره مدير الشركة من الشاشة. المدير لا يُجرَّد من صلاحياته بتجاوز (لئلا
+  يقفل نفسه خارج نظامه).
+
+الإنفاذ على **الخادم** عبر `require_perm` / `@requires_perm`؛ أعلام الواجهة
+(`/api/permissions/me`) للعرض فقط — إخفاء زر لا يحمي endpoint.
+"""
+from __future__ import annotations
+
+import logging
+from functools import wraps
+
+from rest_framework.exceptions import PermissionDenied
+
+logger = logging.getLogger(__name__)
+
+# ──────────────────────────────────────────────────────────────────────────
+# الكتالوج — كل صلاحية تُذكر مرة واحدة هنا، والواجهة تقرأها كما هي.
+# ──────────────────────────────────────────────────────────────────────────
+GROUP_SALES = "المبيعات"
+GROUP_PURCHASE = "المشتريات"
+GROUP_INVENTORY = "المخزون"
+GROUP_ACCOUNTING = "المحاسبة"
+GROUP_IMPORT = "الاستيراد"
+GROUP_HR = "شؤون الموظفين"
+GROUP_ADMIN = "الإدارة والإعدادات"
+
+PERMISSIONS: list[dict] = [
+    # المبيعات
+    {"key": "sales.invoice.view", "label": "عرض فواتير البيع", "group": GROUP_SALES},
+    {"key": "sales.invoice.create", "label": "إنشاء فاتورة بيع", "group": GROUP_SALES},
+    {"key": "sales.invoice.edit", "label": "تعديل فاتورة بيع", "group": GROUP_SALES},
+    {"key": "sales.invoice.delete", "label": "حذف فاتورة بيع", "group": GROUP_SALES},
+    {"key": "sales.invoice.post", "label": "ترحيل فاتورة بيع", "group": GROUP_SALES},
+    {"key": "sales.invoice.unpost", "label": "التراجع عن ترحيل فاتورة بيع", "group": GROUP_SALES},
+    {"key": "sales.payment.create", "label": "إنشاء سند قبض", "group": GROUP_SALES},
+    {"key": "sales.payment.post", "label": "ترحيل سند قبض", "group": GROUP_SALES},
+    {"key": "sales.payment.unpost", "label": "التراجع عن ترحيل سند قبض", "group": GROUP_SALES},
+    {"key": "sales.quotation.manage", "label": "عروض الأسعار والطلبيات", "group": GROUP_SALES},
+    {"key": "sales.customer.view", "label": "عرض العملاء", "group": GROUP_SALES},
+    {"key": "sales.customer.manage", "label": "إدارة العملاء", "group": GROUP_SALES},
+    {"key": "sales.settings.manage", "label": "إعدادات المبيعات", "group": GROUP_SALES},
+    # المشتريات
+    {"key": "purchase.invoice.view", "label": "عرض فواتير الشراء", "group": GROUP_PURCHASE},
+    {"key": "purchase.invoice.create", "label": "إنشاء فاتورة شراء", "group": GROUP_PURCHASE},
+    {"key": "purchase.invoice.edit", "label": "تعديل فاتورة شراء", "group": GROUP_PURCHASE},
+    {"key": "purchase.invoice.delete", "label": "حذف فاتورة شراء", "group": GROUP_PURCHASE},
+    {"key": "purchase.invoice.post", "label": "ترحيل فاتورة شراء", "group": GROUP_PURCHASE},
+    {"key": "purchase.invoice.unpost", "label": "التراجع عن ترحيل فاتورة شراء", "group": GROUP_PURCHASE},
+    {"key": "purchase.payment.create", "label": "إنشاء سند صرف", "group": GROUP_PURCHASE},
+    {"key": "purchase.payment.post", "label": "ترحيل سند صرف", "group": GROUP_PURCHASE},
+    {"key": "purchase.payment.unpost", "label": "التراجع عن ترحيل سند صرف", "group": GROUP_PURCHASE},
+    {"key": "purchase.supplier.view", "label": "عرض الموردين", "group": GROUP_PURCHASE},
+    {"key": "purchase.supplier.manage", "label": "إدارة الموردين", "group": GROUP_PURCHASE},
+    {"key": "purchase.settings.manage", "label": "إعدادات المشتريات", "group": GROUP_PURCHASE},
+    # المخزون
+    {"key": "inventory.item.view", "label": "عرض الأصناف والمخزون", "group": GROUP_INVENTORY},
+    {"key": "inventory.item.manage", "label": "إدارة الأصناف والفئات", "group": GROUP_INVENTORY},
+    {"key": "inventory.cost.view", "label": "عرض التكاليف وهوامش الربح", "group": GROUP_INVENTORY},
+    {"key": "inventory.doc.post", "label": "ترحيل مستندات المخزون (تحويل/جرد/تسوية)", "group": GROUP_INVENTORY},
+    {"key": "inventory.doc.unpost", "label": "التراجع عن ترحيل مستندات المخزون", "group": GROUP_INVENTORY},
+    # المحاسبة
+    {"key": "accounting.journal.view", "label": "عرض القيود والتقارير المحاسبية", "group": GROUP_ACCOUNTING},
+    {"key": "accounting.journal.create", "label": "إنشاء قيد يدوي", "group": GROUP_ACCOUNTING},
+    {"key": "accounting.journal.post", "label": "ترحيل قيد", "group": GROUP_ACCOUNTING},
+    {"key": "accounting.journal.unpost", "label": "التراجع عن ترحيل قيد", "group": GROUP_ACCOUNTING},
+    {"key": "accounting.account.manage", "label": "إدارة شجرة الحسابات", "group": GROUP_ACCOUNTING},
+    {"key": "accounting.period.manage", "label": "الفترات المالية والإغلاق السنوي", "group": GROUP_ACCOUNTING},
+    {"key": "accounting.report.view", "label": "التقارير المالية", "group": GROUP_ACCOUNTING},
+    {"key": "finance.cashbox.manage", "label": "صناديق الكاش (تمويل/تحويل/إيداع)", "group": GROUP_ACCOUNTING},
+    # الاستيراد (يبقى مشروطاً بتفعيل الوحدة للشركة — core.import_access)
+    {"key": "import.deal.manage", "label": "إدارة صفقات الاستيراد", "group": GROUP_IMPORT},
+    {"key": "import.shipment.manage", "label": "إدارة الشحنات والتخليص", "group": GROUP_IMPORT},
+    {"key": "import.doc.unpost", "label": "التراجع عن ترحيل مستندات الاستيراد", "group": GROUP_IMPORT},
+    # شؤون الموظفين (تقود قائمة «إدارة الموظفين» في الشريط الجانبي)
+    {"key": "hr.employees.manage", "label": "قائمة المستخدمين وملاحظات الموظفين", "group": GROUP_HR},
+    {"key": "hr.attendance.view", "label": "شاشة الحضور والغياب", "group": GROUP_HR},
+    {"key": "hr.points.manage", "label": "إدارة النقاط", "group": GROUP_HR},
+    {"key": "hr.tasks.manage", "label": "إدارة المهام (لا مهامي)", "group": GROUP_HR},
+    # الإدارة
+    {"key": "admin.members.manage", "label": "إدارة أعضاء الشركة وأدوارهم", "group": GROUP_ADMIN},
+    {"key": "admin.permissions.manage", "label": "إدارة الصلاحيات", "group": GROUP_ADMIN},
+    {"key": "admin.settings.manage", "label": "إعدادات الشركة العامة", "group": GROUP_ADMIN},
+    {"key": "admin.activity.view", "label": "سجل نشاط المستخدمين", "group": GROUP_ADMIN},
+]
+
+# القراءة المجرّدة — ما يملكه «المستعرض» ويرثه كل دور أعلى منه.
+_VIEW_ONLY = {
+    "sales.invoice.view",
+    "sales.customer.view",
+    "purchase.invoice.view",
+    "purchase.supplier.view",
+    "inventory.item.view",
+}
+
+# قراءة الدفاتر والتقارير المالية ليست قراءةً تشغيلية — المحاسب والمدير فقط
+# افتراضياً (تُمنح لغيرهما بنقرة من شاشة الصلاحيات).
+_ACCOUNTING_VIEW = {
+    "accounting.journal.view",
+    "accounting.report.view",
+}
+
+_SALES_EMPLOYEE = _VIEW_ONLY | {
+    "hr.attendance.view",
+    "sales.invoice.create",
+    "sales.invoice.edit",
+    "sales.invoice.post",
+    "sales.payment.create",
+    "sales.payment.post",
+    "sales.quotation.manage",
+    "sales.customer.manage",
+}
+
+_PROCUREMENT_EMPLOYEE = _VIEW_ONLY | {
+    "hr.attendance.view",
+    "purchase.invoice.create",
+    "purchase.invoice.edit",
+    "purchase.invoice.post",
+    "purchase.payment.create",
+    "purchase.payment.post",
+    "purchase.supplier.manage",
+    "inventory.item.manage",
+    "inventory.cost.view",
+    "inventory.doc.post",
+    "import.deal.manage",
+    "import.shipment.manage",
+}
+
+_ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | {
+    "hr.attendance.view",
+    "sales.invoice.post",
+    "sales.invoice.unpost",
+    "sales.payment.create",
+    "sales.payment.post",
+    "sales.payment.unpost",
+    "purchase.invoice.post",
+    "purchase.invoice.unpost",
+    "purchase.payment.create",
+    "purchase.payment.post",
+    "purchase.payment.unpost",
+    "inventory.cost.view",
+    "inventory.doc.post",
+    "inventory.doc.unpost",
+    "accounting.journal.create",
+    "accounting.journal.post",
+    "accounting.journal.unpost",
+    "accounting.account.manage",
+    "accounting.period.manage",
+    "finance.cashbox.manage",
+    "import.doc.unpost",
+}
+
+# موظف عام (الدور الافتراضي للعضو الجديد): إدخال بيانات بلا ترحيل ولا حذف.
+_STAFF = _VIEW_ONLY | {
+    "hr.attendance.view",
+    "sales.invoice.create",
+    "sales.invoice.edit",
+    "purchase.invoice.create",
+    "purchase.invoice.edit",
+}
+
+ROLE_DEFAULTS: dict[str, object] = {
+    "manager": "*",
+    "accountant": _ACCOUNTANT,
+    "sales": _SALES_EMPLOYEE,
+    "procurement": _PROCUREMENT_EMPLOYEE,
+    "staff": _STAFF,
+    "viewer": _VIEW_ONLY,
+}
+
+# الأدوار المعروضة في شاشة الصلاحيات (المدير أولاً) وتسمياتها العربية.
+ROLE_LABELS = (
+    ("manager", "مدير"),
+    ("accountant", "محاسب"),
+    ("sales", "موظف مبيعات"),
+    ("procurement", "موظف مشتريات"),
+    ("staff", "موظف"),
+    ("viewer", "مستعرض"),
+)
+ROLE_ORDER = tuple(r for r, _ in ROLE_LABELS)
+
+
+def permission_keys() -> frozenset:
+    """كل مفاتيح الكتالوج."""
+    return frozenset(p["key"] for p in PERMISSIONS)
+
+
+def role_default_permissions(role: str) -> frozenset:
+    """صلاحيات الدور الافتراضية قبل تجاوزات الشركة."""
+    granted = ROLE_DEFAULTS.get(role, _VIEW_ONLY)
+    if granted == "*":
+        return permission_keys()
+    return frozenset(granted)
+
+
+def user_tenant_role(user, tenant) -> str:
+    """دور المستخدم الفعلي داخل الشركة.
+
+    العضوية هي المرجع؛ وإن غابت (تركيبات قديمة قبل نظام الشركات) نسقط على دور
+    التطبيق من `core.user_roles` كي لا يفقد مالكٌ منفردٌ صلاحياته فجأة.
+    """
+    if user is None or not getattr(user, "is_authenticated", False):
+        return "viewer"
+    if getattr(user, "is_superuser", False):
+        return "manager"
+
+    if tenant is not None:
+        from tenants.models import UserCompanyMembership
+
+        tenant_id = getattr(tenant, "TenantID", tenant)
+        membership = (
+            UserCompanyMembership.objects
+            .filter(user=user, tenant_id=tenant_id)
+            .only("role")
+            .first()
+        )
+        if membership is not None:
+            # 'employee' القديم لم يكن ضمن أدوار العضوية — يُعامل موظفاً عامّاً.
+            return "staff" if membership.role == "employee" else membership.role
+
+    from core.user_roles import django_user_app_role
+
+    legacy = django_user_app_role(user)
+    if legacy in ROLE_DEFAULTS:
+        return legacy
+    return "manager" if legacy == "manager" else "staff"
+
+
+def _apply(granted: set, overrides, valid: frozenset) -> None:
+    """يطبّق تجاوزات (منح/منع) على مجموعة الصلاحيات، متجاهلاً المفاتيح المجهولة."""
+    for o in overrides:
+        if o.permission_key not in valid:
+            continue
+        if o.allowed:
+            granted.add(o.permission_key)
+        else:
+            granted.discard(o.permission_key)
+
+
+def user_permissions(user, tenant) -> frozenset:
+    """الصلاحيات الفعلية = افتراضي الدور ← تجاوز الدور ← تجاوز العضو (الأعلى)."""
+    role = user_tenant_role(user, tenant)
+    granted = set(role_default_permissions(role))
+    if role == "manager":
+        # المدير مالك الشركة — لا يُقفل خارج نظامه بتجاوز، دوريّاً كان أو فردياً.
+        return frozenset(granted)
+
+    if tenant is not None:
+        from tenants.models import MemberPermission, RolePermission
+
+        tenant_id = getattr(tenant, "TenantID", tenant)
+        valid = permission_keys()
+        _apply(
+            granted,
+            RolePermission.objects.filter(tenant_id=tenant_id, role=role)
+            .only("permission_key", "allowed"),
+            valid,
+        )
+        _apply(
+            granted,
+            MemberPermission.objects.filter(
+                membership__tenant_id=tenant_id, membership__user=user,
+            ).only("permission_key", "allowed"),
+            valid,
+        )
+    return frozenset(granted)
+
+
+def user_has_perm(user, tenant, key: str) -> bool:
+    return key in user_permissions(user, tenant)
+
+
+def require_perm(request, key: str, *, tenant=None) -> None:
+    """يرفع 403 عربية إن لم يملك صاحب الطلب الصلاحية. يسجّل كل رفض."""
+    if tenant is None:
+        from core.tenant_utils import get_tenant
+
+        tenant = get_tenant(request)
+    user = getattr(request, "user", None)
+    if user_has_perm(user, tenant, key):
+        return
+    role = user_tenant_role(user, tenant)
+    logger.info(
+        "perm_denied user=%s role=%s tenant=%s key=%s path=%s",
+        getattr(user, "pk", None), role, getattr(tenant, "TenantID", tenant),
+        key, getattr(request, "path", "?"),
+    )
+    label = next((p["label"] for p in PERMISSIONS if p["key"] == key), key)
+    raise PermissionDenied(f"صلاحية «{label}» غير ممنوحة لدورك ({role}).")
+
+
+def requires_perm(key: str):
+    """مزيّن لإجراءات DRF: يفرض الصلاحية قبل تنفيذ الإجراء."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, request, *args, **kwargs):
+            require_perm(request, key)
+            return func(self, request, *args, **kwargs)
+
+        return wrapper
+
+    return decorator

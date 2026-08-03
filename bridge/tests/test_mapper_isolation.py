@@ -24,10 +24,12 @@ class MapperIsolationTest(APITestCase):
 
         cls.user_a = User.objects.create_user(username="usera", password="x")
         cls.user_b = User.objects.create_user(username="userb", password="x")
+        cls.superuser = User.objects.create_superuser(username="root", password="x")
         UserCompanyMembership.objects.create(user=cls.user_a, tenant=cls.tenant_a, role="manager", is_default=True)
         UserCompanyMembership.objects.create(user=cls.user_b, tenant=cls.tenant_b, role="manager", is_default=True)
         cls.token_a = Token.objects.create(user=cls.user_a)
         cls.token_b = Token.objects.create(user=cls.user_b)
+        cls.super_token = Token.objects.create(user=cls.superuser)
 
     def _as(self, token, tenant_id=None):
         self.client.credentials(
@@ -113,14 +115,25 @@ class MapperIsolationTest(APITestCase):
         ids = [r["id"] for r in res.json()]
         self.assertEqual(ids, ["hist"])
 
-    def test_global_collection_not_scoped(self):
-        """users/* mirror docs are auth-level — readable regardless of company."""
+    def test_user_mirror_cannot_be_enumerated_or_read_cross_user(self):
         FirestoreMirrorDoc.objects.create(
             path=f"users/{self.user_a.pk}", data={"id": str(self.user_a.pk), "isApproved": True})
 
         self._as(self.token_b, self.tenant_b.TenantID)
-        res = self.client.get(f"/api/mapper/users/{self.user_a.pk}/")
-        self.assertEqual(res.status_code, 200)
+        self.assertEqual(self.client.get("/api/mapper/users/").status_code, 403)
+        self.assertEqual(
+            self.client.get(f"/api/mapper/users/{self.user_a.pk}/").status_code,
+            404,
+        )
+
+        self._as(self.token_a, self.tenant_a.TenantID)
+        self.assertEqual(
+            self.client.get(f"/api/mapper/users/{self.user_a.pk}/").status_code,
+            200,
+        )
+
+        self._as(self.super_token, self.tenant_a.TenantID)
+        self.assertEqual(self.client.get("/api/mapper/users/").status_code, 200)
 
     def test_scoped_collection_without_tenant_header_multi_tenant(self):
         """With >1 tenant in the DB and no X-Tenant-Id, business collections

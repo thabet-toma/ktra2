@@ -3,6 +3,7 @@ import React from "react";
 import { Submission } from "../../types";
 import { SubmissionItemGallery } from "./SubmissionItemGallery";
 import { StatusBadge } from "../TaskCard";
+import { formatDateValue } from "../../utils/formatDate";
 
 interface SubmissionHistoryListProps {
   submissions: Submission[];
@@ -36,7 +37,7 @@ export const SubmissionHistoryList: React.FC<SubmissionHistoryListProps> = ({
 
   if (!userSubmissions || userSubmissions.length === 0) {
     return (
-      <p className="text-gray-500 text-sm italic p-2">لا توجد تسليمات سابقة.</p>
+      <p className="text-[var(--color-text-muted)] text-sm italic p-2">لا توجد تسليمات سابقة.</p>
     );
   }
 
@@ -68,13 +69,13 @@ const handleApprove = async (submissionId: string) => {
         return (
           <div
             key={sub.id}
-            className="bg-white dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm overflow-hidden"
+            className="bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)] shadow-sm overflow-hidden"
           >
-            <div className="bg-gray-50 dark:bg-gray-800 px-4 py-2 border-b border-gray-200 dark:border-gray-600 flex justify-between items-center">
+            <div className="bg-[var(--color-surface-2)] px-4 py-2 border-b border-[var(--color-border)] flex justify-between items-center">
               <div>
-                <span className="text-xs font-bold text-gray-700 dark:text-gray-300">
+                <span className="text-xs font-bold text-[var(--color-text)]">
                   تسليم #{userSubmissions.length - idx} -{" "}
-                  {new Date(sub.createdAt).toLocaleDateString()}
+                  {formatDateValue(sub.createdAt)}
                 </span>
                 <StatusBadge status={submissionStatus} />
               </div>
@@ -91,7 +92,7 @@ const handleApprove = async (submissionId: string) => {
                 >
                   <div className="flex items-center gap-2 mb-2">
                     <StatusBadge status={submissionStatus} />
-                    <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    <span className="text-sm font-medium text-[var(--color-text)]">
                       {submissionStatus === "approved" ? "مقبول" : "مرفوض"}
                     </span>
                     {submissionStatus === "approved" && (
@@ -101,12 +102,12 @@ const handleApprove = async (submissionId: string) => {
                     )}
                   </div>
                   {sub.reviewerNotes && (
-                    <p className="text-sm text-gray-600 dark:text-gray-300">
+                    <p className="text-sm text-[var(--color-text-muted)]">
                       <strong>ملاحظات المدير:</strong> {sub.reviewerNotes}
                     </p>
                   )}
                   {sub.reviewedAt && (
-                    <p className="text-xs text-gray-500 mt-1">
+                    <p className="text-xs text-[var(--color-text-muted)] mt-1">
                       تم المراجعة في:{" "}
                       {new Date(sub.reviewedAt).toLocaleString()}
                     </p>
@@ -143,7 +144,7 @@ const handleApprove = async (submissionId: string) => {
                     key={item.id}
                     className={`p-3 ${
                       i !== sub.items.length - 1
-                        ? "border-b border-gray-100 dark:border-gray-600 pb-3"
+                        ? "border-b border-[var(--color-border)] pb-3"
                         : ""
                     }`}
                   >
@@ -166,7 +167,7 @@ const handleApprove = async (submissionId: string) => {
                           </p>
                         )}
                         {item.notes && (
-                          <p className="text-sm text-gray-600 dark:text-gray-300 mt-1 whitespace-pre-wrap">
+                          <p className="text-sm text-[var(--color-text-muted)] mt-1 whitespace-pre-wrap">
                             {item.notes}
                           </p>
                         )}
@@ -177,12 +178,12 @@ const handleApprove = async (submissionId: string) => {
                         )}
                         
                         {item.attachmentName && (
-                          <div className="flex items-center gap-2 mt-2 p-2 bg-gray-50 dark:bg-gray-800 w-fit rounded">
-                            <span className="text-xs text-gray-500">📎</span>
+                          <div className="flex items-center gap-2 mt-2 p-2 bg-[var(--color-surface-2)] w-fit rounded">
+                            <span className="text-xs text-[var(--color-text-muted)]">📎</span>
                             <a
                               href={item.attachmentUrl}
                               download={item.attachmentName}
-                              className="text-xs text-gray-500 underline hover:text-gray-800 dark:hover:text-gray-200"
+                              className="text-xs text-[var(--color-text-muted)] underline hover:text-[var(--color-text)]"
                             >
                               {item.attachmentName}
                             </a>
@@ -193,7 +194,7 @@ const handleApprove = async (submissionId: string) => {
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-gray-500">
+                <p className="text-sm text-[var(--color-text-muted)]">
                   لا توجد بنود في هذا التسليم.
                 </p>
               )}

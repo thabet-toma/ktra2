@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { cloudinaryService } from '../services/cloudinaryService';
 // تأكد من أن مسار الاستيراد صحيح لدوال السيرفس التي قمنا بإنشائها سابقاً
 import { createGalleryItem, getGalleryChunk, getGalleryCount } from '../services/firestoreService';
+import { formatDateValue } from "../utils/formatDate";
 // QueryDocumentSnapshot type — replaced firebase import with a simple type alias
 type QueryDocumentSnapshot = any;
 import { 
@@ -447,7 +448,7 @@ const PublicGallery: React.FC = () => {
                                         </p>
                                         <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 border-t border-gray-100 dark:border-gray-600 pt-3">
                                             <Clock className="w-3 h-3" />
-                                            {new Date(item.createdAt).toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' })}
+                                            {formatDateValue(item.createdAt)}
                                         </div>
                                     </div>
                                 </div>

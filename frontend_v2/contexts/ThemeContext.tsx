@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 import type { Theme } from '../types';
+import { uiLog } from '../utils/uiLog';
 
 interface ThemeContextValue {
   theme: Theme;
@@ -8,16 +9,49 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
+const THEME_KEY = 'ktra.theme';
+
+/** التفضيل المحفوظ، وإلا تفضيل نظام التشغيل، وإلا الوضع الفاتح. */
+export const getStoredTheme = (): Theme => {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === 'dark' || saved === 'light') return saved;
+  } catch (error) {
+    uiLog.warn('تعذّرت قراءة سمة الواجهة من التخزين المحلي.', error);
+  }
+  try {
+    if (window.matchMedia?.('(prefers-color-scheme: dark)').matches) return 'dark';
+  } catch {
+    /* بيئات بلا matchMedia */
+  }
+  return 'light';
+};
+
+const applyThemeClass = (theme: Theme): void => {
+  document.documentElement.classList.toggle('dark', theme === 'dark');
+};
+
+/** تُستدعى مرة من index.tsx قبل الرندر — تمنع وميض الفاتح قبل تطبيق الداكن. */
+export const applyThemeOnBoot = (): Theme => {
+  const theme = getStoredTheme();
+  applyThemeClass(theme);
+  uiLog.info('تم تطبيق سمة الواجهة عند الإقلاع.', { theme });
+  return theme;
+};
+
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setTheme] = useState<Theme>('light');
+  // القراءة من التخزين لا من قيمة ثابتة: كان يبدأ 'light' دائماً فيضيع
+  // اختيار المستخدم مع كل تحديث للصفحة.
+  const [theme, setTheme] = useState<Theme>(getStoredTheme);
 
   const toggleTheme = useCallback(() => {
-    setTheme(prev => {
-      const next = prev === 'light' ? 'dark' : 'light';
-      if (next === 'dark') {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
+    setTheme((prev) => {
+      const next: Theme = prev === 'light' ? 'dark' : 'light';
+      applyThemeClass(next);
+      try {
+        localStorage.setItem(THEME_KEY, next);
+      } catch (error) {
+        uiLog.warn('تعذّر حفظ سمة الواجهة في التخزين المحلي.', error);
       }
       return next;
     });

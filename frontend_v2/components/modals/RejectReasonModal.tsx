@@ -26,29 +26,29 @@ export const RejectReasonModal: React.FC<RejectReasonModalProps> = ({ isOpen, on
             onClick={onClose}
         >
             <div 
-                className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-lg p-8 space-y-6 transform transition-all"
+                className="bg-[var(--color-surface)] rounded-2xl shadow-xl w-full max-w-lg p-8 space-y-6 transform transition-all"
                 onClick={e => e.stopPropagation()}
             >
                 <div className="flex justify-between items-center">
-                    <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100">رفض المهمة</h2>
-                    <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-3xl">&times;</button>
+                    <h2 className="text-2xl font-bold text-[var(--color-text)]">رفض المهمة</h2>
+                    <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] text-3xl">&times;</button>
                 </div>
                
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label htmlFor="rejectReason" className="block text-md font-medium text-gray-700 dark:text-gray-300 mb-1">سبب الرفض</label>
+                        <label htmlFor="rejectReason" className="block text-md font-medium text-[var(--color-text)] mb-1">سبب الرفض</label>
                         <textarea 
                             id="rejectReason" 
                             value={reason} 
                             onChange={e => setReason(e.target.value)} 
                             rows={4}
-                            className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-200" 
+                            className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]" 
                             required 
                             placeholder="يرجى توضيح سبب رفض هذه المهمة..."
                         />
                     </div>
                     <div className="pt-4 flex justify-end gap-3">
-                        <button type="button" onClick={onClose} className="bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200 font-bold py-2 px-6 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition">
+                        <button type="button" onClick={onClose} className="bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold py-2 px-6 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-500 transition">
                             إلغاء
                         </button>
                         <button type="submit" className="bg-red-600 text-white font-bold py-2 px-6 rounded-lg hover:bg-red-700 transition">

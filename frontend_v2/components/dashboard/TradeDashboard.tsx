@@ -1,131 +1,101 @@
-import React, { useEffect, useState, useCallback } from "react";
-import { fetchDashboard } from "../../services/dashboardApi";
-import type { DashboardData, DashboardAlert } from "../../types/dashboard";
-import type { AppView } from "../../types/common";
-import { StatusBadge, Spinner, EmptyState } from "../../components/ui";
-import { AseelDenseTable } from "../aseel";
+import React, { useCallback, useEffect, useState } from "react";
 import {
-  Handshake,
-  Ship,
-  Banknote,
-  FileText,
-  Package,
-  BookOpen,
-  AlertTriangle,
   AlertCircle,
-  Info,
-  RefreshCw,
-  TrendingUp,
-  Activity,
+  AlertTriangle,
   ArrowLeft,
-  DollarSign,
-  Boxes,
   BarChart3,
+  BookOpen,
+  Boxes,
+  FileInput,
+  FileOutput,
+  Handshake,
+  Info,
+  PackagePlus,
+  ReceiptText,
+  RefreshCw,
+  Ship,
+  ShoppingCart,
+  TrendingDown,
+  TrendingUp,
+  WalletCards,
 } from "lucide-react";
+
+import { useCompany } from "../../contexts/CompanyContext";
+import { fetchDashboard } from "../../services/dashboardApi";
+import type {
+  DashboardAlert,
+  DashboardInvoice,
+  DashboardInvoiceSummary,
+} from "../../types/dashboard";
+import type { AppView } from "../../types/common";
+import type { DashboardData } from "../../types/dashboard";
+import { formatDateLocalized } from "../../utils/formatDate";
+import { formatMoney } from "../../utils/formatNumber";
+import { EmptyState, Spinner } from "../ui";
 
 interface TradeDashboardProps {
   userName: string;
   onNavigate: (view: AppView) => void;
 }
 
-const fmt = (n: number) =>
-  n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+const baseMoney = (value: number) => formatMoney(value);
 
-import { formatMoney } from "@/utils/formatNumber";
-const fmtMoney = (n: number) => formatMoney(n);
-
-const fmtDate = (d: string | null) => {
-  if (!d) return "—";
-  const [y, m, day] = d.split("-");
-  return `${day}/${m}/${y}`;
-};
-
-const DEAL_STATUS_AR: Record<string, string> = {
-  Open: "مفتوحة",
-  Shipped: "مشحونة",
-  Cleared: "مخلّصة",
-  Closed: "مغلقة",
-  Cancelled: "ملغاة",
-};
-
-const SHIP_STATUS_AR: Record<string, string> = {
-  Pending: "بالانتظار",
-  "In-Transit": "في الطريق",
-  Arrived: "وصلت",
-  Clearing: "تخليص",
-  Cleared: "مخلّصة",
-};
-
-const INV_STATUS_AR: Record<string, string> = {
+const INVOICE_STATUS: Record<string, string> = {
   draft: "مسودة",
   incomplete: "غير مكتملة",
+  posted: "مرحّلة",
   completed: "مكتملة",
   deposit_paid: "دفعة أولى",
-  partially_paid: "جزئية",
+  partially_paid: "مدفوعة جزئياً",
   fully_paid: "مدفوعة",
   archived: "مؤرشفة",
-};
-
-const alertIcon = (t: DashboardAlert["type"]) => {
-  switch (t) {
-    case "danger":
-      return <AlertCircle className="w-4 h-4 text-[var(--color-danger)]" />;
-    case "warning":
-      return <AlertTriangle className="w-4 h-4 text-[var(--color-warning)]" />;
-    default:
-      return <Info className="w-4 h-4 text-[var(--color-primary)]" />;
-  }
-};
-const alertBg = (t: DashboardAlert["type"]) => {
-  switch (t) {
-    case "danger":
-      return "bg-[var(--color-danger)]/10 border-[var(--color-danger)]/30";
-    case "warning":
-      return "bg-[var(--color-warning)]/10 border-[var(--color-warning)]/30";
-    default:
-      return "bg-[var(--color-primary)]/10 border-[var(--color-primary)]/30";
-  }
 };
 
 export const TradeDashboard: React.FC<TradeDashboardProps> = ({
   userName,
   onNavigate,
 }) => {
+  const { currentCompany, canAccessImport } = useCompany();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
-    setErr(null);
+    setError(null);
     try {
-      const d = await fetchDashboard();
-      setData(d);
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "خطأ");
+      setData(await fetchDashboard());
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "تعذّر تحميل لوحة التحكم");
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    void load();
+  }, [load, currentCompany?.TenantID]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[500px]">
+      <div className="flex min-h-[360px] items-center justify-center">
         <Spinner size="md" />
       </div>
     );
   }
-  if (err || !data) {
+
+  if (error || !data) {
     return (
       <EmptyState
-        icon={<AlertTriangle className="w-10 h-10" />}
-        title={err || "فشل تحميل البيانات"}
+        icon={<AlertTriangle className="h-10 w-10" />}
+        title="تعذّر تحميل بيانات الشركة"
+        description="تحقق من الاتصال ثم أعد المحاولة. لم يتم عرض أي بيانات مخزنة من شركة أخرى."
         action={
-          <button onClick={load} className="px-4 py-2 bg-[var(--color-primary)] text-white rounded-[var(--radius-md)]">
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="rounded-[var(--radius-lg)] bg-[var(--color-primary)] px-4 py-2 text-sm font-semibold text-white"
+          >
             إعادة المحاولة
           </button>
         }
@@ -133,379 +103,300 @@ export const TradeDashboard: React.FC<TradeDashboardProps> = ({
     );
   }
 
-  const { deals, shipments, payments, invoices, inventory, accounting, alerts } = data;
+  const isNewCompany = data.is_new_company;
+  const showImport = canAccessImport && !!data.import_operations;
 
   return (
-    <div className="p-[var(--spacing-4)] md:p-[var(--spacing-6)] max-w-7xl mx-auto gap-[var(--spacing-6)]" dir="rtl">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-[var(--spacing-3)]">
+    <main
+      className="mx-auto flex w-full max-w-[1480px] flex-col gap-5 p-4 md:p-6"
+      dir="rtl"
+      data-testid="business-dashboard"
+    >
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-[var(--font-size-2xl)] md:text-[var(--font-size-2xl)] font-bold text-[var(--color-text)]">
-            مرحباً، {userName.split(" ")[0]}
+          <p className="mb-1 text-xs font-semibold text-[var(--color-primary)]">
+            {currentCompany?.CompanyName}
+          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-[var(--color-text)]">
+            أهلاً {userName.split(" ")[0]}، هذه صورة أعمالك اليوم
           </h1>
-          <p className="text-[var(--color-text-muted)] text-[var(--font-size-sm)] mt-[var(--spacing-1)]">
-            لوحة التحكم التجارية — نظرة شاملة على العمليات
+          <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+            المؤشرات المالية والمبيعات والمشتريات من {formatDateLocalized(data.period.from)} إلى {formatDateLocalized(data.period.to)}، مع حالة المخزون الحالية
           </p>
         </div>
         <button
-          onClick={load}
-          className="flex items-center gap-2 text-[var(--font-size-sm)] px-[var(--spacing-3)] py-2 rounded-[var(--radius-lg)] bg-[var(--color-muted)] text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
+          type="button"
+          onClick={() => void load()}
+          className="inline-flex items-center justify-center gap-2 self-start rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-sm font-medium text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-primary)]"
         >
-          <RefreshCw className="w-4 h-4" />
-          تحديث
+          <RefreshCw className="h-4 w-4" />
+          تحديث البيانات
         </button>
-      </div>
+      </header>
 
-      {/* Alerts */}
-      {alerts.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-[var(--spacing-3)]">
-          {alerts.map((a, i) => (
-            <button
-              key={i}
-              onClick={() => a.link && onNavigate(a.link as AppView)}
-              className={`flex items-start gap-[var(--spacing-3)] p-3 rounded-[var(--radius-lg)] border text-right transition-all hover:shadow-sm ${alertBg(a.type)}`}
-            >
-              <div className="mt-0.5 shrink-0">{alertIcon(a.type)}</div>
-              <div>
-                <p className="text-[var(--font-size-sm)] font-semibold text-[var(--color-text)]">
-                  {a.title}
-                </p>
-                <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">{a.message}</p>
-              </div>
-            </button>
+      {isNewCompany && <GettingStarted onNavigate={onNavigate} />}
+
+      {data.alerts.length > 0 && (
+        <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" aria-label="تنبيهات تحتاج انتباهك">
+          {data.alerts.map((alert) => (
+            <div key={`${alert.title}-${alert.link}`}>
+              <AlertCard alert={alert} onNavigate={onNavigate} />
+            </div>
           ))}
-        </div>
+        </section>
       )}
 
-      {/* Main KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-[var(--spacing-3)]">
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6" aria-label="المؤشرات الرئيسية">
+        <KpiCard icon={TrendingUp} label="إيرادات الفترة" value={baseMoney(data.financials.revenue)} note="بالعملة الأساسية" tone="success" />
+        <KpiCard icon={TrendingDown} label="مصروفات الفترة" value={baseMoney(data.financials.expenses)} note="بالعملة الأساسية" tone="danger" />
         <KpiCard
-          icon={Handshake}
-          label="صفقات مفتوحة"
-          value={deals.open}
-          sub={`${fmtMoney(deals.open_value)} $`}
-          color="blue"
-          onClick={() => onNavigate("deals-management")}
+          icon={WalletCards}
+          label="صافي الربح"
+          value={baseMoney(data.financials.net_profit)}
+          note={data.financials.net_profit < 0 ? "صافي خسارة بالعملة الأساسية" : "بالعملة الأساسية بعد المصروفات"}
+          tone={data.financials.net_profit < 0 ? "danger" : "primary"}
+          onClick={() => onNavigate("accounting-income-statement")}
         />
         <KpiCard
-          icon={Ship}
-          label="شحنات في الطريق"
-          value={shipments.in_transit}
-          sub={`${shipments.clearing} بالتخليص`}
-          color="indigo"
-          onClick={() => onNavigate("shipments-management")}
+          icon={ShoppingCart}
+          label="فواتير المبيعات"
+          value={data.sales_invoices.total}
+          note={`${data.sales_invoices.posted} مرحلة · ${data.sales_invoices.draft} مسودة`}
+          tone="primary"
+          onClick={() => onNavigate("sales-invoices")}
         />
         <KpiCard
-          icon={Banknote}
-          label="مدفوعات الشهر"
-          value={fmtMoney(payments.paid_this_month)}
-          sub={`${payments.posted} مرحّلة`}
-          color="green"
-        />
-        <KpiCard
-          icon={FileText}
-          label="فواتير"
-          value={invoices.total}
-          sub={`${fmtMoney(invoices.total_value)} $`}
-          color="purple"
+          icon={ReceiptText}
+          label="فواتير المشتريات"
+          value={data.purchase_invoices.total}
+          note={`${data.purchase_invoices.posted} مكتملة · ${data.purchase_invoices.draft} مسودة`}
+          tone="amber"
           onClick={() => onNavigate("purchase-invoices")}
         />
         <KpiCard
-          icon={Package}
+          icon={Boxes}
           label="قيمة المخزون"
-          value={fmtMoney(inventory.inventory_value)}
-          sub={`${inventory.in_stock} صنف`}
-          color="amber"
+          value={baseMoney(data.inventory.inventory_value)}
+          note={`${data.inventory.in_stock} صنف · بالعملة الأساسية`}
+          tone="violet"
           onClick={() => onNavigate("stock-levels")}
         />
-        <KpiCard
-          icon={BookOpen}
-          label="قيود الشهر"
-          value={accounting.journals_this_month}
-          sub="قيد محاسبي"
-          color="slate"
-          onClick={() => onNavigate("accounting-journals")}
-        />
-      </div>
+      </section>
 
-      {/* Two-column layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-[var(--spacing-6)]">
-        {/* Left: deals status distribution + recent deals + recent shipments */}
-        <div className="lg:col-span-2 gap-[var(--spacing-6)]">
-          {/* Deal Status Chart (simple bars) */}
-          <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-5)]">
-            <h3 className="text-[var(--font-size-sm)] font-bold text-[var(--color-text)] mb-[var(--spacing-4)] flex items-center gap-2">
-              <BarChart3 className="w-4 h-4 text-[var(--color-primary)]" />
-              توزيع حالات الصفقات
-            </h3>
-            <div className="gap-[var(--spacing-3)]">
-              {deals.status_distribution.map((s) => {
-                const pct = deals.total > 0 ? Math.round((s.count / deals.total) * 100) : 0;
-                return (
-                  <div key={s.status} className="flex items-center gap-[var(--spacing-3)]">
-                    <span className="text-[var(--font-size-xs)] w-20 text-[var(--color-text-muted)] shrink-0">
-                      {DEAL_STATUS_AR[s.status] || s.status}
-                    </span>
-                    <div className="flex-1 h-5 bg-[var(--color-muted)] rounded-[var(--radius-full)] overflow-hidden">
-                      <div
-                        className="h-full bg-[var(--color-primary)] rounded-[var(--radius-full)] transition-all"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
-                    <span className="text-[var(--font-size-xs)] font-semibold text-[var(--color-text)] w-12 text-left">
-                      {s.count} ({pct}%)
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Recent Deals */}
-          <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-5)]">
-            <div className="flex items-center justify-between mb-[var(--spacing-4)]">
-              <h3 className="text-[var(--font-size-sm)] font-bold text-[var(--color-text)] flex items-center gap-2">
-                <Handshake className="w-4 h-4 text-[var(--color-primary)]" />
-                آخر الصفقات
-              </h3>
-              <button
-                onClick={() => onNavigate("deals-management")}
-                className="text-[var(--font-size-xs)] text-[var(--color-primary)] hover:underline flex items-center gap-1"
-              >
-                عرض الكل <ArrowLeft className="w-3 h-3" />
-              </button>
-            </div>
-            <div className="gap-[var(--spacing-2)]">
-              {deals.recent.map((d: any) => (
-                <div
-                  key={d.id}
-                  className="flex items-center justify-between py-2 border-b border-[var(--color-muted)] last:border-0"
-                >
-                  <div>
-                    <p className="text-[var(--font-size-sm)] font-medium text-[var(--color-text)]">
-                      {d.ref_number}
-                    </p>
-                    <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">{d.partner_name}</p>
-                  </div>
-                  <div className="text-left">
-                    <p className="text-[var(--font-size-sm)] font-mono font-semibold text-[var(--color-text)]">
-                      {fmtMoney(d.total_amount)} $
-                    </p>
-                    <StatusBadge status={d.status} />
-                  </div>
-                </div>
-              ))}
-              {deals.recent.length === 0 && (
-                <EmptyState title="لا توجد صفقات" />
-              )}
-            </div>
-          </div>
-
-          {/* Recent Shipments */}
-          <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-5)]">
-            <div className="flex items-center justify-between mb-[var(--spacing-4)]">
-              <h3 className="text-[var(--font-size-sm)] font-bold text-[var(--color-text)] flex items-center gap-2">
-                <Ship className="w-4 h-4 text-[var(--color-primary)]" />
-                آخر الشحنات
-              </h3>
-              <button
-                onClick={() => onNavigate("shipments-management")}
-                className="text-[var(--font-size-xs)] text-[var(--color-primary)] hover:underline flex items-center gap-1"
-              >
-                عرض الكل <ArrowLeft className="w-3 h-3" />
-              </button>
-            </div>
-            {shipments.recent.length === 0 ? (
-              <EmptyState title="لا توجد شحنات" />
-            ) : (
-              <AseelDenseTable
-                columns={[
-                  { key: 'shipment_number', header: 'رقم الشحنة' },
-                  { key: 'status', header: 'الحالة', align: 'center', render: (row: any) => <StatusBadge status={row.status} /> },
-                  { key: 'departure_date', header: 'المغادرة', align: 'center', render: (row: any) => <span className="text-[var(--font-size-xs)]">{fmtDate(row.departure_date)}</span> },
-                  { key: 'arrival_date', header: 'الوصول', align: 'center', render: (row: any) => <span className="text-[var(--font-size-xs)]">{fmtDate(row.arrival_date)}</span> },
-                  { key: 'total_shipping_cost_usd', header: 'التكلفة', align: 'right', render: (row: any) => <span className="font-mono text-[var(--font-size-xs)]">{fmtMoney(row.total_shipping_cost_usd)} $</span> },
-                ]}
-                rows={shipments.recent}
-                getRowKey={(row: any) => row.id}
-              />
-            )}
-          </div>
+      <section className="grid gap-4 xl:grid-cols-12">
+        <div className="grid gap-4 md:grid-cols-2 xl:col-span-8">
+          <InvoicePanel
+            title="آخر فواتير المبيعات"
+            icon={FileOutput}
+            summary={data.sales_invoices}
+            emptyTitle="لم تُنشئ فواتير مبيعات بعد"
+            emptyDescription="سجّل أول عملية بيع لتبدأ متابعة الإيرادات والذمم تلقائياً."
+            actionLabel="إنشاء فاتورة بيع"
+            view="sales-invoices"
+            onNavigate={onNavigate}
+          />
+          <InvoicePanel
+            title="آخر فواتير المشتريات"
+            icon={FileInput}
+            summary={data.purchase_invoices}
+            emptyTitle="لم تُسجّل فواتير مشتريات بعد"
+            emptyDescription="أضف فاتورة المورد لتحديث التكلفة والمخزون والحسابات."
+            actionLabel="إضافة فاتورة شراء"
+            view="purchase-invoices"
+            onNavigate={onNavigate}
+          />
         </div>
 
-        {/* Right column: invoices + inventory + quick nav */}
-        <div className="gap-[var(--spacing-6)]">
-          {/* Recent Invoices */}
-          <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-5)]">
-            <div className="flex items-center justify-between mb-[var(--spacing-4)]">
-              <h3 className="text-[var(--font-size-sm)] font-bold text-[var(--color-text)] flex items-center gap-2">
-                <FileText className="w-4 h-4 text-[var(--color-primary)]" />
-                آخر الفواتير
-              </h3>
-              <button
-                onClick={() => onNavigate("purchase-invoices")}
-                className="text-[var(--font-size-xs)] text-[var(--color-primary)] hover:underline flex items-center gap-1"
-              >
-                الكل <ArrowLeft className="w-3 h-3" />
-              </button>
-            </div>
-            <div className="gap-[var(--spacing-2)]">
-              {invoices.recent.map((inv: any) => (
-                <div
-                  key={inv.id}
-                  className="flex items-center justify-between py-2 border-b border-[var(--color-muted)] last:border-0"
-                >
-                  <div>
-                    <p className="text-[var(--font-size-sm)] font-medium text-[var(--color-text)]">
-                      {inv.invoice_number}
-                    </p>
-                    <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">{inv.partner_name}</p>
-                  </div>
-                  <div className="text-left">
-                    <p className="text-[var(--font-size-sm)] font-mono font-semibold">{fmtMoney(inv.grand_total)}</p>
-                    <span className="text-[10px] text-[var(--color-text-muted)]">
-                      {INV_STATUS_AR[inv.status] || inv.status}
-                    </span>
-                  </div>
-                </div>
-              ))}
-              {invoices.recent.length === 0 && (
-                <EmptyState title="لا توجد فواتير" />
-              )}
-            </div>
-          </div>
+        <aside className="grid gap-4 md:grid-cols-2 xl:col-span-4 xl:grid-cols-1">
+          <InventoryPanel data={data.inventory} onNavigate={onNavigate} />
+          <AccountingPanel journals={data.accounting.journals_this_month} onNavigate={onNavigate} />
+        </aside>
+      </section>
 
-          {/* Inventory Summary */}
-          <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-5)]">
-            <h3 className="text-[var(--font-size-sm)] font-bold text-[var(--color-text)] mb-[var(--spacing-4)] flex items-center gap-2">
-              <Boxes className="w-4 h-4 text-[var(--color-warning)]" />
-              ملخص المخزون
-            </h3>
-            <div className="grid grid-cols-2 gap-[var(--spacing-3)] mb-[var(--spacing-4)]">
-              <MiniStat label="إجمالي الأصناف" value={inventory.total_products} />
-              <MiniStat label="بمخزون" value={inventory.in_stock} />
-              <MiniStat label="منخفض" value={inventory.low_stock} danger={inventory.low_stock > 0} />
-              <MiniStat label="نفذ" value={inventory.out_of_stock} danger={inventory.out_of_stock > 0} />
-            </div>
-            <div className="flex items-center justify-between pt-3 border-t border-[var(--color-muted)]">
-              <span className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">قيمة المخزون</span>
-              <span className="text-[var(--font-size-sm)] font-bold text-[var(--color-success)]">
-                {fmtMoney(inventory.inventory_value)} ₪
-              </span>
-            </div>
-            {inventory.low_stock_items.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-[var(--color-muted)]">
-                <p className="text-[var(--font-size-xs)] font-semibold text-[var(--color-warning)] mb-2">أصناف تحت الحد الأدنى:</p>
-                {inventory.low_stock_items.slice(0, 4).map((p) => (
-                  <div
-                    key={p.id}
-                    className="flex justify-between text-[var(--font-size-xs)] py-1 text-[var(--color-text-muted)]"
-                  >
-                    <span>{p.name_ar || p.sku}</span>
-                    <span className="font-mono text-[var(--color-danger)]">
-                      {Number(p.quantity_on_hand).toFixed(0)} / {p.min_stock_level}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Quick Navigation */}
-          <div className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-5)]">
-            <h3 className="text-[var(--font-size-sm)] font-bold text-[var(--color-text)] mb-3 flex items-center gap-2">
-              <Activity className="w-4 h-4 text-[var(--color-text-muted)]" />
-              وصول سريع
-            </h3>
-            <div className="grid grid-cols-2 gap-[var(--spacing-2)]">
-              {[
-                { label: "الصفقات", view: "deals-management" as AppView, icon: Handshake },
-                { label: "الشحنات", view: "shipments-management" as AppView, icon: Ship },
-                { label: "الفواتير", view: "purchase-invoices" as AppView, icon: FileText },
-                { label: "المخزون", view: "stock-levels" as AppView, icon: Package },
-                { label: "القيود", view: "accounting-journals" as AppView, icon: BookOpen },
-                { label: "حركات المخزون", view: "stock-movements" as AppView, icon: Boxes },
-              ].map((item) => (
-                <button
-                  key={item.view}
-                  onClick={() => onNavigate(item.view)}
-                  className="flex items-center gap-2 p-2.5 rounded-[var(--radius-lg)] text-[var(--font-size-xs)] font-medium text-[var(--color-text-muted)] bg-[var(--color-muted)] hover:bg-[var(--color-primary)]/10 hover:text-[var(--color-primary)] transition-colors"
-                >
-                  <item.icon className="w-4 h-4" />
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+      {showImport && data.import_operations && (
+        <ImportOverview data={data.import_operations} onNavigate={onNavigate} />
+      )}
+    </main>
   );
 };
 
-/* ─── Sub-components ──────────────────────────────────────────────────────── */
-
-function KpiCard({
-  icon: Icon,
-  label,
-  value,
-  sub,
-  color,
-  onClick,
-}: {
-  icon: React.FC<{ className?: string }>;
-  label: string;
-  value: string | number;
-  sub?: string;
-  color: string;
-  onClick?: () => void;
-}) {
-  const colorMap: Record<string, string> = {
-    blue: "bg-[var(--color-primary)]",
-    indigo: "bg-[var(--color-primary)]",
-    green: "bg-[var(--color-success)]",
-    purple: "bg-[var(--color-primary)]",
-    amber: "bg-[var(--color-warning)]",
-    slate: "bg-[var(--color-text-muted)]",
-  };
-  const bg = colorMap[color] || colorMap.slate;
-
+function GettingStarted({ onNavigate }: { onNavigate: (view: AppView) => void }) {
+  const steps = [
+    { icon: PackagePlus, title: "أضف الأصناف", description: "عرّف المنتجات والأرصدة الافتتاحية", view: "items-management" as AppView },
+    { icon: FileInput, title: "سجّل أول شراء", description: "أدخل فاتورة المورد وتكلفة البضاعة", view: "purchase-invoices" as AppView },
+    { icon: FileOutput, title: "أنشئ أول مبيعة", description: "أصدر فاتورة وتابع الإيراد والتحصيل", view: "sales-invoices" as AppView },
+  ];
   return (
-    <button
-      onClick={onClick}
-      className="bg-[var(--color-surface)] rounded-[var(--radius-lg)] border border-[var(--color-border)] p-[var(--spacing-3)] text-right hover:shadow-md transition-all group"
-    >
-      <div className={`inline-flex p-[var(--spacing-1.5)] rounded-[var(--radius-md)] ${bg} text-white mb-3`}>
-        <Icon className="w-5 h-5" />
+    <section className="overflow-hidden rounded-[var(--radius-xl)] border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/5 p-4 md:p-5">
+      <div className="mb-4">
+        <h2 className="text-base font-bold text-[var(--color-text)]">ابدأ تشغيل شركتك بثلاث خطوات</h2>
+        <p className="mt-1 text-sm text-[var(--color-text-muted)]">ستتحول هذه اللوحة تلقائياً إلى مؤشرات حية فور تسجيل أول العمليات.</p>
       </div>
-      <p className="text-[var(--font-size-xl)] md:text-[var(--font-size-2xl)] font-bold text-[var(--color-text)]">{value}</p>
-      <p className="text-[var(--font-size-xs)] text-[var(--color-text-muted)] mt-[var(--spacing-0.5)]">{label}</p>
-      {sub && <p className="text-[10px] text-[var(--color-text-muted)] mt-1">{sub}</p>}
-    </button>
+      <div className="grid gap-3 md:grid-cols-3">
+        {steps.map((step, index) => (
+          <button
+            key={step.view}
+            type="button"
+            onClick={() => onNavigate(step.view)}
+            className="flex items-center gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-right transition-all hover:-translate-y-0.5 hover:border-[var(--color-primary)]/40 hover:shadow-sm"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-lg)] bg-[var(--color-primary)]/10 text-[var(--color-primary)]">
+              <step.icon className="h-5 w-5" />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-xs font-semibold text-[var(--color-primary)]">الخطوة {index + 1}</span>
+              <span className="block text-sm font-bold text-[var(--color-text)]">{step.title}</span>
+              <span className="block truncate text-xs text-[var(--color-text-muted)]">{step.description}</span>
+            </span>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
-function MiniStat({
-  label,
-  value,
-  danger,
-}: {
+function KpiCard({ icon: Icon, label, value, note, tone, onClick }: {
+  icon: React.FC<{ className?: string }>;
   label: string;
-  value: number;
-  danger?: boolean;
+  value: string | number;
+  note?: string;
+  tone: "success" | "danger" | "primary" | "amber" | "violet";
+  onClick?: () => void;
+}) {
+  const tones = {
+    success: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+    danger: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
+    primary: "bg-[var(--color-primary)]/10 text-[var(--color-primary)]",
+    amber: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    violet: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  };
+  const content = (
+    <>
+      <span className={`mb-4 inline-flex rounded-[var(--radius-lg)] p-2 ${tones[tone]}`}><Icon className="h-5 w-5" /></span>
+      <strong className="block text-xl font-bold tabular-nums text-[var(--color-text)]">{value}</strong>
+      <span className="mt-1 block text-xs font-medium text-[var(--color-text-muted)]">{label}</span>
+      {note && <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">{note}</span>}
+    </>
+  );
+  const className = "min-h-36 rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-right transition-all hover:border-[var(--color-primary)]/30 hover:shadow-sm";
+  return onClick ? <button type="button" onClick={onClick} className={className}>{content}</button> : <div className={className}>{content}</div>;
+}
+
+function InvoicePanel({ title, icon: Icon, summary, emptyTitle, emptyDescription, actionLabel, view, onNavigate }: {
+  title: string;
+  icon: React.FC<{ className?: string }>;
+  summary: DashboardInvoiceSummary;
+  emptyTitle: string;
+  emptyDescription: string;
+  actionLabel: string;
+  view: AppView;
+  onNavigate: (view: AppView) => void;
 }) {
   return (
-    <div className="text-center p-2 rounded-[var(--radius-lg)] bg-[var(--color-muted)]">
-      <p
-        className={`text-lg font-bold ${
-          danger ? "text-[var(--color-danger)]" : "text-[var(--color-text)]"
-        }`}
-      >
-        {value}
-      </p>
-      <p className="text-[10px] text-[var(--color-text-muted)]">{label}</p>
+    <article className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text)]"><Icon className="h-4 w-4 text-[var(--color-primary)]" />{title}</h2>
+        <button type="button" onClick={() => onNavigate(view)} className="flex items-center gap-1 text-xs font-semibold text-[var(--color-primary)]">عرض الكل <ArrowLeft className="h-3 w-3" /></button>
+      </div>
+      {summary.recent.length ? (
+        <div className="divide-y divide-[var(--color-border)]">
+          {summary.recent.map((invoice) => (
+            <div key={invoice.id}>
+              <InvoiceRow invoice={invoice} />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex min-h-48 flex-col items-center justify-center rounded-[var(--radius-lg)] bg-[var(--color-muted)]/55 px-5 py-6 text-center">
+          <Icon className="mb-2 h-7 w-7 text-[var(--color-text-muted)]" />
+          <p className="text-sm font-bold text-[var(--color-text)]">{emptyTitle}</p>
+          <p className="mt-1 max-w-xs text-xs leading-5 text-[var(--color-text-muted)]">{emptyDescription}</p>
+          <button type="button" onClick={() => onNavigate(view)} className="mt-3 rounded-[var(--radius-lg)] bg-[var(--color-primary)] px-3 py-2 text-xs font-semibold text-white">{actionLabel}</button>
+        </div>
+      )}
+    </article>
+  );
+}
+
+function InvoiceRow({ invoice }: { invoice: DashboardInvoice }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-3">
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold text-[var(--color-text)]">{invoice.invoice_number}</p>
+        <p className="truncate text-xs text-[var(--color-text-muted)]">{invoice.partner_name || "بدون اسم"}</p>
+      </div>
+      <div className="shrink-0 text-left">
+        <p className="text-sm font-bold tabular-nums text-[var(--color-text)]">{formatMoney(invoice.grand_total)} {invoice.currency_code}</p>
+        <p className="text-[11px] text-[var(--color-text-muted)]">{INVOICE_STATUS[invoice.status] || invoice.status}</p>
+      </div>
     </div>
   );
 }
 
+function InventoryPanel({ data, onNavigate }: { data: DashboardData["inventory"]; onNavigate: (view: AppView) => void }) {
+  return (
+    <article className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="flex items-center gap-2 text-sm font-bold text-[var(--color-text)]"><Boxes className="h-4 w-4 text-violet-500" />حالة المخزون</h2>
+        <button type="button" onClick={() => onNavigate("stock-levels")} className="text-xs font-semibold text-[var(--color-primary)]">التفاصيل</button>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        <MiniStat label="الأصناف" value={data.total_products} />
+        <MiniStat label="منخفض" value={data.low_stock} warning={data.low_stock > 0} />
+        <MiniStat label="نافد" value={data.out_of_stock} warning={data.out_of_stock > 0} />
+      </div>
+      {data.total_products === 0 ? (
+        <button type="button" onClick={() => onNavigate("items-management")} className="mt-3 w-full rounded-[var(--radius-lg)] border border-dashed border-[var(--color-primary)]/40 bg-[var(--color-primary)]/5 px-3 py-3 text-xs font-semibold text-[var(--color-primary)]">إضافة أول صنف للمخزون</button>
+      ) : data.low_stock_items.length > 0 ? (
+        <div className="mt-3 space-y-2 border-t border-[var(--color-border)] pt-3">
+          {data.low_stock_items.slice(0, 3).map((item) => (
+            <div key={item.id} className="flex justify-between text-xs"><span className="truncate text-[var(--color-text-muted)]">{item.name_ar || item.sku}</span><span className="font-semibold text-rose-500">{Number(item.quantity_on_hand).toFixed(0)} متبقٍ</span></div>
+          ))}
+        </div>
+      ) : <p className="mt-3 text-xs text-emerald-600 dark:text-emerald-400">مستويات المخزون ضمن الحدود المحددة.</p>}
+    </article>
+  );
+}
 
+function AccountingPanel({ journals, onNavigate }: { journals: number; onNavigate: (view: AppView) => void }) {
+  return (
+    <article className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <div className="flex items-center gap-3">
+        <span className="rounded-[var(--radius-lg)] bg-[var(--color-primary)]/10 p-2 text-[var(--color-primary)]"><BookOpen className="h-5 w-5" /></span>
+        <div><p className="text-xs text-[var(--color-text-muted)]">القيود المرحلة خلال الفترة</p><p className="text-xl font-bold text-[var(--color-text)]">{journals}</p></div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button type="button" onClick={() => onNavigate("accounting-journals")} className="rounded-[var(--radius-lg)] bg-[var(--color-muted)] px-3 py-2 text-xs font-medium text-[var(--color-text)]">دفتر اليومية</button>
+        <button type="button" onClick={() => onNavigate("accounting-trial-balance")} className="rounded-[var(--radius-lg)] bg-[var(--color-muted)] px-3 py-2 text-xs font-medium text-[var(--color-text)]">ميزان المراجعة</button>
+      </div>
+    </article>
+  );
+}
+
+function ImportOverview({ data, onNavigate }: { data: NonNullable<DashboardData["import_operations"]>; onNavigate: (view: AppView) => void }) {
+  return (
+    <section data-testid="import-overview" className="rounded-[var(--radius-xl)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+      <div className="mb-3 flex items-center justify-between"><div><p className="text-xs font-semibold text-[var(--color-primary)]">وحدة الاستيراد</p><h2 className="text-sm font-bold text-[var(--color-text)]">ملخص العمليات الدولية</h2></div><BarChart3 className="h-5 w-5 text-[var(--color-text-muted)]" /></div>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <button type="button" onClick={() => onNavigate("deals-management")} className="flex items-center gap-3 rounded-[var(--radius-lg)] bg-[var(--color-muted)] p-3 text-right"><Handshake className="h-5 w-5 text-[var(--color-primary)]" /><span><strong className="block text-lg text-[var(--color-text)]">{data.deals.open}</strong><span className="text-xs text-[var(--color-text-muted)]">صفقات مفتوحة</span></span></button>
+        <button type="button" onClick={() => onNavigate("shipments-management")} className="flex items-center gap-3 rounded-[var(--radius-lg)] bg-[var(--color-muted)] p-3 text-right"><Ship className="h-5 w-5 text-[var(--color-primary)]" /><span><strong className="block text-lg text-[var(--color-text)]">{data.shipments.in_transit}</strong><span className="text-xs text-[var(--color-text-muted)]">شحنات في الطريق</span></span></button>
+        <button type="button" onClick={() => onNavigate("shipments-management")} className="flex items-center gap-3 rounded-[var(--radius-lg)] bg-[var(--color-muted)] p-3 text-right"><ReceiptText className="h-5 w-5 text-[var(--color-primary)]" /><span><strong className="block text-lg text-[var(--color-text)]">{data.shipments.clearing}</strong><span className="text-xs text-[var(--color-text-muted)]">شحنات قيد التخليص</span></span></button>
+      </div>
+    </section>
+  );
+}
+
+function MiniStat({ label, value, warning = false }: { label: string; value: number; warning?: boolean }) {
+  return <div className="rounded-[var(--radius-lg)] bg-[var(--color-muted)] p-2 text-center"><strong className={`block text-lg ${warning ? "text-rose-500" : "text-[var(--color-text)]"}`}>{value}</strong><span className="text-[11px] text-[var(--color-text-muted)]">{label}</span></div>;
+}
+
+function AlertCard({ alert, onNavigate }: { alert: DashboardAlert; onNavigate: (view: AppView) => void }) {
+  const icons = { danger: AlertCircle, warning: AlertTriangle, info: Info };
+  const Icon = icons[alert.type];
+  return (
+    <button type="button" onClick={() => alert.link && onNavigate(alert.link as AppView)} className="flex items-start gap-3 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-right">
+      <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${alert.type === "danger" ? "text-rose-500" : alert.type === "warning" ? "text-amber-500" : "text-[var(--color-primary)]"}`} />
+      <span><strong className="block text-xs text-[var(--color-text)]">{alert.title}</strong><span className="text-[11px] text-[var(--color-text-muted)]">{alert.message}</span></span>
+    </button>
+  );
+}

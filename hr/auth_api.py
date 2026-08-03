@@ -1,10 +1,13 @@
 import json
 import logging
+import time
 from typing import Any, Dict, Optional
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
+from django.db import IntegrityError, transaction
 from django.db.models import Q
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
@@ -15,34 +18,6 @@ from bridge.models import FirestoreMirrorDoc
 logger = logging.getLogger(__name__)
 
 User = get_user_model()
-
-
-def _attach_default_company(user, is_first_user: bool) -> None:
-    """Attach a new user to the default company so the membership-based
-    tenant-access check (multi-company feature) doesn't lock them out.
-
-    First user → manager; subsequent users → staff. No-op if no tenant exists
-    yet (a fresh system bootstraps its first company via the companies API).
-    """
-    try:
-        from tenants.models import Tenant, UserCompanyMembership
-
-        default_tenant = (
-            Tenant.objects.filter(pk=1).first()
-            or Tenant.objects.order_by("TenantID").first()
-        )
-        if default_tenant is None:
-            return
-        UserCompanyMembership.objects.get_or_create(
-            user=user,
-            tenant=default_tenant,
-            defaults={
-                "role": "manager" if is_first_user else "staff",
-                "is_default": True,
-            },
-        )
-    except Exception:  # noqa: BLE001 — never block signup on membership wiring
-        logger.exception("signup: failed to attach default-company membership for user=%s", user.pk)
 
 
 def _base_payload(user) -> Dict[str, Any]:
@@ -111,6 +86,13 @@ def _user_payload(user) -> Dict[str, Any]:
         result = _apply_sole_active_owner_role(user, merged)
     else:
         result = _apply_sole_active_owner_role(user, base)
+
+    # Membership is the authoritative company role. A manager membership must
+    # override the legacy mirror/default employee value after company creation.
+    from tenants.models import UserCompanyMembership
+
+    if UserCompanyMembership.objects.filter(user=user, role="manager").exists():
+        result = {**result, "role": "manager"}
     return {**result, **_import_flags(user)}
 
 
@@ -206,52 +188,87 @@ def logout_view(request):
 
 @csrf_exempt
 def signup_view(request):
+    started_at = time.monotonic()
+
+    def reject(detail, reason, field=None):
+        logger.info(
+            "signup rejected reason=%s duration_ms=%d",
+            reason,
+            round((time.monotonic() - started_at) * 1000),
+        )
+        payload = {"detail": detail}
+        if field:
+            payload["field"] = field
+        return JsonResponse(payload, status=400)
+
     if request.method != "POST":
         return JsonResponse({"detail": "Method not allowed"}, status=405)
     body = _json_body(request)
-    if body is None:
-        return JsonResponse({"detail": "Invalid JSON"}, status=400)
+    if not isinstance(body, dict):
+        return reject("يجب أن يكون الطلب كائن JSON صالحاً.", "invalid_json")
 
-    email = (body.get("email") or "").strip()
-    password = body.get("password") or ""
-    full_name = (body.get("fullName") or "").strip()
-    if User.objects.filter(username=email).exists():
-        return JsonResponse({"detail": "Email already registered"}, status=400)
+    raw_full_name = body.get("fullName")
+    raw_email = body.get("email")
+    password = body.get("password")
+    full_name = raw_full_name.strip() if isinstance(raw_full_name, str) else ""
+    email = raw_email.strip().lower() if isinstance(raw_email, str) else ""
+
+    if not full_name:
+        return reject("الاسم الكامل مطلوب.", "missing_full_name", "fullName")
+    if not email:
+        return reject("البريد الإلكتروني مطلوب.", "missing_email", "email")
+    if not isinstance(password, str) or not password:
+        return reject("كلمة المرور مطلوبة.", "missing_password", "password")
     try:
-        validate_password(password)
-    except ValidationError as e:
-        return JsonResponse({"detail": "; ".join(e.messages)}, status=400)
-    parts = full_name.split(" ", 1)
-    first = parts[0] or email.split("@")[0]
+        validate_email(email)
+    except ValidationError:
+        return reject("أدخل بريداً إلكترونياً صالحاً.", "invalid_email", "email")
+    if len(email) > User._meta.get_field("username").max_length:
+        return reject("أدخل بريداً إلكترونياً صالحاً.", "invalid_email", "email")
+    if len(password) < 6:
+        return reject(
+            "يجب أن تتكون كلمة المرور من 6 أحرف على الأقل.",
+            "password_too_short",
+            "password",
+        )
+    if User.objects.filter(Q(username__iexact=email) | Q(email__iexact=email)).exists():
+        return reject("البريد الإلكتروني مسجل مسبقاً.", "duplicate_email", "email")
+
+    parts = full_name.split(maxsplit=1)
+    first = parts[0]
     last = parts[1] if len(parts) > 1 else ""
-    # أول حساب في قاعدة البيانات يُفعّل مباشرة (لا يوجد مدير بعد ليوافق عليه).
-    is_first_user = not User.objects.exists()
-    user = User.objects.create_user(
-        username=email,
-        email=email,
-        password=password,
-        first_name=first[:100],
-        last_name=last[:100],
-        is_active=is_first_user,
+    try:
+        with transaction.atomic():
+            try:
+                # Inner savepoint lets a duplicate race roll back cleanly while
+                # the outer transaction still owns user + mirror atomically.
+                with transaction.atomic():
+                    user = User.objects.create_user(
+                        username=email,
+                        email=email,
+                        password=password,
+                        first_name=first[:150],
+                        last_name=last[:150],
+                        is_active=True,
+                    )
+            except IntegrityError:
+                return reject(
+                    "البريد الإلكتروني مسجل مسبقاً.",
+                    "duplicate_email",
+                    "email",
+                )
+            _sync_user_mirror(user)
+    except Exception:
+        logger.exception(
+            "signup failed reason=persistence_error duration_ms=%d",
+            round((time.monotonic() - started_at) * 1000),
+        )
+        raise
+
+    logger.info(
+        "signup completed duration_ms=%d",
+        round((time.monotonic() - started_at) * 1000),
     )
-    # نوع الحساب: t=تاجر/شركة، e=موظف/فريق كترا — يحدّد واجهة الترحيب والتسجيل.
-    account_type = str(body.get("accountType") or "employee").strip().lower()
-    if account_type not in ("trader", "employee"):
-        account_type = "employee"
-    extra = {
-        "role": "manager" if is_first_user else "employee",
-        "isEmailVerified": True,
-        "accountType": account_type,
-        "companyName": body.get("companyName") or "",
-        "phone": body.get("phone") or "",
-        "address": body.get("address") or "",
-        "experienceDescription": body.get("experienceDescription") or "",
-        "educationLevel": body.get("educationLevel") or "",
-        "resumeData": body.get("resumeData"),
-        "employmentStatus": "",
-    }
-    _sync_user_mirror(user, extra)
-    _attach_default_company(user, is_first_user)
     return JsonResponse({"user": _user_payload(user)}, status=201)
 
 

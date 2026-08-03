@@ -307,8 +307,13 @@ function mapDealFromSql(d: SqlDeal): Deal {
     totalAmount,
     remainingAmount: Math.max(0, Number(d?.amount_outstanding ?? d?.remaining_amount ?? totalAmount - paid)),
     postedPaidAmount: Number(d?.posted_paid_amount ?? 0),
+    unpostedRegisteredAmount: Number(d?.unposted_registered_amount ?? 0),
     amountOutstanding: Math.max(0, Number(d?.amount_outstanding ?? d?.remaining_amount ?? totalAmount - paid)),
     supplierAdvance: Math.max(0, Number(d?.supplier_advance ?? 0)),
+    paymentStatusSummary: d?.payment_status_summary || "unpaid",
+    supplierBalanceCurrent: Number(d?.supplier_balance_current ?? 0),
+    supplierBalanceBeforeDealPayments: Number(d?.supplier_balance_before_deal_payments ?? 0),
+    supplierBalanceAfterDealPayments: Number(d?.supplier_balance_after_deal_payments ?? 0),
     subtotal: Number(d?.subtotal || totalAmount),
     shippingCost: Number(d?.shipping_cost_estimate || 0),
     shippingIncluded: Boolean(d?.is_shipping_included),
@@ -357,6 +362,12 @@ function mapDealFromSql(d: SqlDeal): Deal {
           id: Number(d.linked_shipment.id),
           shipmentNumber: String(d.linked_shipment.shipment_number || ""),
           shipmentName: String(d.linked_shipment.shipment_name || ""),
+        }
+      : null,
+    linkedInvoice: d?.linked_invoice
+      ? {
+          id: Number(d.linked_invoice.id),
+          invoiceNumber: String(d.linked_invoice.invoice_number || ""),
         }
       : null,
   };

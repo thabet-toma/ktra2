@@ -71,6 +71,7 @@ import { DealPrintView } from "./DealPrintView";
 import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
 import { mergeSupplier } from "@/utils/supplierList";
 import { BANK_SWIFT_IMAGE_REQUIRED } from "@/utils/dealPaymentFlow";
+import { formatDateLocalized } from "../../../utils/formatDate";
 
 type OperationalStatus =
   | "initial"
@@ -700,10 +701,11 @@ export const DealForm: React.FC<DealFormProps> = ({
   const dealStats = {
     totalAmount: calculateGrandTotal(),
     itemsCount: items.length,
-    paidAmount: formData.payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0,
-    remainingAmount: Math.max(0, calculateGrandTotal() - (formData.payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0)),
-    supplierAdvance: Math.max(0, (formData.payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0) - calculateGrandTotal()),
-    paymentPercentage: calculateGrandTotal() > 0 ? ((formData.payments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0) / calculateGrandTotal()) * 100 : 0
+    paidAmount: Number(formData.postedPaidAmount) || 0,
+    unpostedAmount: Number(formData.unpostedRegisteredAmount) || 0,
+    remainingAmount: Math.max(0, Number(formData.amountOutstanding) || calculateGrandTotal() - (Number(formData.postedPaidAmount) || 0)),
+    supplierAdvance: Math.max(0, Number(formData.supplierAdvance) || 0),
+    paymentPercentage: calculateGrandTotal() > 0 ? ((Number(formData.postedPaidAmount) || 0) / calculateGrandTotal()) * 100 : 0
   };
 
   const fmt = (v: number) => formatMoney(v);
@@ -997,11 +999,11 @@ export const DealForm: React.FC<DealFormProps> = ({
       }}
       metrics={[
         { label: "إجمالي الصفقة", value: dealMoney(dealStats.totalAmount), tone: "info" },
-        { label: "المدفوع", value: dealMoney(dealStats.paidAmount), tone: "ok" },
+        { label: "المدفوع والمرحّل", value: dealMoney(dealStats.paidAmount), tone: "ok" },
         dealStats.supplierAdvance > 0
-          ? { label: "رصيد لصالحك عند المورد", value: dealMoney(dealStats.supplierAdvance), tone: "info" }
+          ? { label: "دفعة مقدمة على هذه الصفقة", value: dealMoney(dealStats.supplierAdvance), tone: "info" }
           : { label: "المتبقي", value: dealMoney(dealStats.remainingAmount), tone: "warn" },
-        { label: "نسبة الإنجاز", value: `${formatMoney(dealStats.paymentPercentage)}%` },
+        { label: "مسجّل بانتظار الترحيل", value: dealMoney(dealStats.unpostedAmount) },
       ]}
       parties={[
         {
@@ -1047,7 +1049,7 @@ export const DealForm: React.FC<DealFormProps> = ({
             <div>
               <span className="font-semibold">{r.name || "—"}</span>
               {r.specifications && (
-                <span className="block text-[11px] text-slate-500">{r.specifications}</span>
+                <span className="block text-[11px] text-[var(--color-text-muted)]">{r.specifications}</span>
               )}
             </div>
           ),
@@ -1061,6 +1063,7 @@ export const DealForm: React.FC<DealFormProps> = ({
       rows={filledDealItems}
       rowKey={(r) => r.id}
       emptyRowsHint="لا توجد أصناف في الصفقة"
+      /* ملخّص كامل داخل المستند (يُرفع لأعلى بدل دوك سفلي عالق) — طلب المالك. */
       totals={[
         { label: "مجموع البنود", value: dealMoney(calculateSubtotal()) },
         ...((formData.discountAmount || 0) > 0
@@ -1070,6 +1073,15 @@ export const DealForm: React.FC<DealFormProps> = ({
           ? [{ label: "شحن داخل الصين", value: dealMoney(formData.shippingCost || 0) }]
           : []),
         { label: "إجمالي الصفقة (للمورد)", value: dealMoney(calculateGrandTotal()), emphasis: true },
+        { label: "المدفوع والمرحّل", value: dealMoney(dealStats.paidAmount) },
+        { label: "مسجّل بانتظار الترحيل", value: dealMoney(dealStats.unpostedAmount) },
+        {
+          label: dealStats.supplierAdvance > 0 ? "دفعة مقدمة على هذه الصفقة" : "المتبقي",
+          value: dealMoney(dealStats.supplierAdvance > 0 ? dealStats.supplierAdvance : dealStats.remainingAmount),
+          tone: dealStats.supplierAdvance > 0 ? "info" : "warn",
+        },
+        { label: "رصيد المورد قبل دفعات هذه الصفقة (بالعملة الأساسية)", value: fmt(Number(formData.supplierBalanceBeforeDealPayments) || 0) },
+        { label: "رصيد المورد الحالي بعد الدفعات المرحّلة (بالعملة الأساسية)", value: fmt(Number(formData.supplierBalanceAfterDealPayments) || 0), emphasis: true },
       ]}
       sections={[
         ...(dealInstallments.length > 0
@@ -1083,7 +1095,7 @@ export const DealForm: React.FC<DealFormProps> = ({
                       { key: "no", header: "القسط", width: "70px", align: "center", render: (r) => `#${r.installmentNumber}` },
                       { key: "pct", header: "النسبة", width: "80px", align: "center", numeric: true, render: (r) => `${formatMoney(r.percentage)}%` },
                       { key: "amt", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => fmt(r.amount) },
-                      { key: "due", header: "الاستحقاق", width: "110px", align: "center", render: (r) => r.dueDate || "—" },
+                      { key: "due", header: "الاستحقاق", width: "110px", align: "center", render: (r) => formatDateLocalized(r.dueDate) || "—" },
                       { key: "st", header: "الحالة", width: "100px", align: "center", render: (r) => String(r.status) },
                     ]}
                     rows={dealInstallments}
@@ -1107,6 +1119,13 @@ export const DealForm: React.FC<DealFormProps> = ({
                       { key: "amt", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => fmt(r.amount) },
                       { key: "rate", header: "سعر الصرف", width: "100px", align: "left", numeric: true, render: (r) => (r.usdToIls ? formatMoney(r.usdToIls) : "—") },
                       { key: "fee", header: "عمولة التحويل", width: "110px", align: "left", numeric: true, render: (r) => fmt(r.transferCost || 0) },
+                      {
+                        key: "posted",
+                        header: "الترحيل",
+                        width: "100px",
+                        align: "center",
+                        render: (r) => r.isPosted ? "مرحّلة" : "غير مرحّلة",
+                      },
                       {
                         key: "conf",
                         header: "تأكيد المورد",
@@ -1138,19 +1157,19 @@ export const DealForm: React.FC<DealFormProps> = ({
                 content: (
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <div>
-                      <span className="block text-[11px] text-slate-500">الحجم (CBM)</span>
+                      <span className="block text-[11px] text-[var(--color-text-muted)]">الحجم (CBM)</span>
                       <b>{formData.totalVolume ? formatQuantity(formData.totalVolume) : "—"}</b>
                     </div>
                     <div>
-                      <span className="block text-[11px] text-slate-500">الوزن (كغ)</span>
+                      <span className="block text-[11px] text-[var(--color-text-muted)]">الوزن (كغ)</span>
                       <b>{formatQuantity(formData.totalWeightKg ?? formData.totalWeight ?? 0) || "—"}</b>
                     </div>
                     <div>
-                      <span className="block text-[11px] text-slate-500">الضمان</span>
+                      <span className="block text-[11px] text-[var(--color-text-muted)]">الضمان</span>
                       <b>{formData.warrantyDuration ? `${formData.warrantyDuration} شهر` : "—"}</b>
                     </div>
                     <div>
-                      <span className="block text-[11px] text-slate-500">الشهادات</span>
+                      <span className="block text-[11px] text-[var(--color-text-muted)]">الشهادات</span>
                       <b>{formData.certificates || "—"}</b>
                     </div>
                   </div>
@@ -1167,13 +1186,13 @@ export const DealForm: React.FC<DealFormProps> = ({
                   <div className="space-y-1">
                     {formData.internalNotes && (
                       <p>
-                        <span className="text-slate-500">داخلية: </span>
+                        <span className="text-[var(--color-text-muted)]">داخلية: </span>
                         {formData.internalNotes}
                       </p>
                     )}
                     {formData.shipmentNotes && (
                       <p>
-                        <span className="text-slate-500">الشحنة: </span>
+                        <span className="text-[var(--color-text-muted)]">الشحنة: </span>
                         {formData.shipmentNotes}
                       </p>
                     )}
@@ -1197,6 +1216,7 @@ export const DealForm: React.FC<DealFormProps> = ({
   return (
     <div id="deal-print" dir="rtl">
       <AseelDocumentShell
+        gridFitContent={viewMode}
         title="صفقة استيراد"
         state={formData.id ? `صفقة ${formData.dealNumber || `#${formData.id}`}` : "صفقة جديدة"}
         nav={nav}
@@ -1227,7 +1247,7 @@ export const DealForm: React.FC<DealFormProps> = ({
             content: <EntityActivityLog entityType="deal" entityId={formData.id} defaultOpen />,
           }] : []),
         ]}
-        totals={
+        totals={viewMode ? undefined : (
           <>
             {/* ج8: الصفقة دولية = بضاعة المورد + شحن داخل الصين − خصم. الضريبة
                 تُدفع بالتخليص (لا تدخل إجمالي الصفقة ولا سقف دفعات المورد). */}
@@ -1237,13 +1257,14 @@ export const DealForm: React.FC<DealFormProps> = ({
               <div className="aseel-total-row"><span>شحن داخل الصين</span><span className="aseel-total-value">{fmt(formData.shippingCost || 0)}</span></div>
             )}
             <div className="aseel-total-row aseel-total-row--grand"><span>مبلغ الصفقة الإجمالي (للمورد)</span><span className="aseel-total-value">{fmt(calculateGrandTotal())}</span></div>
-            <div className="aseel-total-row"><span>المدفوع</span><span className="aseel-total-value">{fmt(dealStats.paidAmount)}</span></div>
+            <div className="aseel-total-row"><span>المدفوع والمرحّل</span><span className="aseel-total-value">{fmt(dealStats.paidAmount)}</span></div>
+            <div className="aseel-total-row"><span>مسجّل بانتظار الترحيل</span><span className="aseel-total-value">{fmt(dealStats.unpostedAmount)}</span></div>
             <div className="aseel-total-row">
-              <span>{dealStats.supplierAdvance > 0 ? "رصيد لصالحك عند المورد" : "المتبقي"}</span>
+              <span>{dealStats.supplierAdvance > 0 ? "دفعة مقدمة على هذه الصفقة" : "المتبقي"}</span>
               <span className="aseel-total-value">{fmt(dealStats.supplierAdvance > 0 ? dealStats.supplierAdvance : dealStats.remainingAmount)}</span>
             </div>
           </>
-        }
+        )}
         status={
           <>
             <span className="aseel-status-item">المستخدم <b>{currentUser?.name || "—"}</b></span>

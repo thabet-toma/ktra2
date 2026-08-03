@@ -260,6 +260,8 @@ class Cheque(models.Model):
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     cheque_number = models.CharField(max_length=50, db_column='ChequeNumber')
     bank_name = models.CharField(max_length=100, null=True, blank=True, db_column='BankName')
+    account_number = models.CharField(max_length=50, null=True, blank=True, db_column='AccountNumber')
+    bank_branch = models.CharField(max_length=100, null=True, blank=True, db_column='BankBranch')
     amount = models.DecimalField(max_digits=18, decimal_places=2, db_column='Amount', default=0.00)
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT, default=1, db_column='CurrencyID')
     due_date = models.DateField(db_column='DueDate', null=True, blank=True)
@@ -284,6 +286,14 @@ class Cheque(models.Model):
         on_delete=models.SET_NULL,
         null=True, blank=True,
         db_column='CustomerPaymentID',
+        related_name='cheques',
+    )
+    # T-ONEPAY: شيك صادر داخل سند صرف (مرآة customer_payment للجانب الدائن).
+    supplier_payment = models.ForeignKey(
+        'sales.SupplierPayment',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column='SupplierPaymentID',
         related_name='cheques',
     )
     # P-H-1: link to purchase invoice (mirror of sales_invoice)

@@ -182,7 +182,7 @@ export const IncomeStatementPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel">
+    <div>
       <AseelDocumentShell
         title="كشف الإيرادات والمصروفات"
         actions={shellActions}

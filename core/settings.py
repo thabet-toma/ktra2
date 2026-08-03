@@ -306,6 +306,42 @@ OPENCLAW_WS_MESSAGES_URL = (os.environ.get("OPENCLAW_WS_MESSAGES_URL") or "").st
 _oc_ws = (os.environ.get("OPENCLAW_USE_WEBSOCKET", "0") or "0").strip().lower()
 OPENCLAW_USE_WEBSOCKET = _oc_ws in ("1", "true", "yes", "on")
 
+# ── المساعد الذكي عبر Ollama السحابي (Qwen) ────────────────────────────────
+# assistant/chat/ يوجّه للنموذج على Ollama عندما ASSISTANT_BACKEND=ollama
+# (الافتراضي). النموذج يجيب من قاعدة بيانات كترا عبر أدوات مقفولة على شركة
+# المستخدم (core/assistant_tools.py). المفتاح لا يُعرَّض للمتصفح — الطلب صادر
+# من خادم Django مع Authorization: Bearer.
+ASSISTANT_BACKEND = (os.environ.get("ASSISTANT_BACKEND", "ollama") or "ollama").strip().lower()
+# نقطة متوافقة مع OpenAI. السحابة: https://ollama.com/v1 — أو خادم Ollama محلي: http://IP:11434/v1
+OLLAMA_BASE_URL = (os.environ.get("OLLAMA_BASE_URL") or "https://ollama.com/v1").strip()
+# المفتاح سرّي — لا يُحفظ في git. يُقرأ من البيئة فقط.
+OLLAMA_API_KEY = os.environ.get("OLLAMA_API_KEY", "").strip()
+# اسم الموديل بالضبط كما يظهر في /v1/models.
+# ملاحظة: qwen3.6 غير متاح سحابياً إطلاقاً (محلي فقط). qwen3.5:397b متاح لكنه
+# يتطلب اشتراك Ollama مدفوع (يرجع 403 على الخطة المجانية). النماذج المجانية
+# التي تدعم الأدوات: gpt-oss:120b و gpt-oss:20b — لذا الافتراضي gpt-oss:120b
+# ليعمل المساعد فوراً. للتبديل لكوين: اشترك ثم ضع OLLAMA_MODEL=qwen3.5:397b،
+# أو شغّل qwen3.6 على خادمك واضبط OLLAMA_BASE_URL على http://IP:11434/v1.
+OLLAMA_MODEL = (os.environ.get("OLLAMA_MODEL") or "gpt-oss:120b").strip()
+OLLAMA_ASSISTANT_TIMEOUT = int(os.environ.get("OLLAMA_ASSISTANT_TIMEOUT", "120") or "120")
+
+# ── واتساب ↔ المساعد الذكي عبر Evolution API (self-hosted، غير رسمي) ───────
+# core/whatsapp_views.py يستقبل الرسائل الواردة على api/assistant/whatsapp/webhook/<secret>/
+# ويرسل الردود عبر EVOLUTION_API_BASE_URL. العزل الأمني الوحيد هو جدول
+# tenants.WhatsAppContact (رقم → شركة) — رقم غير مُدرَج لا يحصل على أي رد.
+# رابط الـ webhook الكامل الذي يُضبط داخل Evolution API:
+#   https://<نطاق-خادمك>/api/assistant/whatsapp/webhook/<WHATSAPP_WEBHOOK_SECRET>/
+# السرّ إلزامي في الإنتاج — لا افتراضي، لمنع رابط webhook عام بلا حماية.
+WHATSAPP_WEBHOOK_SECRET = _environment_value(
+    "WHATSAPP_WEBHOOK_SECRET", required_in_production=True
+)
+# عنوان خادم Evolution API نفسه (وليس Django) — مثال: http://127.0.0.1:8080 أو https://evo.example.com
+EVOLUTION_API_BASE_URL = (os.environ.get("EVOLUTION_API_BASE_URL") or "").strip().rstrip("/")
+# مفتاح apikey لنسخة Evolution API (Global API Key أو مفتاح الـ instance)
+EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY", "").strip()
+# اسم الـ instance المُنشأ داخل Evolution API (وليس رقم الهاتف)
+EVOLUTION_INSTANCE_NAME = os.environ.get("EVOLUTION_INSTANCE_NAME", "").strip()
+
 # ── كاش الخادم (صيانة الأداء 2026-07) ──────────────────────────────────────
 # استضافة مشتركة بلا root ⇒ لا Redis/Memcached. FileBasedCache مشتركة بين كل
 # عمليات WSGI (نفس القرص) وضربة الكاش = صفر استعلامات MySQL — بعكس LocMemCache
@@ -416,6 +452,7 @@ LOGGING = {
         "core.request_tracing": {"handlers": ["queue"], "level": LOG_LEVEL, "propagate": False},
         "core.exception_handler": {"handlers": ["queue"], "level": "INFO", "propagate": False},
         "core.health": {"handlers": ["queue"], "level": "INFO", "propagate": False},
+        "hr.auth_api": {"handlers": ["queue"], "level": "INFO", "propagate": False},
         "client_logs": {"handlers": ["queue"], "level": "INFO", "propagate": False},
         "django.request": {"handlers": ["queue"], "level": "ERROR", "propagate": False},
     },

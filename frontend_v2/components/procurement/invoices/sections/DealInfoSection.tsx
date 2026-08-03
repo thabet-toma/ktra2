@@ -1,6 +1,7 @@
 import React from 'react';
 import { DealInvoiceInfo, Invoice } from '@/types';
 import { Factory, Truck, FileText, Calendar, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { formatDateValue } from "../../../../utils/formatDate";
 
 interface DealInfoSectionProps {
   dealInfo: DealInvoiceInfo;
@@ -115,7 +116,7 @@ export const DealInfoSection: React.FC<DealInfoSectionProps> = ({
               {dealInfo.startedProductionAt && (
                 <div className="text-sm">
                   <span className="aseel-text-soft dark:aseel-text-soft">بدء الإنتاج: </span>
-                  <span className="font-medium">{new Date(dealInfo.startedProductionAt).toLocaleDateString('ar-SA')}</span>
+                  <span className="font-medium">{formatDateValue(dealInfo.startedProductionAt)}</span>
                 </div>
               )}
             </div>
@@ -140,7 +141,7 @@ export const DealInfoSection: React.FC<DealInfoSectionProps> = ({
               {dealInfo.completedAt && (
                 <div className="text-sm">
                   <span className="aseel-text-soft dark:aseel-text-soft">تاريخ الإكمال: </span>
-                  <span className="font-medium">{new Date(dealInfo.completedAt).toLocaleDateString('ar-SA')}</span>
+                  <span className="font-medium">{formatDateValue(dealInfo.completedAt)}</span>
                 </div>
               )}
             </div>

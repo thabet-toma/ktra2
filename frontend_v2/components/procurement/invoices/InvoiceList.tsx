@@ -8,7 +8,9 @@ import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Invoice, Item, Supplier } from "@/types";
 import { openInNewTab } from "@/utils/openInNewTab";
+import { clientLogger } from "../../../services/logger";
 import { useConfirm } from "../../../contexts/ConfirmContext";
+import { PaymentStatusBadge } from "../../shared/PaymentStatusBadge";
 import {
   Plus,
   RefreshCw,
@@ -17,10 +19,12 @@ import {
   Eye,
   ArrowRightLeft,
   ScrollText,
+  Truck,
 } from "lucide-react";
 import {
   AseelDocumentShell,
   AseelDenseTable,
+  AseelDateInput,
   type DenseColumn,
   type AseelToolbarAction,
 } from "../../aseel";
@@ -52,6 +56,7 @@ interface InvoiceListProps {
 export interface InvoiceListFilters {
   search: string;
   status: string;
+  paymentStatus: "all" | "paid" | "partially_paid" | "unpaid";
   kind: "all" | "invoice" | "return";
   dateFrom: string;
   dateTo: string;
@@ -63,7 +68,18 @@ const STATUS_OPTIONS = [
   { v: "draft", l: "مسودة" },
 ];
 
+/** شارات حالة استلام البضاعة — مرآة شارات التسليم في قائمة المبيعات. */
+const RECEIPT_BADGE: Record<
+  NonNullable<Invoice["receiptStatus"]>,
+  { label: string; color: string }
+> = {
+  not_received: { label: "غير مستلمة", color: "var(--aseel-warn, #b06800)" },
+  partially_received: { label: "مستلمة جزئياً", color: "var(--aseel-accent, #2563eb)" },
+  received: { label: "مستلمة", color: "var(--aseel-ok, #2d7d46)" },
+};
+
 import { formatMoney } from "@/utils/formatNumber";
+import { formatDateLocalized } from "../../../utils/formatDate";
 const fmtNum = (s: string | number | undefined | null) => formatMoney(s, "—");
 
 export const InvoiceList: React.FC<InvoiceListProps> = ({
@@ -90,6 +106,9 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   // فلاتر
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterPaymentStatus, setFilterPaymentStatus] = useState<
+    "all" | "paid" | "partially_paid" | "unpaid"
+  >("all");
   // فلتر النوع: الكل / فواتير الشراء / مراجيع الشراء.
   const [filterKind, setFilterKind] = useState<"all" | "invoice" | "return">("all");
   const [dateFrom, setDateFrom] = useState("");
@@ -100,6 +119,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
     onFiltersChange?.({
       search,
       status: filterStatus,
+      paymentStatus: filterPaymentStatus,
       kind: filterKind,
       dateFrom,
       dateTo,
@@ -108,6 +128,9 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   };
 
   const grandOf = (invoice: Invoice): number => {
+    if (invoice.payableTotal != null && !Number.isNaN(Number(invoice.payableTotal))) {
+      return Number(invoice.payableTotal);
+    }
     const itemsTotal = (invoice.items || []).reduce((sum, it) => {
       const qty = parseFloat(it.quantity as any) || 0;
       const price = parseFloat(it.unitPrice as any) || 0;
@@ -124,9 +147,9 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   };
 
   const supplierName = (invoice: Invoice): string => {
-    if (!suppliers || !invoice.supplierId) return "مورد غير محدد";
-    const s = suppliers.find((x) => x.id === invoice.supplierId);
-    return s?.alias || s?.tradeName || invoice.factoryName || "مورد غير محدد";
+    if (!invoice.supplierId) return "مورد غير محدد";
+    const s = suppliers?.find((x) => x.id === invoice.supplierId);
+    return s?.alias || s?.tradeName || invoice.supplierSnapshot?.tradeName || invoice.factoryName || "مورد غير محدد";
   };
 
   const filteredRows = useMemo(() => {
@@ -137,6 +160,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         if (filterKind === "return" && !inv.isReturn) return false;
         if (filterStatus === "posted" && !inv.isPosted) return false;
         if (filterStatus === "draft" && inv.isPosted) return false;
+        if (filterPaymentStatus !== "all" && inv.paymentStatus !== filterPaymentStatus) return false;
         const d = inv.invoiceDate || (inv.createdAt ? inv.createdAt.slice(0, 10) : "");
         if (dateFrom && d && d < dateFrom) return false;
         if (dateTo && d && d > dateTo) return false;
@@ -152,7 +176,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         const db = new Date(b.invoiceDate || b.createdAt || "").getTime();
         return db - da;
       });
-  }, [invoices, filterStatus, filterKind, dateFrom, dateTo, search, suppliers]);
+  }, [invoices, filterStatus, filterPaymentStatus, filterKind, dateFrom, dateTo, search, suppliers]);
 
   const columns: DenseColumn<Invoice>[] = [
     {
@@ -195,7 +219,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       header: "التاريخ",
       width: "110px",
       align: "center",
-      render: (r) => <span className="text-xs">{r.invoiceDate || (r.createdAt ? r.createdAt.slice(0, 10) : "—")}</span>,
+      render: (r) => <span className="text-xs">{formatDateLocalized(r.invoiceDate || r.createdAt) || "—"}</span>,
     },
     {
       key: "supplier",
@@ -207,6 +231,9 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             type="button"
             className="text-xs text-[var(--aseel-accent)] underline hover:no-underline cursor-pointer bg-transparent border-0 p-0 font-inherit text-right"
             title="فتح كشف حساب المورد في تبويب جديد"
+            data-ctx-partner-id={r.supplierId}
+            data-ctx-partner-name={supplierName(r)}
+            data-ctx-partner-kind="supplier"
             onClick={(e) => { e.stopPropagation(); openInNewTab(`/partners/${r.supplierId}`); }}
           >
             {supplierName(r)}
@@ -251,12 +278,65 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       ),
     },
     {
+      key: "receiptStatus",
+      header: "الاستلام",
+      width: "100px",
+      align: "center",
+      render: (r) => {
+        const st = r.receiptStatus || "not_received";
+        return (
+          <span
+            style={{ fontSize: "11px", fontWeight: 600, color: RECEIPT_BADGE[st].color }}
+            title="حالة استلام البضاعة للمخزن"
+          >
+            {r.receiptStatusDisplay || RECEIPT_BADGE[st].label}
+          </span>
+        );
+      },
+    },
+    {
       key: "grandTotal",
       header: "الإجمالي",
       width: "120px",
       align: "left",
       numeric: true,
       render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmtNum(grandOf(r))}</span>,
+    },
+    {
+      key: "paymentStatus",
+      header: "حالة الدفع",
+      width: "125px",
+      align: "center",
+      render: (r) => (
+        <PaymentStatusBadge
+          status={r.paymentStatus}
+          label={r.paymentStatusDisplay}
+        />
+      ),
+    },
+    {
+      key: "amountPaid",
+      header: "المدفوع",
+      width: "100px",
+      align: "left",
+      numeric: true,
+      render: (r) => <span className="aseel-num font-mono text-xs">{fmtNum(r.amountPaid)}</span>,
+    },
+    {
+      key: "remainingBalance",
+      header: "المتبقي",
+      width: "100px",
+      align: "left",
+      numeric: true,
+      render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmtNum(r.remainingBalance)}</span>,
+    },
+    {
+      key: "partnerBalance",
+      header: "رصيد المورد",
+      width: "110px",
+      align: "left",
+      numeric: true,
+      render: (r) => <span className="aseel-num font-mono text-xs">{fmtNum(r.partnerBalance)}</span>,
     },
     {
       key: "actions",
@@ -283,6 +363,22 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           >
             <Printer className="w-3 h-3" />
           </button>
+          {/* استلام: يفتح محرّر إرسالية بهذه الفاتورة مربوطةً مسبقاً. */}
+          {r.isPosted && !r.isReturn && r.invoiceType !== "international"
+            && r.receiptStatus !== "received" && (
+            <button
+              type="button"
+              className="aseel-toolbtn"
+              style={{ fontSize: "10px", padding: "2px 6px" }}
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/purchase-receipts/new?invoice=${r.id}`);
+              }}
+              title="استلام البضاعة (إرسالية)"
+            >
+              <Truck className="w-3 h-3" /> استلام
+            </button>
+          )}
           <button
             type="button"
             className="aseel-toolbtn"
@@ -319,7 +415,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   ];
 
   const filterBar = (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
+    <div className="aseel-print-hidden" style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-end" }}>
       <label className="aseel-field" style={{ flex: 1, minWidth: "200px" }}>
         <span className="aseel-field-label">بحث (رقم / مورد)</span>
         <input
@@ -352,13 +448,31 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           {STATUS_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
         </select>
       </label>
+      <label className="aseel-field" style={{ minWidth: "125px" }}>
+        <span className="aseel-field-label">حالة الدفع</span>
+        <select
+          className="aseel-input"
+          value={filterPaymentStatus}
+          onChange={(e) => {
+            const value = e.target.value as InvoiceListFilters["paymentStatus"];
+            clientLogger.info("purchase_invoice.payment_filter_changed", { paymentStatus: value });
+            setFilterPaymentStatus(value);
+            publishFilters({ paymentStatus: value });
+          }}
+        >
+          <option value="all">الكل</option>
+          <option value="unpaid">غير مدفوعة</option>
+          <option value="partially_paid">مدفوعة جزئياً</option>
+          <option value="paid">مدفوعة بالكامل</option>
+        </select>
+      </label>
       <label className="aseel-field">
         <span className="aseel-field-label">من تاريخ</span>
-        <input type="date" className="aseel-input" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); publishFilters({ dateFrom: e.target.value }); }} />
+        <AseelDateInput value={dateFrom} onChange={(value) => { clientLogger.info("purchase_invoice.date_filter_changed", { boundary: "from", hasValue: Boolean(value) }); setDateFrom(value); publishFilters({ dateFrom: value }); }} />
       </label>
       <label className="aseel-field">
         <span className="aseel-field-label">إلى تاريخ</span>
-        <input type="date" className="aseel-input" value={dateTo} onChange={(e) => { setDateTo(e.target.value); publishFilters({ dateTo: e.target.value }); }} />
+        <AseelDateInput value={dateTo} onChange={(value) => { clientLogger.info("purchase_invoice.date_filter_changed", { boundary: "to", hasValue: Boolean(value) }); setDateTo(value); publishFilters({ dateTo: value }); }} />
       </label>
     </div>
   );
@@ -384,7 +498,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   const draftCount = filteredRows.length - postedCount;
 
   return (
-    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
+    <div style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title={isInternational ? "الفواتير الدولية" : "فواتير الشراء"}
         state={`${filteredRows.length} في الصفحة من ${total}`}

@@ -3,28 +3,67 @@
  * المرجع: العروض والطلبيات.txt:4-9
  * القالب: SalesInvoiceEditor.tsx
  */
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { PriceOffer, PriceOfferItem, PriceOfferStatus, PriceOfferType, Supplier, Item } from "../../../types";
+import type { PriceOfferAttachment, PriceOfferNote } from "../../../types/offer";
+import type { PriceOfferScope } from "../../../services/firestoreService";
 import {
-  AseelDocumentShell,
-  AseelGrid,
+  AseelAutocomplete,
   useAseelKeymap,
   type AseelGridColumn,
   type AseelToolbarAction,
 } from "../../aseel";
-import { Plus, Save, X, Loader2, AlertCircle, CheckCircle2, Trash2 } from "lucide-react";
+import {
+  Save, X, Loader2, AlertCircle, CheckCircle2, Trash2, Search, Info,
+  FileText, Upload, Link2, Plus,
+} from "lucide-react";
+import { formatDateValue } from "../../../utils/formatDate";
+import { ItemSearchModal, productToItem } from "./ItemSearchModal";
+import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
+import { ProductCardModal } from "../../shared/ProductCardModal";
+import { FilePreviewModal } from "../../shared/FilePreviewModal";
+import { cloudinaryService } from "../../../services/cloudinaryService";
+import { usePasteImageUpload } from "../../../utils/clipboardImage";
+import {
+  CommercialDocumentEditor,
+  type CommercialHeaderField,
+} from "../../shared/CommercialDocumentEditor";
 
-// 4 أنواع العروض والطلبيات
+// مستندا دورة الشراء؛ اتجاه العميل يخص شاشة البيع المنفصلة.
 const OFFER_TYPES = [
-  { v: "incoming_offer", l: "عرض سعر وارد (من مورد)" },
-  { v: "outgoing_offer", l: "عرض سعر صادر (للعميل)" },
-  { v: "incoming_order", l: "طلبية واردة (من عميل)" },
-  { v: "outgoing_order", l: "طلبية صادرة (للمورد)" },
+  { v: "incoming_offer", l: "عرض سعر من مورد" },
+  { v: "outgoing_order", l: "طلبية إلى مورد" },
 ];
 
 const STATUS_LABELS: Record<string, string> = {
   initial: "مسودة", pending_info: "بانتظار معلومات",
   under_discussion: "قيد المناقشة", approved_for_shipping: "معتمد للشحن", rejected: "مرفوض",
+};
+
+/**
+ * T-IMPOFFER — في الاستيراد يُقرأ العرض كقرار ملاءمة: «ملائم» تعني أنه صالح
+ * للتحويل إلى صفقة، و«غير ملائم» تلزمها كتابة السبب. نفس المفاتيح، لغة أصدق.
+ */
+const IMPORT_STATUS_LABELS: Record<string, string> = {
+  initial: "مسودة", pending_info: "بانتظار معلومات",
+  under_discussion: "قيد المناقشة", approved_for_shipping: "ملائم", rejected: "غير ملائم",
+};
+
+/**
+ * T-OFFERSTATE: حالتان لا تكفيهما التسمية — «غير ملائم» تلزمها **لماذا**،
+ * و«بانتظار معلومات» تلزمها **بانتظار ماذا**. نفس قاعدة الخادم
+ * (`SupplierQuotationSerializer.validate`) كي لا تختلف الواجهة عنه.
+ */
+const STATUS_NEEDS_DETAIL: PriceOfferStatus[] = ["rejected", "pending_info"];
+
+const STATUS_DETAIL_LABEL: Partial<Record<PriceOfferStatus, string>> = {
+  rejected: "سبب عدم الملاءمة",
+  pending_info: "بانتظار ماذا؟",
+};
+
+const STATUS_DETAIL_PLACEHOLDER: Partial<Record<PriceOfferStatus, string>> = {
+  rejected: "مثال: السعر أعلى من السوق بـ20% / مدة التسليم 90 يوماً",
+  pending_info: "مثال: بانتظار شهادة المنشأ / عيّنة من المصنع / سعر الشحن",
 };
 
 type LineItem = PriceOfferItem & { key: string };
@@ -42,28 +81,23 @@ interface Props {
   offer: Partial<PriceOffer>;
   items: Item[];
   suppliers: Supplier[];
+  scope?: PriceOfferScope;
   isReadOnly?: boolean;
   saving?: boolean;
   onSave: (offer: Partial<PriceOffer>) => void | Promise<void>;
   onCancel: () => void;
-  onStatusChangeRequest?: (offer: Partial<PriceOffer>, newStatus: PriceOfferStatus) => void;
 }
 
-const fld = (label: string, node: React.ReactNode, span?: number) => (
-  <label className="aseel-field" style={span ? { gridColumn: `span ${span}` } : {}}>
-    <span className="aseel-field-label">{label}</span>
-    {node}
-  </label>
-);
-
-import { formatMoney } from "@/utils/formatNumber";
+import { formatMoney, formatNumber } from "@/utils/formatNumber";
 const fmt = (n: number) => formatMoney(n);
 
 export const PriceOfferForm: React.FC<Props> = ({
   offer, items, suppliers, isReadOnly = false, saving = false,
-  onSave, onCancel, onStatusChangeRequest,
+  scope = "purchase", onSave, onCancel,
 }) => {
   const [offerNumber, setOfferNumber] = useState(offer.offerNumber || "");
+  const [orderName, setOrderName] = useState(offer.orderName || "");
+  const [orderDescription, setOrderDescription] = useState(offer.orderDescription || "");
   const [supplierId, setSupplierId] = useState(offer.supplierId || "");
   const [factoryName, setFactoryName] = useState(offer.factoryName || "");
   const [offerDate, setOfferDate] = useState(
@@ -77,7 +111,20 @@ export const PriceOfferForm: React.FC<Props> = ({
   const [shippingMethod, setShippingMethod] = useState(offer.shippingMethod || "");
   const [paymentMethod, setPaymentMethod] = useState(offer.paymentMethod || "");
   const [deliveryDays, setDeliveryDays] = useState(String(offer.deliveryDays ?? ""));
+  // T-IMPOFFER: مبلغ الشحن كان مُخزَّناً في الخادم ومُمرَّراً في الطرفين لكن بلا
+  // أي حقل إدخال في هذه الشاشة — «فش مبلغ الشحن» حرفياً.
+  const [shippingCost, setShippingCost] = useState(String(offer.shippingCost ?? 0));
+  const [shippingIncluded, setShippingIncluded] = useState(Boolean(offer.shippingIncluded));
+  const [alibabaLink, setAlibabaLink] = useState(offer.alibabaLink || "");
+  const [supplierContact, setSupplierContact] = useState(offer.supplierContact || "");
+  const [decisionReason, setDecisionReason] = useState(offer.decisionReason || "");
+  const [attachments, setAttachments] = useState<PriceOfferAttachment[]>(offer.attachments || []);
+  const [uploading, setUploading] = useState(false);
+  const [previewFile, setPreviewFile] = useState<PriceOfferAttachment | null>(null);
   const [internalNotes, setInternalNotes] = useState(offer.internalNotes || "");
+  // T-OFFERSTATE: دفتر ملاحظات مؤرَّخ — ملاحظة واحدة تُدهس لا تكفي متابعةَ مورد.
+  const [notesLog, setNotesLog] = useState<PriceOfferNote[]>(offer.notesLog || []);
+  const [newNote, setNewNote] = useState("");
   const [taxRate, setTaxRate] = useState(String(offer.taxRate ?? 0));
   const [discountAmount, setDiscountAmount] = useState(String(offer.discountAmount ?? 0));
   const [lines, setLines] = useState<LineItem[]>(() =>
@@ -88,10 +135,18 @@ export const PriceOfferForm: React.FC<Props> = ({
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [lastKey, setLastKey] = useState("—");
+  const [itemPickerLineKey, setItemPickerLineKey] = useState<string | null>(null);
+  const [availableItems, setAvailableItems] = useState<Item[]>(items);
+  // T-IMPOFFER: نفس مسار الإدخال المعتمد في باقي المنصة (فاتورة الشراء/الصفقة):
+  // إكمال تلقائي داخل الخلية، إنشاء صنف من النص الحر، وبطاقة الصنف عبر (i).
+  const [inlineCreate, setInlineCreate] = useState<{ lineKey: string; name: string } | null>(null);
+  const [cardProductId, setCardProductId] = useState<number | null>(null);
 
   // إعادة تحميل عند تغيير offer prop
   useEffect(() => {
     setOfferNumber(offer.offerNumber || "");
+    setOrderName(offer.orderName || "");
+    setOrderDescription(offer.orderDescription || "");
     setSupplierId(offer.supplierId || "");
     setFactoryName(offer.factoryName || "");
     setOfferDate(offer.offerDate || new Date().toISOString().slice(0, 10));
@@ -103,26 +158,46 @@ export const PriceOfferForm: React.FC<Props> = ({
     setShippingMethod(offer.shippingMethod || "");
     setPaymentMethod(offer.paymentMethod || "");
     setDeliveryDays(String(offer.deliveryDays ?? ""));
+    setShippingCost(String(offer.shippingCost ?? 0));
+    setShippingIncluded(Boolean(offer.shippingIncluded));
+    setAlibabaLink(offer.alibabaLink || "");
+    setSupplierContact(offer.supplierContact || "");
+    setDecisionReason(offer.decisionReason || "");
+    setAttachments(offer.attachments || []);
+    setNotesLog(offer.notesLog || []);
+    setNewNote("");
     setInternalNotes(offer.internalNotes || "");
     setTaxRate(String(offer.taxRate ?? 0));
     setDiscountAmount(String(offer.discountAmount ?? 0));
     setLines(offer.items?.length ? offer.items.map((it) => ({ ...it, key: newLineKey() })) : [blankLine()]);
   }, [offer.id]);
 
-  // حساب الإجماليات
+  useEffect(() => {
+    setAvailableItems(items);
+  }, [items]);
+
+  // حساب الإجماليات — نفس قاعدة الخادم (`SupplierQuotationSerializer._recalculate`):
+  // الشحن يُضاف إلى الإجمالي إلا إذا كانت الأسعار تشمله، وإلا لاختلف الرقم
+  // المعروض عن الرقم المحفوظ.
   const subtotal = lines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0);
   const disc = Number(discountAmount) || 0;
   const afterDiscount = Math.max(0, subtotal - disc);
   const tax = afterDiscount * (Number(taxRate) || 0) / 100;
-  const grandTotal = afterDiscount + tax;
+  const shipping = shippingIncluded ? 0 : (Number(shippingCost) || 0);
+  const grandTotal = afterDiscount + tax + shipping;
 
   const selectedSupplier = suppliers.find((s) => s.id === supplierId);
+  const supplierAddress = selectedSupplier
+    ? [selectedSupplier.street, selectedSupplier.city, selectedSupplier.country].filter(Boolean).join(", ")
+    : "";
 
   const buildPayload = useCallback((): Partial<PriceOffer> => ({
     ...offer,
     offerNumber,
+    orderName: orderName.trim(),
+    orderDescription: orderDescription.trim(),
     supplierId,
-    factoryName,
+    factoryName: selectedSupplier?.tradeName || factoryName,
     offerType,
     offerDate,
     validUntil: validUntil || undefined,
@@ -131,6 +206,15 @@ export const PriceOfferForm: React.FC<Props> = ({
     status,
     shippingMethod,
     paymentMethod,
+    shippingCost: Number(shippingCost) || 0,
+    shippingIncluded,
+    alibabaLink: alibabaLink.trim(),
+    supplierContact: supplierContact.trim(),
+    // T-OFFERSTATE: التفصيل يلزم حالتين — «غير ملائم» (لماذا) و«بانتظار معلومات»
+    // (بانتظار ماذا)؛ وما عداهما يُمحى كي لا يبقى تفصيل حالة سابقة معلّقاً.
+    decisionReason: STATUS_NEEDS_DETAIL.includes(status) ? decisionReason.trim() : "",
+    attachments,
+    notesLog,
     deliveryDays: deliveryDays ? Number(deliveryDays) : undefined,
     internalNotes,
     taxRate: Number(taxRate) || 0,
@@ -138,16 +222,43 @@ export const PriceOfferForm: React.FC<Props> = ({
     subtotal,
     taxAmount: tax,
     grandTotal,
-    items: lines.map(({ key: _k, ...rest }) => ({ ...rest, totalPrice: (Number(rest.quantity) || 0) * (Number(rest.unitPrice) || 0) })),
+    items: lines
+      .filter((line) => line.itemId)
+      .map(({ key: _k, ...rest }) => ({
+        ...rest,
+        totalPrice: (Number(rest.quantity) || 0) * (Number(rest.unitPrice) || 0),
+      })),
+    supplierSnapshot: selectedSupplier ? {
+      tradeName: selectedSupplier.tradeName,
+      alias: selectedSupplier.alias,
+      address: supplierAddress,
+      salesRepName: selectedSupplier.salesRepName,
+      salesRepPhone: selectedSupplier.salesRepPhone,
+    } : offer.supplierSnapshot,
     updatedAt: new Date().toISOString(),
     createdAt: offer.createdAt || new Date().toISOString(),
     createdBy: offer.createdBy || "user",
-  }), [offer, offerNumber, supplierId, factoryName, offerType, offerDate, validUntil,
-    currency, exchangeRate, status, shippingMethod, paymentMethod,
+  }), [offer, offerNumber, orderName, orderDescription, supplierId, factoryName, selectedSupplier, supplierAddress, offerType, offerDate, validUntil,
+    currency, exchangeRate, status, shippingMethod, paymentMethod, shippingCost, shippingIncluded,
+    alibabaLink, supplierContact, decisionReason, attachments,
     deliveryDays, internalNotes, taxRate, discountAmount, subtotal, tax, grandTotal, lines]);
 
   const handleSave = async () => {
     if (!supplierId) { setErr("اختر المورد."); return; }
+    if (!lines.some((line) => line.itemId && Number(line.quantity) > 0)) {
+      setErr("اختر صنفاً واحداً على الأقل وحدد كميته.");
+      return;
+    }
+    // T-IMPOFFER: «غير ملائم» بلا سبب لا يُحفظ في نطاق الاستيراد — الخادم يرفضه
+    // أيضاً، والتحقّق هنا يوفّر رحلة شبكة ويضع الرسالة قرب الحقل. الشراء المحلي
+    // لم يُطلب تغييره فيبقى السبب اختيارياً فيه.
+    // T-OFFERSTATE: و«بانتظار معلومات» تلزمها كتابة ما يُنتظَر — نفس القاعدة.
+    if (scope === "import" && needsDetail && !decisionReason.trim()) {
+      setErr(status === "rejected"
+        ? "اذكر سبب اعتبار العرض غير ملائم."
+        : "اذكر ما تنتظره من المورد.");
+      return;
+    }
     setErr(null); setMsg(null);
     try {
       await onSave(buildPayload());
@@ -161,6 +272,63 @@ export const PriceOfferForm: React.FC<Props> = ({
   const removeLine = (key: string) => setLines((prev) => prev.filter((l) => l.key !== key));
   const updateLine = (key: string, patch: Partial<LineItem>) =>
     setLines((prev) => prev.map((l) => l.key === key ? { ...l, ...patch } : l));
+
+  /** تعبئة سطر من صنف مختار — مشتركة بين الإكمال التلقائي والمنتقي والإنشاء السريع. */
+  const fillLineWithItem = useCallback((lineKey: string, item: Item, lastPrice?: number) => {
+    setLines((prev) => prev.map((line) => line.key === lineKey ? {
+      ...line,
+      id: line.id || crypto.randomUUID(),
+      itemId: item.id,
+      name: item.name,
+      categoryId: item.categoryId,
+      categoryName: item.categoryName,
+      specifications: item.specifications || "",
+      imageUrls: item.imageUrls || [],
+      hsCodePrimary: item.hsCodePrimary || "",
+      modelNumber: item.modelNumber,
+      unitPrice: lastPrice ?? item.salePrice ?? line.unitPrice ?? 0,
+    } : line));
+  }, []);
+
+  const itemOptions = useMemo(
+    () => availableItems.map((item) => ({
+      id: item.id,
+      label: item.name,
+      sub: item.modelNumber || item.categoryName || undefined,
+    })),
+    [availableItems],
+  );
+
+  /** T-IMPOFFER: رفع ملف عرض السعر — روابط مستضافة عبر نفس خدمة الوسائط. */
+  const uploadAttachmentFiles = async (files: File[]) => {
+    if (files.length === 0) return;
+    setUploading(true);
+    setErr(null);
+    try {
+      const uploaded: PriceOfferAttachment[] = [];
+      for (const file of files) {
+        const url = await cloudinaryService.uploadFile(file);
+        uploaded.push({ name: file.name, url, type: file.type, size: file.size });
+      }
+      setAttachments((prev) => [...prev, ...uploaded]);
+    } catch (cause) {
+      setErr(cause instanceof Error ? cause.message : "فشل رفع الملف");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files: File[] = Array.from(event.target.files ?? []) as File[];
+    event.target.value = "";
+    await uploadAttachmentFiles(files);
+  };
+
+  // لصق صورة من الحافظة (Ctrl+V) بدل رفعها كملف.
+  usePasteImageUpload((files) => { void uploadAttachmentFiles(files); }, !uploading);
+
+  const removeAttachment = (index: number) =>
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
 
   useAseelKeymap({
     F12: () => { setLastKey("F12 حفظ"); if (!saving && !isReadOnly) void handleSave(); },
@@ -219,6 +387,47 @@ export const PriceOfferForm: React.FC<Props> = ({
         <Trash2 className="h-3 w-3" />
       </button>
     );
+  /**
+   * T-IMPOFFER — «طريقة اختيار المنتجات خطأ، لازم زي باقي المنصة».
+   *
+   * كانت الخلية زرّاً يفتح `ItemSearchModal` العريض: مسار مختلف عن كل شاشة أخرى
+   * (فاتورة الشراء، الصفقة، فاتورة البيع) التي تكتب اسم الصنف داخل الخلية.
+   * الآن نفس المكوّن المشترك `AseelAutocomplete`: كتابة ← قائمة مرشَّحة ←
+   * «إضافة كصنف جديد» للنص الحر، مع (i) لبطاقة الصنف. المنتقي العريض باقٍ خلف
+   * أيقونة البحث لمن يريد الفهرس الكامل.
+   */
+  gridColumns[1].render = (row: LineItem) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+      <AseelAutocomplete
+        value={row.name || ""}
+        options={itemOptions}
+        disabled={isReadOnly}
+        placeholder="اكتب اسم الصنف…"
+        onPick={(id) => {
+          const item = availableItems.find((candidate) => String(candidate.id) === String(id));
+          if (item) fillLineWithItem(row.key, item);
+        }}
+        onInfo={(id) => { const pid = Number(id); if (pid) setCardProductId(pid); }}
+        onFreeText={(text) => setInlineCreate({ lineKey: row.key, name: text.trim() })}
+      />
+      {row.itemId && (
+        <button
+          type="button"
+          className="aseel-ellipsis"
+          onClick={() => setCardProductId(Number(row.itemId))}
+          title="بطاقة الصنف"
+        ><Info className="h-3.5 w-3.5" /></button>
+      )}
+      {!isReadOnly && (
+        <button
+          type="button"
+          className="aseel-ellipsis"
+          onClick={() => setItemPickerLineKey(row.key)}
+          title="فهرس الأصناف الكامل"
+        ><Search className="h-3.5 w-3.5" /></button>
+      )}
+    </div>
+  );
 
   const banner = (err || msg) ? (
     <div className={`aseel-banner ${err ? "aseel-banner--err" : "aseel-banner--ok"}`}>
@@ -227,128 +436,426 @@ export const PriceOfferForm: React.FC<Props> = ({
     </div>
   ) : null;
 
+  /**
+   * T-OFFERSTATE: الملاحظات كانت مربّعاً واحداً قصيراً يُدهس عند كل تعديل.
+   * الآن: ملاحظة عامة أطول + **دفتر ملاحظات مؤرَّخ** يُضاف إليه بلا حدّ —
+   * متابعة المورد سلسلةُ أحداث لا سطرٌ أخير.
+   */
+  const addNote = () => {
+    const text = newNote.trim();
+    if (!text) return;
+    // بلا تاريخ هنا: الخادم يختمه عند الحفظ (ساعة المتصفح ليست مصدراً موثوقاً).
+    setNotesLog((current) => [...current, { text }]);
+    setNewNote("");
+  };
+
   const notesTab = (
-    <div style={{ padding: "8px 4px" }}>
-      <textarea className="aseel-input" rows={4} style={{ width: "100%" }}
-        disabled={isReadOnly} value={internalNotes}
-        onChange={(e) => setInternalNotes(e.target.value)}
-        placeholder="ملاحظات داخلية…" />
+    <div className="space-y-3 px-1 py-2">
+      <label className="aseel-field">
+        <span className="aseel-field-label">ملاحظة عامة على العرض</span>
+        <textarea className="aseel-input w-full" rows={6}
+          disabled={isReadOnly} value={internalNotes}
+          onChange={(e) => setInternalNotes(e.target.value)}
+          placeholder="ملاحظات داخلية…" />
+      </label>
+
+      <div className="space-y-2">
+        <span className="aseel-field-label">
+          دفتر الملاحظات {notesLog.length > 0 && `(${notesLog.length})`}
+        </span>
+        {!isReadOnly && (
+          <div className="flex items-start gap-2">
+            <textarea className="aseel-input w-full" rows={3}
+              value={newNote} onChange={(e) => setNewNote(e.target.value)}
+              placeholder="أضف ملاحظة جديدة… (تُحفظ بتاريخها)" />
+            <button type="button" className="aseel-btn shrink-0"
+              disabled={!newNote.trim()} onClick={addNote}
+              title="إضافة ملاحظة مؤرَّخة">
+              <Plus className="h-4 w-4" /> إضافة
+            </button>
+          </div>
+        )}
+        {notesLog.length === 0 ? (
+          <p className="aseel-hint">لا ملاحظات بعد — أضف ملاحظة لتبقى مؤرَّخة في سجل العرض.</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {notesLog.map((note, index) => (
+              <li key={`${note.at || "new"}-${index}`}
+                className="flex items-start justify-between gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1.5">
+                <div className="min-w-0 flex-1">
+                  <div className="whitespace-pre-wrap break-words text-xs aseel-text-ink">{note.text}</div>
+                  <div className="mt-0.5 text-[10px] aseel-text-soft">
+                    {note.at ? formatDateValue(note.at) : "ستُؤرَّخ عند الحفظ"}
+                    {note.by ? ` · ${note.by}` : ""}
+                  </div>
+                </div>
+                {!isReadOnly && (
+                  <button type="button" className="aseel-iconbtn aseel-iconbtn--danger"
+                    onClick={() => setNotesLog((current) => current.filter((_, i) => i !== index))}
+                    title="حذف الملاحظة">
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 
   const shippingTab = (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, padding: "8px 4px" }}>
-      {fld("طريقة الشحن", <input className="aseel-input" disabled={isReadOnly}
-        value={shippingMethod} onChange={(e) => setShippingMethod(e.target.value)} />)}
-      {fld("طريقة الدفع", <input className="aseel-input" disabled={isReadOnly}
-        value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} />)}
-      {fld("مدة التسليم (يوم)", <input className="aseel-input" type="number" min="0" disabled={isReadOnly}
-        value={deliveryDays} onChange={(e) => setDeliveryDays(e.target.value)} />)}
+    <div className="grid grid-cols-1 gap-2 px-1 py-2 md:grid-cols-3">
+      <label className="aseel-field">
+        <span className="aseel-field-label">طريقة الشحن</span>
+        <input className="aseel-input" disabled={isReadOnly}
+          value={shippingMethod} onChange={(e) => setShippingMethod(e.target.value)} />
+      </label>
+      <label className="aseel-field">
+        <span className="aseel-field-label">طريقة الدفع</span>
+        <input className="aseel-input" disabled={isReadOnly}
+          value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)} />
+      </label>
+      <label className="aseel-field">
+        <span className="aseel-field-label">مدة التسليم (يوم)</span>
+        <input className="aseel-input" type="number" min="0" disabled={isReadOnly}
+          value={deliveryDays} onChange={(e) => setDeliveryDays(e.target.value)} />
+      </label>
+      {/* T-IMPOFFER: مبلغ الشحن المقدَّر — كان غائباً عن الشاشة كلياً. */}
+      <label className="aseel-field">
+        <span className="aseel-field-label">مبلغ الشحن المقدَّر</span>
+        <input className="aseel-input" type="number" min="0" step="0.01"
+          disabled={isReadOnly || shippingIncluded}
+          value={shippingCost} onChange={(e) => setShippingCost(e.target.value)} />
+      </label>
+      <label className="aseel-field aseel-field--inline">
+        <input type="checkbox" disabled={isReadOnly}
+          checked={shippingIncluded}
+          onChange={(e) => setShippingIncluded(e.target.checked)} />
+        <span className="aseel-field-label" style={{ flex: "unset" }}>
+          الأسعار تشمل الشحن
+        </span>
+      </label>
     </div>
   );
 
-  return (
-    <div dir="rtl">
-      <AseelDocumentShell
-        title="عرض سعر / طلبية"
-        state={`${STATUS_LABELS[status]} — ${OFFER_TYPES.find((t) => t.v === offerType)?.l ?? offerType}`}
-        actions={toolbarActions}
-        header={
-          <>
-            {fld("رقم العرض", <input className="aseel-input aseel-input--hl" disabled={isReadOnly}
-              value={offerNumber} onChange={(e) => setOfferNumber(e.target.value)} placeholder="تلقائي" />)}
-            {fld("التاريخ", <input className="aseel-input" type="date" disabled={isReadOnly}
-              value={offerDate} onChange={(e) => setOfferDate(e.target.value)} />)}
-            {fld("صالح حتى", <input className="aseel-input" type="date" disabled={isReadOnly}
-              value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />)}
-            {fld("نوع العرض", <select className="aseel-input" disabled={isReadOnly}
-              value={offerType} onChange={(e) => setOfferType(e.target.value as PriceOfferType)}>
-              {OFFER_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
-            </select>)}
-            {fld("المورد / الحساب", <select className="aseel-input" disabled={isReadOnly}
-              value={supplierId} onChange={(e) => {
-                setSupplierId(e.target.value);
-                const s = suppliers.find((x) => x.id === e.target.value);
-                if (s) setFactoryName(s.name);
-              }}>
-              <option value="">— اختر المورد —</option>
-              {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>)}
-            {fld("الاسم", <input className="aseel-input" readOnly value={selectedSupplier?.name ?? factoryName} />)}
-            {fld("العملة", <select className="aseel-input" disabled={isReadOnly}
-              value={currency} onChange={(e) => setCurrency(e.target.value)}>
-              <option value="USD">USD</option>
-              <option value="EUR">EUR</option>
-              <option value="ILS">ILS</option>
-            </select>)}
-            {fld("سعر العملة", <input className="aseel-input" type="number" min="0" step="0.001"
-              disabled={isReadOnly} value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />)}
-            {fld("الحالة", <select className="aseel-input" disabled={isReadOnly}
-              value={status} onChange={(e) => setStatus(e.target.value as PriceOfferStatus)}>
-              {Object.entries(STATUS_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>)}
-          </>
-        }
-        tabs={[
-          { key: "notes", label: "الملاحظات", content: notesTab },
-          { key: "shipping", label: "بيانات الشحن", content: shippingTab },
-        ]}
-        totals={
-          <>
-            <div className="aseel-total-row">
-              <span>مجموع البنود</span>
-              <span className="aseel-total-value">{fmt(subtotal)}</span>
-            </div>
-            <div className="aseel-total-row">
-              <span>الخصم</span>
-              <input className="aseel-input aseel-total-input" type="number" step="0.01" min="0"
-                disabled={isReadOnly} value={discountAmount}
-                onChange={(e) => setDiscountAmount(e.target.value)} />
-            </div>
-            <div className="aseel-total-row">
-              <span>بعد الخصم</span>
-              <span className="aseel-total-value">{fmt(afterDiscount)}</span>
-            </div>
-            <div className="aseel-total-row">
-              <span>نسبة الضريبة %</span>
-              <input className="aseel-input aseel-total-input" type="number" step="0.01" min="0"
-                disabled={isReadOnly} value={taxRate}
-                onChange={(e) => setTaxRate(e.target.value)} />
-            </div>
-            <div className="aseel-total-row">
-              <span>الضريبة</span>
-              <span className="aseel-total-value">{fmt(tax)}</span>
-            </div>
-            <div className="aseel-total-row aseel-total-row--grand">
-              <span>إجمالي العرض</span>
-              <span className="aseel-total-value">{fmt(grandTotal)} {currency}</span>
-            </div>
-          </>
-        }
-        status={
-          <>
-            <span className="aseel-status-item">عدد الأصناف <b>{lines.length}</b></span>
-            <span className="aseel-status-item">آخر مفتاح <b>{lastKey}</b></span>
-            {isReadOnly && <span className="aseel-status-item">للقراءة فقط</span>}
-          </>
-        }
-      >
-        {banner}
-        <AseelGrid<LineItem>
-          columns={gridColumns}
-          rows={lines}
-          getCell={gridGetCell}
-          getRowKey={(l) => l.key}
-          onChange={isReadOnly ? undefined : gridOnChange}
-          onAddRow={isReadOnly ? undefined : addLine}
-          emptyHint="لا توجد بنود — أضف صنفاً"
-        />
-        {!isReadOnly && (
-          <button type="button" className="aseel-addrow" onClick={addLine}>
-            <Plus className="h-3 w-3" /> إضافة سطر
-          </button>
-        )}
-      </AseelDocumentShell>
+  /** T-IMPOFFER: مصدر العرض — رابط علي بابا ورقم التواصل مع مندوب المورد. */
+  const sourceTab = (
+    <div className="grid grid-cols-1 gap-2 px-1 py-2 md:grid-cols-2">
+      <label className="aseel-field">
+        <span className="aseel-field-label">رابط علي بابا / المصدر</span>
+        <input className="aseel-input" dir="ltr" disabled={isReadOnly}
+          value={alibabaLink} onChange={(e) => setAlibabaLink(e.target.value)}
+          placeholder="https://www.alibaba.com/product-detail/…" />
+      </label>
+      <label className="aseel-field">
+        <span className="aseel-field-label">رقم التواصل مع المورد</span>
+        <input className="aseel-input" dir="ltr" disabled={isReadOnly}
+          value={supplierContact} onChange={(e) => setSupplierContact(e.target.value)}
+          placeholder="+86 138 0000 0000" />
+      </label>
+      {alibabaLink.trim() && (
+        <a className="aseel-hint flex items-center gap-1 hover:underline md:col-span-2"
+          href={alibabaLink.trim()} target="_blank" rel="noopener noreferrer">
+          <Link2 className="h-3.5 w-3.5" />
+          <span>افتح صفحة المنتج عند المورد</span>
+        </a>
+      )}
     </div>
+  );
+
+  /**
+   * T-IMPOFFER: ملفات عرض السعر. النقر على الملف يفتح معاينة **وسط الصفحة**
+   * (`FilePreviewModal`) بدل تبويب جديد كما في `AttachmentsSection`.
+   */
+  const attachmentsTab = (
+    <div className="space-y-2 px-1 py-2">
+      {!isReadOnly && (
+        <div>
+          <input id="price-offer-file" type="file" multiple className="hidden"
+            accept=".pdf,image/*"
+            disabled={uploading} onChange={(e) => void handleUpload(e)} />
+          <label htmlFor="price-offer-file"
+            className="flex h-20 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed border-[var(--color-border)] text-xs hover:bg-[var(--color-surface-2)]">
+            {uploading
+              ? <Loader2 className="h-5 w-5 animate-spin text-blue-500" />
+              : <Upload className="h-5 w-5 text-[var(--color-text-muted)]" />}
+            <span className="text-[var(--color-text-muted)]">
+              {uploading ? "جاري الرفع…" : "اضغط لرفع ملف عرض السعر (PDF أو صورة)"}
+            </span>
+          </label>
+        </div>
+      )}
+      {attachments.length === 0 ? (
+        <p className="aseel-hint text-center">لا توجد ملفات مرفوعة لهذا العرض</p>
+      ) : (
+        <ul className="space-y-1">
+          {attachments.map((file, index) => (
+            <li key={`${file.url}-${index}`}
+              className="flex items-center justify-between gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] px-2 py-1.5">
+              <button type="button"
+                className="flex min-w-0 flex-1 items-center gap-2 text-right text-xs font-semibold hover:text-blue-600"
+                onClick={() => setPreviewFile(file)}
+                title="عرض الملف في نافذة وسط الشاشة">
+                <FileText className="h-4 w-4 shrink-0 text-red-500" />
+                <span className="truncate">{file.name || file.url}</span>
+                {file.size ? (
+                  <span className="shrink-0 text-[10px] aseel-text-soft">
+                    {formatNumber(file.size / 1024, { maxDecimals: 1 })} KB
+                  </span>
+                ) : null}
+              </button>
+              {!isReadOnly && (
+                <button type="button" className="aseel-iconbtn aseel-iconbtn--danger"
+                  onClick={() => removeAttachment(index)} title="إزالة الملف">
+                  <Trash2 className="h-3 w-3" />
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+
+  /**
+   * T-IMPOFFER: حالة العرض وتفصيلها — تُقرأ داخل العرض لا في القائمة وحدها.
+   * T-OFFERSTATE: صارت «الحالة» لا «القرار»: الانتظار والمناقشة حالتان قبل أي
+   * قرار، و«بانتظار معلومات» تلزمها كتابة ما يُنتظَر كي يظهر في القائمة.
+   */
+  const needsDetail = STATUS_NEEDS_DETAIL.includes(status);
+  const decisionTab = (
+    <div className="space-y-2 px-1 py-2">
+      <p className="aseel-hint">
+        {status === "rejected"
+          ? "هذا العرض غير ملائم — سيظهر مشطوباً في القائمة."
+          : status === "approved_for_shipping"
+            ? "هذا العرض ملائم — يمكن تحويله إلى صفقة استيراد من قائمة العروض."
+            : status === "pending_info"
+              ? "العرض موقوف بانتظار معلومات — اكتب ما تنتظره ليظهر بجانب الحالة في القائمة."
+              : status === "under_discussion"
+                ? "العرض قيد المناقشة مع المورد — لم يُتَّخذ قرار بعد."
+                : "لم تُحدَّد حالة العرض بعد."}
+      </p>
+      <label className="aseel-field">
+        <span className="aseel-field-label">
+          {STATUS_DETAIL_LABEL[status] || "تفصيل الحالة"} {needsDetail ? "*" : ""}
+        </span>
+        <textarea className="aseel-input w-full" rows={4}
+          disabled={isReadOnly || !needsDetail}
+          value={decisionReason} onChange={(e) => setDecisionReason(e.target.value)}
+          placeholder={STATUS_DETAIL_PLACEHOLDER[status]
+            || "يُكتب عند «غير ملائم» أو «بانتظار معلومات»"} />
+      </label>
+    </div>
+  );
+
+  const statusLabels = scope === "import" ? IMPORT_STATUS_LABELS : STATUS_LABELS;
+
+  const headerFields: CommercialHeaderField[] = [
+    {
+      key: "number",
+      label: "رقم العرض",
+      control: <input className="aseel-input aseel-input--hl" disabled={isReadOnly}
+        value={offerNumber} onChange={(e) => setOfferNumber(e.target.value)} placeholder="تلقائي" />,
+    },
+    {
+      key: "orderName",
+      label: "اسم الطلبية",
+      control: <input className="aseel-input" disabled={isReadOnly}
+        value={orderName} onChange={(e) => setOrderName(e.target.value)}
+        maxLength={200} placeholder="مثال: طلبية أثاث مكتبي" />,
+    },
+    {
+      key: "orderDescription",
+      label: "وصف الطلبية",
+      control: <textarea className="aseel-input min-h-16 resize-y" disabled={isReadOnly}
+        value={orderDescription} onChange={(e) => setOrderDescription(e.target.value)}
+        placeholder="وصف مختصر يوضح محتوى الطلبية والغرض منها" />,
+    },
+    {
+      key: "date",
+      label: "التاريخ",
+      control: <input className="aseel-input" type="date" disabled={isReadOnly}
+        value={offerDate} onChange={(e) => setOfferDate(e.target.value)} />,
+    },
+    {
+      key: "validUntil",
+      label: "صالح حتى",
+      control: <input className="aseel-input" type="date" disabled={isReadOnly}
+        value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />,
+    },
+    {
+      key: "type",
+      label: "نوع العرض",
+      control: (
+        <select className="aseel-input" disabled={isReadOnly}
+          value={offerType} onChange={(e) => setOfferType(e.target.value as PriceOfferType)}>
+          {OFFER_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
+        </select>
+      ),
+    },
+    {
+      key: "party",
+      label: "المورد / الحساب",
+      control: (
+        <select className="aseel-input" disabled={isReadOnly}
+          value={supplierId} onChange={(e) => {
+            setSupplierId(e.target.value);
+            const supplier = suppliers.find((item) => item.id === e.target.value);
+            if (supplier) setFactoryName(supplier.tradeName);
+          }}>
+          <option value="">— اختر المورد —</option>
+          {suppliers.map((supplier) => (
+            <option key={supplier.id} value={supplier.id}>{supplier.tradeName}</option>
+          ))}
+        </select>
+      ),
+    },
+    {
+      key: "partyName",
+      label: "الاسم",
+      control: <input className="aseel-input" readOnly value={selectedSupplier?.tradeName ?? factoryName} />,
+    },
+    {
+      key: "currency",
+      label: "العملة",
+      control: (
+        <select className="aseel-input" disabled={isReadOnly}
+          value={currency} onChange={(e) => setCurrency(e.target.value)}>
+          <option value="USD">USD</option>
+          <option value="EUR">EUR</option>
+          <option value="ILS">ILS</option>
+        </select>
+      ),
+    },
+    {
+      key: "exchangeRate",
+      label: "سعر العملة",
+      control: <input className="aseel-input" type="number" min="0" step="0.001"
+        disabled={isReadOnly} value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />,
+    },
+    {
+      key: "status",
+      // T-OFFERSTATE: «الحالة» لا «القرار» — الانتظار والمناقشة حالتان قبل القرار.
+      label: "الحالة",
+      control: (
+        <select className="aseel-input" disabled={isReadOnly}
+          value={status} onChange={(e) => setStatus(e.target.value as PriceOfferStatus)}>
+          {Object.entries(statusLabels).map(([key, label]) => (
+            <option key={key} value={key}>{label}</option>
+          ))}
+        </select>
+      ),
+    },
+  ];
+
+  return (
+    <CommercialDocumentEditor<LineItem>
+      title={scope === "import" ? "عرض / طلبية استيراد" : "عرض سعر / طلبية شراء"}
+      state={`${statusLabels[status]} — ${OFFER_TYPES.find((t) => t.v === offerType)?.l ?? offerType}`}
+      actions={toolbarActions}
+      headerFields={headerFields}
+      lines={lines}
+      lineColumns={gridColumns}
+      getLineCell={gridGetCell}
+      getLineKey={(line) => line.key}
+      onLineChange={gridOnChange}
+      onAddLine={addLine}
+      readOnly={isReadOnly}
+      banner={banner}
+      tabs={[
+        { key: "notes", label: "الملاحظات", content: notesTab },
+        { key: "shipping", label: "بيانات الشحن", content: shippingTab },
+        { key: "source", label: "مصدر العرض", content: sourceTab },
+        {
+          key: "attachments",
+          label: attachments.length ? `الملفات (${attachments.length})` : "الملفات",
+          content: attachmentsTab,
+        },
+        { key: "decision", label: "الحالة", content: decisionTab },
+      ]}
+      totals={
+        <>
+          <div className="aseel-total-row">
+            <span>مجموع البنود</span>
+            <span className="aseel-total-value">{fmt(subtotal)}</span>
+          </div>
+          <div className="aseel-total-row">
+            <span>الخصم</span>
+            <input className="aseel-input aseel-total-input" type="number" step="0.01" min="0"
+              disabled={isReadOnly} value={discountAmount}
+              onChange={(e) => setDiscountAmount(e.target.value)} />
+          </div>
+          <div className="aseel-total-row">
+            <span>بعد الخصم</span>
+            <span className="aseel-total-value">{fmt(afterDiscount)}</span>
+          </div>
+          <div className="aseel-total-row">
+            <span>نسبة الضريبة %</span>
+            <input className="aseel-input aseel-total-input" type="number" step="0.01" min="0"
+          disabled={isReadOnly || scope === "import"} value={scope === "import" ? "0" : taxRate}
+              onChange={(e) => setTaxRate(e.target.value)} />
+          </div>
+          <div className="aseel-total-row">
+            <span>الضريبة</span>
+            <span className="aseel-total-value">{fmt(tax)}</span>
+          </div>
+          {/* T-IMPOFFER: الشحن ظاهر في الإجماليات لا مخفياً في تبويب. */}
+          <div className="aseel-total-row">
+            <span>{shippingIncluded ? "الشحن (مشمول بالأسعار)" : "الشحن المقدَّر"}</span>
+            <span className="aseel-total-value">{fmt(shipping)}</span>
+          </div>
+          <div className="aseel-total-row aseel-total-row--grand">
+            <span>إجمالي العرض</span>
+            <span className="aseel-total-value">{fmt(grandTotal)} {currency}</span>
+          </div>
+        </>
+      }
+      status={
+        <>
+          <span className="aseel-status-item">عدد الأصناف <b>{lines.length}</b></span>
+          <span className="aseel-status-item">آخر مفتاح <b>{lastKey}</b></span>
+          {isReadOnly && <span className="aseel-status-item">للقراءة فقط</span>}
+        </>
+      }
+      overlay={<>
+        <ItemSearchModal
+          isOpen={itemPickerLineKey !== null}
+          onClose={() => setItemPickerLineKey(null)}
+          items={availableItems}
+          supplierId={supplierId}
+          onItemCreated={(item) => {
+            setAvailableItems((prev) => prev.some((row) => row.id === item.id) ? prev : [...prev, item]);
+          }}
+          onSelectItem={(item, lastPrice) => {
+            if (!itemPickerLineKey) return;
+            fillLineWithItem(itemPickerLineKey, item, lastPrice);
+            setItemPickerLineKey(null);
+          }}
+        />
+        {/* النص الحر يُنشئ صنفاً فعلياً (Product) بدل سطر بلا itemId يُحذف عند الحفظ. */}
+        {inlineCreate && (
+          <ItemQuickCreateModal
+            isOpen
+            initialName={inlineCreate.name}
+            onClose={() => setInlineCreate(null)}
+            onSaved={(newProduct) => {
+              const item = productToItem(newProduct);
+              setAvailableItems((prev) => prev.some((row) => row.id === item.id) ? prev : [...prev, item]);
+              fillLineWithItem(inlineCreate.lineKey, item);
+              setInlineCreate(null);
+            }}
+          />
+        )}
+        {cardProductId != null && (
+          <ProductCardModal
+            productId={cardProductId}
+            onClose={() => setCardProductId(null)}
+          />
+        )}
+        <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+      </>}
+    />
   );
 };

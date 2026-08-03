@@ -129,13 +129,13 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" dir="rtl">
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden">
+      <div className="bg-[var(--color-surface)] rounded-xl shadow-xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden">
         {/* الرأس + مؤشّر الخطوات */}
-        <div className="px-5 py-4 border-b border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+        <div className="px-5 py-4 border-b border-[var(--color-border)] bg-[var(--color-surface-2)]">
           <div className="flex justify-between items-center mb-3">
-            <h3 className="font-bold text-gray-800 dark:text-gray-100">إنشاء أول صفقة استيراد</h3>
-            <button onClick={onClose} className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full" aria-label="إغلاق">
-              <X className="w-5 h-5 text-gray-500" />
+            <h3 className="font-bold text-[var(--color-text)]">إنشاء أول صفقة استيراد</h3>
+            <button onClick={onClose} className="p-1 hover:bg-[var(--color-surface-3)] rounded-full" aria-label="إغلاق">
+              <X className="w-5 h-5 text-[var(--color-text-muted)]" />
             </button>
           </div>
           <div className="flex items-center gap-2">
@@ -145,13 +145,13 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
               const done = step > s.n;
               return (
                 <React.Fragment key={s.n}>
-                  <div className={`flex items-center gap-1.5 text-xs font-medium ${active ? "text-blue-600" : done ? "text-emerald-600" : "text-gray-400"}`}>
-                    <span className={`w-6 h-6 rounded-full flex items-center justify-center border ${active ? "border-blue-500 bg-blue-50 dark:bg-blue-900/30" : done ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20" : "border-gray-300"}`}>
+                  <div className={`flex items-center gap-1.5 text-xs font-medium ${active ? "text-blue-600" : done ? "text-emerald-600" : "text-[var(--color-text-muted)]"}`}>
+                    <span className={`w-6 h-6 rounded-full flex items-center justify-center border ${active ? "border-blue-500 bg-blue-50 dark:bg-blue-900/30" : done ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-900/20" : "border-[var(--color-border)]"}`}>
                       {done ? <Check className="w-3.5 h-3.5" /> : <Icon className="w-3.5 h-3.5" />}
                     </span>
                     <span className="hidden sm:inline">{s.n}. {s.label}</span>
                   </div>
-                  {idx < steps.length - 1 && <div className={`flex-1 h-px ${done ? "bg-emerald-300" : "bg-gray-200 dark:bg-gray-700"}`} />}
+                  {idx < steps.length - 1 && <div className={`flex-1 h-px ${done ? "bg-emerald-300" : "bg-[var(--color-surface-3)]"}`} />}
                 </React.Fragment>
               );
             })}
@@ -164,16 +164,16 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
 
           {step === 1 && (
             <div className="space-y-3">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">اختر المورد <span className="text-red-500">*</span></label>
+              <label className="block text-sm font-medium text-[var(--color-text)]">اختر المورد <span className="text-red-500">*</span></label>
               <input
                 type="text" autoFocus value={supplierQuery}
                 onChange={(e) => setSupplierQuery(e.target.value)}
                 placeholder="ابحث عن مورد بالاسم…"
-                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-sm"
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] text-sm"
               />
-              <div className="border border-gray-200 dark:border-gray-700 rounded-lg max-h-64 overflow-y-auto divide-y divide-gray-100 dark:divide-gray-700">
+              <div className="border border-[var(--color-border)] rounded-lg max-h-64 overflow-y-auto divide-y divide-[var(--color-border)]">
                 {filteredSuppliers.length === 0 ? (
-                  <p className="p-3 text-sm text-gray-400 text-center">لا موردين مطابقين — أنشئ مورداً من شاشة الموردين أولاً.</p>
+                  <p className="p-3 text-sm text-[var(--color-text-muted)] text-center">لا موردين مطابقين — أنشئ مورداً من شاشة الموردين أولاً.</p>
                 ) : filteredSuppliers.map((s) => (
                   <button
                     key={s.id} type="button"
@@ -185,12 +185,12 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
                   </button>
                 ))}
               </div>
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 pt-1">وصف الصفقة (اختياري)</label>
+              <label className="block text-sm font-medium text-[var(--color-text)] pt-1">وصف الصفقة (اختياري)</label>
               <input
                 type="text" value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="مثال: طلبية ألواح شمسية"
-                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-sm"
+                className="w-full px-3 py-2 border rounded-lg dark:bg-gray-700 border-[var(--color-border)] text-sm"
               />
             </div>
           )}
@@ -200,7 +200,7 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
               <datalist id="wizard-products">
                 {products.map((p) => <option key={p.id} value={p.name} />)}
               </datalist>
-              <div className="grid grid-cols-[1fr_70px_90px_32px] gap-2 text-xs text-gray-500 font-medium px-1">
+              <div className="grid grid-cols-[1fr_70px_90px_32px] gap-2 text-xs text-[var(--color-text-muted)] font-medium px-1">
                 <span>اسم الصنف</span><span>الكمية</span><span>السعر</span><span />
               </div>
               {items.map((it) => (
@@ -209,17 +209,17 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
                     list="wizard-products" value={it.name}
                     onChange={(e) => onItemName(it.key, e.target.value)}
                     placeholder="اكتب أو اختر صنفاً"
-                    className="px-2 py-1.5 border rounded dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-sm"
+                    className="px-2 py-1.5 border rounded dark:bg-gray-700 border-[var(--color-border)] text-sm"
                   />
                   <input
                     type="number" min={0} value={it.quantity}
                     onChange={(e) => setItem(it.key, { quantity: Number(e.target.value) || 0 })}
-                    className="px-2 py-1.5 border rounded dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-sm text-center"
+                    className="px-2 py-1.5 border rounded dark:bg-gray-700 border-[var(--color-border)] text-sm text-center"
                   />
                   <input
                     type="number" min={0} value={it.unitPrice}
                     onChange={(e) => setItem(it.key, { unitPrice: Number(e.target.value) || 0 })}
-                    className="px-2 py-1.5 border rounded dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-sm text-center"
+                    className="px-2 py-1.5 border rounded dark:bg-gray-700 border-[var(--color-border)] text-sm text-center"
                   />
                   <button
                     type="button" onClick={() => setItems((prev) => prev.length > 1 ? prev.filter((x) => x.key !== it.key) : prev)}
@@ -235,22 +235,22 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
               >
                 <Plus className="w-4 h-4" /> إضافة سطر
               </button>
-              <p className="text-xs text-gray-400">الأصناف الجديدة (غير الموجودة) تُنشأ تلقائياً كمنتجات عند الإنشاء.</p>
+              <p className="text-xs text-[var(--color-text-muted)]">الأصناف الجديدة (غير الموجودة) تُنشأ تلقائياً كمنتجات عند الإنشاء.</p>
             </div>
           )}
 
           {step === 3 && (
             <div className="space-y-3">
-              <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3 text-sm space-y-1">
-                <div className="flex justify-between"><span className="text-gray-500">المورد</span><b>{selectedSupplier ? supplierLabel(selectedSupplier) : "—"}</b></div>
-                {description && <div className="flex justify-between"><span className="text-gray-500">الوصف</span><span>{description}</span></div>}
-                <div className="flex justify-between"><span className="text-gray-500">عدد البنود</span><b>{validItems.length}</b></div>
+              <div className="rounded-lg border border-[var(--color-border)] p-3 text-sm space-y-1">
+                <div className="flex justify-between"><span className="text-[var(--color-text-muted)]">المورد</span><b>{selectedSupplier ? supplierLabel(selectedSupplier) : "—"}</b></div>
+                {description && <div className="flex justify-between"><span className="text-[var(--color-text-muted)]">الوصف</span><span>{description}</span></div>}
+                <div className="flex justify-between"><span className="text-[var(--color-text-muted)]">عدد البنود</span><b>{validItems.length}</b></div>
               </div>
               <table className="w-full text-sm">
-                <thead><tr className="text-gray-500 text-xs text-right"><th className="py-1">الصنف</th><th>الكمية</th><th>السعر</th><th className="text-left">الإجمالي</th></tr></thead>
+                <thead><tr className="text-[var(--color-text-muted)] text-xs text-right"><th className="py-1">الصنف</th><th>الكمية</th><th>السعر</th><th className="text-left">الإجمالي</th></tr></thead>
                 <tbody>
                   {validItems.map((i) => (
-                    <tr key={i.key} className="border-t border-gray-100 dark:border-gray-700">
+                    <tr key={i.key} className="border-t border-[var(--color-border)]">
                       <td className="py-1.5">{i.name}</td>
                       <td>{formatMoney(i.quantity)}</td>
                       <td>{formatMoney(i.unitPrice)}</td>
@@ -259,7 +259,7 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
                   ))}
                 </tbody>
               </table>
-              <div className="flex justify-between items-center border-t border-gray-200 dark:border-gray-700 pt-2 font-bold">
+              <div className="flex justify-between items-center border-t border-[var(--color-border)] pt-2 font-bold">
                 <span>الإجمالي</span><span className="text-emerald-600">${formatMoney(total)}</span>
               </div>
             </div>
@@ -267,11 +267,11 @@ export const FirstDealWizard: React.FC<Props> = ({ isOpen, onClose, suppliers, o
         </div>
 
         {/* التذييل — تنقّل */}
-        <div className="px-5 py-4 border-t border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 flex justify-between items-center">
+        <div className="px-5 py-4 border-t border-[var(--color-border)] bg-[var(--color-surface-2)] flex justify-between items-center">
           <button
             type="button"
             onClick={() => (step === 1 ? onClose() : setStep((s) => (s - 1) as 1 | 2 | 3))}
-            className="px-4 py-2 border rounded-lg text-sm font-medium hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 flex items-center gap-1"
+            className="px-4 py-2 border rounded-lg text-sm font-medium hover:bg-[var(--color-surface-3)] text-[var(--color-text-muted)] flex items-center gap-1"
           >
             <ArrowRight className="w-4 h-4" /> {step === 1 ? "إلغاء" : "السابق"}
           </button>

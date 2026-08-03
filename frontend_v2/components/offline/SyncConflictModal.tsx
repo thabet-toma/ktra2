@@ -39,25 +39,25 @@ export default function SyncConflictModal({
       <div
         ref={dialogRef}
         tabIndex={-1}
-        className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col"
+        className="bg-[var(--color-surface)] rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col"
       >
         <div className="p-4 border-b">
-          <h2 id="conflict-title" className="text-lg font-bold text-gray-800">
+          <h2 id="conflict-title" className="text-lg font-bold text-[var(--color-text)]">
             تعارض في المزامنة — {modelName}
           </h2>
-          <p className="text-sm text-gray-500 mt-1">هناك نسختان مختلفتان. اختر الإجراء المناسب.</p>
+          <p className="text-sm text-[var(--color-text-muted)] mt-1">هناك نسختان مختلفتان. اختر الإجراء المناسب.</p>
         </div>
 
         <div className="flex-1 overflow-auto grid grid-cols-2 gap-0">
-          <div className="p-4 border-l border-gray-200 bg-gray-50">
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">تعديلك المحلي</h3>
-            <pre className="text-xs text-gray-600 whitespace-pre-wrap break-words max-h-60 overflow-auto">
+          <div className="p-4 border-l border-[var(--color-border)] bg-[var(--color-surface-2)]">
+            <h3 className="text-sm font-semibold text-[var(--color-text)] mb-2">تعديلك المحلي</h3>
+            <pre className="text-xs text-[var(--color-text-muted)] whitespace-pre-wrap break-words max-h-60 overflow-auto">
               {localData}
             </pre>
           </div>
           <div className="p-4">
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">الـ Server الحالي</h3>
-            <pre className="text-xs text-gray-600 whitespace-pre-wrap break-words max-h-60 overflow-auto">
+            <h3 className="text-sm font-semibold text-[var(--color-text)] mb-2">الـ Server الحالي</h3>
+            <pre className="text-xs text-[var(--color-text-muted)] whitespace-pre-wrap break-words max-h-60 overflow-auto">
               {serverData}
             </pre>
           </div>
@@ -67,7 +67,7 @@ export default function SyncConflictModal({
           <button
             type="button"
             onClick={() => onResolve('take_server')}
-            className="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+            className="px-4 py-2 rounded-lg border border-[var(--color-border)] text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
           >
             خذ نسخة الـ Server (تجاهل تعديلي)
           </button>

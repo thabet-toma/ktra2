@@ -1,6 +1,7 @@
 import React from 'react';
 import { Invoice, Item } from '../../types';
 import { FileText, Calendar, ArrowRight, Package } from 'lucide-react';
+import { formatDateValue } from "../../utils/formatDate";
 
 interface RelatedInvoicesProps {
   item: Item;
@@ -34,7 +35,7 @@ export const RelatedInvoices: React.FC<RelatedInvoicesProps> = ({ item, invoices
               <th className="px-6 py-4">الإجمالي</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-700/50">
+          <tbody className="divide-y divide-[var(--color-border)]">
             {invoices.map((inv, index) => {
               const invoiceItem = inv.items.find(i => i.itemId === item.id);
               return (
@@ -50,7 +51,7 @@ export const RelatedInvoices: React.FC<RelatedInvoicesProps> = ({ item, invoices
                   <td className="px-6 py-4 aseel-text-soft">
                     <div className="flex items-center gap-1">
                       <Calendar className="w-3 h-3" />
-                      {new Date(inv.createdAt).toLocaleDateString('en-GB')}
+                      {formatDateValue(inv.createdAt)}
                     </div>
                   </td>
                   <td className="px-6 py-4">

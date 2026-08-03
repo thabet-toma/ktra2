@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Search, X } from 'lucide-react';
 import { AppView } from '../../types';
+import { useCompany } from '../../contexts/CompanyContext';
 
 interface GlobalSearchProps {
   userRole: string;
@@ -17,6 +18,7 @@ const QUICK_LINKS: { label: string; view: AppView }[] = [
 ];
 
 export const GlobalSearch: React.FC<GlobalSearchProps> = ({ userRole, onNavigate }) => {
+  const { canAccessImport } = useCompany();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -45,7 +47,11 @@ export const GlobalSearch: React.FC<GlobalSearchProps> = ({ userRole, onNavigate
           <div className="p-2 border-b border-[var(--color-border)]">
             <span className="text-[var(--font-size-xs)] text-[var(--color-text-muted)]">روابط سريعة</span>
           </div>
-          {QUICK_LINKS.map(link => (
+          {QUICK_LINKS.filter(link => canAccessImport || ![
+            'deals-management',
+            'shipments-management',
+            'customs-clearance',
+          ].includes(link.view)).map(link => (
             <button
               key={link.view}
               onClick={() => { onNavigate(link.view); setOpen(false); }}

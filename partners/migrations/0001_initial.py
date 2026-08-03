@@ -33,7 +33,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'partners',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(
@@ -50,7 +50,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'partner_bank_accounts',
-                'managed': False,
+                'managed': True,
             },
         ),
         migrations.CreateModel(
@@ -62,7 +62,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 'db_table': 'partner_groups',
-                'managed': False,
+                'managed': True,
             },
         ),
     ]

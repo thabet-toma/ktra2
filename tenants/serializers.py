@@ -40,6 +40,8 @@ class TenantSettingsSerializer(serializers.ModelSerializer):
             "fiscal_period_label",
             "fiscal_period_start",
             "fiscal_period_end",
+            # دورة ملخص لوحة الأعمال
+            "dashboard_month_start_day",
             # حسابات افتراضية
             "default_freight_credit_account",
             # خيارات
@@ -48,6 +50,8 @@ class TenantSettingsSerializer(serializers.ModelSerializer):
             # تفضيل المظهر (per-company)
             "font_scale",
             "font_family",
+            # الجلسة (per-company)
+            "idle_timeout_minutes",
         ]
 
 
@@ -75,8 +79,8 @@ class TenantBookSerializer(serializers.ModelSerializer):
 class TenantSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tenant
-        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt", "import_enabled"]
-        read_only_fields = ["import_enabled"]
+        fields = ["TenantID", "CompanyName", "SubscriptionPlan", "Status", "CreatedAt", "import_enabled", "is_example"]
+        read_only_fields = ["import_enabled", "is_example"]
 
 
 class UserCompanyMembershipSerializer(serializers.ModelSerializer):

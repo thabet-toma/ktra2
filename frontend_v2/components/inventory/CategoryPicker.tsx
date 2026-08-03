@@ -114,10 +114,10 @@ export const CategoryPicker: React.FC<Props> = ({ value, onChange, className, di
 const CategoryManageModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" dir="rtl">
-      <div className="bg-white rounded shadow-xl w-full max-w-md flex flex-col" style={{ maxHeight: "80vh", height: "600px" }}>
-        <div className="flex items-center justify-between p-3 border-b bg-gray-50">
+      <div className="bg-[var(--color-surface)] rounded shadow-xl w-full max-w-md flex flex-col" style={{ maxHeight: "80vh", height: "600px" }}>
+        <div className="flex items-center justify-between p-3 border-b bg-[var(--color-surface-2)]">
           <h3 className="font-bold text-[var(--aseel-ink)]">إدارة التصنيفات (شجرة)</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X className="h-5 w-5" /></button>
+          <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)]"><X className="h-5 w-5" /></button>
         </div>
         <div className="p-0 overflow-hidden flex-1 flex flex-col">
           <InvoiceCategoryTree items={[]} onPickItem={()=>{}} disabled={false} manageMode />

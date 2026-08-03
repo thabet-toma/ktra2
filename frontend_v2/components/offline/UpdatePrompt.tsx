@@ -41,15 +41,12 @@ export default function UpdatePrompt() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50
-                 bg-white border border-blue-200 rounded-xl shadow-lg
-                 px-5 py-3 flex items-center gap-4 text-sm"
+      className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-[var(--color-surface)] border border-blue-200 rounded-xl shadow-lg px-5 py-3 flex items-center gap-4 text-sm"
     >
-      <span className="text-gray-700">توفّر تحديث للنظام</span>
+      <span className="text-[var(--color-text)]">توفّر تحديث للنظام</span>
       <button
         onClick={applyUpdate}
-        className="bg-blue-600 text-white px-4 py-1.5 rounded-lg
-                   hover:bg-blue-700 transition-colors text-sm font-medium"
+        className="bg-blue-600 text-white px-4 py-1.5 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
       >
         أعِد التحميل
       </button>

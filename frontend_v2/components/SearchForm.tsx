@@ -60,7 +60,7 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, activeTask, on
   }, []);
 
   return (
-    <div className="max-w-5xl mx-auto bg-white dark:bg-gray-800 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700 animate-fade-in overflow-hidden">
+    <div className="max-w-5xl mx-auto bg-[var(--color-surface)] rounded-2xl shadow-lg border border-[var(--color-border)] animate-fade-in overflow-hidden">
         {/* Active Task Banner */}
         {activeTask && (
             <div className="bg-blue-50 dark:bg-blue-900/30 p-4 border-b border-blue-100 dark:border-blue-800 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
@@ -78,13 +78,13 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, activeTask, on
           <div className="grid lg:grid-cols-2 gap-6 lg:gap-12 items-start">
             {/* Image Upload Area */}
             <div className="w-full">
-                <label className="block text-lg font-medium text-gray-700 dark:text-gray-300 mb-3">صورة المنتج</label>
+                <label className="block text-lg font-medium text-[var(--color-text)] mb-3">صورة المنتج</label>
                 <label
                     onDragEnter={handleDragEnter}
                     onDragLeave={handleDragLeave}
                     onDragOver={e => e.preventDefault()}
                     onDrop={handleDrop}
-                    className={`w-full aspect-video sm:aspect-square lg:aspect-[4/3] border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all duration-300 relative overflow-hidden group ${isDragging ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/30 hover:bg-gray-100 dark:hover:bg-gray-700/50'}`}
+                    className={`w-full aspect-video sm:aspect-square lg:aspect-[4/3] border-2 border-dashed rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all duration-300 relative overflow-hidden group ${isDragging ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30' : 'border-[var(--color-border)] bg-[var(--color-surface-2)] hover:bg-[var(--color-surface-3)]'}`}
                 >
                     <input type="file" className="hidden" accept="image/*" onChange={(e) => handleFileChange(e.target.files)} />
                     
@@ -97,9 +97,9 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, activeTask, on
                     </>
                     ) : (
                     <div className="text-center p-6">
-                        <UploadIcon className="mx-auto h-12 w-12 text-gray-400 mb-3" />
-                        <p className="text-gray-600 dark:text-gray-300 font-medium">اضغط لرفع صورة</p>
-                        <p className="text-sm text-gray-400 mt-1">أو اسحب الصورة هنا</p>
+                        <UploadIcon className="mx-auto h-12 w-12 text-[var(--color-text-muted)] mb-3" />
+                        <p className="text-[var(--color-text-muted)] font-medium">اضغط لرفع صورة</p>
+                        <p className="text-sm text-[var(--color-text-muted)] mt-1">أو اسحب الصورة هنا</p>
                     </div>
                     )}
                 </label>
@@ -108,31 +108,31 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, activeTask, on
             {/* Form Fields */}
             <form onSubmit={handleSubmit} className="space-y-6 flex flex-col h-full justify-center">
                 <div>
-                    <label htmlFor="description" className="block text-lg font-medium text-gray-700 dark:text-gray-300 mb-2">وصف المنتج</label>
+                    <label htmlFor="description" className="block text-lg font-medium text-[var(--color-text)] mb-2">وصف المنتج</label>
                     <textarea
                         id="description"
                         value={description}
                         onChange={(e) => setDescription(e.target.value)}
-                        className="w-full p-4 text-base bg-gray-50 dark:bg-gray-700 rounded-xl border-2 border-gray-200 dark:border-gray-600 focus:border-blue-500 focus:ring-0 transition-colors min-h-[120px]"
+                        className="w-full p-4 text-base bg-[var(--color-surface-2)] rounded-xl border-2 border-[var(--color-border)] focus:border-blue-500 focus:ring-0 transition-colors min-h-[120px]"
                         placeholder="صف المنتج بدقة (اللون، المادة، الاستخدام...)"
                         rows={4}
                     />
                 </div>
             
                 <div>
-                    <label htmlFor="targetPrice" className="block text-lg font-medium text-gray-700 dark:text-gray-300 mb-2">السعر المستهدف ($)</label>
+                    <label htmlFor="targetPrice" className="block text-lg font-medium text-[var(--color-text)] mb-2">السعر المستهدف ($)</label>
                     <div className="relative">
                         <input
                             type="number"
                             id="targetPrice"
                             value={targetPrice}
                             onChange={(e) => setTargetPrice(e.target.value)}
-                            className="w-full p-4 pl-12 text-base bg-gray-50 dark:bg-gray-700 rounded-xl border-2 border-gray-200 dark:border-gray-600 focus:border-blue-500 focus:ring-0 transition-colors"
+                            className="w-full p-4 pl-12 text-base bg-[var(--color-surface-2)] rounded-xl border-2 border-[var(--color-border)] focus:border-blue-500 focus:ring-0 transition-colors"
                             placeholder="0.00"
                             min="0"
                             step="0.01"
                         />
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] font-bold">$</span>
                     </div>
                 </div>
 
@@ -141,7 +141,7 @@ export const SearchForm: React.FC<SearchFormProps> = ({ onSearch, activeTask, on
                         <button
                             type="button"
                             onClick={onBackToDashboard}
-                            className="flex-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-bold py-3 px-6 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors"
+                            className="flex-1 bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold py-3 px-6 rounded-xl hover:bg-[var(--color-surface-3)] transition-colors"
                         >
                             تأجيل
                         </button>

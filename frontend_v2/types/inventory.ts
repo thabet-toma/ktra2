@@ -22,7 +22,11 @@ export interface SqlProduct {
   hs_code?: string | null;
   min_stock_level?: number | null;
   quantity_on_hand: number;
+  reserved_quantity?: number | string;
+  available_quantity?: number | string;
   avg_cost: number;
+  /** سعر البيع الافتراضي المحفوظ على الصنف (فارغ = يتبع آخر سعر بيع فعلي). */
+  sale_price?: string | number | null;
   /** W8: الوارد التراكمي (كل حركات IN) — من StockMovement. */
   purchased_qty?: string | null;
   /** W8: متوسط المبيعات الشهري = صافي (OUT−RETURN_IN) 90ي ÷ 3. */

@@ -4,8 +4,9 @@
  * owner's «فواتير الشراء» screenshot, so M0 can be visually + behaviourally
  * verified WITHOUT touching any backend or real screen.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { formatMoney } from '../../utils/formatNumber';
+import { getSkin } from '../../styles/skin';
 import {
   Plus,
   Save,
@@ -72,6 +73,7 @@ const fld = (label: string, node: React.ReactNode) => (
 );
 
 export const AseelKitStory: React.FC = () => {
+  const [skin, setSkin] = useState(() => getSkin());
   const [currentId, setCurrentId] = useState<number | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [lastKey, setLastKey] = useState('—');
@@ -79,6 +81,12 @@ export const AseelKitStory: React.FC = () => {
   const [lines, setLines] = useState<DemoLine[]>([
     { sku: '', name: '', unit: 'عدد', qty: '1', price: '0' },
   ]);
+
+  useEffect(() => {
+    const handleSkinChange = () => setSkin(getSkin());
+    window.addEventListener('ktra:skin', handleSkinChange);
+    return () => window.removeEventListener('ktra:skin', handleSkinChange);
+  }, []);
 
   const nav = useRecordNavigation<DemoInvoice>({
     items: DEMO_INVOICES,
@@ -140,7 +148,7 @@ export const AseelKitStory: React.FC = () => {
   const cur = DEMO_INVOICES.find((i) => i.id === currentId);
 
   return (
-    <div style={{ height: 'calc(100vh - 7rem)' }}>
+    <div data-skin={skin} style={{ height: 'calc(100vh - 7rem)' }}>
       <AseelDocumentShell
         title="فواتير الشراء"
         state={cur ? `فاتورة ${cur.number}` : 'فاتورة جديدة'}
@@ -307,7 +315,7 @@ const DateInputStoryPanel: React.FC = () => {
   return (
     <div className="mt-4">
       <h4 className="font-bold mb-2">AseelDateInput — حقل تاريخ مع تقويم سنوي</h4>
-      <p className="text-xs text-gray-500 mb-2">
+      <p className="text-xs text-[var(--color-text-muted)] mb-2">
         داخل الحقل: * يَزيد يوم · - يَنقص يوم · + يَزيد شهر · double-click يَفتح التقويم السنوي.
       </p>
       <div className="flex gap-3 items-center">
@@ -330,10 +338,10 @@ const DocumentViewStoryPanel: React.FC = () => {
   return (
     <div className="mt-4">
       <h4 className="font-bold mb-2">AseelDocumentView — عرض مستندي للقراءة</h4>
-      <p className="text-xs text-gray-500 mb-2">
+      <p className="text-xs text-[var(--color-text-muted)] mb-2">
         يفتح المستند على هذا العرض، و«تحرير» في شريط الأدوات يفتح نموذج التحرير.
       </p>
-      <div className="border rounded-xl overflow-hidden bg-slate-50">
+      <div className="border rounded-xl overflow-hidden bg-[var(--color-surface-2)]">
         <AseelDocumentView<StoryLine>
           title="فاتورة مبيعات"
           subtitle="SALES INVOICE"

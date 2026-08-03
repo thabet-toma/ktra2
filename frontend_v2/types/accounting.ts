@@ -2,6 +2,8 @@ export interface AccountingLinkedPartner {
   id: number;
   trade_name: string;
   legal_name: string | null;
+  /** T-COAMENU: يقود إجراءات كبسة اليمين (عميل ⇒ بيع، مورد ⇒ شراء). */
+  partner_type?: string;
 }
 
 export interface AccountingAccount {
@@ -54,6 +56,8 @@ export interface ChequeDto {
   id: number;
   cheque_number: string;
   bank_name?: string | null;
+  account_number?: string | null;
+  bank_branch?: string | null;
   amount: string;
   due_date?: string | null;
   issue_date?: string | null;

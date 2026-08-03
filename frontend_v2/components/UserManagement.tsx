@@ -10,8 +10,6 @@ import {
   activityService,
 } from "../services/firestoreService";
 import { Filter, UserCheck, Briefcase, Activity } from 'lucide-react'; // استيراد أيقونات الفلاتر
-import { useCompany } from "../contexts/CompanyContext";
-import { apiGetObject } from "../services/restApi";
 
 // إضافة نوع لحالة التوظيف للاستخدام المحلي
 type EmploymentStatus = "probation" | "permanent" | "intern";
@@ -50,7 +48,7 @@ const getEmploymentStatusColor = (
     case "intern":
       return "bg-blue-100 text-blue-800";
     default:
-      return "bg-gray-100 text-gray-800";
+      return "bg-[var(--color-surface-3)] text-[var(--color-text)]";
   }
 };
 
@@ -100,7 +98,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   onUpdateUser,
   onDeleteUser,
 }) => {
-  const { currentCompany } = useCompany();
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -113,28 +110,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   const [roleFilter, setRoleFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [activityFilter, setActivityFilter] = useState<string>('all');
-
-  const [companyMemberEmails, setCompanyMemberEmails] = useState<Set<string>>(new Set());
-  const [membersLoaded, setMembersLoaded] = useState(false);
-
-  useEffect(() => {
-    if (!currentCompany) {
-      setCompanyMemberEmails(new Set());
-      setMembersLoaded(true);
-      return;
-    }
-    setMembersLoaded(false);
-    apiGetObject<any[]>(`tenants/companies/${currentCompany.TenantID}/members/`)
-      .then((members) => {
-        const emails = new Set(members.map((m) => m.email?.toLowerCase()).filter(Boolean));
-        setCompanyMemberEmails(emails);
-        setMembersLoaded(true);
-      })
-      .catch((e) => {
-        console.error("Failed to fetch company members for user management", e);
-        setMembersLoaded(true);
-      });
-  }, [currentCompany]);
 
   // دالة لتحميل جميع بيانات النشاط للموظفين (لم تتغير)
   const loadAllActivityStatuses = async (): Promise<void> => {
@@ -206,17 +181,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   // دالة الفلترة الرئيسية
   const filteredUsers = useMemo(() => {
-    if (!membersLoaded) return []; // تجنب عرض كل المستخدمين أثناء جلب أعضاء الشركة
     return users.filter(user => {
-      // فلتر الشركة: حصر المستخدمين بأعضاء الشركة الحالية
-      if (currentCompany && user.email) {
-        if (!companyMemberEmails.has(user.email.toLowerCase())) {
-          return false;
-        }
-      } else if (currentCompany && !user.email && companyMemberEmails.size > 0) {
-        return false;
-      }
-
       // فلتر الدور
       if (roleFilter !== 'all' && user.role !== roleFilter) {
         return false;
@@ -317,11 +282,11 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   if (loading) {
     return (
       <div className="animate-fade-in">
-        <h1 className="text-3xl font-bold mb-6 text-gray-800 dark:text-gray-100">
+        <h1 className="text-3xl font-bold mb-6 text-[var(--color-text)]">
           إدارة المستخدمين
         </h1>
         <div className="flex items-center justify-center h-64">
-          <div className="text-lg text-gray-500">
+          <div className="text-lg text-[var(--color-text-muted)]">
             جاري تحميل بيانات النشاط...
           </div>
         </div>
@@ -332,7 +297,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
   return (
     <div className="animate-fade-in">
       <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-100">
+        <h1 className="text-3xl font-bold text-[var(--color-text)]">
           إدارة المستخدمين
         </h1>
         <button
@@ -358,15 +323,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       </div>
 
       {/* منطقة الفلاتر */}
-      <div className="mb-6 p-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-        <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 mb-3 flex items-center gap-2">
+      <div className="mb-6 p-4 bg-[var(--color-surface)] rounded-xl shadow-sm border border-[var(--color-border)]">
+        <h3 className="text-lg font-bold text-[var(--color-text)] mb-3 flex items-center gap-2">
             <Filter className="w-5 h-5 text-blue-500" />
             تصفية المستخدمين
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* فلتر الدور */}
             <div>
-                <label htmlFor="roleFilter" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-1">
+                <label htmlFor="roleFilter" className="block text-sm font-medium text-[var(--color-text)] mb-1 flex items-center gap-1">
                     <Briefcase className="w-4 h-4" />
                     الدور
                 </label>
@@ -374,7 +339,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     id="roleFilter"
                     value={roleFilter}
                     onChange={(e) => setRoleFilter(e.target.value)}
-                    className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-200"
+                    className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]"
                 >
                     <option value="all">الكل</option>
                     <option value="manager">مدير</option>
@@ -385,7 +350,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
             
             {/* فلتر الحالة الوظيفية */}
             <div>
-                <label htmlFor="statusFilter" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-1">
+                <label htmlFor="statusFilter" className="block text-sm font-medium text-[var(--color-text)] mb-1 flex items-center gap-1">
                     <UserCheck className="w-4 h-4" />
                     الحالة الوظيفية
                 </label>
@@ -393,7 +358,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     id="statusFilter"
                     value={statusFilter}
                     onChange={(e) => setStatusFilter(e.target.value)}
-                    className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-200"
+                    className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]"
                 >
                     <option value="all">الكل</option>
                     <option value="permanent">موظف ثابت</option>
@@ -405,7 +370,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
             
             {/* فلتر حالة النشاط */}
             <div>
-                <label htmlFor="activityFilter" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-1">
+                <label htmlFor="activityFilter" className="block text-sm font-medium text-[var(--color-text)] mb-1 flex items-center gap-1">
                     <Activity className="w-4 h-4" />
                     حالة النشاط
                 </label>
@@ -413,7 +378,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     id="activityFilter"
                     value={activityFilter}
                     onChange={(e) => setActivityFilter(e.target.value)}
-                    className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-200"
+                    className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]"
                 >
                     <option value="all">الكل</option>
                     <option value="active">نشط حالياً</option>
@@ -427,32 +392,32 @@ export const UserManagement: React.FC<UserManagementProps> = ({
       {/* نهاية منطقة الفلاتر */}
 
 
-      <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-md border border-gray-200 dark:border-gray-700 overflow-hidden">
+      <div className="bg-[var(--color-surface)] rounded-2xl shadow-md border border-[var(--color-border)] overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-right min-w-max">
-            <thead className="bg-gray-50 dark:bg-gray-700/50">
+            <thead className="bg-[var(--color-surface-2)]">
               <tr>
-                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">
+                <th className="p-4 font-semibold text-[var(--color-text-muted)]">
                   الاسم
                 </th>
-                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">
+                <th className="p-4 font-semibold text-[var(--color-text-muted)]">
                   الملاحظات الإدارية
                 </th>
-                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">
+                <th className="p-4 font-semibold text-[var(--color-text-muted)]">
                   العنوان
                 </th>
-                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">
+                <th className="p-4 font-semibold text-[var(--color-text-muted)]">
                   الدور
                 </th>
-                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">
+                <th className="p-4 font-semibold text-[var(--color-text-muted)]">
                   الحالة الوظيفية
                 </th>
-                <th className="p-4 font-semibold text-gray-600 dark:text-gray-300">
+                <th className="p-4 font-semibold text-[var(--color-text-muted)]">
                   إجراءات
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+            <tbody className="divide-y divide-[var(--color-border)]">
               {filteredUsers.map((user) => { // استخدام filteredUsers
                 const userActivityStatus = activityStatuses[user.id];
                 const isActive = calculateIsActive(userActivityStatus);
@@ -471,9 +436,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     key={user.id}
                     // إضافة النقر على الصف لفتح التفاصيل
                     onClick={(e) => handleRowClick(user, e)} 
-                    className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors cursor-pointer"
+                    className="hover:bg-[var(--color-surface-2)] transition-colors cursor-pointer"
                   >
-                    <td className="p-4 font-medium text-gray-800 dark:text-gray-100">
+                    <td className="p-4 font-medium text-[var(--color-text)]">
                       {/* النقطة بجانب الاسم */}
                       <div className="flex items-center gap-2">
                         <span
@@ -487,15 +452,15 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     </td>
                     
                     <td
-                      className="p-4 text-gray-600 dark:text-gray-300 max-w-xs truncate"
+                      className="p-4 text-[var(--color-text-muted)] max-w-xs truncate"
                       title={user.notes}
                     >
                       {user.notes || "لا يوجد"}
                     </td>
-                    <td className="p-4 text-gray-600 dark:text-gray-300">
+                    <td className="p-4 text-[var(--color-text-muted)]">
                       {user.address || "غير متوفر"}
                     </td>
-                    <td className="p-4 text-gray-600 dark:text-gray-300">
+                    <td className="p-4 text-[var(--color-text-muted)]">
                       {user.role === "manager" ? (
                         <span className="bg-[var(--color-surface-2)] text-[var(--color-primary)] px-2 py-1 rounded text-xs">
                           مدير
@@ -505,7 +470,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                           مشتريات
                         </span>
                       ) : (
-                        <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs">
+                        <span className="bg-[var(--color-surface-3)] text-[var(--color-text)] px-2 py-1 rounded text-xs">
                           موظف
                         </span>
                       )}
@@ -536,7 +501,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
                         <button
                           onClick={() => handleEditClick(user)}
-                          className="text-gray-500 hover:text-blue-700 p-1"
+                          className="text-[var(--color-text-muted)] hover:text-blue-700 p-1"
                           title="تعديل"
                         >
                           <EditIcon className="h-5 w-5" />

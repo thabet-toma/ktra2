@@ -15,14 +15,14 @@ interface TermsProps {
 
 const TermsAndShippingCard: React.FC<TermsProps> = ({ data, onUpdate, readOnly }) => {
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden h-full">
+    <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] overflow-hidden h-full">
       {/* Header */}
       <div className="p-3 bg-gradient-to-r from-blue-50 to-[var(--color-primary)] dark:from-blue-900/20 dark:to-[var(--color-primary)]/20 border-b">
         <div className="flex items-center gap-2">
           <div className="p-1.5 bg-blue-500 rounded-lg">
             <Truck className="w-4 h-4 text-white" />
           </div>
-          <h3 className="font-semibold text-gray-900 dark:text-white text-sm">الشروط والشحن</h3>
+          <h3 className="font-semibold text-[var(--color-text)] text-sm">الشروط والشحن</h3>
         </div>
       </div>
 
@@ -31,24 +31,24 @@ const TermsAndShippingCard: React.FC<TermsProps> = ({ data, onUpdate, readOnly }
         {/* حقول الأيام */}
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
-            <label className="text-xs text-gray-600 dark:text-gray-400">الإنتاج (يوم)</label>
+            <label className="text-xs text-[var(--color-text-muted)]">الإنتاج (يوم)</label>
             <input
               type="number" min="0"
               value={data.productionDays || ''}
               onChange={e => onUpdate('productionDays', parseFloat(e.target.value))}
               disabled={readOnly}
-              className="w-full h-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+              className="w-full h-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
               placeholder="0"
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-gray-600 dark:text-gray-400">التوصيل (يوم)</label>
+            <label className="text-xs text-[var(--color-text-muted)]">التوصيل (يوم)</label>
             <input
               type="number" min="0"
               value={data.deliveryDays || ''}
               onChange={e => onUpdate('deliveryDays', parseFloat(e.target.value))}
               disabled={readOnly}
-              className="w-full h-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+              className="w-full h-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
               placeholder="0"
             />
           </div>
@@ -56,57 +56,57 @@ const TermsAndShippingCard: React.FC<TermsProps> = ({ data, onUpdate, readOnly }
 
         {/* طريقة الدفع والشحن */}
         <div className="space-y-1">
-          <label className="text-xs text-gray-600 dark:text-gray-400">طريقة الدفع</label>
+          <label className="text-xs text-[var(--color-text-muted)]">طريقة الدفع</label>
           <input
             type="text"
             value={data.paymentMethod || ''}
             onChange={e => onUpdate('paymentMethod', e.target.value)}
             disabled={readOnly}
-            className="w-full h-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+            className="w-full h-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
             placeholder="T/T 30%"
           />
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
-            <label className="text-xs text-gray-600 dark:text-gray-400">طريقة الشحن</label>
+            <label className="text-xs text-[var(--color-text-muted)]">طريقة الشحن</label>
             <select
               value={data.shippingMethod || ''}
               onChange={e => onUpdate('shippingMethod', e.target.value)}
               disabled={readOnly}
-              className="w-full h-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+              className="w-full h-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
             >
               <option value="">اختر...</option>
               {SHIPPING_TERMS.map(t => <option key={t.code} value={t.code}>{t.code}</option>)}
             </select>
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-gray-600 dark:text-gray-400">ضمان (سنة)</label>
+            <label className="text-xs text-[var(--color-text-muted)]">ضمان (سنة)</label>
             <input
               type="number" min="0" step="0.5"
               value={data.warrantyDuration || ''}
               onChange={e => onUpdate('warrantyDuration', parseFloat(e.target.value))}
               disabled={readOnly}
-              className="w-full h-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+              className="w-full h-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
             />
           </div>
         </div>
 
         <div className="space-y-1">
-          <label className="text-xs text-gray-600 dark:text-gray-400">شهادات</label>
+          <label className="text-xs text-[var(--color-text-muted)]">شهادات</label>
           <input
             type="text"
             value={data.certificates || ''}
             onChange={e => onUpdate('certificates', e.target.value)}
             disabled={readOnly}
             placeholder="CE, ISO"
-            className="w-full h-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+            className="w-full h-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
           />
         </div>
 
         {/* تكلفة الشحن */}
-        <div className="p-2 bg-gray-50 dark:bg-gray-900/50 rounded-lg border">
+        <div className="p-2 bg-[var(--color-surface-2)] rounded-lg border">
           <div className="flex items-center justify-between mb-1">
-            <label className="text-xs font-medium text-gray-700 dark:text-gray-300">تكلفة الشحن</label>
+            <label className="text-xs font-medium text-[var(--color-text)]">تكلفة الشحن</label>
             <label className="flex items-center gap-1 cursor-pointer">
               <input
                 type="checkbox"
@@ -118,11 +118,11 @@ const TermsAndShippingCard: React.FC<TermsProps> = ({ data, onUpdate, readOnly }
                 disabled={readOnly}
                 className="w-3 h-3"
               />
-              <span className="text-xs text-gray-600 dark:text-gray-400">متضمن</span>
+              <span className="text-xs text-[var(--color-text-muted)]">متضمن</span>
             </label>
           </div>
           <div className="relative">
-            <span className="w-3 h-3 text-gray-500 absolute right-2 top-2.5 flex items-center justify-center font-bold text-xs">
+            <span className="w-3 h-3 text-[var(--color-text-muted)] absolute right-2 top-2.5 flex items-center justify-center font-bold text-xs">
               {data.currency === 'ILS' ? '₪' : '$'}
             </span>
             <input
@@ -131,8 +131,8 @@ const TermsAndShippingCard: React.FC<TermsProps> = ({ data, onUpdate, readOnly }
               onChange={e => onUpdate('shippingCost', parseFloat(e.target.value) || 0)}
               disabled={readOnly || data.shippingIncluded}
               className={`w-full h-8 pl-8 pr-2 text-sm border rounded-lg ${data.shippingIncluded
-                ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700'
-                : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600'
+                ? 'bg-[var(--color-surface-3)] text-[var(--color-text-muted)] border-[var(--color-border)]'
+                : 'bg-[var(--color-surface)] border-[var(--color-border)]'
                 }`}
               placeholder={data.shippingIncluded ? "0.00 (متضمن)" : "0.00"}
             />
@@ -142,23 +142,23 @@ const TermsAndShippingCard: React.FC<TermsProps> = ({ data, onUpdate, readOnly }
         {/* الوزن والحجم */}
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
-            <label className="text-xs text-gray-600 dark:text-gray-400">الوزن (kg)</label>
+            <label className="text-xs text-[var(--color-text-muted)]">الوزن (kg)</label>
             <input
               type="number"
               value={data.totalWeight || 0}
               onChange={e => onUpdate('totalWeight', parseFloat(e.target.value))}
               disabled={readOnly}
-              className="w-full h-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+              className="w-full h-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
             />
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-gray-600 dark:text-gray-400">الحجم (CBM)</label>
+            <label className="text-xs text-[var(--color-text-muted)]">الحجم (CBM)</label>
             <input
               type="number"
               value={data.totalVolume || 0}
               onChange={e => onUpdate('totalVolume', parseFloat(e.target.value))}
               disabled={readOnly}
-              className="w-full h-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+              className="w-full h-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
             />
           </div>
         </div>
@@ -167,7 +167,7 @@ const TermsAndShippingCard: React.FC<TermsProps> = ({ data, onUpdate, readOnly }
         <textarea
           value={data.shipmentNotes || ''}
           onChange={e => onUpdate('shipmentNotes', e.target.value)}
-          className="w-full p-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-900/50 resize-none"
+          className="w-full p-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] resize-none"
           rows={2}
           placeholder="ملاحظات شحن..."
           disabled={readOnly}
@@ -207,21 +207,21 @@ const LocalPaymentsCard: React.FC<LocalPaymentsCardProps> = ({
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden h-full">
+    <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] overflow-hidden h-full">
       <div className="p-3 bg-gradient-to-r from-[var(--color-primary)] to-[var(--color-primary)] dark:from-[var(--color-primary)]/20 dark:to-[var(--color-primary)]/20 border-b">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="p-1.5 bg-[var(--color-primary)] rounded-lg">
               <CreditCard className="w-4 h-4 text-white" />
             </div>
-            <h3 className="font-semibold text-gray-900 dark:text-white text-sm">المدفوعات المحلية</h3>
+            <h3 className="font-semibold text-[var(--color-text)] text-sm">المدفوعات المحلية</h3>
           </div>
           <button
             onClick={() => !readOnly && handleUpdate('includedInPrice', !data.includedInPrice)}
             disabled={readOnly}
             className={`text-xs px-2 py-1 rounded-full transition-colors ${data.includedInPrice
               ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
-              : 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+              : 'bg-[var(--color-surface-3)] text-[var(--color-text)]'
               }`}
           >
             {data.includedInPrice ? 'مشمولة' : 'غير مشمولة'}
@@ -232,13 +232,13 @@ const LocalPaymentsCard: React.FC<LocalPaymentsCardProps> = ({
       <div className="p-3 space-y-3">
         {!data.includedInPrice && (
           <>
-            <div className="flex gap-1 p-1 bg-gray-100 dark:bg-gray-700/50 rounded-lg">
+            <div className="flex gap-1 p-1 bg-[var(--color-surface-3)] rounded-lg">
               <button
                 onClick={() => handleUpdate('calculationMethod', 'detailed')}
                 disabled={readOnly}
                 className={`flex-1 py-1.5 text-xs rounded transition-colors ${data.calculationMethod === 'detailed'
-                  ? 'bg-white dark:bg-gray-600 text-[var(--color-primary)] dark:text-[var(--color-primary)] font-medium'
-                  : 'text-gray-600 dark:text-gray-400'
+                  ? 'bg-[var(--color-surface)] text-[var(--color-primary)] dark:text-[var(--color-primary)] font-medium'
+                  : 'text-[var(--color-text-muted)]'
                   }`}
               >
                 تفصيلي
@@ -247,8 +247,8 @@ const LocalPaymentsCard: React.FC<LocalPaymentsCardProps> = ({
                 onClick={() => handleUpdate('calculationMethod', 'lump_sum')}
                 disabled={readOnly}
                 className={`flex-1 py-1.5 text-xs rounded transition-colors ${data.calculationMethod === 'lump_sum'
-                  ? 'bg-white dark:bg-gray-600 text-[var(--color-primary)] dark:text-[var(--color-primary)] font-medium'
-                  : 'text-gray-600 dark:text-gray-400'
+                  ? 'bg-[var(--color-surface)] text-[var(--color-primary)] dark:text-[var(--color-primary)] font-medium'
+                  : 'text-[var(--color-text-muted)]'
                   }`}
               >
                 مبلغ شامل
@@ -258,63 +258,63 @@ const LocalPaymentsCard: React.FC<LocalPaymentsCardProps> = ({
             {data.calculationMethod === 'detailed' ? (
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-xs text-gray-600 dark:text-gray-400 block mb-1">مخلص جمركي</label>
+                  <label className="text-xs text-[var(--color-text-muted)] block mb-1">مخلص جمركي</label>
                   <input
                     type="number"
                     value={data.customsClearanceFees || ''}
                     onChange={(e) => handleUpdate('customsClearanceFees', parseFloat(e.target.value) || 0)}
                     disabled={readOnly}
-                    className="w-full h-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                    className="w-full h-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
                     placeholder="0.00"
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-600 dark:text-gray-400 block mb-1">جمارك</label>
+                  <label className="text-xs text-[var(--color-text-muted)] block mb-1">جمارك</label>
                   <input
                     type="number"
                     value={data.customsDuties || ''}
                     onChange={(e) => handleUpdate('customsDuties', parseFloat(e.target.value) || 0)}
                     disabled={readOnly}
-                    className="w-full h-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                    className="w-full h-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
                     placeholder="0.00"
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-600 dark:text-gray-400 block mb-1">رسوم ميناء</label>
+                  <label className="text-xs text-[var(--color-text-muted)] block mb-1">رسوم ميناء</label>
                   <input
                     type="number"
                     value={data.portFees || ''}
                     onChange={(e) => handleUpdate('portFees', parseFloat(e.target.value) || 0)}
                     disabled={readOnly}
-                    className="w-full h-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                    className="w-full h-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
                     placeholder="0.00"
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-gray-600 dark:text-gray-400 block mb-1">شحن داخلي</label>
+                  <label className="text-xs text-[var(--color-text-muted)] block mb-1">شحن داخلي</label>
                   <input
                     type="number"
                     value={data.internalShippingFees || ''}
                     onChange={(e) => handleUpdate('internalShippingFees', parseFloat(e.target.value) || 0)}
                     disabled={readOnly}
-                    className="w-full h-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                    className="w-full h-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
                     placeholder="0.00"
                   />
                 </div>
               </div>
             ) : (
               <div>
-                <label className="text-xs text-gray-600 dark:text-gray-400 block mb-1">المبلغ الإجمالي الشامل</label>
+                <label className="text-xs text-[var(--color-text-muted)] block mb-1">المبلغ الإجمالي الشامل</label>
                 <div className="relative">
                   <input
                     type="number"
                     value={data.lumpSumAmount || ''}
                     onChange={(e) => handleUpdate('lumpSumAmount', parseFloat(e.target.value) || 0)}
                     disabled={readOnly}
-                    className="w-full h-8 pl-8 px-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 font-bold"
+                    className="w-full h-8 pl-8 px-2 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)] font-bold"
                     placeholder="0.00"
                   />
-                  <span className="text-gray-500 absolute left-2 top-2 text-xs font-bold leading-none">
+                  <span className="text-[var(--color-text-muted)] absolute left-2 top-2 text-xs font-bold leading-none">
                     {data.currency === 'ILS' ? '₪' : '$'}
                   </span>
                 </div>
@@ -323,8 +323,8 @@ const LocalPaymentsCard: React.FC<LocalPaymentsCardProps> = ({
           </>
         )}
 
-        <div className="pt-2 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center">
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">الإجمالي:</span>
+        <div className="pt-2 border-t border-[var(--color-border)] flex justify-between items-center">
+          <span className="text-sm font-medium text-[var(--color-text)]">الإجمالي:</span>
           <span className="font-bold text-[var(--color-primary)] dark:text-[var(--color-primary)] text-lg">
             ${totalLocalPayments.toLocaleString()}
           </span>
@@ -396,14 +396,14 @@ const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
   };
 
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 overflow-hidden h-full">
+    <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] overflow-hidden h-full">
       <div className="p-3 bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-900/20 dark:to-emerald-900/20 border-b">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="p-1.5 bg-green-500 rounded-lg">
               <DollarSign className="w-4 h-4 text-white" />
             </div>
-            <h3 className="font-semibold text-gray-900 dark:text-white text-sm">الملخص المالي</h3>
+            <h3 className="font-semibold text-[var(--color-text)] text-sm">الملخص المالي</h3>
           </div>
           <div className="text-lg font-bold text-green-600 dark:text-green-400">
             {symbol}{grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
@@ -414,13 +414,13 @@ const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
       <div className="p-3 space-y-3">
         {/* سعر المنتجات */}
         <div className="flex justify-between items-center">
-          <span className="text-sm text-gray-700 dark:text-gray-300">سعر المنتجات</span>
-          <span className="font-medium text-gray-900 dark:text-white">{symbol}{subtotal.toLocaleString()}</span>
+          <span className="text-sm text-[var(--color-text)]">سعر المنتجات</span>
+          <span className="font-medium text-[var(--color-text)]">{symbol}{subtotal.toLocaleString()}</span>
         </div>
 
         {/* الخصم */}
         <div className="flex justify-between items-center">
-          <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <div className="flex items-center gap-2 text-sm text-[var(--color-text)]">
             <Tag className="w-3 h-3 text-red-500" />
             <span>الخصم</span>
             {!readOnly && (
@@ -440,10 +440,10 @@ const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
                 onChange={(e) => setDiscountInput(e.target.value)}
                 onBlur={handleDiscountUpdate}
                 onKeyDown={(e) => e.key === 'Enter' && handleDiscountUpdate()}
-                className="w-20 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                className="w-20 px-2 py-1 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
               />
             ) : (
-              <span className={discountAmount > 0 ? "text-red-600 font-medium" : "text-gray-400"}>
+              <span className={discountAmount > 0 ? "text-red-600 font-medium" : "text-[var(--color-text-muted)]"}>
                 {discountAmount > 0 ? `-${symbol}${discountAmount.toLocaleString()}` : '-'}
               </span>
             )}
@@ -452,7 +452,7 @@ const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
 
         {/* الضريبة */}
         <div className="flex justify-between items-center">
-          <div className="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+          <div className="flex items-center gap-2 text-sm text-[var(--color-text)]">
             <Percent className="w-3 h-3" />
             <span>الضريبة</span>
             {!readOnly && (
@@ -460,14 +460,14 @@ const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
                 <button
                   onClick={() => setTaxInputMode('percentage')}
                   disabled={readOnly}
-                  className={`text-xs px-2 py-0.5 rounded ${taxInputMode === 'percentage' ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300' : 'text-gray-500'}`}
+                  className={`text-xs px-2 py-0.5 rounded ${taxInputMode === 'percentage' ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300' : 'text-[var(--color-text-muted)]'}`}
                 >
                   %
                 </button>
                 <button
                   onClick={() => setTaxInputMode('amount')}
                   disabled={readOnly}
-                  className={`text-xs px-2 py-0.5 rounded ${taxInputMode === 'amount' ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300' : 'text-gray-500'}`}
+                  className={`text-xs px-2 py-0.5 rounded ${taxInputMode === 'amount' ? 'bg-blue-100 dark:bg-blue-900 text-blue-600 dark:text-blue-300' : 'text-[var(--color-text-muted)]'}`}
                 >
                   {symbol}
                 </button>
@@ -482,10 +482,10 @@ const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
                 onChange={(e) => setTaxInput(e.target.value)}
                 onBlur={handleTaxUpdate}
                 onKeyDown={(e) => e.key === 'Enter' && handleTaxUpdate()}
-                className="w-20 px-2 py-1 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                className="w-20 px-2 py-1 text-sm border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
               />
             ) : (
-              <span className="font-medium text-gray-900 dark:text-white">
+              <span className="font-medium text-[var(--color-text)]">
                 {taxInputMode === 'percentage'
                   ? `${symbol}${formatMoney(taxAmount)} (${taxRate}%)`
                   : `${symbol}${formatMoney(taxAmount)}`
@@ -498,7 +498,7 @@ const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
         {/* الشحن */}
         {(shippingCost > 0 || shippingIncluded) && (
           <div className="flex justify-between items-center">
-            <span className="text-sm text-gray-700 dark:text-gray-300">الشحن</span>
+            <span className="text-sm text-[var(--color-text)]">الشحن</span>
             <span className="font-medium">
               {shippingIncluded ? (
                 <span className="text-xs text-green-600">متضمن</span>
@@ -510,7 +510,7 @@ const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
         {/* المدفوعات المحلية */}
         {showLocalPayments && (totalLocalPayments > 0 || localPaymentsIncluded) && (
           <div className="flex justify-between items-center">
-            <span className="text-sm text-gray-700 dark:text-gray-300">مدفوعات محلية</span>
+            <span className="text-sm text-[var(--color-text)]">مدفوعات محلية</span>
             <span className="font-medium">
               {localPaymentsIncluded ? (
                 <span className="text-xs text-green-600">مشمولة</span>
@@ -519,36 +519,36 @@ const FinancialSummaryCard: React.FC<FinancialSummaryCardProps> = ({
           </div>
         )}
 
-        <div className="border-t border-gray-200 dark:border-gray-700 my-2"></div>
+        <div className="border-t border-[var(--color-border)] my-2"></div>
 
         {/* الإجمالي */}
         <div className="flex justify-between items-center">
-          <span className="font-bold text-gray-900 dark:text-white">الإجمالي</span>
+          <span className="font-bold text-[var(--color-text)]">الإجمالي</span>
           <span className="text-xl font-bold text-green-600 dark:text-green-400">
             {symbol}{grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
           </span>
         </div>
 
-        <div className="border-t border-gray-200 dark:border-gray-700 my-2"></div>
+        <div className="border-t border-[var(--color-border)] my-2"></div>
 
         {/* المدفوع والمتبقي */}
         <div className="flex justify-between items-center text-sm">
-          <span className="text-gray-600 dark:text-gray-400">المدفوع</span>
+          <span className="text-[var(--color-text-muted)]">المدفوع</span>
           <span className="font-medium text-green-600 dark:text-green-400">{symbol}{paidAmount.toLocaleString()}</span>
         </div>
         <div className="flex justify-between items-center text-sm">
-          <span className="text-gray-600 dark:text-gray-400">المتبقي</span>
+          <span className="text-[var(--color-text-muted)]">المتبقي</span>
           <span className="font-medium text-orange-600 dark:text-orange-400">{symbol}{remainingAmount.toLocaleString()}</span>
         </div>
 
         {/* تقدم الدفع */}
         {grandTotal > 0 && (
-          <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
-            <div className="flex justify-between text-xs text-gray-500 mb-1">
+          <div className="pt-2 border-t border-[var(--color-border)]">
+            <div className="flex justify-between text-xs text-[var(--color-text-muted)] mb-1">
               <span>تقدم الدفع</span>
               <span>{Math.round((paidAmount / grandTotal) * 100)}%</span>
             </div>
-            <div className="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div className="h-1.5 bg-[var(--color-surface-3)] rounded-full overflow-hidden">
               <div
                 className="h-full bg-green-500 transition-all"
                 style={{ width: `${(paidAmount / grandTotal) * 100}%` }}
@@ -748,12 +748,12 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
             <Package className="w-5 h-5 text-blue-600 dark:text-blue-400" />
           </div>
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">المنتجات والأسعار</h3>
+            <h3 className="text-lg font-semibold text-[var(--color-text)]">المنتجات والأسعار</h3>
             <div className="flex items-center gap-3 mt-1">
-              <span className="text-xs bg-gray-100 dark:bg-gray-700 px-2.5 py-1 rounded-full text-gray-700 dark:text-gray-300">
+              <span className="text-xs bg-[var(--color-surface-3)] px-2.5 py-1 rounded-full text-[var(--color-text)]">
                 {items.length} منتج
               </span>
-              <span className="text-sm text-gray-600 dark:text-gray-400">
+              <span className="text-sm text-[var(--color-text-muted)]">
                 الإجمالي: ${grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
               </span>
             </div>
@@ -770,11 +770,11 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
       </div>
 
       {/* Table Section */}
-      <div className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-white dark:bg-gray-800">
+      <div className="border border-[var(--color-border)] rounded-xl overflow-hidden bg-[var(--color-surface)]">
         {items.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-right text-sm">
-              <thead className="bg-gray-50 dark:bg-gray-900 text-gray-700 dark:text-gray-300">
+              <thead className="bg-[var(--color-surface-2)] text-[var(--color-text)]">
                 <tr>
                   <th className="px-4 py-3 font-medium min-w-[200px]">الصنف</th>
                   <th className="px-4 py-3 font-medium text-center min-w-[80px]">الكمية</th>
@@ -785,7 +785,7 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
                   <th className="px-4 py-3 font-medium text-center min-w-[60px]"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
+              <tbody className="divide-y divide-[var(--color-border)]">
                 {items.map((item, index) => {
                   const dbItem = allDbItems?.find(d => d.id === item.itemId || d.id === item.id);
                   const displayHsPrimary = item.hsCodePrimary || dbItem?.hsCodePrimary;
@@ -793,24 +793,24 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
                   const itemDiscount = parseFloat(item.itemDiscount) || 0;
 
                   return (
-                    <tr key={item.id || index} className="hover:bg-gray-50 dark:hover:bg-gray-700/30">
+                    <tr key={item.id || index} className="hover:bg-[var(--color-surface-2)]">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <button
                             onClick={() => (item.imageUrls?.[0] || item.factoryImageUrl) && onPreviewImage(item.imageUrls?.[0] || item.factoryImageUrl)}
-                            className="w-10 h-10 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center overflow-hidden border border-gray-200 dark:border-gray-600"
+                            className="w-10 h-10 bg-[var(--color-surface-3)] rounded-lg flex items-center justify-center overflow-hidden border border-[var(--color-border)]"
                           >
                             {item.imageUrls?.[0] || item.factoryImageUrl ? (
                               <img src={item.imageUrls?.[0] || item.factoryImageUrl} alt={item.name} className="w-full h-full object-cover" />
                             ) : (
-                              <ImageIcon className="w-4 h-4 text-gray-400" />
+                              <ImageIcon className="w-4 h-4 text-[var(--color-text-muted)]" />
                             )}
                           </button>
                           <div className="flex-1 min-w-0">
-                            <div className="font-medium text-gray-900 dark:text-white truncate">{item.name}</div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 flex justify-between items-center">
+                            <div className="font-medium text-[var(--color-text)] truncate">{item.name}</div>
+                            <div className="text-xs text-[var(--color-text-muted)] flex justify-between items-center">
                               <span>{item.categoryName}</span>
-                              {item.modelNumber && <span className="text-[10px] bg-gray-100 dark:bg-gray-800 px-1 rounded text-gray-500">{item.modelNumber}</span>}
+                              {item.modelNumber && <span className="text-[10px] bg-[var(--color-surface-3)] px-1 rounded text-[var(--color-text-muted)]">{item.modelNumber}</span>}
                             </div>
                             {item.notes && (
                               <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-1 line-clamp-1 italic" title={item.notes}>
@@ -826,7 +826,7 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
                           value={item.quantity ?? ''}
                           onChange={(e) => onUpdateItem(index, 'quantity', e.target.value)}
                           disabled={readOnly}
-                          className="w-16 p-1.5 text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                          className="w-16 p-1.5 text-center border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
                         />
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -835,7 +835,7 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
                           value={item.unitPrice ?? ''}
                           onChange={(e) => onUpdateItem(index, 'unitPrice', e.target.value)}
                           disabled={readOnly}
-                          className="w-20 p-1.5 text-center border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700"
+                          className="w-20 p-1.5 text-center border border-[var(--color-border)] rounded-lg bg-[var(--color-surface)]"
                         />
                       </td>
                       <td className="px-4 py-3 text-center">
@@ -851,13 +851,13 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
                             onChange={(e) => setTempItemDiscountValue(e.target.value)}
                             onBlur={() => commitItemDiscount(index)}
                             onKeyDown={(e) => { if (e.key === 'Enter') commitItemDiscount(index); }}
-                            className="w-16 p-1.5 text-center border border-gray-300 rounded-lg text-sm bg-white"
+                            className="w-16 p-1.5 text-center border border-[var(--color-border)] rounded-lg text-sm bg-[var(--color-surface)]"
                             autoFocus
                           />
                         ) : (
                           <div
                             onClick={() => startEditingItemDiscount(index, item.itemDiscount)}
-                            className={`cursor-pointer text-sm ${itemDiscount > 0 ? 'text-red-600 font-medium' : 'text-gray-500'
+                            className={`cursor-pointer text-sm ${itemDiscount > 0 ? 'text-red-600 font-medium' : 'text-[var(--color-text-muted)]'
                               }`}
                           >
                             {itemDiscount > 0 ? `-$${formatMoney(itemDiscount)}` : 'إضافة'}
@@ -872,12 +872,12 @@ export const ItemsTableSection: React.FC<ItemsTableProps> = ({
                             </span>
                             <button
                               onClick={() => copyHsCode(displayHsPrimary)}
-                              className="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded"
+                              className="p-1 hover:bg-[var(--color-surface-3)] rounded"
                             >
                               <Copy className="w-3 h-3 text-blue-500" />
                             </button>
                           </div>
-                        ) : <span className="text-gray-400 text-sm">--</span>}
+                        ) : <span className="text-[var(--color-text-muted)] text-sm">--</span>}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <button

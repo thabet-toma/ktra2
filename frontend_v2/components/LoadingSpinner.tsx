@@ -34,8 +34,8 @@ export const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ size = 'lg', sho
       <div className={`border-blue-500 border-dashed rounded-full animate-spin ${size === 'md' ? 'w-10 h-10 border-4' : 'w-16 h-16 border-4'}`}></div>
       {showText && (
         <>
-          <h2 className="text-xl font-semibold text-gray-700 dark:text-gray-200 mt-6">Searching for Products</h2>
-          <p className="text-gray-500 dark:text-gray-400 mt-2 transition-opacity duration-500">{messages[messageIndex]}</p>
+          <h2 className="text-xl font-semibold text-[var(--color-text)] mt-6">Searching for Products</h2>
+          <p className="text-[var(--color-text-muted)] mt-2 transition-opacity duration-500">{messages[messageIndex]}</p>
         </>
       )}
     </div>

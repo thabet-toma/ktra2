@@ -3,6 +3,7 @@
  * الاتصال بـ OpenClaw يتم من خادم Django، ليس من المتصفح.
  */
 import { apiPostFormData, apiPostObject } from "./restApi";
+import { resolveTenantId } from "@/utils/tenantContext";
 
 export async function uploadAssistantFile(file: File): Promise<string> {
   const form = new FormData();
@@ -29,7 +30,8 @@ export async function sendAssistantMessage(
     {
       message: trimmed,
       ...(ids.length ? { file_ids: ids } : {}),
-    }
+    },
+    { tenantId: resolveTenantId() }
   );
   if (data.detail && typeof data.detail === "string" && !data.reply) {
     throw new Error(data.detail);

@@ -18,11 +18,19 @@ from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from core import assistant_views, agent_db_view, dashboard_api, health, media_views
+from core import (
+    assistant_views, agent_db_view, dashboard_api, health, media_views,
+    permissions_api, platform_admin_api, whatsapp_views,
+)
 from core.activity_views import ActivityLogViewSet
+from core.platform_admin_api import DevelopmentNoteViewSet
 
 _activity_router = DefaultRouter()
 _activity_router.register(r'', ActivityLogViewSet, basename='activity')
+_platform_router = DefaultRouter()
+_platform_router.register(
+    r'development-notes', DevelopmentNoteViewSet, basename='platform-development-notes',
+)
 
 urlpatterns = [
     path('api/health/', health.health_check),
@@ -35,8 +43,31 @@ urlpatterns = [
     path('api/assistant/files/', assistant_views.assistant_upload),
     path('api/assistant/openclaw-status/', assistant_views.assistant_openclaw_status),
     path('api/assistant/openclaw-ws-probe/', assistant_views.assistant_openclaw_ws_probe),
+    path('api/assistant/whatsapp/webhook/<str:secret>/', whatsapp_views.whatsapp_webhook),
+    # Evolution API يضيف اسم الحدث لآخر الرابط تلقائياً عند webhookByEvents=true
+    # (إعداد عام بسيرفر Evolution، غير قابل للتحكم لكل instance) — **بلا شرطة مائلة
+    # بالآخر** (تأكَّدنا من سجلات الإنتاج). لا نعتمد على تحويل APPEND_SLASH لأنه
+    # يحوّل POST إلى GET ويُفقِد جسم الطلب — نطابق الشكل الحقيقي مباشرة، ونقبل
+    # النسخة بشرطة مائلة أيضاً احتياطاً.
+    path('api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>', whatsapp_views.whatsapp_webhook),
+    path('api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>/', whatsapp_views.whatsapp_webhook),
     path('api/agent/query/', agent_db_view.agent_query),
     path('api/dashboard/', dashboard_api.trade_dashboard),
+    path('api/platform/dashboard/', platform_admin_api.platform_dashboard),
+    path('api/platform/super-admins/', platform_admin_api.platform_super_admins),
+    path('api/platform/super-admins/<int:pk>/', platform_admin_api.platform_super_admin_detail),
+    path('api/platform/companies/<int:pk>/', platform_admin_api.platform_company_detail),
+    path('api/platform/companies/<int:pk>/members/', platform_admin_api.platform_company_members),
+    path('api/platform/companies/<int:pk>/members/<int:membership_id>/',
+         platform_admin_api.platform_company_member_detail),
+    path('api/platform/users/<int:pk>/set-active/', platform_admin_api.platform_user_set_active),
+    path('api/platform/', include(_platform_router.urls)),
+    # T-PERM: محرّك الصلاحيات (صلاحياتي + مصفوفة الأدوار لكل شركة)
+    path('api/permissions/me/', permissions_api.my_permissions),
+    path('api/permissions/matrix/', permissions_api.permissions_matrix),
+    path('api/permissions/matrix/reset/', permissions_api.reset_permissions_matrix),
+    path('api/permissions/members/', permissions_api.permission_members),
+    path('api/permissions/member/', permissions_api.member_permissions),
     path('api/', include('partners.urls')),
     path('api/accounting/', include('accounting.urls')),
     path('api/inventory/', include('inventory.urls')),

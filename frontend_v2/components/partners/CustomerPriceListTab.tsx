@@ -56,7 +56,7 @@ export const CustomerPriceListTab: React.FC<Props> = ({ customerId }) => {
   const hasEdits = Object.values(edits).some((v) => String(v).trim() !== '');
 
   return (
-    <div className="p-2" data-skin="aseel">
+    <div className="p-2">
       <div className="flex items-center gap-2 mb-2">
         <div className="relative flex-1 max-w-xs">
           <input
@@ -66,7 +66,7 @@ export const CustomerPriceListTab: React.FC<Props> = ({ customerId }) => {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <Search className="w-4 h-4 text-gray-400 absolute" style={{ insetInlineStart: 6, top: 7 }} />
+          <Search className="w-4 h-4 text-[var(--color-text-muted)] absolute" style={{ insetInlineStart: 6, top: 7 }} />
         </div>
         <button
           type="button"
@@ -119,8 +119,15 @@ export const CustomerPriceListTab: React.FC<Props> = ({ customerId }) => {
                   </td>
                   <td>
                     <span
-                      className={`aseel-price-badge ${r.source === 'last_invoice' ? 'aseel-price-badge--last' : 'aseel-price-badge--quote'}`}
-                      title={r.invoice_number ? `فاتورة ${r.invoice_number}` : undefined}
+                      className={`aseel-price-badge ${
+                        r.source === 'last_invoice' ? 'aseel-price-badge--last'
+                        : r.source === 'default' ? 'aseel-price-badge--general'
+                        : 'aseel-price-badge--quote'}`}
+                      title={
+                        r.invoice_number ? `فاتورة ${r.invoice_number}`
+                        : r.source === 'default'
+                          ? 'سعر عام من كرت الصنف — لا عرض لهذا الزبون ولا شراء سابق. اكتب سعراً هنا ليصير عرضه الخاص.'
+                          : undefined}
                     >{r.source_label}</span>
                   </td>
                 </tr>

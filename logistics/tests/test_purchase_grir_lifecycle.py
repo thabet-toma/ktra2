@@ -12,6 +12,7 @@ from rest_framework.test import APITestCase
 from accounting.models import Account, JournalHeader, JournalLine, VoidedJournal
 from inventory.models import Product, StockMovement, Warehouse
 from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
+from logistics.services import GR_IR_ACCOUNT_CODE
 from partners.models import Partner
 from tenants.models import Currency
 from tenants.services import create_company
@@ -51,7 +52,7 @@ class PurchaseGrIrLifecycleTest(APITestCase):
         return inv
 
     def _grir_account(self):
-        return Account.objects.get(tenant=self.tenant, code="2106")
+        return Account.objects.get(tenant=self.tenant, code=GR_IR_ACCOUNT_CODE)
 
     def _grir_net(self):
         """صافي رصيد الوسيط = مدين − دائن (يجب أن يكون صفراً عند ترحيل كامل)."""

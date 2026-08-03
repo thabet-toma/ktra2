@@ -303,8 +303,8 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
 
   if (panelCollapsed && !manageMode) {
     return (
-      <div className="aseel-tree-panel w-10 shrink-0 flex flex-col items-center py-2 cursor-pointer hover:bg-gray-50" onClick={() => setPanelCollapsed(false)} title="إظهار الشجرة">
-        <PanelRightOpen className="w-5 h-5 text-gray-500" />
+      <div className="aseel-tree-panel w-10 shrink-0 flex flex-col items-center py-2 cursor-pointer hover:bg-[var(--color-surface-2)]" onClick={() => setPanelCollapsed(false)} title="إظهار الشجرة">
+        <PanelRightOpen className="w-5 h-5 text-[var(--color-text-muted)]" />
       </div>
     );
   }
@@ -329,7 +329,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
-          <Search className="w-4 h-4 text-gray-400 absolute" style={{ insetInlineStart: "6px", top: "6px" }} />
+          <Search className="w-4 h-4 text-[var(--color-text-muted)] absolute" style={{ insetInlineStart: "6px", top: "6px" }} />
         </div>
         {!disabled && (
           <div className="flex gap-1 mt-1.5">
@@ -356,7 +356,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
       {/* كبسة يمين على الفراغ → إضافة صنف رئيسي/منتج بدون صنف */}
       <div className="aseel-tree-body" onContextMenu={(e) => openMenu(e, null)}>
         {loadingCats ? (
-          <div className="p-3 text-center text-sm text-gray-500 flex items-center justify-center gap-2">
+          <div className="p-3 text-center text-sm text-[var(--color-text-muted)] flex items-center justify-center gap-2">
             <Loader2 className="w-4 h-4 animate-spin" /> جاري التحميل...
           </div>
         ) : (
@@ -365,7 +365,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
             {!manageMode && uncategorizedItems.length > 0 && (
               <div className="mt-1">
                 <div className="aseel-tree-cat">
-                  <FolderTree className="w-4 h-4 text-gray-400 shrink-0" />
+                  <FolderTree className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
                   <span className="truncate flex-1">بدون صنف</span>
                   <span className="aseel-tree-count">{uncategorizedItems.length}</span>
                 </div>
@@ -373,7 +373,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
               </div>
             )}
             {!rootCats.length && !uncategorizedItems.length && !query && (
-              <div className="p-3 text-center text-sm text-gray-500">لا أصناف/منتجات — كبسة يمين أو الأزرار بالأعلى لإضافة.</div>
+              <div className="p-3 text-center text-sm text-[var(--color-text-muted)]">لا أصناف/منتجات — كبسة يمين أو الأزرار بالأعلى لإضافة.</div>
             )}
           </>
         )}

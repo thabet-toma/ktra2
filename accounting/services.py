@@ -1075,9 +1075,85 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
 #  task18 DEF-C1: رصيد الشريك من دفتر الأستاذ الفرعي (subledger)
 # ─────────────────────────────────────────────────────────
 
+def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
+    """يربط حركات كشف الحساب بمستند المرساة (الفاتورة) — استعلامات بالدفعة لا لكل صف.
+
+    الفاتورة مرساة مجموعتها، وسند القبض/الصرف ينضمّ لمجموعة الفاتورة التي وُزّع
+    عليها؛ فتُعرَض الحركتان متجاورتين في الواجهة. سند موزَّع على أكثر من فاتورة
+    يبقى بلا مرساة واحدة (link_key=None) ويحمل عددها في link_count. يعدّل `rows`
+    في مكانها.
+    """
+    invoice_type = "PURCHASE_INVOICE" if is_supplier else "SALES_INVOICE"
+    payment_type = "SUPPLIER_PAYMENT" if is_supplier else "CUSTOMER_PAYMENT"
+    invoice_ids = {
+        r["reference_id"] for r in rows
+        if r["reference_type"] == invoice_type and r["reference_id"]
+    }
+    payment_ids = {
+        r["reference_id"] for r in rows
+        if r["reference_type"] == payment_type and r["reference_id"]
+    }
+
+    by_payment: dict[int, list[int]] = {}
+    if payment_ids:
+        if is_supplier:
+            from sales.models import SupplierPayment, SupplierPaymentAllocation
+            allocations = SupplierPaymentAllocation.objects.filter(
+                payment_id__in=payment_ids,
+            ).values_list("payment_id", "invoice_id")
+        else:
+            from sales.models import PaymentAllocation
+            allocations = PaymentAllocation.objects.filter(
+                payment_id__in=payment_ids,
+            ).values_list("payment_id", "invoice_id")
+        for pay_id, inv_id in allocations:
+            by_payment.setdefault(pay_id, []).append(inv_id)
+        if is_supplier:
+            # سندات الصرف القديمة مربوطة بالحقل المفرد لا بجدول التوزيعات.
+            legacy = SupplierPayment.objects.filter(
+                id__in=[p for p in payment_ids if p not in by_payment],
+                purchase_invoice__isnull=False,
+            ).values_list("id", "purchase_invoice_id")
+            for pay_id, inv_id in legacy:
+                by_payment.setdefault(pay_id, []).append(inv_id)
+        invoice_ids.update(inv_id for links in by_payment.values() for inv_id in links)
+
+    numbers: dict[int, str] = {}
+    if invoice_ids:
+        if is_supplier:
+            from logistics.models import PurchaseInvoice
+            source = PurchaseInvoice.objects.filter(id__in=invoice_ids)
+        else:
+            from sales.models import SalesInvoice
+            source = SalesInvoice.objects.filter(id__in=invoice_ids)
+        numbers = dict(source.values_list("id", "invoice_number"))
+
+    for row in rows:
+        ref_id = row["reference_id"]
+        row["document_number"] = None
+        row["link_key"] = None
+        row["link_label"] = None
+        row["link_count"] = 0
+        if not ref_id:
+            continue
+        if row["reference_type"] == invoice_type:
+            row["document_number"] = numbers.get(ref_id) or f"#{ref_id}"
+            row["link_key"] = f"{invoice_type}:{ref_id}"
+            row["link_label"] = row["document_number"]
+            row["link_count"] = 1
+        elif row["reference_type"] == payment_type:
+            links = by_payment.get(ref_id, [])
+            row["link_count"] = len(links)
+            if len(links) == 1:
+                row["link_key"] = f"{invoice_type}:{links[0]}"
+                row["link_label"] = numbers.get(links[0]) or f"#{links[0]}"
+            elif links:
+                row["link_label"] = f"{len(links)} فواتير"
+
+
 def partner_account_statement(
     *, tenant_id: int, partner_id: int, is_supplier: bool,
-    limit: int = 50, offset: int = 0,
+    limit: int = 50, offset: int = 0, ordering: str = "newest",
 ) -> dict:
     """FEAT-4: كشف حساب الشريك من أسطر القيود المرحَّلة — مع رصيد جارٍ لكل سطر.
 
@@ -1102,7 +1178,9 @@ def partner_account_statement(
         running_by_id[lid] = running
     closing = running
 
-    page_ids = [lid for lid, _d, _c in ordered[offset:offset + limit]]
+    normalized_ordering = "oldest" if ordering == "oldest" else "newest"
+    display_order = ordered if normalized_ordering == "oldest" else list(reversed(ordered))
+    page_ids = [lid for lid, _d, _c in display_order[offset:offset + limit]]
     page = (
         JournalLine.objects.filter(id__in=page_ids)
         .select_related("journal")
@@ -1125,11 +1203,13 @@ def partner_account_statement(
             "credit": str(jl.base_credit),
             "running_balance": str(running_by_id[lid]),
         })
+    _attach_statement_document_links(rows, is_supplier=is_supplier)
     return {
         "results": rows,
         "count": total,
         "limit": limit,
         "offset": offset,
+        "ordering": normalized_ordering,
         "closing_balance": str(closing),
     }
 
@@ -1149,4 +1229,59 @@ def partner_posted_balance(tenant_id: int, partner_id: int) -> tuple[Decimal, De
     debit = Decimal(str(agg["d"] or 0))
     credit = Decimal(str(agg["c"] or 0))
     return debit, credit
+
+
+def partner_posted_journal_effect(
+    tenant_id: int,
+    partner_id: int,
+    journal_ids,
+    *,
+    supplier: bool,
+) -> Decimal:
+    """صافي أثر مجموعة قيود مرحّلة على رصيد شريك بالعملة الأساسية."""
+    from django.db.models import Sum
+
+    ids = [journal_id for journal_id in journal_ids if journal_id]
+    if not ids:
+        return Decimal("0.00")
+    agg = JournalLine.objects.filter(
+        tenant_id=tenant_id,
+        partner_id=partner_id,
+        journal_id__in=ids,
+        journal__is_posted=True,
+    ).aggregate(d=Sum("base_debit"), c=Sum("base_credit"))
+    debit = Decimal(str(agg["d"] or 0))
+    credit = Decimal(str(agg["c"] or 0))
+    return (credit - debit if supplier else debit - credit).quantize(Decimal("0.01"))
+
+
+def annotate_partner_posted_balance(queryset, partner_id_field: str, *, supplier: bool, alias: str):
+    """يضيف رصيد الشريك المرحّل إلى queryset واحد بلا استعلام لكل صف."""
+    from django.db.models import DecimalField, F, OuterRef, Subquery, Sum, Value
+    from django.db.models.functions import Coalesce
+
+    money = DecimalField(max_digits=18, decimal_places=2)
+    balance_expression = (
+        F("base_credit") - F("base_debit")
+        if supplier
+        else F("base_debit") - F("base_credit")
+    )
+    balance = (
+        JournalLine.objects
+        .filter(
+            tenant_id=OuterRef("tenant_id"),
+            partner_id=OuterRef(partner_id_field),
+            journal__is_posted=True,
+        )
+        .values("partner_id")
+        .annotate(total=Sum(balance_expression, output_field=money))
+        .values("total")[:1]
+    )
+    return queryset.annotate(**{
+        alias: Coalesce(
+            Subquery(balance, output_field=money),
+            Value(Decimal("0.00"), output_field=money),
+            output_field=money,
+        ),
+    })
 

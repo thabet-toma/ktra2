@@ -53,8 +53,9 @@ const statusColor = (s?: string) => {
     return 'inherit';
 };
 
-const fmtDate = (d?: string | null) => { if (!d) return '—'; const dt = new Date(d); return Number.isNaN(dt.getTime()) ? String(d) : dt.toLocaleDateString('en-GB'); };
+const fmtDate = (d?: string | null) => (d ? formatDateValue(d) : '—');
 import { formatMoney } from "@/utils/formatNumber";
+import { formatDateValue } from "../../utils/formatDate";
 const fmtMoney = (v: any) => formatMoney(v, String(v ?? '—'));
 
 export function SqlDealsPage() {
@@ -83,7 +84,8 @@ export function SqlDealsPage() {
     }, []);
 
     useEffect(() => {
-        apiGetList<PartnerOption>('partners/lookup/?limit=500', { tenantId: resolveTenantId() }).then(setPartners).catch(() => setPartners([]));
+        // T-PARTYPURE: طرف الصفقة مورد — القائمة كانت تعرض العملاء أيضاً.
+        apiGetList<PartnerOption>('partners/lookup/?limit=500&partner_type=Supplier', { tenantId: resolveTenantId() }).then(setPartners).catch(() => setPartners([]));
     }, []);
 
     const filtered = useMemo(() => {
@@ -320,7 +322,7 @@ export function SqlDealsPage() {
             {/* مودال إضافة صفقة */}
             {createOpen && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }} onClick={() => setCreateOpen(false)}>
-                    <div dir="rtl" data-skin="aseel" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+                    <div dir="rtl" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
                         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--aseel-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>إضافة صفقة جديدة</strong>
                             <button className="aseel-toolbtn" onClick={() => setCreateOpen(false)}>إغلاق</button>

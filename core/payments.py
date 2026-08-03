@@ -143,6 +143,26 @@ def validate_payment(ctx: PaymentContext) -> list[str]:
     return errors
 
 
+def should_auto_post_payment(tenant, request_data: Any = None) -> bool:
+    """T-AUTOPOST: هل يُرحَّل السند فور الحفظ؟ (سند قبض العميل وسند صرف المورد).
+
+    مصدر حقيقة واحد للطرفين: الراية الصريحة `auto_post` في جسم الطلب تسمو على
+    إعداد الشركة `SalesSettings.auto_post_payments` (الافتراضي: مُفعَّل — لا معنى
+    لمسودة سند دفع). نفس عقد `auto_post` المستخدم في فواتير المبيعات.
+    """
+    flag = (request_data or {}).get("auto_post") if hasattr(request_data, "get") else None
+    if flag is True or str(flag).lower() == "true":
+        return True
+    if flag is False or str(flag).lower() == "false":
+        return False
+    if tenant is None:
+        return False
+    from sales.services import get_or_create_sales_settings
+
+    ss = get_or_create_sales_settings(tenant)
+    return bool(ss and ss.auto_post_payments)
+
+
 def get_payment_summary(ctx: PaymentContext) -> dict[str, Any]:
     """ملخص موحّد للواجهة — نفس الحقول لكل نوع دفعة."""
     return {
@@ -155,6 +175,55 @@ def get_payment_summary(ctx: PaymentContext) -> dict[str, Any]:
         'is_posted': ctx.is_posted,
         'journal_id': ctx.journal_id,
         'notes': ctx.notes,
+    }
+
+
+def document_payment_summary(total, paid) -> dict[str, Any]:
+    """ملخص دفع موحّد للمستندات: مدفوع/جزئي/غير مدفوع مع متبقٍ غير سالب."""
+    total_dec = Decimal(str(total or 0)).quantize(Decimal("0.01"))
+    paid_dec = Decimal(str(paid or 0)).quantize(Decimal("0.01"))
+    if total_dec <= 0:
+        status = "unpaid"
+        paid_dec = Decimal("0.00")
+    else:
+        paid_dec = min(max(paid_dec, Decimal("0.00")), total_dec)
+        status = (
+            "paid" if paid_dec >= total_dec
+            else "partially_paid" if paid_dec > 0
+            else "unpaid"
+        )
+    remaining = max(total_dec - paid_dec, Decimal("0.00"))
+    return {
+        "amount_paid": paid_dec,
+        "remaining_balance": remaining,
+        "payment_status": status,
+        "payment_status_display": {
+            "paid": "مدفوعة بالكامل",
+            "partially_paid": "مدفوعة جزئياً",
+            "unpaid": "غير مدفوعة",
+        }[status],
+    }
+
+
+def document_partner_balance_summary(
+    current_balance,
+    remaining_balance,
+    exchange_rate,
+    *,
+    is_posted: bool,
+    direction: int = 1,
+) -> dict[str, Decimal]:
+    """رصيد الشريك قبل/بعد احتساب المتبقي الحالي للمستند بالعملة الأساسية."""
+    current = Decimal(str(current_balance or 0)).quantize(Decimal("0.01"))
+    remaining = Decimal(str(remaining_balance or 0))
+    rate = Decimal(str(exchange_rate or 1))
+    effect = (remaining * rate * Decimal(direction)).quantize(Decimal("0.01"))
+    before = current - effect if is_posted else current
+    after = current if is_posted else current + effect
+    return {
+        "balance_before": before.quantize(Decimal("0.01")),
+        "balance_after": after.quantize(Decimal("0.01")),
+        "balance_current": current,
     }
 
 

@@ -104,14 +104,14 @@ export const DocumentPaymentsTab: React.FC<Props> = ({ referenceType, referenceI
     <div className="p-4 space-y-4" dir="rtl">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold text-lg aseel-text-ink">الحركات المالية المرتبطة</h3>
-        <button onClick={load} className="p-2 hover:aseel-bg-panel rounded-full text-gray-500 transition-colors" title="تحديث">
+        <button onClick={load} className="p-2 hover:aseel-bg-panel rounded-full text-[var(--color-text-muted)] transition-colors" title="تحديث">
           <RefreshCw className="w-4 h-4" />
         </button>
       </div>
       
       <div className="overflow-x-auto rounded-lg border aseel-border-soft dark:aseel-border-soft">
         <table className="w-full text-sm text-right">
-          <thead className="aseel-bg-panel dark:aseel-bg-panel text-xs text-gray-500">
+          <thead className="aseel-bg-panel dark:aseel-bg-panel text-xs text-[var(--color-text-muted)]">
             <tr className="border-b aseel-border-soft dark:aseel-border-soft">
               <th className="px-4 py-3 font-medium">رقم القيد</th>
               <th className="px-4 py-3 font-medium">التاريخ</th>
@@ -122,14 +122,14 @@ export const DocumentPaymentsTab: React.FC<Props> = ({ referenceType, referenceI
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700 bg-white dark:bg-gray-800">
+          <tbody className="divide-y divide-[var(--color-border)] bg-[var(--color-surface)]">
             {journals.map(j => {
               const amount = Number(j.total_debit) || j.lines?.reduce((sum, l) => sum + (Number(l.debit) || 0), 0) || 0;
               return (
-                <tr key={j.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
+                <tr key={j.id} className="hover:bg-[var(--color-surface-2)] transition-colors">
                   <td className="px-4 py-3 font-mono text-xs">{j.id}</td>
                   <td className="px-4 py-3">{(j.transaction_date || "").slice(0, 10)}</td>
-                  <td className="px-4 py-3 text-xs text-gray-500">{j.reference_type || "عام / يدوي"}</td>
+                  <td className="px-4 py-3 text-xs text-[var(--color-text-muted)]">{j.reference_type || "عام / يدوي"}</td>
                   <td className="px-4 py-3 max-w-xs truncate" title={j.description || ""}>{j.description || "—"}</td>
                   <td className="px-4 py-3 font-mono">
                     {formatMoney(amount)} {j.currency_code}

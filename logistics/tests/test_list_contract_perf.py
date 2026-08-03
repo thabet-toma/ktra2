@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 from django.contrib.auth.models import User
 from django.db import connection
@@ -7,6 +8,7 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
+from accounting.models import Account, JournalHeader, JournalLine
 from inventory.models import Product
 from logistics.models import (
     LogisticsDeal,
@@ -125,7 +127,9 @@ class LogisticsListContractPerformanceTest(TestCase):
             "/api/logistics/deals/?page=1&page_size=2"
         )
         self.assertEqual(response.data["count"], 8)
-        self.assertLessEqual(query_count, 5)
+        # 6: أضيف prefetch لـ purchase_invoices (رابط «تحولت إلى فاتورة») — استعلام
+        # ثابت واحد لكل الصفحة لا N+1، تحرسه assertion ثبات العدد أدناه.
+        self.assertLessEqual(query_count, 6)
         _, large_query_count = self._get_with_query_count(
             "/api/logistics/deals/?page=1&page_size=8"
         )
@@ -222,3 +226,54 @@ class LogisticsListContractPerformanceTest(TestCase):
         )
         self.assertEqual(detail.status_code, 200, detail.content)
         self.assertEqual(len(detail.data["items"]), 1)
+
+    def test_purchase_invoice_list_exposes_linked_payment_summary_and_supplier_balance(self):
+        partial = self.purchase_invoices[0]
+        paid = self.purchase_invoices[1]
+        cash = Account.objects.create(
+            tenant=self.tenant, code="CASH-PI-LIST", name="صندوق القائمة",
+            account_type="Asset", is_active=True,
+        )
+        payable = Account.objects.create(
+            tenant=self.tenant, code="AP-PI-LIST", name="ذمم مورد القائمة",
+            account_type="Liability", is_active=True,
+        )
+        journal = JournalHeader.objects.create(
+            tenant=self.tenant, transaction_date="2026-07-20",
+            description="رصيد مورد القائمة", is_posted=True,
+        )
+        JournalLine.objects.create(
+            tenant=self.tenant, journal=journal, account=payable,
+            partner=self.partner, debit=0, credit=450,
+            base_debit=0, base_credit=450,
+        )
+        from sales.models import SupplierPayment
+        SupplierPayment.objects.create(
+            tenant=self.tenant, partner=self.partner, purchase_invoice=partial,
+            payment_date="2026-07-20", amount=50, currency=self.currency,
+            cash_or_bank_account=cash, is_posted=True,
+        )
+        SupplierPayment.objects.create(
+            tenant=self.tenant, partner=self.partner, purchase_invoice=paid,
+            payment_date="2026-07-20", amount=paid.grand_total, currency=self.currency,
+            cash_or_bank_account=cash, is_posted=True,
+        )
+
+        partial_response = self.client.get(
+            "/api/logistics/purchase-invoices/?page=1&payment_status=partially_paid"
+        )
+        self.assertEqual(partial_response.status_code, 200, partial_response.content)
+        self.assertEqual(partial_response.data["count"], 1)
+        row = partial_response.data["results"][0]
+        self.assertEqual(row["partner_name"], "Fast Supplier")
+        self.assertEqual(row["payment_status"], "partially_paid")
+        self.assertEqual(row["payment_status_display"], "مدفوعة جزئياً")
+        self.assertEqual(Decimal(row["amount_paid"]), Decimal("50.00"))
+        self.assertEqual(Decimal(row["remaining_balance"]), Decimal("150.00"))
+        self.assertEqual(Decimal(row["supplier_balance"]), Decimal("450.00"))
+
+        paid_response = self.client.get(
+            "/api/logistics/purchase-invoices/?page=1&payment_status=paid"
+        )
+        self.assertEqual(paid_response.data["count"], 1)
+        self.assertEqual(paid_response.data["results"][0]["id"], paid.id)

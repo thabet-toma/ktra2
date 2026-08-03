@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
 import { Plus, Save, Send, Trash2, RefreshCw, X } from "lucide-react";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 type Wh = { id: number; name: string; code?: string };
 type Prod = { id: number; sku: string; name_ar?: string; name_en?: string };
@@ -113,7 +114,7 @@ export const WarehouseTransferPage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
+    <div style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell title="تحويل بين المستودعات" state={`${rows.length} مستند`} actions={actions}>
         <div style={{ padding: 8 }}>
           {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: 8 }}>{err}</div>}
@@ -176,7 +177,7 @@ export const WarehouseTransferPage: React.FC = () => {
                 <tr key={r.id}>
                   <td>#{r.id}</td>
                   <td>{r.transfer_number || "—"}</td>
-                  <td>{r.transfer_date}</td>
+                  <td>{formatDateLocalized(r.transfer_date)}</td>
                   <td>{r.source_warehouse_name}</td>
                   <td>{r.dest_warehouse_name}</td>
                   <td>

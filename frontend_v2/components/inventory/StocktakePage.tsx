@@ -13,6 +13,7 @@ import { openInNewTab } from "../../utils/openInNewTab";
 import type { TreeCategory } from "../items/GroupedItemsTable";
 import { clientLogger } from "../../services/logger";
 import { Plus, Send, Trash2, RefreshCw, X, List, Save, Printer, Info, ChevronDown, ChevronLeft } from "lucide-react";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 type Wh = { id: number; name: string };
 type Prod = {
@@ -478,7 +479,7 @@ export const StocktakePage: React.FC = () => {
   ];
 
   return (
-    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
+    <div style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell title="الجرد (جرد المخزون)" state={`${rows.length} مستند`} actions={actions}>
         <div style={{ padding: 8 }}>
           {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: 8 }}>{err}</div>}
@@ -610,7 +611,7 @@ export const StocktakePage: React.FC = () => {
                 <tr key={r.id} onClick={() => void openStocktake(r.id)} style={{ cursor: "pointer" }} title="انقر لفتح المستند">
                   <td>#{r.id}</td>
                   <td>{r.stocktake_number || "—"}</td>
-                  <td>{r.stocktake_date}</td>
+                  <td>{formatDateLocalized(r.stocktake_date)}</td>
                   <td>{r.warehouse_name || "كل المخزون"}</td>
                   <td>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

@@ -157,9 +157,15 @@ export const SalesSettingsPage: React.FC = () => {
         default_vat_rate: rest.default_vat_rate,
         prices_include_tax: rest.prices_include_tax,
         auto_post_invoices: rest.auto_post_invoices,
+        auto_post_payments: rest.auto_post_payments,
         show_journal_preview: rest.show_journal_preview,
         warn_on_duplicate_item: rest.warn_on_duplicate_item,
         block_loss_invoices: rest.block_loss_invoices,
+        dormant_customer_days: rest.dormant_customer_days,
+        quotation_valid_days: rest.quotation_valid_days,
+        order_reserve_days: rest.order_reserve_days,
+        allow_document_delete: rest.allow_document_delete,
+        block_reserved_stock_sale: rest.block_reserved_stock_sale,
         default_shipping_origin: rest.default_shipping_origin,
         default_shipping_destination: rest.default_shipping_destination,
       };
@@ -555,6 +561,19 @@ export const SalesSettingsPage: React.FC = () => {
           </select>
         </FieldLabel>
 
+        <FieldLabel label="ترحيل سندات القبض والصرف بعد الحفظ">
+          <select
+            className={input}
+            value={settings.auto_post_payments ? "yes" : "no"}
+            onChange={(e) =>
+              setField("auto_post_payments", e.target.value === "yes")
+            }
+          >
+            <option value="yes">«حفظ» يرحّل السند مباشرةً (موصى به)</option>
+            <option value="no">حفظ كمسودة ثم ترحيل يدوي</option>
+          </select>
+        </FieldLabel>
+
         <FieldLabel label="إظهار معاينة القيد قبل الترحيل">
           <select
             className={input}
@@ -593,6 +612,110 @@ export const SalesSettingsPage: React.FC = () => {
             <option value="no">السماح بالحفظ (افتراضي)</option>
             <option value="yes">منع الحفظ والترحيل</option>
           </select>
+        </FieldLabel>
+        {/* T-DORMANT: عتبة إشعار «عميل مختفٍ» (توقّف عن الشراء). 0 = تعطيل. */}
+        <FieldLabel label="تنبيه «عميل مختفٍ» بعد (يوم بلا شراء)">
+          <input
+            type="number"
+            min={0}
+            className={input}
+            value={settings.dormant_customer_days ?? 30}
+            onChange={(e) =>
+              setField("dormant_customer_days", Math.max(0, Number(e.target.value) || 0))
+            }
+          />
+        </FieldLabel>
+        {/* T-ORDERS: صلاحية العرض، مدة حجز الطلبية، وإظهار زر الحذف. */}
+        <FieldLabel label="صلاحية عرض السعر (يوم)">
+          <input
+            type="number"
+            min={0}
+            className={input}
+            value={settings.quotation_valid_days ?? 14}
+            onChange={(e) =>
+              setField("quotation_valid_days", Math.max(0, Number(e.target.value) || 0))
+            }
+          />
+        </FieldLabel>
+        <FieldLabel label="حجز كمية الطلبية المؤكَّدة (يوم)">
+          <input
+            type="number"
+            min={0}
+            className={input}
+            value={settings.order_reserve_days ?? 7}
+            onChange={(e) =>
+              setField("order_reserve_days", Math.max(0, Number(e.target.value) || 0))
+            }
+          />
+        </FieldLabel>
+        <FieldLabel label="إظهار زر «حذف» في العروض والطلبيات">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-emerald-600"
+              checked={settings.allow_document_delete !== false}
+              onChange={(e) => setField("allow_document_delete", e.target.checked)}
+            />
+            <span>عند الإطفاء يبقى «إلغاء» فقط (لا يحذف المستند)</span>
+          </label>
+        </FieldLabel>
+        {/* T-RESERVEGUARD: الحجز كان عرضاً بلا أثر — فاتورة لزبون آخر كانت تسحبه. */}
+        <FieldLabel label="بيع الكمية المحجوزة لطلبية زبون آخر">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-emerald-600"
+              checked={settings.block_reserved_stock_sale !== false}
+              onChange={(e) => setField("block_reserved_stock_sale", e.target.checked)}
+            />
+            <span>منع ترحيل فاتورة تسحب كمية محجوزة (يظهر المحجوز في «تقرير المحجوزات»)</span>
+          </label>
+        </FieldLabel>
+      </Section>
+
+      {/* مستند التسليم: التسمية حرّة لكل شركة، والسند المستقل والتعديل اختياريان. */}
+      <Section
+        title="مستند التسليم (الإرسالية)"
+        description="سمِّ المستند كما تسميه شركتك — الاسم يظهر في الشاشات والطباعة. المستند المرتبط بفاتورة اسم، والمستند بلا فاتورة (بضاعة خرجت قبل فوترتها) اسم آخر."
+      >
+        <FieldLabel label="اسم المستند المرتبط بفاتورة">
+          <input
+            className={input}
+            value={settings.delivery_doc_label ?? ""}
+            placeholder="إرسالية بيع"
+            onChange={(e) => setField("delivery_doc_label", e.target.value)}
+          />
+        </FieldLabel>
+        <FieldLabel label="اسم المستند بلا فاتورة">
+          <input
+            className={input}
+            value={settings.standalone_delivery_label ?? ""}
+            placeholder="سند تسليم"
+            disabled={settings.allow_standalone_delivery === false}
+            onChange={(e) => setField("standalone_delivery_label", e.target.value)}
+          />
+        </FieldLabel>
+        <FieldLabel label="السماح بمستند تسليم بلا فاتورة مرتبطة">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-emerald-600"
+              checked={settings.allow_standalone_delivery !== false}
+              onChange={(e) => setField("allow_standalone_delivery", e.target.checked)}
+            />
+            <span>يُرحَّل مقابل «بضاعة مسلَّمة لم تُفوتَر» حتى تصدر الفاتورة</span>
+          </label>
+        </FieldLabel>
+        <FieldLabel label="السماح بتعديل/إلغاء الإرسالية">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="w-4 h-4 accent-emerald-600"
+              checked={settings.allow_edit_delivery !== false}
+              onChange={(e) => setField("allow_edit_delivery", e.target.checked)}
+            />
+            <span>التعديل يعكس أثر الإرسالية القديم ويعيد تطبيقه</span>
+          </label>
         </FieldLabel>
       </Section>
 
@@ -672,7 +795,7 @@ export const SalesSettingsPage: React.FC = () => {
   // task11 M6: المحتوى في منطقة gridwrap الرئيسية المرنة — كان محشوراً في
   // tab سفلي بارتفاع أقصى 220px تاركاً فراغاً أبيض ضخماً وسط الشاشة.
   return (
-    <div data-skin="aseel" style={{ minHeight: "calc(100vh - 5rem)" }}>
+    <div style={{ minHeight: "calc(100vh - 5rem)" }}>
       <AseelDocumentShell
         title="إعدادات فواتير المبيعات"
         state="حسابات افتراضية + ضرائب + شحن"

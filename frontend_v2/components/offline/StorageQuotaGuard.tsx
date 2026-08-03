@@ -68,12 +68,12 @@ export default function StorageQuotaGuard() {
           aria-modal="true"
           aria-labelledby="quota-title"
         >
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 text-center">
+          <div className="bg-[var(--color-surface)] rounded-2xl shadow-2xl max-w-md w-full p-6 text-center">
             <span className="text-5xl block mb-4">🚫</span>
-            <h2 id="quota-title" className="text-xl font-bold text-gray-800 mb-2">
+            <h2 id="quota-title" className="text-xl font-bold text-[var(--color-text)] mb-2">
               مساحة التخزين ممتلئة
             </h2>
-            <p className="text-sm text-gray-600 mb-4">
+            <p className="text-sm text-[var(--color-text-muted)] mb-4">
               تم استخدام {quota.usagePercent}% من المساحة المحلية. لا يمكن حفظ بيانات جديدة.
             </p>
             <button
@@ -89,7 +89,7 @@ export default function StorageQuotaGuard() {
             <button
               type="button"
               onClick={() => setBlocked(false)}
-              className="text-gray-500 underline text-sm"
+              className="text-[var(--color-text-muted)] underline text-sm"
             >
               تجاهل (قد تفقد بيانات محلية)
             </button>

@@ -206,12 +206,33 @@ export const StockLevelsPage: React.FC = () => {
         </button>
       ) },
     { key: "cat", header: "التصنيف", width: "130px", render: (p) => <>{p.category_name || "—"}</> },
-    { key: "qty", header: "المتاح", width: "90px", align: "center", numeric: true,
+    // T-RESERVE: «المتاح» كان يعرض الرصيد نفسه — تسمية مضلِّلة بعد وجود الحجز.
+    // الرصيد ثم المحجوز (طلبيات مؤكَّدة سارية) ثم المتاح للبيع = الفرق.
+    { key: "qty", header: "الرصيد", width: "90px", align: "center", numeric: true,
       render: (p) => {
         const qty = Number(p.quantity_on_hand);
         const low = qty <= (p.min_stock_level || 0);
         return <span style={low ? { color: "var(--aseel-danger, #c00)", fontWeight: 600 } : {}}>{formatQuantity(qty)}</span>;
       }
+    },
+    { key: "reserved", header: "محجوز", width: "80px", align: "center", numeric: true,
+      render: (p) => {
+        const reserved = Number(p.reserved_quantity || 0);
+        if (!reserved) return <span className="text-[var(--aseel-ink-soft)]">—</span>;
+        return (
+          <span title="محجوز بطلبيات زبائن مؤكَّدة سارية"
+            style={{ color: "var(--aseel-warn, #b06800)", fontWeight: 600 }}>
+            {formatQuantity(reserved)}
+          </span>
+        );
+      }
+    },
+    { key: "available", header: "المتاح", width: "90px", align: "center", numeric: true,
+      render: (p) => (
+        <span title="المتاح للبيع = الرصيد − المحجوز">
+          {formatQuantity(p.available_quantity ?? p.quantity_on_hand)}
+        </span>
+      )
     },
     { key: "min", header: "الحد الأدنى", width: "90px", align: "center", numeric: true,
       render: (p) => <>{p.min_stock_level ?? "—"}</> },
@@ -228,7 +249,7 @@ export const StockLevelsPage: React.FC = () => {
   );
 
   return (
-    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }} data-skin="aseel">
+    <div dir="rtl" style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }}>
       {/* شريط العنوان والفلاتر */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <strong style={{ fontSize: "var(--aseel-fs-title, 14px)", color: "var(--aseel-ink)" }}>

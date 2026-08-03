@@ -3,6 +3,7 @@ import { useTenantSettings } from '../../hooks/useTenantSettings';
 import { Printer, X, FileText, Building2 } from 'lucide-react';
 import { formatMoney, formatQuantity } from '../../utils/formatNumber';
 import type { PartnerRow, ProductRow, DraftLine } from './SalesInvoiceEditor';
+import { formatDateValue } from "../../utils/formatDate";
 
 export interface SalesPrintData {
   invoiceNumber: string;
@@ -22,6 +23,12 @@ export interface SalesPrintData {
   currentUserName?: string;
   notes?: string;
   currencyCode?: string;
+  amountPaid: number;
+  remainingBalance: number;
+  paymentStatusDisplay: string;
+  customerBalanceBeforeInvoice: number;
+  customerBalanceAfterInvoice: number;
+  paymentDetails: NonNullable<import("../../services/salesApi").SalesInvoiceDetail["payment_details"]>;
 }
 
 interface Props {
@@ -39,7 +46,7 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
 
     const formatDate = (dateString?: string) => {
         if (!dateString) return '-';
-        return new Date(dateString).toLocaleDateString('en-GB');
+        return formatDateValue(dateString);
     };
 
     const curr = data.currencyCode || 'ILS';
@@ -191,12 +198,60 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                                 <span className="font-mono" dir="ltr">{formatMoney(data.totals.grandTotal)} {curr}</span>
                             </div>
                             <div className="flex justify-between pt-1.5">
+                                <span className="aseel-text-soft">المدفوع المرحّل:</span>
+                                <span className="font-mono font-bold" dir="ltr">{formatMoney(data.amountPaid)} {curr}</span>
+                            </div>
+                            <div className="flex justify-between pt-1.5">
+                                <span className="aseel-text-soft">المتبقي:</span>
+                                <span className="font-mono font-bold" dir="ltr">{formatMoney(data.remainingBalance)} {curr}</span>
+                            </div>
+                            <div className="flex justify-between pt-1.5">
+                                <span className="aseel-text-soft">حالة الدفع:</span>
+                                <span className="font-bold">{data.paymentStatusDisplay}</span>
+                            </div>
+                            <div className="flex justify-between pt-1.5">
+                                <span className="aseel-text-soft">رصيد العميل قبل احتساب المتبقي (بالعملة الأساسية):</span>
+                                <span className="font-mono font-bold" dir="ltr">{formatMoney(data.customerBalanceBeforeInvoice)}</span>
+                            </div>
+                            <div className="flex justify-between pt-1.5">
+                                <span className="aseel-text-soft">الرصيد الحالي بعد احتسابه (بالعملة الأساسية):</span>
+                                <span className="font-mono font-bold" dir="ltr">{formatMoney(data.customerBalanceAfterInvoice)}</span>
+                            </div>
+                            <div className="flex justify-between pt-1.5">
                                 <span className="aseel-text-soft">إجمالي الكمية:</span>
                                 <span className="font-mono font-bold" dir="ltr">{formatQuantity(data.lines.reduce((s, l) => l.product === "" ? s : s + (Number(l.quantity) || 0), 0))}</span>
                             </div>
                         </div>
                     </div>
                 </div>
+
+                {data.paymentDetails.length > 0 && (
+                    <div className="mb-4 border aseel-border-soft rounded-lg overflow-hidden">
+                        <div className="aseel-bg-panel px-3 py-2 border-b aseel-border-soft font-bold">تفاصيل سندات القبض</div>
+                        <table className="w-full text-[10px]">
+                            <thead>
+                                <tr className="border-b aseel-border-soft">
+                                    <th className="p-2 text-right">السند</th>
+                                    <th className="p-2 text-right">التاريخ</th>
+                                    <th className="p-2 text-right">المبلغ المخصص</th>
+                                    <th className="p-2 text-right">الحالة</th>
+                                    <th className="p-2 text-right">القيد</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {data.paymentDetails.map((payment) => (
+                                    <tr key={payment.id} className="border-b aseel-border-soft">
+                                        <td className="p-2">سند قبض #{payment.id}</td>
+                                        <td className="p-2">{formatDate(payment.payment_date)}</td>
+                                        <td className="p-2">{formatMoney(Number(payment.allocated_amount))} {curr}</td>
+                                        <td className="p-2">{payment.is_posted ? "مرحّل" : "غير مرحّل"}</td>
+                                        <td className="p-2">{payment.journal ? `#${payment.journal}` : "—"}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
 
                 {data.notes && (
                     <div className="mt-4 border aseel-border-soft rounded-lg p-3 aseel-bg-field">

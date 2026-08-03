@@ -12,6 +12,7 @@ import type { PurchaseInvoiceDto } from "../../types/purchaseInvoice";
 import { referenceTypeLabel, invoicePathForReference } from "../../utils/entityLinks";
 import { formatMoney } from "../../utils/formatNumber";
 import { clientLogger } from "../../services/logger";
+import { formatDateLocalized } from "../../utils/formatDate";
 
 /**
  * كشف الحساب — «تفاصيل الحركة»: نافذة تعرض تفاصيل السطر حسب نوعه:
@@ -93,22 +94,22 @@ export const StatementDetailsModal: React.FC<{
       onClick={onClose}
     >
       <div
-        className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl border border-gray-200 dark:border-gray-700 max-h-[85vh] overflow-auto"
+        className="bg-[var(--color-surface)] rounded-xl shadow-2xl w-full max-w-2xl border border-[var(--color-border)] max-h-[85vh] overflow-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center sticky top-0 bg-white dark:bg-gray-800">
-          <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+        <div className="p-4 border-b border-[var(--color-border)] flex justify-between items-center sticky top-0 bg-[var(--color-surface)]">
+          <h2 className="text-base font-bold text-[var(--color-text)] flex items-center gap-2">
             <FileText className="w-5 h-5 text-blue-500" />
             {title}
           </h2>
-          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 rounded-full" aria-label="إغلاق">
+          <button onClick={onClose} className="p-1.5 text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] rounded-full" aria-label="إغلاق">
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-4 space-y-3 text-sm">
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-[var(--aseel-ink-soft)]">
-            <span>التاريخ: <b className="text-[var(--aseel-ink)]">{movement.date || "—"}</b></span>
+            <span>التاريخ: <b className="text-[var(--aseel-ink)]">{formatDateLocalized(movement.date) || "—"}</b></span>
             <span>مدين: <b className="text-[var(--aseel-ink)] aseel-num">{movement.debit}</b></span>
             <span>دائن: <b className="text-[var(--aseel-ink)] aseel-num">{movement.credit}</b></span>
           </div>
@@ -176,7 +177,7 @@ export const StatementDetailsModal: React.FC<{
             <div className="space-y-3">
               <div className="flex flex-wrap gap-x-6 gap-y-1">
                 <span className="text-[var(--aseel-ink-soft)]">المبلغ المقبوض: <b className="text-[var(--aseel-ink)] aseel-num">{formatMoney(payment.amount)}</b></span>
-                <span className="text-[var(--aseel-ink-soft)]">تاريخ القبض: <b className="text-[var(--aseel-ink)]">{payment.payment_date || "—"}</b></span>
+                <span className="text-[var(--aseel-ink-soft)]">تاريخ القبض: <b className="text-[var(--aseel-ink)]">{formatDateLocalized(payment.payment_date) || "—"}</b></span>
               </div>
               {payment.notes && (
                 <div className="text-[var(--aseel-ink-soft)]">ملاحظات: <span className="text-[var(--aseel-ink)]">{payment.notes}</span></div>

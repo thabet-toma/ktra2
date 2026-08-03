@@ -4,6 +4,7 @@ import { User, AttendanceSession } from '../types';
 import { attendanceService } from '../services/attendanceService';
 import { formatDistanceToNow } from 'date-fns';
 import { ar } from 'date-fns/locale';
+import { formatDateValue } from "../utils/formatDate";
 
 interface EmployeeAttendanceProps {
   currentUser: User;
@@ -88,16 +89,16 @@ export const EmployeeAttendance: React.FC<EmployeeAttendanceProps> = ({ currentU
   if (!activeSession) {
     return (
       <div className="animate-fade-in">
-        <h1 className="text-3xl font-bold mb-6 text-gray-800 dark:text-gray-100">
+        <h1 className="text-3xl font-bold mb-6 text-[var(--color-text)]">
           الحضور والغياب
         </h1>
         
-        <div className="bg-white dark:bg-gray-800 rounded-2xl p-8 shadow-md border border-gray-200 dark:border-gray-700 text-center">
+        <div className="bg-[var(--color-surface)] rounded-2xl p-8 shadow-md border border-[var(--color-border)] text-center">
           <div className="text-6xl mb-4">⏰</div>
-          <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-4">
+          <h2 className="text-2xl font-bold text-[var(--color-text)] mb-4">
             لا توجد جلسة حضور نشطة
           </h2>
-          <p className="text-gray-600 dark:text-gray-400 text-lg">
+          <p className="text-[var(--color-text-muted)] text-lg">
             انتظر حتى يبدأ المدير جلسة حضور جديدة
           </p>
         </div>
@@ -107,18 +108,18 @@ export const EmployeeAttendance: React.FC<EmployeeAttendanceProps> = ({ currentU
 
   return (
     <div className="animate-fade-in">
-      <h1 className="text-3xl font-bold mb-6 text-gray-800 dark:text-gray-100">
+      <h1 className="text-3xl font-bold mb-6 text-[var(--color-text)]">
         الحضور والغياب
       </h1>
 
       {/* جلسة الحضور النشطة */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-md border border-gray-200 dark:border-gray-700 mb-6">
+      <div className="bg-[var(--color-surface)] rounded-2xl p-6 shadow-md border border-[var(--color-border)] mb-6">
         <div className="text-center">
           <div className="text-4xl mb-4">📅</div>
-          <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">
+          <h2 className="text-2xl font-bold text-[var(--color-text)] mb-2">
             جلسة حضور نشطة
           </h2>
-          <p className="text-gray-600 dark:text-gray-400 mb-4">
+          <p className="text-[var(--color-text-muted)] mb-4">
             بدأت منذ {formatDistanceToNow(new Date(activeSession.startTime), { locale: ar, addSuffix: true })}
           </p>
           
@@ -162,25 +163,25 @@ export const EmployeeAttendance: React.FC<EmployeeAttendanceProps> = ({ currentU
       </div>
 
       {/* معلومات الجلسة */}
-      <div className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-md border border-gray-200 dark:border-gray-700">
-        <h3 className="text-lg font-bold text-gray-800 dark:text-gray-100 mb-4">
+      <div className="bg-[var(--color-surface)] rounded-2xl p-6 shadow-md border border-[var(--color-border)]">
+        <h3 className="text-lg font-bold text-[var(--color-text)] mb-4">
           معلومات الجلسة
         </h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
           <div>
-            <span className="font-semibold text-gray-600 dark:text-gray-400">تاريخ الجلسة:</span>
-            <span className="mr-2 text-gray-800 dark:text-gray-200">
-              {new Date(activeSession.startTime).toLocaleDateString('ar-EG')}
+            <span className="font-semibold text-[var(--color-text-muted)]">تاريخ الجلسة:</span>
+            <span className="mr-2 text-[var(--color-text)]">
+              {formatDateValue(activeSession.startTime)}
             </span>
           </div>
           <div>
-            <span className="font-semibold text-gray-600 dark:text-gray-400">وقت البدء:</span>
-            <span className="mr-2 text-gray-800 dark:text-gray-200">
+            <span className="font-semibold text-[var(--color-text-muted)]">وقت البدء:</span>
+            <span className="mr-2 text-[var(--color-text)]">
               {new Date(activeSession.startTime).toLocaleTimeString('ar-EG')}
             </span>
           </div>
           <div>
-            <span className="font-semibold text-gray-600 dark:text-gray-400">النقاط:</span>
+            <span className="font-semibold text-[var(--color-text-muted)]">النقاط:</span>
             <span className="mr-2 text-green-600 dark:text-green-400 font-bold">
               +10 لكل حاضر
             </span>

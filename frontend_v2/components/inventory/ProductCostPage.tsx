@@ -131,7 +131,6 @@ export const ProductCostPage: React.FC = () => {
   return (
     <div
       dir="rtl"
-      data-skin="aseel"
       style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8, padding: "8px 12px" }}
     >
       {/* Header */}

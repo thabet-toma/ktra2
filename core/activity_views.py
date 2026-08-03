@@ -10,7 +10,7 @@ from django.db.models import Q
 from django.utils.dateparse import parse_date
 from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
@@ -18,6 +18,67 @@ from core.api_defaults import ApiAuthAndUser
 from core.models import ActivityLog
 from core.tenant_utils import get_tenant
 from core.user_roles import user_is_admin
+
+
+def _partner_activity_filter(tenant, partner_id):
+    """روابط جديدة + حل علاقات المستندات للسجلات التاريخية غير المربوطة."""
+    from logistics.models import (
+        LocalShipment, LogisticsClearance, LogisticsDeal, LogisticsShipment,
+        LogisticsShipmentDeal, PurchaseInvoice,
+    )
+    from sales.models import CustomerPayment, SalesInvoice, SupplierPayment
+
+    deal_ids = LogisticsDeal.all_objects.filter(
+        tenant=tenant, partner_id=partner_id,
+    ).values("id")
+    supplier_shipment_ids = LogisticsShipmentDeal.objects.filter(
+        shipment__tenant=tenant, deal__partner_id=partner_id,
+    ).values("shipment_id")
+    shipment_ids = LogisticsShipment.all_objects.filter(
+        Q(tenant=tenant, shipping_agent_id=partner_id)
+        | Q(id__in=supplier_shipment_ids),
+    ).values("id")
+    clearance_ids = LogisticsClearance.objects.filter(
+        Q(tenant=tenant, customs_broker_id=partner_id)
+        | Q(tenant=tenant, shipment_id__in=supplier_shipment_ids),
+    ).values("id")
+    local_shipment_ids = LocalShipment.objects.filter(
+        Q(tenant=tenant, carrier_id=partner_id)
+        | Q(tenant=tenant, shipment_id__in=supplier_shipment_ids),
+    ).values("id")
+
+    return (
+        Q(partner_links__partner_id=partner_id)
+        | Q(entity_type="partner", entity_id=partner_id)
+        | Q(entity_type="deal", entity_id__in=deal_ids)
+        | Q(
+            entity_type="purchase_invoice",
+            entity_id__in=PurchaseInvoice.objects.filter(
+                tenant=tenant, partner_id=partner_id,
+            ).values("id"),
+        )
+        | Q(
+            entity_type="sales_invoice",
+            entity_id__in=SalesInvoice.objects.filter(
+                tenant=tenant, customer_id=partner_id,
+            ).values("id"),
+        )
+        | Q(
+            entity_type="customer_payment",
+            entity_id__in=CustomerPayment.objects.filter(
+                tenant=tenant, partner_id=partner_id,
+            ).values("id"),
+        )
+        | Q(
+            entity_type="supplier_payment",
+            entity_id__in=SupplierPayment.objects.filter(
+                tenant=tenant, partner_id=partner_id,
+            ).values("id"),
+        )
+        | Q(entity_type="shipment", entity_id__in=shipment_ids)
+        | Q(entity_type="clearance", entity_id__in=clearance_ids)
+        | Q(entity_type="local_shipment", entity_id__in=local_shipment_ids)
+    )
 
 
 class ActivityLogSerializer(serializers.ModelSerializer):
@@ -61,16 +122,29 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
         p = self.request.query_params
         entity_type = p.get("entity_type")
         entity_id = p.get("entity_id")
+        partner_id = p.get("partner_id")
 
-        # صلاحية: عرض عبر كل المستخدمين (سجل عام) للمدير فقط. سجل مستند واحد متاح للجميع.
-        is_entity_scoped = bool(entity_type and entity_id)
-        if not is_entity_scoped and not user_is_admin(self.request.user):
+        # صلاحية: سجل مستند/جهة متاح للعضو؛ السجل العام للمدير فقط.
+        is_document_scoped = bool(entity_type and entity_id)
+        is_partner_scoped = bool(partner_id)
+        is_scoped = is_document_scoped or is_partner_scoped
+        if not is_scoped and not user_is_admin(self.request.user):
             raise PermissionDenied("سجل النشاط العام متاح للمدير فقط.")
 
         if entity_type:
             qs = qs.filter(entity_type=entity_type)
         if entity_id:
             qs = qs.filter(entity_id=entity_id)
+        if partner_id:
+            try:
+                partner_id = int(partner_id)
+            except (TypeError, ValueError):
+                raise ValidationError({"partner_id": "معرّف الجهة غير صالح."})
+            from partners.models import Partner
+
+            if not Partner.objects.filter(tenant=tenant, id=partner_id).exists():
+                raise ValidationError({"partner_id": "الجهة غير موجودة في هذه الشركة."})
+            qs = qs.filter(_partner_activity_filter(tenant, partner_id)).distinct()
 
         user_id = p.get("user")
         if user_id:
@@ -83,7 +157,7 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
         # أحداث العرض مستبعَدة افتراضياً من الجدول العام؛ تُطلب صراحةً بـ include_views=true
         # أو ضمن سجل مستند واحد.
         include_views = str(p.get("include_views", "")).lower() in ("1", "true", "yes")
-        if not include_views and not is_entity_scoped:
+        if not include_views and not is_document_scoped:
             qs = qs.filter(is_view=False)
 
         # التاريخ: افتراضي اليوم للصفحة العامة (لا يُطبّق على سجل مستند واحد).
@@ -97,7 +171,7 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
                 qs = qs.filter(timestamp__date__gte=date_from)
             if date_to:
                 qs = qs.filter(timestamp__date__lte=date_to)
-            if not is_entity_scoped and not date_from and not date_to:
+            if not is_scoped and not date_from and not date_to:
                 from django.utils import timezone
                 qs = qs.filter(timestamp__date=timezone.localdate())
 

@@ -9,6 +9,7 @@ import {
 import { SupplierViewModal } from '@/components/common/SupplierViewModal';
 import { buildShipmentOptionLabelCamel } from '@/utils/shipmentLabel';
 import { formatNumber } from '@/utils/formatNumber';
+import { formatDateValue } from "../../../utils/formatDate";
 
 interface ShipmentListProps {
     shipments: Shipment[];
@@ -167,10 +168,7 @@ export const ShipmentList: React.FC<ShipmentListProps> = ({ shipments, onEdit, o
     const formatDate = (dateString?: string) => {
         if (!dateString) return '-';
         const date = new Date(dateString);
-        return date.toLocaleDateString('ar-EG', {
-            day: 'numeric',
-            month: 'short'
-        });
+        return formatDateValue(date);
     };
 
     // --- Empty State ---

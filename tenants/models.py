@@ -1,3 +1,4 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 class Currency(models.Model):
@@ -37,6 +38,8 @@ class Tenant(models.Model):
     # فقط لكل شركة. الشركة غير المفعّلة لا يرى أعضاؤها قائمة الاستيراد ولا قسم
     # «تكاليف الاستيراد» في شجرة الحسابات.
     import_enabled = models.BooleanField(default=False, db_column='ImportEnabled')
+    # شركة مشتركة للتجربة؛ تعيينها من لوحة السوبر أدمن يمنح الجميع عضوية staff.
+    is_example = models.BooleanField(default=False, db_column='IsExample')
 
     class Meta:
         db_table = 'tenants'
@@ -84,6 +87,13 @@ class TenantSettings(models.Model):
     fiscal_period_start = models.DateField(null=True, blank=True, db_column='FiscalPeriodStart')
     fiscal_period_end = models.DateField(null=True, blank=True, db_column='FiscalPeriodEnd')
 
+    # يوم بداية الدورة الشهرية المتكررة لملخص لوحة الأعمال.
+    dashboard_month_start_day = models.PositiveSmallIntegerField(
+        default=1, db_column='DashboardMonthStartDay',
+        validators=[MinValueValidator(1), MaxValueValidator(31)],
+        help_text="يوم بداية شهر ملخص الأعمال (1..31)",
+    )
+
     # حسابات افتراضية
     default_freight_credit_account = models.ForeignKey(
         'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
@@ -107,6 +117,15 @@ class TenantSettings(models.Model):
     font_family = models.CharField(
         max_length=20, default='default', db_column='FontFamily',
         help_text="default | tahoma | segoe | arial",
+    )
+
+    # مهلة الخمول قبل إنهاء الجلسة (بالدقائق) — يُحفَظ خادمياً لكل شركة فيثبت
+    # عبر الأجهزة، ويُدخِله المستخدم من صفحة الإعدادات. مقيّد بنطاق معقول
+    # (5 دقائق .. 24 ساعة) حماية من إدخال خاطئ يُبقي الجلسة أبداً أو يقطعها فوراً.
+    idle_timeout_minutes = models.PositiveIntegerField(
+        default=180, db_column='IdleTimeoutMinutes',
+        validators=[MinValueValidator(5), MaxValueValidator(1440)],
+        help_text="مهلة إنهاء الجلسة عند الخمول بالدقائق (5..1440)",
     )
 
     class Meta:
@@ -144,6 +163,39 @@ class Branch(models.Model):
 
     def __str__(self):
         return f"{self.tenant.CompanyName} / {self.name}"
+
+
+# ── task49: WhatsAppContact (ربط رقم واتساب بشركة للمساعد الذكي) ───────
+
+class WhatsAppContact(models.Model):
+    """رقم واتساب مصرَّح له بمحادثة المساعد الذكي، مربوط بشركة واحدة.
+
+    هذا الربط هو حارس العزل الوحيد على مسار واتساب: أي رقم غير مُدرَج هنا
+    (أو مُدرَج لكنه غير نشط) لا يحصل على أي رد من المساعد مهما كان محتوى
+    رسالته — الأمان هنا خادمي بالكامل، لا يعتمد على النموذج أو على واتساب.
+    """
+
+    phone_number = models.CharField(
+        max_length=20, unique=True, db_column='PhoneNumber',
+        help_text='أرقام فقط بصيغة دولية بلا +، مثل 972501234567',
+    )
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='whatsapp_contacts',
+        db_column='TenantID',
+    )
+    label = models.CharField(
+        max_length=100, blank=True, default='', db_column='Label',
+        help_text='اسم توضيحي اختياري (مثال: أشرف — مدير المبيعات)',
+    )
+    is_active = models.BooleanField(default=True, db_column='IsActive')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'whatsapp_contacts'
+        managed = True
+
+    def __str__(self):
+        return f"{self.phone_number} → {self.tenant.CompanyName}"
 
 
 # ── N0-T2: TenantBook (أرقام الدفاتر) ──────────────────────────────────
@@ -228,6 +280,9 @@ class UserCompanyMembership(models.Model):
     ROLE_CHOICES = [
         ('manager', 'مدير (Manager)'),
         ('accountant', 'محاسب (Accountant)'),
+        # T-PERM: دورا الموظف المتخصّص — لكلٍّ مصفوفة صلاحيات في core.access
+        ('sales', 'موظف مبيعات (Sales)'),
+        ('procurement', 'موظف مشتريات (Procurement)'),
         ('staff', 'موظف (Staff)'),
         ('viewer', 'مستعرض (Viewer)'),
     ]
@@ -239,6 +294,8 @@ class UserCompanyMembership(models.Model):
     # منح هذا العضو صلاحية وحدة الاستيراد — يضبطه مدير الشركة، وفعّال فقط ضمن
     # شركة مفعّل لديها الاستيراد. المدير يملكها ضمناً.
     can_access_import = models.BooleanField(default=False, db_column='CanAccessImport')
+    # عضوية أنشأها تعيين «شركة المثال» وليست دعوة أصلية من مدير الشركة.
+    is_example_access = models.BooleanField(default=False, db_column='IsExampleAccess')
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
 
     class Meta:
@@ -249,3 +306,55 @@ class UserCompanyMembership(models.Model):
     def __str__(self):
         return f"{self.user.username} - {self.tenant.CompanyName} ({self.role})"
 
+
+
+class RolePermission(models.Model):
+    """T-PERM: تجاوز صلاحية لدور داخل شركة بعينها.
+
+    الافتراضات في `core.access.ROLE_DEFAULTS`؛ هذا الجدول يحمل الفروق فقط
+    (منح صريح allowed=True أو منع صريح allowed=False) كما يضبطها مدير الشركة من
+    شاشة الصلاحيات. غياب السطر = «كما هو الافتراضي» — فالاستعادة تعني الحذف.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='role_permissions',
+        db_column='TenantID')
+    role = models.CharField(
+        max_length=20, choices=UserCompanyMembership.ROLE_CHOICES, db_column='Role')
+    permission_key = models.CharField(max_length=64, db_column='PermissionKey')
+    allowed = models.BooleanField(default=True, db_column='Allowed')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+
+    class Meta:
+        db_table = 'tenant_role_permissions'
+        managed = True
+        unique_together = [['tenant', 'role', 'permission_key']]
+
+    def __str__(self):
+        state = 'منح' if self.allowed else 'منع'
+        return f"{self.tenant_id}/{self.role}/{self.permission_key} = {state}"
+
+
+class MemberPermission(models.Model):
+    """T-PERM (المرحلة 2): تجاوز صلاحية لعضو بعينه فوق دوره.
+
+    الترتيب: افتراضي الدور ← تجاوز الدور (RolePermission) ← هذا الجدول (الأعلى).
+    مثال: موظف مبيعات واحد يُمنح «التراجع عن ترحيل فاتورة بيع» دون زملائه.
+    حذف السطر = العودة لما يمليه الدور.
+    """
+
+    membership = models.ForeignKey(
+        UserCompanyMembership, on_delete=models.CASCADE,
+        related_name='permission_overrides', db_column='MembershipID')
+    permission_key = models.CharField(max_length=64, db_column='PermissionKey')
+    allowed = models.BooleanField(default=True, db_column='Allowed')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+
+    class Meta:
+        db_table = 'member_permissions'
+        managed = True
+        unique_together = [['membership', 'permission_key']]
+
+    def __str__(self):
+        state = 'منح' if self.allowed else 'منع'
+        return f"{self.membership_id}/{self.permission_key} = {state}"

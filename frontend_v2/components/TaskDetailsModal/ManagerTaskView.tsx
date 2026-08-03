@@ -34,16 +34,16 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
   return (
     <>
       <div className="fixed inset-0 bg-black bg-opacity-50 z-40 flex items-start sm:items-center justify-center p-0 sm:p-4 animate-fade-in overflow-y-auto" onClick={onClose}>
-        <div className="bg-white dark:bg-gray-800 w-full max-w-6xl transform transition-all flex flex-col mt-4 sm:mt-0 max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] sm:rounded-2xl shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="bg-[var(--color-surface)] w-full max-w-6xl transform transition-all flex flex-col mt-4 sm:mt-0 max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] sm:rounded-2xl shadow-xl" onClick={(e) => e.stopPropagation()}>
           {/* Header */}
-          <header className="flex justify-between items-center p-4 sm:p-5 border-b border-gray-200 dark:border-gray-700 flex-shrink-0 bg-white dark:bg-gray-800 sm:rounded-t-2xl sticky top-0 z-10">
+          <header className="flex justify-between items-center p-4 sm:p-5 border-b border-[var(--color-border)] flex-shrink-0 bg-[var(--color-surface)] sm:rounded-t-2xl sticky top-0 z-10">
             <div className="space-y-1 overflow-hidden flex-1 min-w-0">
-              <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-gray-800 dark:text-gray-100 truncate">
+              <h2 className="text-lg sm:text-xl md:text-2xl font-bold text-[var(--color-text)] truncate">
                 {task.title} - لوحة المتابعة
               </h2>
               <div className="flex flex-wrap items-center gap-2 text-xs sm:text-sm">
                 <PriorityIndicator priority={task.priority} />
-                <span className="text-gray-500 dark:text-gray-400">تاريخ التسليم: {task.dueDate}</span>
+                <span className="text-[var(--color-text-muted)]">تاريخ التسليم: {task.dueDate}</span>
               </div>
             </div>
             
@@ -56,12 +56,12 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
                   العمل على المهمة
                 </button>
               )}
-              <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-2xl sm:text-3xl px-2 flex-shrink-0">&times;</button>
+              <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)] text-2xl sm:text-3xl px-2 flex-shrink-0">&times;</button>
             </div>
           </header>
 
           {/* Stats Grid - Clickable Filters */}
-          <div className="px-4 sm:px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+          <div className="px-4 sm:px-5 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface-2)]">
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                <StatCard 
                  icon={<Users className="text-blue-500" />} 
@@ -115,16 +115,16 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
           </div>
 
           {/* Filters */}
-          <div className="px-4 sm:px-5 py-3 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+          <div className="px-4 sm:px-5 py-3 border-b border-[var(--color-border)] bg-[var(--color-surface)]">
             <div className="flex flex-col md:flex-row gap-3">
               <div className="flex-1 relative">
-                <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-                <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ابحث عن موظف أو حالة..." className="w-full pr-10 pl-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm" />
+                <Search className="absolute right-3 top-1/2 transform -translate-y-1/2 text-[var(--color-text-muted)] w-4 h-4" />
+                <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="ابحث عن موظف أو حالة..." className="w-full pr-10 pl-4 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] text-sm" />
               </div>
               <div className="w-full md:w-48">
                 <div className="flex items-center gap-2">
-                  <Filter className="w-4 h-4 text-gray-400" />
-                  <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm">
+                  <Filter className="w-4 h-4 text-[var(--color-text-muted)]" />
+                  <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] text-sm">
                     <option value="all">جميع الحالات</option>
                     <option value="submitted">مسلمة (الكل)</option>
                     <option value="pending">قيد المراجعة</option>
@@ -136,8 +136,8 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
                 </div>
               </div>
               <div className="flex gap-2">
-                <button onClick={expandAllUsers} className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm"><ChevronDown className="w-4 h-4 inline ml-1" />فتح الكل</button>
-                <button onClick={collapseAllUsers} className="px-3 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg text-sm"><ChevronUp className="w-4 h-4 inline ml-1" />غلق الكل</button>
+                <button onClick={expandAllUsers} className="px-3 py-2 bg-[var(--color-surface-3)] text-[var(--color-text)] rounded-lg text-sm"><ChevronDown className="w-4 h-4 inline ml-1" />فتح الكل</button>
+                <button onClick={collapseAllUsers} className="px-3 py-2 bg-[var(--color-surface-3)] text-[var(--color-text)] rounded-lg text-sm"><ChevronUp className="w-4 h-4 inline ml-1" />غلق الكل</button>
               </div>
             </div>
           </div>
@@ -145,16 +145,16 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
           {/* List Content */}
           <main className="flex-1 p-4 sm:p-5 overflow-y-auto space-y-4">
             {filteredSubmissionsData.map((data) => (
-              <div key={data.userId} className="bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+              <div key={data.userId} className="bg-[var(--color-surface-2)] rounded-lg border border-[var(--color-border)] overflow-hidden">
                  {/* User Header Row */}
-                 <div className="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors" onClick={() => toggleUserExpansion(data.userId)}>
+                 <div className="flex justify-between items-center p-4 cursor-pointer hover:bg-[var(--color-surface-3)] transition-colors" onClick={() => toggleUserExpansion(data.userId)}>
                     <div className="flex items-center gap-3 flex-1">
-                      <div className="w-10 h-10 bg-gray-200 dark:bg-gray-700 rounded-full flex items-center justify-center">
-                        <span className="font-bold text-gray-700 dark:text-gray-300">{data.user.name?.charAt(0) || '?'}</span>
+                      <div className="w-10 h-10 bg-[var(--color-surface-3)] rounded-full flex items-center justify-center">
+                        <span className="font-bold text-[var(--color-text)]">{data.user.name?.charAt(0) || '?'}</span>
                       </div>
                       <div>
-                        <h3 className="font-bold text-gray-900 dark:text-white text-sm md:text-base">{data.user.name}</h3>
-                        <div className="flex items-center gap-3 mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        <h3 className="font-bold text-[var(--color-text)] text-sm md:text-base">{data.user.name}</h3>
+                        <div className="flex items-center gap-3 mt-1 text-xs text-[var(--color-text-muted)]">
                           {data.user.email && <span className="flex items-center gap-1"><Mail className="w-3 h-3" />{data.user.email}</span>}
                           {data.user.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{data.user.phone}</span>}
                         </div>
@@ -165,14 +165,14 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
                       {data.latestSubmission?.newItemsCount && data.latestSubmission.newItemsCount > 0 && (
                         <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded-full text-xs">{data.latestSubmission.newItemsCount} جديد</span>
                       )}
-                      <span className="text-sm text-gray-600 dark:text-gray-400">{data.submissionCount} تسليم</span>
-                      <ChevronDown className={`w-5 h-5 text-gray-400 transition-transform ${data.isExpanded ? 'rotate-180' : ''}`} />
+                      <span className="text-sm text-[var(--color-text-muted)]">{data.submissionCount} تسليم</span>
+                      <ChevronDown className={`w-5 h-5 text-[var(--color-text-muted)] transition-transform ${data.isExpanded ? 'rotate-180' : ''}`} />
                     </div>
                  </div>
 
                  {/* Expanded Details */}
                  {data.isExpanded && (
-                   <div className="border-t border-gray-200 dark:border-gray-700 p-4 space-y-4">
+                   <div className="border-t border-[var(--color-border)] p-4 space-y-4">
                       {data.submissions.length > 0 ? data.submissions.map((submission: Submission, subIndex: number) => {
                         
                         const allSubmissionImages = submission.items
@@ -180,11 +180,11 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
                           : [];
 
                         return (
-                          <div key={submission.id} className="bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
+                          <div key={submission.id} className="bg-[var(--color-surface)] p-4 rounded-lg border border-[var(--color-border)]">
                              <div className="flex justify-between items-start mb-3">
                                <div>
-                                 <h4 className="font-bold text-gray-900 dark:text-white text-sm">التسليم #{data.submissions.length - subIndex}</h4>
-                                 <p className="text-xs text-gray-500 mt-1">{new Date(submission.createdAt).toLocaleString('ar-EG')}</p>
+                                 <h4 className="font-bold text-[var(--color-text)] text-sm">التسليم #{data.submissions.length - subIndex}</h4>
+                                 <p className="text-xs text-[var(--color-text-muted)] mt-1">{new Date(submission.createdAt).toLocaleString('ar-EG')}</p>
                                </div>
                                <div className="flex gap-2">
                                  {submission.status === 'pending' && (
@@ -199,14 +199,14 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
                              
                              {allSubmissionImages.length > 0 && (
                                <div className="mt-3">
-                                 <h5 className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2 flex items-center gap-1">
+                                 <h5 className="text-xs font-semibold text-[var(--color-text-muted)] mb-2 flex items-center gap-1">
                                    <ImageIcon className="w-3 h-3" /> صور التسليم ({allSubmissionImages.length})
                                  </h5>
                                  <div className="flex flex-wrap gap-2">
                                    {allSubmissionImages.map((imgUrl, idx) => (
                                      <div 
                                        key={idx} 
-                                       className="group relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600 cursor-zoom-in"
+                                       className="group relative w-16 h-16 sm:w-20 sm:h-20 rounded-lg overflow-hidden border border-[var(--color-border)] cursor-zoom-in"
                                        onClick={() => setPreviewImage(imgUrl)}
                                      >
                                        <img 
@@ -224,28 +224,28 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
                              {submission.items && submission.items.length > 0 && (
                                <div className="mt-3 max-h-40 overflow-y-auto space-y-2">
                                  {submission.items.map((item, i) => (
-                                   <div key={i} className="bg-gray-50 dark:bg-gray-700/50 p-2 rounded text-xs">
+                                   <div key={i} className="bg-[var(--color-surface-2)] p-2 rounded text-xs">
                                      <div className="flex justify-between items-start">
-                                        <p className="font-medium text-gray-800 dark:text-gray-200">{item.productLink || 'بند بدون رابط'}</p>
+                                        <p className="font-medium text-[var(--color-text)]">{item.productLink || 'بند بدون رابط'}</p>
                                         {item.images && item.images.length > 0 && <ImageIcon className="w-3 h-3 text-blue-500" />}
                                      </div>
-                                     {item.productPrice && <p className="text-gray-600 mt-1">السعر: {item.productPrice} $</p>}
+                                     {item.productPrice && <p className="text-[var(--color-text-muted)] mt-1">السعر: {item.productPrice} $</p>}
                                    </div>
                                  ))}
                                </div>
                              )}
                           </div>
                         );
-                      }) : <p className="text-center py-6 text-gray-500 text-sm">لم يسلم هذا الموظف بعد</p>}
+                      }) : <p className="text-center py-6 text-[var(--color-text-muted)] text-sm">لم يسلم هذا الموظف بعد</p>}
                    </div>
                  )}
               </div>
             ))}
-            {filteredSubmissionsData.length === 0 && <div className="text-center py-12 text-gray-500"><p>لا توجد نتائج مطابقة</p></div>}
+            {filteredSubmissionsData.length === 0 && <div className="text-center py-12 text-[var(--color-text-muted)]"><p>لا توجد نتائج مطابقة</p></div>}
           </main>
           
-          <footer className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex justify-end">
-            <button onClick={onClose} className="px-6 py-2.5 bg-gray-200 text-gray-800 font-bold rounded-lg hover:bg-gray-300">إغلاق</button>
+          <footer className="p-4 border-t border-[var(--color-border)] bg-[var(--color-surface)] flex justify-end">
+            <button onClick={onClose} className="px-6 py-2.5 bg-[var(--color-surface-3)] text-[var(--color-text)] font-bold rounded-lg hover:bg-gray-300">إغلاق</button>
           </footer>
         </div>
       </div>
@@ -282,20 +282,20 @@ const StatCard = ({ icon, label, value, isActive, onClick, activeColor }: any) =
       flex items-center gap-2
       ${isActive 
         ? `${activeColor} ring-1 ring-offset-0 shadow-md transform scale-105` 
-        : "bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 hover:border-gray-300 dark:hover:border-gray-500 hover:shadow-sm"
+        : "bg-[var(--color-surface)] border-[var(--color-border)] hover:border-[var(--color-border)] hover:shadow-sm"
       }
     `}
   >
     <div className="w-4 h-4">{icon}</div>
     <div>
-      <p className={`text-xs ${isActive ? 'text-gray-800 dark:text-gray-100 font-semibold' : 'text-gray-500 dark:text-gray-400'}`}>{label}</p>
-      <p className="font-bold text-gray-900 dark:text-white">{value}</p>
+      <p className={`text-xs ${isActive ? 'text-[var(--color-text)] font-semibold' : 'text-[var(--color-text-muted)]'}`}>{label}</p>
+      <p className="font-bold text-[var(--color-text)]">{value}</p>
     </div>
   </div>
 );
 
 const StatusBadge = ({ submission }: { submission: Submission | null }) => {
-  if (!submission) return <span className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-xs font-medium">لم يسلم</span>;
+  if (!submission) return <span className="px-3 py-1 bg-[var(--color-surface-3)] text-[var(--color-text)] rounded-full text-xs font-medium">لم يسلم</span>;
   const colors = {
     approved: 'bg-green-100 text-green-700',
     rejected: 'bg-red-100 text-red-700',

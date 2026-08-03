@@ -1,6 +1,9 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from .views import TaskViewSet, AttendanceRecordViewSet, PointsHistoryViewSet
+from .views import (
+    TaskViewSet, AttendanceRecordViewSet, PointsHistoryViewSet, PersonalExpenseViewSet,
+    PersonalExpenseCategoryViewSet, PersonalExpenseSheetViewSet,
+)
 from .auth_api import (
     login_view,
     logout_view,
@@ -14,6 +17,9 @@ router = DefaultRouter()
 router.register(r'tasks', TaskViewSet)
 router.register(r'attendance', AttendanceRecordViewSet)
 router.register(r'points', PointsHistoryViewSet)
+router.register(r'personal-expenses', PersonalExpenseViewSet, basename='personal-expense')
+router.register(r'personal-expense-sheets', PersonalExpenseSheetViewSet, basename='personal-expense-sheet')
+router.register(r'personal-expense-categories', PersonalExpenseCategoryViewSet, basename='personal-expense-category')
 
 urlpatterns = [
     path('auth/login/', login_view),

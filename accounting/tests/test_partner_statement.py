@@ -54,7 +54,8 @@ def test_customer_statement_running_balance_reconciles(env):
              lines=[(cash, 30, 0, None), (ar, 0, 30, customer)])
 
     st = partner_account_statement(
-        tenant_id=tenant.TenantID, partner_id=customer.id, is_supplier=False)
+        tenant_id=tenant.TenantID, partner_id=customer.id, is_supplier=False,
+        ordering="oldest")
     assert st["count"] == 2
     balances = [Decimal(r["running_balance"]) for r in st["results"]]
     assert balances == [Decimal("100"), Decimal("70")]
@@ -72,11 +73,38 @@ def test_statement_pagination(env):
                  lines=[(ar, 10, 0, customer), (rev, 0, 10, None)])
     page = partner_account_statement(
         tenant_id=tenant.TenantID, partner_id=customer.id, is_supplier=False,
-        limit=2, offset=2)
+        limit=2, offset=2, ordering="oldest")
     assert page["count"] == 5
     assert len(page["results"]) == 2
     # third row running balance = 30 (after 3 entries of 10)
     assert Decimal(page["results"][0]["running_balance"]) == Decimal("30")
+
+
+def test_statement_defaults_to_newest_and_can_sort_oldest(env):
+    tenant, ar, rev, cash, customer = env
+    for day in (1, 2, 3):
+        _journal(
+            tenant,
+            date=f"2026-06-0{day}",
+            lines=[(ar, 10, 0, customer), (rev, 0, 10, None)],
+        )
+
+    newest = partner_account_statement(
+        tenant_id=tenant.TenantID, partner_id=customer.id, is_supplier=False)
+    assert [row["date"] for row in newest["results"]] == [
+        "2026-06-03", "2026-06-02", "2026-06-01",
+    ]
+    assert [Decimal(row["running_balance"]) for row in newest["results"]] == [
+        Decimal("30"), Decimal("20"), Decimal("10"),
+    ]
+
+    oldest = partner_account_statement(
+        tenant_id=tenant.TenantID, partner_id=customer.id, is_supplier=False,
+        ordering="oldest",
+    )
+    assert [row["date"] for row in oldest["results"]] == [
+        "2026-06-01", "2026-06-02", "2026-06-03",
+    ]
 
 
 class PartnerProfileEndpointTest(APITestCase):

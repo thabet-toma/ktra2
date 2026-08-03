@@ -36,6 +36,7 @@ import {
   Invoice, 
   Supplier, 
   PriceOffer, 
+  PriceOfferStatus,
   Deal, 
   DealStatus, 
   DealItem, 
@@ -48,6 +49,22 @@ import {
 import { apiDelete, apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "../../services/restApi";
 import { tryPostPurchaseReceiptFromInvoice } from "../../services/invoiceAccountingBridge";
 import { resolveTenantId } from "../../utils/tenantContext";
+import {
+  cancelPurchaseOrder,
+  confirmPurchaseOrder,
+  createPurchaseOrder,
+  createSupplierQuotation,
+  getPurchaseOrder,
+  getSupplierQuotation,
+  listPurchaseOrders,
+  listSupplierQuotations,
+  updatePurchaseOrder,
+  updateSupplierQuotation,
+  type ProcurementScope,
+  type PurchaseOrderDto,
+  type SupplierQuotationDto,
+  type SupplierQuotationStatus,
+} from "../../services/procurementDocumentsApi";
 
 // --- Helper: Sanitize Data ---
 export const removeUndefined = <T>(obj: T): T => {
@@ -1110,12 +1127,41 @@ export const deleteUserFromDb = async (userId: string) => {
   await deleteDoc(userRef);
 };
 
-export const subscribeToUsers = (callback: (users: User[]) => void) => {
+export const subscribeToUsers = (isSuperuser: boolean, callback: (users: User[]) => void) => {
+  if (!isSuperuser) {
+    callback([]);
+    return () => { };
+  }
   const q = query(collection(db, "users"));
   return onSnapshot(q, (snapshot) => {
     const users = snapshot.docs.map(doc => doc.data() as User);
     callback(users);
   });
+};
+
+type CompanyMemberUserRow = {
+  user_id: number;
+  username: string;
+  email: string;
+  full_name: string;
+  role: string;
+};
+
+/** Minimal user records sourced from the membership-scoped API, never the
+ * platform-wide users mirror. */
+export const loadCompanyMemberUsers = async (tenantId: number): Promise<User[]> => {
+  const members = await apiGetObject<CompanyMemberUserRow[]>(
+    `tenants/companies/${tenantId}/members/`
+  );
+  return members.map((member) => ({
+    id: String(member.user_id),
+    name: member.full_name || member.username,
+    email: member.email || "",
+    role: member.role === "manager" ? "manager" : "employee",
+    employmentStatus: "",
+    isApproved: true,
+    isEmailVerified: true,
+  }));
 };
 
 // --- Tasks Service ---
@@ -1331,7 +1377,10 @@ export const itemsService = {
     }
   },
 
-  subscribeToItems: (callback: (items: Item[]) => void) => {
+  subscribeToItems: (
+    callback: (items: Item[]) => void,
+    onError?: (error: unknown) => void,
+  ) => {
     let alive = true;
     let inFlight = false;
     const load = async () => {
@@ -1343,8 +1392,9 @@ export const itemsService = {
           query: { view: "lookup" },
         });
         if (alive) callback(products.map((p: any) => itemsService._mapProductToItem(p)));
-      } catch {
+      } catch (error) {
         // احتفظ بآخر snapshot ناجح؛ فشل refresh عابر لا يمسح المحددات.
+        if (alive) onError?.(error);
       } finally {
         inFlight = false;
       }
@@ -1583,6 +1633,7 @@ export const suppliersService = {
       salesRepWechat: p?.sales_rep_wechat || "",
       salesRepPhone: p?.sales_rep_phone || "",
       type: suppliersService._mapPartnerTypeToSupplierType(p?.partner_type),
+      supplierScope: (p?.supplier_scope || "") as Supplier["supplierScope"],
       createdAt: p?.created_at || new Date().toISOString(),
       updatedAt: p?.updated_at || p?.created_at || new Date().toISOString(),
     };
@@ -1614,11 +1665,24 @@ export const suppliersService = {
     }
   },
   
-  subscribeToSuppliers: (callback: (suppliers: Supplier[]) => void) => {
+  subscribeToSuppliers: (
+    callback: (suppliers: Supplier[]) => void,
+    onError?: (error: unknown) => void,
+    /**
+     * T-IMPOFFER: نطاق المورد. شاشة الاستيراد تطلب `international` وشاشة الشراء
+     * المحلي `local`؛ الخادم يُضيف غير المصنَّفين إلى الجانبين فلا يختفي مورد
+     * قائم. غياب النطاق = كل الموردين (السلوك السابق حرفياً).
+     */
+    scope?: "local" | "international",
+  ) => {
     let alive = true;
     const load = async () => {
       try {
-        const partners = await apiGetList<any>("partners/lookup/?limit=500", { tenantId: resolveTenantId() });
+        const scopeQuery = scope ? `&supplier_scope=${scope}` : "";
+        const partners = await apiGetList<any>(
+          `partners/lookup/?limit=500&partner_type=Supplier${scopeQuery}`,
+          { tenantId: resolveTenantId() },
+        );
         let mapped = partners.map((p: any) => suppliersService._mapPartnerToSupplier(p));
 
         // Fallback: if partners list is empty but deals exist, synthesize supplier list from deals.
@@ -1691,6 +1755,7 @@ export const suppliersService = {
         } catch (e2) {
           // console suppressed
           // فشل المصدرين ليس «لا يوجد موردون»؛ احتفظ بآخر لقطة ناجحة.
+          if (alive) onError?.(e2);
         }
       }
     };
@@ -1753,12 +1818,18 @@ export const suppliersService = {
   },
 
   fetchAllSuppliers: async (): Promise<Supplier[]> => {
-    const partners = await apiGetList<any>("partners/lookup/?limit=500", { tenantId: resolveTenantId() });
+    const partners = await apiGetList<any>(
+      "partners/lookup/?limit=500&partner_type=Supplier",
+      { tenantId: resolveTenantId() },
+    );
     return partners.map((p: any) => suppliersService._mapPartnerToSupplier(p));
   },
 
   getSuppliersFromDb: async (): Promise<Supplier[]> => {
-    const partners = await apiGetList<any>("partners/lookup/?limit=500", { tenantId: resolveTenantId() });
+    const partners = await apiGetList<any>(
+      "partners/lookup/?limit=500&partner_type=Supplier",
+      { tenantId: resolveTenantId() },
+    );
     return partners.map((p: any) => suppliersService._mapPartnerToSupplier(p));
   },
 
@@ -1769,74 +1840,485 @@ export const suppliersService = {
 
 // shippingMethodsService removed
 // --- Price Offers Service ---
-export const priceOffersService = {
-  subscribeToPriceOffers: (callback: (offers: PriceOffer[]) => void) => {
-    const q = query(collection(db, "price_offers"), orderBy("createdAt", "desc"));
-    return onSnapshot(q, (snapshot) => {
-      const offers = snapshot.docs.map(doc => doc.data() as PriceOffer);
-      callback(offers);
+export type PriceOfferScope = "purchase" | "import";
+
+type CurrencyLookup = {
+  CurrencyID: number;
+  Code: string;
+};
+
+type ImportDealDto = {
+  id: number;
+  ref_number: string;
+  partner: number;
+  partner_name?: string;
+  order_date: string;
+  currency: number;
+  currency_code?: string;
+  currency_rate?: string;
+  subtotal?: string;
+  discount_amount?: string;
+  tax_rate?: string;
+  tax_amount?: string;
+  total_amount?: string;
+  shipping_cost_estimate?: string;
+  is_shipping_included?: boolean;
+  shipping_method?: string;
+  payment_method?: string;
+  delivery_days?: number;
+  production_days?: number;
+  notes?: string;
+  status?: string;
+  stage?: string;
+  created_at?: string;
+  items?: Array<{
+    id?: number;
+    product: number;
+    product_name?: string;
+    name_snapshot?: string;
+    description_line?: string;
+    quantity: string;
+    unit_price: string;
+    total_price?: string;
+  }>;
+};
+
+let procurementCurrencies: CurrencyLookup[] | null = null;
+
+const loadProcurementCurrencies = async () => {
+  if (!procurementCurrencies) {
+    procurementCurrencies = await apiGetList<CurrencyLookup>("tenants/currencies/", {
+      tenantId: resolveTenantId(),
     });
-  },
+  }
+  return procurementCurrencies;
+};
 
-  addPriceOfferToDb: async (offer: PriceOffer) => {
-    const offerRef = doc(db, "price_offers", offer.id);
-    await setDoc(offerRef, removeUndefined(offer));
-  },
+const currencyCode = async (currencyId: number, fallback?: string) => {
+  if (fallback) return fallback;
+  const rows = await loadProcurementCurrencies();
+  return rows.find((row) => row.CurrencyID === currencyId)?.Code || "USD";
+};
 
+const currencyId = async (code?: string) => {
+  const rows = await loadProcurementCurrencies();
+  return (
+    rows.find((row) => row.Code === (code || "USD"))?.CurrencyID
+    ?? rows.find((row) => row.Code === "USD")?.CurrencyID
+    ?? rows[0]?.CurrencyID
+  );
+};
 
- updatePriceOfferInDb: async (offer: PriceOffer) => {
-    // تنظيف البيانات قبل التحديث
-    const cleanOffer = {
-      ...offer,
-      internalNotes: offer.internalNotes || '',
-      // إزالة statusNotes إذا كان موجوداً
-      statusNotes: undefined
+// T-OFFERSTATE: «بانتظار معلومات» و«قيد المناقشة» صارتا حالتين حقيقيتين في
+// الخادم، فالخريطة تعبر الطرفين بلا فقد. `sent` يبقى مقروءاً كـ«بانتظار
+// معلومات» للسجلات القديمة التي حُفظت قبل الفصل.
+const quoteUiStatus = (status: string): PriceOfferStatus => ({
+  draft: "initial",
+  sent: "pending_info",
+  pending_info: "pending_info",
+  under_discussion: "under_discussion",
+  accepted: "approved_for_shipping",
+  rejected: "rejected",
+  expired: "rejected",
+  cancelled: "rejected",
+  converted: "approved_for_shipping",
+}[status] as PriceOfferStatus || "initial");
+
+const quoteApiStatus = (status: PriceOfferStatus): SupplierQuotationStatus => ({
+  initial: "draft",
+  pending_info: "pending_info",
+  under_discussion: "under_discussion",
+  approved_for_shipping: "accepted",
+  rejected: "rejected",
+}[status] as SupplierQuotationStatus);
+
+const lineToUi = (line: {
+  id?: number;
+  product: number;
+  product_name?: string;
+  name_snapshot?: string;
+  description_line?: string;
+  quantity: string;
+  unit_price: string;
+  line_total?: string;
+}) => ({
+  id: String(line.id ?? `${line.product}-${Math.random()}`),
+  itemId: String(line.product),
+  name: line.name_snapshot || line.product_name || `#${line.product}`,
+  categoryId: "",
+  categoryName: "",
+  specifications: line.description_line || "",
+  imageUrls: [],
+  quantity: Number(line.quantity || 0),
+  unitPrice: Number(line.unit_price || 0),
+  totalPrice: Number(line.line_total || 0),
+});
+
+const quoteToUi = async (row: SupplierQuotationDto): Promise<PriceOffer> => ({
+  id: `quote-${row.id}`,
+  offerNumber: row.quotation_number,
+  orderName: row.order_name || "",
+  orderDescription: row.order_description || "",
+  supplierId: String(row.supplier),
+  factoryName: row.supplier_name || "",
+  offerType: "incoming_offer",
+  offerDate: row.quotation_date,
+  validUntil: row.valid_until || undefined,
+  currency: await currencyCode(row.currency, row.currency_code),
+  exchangeRate: Number(row.exchange_rate || 1),
+  shippingMethod: row.shipping_method || "",
+  shippingCost: Number(row.shipping_cost_estimate || 0),
+  shippingIncluded: row.is_shipping_included,
+  deliveryDays: row.delivery_days || 0,
+  productionDays: row.production_days || 0,
+  paymentMethod: row.payment_method || "",
+  items: (row.lines || []).map(lineToUi),
+  status: quoteUiStatus(row.status),
+  backendStatus: row.status,
+  // T-IMPOFFER: رقم الصفقة الناتجة يُعرض بجانب الحالة — «محوَّل» بلا رقم يبدو
+  // كأنه لم يحدث (نفس عيب طلبية الشراء المُصلَح في T-DOCBADGE).
+  // T-PLINEAGE: وللشراء المحلي وجهتان — فاتورة مباشرة أو طلبية — ومعرّف الوجهة
+  // يجعل الرقم رابطاً يُفتح لا نصاً معلَّقاً.
+  linkedDocNumber: row.converted_deal?.ref_number
+    || row.converted_invoice?.invoice_number
+    || row.converted_order?.order_number
+    || undefined,
+  linkedDocKind: row.converted_deal
+    ? "deal"
+    : row.converted_invoice
+      ? "invoice"
+      : row.converted_order
+        ? "order"
+        : undefined,
+  linkedDocId: row.converted_deal?.id
+    ?? row.converted_invoice?.id
+    ?? row.converted_order?.id
+    ?? undefined,
+  alibabaLink: row.alibaba_link || "",
+  supplierContact: row.supplier_contact || "",
+  decisionReason: row.decision_reason || "",
+  attachments: row.attachments || [],
+  notesLog: row.notes_log || [],
+  internalNotes: row.notes || "",
+  subtotal: Number(row.subtotal || 0),
+  discountAmount: Number(row.discount_amount || 0),
+  taxRate: Number(row.tax_rate || 0),
+  taxAmount: Number(row.tax_amount || 0),
+  grandTotal: Number(row.grand_total || 0),
+  createdBy: "",
+  createdAt: row.created_at || row.quotation_date,
+  updatedAt: row.updated_at || row.created_at || row.quotation_date,
+});
+
+const orderToUi = async (row: PurchaseOrderDto): Promise<PriceOffer> => ({
+  id: `order-${row.id}`,
+  offerNumber: row.order_number,
+  supplierId: String(row.supplier),
+  factoryName: row.supplier_name || "",
+  offerType: "outgoing_order",
+  offerDate: row.order_date,
+  validUntil: row.expected_delivery_date || undefined,
+  currency: await currencyCode(row.currency, row.currency_code),
+  exchangeRate: Number(row.exchange_rate || 1),
+  shippingMethod: row.shipping_method || "",
+  shippingCost: Number(row.shipping_cost || 0),
+  shippingIncluded: row.is_shipping_included,
+  deliveryDays: row.delivery_days || 0,
+  paymentMethod: row.payment_method || "",
+  items: (row.lines || []).map(lineToUi),
+  status: row.status === "draft"
+    ? "initial"
+    : row.status === "cancelled"
+      ? "rejected"
+      : "approved_for_shipping",
+  backendStatus: row.status,
+  // فاتورة الشراء الناتجة عن التحويل — تُعرض بجانب الحالة في قائمة المستندات.
+  linkedDocNumber: row.invoice_number || undefined,
+  linkedDocKind: row.invoice ? "invoice" : undefined,
+  linkedDocId: row.invoice ?? undefined,
+  internalNotes: row.notes || "",
+  subtotal: Number(row.subtotal || 0),
+  discountAmount: Number(row.discount_amount || 0),
+  taxRate: Number(row.tax_rate || 0),
+  taxAmount: Number(row.tax_amount || 0),
+  grandTotal: Number(row.grand_total || 0),
+  createdBy: "",
+  createdAt: row.created_at || row.order_date,
+  updatedAt: row.updated_at || row.created_at || row.order_date,
+});
+
+const dealToUi = async (row: ImportDealDto): Promise<PriceOffer> => ({
+  id: `deal-${row.id}`,
+  offerNumber: row.ref_number,
+  supplierId: String(row.partner),
+  factoryName: row.partner_name || "",
+  offerType: "outgoing_order",
+  offerDate: row.order_date,
+  currency: await currencyCode(row.currency, row.currency_code),
+  exchangeRate: Number(row.currency_rate || 1),
+  shippingMethod: row.shipping_method || "",
+  shippingCost: Number(row.shipping_cost_estimate || 0),
+  shippingIncluded: row.is_shipping_included,
+  deliveryDays: row.delivery_days || 0,
+  productionDays: row.production_days || 0,
+  paymentMethod: row.payment_method || "",
+  items: (row.items || []).map(lineToUi),
+  status: String(row.status).toLowerCase() === "cancelled" ? "rejected" : "approved_for_shipping",
+  backendStatus: row.stage || row.status || "draft",
+  internalNotes: row.notes || "",
+  subtotal: Number(row.subtotal || 0),
+  discountAmount: Number(row.discount_amount || 0),
+  taxRate: Number(row.tax_rate || 0),
+  taxAmount: Number(row.tax_amount || 0),
+  grandTotal: Number(row.total_amount || 0),
+  createdBy: "",
+  createdAt: row.created_at || row.order_date,
+  updatedAt: row.created_at || row.order_date,
+});
+
+const uiLinesToApi = (offer: PriceOffer) => (offer.items || []).map((line, index) => ({
+  product: Number(line.itemId || line.id),
+  seq: index + 1,
+  name_snapshot: line.name || "",
+  description_line: line.specifications || "",
+  quantity: String(Number(line.quantity || 0)),
+  unit_price: String(Number(line.unitPrice || 0)),
+}));
+
+const parseSqlDocumentId = (id: string) => {
+  const match = /^(quote|order|deal)-(\d+)$/.exec(id);
+  if (!match) throw new Error("معرّف مستند الشراء غير صالح.");
+  return { kind: match[1] as "quote" | "order" | "deal", id: Number(match[2]) };
+};
+
+export const priceOffersService = {
+  subscribeToPriceOffers: (
+    callback: (offers: PriceOffer[]) => void,
+    scope: PriceOfferScope = "purchase",
+    onError?: (error: unknown) => void,
+  ) => {
+    let active = true;
+    let inFlight = false;
+    const load = async () => {
+      if (!active || inFlight) return;
+      inFlight = true;
+      try {
+        const procurementScope: ProcurementScope = scope === "import" ? "import" : "local";
+        // الصفقات لها شاشتها الخاصة («الصفقات») ولا تُعرض هنا — عروض وطلبيات
+        // الاستيراد تقتصر على عروض أسعار الموردين (لا نجلب logistics/deals/).
+        const [quotes, orders] = await Promise.all([
+          listSupplierQuotations(procurementScope),
+          scope === "import" ? Promise.resolve([]) : listPurchaseOrders(),
+        ]);
+        const mapped = await Promise.all([
+          ...quotes.map(quoteToUi),
+          ...(scope === "import" ? [] : (orders as PurchaseOrderDto[]).map(orderToUi)),
+        ]);
+        mapped.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+        if (active) callback(mapped);
+      } catch (error) {
+        if (active) onError?.(error);
+      } finally {
+        inFlight = false;
+      }
     };
-    
-    const offerRef = doc(db, "price_offers", offer.id);
-    await updateDoc(offerRef, removeUndefined(cleanOffer) as any);
+    void load();
+    const refresh = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   },
 
-  deletePriceOfferFromDb: async (offerId: string) => {
-    const offerRef = doc(db, "price_offers", offerId);
-    await deleteDoc(offerRef);
-  },
-
-  getPriceOfferById: async (offerId: string): Promise<PriceOffer | null> => {
-    const offerRef = doc(db, "price_offers", offerId);
-    const snap = await getDoc(offerRef);
-    return snap.exists() ? (snap.data() as PriceOffer) : null;
-  },
-
-  // --- الدالة التي كانت ناقصة ---
-  getNextOfferNumber: async (): Promise<string> => {
-    try {
-      // 1. جلب آخر عرض سعر تم إنشاؤه
-      const q = query(collection(db, "price_offers"), orderBy("createdAt", "desc"), limit(1));
-      const snapshot = await getDocs(q);
-
-      if (snapshot.empty) {
-        return "OFF-0001"; // أول رقم في حال عدم وجود عروض
+  addPriceOfferToDb: async (offer: PriceOffer, scope: PriceOfferScope = "purchase") => {
+    const currency = await currencyId(offer.currency);
+    if (!currency) throw new Error("لا توجد عملة معرفة في النظام.");
+    if (offer.offerType === "outgoing_order" || offer.offerType === "incoming_order") {
+      if (scope === "import") {
+        const row = await apiPostObject<ImportDealDto>("logistics/deals/", {
+          partner: Number(offer.supplierId),
+          order_date: offer.offerDate,
+          currency,
+          currency_rate: offer.exchangeRate || 1,
+          status: "Open",
+          stage: "draft",
+          notes: offer.internalNotes || "",
+          shipping_method: offer.shippingMethod || "Sea",
+          payment_method: offer.paymentMethod || "T/T",
+          delivery_days: Number(offer.deliveryDays || 0),
+          production_days: Number(offer.productionDays || 0),
+          shipping_cost_estimate: Number(offer.shippingCost || 0),
+          is_shipping_included: Boolean(offer.shippingIncluded),
+          discount_amount: Number(offer.discountAmount || 0),
+          items: uiLinesToApi(offer),
+        }, { tenantId: resolveTenantId() });
+        return dealToUi(row);
       }
-
-      const lastOffer = snapshot.docs[0].data() as PriceOffer;
-      const lastNumberString = lastOffer.offerNumber; // مثال: "OFF-0005"
-
-      // 2. استخراج الرقم وزيادته
-      const parts = lastNumberString.split('-');
-      if (parts.length === 2 && !isNaN(parseInt(parts[1]))) {
-        const nextNumber = parseInt(parts[1]) + 1;
-        // تنسيق الرقم الجديد ليكون 4 خانات (0006)
-        return `OFF-${nextNumber.toString().padStart(4, '0')}`;
-      }
-
-      // في حال كان التنسيق القديم مختلفاً، نبدأ تسلسل جديد أو نستخدم fallback
-      return `OFF-${Date.now().toString().slice(-4)}`;
-      
-    } catch (error) {
-      // console suppressed
-      return "OFF-0001";
+      const row = await createPurchaseOrder({
+        order_number: offer.offerNumber || undefined,
+        supplier: Number(offer.supplierId),
+        quotation: null,
+        order_date: offer.offerDate || new Date().toISOString().slice(0, 10),
+        expected_delivery_date: offer.validUntil || null,
+        currency,
+        exchange_rate: String(offer.exchangeRate || 1),
+        discount_amount: String(offer.discountAmount || 0),
+        tax_rate: String(offer.taxRate || 0),
+        shipping_cost: String(offer.shippingCost || 0),
+        is_shipping_included: Boolean(offer.shippingIncluded),
+        shipping_method: offer.shippingMethod || "",
+        payment_method: offer.paymentMethod || "",
+        delivery_days: Number(offer.deliveryDays || 0),
+        notes: offer.internalNotes || "",
+        lines: uiLinesToApi(offer),
+      });
+      return orderToUi(
+        offer.status === "approved_for_shipping"
+          ? await confirmPurchaseOrder(row.id)
+          : row,
+      );
     }
+    const row = await createSupplierQuotation({
+      quotation_number: offer.offerNumber || undefined,
+      order_name: offer.orderName || "",
+      order_description: offer.orderDescription || "",
+      scope: scope === "import" ? "import" : "local",
+      supplier: Number(offer.supplierId),
+      quotation_date: offer.offerDate || new Date().toISOString().slice(0, 10),
+      valid_until: offer.validUntil || null,
+      status: quoteApiStatus(offer.status),
+      currency,
+      exchange_rate: String(offer.exchangeRate || 1),
+      discount_amount: String(offer.discountAmount || 0),
+      tax_rate: String(scope === "import" ? 0 : offer.taxRate || 0),
+      shipping_cost_estimate: String(offer.shippingCost || 0),
+      is_shipping_included: Boolean(offer.shippingIncluded),
+      incoterms: "FOB",
+      shipping_method: offer.shippingMethod || "Sea",
+      payment_method: offer.paymentMethod || "T/T",
+      production_days: Number(offer.productionDays || 0),
+      delivery_days: Number(offer.deliveryDays || 0),
+      total_cbm: "0",
+      total_weight_kg: String(offer.totalWeight || 0),
+      notes: offer.internalNotes || "",
+      alibaba_link: offer.alibabaLink || "",
+      supplier_contact: offer.supplierContact || "",
+      decision_reason: offer.decisionReason || "",
+      attachments: offer.attachments || [],
+      notes_log: offer.notesLog || [],
+      lines: uiLinesToApi(offer),
+    });
+    return quoteToUi(row);
+  },
+
+
+ updatePriceOfferInDb: async (offer: PriceOffer, scope: PriceOfferScope = "purchase") => {
+    const parsed = parseSqlDocumentId(offer.id);
+    const currency = await currencyId(offer.currency);
+    if (!currency) throw new Error("لا توجد عملة معرفة في النظام.");
+    if (parsed.kind === "quote") {
+      const row = await updateSupplierQuotation(parsed.id, {
+        quotation_number: offer.offerNumber || undefined,
+        order_name: offer.orderName || "",
+        order_description: offer.orderDescription || "",
+        supplier: Number(offer.supplierId),
+        quotation_date: offer.offerDate,
+        valid_until: offer.validUntil || null,
+        status: quoteApiStatus(offer.status),
+        currency,
+        exchange_rate: String(offer.exchangeRate || 1),
+        discount_amount: String(offer.discountAmount || 0),
+        tax_rate: String(scope === "import" ? 0 : offer.taxRate || 0),
+        shipping_cost_estimate: String(offer.shippingCost || 0),
+        is_shipping_included: Boolean(offer.shippingIncluded),
+        shipping_method: offer.shippingMethod || "Sea",
+        payment_method: offer.paymentMethod || "T/T",
+        production_days: Number(offer.productionDays || 0),
+        delivery_days: Number(offer.deliveryDays || 0),
+        notes: offer.internalNotes || "",
+        alibaba_link: offer.alibabaLink || "",
+        supplier_contact: offer.supplierContact || "",
+        decision_reason: offer.decisionReason || "",
+        attachments: offer.attachments || [],
+        notes_log: offer.notesLog || [],
+        lines: uiLinesToApi(offer),
+      });
+      return quoteToUi(row);
+    }
+    if (parsed.kind === "order") {
+      const row = await updatePurchaseOrder(parsed.id, {
+        order_number: offer.offerNumber || undefined,
+        supplier: Number(offer.supplierId),
+        order_date: offer.offerDate,
+        expected_delivery_date: offer.validUntil || null,
+        currency,
+        exchange_rate: String(offer.exchangeRate || 1),
+        discount_amount: String(offer.discountAmount || 0),
+        tax_rate: String(offer.taxRate || 0),
+        shipping_cost: String(offer.shippingCost || 0),
+        is_shipping_included: Boolean(offer.shippingIncluded),
+        shipping_method: offer.shippingMethod || "",
+        payment_method: offer.paymentMethod || "",
+        delivery_days: Number(offer.deliveryDays || 0),
+        notes: offer.internalNotes || "",
+        lines: uiLinesToApi(offer),
+      });
+      if (offer.status === "approved_for_shipping") {
+        return orderToUi(await confirmPurchaseOrder(row.id));
+      }
+      if (offer.status === "rejected") {
+        return orderToUi(await cancelPurchaseOrder(row.id));
+      }
+      return orderToUi(row);
+    }
+    const row = await apiPatchObject<ImportDealDto>(`logistics/deals/${parsed.id}/`, {
+      partner: Number(offer.supplierId),
+      order_date: offer.offerDate,
+      currency,
+      currency_rate: offer.exchangeRate || 1,
+      notes: offer.internalNotes || "",
+      shipping_method: offer.shippingMethod || "Sea",
+      payment_method: offer.paymentMethod || "T/T",
+      delivery_days: Number(offer.deliveryDays || 0),
+      production_days: Number(offer.productionDays || 0),
+      shipping_cost_estimate: Number(offer.shippingCost || 0),
+      is_shipping_included: Boolean(offer.shippingIncluded),
+      discount_amount: Number(offer.discountAmount || 0),
+      items: uiLinesToApi(offer),
+    }, { tenantId: resolveTenantId() });
+    return dealToUi(row);
+  },
+
+  deletePriceOfferFromDb: async (offerId: string, scope: PriceOfferScope = "purchase") => {
+    const parsed = parseSqlDocumentId(offerId);
+    const path = parsed.kind === "quote"
+      ? `logistics/supplier-quotations/${parsed.id}/`
+      : parsed.kind === "order"
+        ? `logistics/purchase-orders/${parsed.id}/`
+        : `logistics/deals/${parsed.id}/`;
+    await apiDelete(path, { tenantId: resolveTenantId() });
+  },
+
+  getPriceOfferById: async (
+    offerId: string,
+    scope: PriceOfferScope = "purchase",
+  ): Promise<PriceOffer | null> => {
+    const parsed = parseSqlDocumentId(offerId);
+    if (parsed.kind === "quote") return quoteToUi(await getSupplierQuotation(parsed.id));
+    if (parsed.kind === "order") return orderToUi(await getPurchaseOrder(parsed.id));
+    return dealToUi(await apiGetObject<ImportDealDto>(
+      `logistics/deals/${parsed.id}/`,
+      { tenantId: resolveTenantId() },
+    ));
+  },
+
+  getNextOfferNumber: async (scope: PriceOfferScope = "purchase"): Promise<string> => {
+    return "";
   }
 };
 

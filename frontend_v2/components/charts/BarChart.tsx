@@ -43,7 +43,7 @@ export const BarChart: React.FC<BarChartProps> = ({ data }) => {
                                 x={x + barWidth / 2}
                                 y={y - 5}
                                 textAnchor="middle"
-                                className="text-xs font-semibold fill-current text-gray-700 dark:text-gray-200"
+                                className="text-xs font-semibold fill-current text-[var(--color-text)]"
                             >
                                 {value}
                             </text>
@@ -51,7 +51,7 @@ export const BarChart: React.FC<BarChartProps> = ({ data }) => {
                                 x={x + barWidth / 2}
                                 y={chartHeight}
                                 textAnchor="middle"
-                                className="text-sm fill-current text-gray-500 dark:text-gray-400"
+                                className="text-sm fill-current text-[var(--color-text-muted)]"
                             >
                                 {data.labels[index]}
                             </text>

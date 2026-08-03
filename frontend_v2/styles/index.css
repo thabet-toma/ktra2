@@ -8,6 +8,10 @@
   --color-primary: #2563eb;
   --color-primary-hover: #1d4ed8;
   --color-primary-foreground: #ffffff;
+  /* M5: أزرق للنص فوق سطح ملوّن (surface-3). --color-primary نفسه يبقى
+     للخلفيات لأن تفتيحه يقتل تباين النص الأبيض فوق الأزرار. في الوضع
+     الداكن #2563eb على #334155 = تباين 2.0 (غير مقروء) فيُفتَّح هنا فقط. */
+  --color-primary-emphasis: #2563eb;
 
   --color-surface: #ffffff;
   --color-surface-2: #f8fafc;
@@ -27,18 +31,21 @@
   --color-text-muted: #64748b;
   --color-text-inverted: #ffffff;
 
-  /* ── Spacing (compact ERP density) ── */
-  --spacing-xs: 0.125rem;
-  --spacing-sm: 0.25rem;
+  /* ── Spacing (compact ERP density) ──
+     المفاتيح رقمية فقط: في Tailwind v4 يقتسم نطاق `spacing` مقاييسَ العرض، فـ
+     `--spacing-sm` كان يجعل `max-w-sm` = 0.25rem بدل 24rem ⇒ كل نافذة تستعمله
+     تنطوي إلى شريط رفيع (نافذة العربون: النص يتكسّر فيبدو السعر مشوَّهاً).
+     `--spacing-xs/sm` كانا بلا أي مستهلك، فأُسقطا. يحرسهما اختبار
+     `utils/documentBadges.test.ts`. */
   --spacing-1: 0.25rem;
   --spacing-2: 0.5rem;
   --spacing-3: 0.75rem;
   --spacing-4: 1rem;
   --spacing-5: 1.25rem;
   --spacing-6: 1.5rem;
-  --spacing-1.5: 0.375rem;
-  --spacing-2.5: 0.625rem;
-  --spacing-0.5: 0.125rem;
+  --spacing-1-5: 0.375rem;
+  --spacing-2-5: 0.625rem;
+  --spacing-0-5: 0.125rem;
 
   /* ── Typography ── */
   --font-family-base: 'IBM Plex Sans Arabic', 'Segoe UI', system-ui, sans-serif;
@@ -67,6 +74,7 @@
 
 /* Dark mode: apply dark token overrides when .dark class is on <html> */
 .dark {
+  --color-primary-emphasis: #93c5fd;
   --color-surface: #0f172a;
   --color-surface-2: #1e293b;
   --color-surface-3: #334155;
@@ -196,7 +204,11 @@ body {
 }
 
 .app-content {
-  min-height: calc(100vh - 2.75rem);
+  /* السكرولر الوحيد للصفحة، وارتفاعه من flex-1 وحده. كان min-height بـ 100vh
+     يتجاوز ارتفاع الحاوية (شريط علوي + شريط تنقل) فيُقصّ أسفله خارج الشاشة ⇒
+     آخر ~80px من أي صفحة طويلة (جدول الشركات في لوحة السوبر أدمن) لا تُرى
+     مهما سكرلت. min-height:0 يسمح للعنصر بالانكماش لمساحته الفعلية. */
+  min-height: 0;
   background: var(--color-surface);
 }
 
@@ -341,13 +353,17 @@ tbody td {
 }
 
 /* ════════════════════════════════════════════════════════════════════
-   M0-T2 — Aseel hybrid skin (classic dense Windows-accounting look)
-   Activated by data-skin="aseel" on any ancestor (story scopes it;
-   M5 will set it on <html>). Does NOT alter the default theme.
+   Aseel skin system — shared structure with per-skin tokens.
+   data-skin is applied once on <html>; structural .aseel-* rules below
+   are shared by both skins while each skin owns its token values.
    Faithful to the «الأصيل» screenshots: cream workspace, pale-blue
    title chip, red doc-state, pale-yellow thin-bordered fields,
    sharp 2px corners, Tahoma, high density.
    ════════════════════════════════════════════════════════════════════ */
+/* M1-T1: 60 توكناً — كل قيمة بصرية في القواعد الهيكلية تُقرأ من هنا.
+   لا قيمة صلبة (hex/rgba/ظل) باقية في قواعد .aseel-* عدا كتلة @media print
+   (سوداء على أبيض عمداً في الجلدين). قيم هذه الكتلة = ما كان مكتوباً حرفياً
+   في القواعد قبل الاستخراج ⇒ صفر تغيير بصري لجلد الأصيل. */
 [data-skin="aseel"] {
   --aseel-font: 'Tahoma', 'Segoe UI', 'IBM Plex Sans Arabic', system-ui, sans-serif;
   --aseel-fs: 12px;
@@ -374,12 +390,237 @@ tbody td {
   --aseel-status-debit: #c62828;
   --aseel-status-paid: #2e7d32;
   --aseel-status-due: #ef6c00;
+
+  /* ── تفاعل (hover/active) ── */
+  --aseel-hover: #dceaf6;
+  --aseel-hover-soft: #eef4fa;
+  --aseel-active: #c7ddef;
+  --aseel-accent-hover: #1e4a75;
+  --aseel-on-accent: #ffffff;
+  --aseel-info-hover-bg: #e3ecf6;
+  --aseel-info-hover-bd: #9bb4d0;
+  --aseel-danger-bg: #f6dcdc;
+  --aseel-danger-bd: #c98686;
+  --aseel-danger-soft: #f1d6d1;
+
+  /* ── أسطح ── */
+  --aseel-grid-bg: #ffffff;
+  --aseel-tab-bg: #dbd8c4;
+  --aseel-pop-line: #e6e4d2;
+  --aseel-ink-faint: #6b6952;
+  --aseel-code-bg: rgba(0, 0, 0, .07);
+
+  /* ── ظلال وأقنعة ── */
+  --aseel-shadow-pop: 0 6px 20px rgba(0, 0, 0, .18);
+  --aseel-shadow-drop: 0 4px 14px rgba(43, 43, 28, .25);
+  --aseel-shadow-panel: -4px 0 16px rgba(0, 0, 0, .15);
+  --aseel-shadow-modal: 0 8px 24px rgba(0, 0, 0, .25);
+  --aseel-mask: rgba(0, 0, 0, .2);
+  --aseel-mask-strong: rgba(0, 0, 0, .45);
+
+  /* ── دلالات (نجاح/خطأ/تحذير/أسعار) ── */
+  --aseel-ok-bg: #dceadb;
+  --aseel-ok-bd: #5f8f5f;
+  --aseel-ok-fg: #2c4f2c;
+  --aseel-ok-text: #2c6f2c;
+  --aseel-err-bg: #f7dcd7;
+  --aseel-err-fg: #7a241a;
+  --aseel-warn-bg: #f3eccf;
+  --aseel-warn-bd: #b9982f;
+  --aseel-warn-fg: #6b551a;
+  --aseel-badge-state-bg: #fce4e4;
+  --aseel-badge-ok-bg: #e4f0e4;
+  --aseel-badge-ok-fg: #2e7d32;
+  --aseel-price-fg: #15803d;
+  --aseel-price-src-fg: #166534;
+  --aseel-price-src-bg: #dcfce7;
+  --aseel-price-none-fg: #a3a193;
+  --aseel-badge-last-bg: #dbeafe;
+  --aseel-badge-last-fg: #1e40af;
+  --aseel-badge-quote-bg: #fef3c7;
+  --aseel-badge-quote-fg: #92400e;
+
+  /* ── شريط الحالة ── */
+  --aseel-statusbar-bg: #1f2937;
+  --aseel-statusbar-fg: #e5e7eb;
+  --aseel-statusbar-strong-fg: #ffffff;
+  --aseel-statusbar-chip-bg: rgba(255, 255, 255, .1);
+  --aseel-statusbar-shadow: 0 -2px 10px rgba(0, 0, 0, .05);
+
+  /* ── M5: توكنات كانت «معلّقة» ──────────────────────────────────────
+     ~280 موضعاً في components/ تكتب var(--aseel-X, #literal) لتوكنات لم
+     تُعرَّف قط في أي جلد ⇒ كانت تسقط دائماً على القيمة الاحتياطية الصلبة،
+     فلا تستجيب للجلد ولا للوضع الداكن. القيم هنا = القيمة الاحتياطية
+     السائدة في الكود حفاظاً على مظهر الأصيل.
+     (كان `--aseel-ok` وحده يُكتب بأربعة أخضر مختلفة — وُحّدت.) */
+  --aseel-ok: #267346;
+  --aseel-danger: #cc0000;
+  --aseel-err: #c0392b;
+  --aseel-warn: #b8800a;
+  --aseel-primary: #1857a4;
+  --aseel-accent-dark: #1e4a75;
+  --aseel-accent-soft: #f3f4f6;
+  --aseel-surface: #ffffff;
+  --aseel-surface-2: #f4ede0;
+  --aseel-surface-alt: rgba(0, 0, 0, .04);
+  --aseel-surface-accent: #f0f5ff;
+  --aseel-bg-soft: #f1f3f5;
+  --aseel-bg-strip: #f5f5f5;
+  --aseel-bg-panel: var(--aseel-panel);
+  --aseel-panel-hover: #f3f3f3;
+  --aseel-head: #f2f0e4;
+  --aseel-table-head: var(--aseel-grid-head);
+}
+
+/* ── M1-T2: الجلد الحديث ──────────────────────────────────────────────
+   نفس أسماء التوكنات، قيم حديثة. كل قيمة تُشتق عبر var() من توكنات @theme
+   (--color-* / --radius-* / --shadow-*) فمصدر الحقيقة يبقى واحداً، وتنقلب
+   تلقائياً مع كلاس .dark (مبدّل السمة يضيفه على <html>) ⇒ وضع داكن حقيقي
+   بلا كتلة منفصلة. الاستثناء الوحيد: ألوان الشارات الدلالية المسطّحة
+   (نجاح/خطأ/تحذير/سعر) لها قيم صريحة تطابق نمط .badge-* أعلى الملف،
+   ولها كتلة داكنة مقابلة تحت (.dark[data-skin="modern"]).
+   لا يمسّ هذا القسم أي خاصية layout — ألوان وخطوط وحواف وظلال فقط. */
+[data-skin="modern"] {
+  /* الطباعة ليست شأن الجلد: contexts/AppearanceContext.tsx يكتب
+     --aseel-font/--aseel-fs/--aseel-fs-sm أنماطاً inline على <html> مضروبة
+     في مقياس خط الشركة (ميزة task34)، والـ inline يتفوق على أي قاعدة هنا.
+     فالقيم التالية احتياطي ما قبل تركيب المزوّد فقط، ومطابقة لما يكتبه عند
+     المقياس 1 كي لا يومض الحجم. تكبير الخط يتم من إعدادات المظهر لا من هنا. */
+  --aseel-font: var(--font-family-base);
+  --aseel-fs: 12px;
+  --aseel-fs-sm: 11px;
+  --aseel-bg: var(--color-surface-2);
+  --aseel-panel: var(--color-surface);
+  --aseel-field: var(--color-surface);
+  --aseel-field-hl: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+  --aseel-field-focus: var(--color-surface);
+  --aseel-border: var(--color-border);
+  --aseel-border-soft: var(--color-border);
+  --aseel-line: var(--color-border);
+  --aseel-ink: var(--color-text);
+  --aseel-ink-soft: var(--color-text-muted);
+  --aseel-accent: var(--color-primary);
+  --aseel-accent-bg: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
+  --aseel-accent-bd: color-mix(in srgb, var(--color-primary) 35%, var(--color-surface));
+  --aseel-state: var(--color-danger);
+  --aseel-grid-head: var(--color-surface-3);
+  --aseel-row-alt: var(--color-surface-2);
+  --aseel-row-sel: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+  --aseel-radius: var(--radius-md);
+  --aseel-status-credit: var(--color-success);
+  --aseel-status-debit: var(--color-danger);
+  --aseel-status-paid: var(--color-success);
+  --aseel-status-due: var(--color-warning);
+
+  --aseel-hover: var(--color-surface-3);
+  --aseel-hover-soft: var(--color-surface-2);
+  --aseel-active: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
+  --aseel-accent-hover: var(--color-primary-hover);
+  --aseel-on-accent: var(--color-primary-foreground);
+  --aseel-info-hover-bg: color-mix(in srgb, var(--color-primary) 10%, var(--color-surface));
+  --aseel-info-hover-bd: color-mix(in srgb, var(--color-primary) 30%, var(--color-surface));
+  --aseel-danger-bg: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
+  --aseel-danger-bd: color-mix(in srgb, var(--color-danger) 35%, var(--color-surface));
+  --aseel-danger-soft: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface));
+
+  --aseel-grid-bg: var(--color-surface);
+  --aseel-tab-bg: var(--color-surface-2);
+  --aseel-pop-line: var(--color-border);
+  --aseel-ink-faint: var(--color-text-muted);
+  --aseel-code-bg: var(--color-surface-3);
+
+  --aseel-shadow-pop: var(--shadow-lg);
+  --aseel-shadow-drop: var(--shadow-lg);
+  --aseel-shadow-panel: var(--shadow-lg);
+  --aseel-shadow-modal: var(--shadow-lg);
+  --aseel-mask: rgb(0 0 0 / 0.35);
+  --aseel-mask-strong: rgb(0 0 0 / 0.5);
+
+  --aseel-ok-bg: #dcfce7;
+  --aseel-ok-bd: color-mix(in srgb, var(--color-success) 35%, var(--color-surface));
+  --aseel-ok-fg: #166534;
+  --aseel-ok-text: var(--color-success);
+  --aseel-err-bg: #fee2e2;
+  --aseel-err-fg: #991b1b;
+  --aseel-warn-bg: #fef3c7;
+  --aseel-warn-bd: color-mix(in srgb, var(--color-warning) 35%, var(--color-surface));
+  --aseel-warn-fg: #92400e;
+  --aseel-badge-state-bg: #fee2e2;
+  --aseel-badge-ok-bg: #dcfce7;
+  --aseel-badge-ok-fg: #166534;
+  --aseel-price-fg: #15803d;
+  --aseel-price-src-fg: #166534;
+  --aseel-price-src-bg: #dcfce7;
+  --aseel-price-none-fg: var(--color-text-muted);
+  --aseel-badge-last-bg: #dbeafe;
+  --aseel-badge-last-fg: #1e40af;
+  --aseel-badge-quote-bg: #fef3c7;
+  --aseel-badge-quote-fg: #92400e;
+
+  --aseel-statusbar-bg: var(--color-surface);
+  --aseel-statusbar-fg: var(--color-text-muted);
+  --aseel-statusbar-strong-fg: var(--color-text);
+  --aseel-statusbar-chip-bg: var(--color-surface-3);
+  --aseel-statusbar-shadow: none;
+
+  /* M5: التوكنات المعلّقة — نسخة الجلد الحديث (مشتقة، تنقلب مع .dark) */
+  --aseel-ok: var(--color-success);
+  --aseel-danger: var(--color-danger);
+  --aseel-err: var(--color-danger);
+  --aseel-warn: var(--color-warning);
+  --aseel-primary: var(--color-primary);
+  --aseel-accent-dark: var(--color-primary-hover);
+  --aseel-accent-soft: var(--color-surface-3);
+  --aseel-surface: var(--color-surface);
+  --aseel-surface-2: var(--color-surface-2);
+  --aseel-surface-alt: var(--color-surface-2);
+  --aseel-surface-accent: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+  --aseel-bg-soft: var(--color-surface-2);
+  --aseel-bg-strip: var(--color-surface-2);
+  --aseel-bg-panel: var(--aseel-panel);
+  --aseel-panel-hover: var(--color-surface-3);
+  --aseel-head: var(--color-surface-3);
+  --aseel-table-head: var(--aseel-grid-head);
+}
+
+/* الجلد الحديث في الوضع الداكن: بقية التوكنات تنقلب وحدها لأنها var(--color-*)
+   والكلاس .dark يعيد تعريفها؛ هنا فقط الشارات الدلالية ذات القيم الصريحة
+   (نفس درجات .dark .badge-* أعلى الملف حفاظاً على لغة لونية واحدة). */
+.dark[data-skin="modern"] {
+  --aseel-ok-bg: #14532d;
+  --aseel-ok-fg: #bbf7d0;
+  --aseel-err-bg: #7f1d1d;
+  --aseel-err-fg: #fecaca;
+  --aseel-warn-bg: #78350f;
+  --aseel-warn-fg: #fde68a;
+  --aseel-badge-state-bg: #7f1d1d;
+  --aseel-badge-ok-bg: #14532d;
+  --aseel-badge-ok-fg: #bbf7d0;
+  --aseel-price-fg: #86efac;
+  --aseel-price-src-fg: #bbf7d0;
+  --aseel-price-src-bg: #14532d;
+  --aseel-badge-last-bg: #1e3a8a;
+  --aseel-badge-last-fg: #bfdbfe;
+  --aseel-badge-quote-bg: #78350f;
+  --aseel-badge-quote-fg: #fde68a;
+
+  /* M5: درجات النجاح/الخطأ/التحذير الافتراضية داكنة جداً على خلفية داكنة
+     (تباين <3) — تُرفع هنا. تُقرأ من ~280 موضعاً عبر التوكنات المعلّقة سابقاً. */
+  --aseel-ok: #4ade80;
+  --aseel-danger: #f87171;
+  --aseel-err: #f87171;
+  --aseel-warn: #fbbf24;
+  --aseel-status-credit: #4ade80;
+  --aseel-status-debit: #f87171;
+  --aseel-status-paid: #4ade80;
+  --aseel-status-due: #fbbf24;
+  --aseel-price-fg: #4ade80;
 }
 
 /* task13 M3: المستند تدفقٌ طبيعي يكبر بمحتواه — سكرولر الصفحة الوحيد هو
    main.app-content. (كان height:100% + مناطق overflow داخلية ⇒ 4 سكرولات
    متداخلة: headband / gridwrap / bottom / totals — عيب #1 عند المالك.) */
-[data-skin="aseel"] .aseel-doc {
+:root[data-skin] .aseel-doc {
   display: flex;
   flex-direction: column;
   min-height: 100%;
@@ -391,7 +632,7 @@ tbody td {
 }
 
 /* ── Title bar ── */
-[data-skin="aseel"] .aseel-titlebar {
+:root[data-skin] .aseel-titlebar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -400,8 +641,8 @@ tbody td {
   background: var(--aseel-panel);
   border-bottom: 1px solid var(--aseel-border-soft);
 }
-[data-skin="aseel"] .aseel-title-grp { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
-[data-skin="aseel"] .aseel-title-chip {
+:root[data-skin] .aseel-title-grp { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+:root[data-skin] .aseel-title-chip {
   background: var(--aseel-accent-bg);
   border: 1px solid var(--aseel-accent-bd);
   border-radius: var(--aseel-radius);
@@ -410,18 +651,18 @@ tbody td {
   font-size: 13px;
   padding: 3px 14px;
 }
-[data-skin="aseel"] .aseel-title-state { color: var(--aseel-state); font-weight: 700; font-size: var(--aseel-fs); }
-[data-skin="aseel"] .aseel-company { color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); text-align: end; }
+:root[data-skin] .aseel-title-state { color: var(--aseel-state); font-weight: 700; font-size: var(--aseel-fs); }
+:root[data-skin] .aseel-company { color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); text-align: end; }
 
 /* ── Command toolbar ── */
 /* task13 M3: شريط الأوامر يلتصق بأعلى سكرولر الصفحة — أزرار الحفظ/الطباعة
    تبقى في المتناول أثناء تمرير النموذج الطويل (نمط دفترة). */
-[data-skin="aseel"] .aseel-doc .aseel-toolbar {
+:root[data-skin] .aseel-doc .aseel-toolbar {
   position: sticky;
   top: 0;
   z-index: 30;
 }
-[data-skin="aseel"] .aseel-toolbar {
+:root[data-skin] .aseel-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: stretch;
@@ -430,9 +671,9 @@ tbody td {
   background: var(--aseel-panel);
   border-bottom: 1px solid var(--aseel-border-soft);
 }
-[data-skin="aseel"] .aseel-toolgrp { display: flex; align-items: stretch; gap: 1px; }
-[data-skin="aseel"] .aseel-toolsep { width: 1px; background: var(--aseel-border-soft); margin: 2px 4px; }
-[data-skin="aseel"] .aseel-toolbtn {
+:root[data-skin] .aseel-toolgrp { display: flex; align-items: stretch; gap: 1px; }
+:root[data-skin] .aseel-toolsep { width: 1px; background: var(--aseel-border-soft); margin: 2px 4px; }
+:root[data-skin] .aseel-toolbtn {
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -447,14 +688,14 @@ tbody td {
   cursor: pointer;
   transition: background .1s, border-color .1s;
 }
-[data-skin="aseel"] .aseel-toolbtn:hover:not(:disabled) { background: #dceaf6; border-color: var(--aseel-accent-bd); }
-[data-skin="aseel"] .aseel-toolbtn:active:not(:disabled) { background: #c7ddef; }
-[data-skin="aseel"] .aseel-toolbtn:disabled { opacity: .4; cursor: default; }
-[data-skin="aseel"] .aseel-toolbtn--danger:hover:not(:disabled) { background: #f6dcdc; border-color: #c98686; color: var(--aseel-state); }
-[data-skin="aseel"] .aseel-toolbtn svg { width: 15px; height: 15px; }
+:root[data-skin] .aseel-toolbtn:hover:not(:disabled) { background: var(--aseel-hover); border-color: var(--aseel-accent-bd); }
+:root[data-skin] .aseel-toolbtn:active:not(:disabled) { background: var(--aseel-active); }
+:root[data-skin] .aseel-toolbtn:disabled { opacity: .4; cursor: default; }
+:root[data-skin] .aseel-toolbtn--danger:hover:not(:disabled) { background: var(--aseel-danger-bg); border-color: var(--aseel-danger-bd); color: var(--aseel-state); }
+:root[data-skin] .aseel-toolbtn svg { width: 15px; height: 15px; }
 
 /* task18 DEF-A2: شريط الإجراءات العام السفلي — حد علوي بدل السفلي + لفّ آمن */
-[data-skin="aseel"] .aseel-actionbar {
+:root[data-skin] .aseel-actionbar {
   border-top: 1px solid var(--aseel-border-soft);
   border-bottom: none;
   padding: 2px 6px;
@@ -464,7 +705,7 @@ tbody td {
 /* task18 DEF-B1/B3 + DEF-001: شجرة المنتجات المرساة بجانب الفاتورة.
    DEF-001: ترتفع لتحاذي رأس جدول البنود وتستعمل ارتفاع الشاشة المتاح حتى تظهر
    أول ~8 صفوف دون تمرير على دقّة 1366×768 (يبقى الـ body قابلاً للتمرير عند الطول). */
-[data-skin="aseel"] .aseel-tree-panel {
+:root[data-skin] .aseel-tree-panel {
   flex: 0 0 240px;
   max-width: 240px;
   display: flex;
@@ -478,20 +719,20 @@ tbody td {
   max-height: calc(100vh - 160px);
   min-height: 320px;
 }
-[data-skin="aseel"] .aseel-tree-head,
-[data-skin="aseel"] .aseel-tree-search,
-[data-skin="aseel"] .aseel-tree-actions {
+:root[data-skin] .aseel-tree-head,
+:root[data-skin] .aseel-tree-search,
+:root[data-skin] .aseel-tree-actions {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 4px 6px;
   border-bottom: 1px solid var(--aseel-border-soft);
 }
-[data-skin="aseel"] .aseel-tree-search .aseel-input { height: 22px; }
-[data-skin="aseel"] .aseel-tree-actions { flex-wrap: wrap; }
-[data-skin="aseel"] .aseel-tree-body { overflow: auto; flex: 1; padding: 4px 2px; }
-[data-skin="aseel"] .aseel-tree-node,
-[data-skin="aseel"] .aseel-tree-leaf {
+:root[data-skin] .aseel-tree-search .aseel-input { height: 22px; }
+:root[data-skin] .aseel-tree-actions { flex-wrap: wrap; }
+:root[data-skin] .aseel-tree-body { overflow: auto; flex: 1; padding: 4px 2px; }
+:root[data-skin] .aseel-tree-node,
+:root[data-skin] .aseel-tree-leaf {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -505,17 +746,17 @@ tbody td {
   border-radius: var(--aseel-radius);
   cursor: pointer;
 }
-[data-skin="aseel"] .aseel-tree-node:hover,
-[data-skin="aseel"] .aseel-tree-leaf:hover:not(:disabled) { background: #dceaf6; }
-[data-skin="aseel"] .aseel-tree-leaf:disabled { opacity: .5; cursor: default; }
-[data-skin="aseel"] .aseel-tree-count { margin-inline-start: auto; font-size: 10px; color: var(--aseel-ink-soft, #888); }
+:root[data-skin] .aseel-tree-node:hover,
+:root[data-skin] .aseel-tree-leaf:hover:not(:disabled) { background: var(--aseel-hover); }
+:root[data-skin] .aseel-tree-leaf:disabled { opacity: .5; cursor: default; }
+:root[data-skin] .aseel-tree-count { margin-inline-start: auto; font-size: 10px; color: var(--aseel-ink-soft); }
 
 /* task18: شجرة احترافية — عقد قابلة للطيّ + أزرار إجراءات لكل فئة */
-[data-skin="aseel"] .aseel-tree-toolbar {
+:root[data-skin] .aseel-tree-toolbar {
   padding: 6px;
   border-bottom: 1px solid var(--aseel-border-soft);
 }
-[data-skin="aseel"] .aseel-tree-cat {
+:root[data-skin] .aseel-tree-cat {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -525,43 +766,43 @@ tbody td {
   font-weight: 600;
   color: var(--aseel-ink);
 }
-[data-skin="aseel"] .aseel-tree-cat:hover { background: #eef4fa; }
-[data-skin="aseel"] .aseel-tree-twisty {
+:root[data-skin] .aseel-tree-cat:hover { background: var(--aseel-hover-soft); }
+:root[data-skin] .aseel-tree-twisty {
   display: inline-flex; align-items: center; justify-content: center;
   width: 16px; height: 16px; padding: 0; background: transparent; border: 0;
   color: var(--aseel-ink); cursor: pointer; flex-shrink: 0;
 }
-[data-skin="aseel"] .aseel-tree-actions-inline {
+:root[data-skin] .aseel-tree-actions-inline {
   display: inline-flex; gap: 1px; margin-inline-start: 2px;
   opacity: 0; transition: opacity .1s;
 }
-[data-skin="aseel"] .aseel-tree-cat:hover .aseel-tree-actions-inline,
-[data-skin="aseel"] .group:hover .aseel-tree-actions-inline { opacity: 1; }
-[data-skin="aseel"] .aseel-tree-act {
+:root[data-skin] .aseel-tree-cat:hover .aseel-tree-actions-inline,
+:root[data-skin] .group:hover .aseel-tree-actions-inline { opacity: 1; }
+:root[data-skin] .aseel-tree-act {
   display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 20px; padding: 0; border-radius: var(--aseel-radius);
   background: transparent; border: 1px solid transparent; color: var(--aseel-ink);
   cursor: pointer;
 }
-[data-skin="aseel"] .aseel-tree-act:hover { background: #dceaf6; border-color: var(--aseel-accent-bd); }
+:root[data-skin] .aseel-tree-act:hover { background: var(--aseel-hover); border-color: var(--aseel-accent-bd); }
 
 /* task18: قائمة زر الماوس الأيمن للشجرة */
-[data-skin="aseel"] .aseel-ctxmenu {
+:root[data-skin] .aseel-ctxmenu {
   min-width: 160px;
-  background: var(--aseel-field, #fff);
-  border: 1px solid var(--aseel-border, #b9c4cf);
+  background: var(--aseel-field);
+  border: 1px solid var(--aseel-border);
   border-radius: var(--aseel-radius);
-  box-shadow: 0 6px 20px rgba(0,0,0,.18);
+  box-shadow: var(--aseel-shadow-pop);
   padding: 3px;
 }
-[data-skin="aseel"] .aseel-ctxmenu-item {
+:root[data-skin] .aseel-ctxmenu-item {
   display: flex; align-items: center; gap: 6px; width: 100%;
   padding: 5px 8px; border: 0; background: transparent; cursor: pointer;
   font-size: var(--aseel-fs-sm); color: var(--aseel-ink); text-align: start;
   border-radius: var(--aseel-radius);
 }
-[data-skin="aseel"] .aseel-ctxmenu-item:hover { background: #dceaf6; }
-[data-skin="aseel"] .aseel-tree-rail {
+:root[data-skin] .aseel-ctxmenu-item:hover { background: var(--aseel-hover); }
+:root[data-skin] .aseel-tree-rail {
   flex: 0 0 32px;
   align-self: stretch;
   min-height: 180px;
@@ -577,8 +818,8 @@ tbody td {
   cursor: pointer;
   transition: background .1s;
 }
-[data-skin="aseel"] .aseel-tree-rail:hover { background: #dceaf6; }
-[data-skin="aseel"] .aseel-tree-rail-label {
+:root[data-skin] .aseel-tree-rail:hover { background: var(--aseel-hover); }
+:root[data-skin] .aseel-tree-rail-label {
   writing-mode: vertical-rl;
   text-orientation: mixed;
   font-size: 12px;
@@ -586,12 +827,12 @@ tbody td {
   white-space: nowrap;
 }
 @media print {
-  [data-skin="aseel"] .aseel-tree-panel,
-  [data-skin="aseel"] .aseel-tree-rail { display: none !important; }
+  :root[data-skin] .aseel-tree-panel,
+  :root[data-skin] .aseel-tree-rail { display: none !important; }
 }
 
 /* ── Header field band ── */
-[data-skin="aseel"] .aseel-headband {
+:root[data-skin] .aseel-headband {
   padding: 3px 8px;
   background: var(--aseel-panel);
   border-bottom: 1px solid var(--aseel-border-soft);
@@ -603,26 +844,26 @@ tbody td {
   align-items: center;
   gap: 3px 14px;
 }
-[data-skin="aseel"] .aseel-headband > .aseel-field {
+:root[data-skin] .aseel-headband > .aseel-field {
   flex: 1 1 220px;
   min-width: 190px;
   max-width: 340px;
 }
-[data-skin="aseel"] .aseel-headband > .aseel-field > :not(.aseel-field-label) {
+:root[data-skin] .aseel-headband > .aseel-field > :not(.aseel-field-label) {
   flex: 1 1 auto;
   min-width: 0;
 }
-[data-skin="aseel"] .aseel-field { display: flex; align-items: center; gap: 4px; }
-[data-skin="aseel"] .aseel-field-label {
+:root[data-skin] .aseel-field { display: flex; align-items: center; gap: 4px; }
+:root[data-skin] .aseel-field-label {
   flex: 0 0 80px;
   text-align: start;
   color: var(--aseel-ink);
   font-size: var(--aseel-fs-sm);
   line-height: 1.2;
 }
-[data-skin="aseel"] .aseel-input,
-[data-skin="aseel"] .aseel-doc input:not([type="checkbox"]):not([type="radio"]),
-[data-skin="aseel"] .aseel-doc select {
+:root[data-skin] .aseel-input,
+:root[data-skin] .aseel-doc input:not([type="checkbox"]):not([type="radio"]),
+:root[data-skin] .aseel-doc select {
   flex: 1;
   min-width: 0;
   height: 20px;
@@ -635,42 +876,49 @@ tbody td {
   font-size: var(--aseel-fs);
   box-shadow: none;
 }
-[data-skin="aseel"] .aseel-doc input:focus,
-[data-skin="aseel"] .aseel-doc select:focus {
+:root[data-skin] .aseel-doc input:focus,
+:root[data-skin] .aseel-doc select:focus {
   outline: none;
   border-color: var(--aseel-accent);
   background: var(--aseel-field-focus);
   box-shadow: 0 0 0 1px var(--aseel-accent);
 }
-[data-skin="aseel"] .aseel-input--hl { background: var(--aseel-field-hl); }
+:root[data-skin] .aseel-input--hl { background: var(--aseel-field-hl); }
 
 /* ── Grid area ── */
 /* task13 M3: ينمو بمحتواه (flex-basis:auto) ويملأ الفراغ عند قصره؛
    overflow-x فقط للجداول العريضة — لا سكرول عمودي داخلي. */
-[data-skin="aseel"] .aseel-gridwrap {
+:root[data-skin] .aseel-gridwrap {
   flex: 1 0 auto;
   min-height: 120px;
   overflow-x: auto;
-  background: #ffffff;
+  background: var(--aseel-grid-bg);
   border-top: 1px solid var(--aseel-border);
   border-bottom: 1px solid var(--aseel-border);
 }
+/* وضع العرض (مستند مُنسَّق للقراءة فقط): لا يوجد جدول إدخال يُفترض أن يملأ
+   الفراغ، فالنمو الإجباري يترك فراغاً أبيض ضخماً أسفل مستند قصير (بند واحد
+   مثلاً). يأخذ ارتفاع محتواه فقط. */
+:root[data-skin] .aseel-gridwrap--fit {
+  flex: 0 0 auto;
+  min-height: 0;
+}
 /* DEF: الشجرة كشريط جانبي يمتدّ من رأس المستند (يحاذي بطاقة العميل) لأقصى أعلى. */
-[data-skin="aseel"] .aseel-doc-mainrow {
+:root[data-skin] .aseel-doc-mainrow {
   display: flex;
   gap: 8px;
   align-items: flex-start;
   flex: 1 0 auto;
   min-height: 0;
 }
-[data-skin="aseel"] .aseel-doc-maincol {
+:root[data-skin] .aseel-doc-maincol {
   flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
 }
-[data-skin="aseel"] .aseel-grid { width: 100%; border-collapse: collapse; font-size: var(--aseel-fs); }
-[data-skin="aseel"] .aseel-grid thead th {
+:root[data-skin] .aseel-grid { width: 100%; border-collapse: collapse; font-size: var(--aseel-fs); }
+:root[data-skin] .aseel-grid thead th {
   position: sticky;
   top: 0;
   background: var(--aseel-grid-head);
@@ -684,17 +932,17 @@ tbody td {
   border: 1px solid var(--aseel-border);
   white-space: nowrap;
 }
-[data-skin="aseel"] .aseel-grid tbody td {
+:root[data-skin] .aseel-grid tbody td {
   padding: 0 4px;
   border: 1px solid var(--aseel-line);
   height: 20px;
-  background: #ffffff;
+  background: var(--aseel-grid-bg);
 }
-[data-skin="aseel"] .aseel-grid tbody tr:nth-child(even) td { background: var(--aseel-row-alt); }
-[data-skin="aseel"] .aseel-grid tbody tr.aseel-row--sel td { background: var(--aseel-row-sel); }
-[data-skin="aseel"] .aseel-grid tbody tr:hover td { background: #eef4fa; }
-[data-skin="aseel"] .aseel-grid input,
-[data-skin="aseel"] .aseel-grid select {
+:root[data-skin] .aseel-grid tbody tr:nth-child(even) td { background: var(--aseel-row-alt); }
+:root[data-skin] .aseel-grid tbody tr.aseel-row--sel td { background: var(--aseel-row-sel); }
+:root[data-skin] .aseel-grid tbody tr:hover td { background: var(--aseel-hover-soft); }
+:root[data-skin] .aseel-grid input,
+:root[data-skin] .aseel-grid select {
   width: 100%;
   height: 20px;
   border: 1px solid transparent;
@@ -702,37 +950,37 @@ tbody td {
   padding: 0 3px;
   font: inherit;
 }
-[data-skin="aseel"] .aseel-grid input:focus,
-[data-skin="aseel"] .aseel-grid select:focus {
+:root[data-skin] .aseel-grid input:focus,
+:root[data-skin] .aseel-grid select:focus {
   border-color: var(--aseel-accent);
   background: var(--aseel-field-focus);
   box-shadow: none;
 }
 /* Numeric cells: right-aligned (Aseel convention) + tabular-nums for column alignment.
    Inline style="text-align:right" on the <td> still wins, keeping per-cell overrides intact. */
-[data-skin="aseel"] .aseel-num { text-align: right; font-variant-numeric: tabular-nums; }
+:root[data-skin] .aseel-num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ── Bottom tabs + totals dock ── */
 /* task13 M3: بلا max-height ولا سكرول داخلي — محتوى التبويبات يكبر بطبيعته */
-[data-skin="aseel"] .aseel-bottom { display: flex; align-items: stretch; gap: 6px; background: var(--aseel-panel); border-top: 1px solid var(--aseel-border-soft); padding: 2px 6px 3px; flex-shrink: 0; }
-[data-skin="aseel"] .aseel-tabscol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+:root[data-skin] .aseel-bottom { display: flex; align-items: stretch; gap: 6px; background: var(--aseel-panel); border-top: 1px solid var(--aseel-border-soft); padding: 2px 6px 3px; flex-shrink: 0; }
+:root[data-skin] .aseel-tabscol { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 /* Tabs row: scrolls horizontally when there are too many tabs to fit, so
    "البيانات الأساسية / الشروط والشحن / الدفعات" never get clipped off-screen. */
-[data-skin="aseel"] .aseel-tabs {
+:root[data-skin] .aseel-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
   overflow-x: auto;
   scrollbar-width: thin;
 }
-[data-skin="aseel"] .aseel-tabs::-webkit-scrollbar { height: 4px; }
-[data-skin="aseel"] .aseel-tabs::-webkit-scrollbar-thumb { background: var(--aseel-border); border-radius: 2px; }
+:root[data-skin] .aseel-tabs::-webkit-scrollbar { height: 4px; }
+:root[data-skin] .aseel-tabs::-webkit-scrollbar-thumb { background: var(--aseel-border); border-radius: 2px; }
 /* task13 M4: كانت التبويبات «مخفية» — خلفية #e4e1d0 على لوحة #f2f0e4 بخط 11px
    (تباين شبه معدوم، عيب #2/#3 عند المالك). الآن: حدود واضحة، خط أكبر،
    والنشط مميز بشريط علوي بلون الـ accent. */
-[data-skin="aseel"] .aseel-tab {
+:root[data-skin] .aseel-tab {
   padding: 5px 14px;
-  background: #dbd8c4;
+  background: var(--aseel-tab-bg);
   border: 1px solid var(--aseel-border);
   border-bottom: none;
   border-radius: var(--aseel-radius) var(--aseel-radius) 0 0;
@@ -743,21 +991,21 @@ tbody td {
   white-space: nowrap;
   flex-shrink: 0;
 }
-[data-skin="aseel"] .aseel-tab:hover:not(.aseel-tab--active) { background: #dceaf6; border-color: var(--aseel-accent-bd); }
-[data-skin="aseel"] .aseel-tab--active {
+:root[data-skin] .aseel-tab:hover:not(.aseel-tab--active) { background: var(--aseel-hover); border-color: var(--aseel-accent-bd); }
+:root[data-skin] .aseel-tab--active {
   background: var(--aseel-field);
   color: var(--aseel-accent);
   font-weight: 700;
   border-color: var(--aseel-accent-bd);
   box-shadow: inset 0 2px 0 var(--aseel-accent);
 }
-[data-skin="aseel"] .aseel-tabpanel {
+:root[data-skin] .aseel-tabpanel {
   border: 1px solid var(--aseel-border-soft);
   background: var(--aseel-field);
   padding: 4px 6px;
   min-height: 48px;
 }
-[data-skin="aseel"] .aseel-totals {
+:root[data-skin] .aseel-totals {
   flex: 0 0 240px;
   align-self: flex-start;
   background: var(--aseel-panel);
@@ -765,25 +1013,26 @@ tbody td {
   border-radius: var(--aseel-radius);
   padding: 3px 6px;
 }
-[data-skin="aseel"] .aseel-total-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0; font-size: var(--aseel-fs-sm); line-height: 1.4; }
-[data-skin="aseel"] .aseel-total-row--grand { border-top: 1px solid var(--aseel-border); margin-top: 2px; padding-top: 2px; font-weight: 700; font-size: var(--aseel-fs); }
-[data-skin="aseel"] .aseel-total-value { min-width: 90px; text-align: left; background: var(--aseel-field); border: 1px solid var(--aseel-border); border-radius: var(--aseel-radius); padding: 0 4px; font-variant-numeric: tabular-nums; }
+:root[data-skin] .aseel-total-row { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0; font-size: var(--aseel-fs-sm); line-height: 1.4; }
+:root[data-skin] .aseel-total-row--grand { border-top: 1px solid var(--aseel-border); margin-top: 2px; padding-top: 2px; font-weight: 700; font-size: var(--aseel-fs); }
+:root[data-skin] .aseel-total-value { min-width: 90px; text-align: left; background: var(--aseel-field); border: 1px solid var(--aseel-border); border-radius: var(--aseel-radius); padding: 0 4px; font-variant-numeric: tabular-nums; }
 
 /* ── task13 M5: القائمة المنسدلة لمنتقي الأصناف المدمج ──
-   تُرسم على body عبر portal (خارج نطاق data-skin) فالألوان مضمّنة هنا. */
-.aseel-autocomplete-pop {
+   M0-T3: data-skin صار على <html> فالبوابة (portal) ترث التوكنات — لم تعد
+   الألوان بحاجة للتضمين الصلب كما كانت. */
+:root[data-skin] .aseel-autocomplete-pop {
   z-index: 10000;
   max-height: 260px;
   overflow-y: auto;
-  background: #fcfcec;
-  border: 1px solid #9e9c7e;
-  border-radius: 2px;
-  box-shadow: 0 4px 14px rgba(43, 43, 28, 0.25);
-  font-family: 'Tahoma', 'Segoe UI', 'IBM Plex Sans Arabic', system-ui, sans-serif;
-  font-size: 12px;
-  color: #2b2b1c;
+  background: var(--aseel-field);
+  border: 1px solid var(--aseel-border);
+  border-radius: var(--aseel-radius);
+  box-shadow: var(--aseel-shadow-drop);
+  font-family: var(--aseel-font);
+  font-size: var(--aseel-fs);
+  color: var(--aseel-ink);
 }
-.aseel-autocomplete-row {
+:root[data-skin] .aseel-autocomplete-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -792,110 +1041,115 @@ tbody td {
   padding: 4px 8px;
   background: transparent;
   border: none;
-  border-bottom: 1px solid #e6e4d2;
+  border-bottom: 1px solid var(--aseel-pop-line);
   text-align: start;
   cursor: pointer;
   font: inherit;
   color: inherit;
 }
-.aseel-autocomplete-row--sel { background: #cbd9e8; }
-.aseel-autocomplete-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
-.aseel-autocomplete-sub { color: #6b6952; font-size: 10px; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 25%; }
-.aseel-autocomplete-empty { padding: 8px; color: #6b6952; text-align: center; }
+:root[data-skin] .aseel-autocomplete-row--sel { background: var(--aseel-row-sel); }
+:root[data-skin] .aseel-autocomplete-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
+:root[data-skin] .aseel-autocomplete-sub { color: var(--aseel-ink-faint); font-size: 10px; flex-shrink: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 25%; }
+:root[data-skin] .aseel-autocomplete-empty { padding: 8px; color: var(--aseel-ink-faint); text-align: center; }
 /* task24: السعر المقترح + مصدره داخل خيار المنتقي (يظهر بلا نقر) */
-.aseel-autocomplete-price {
+:root[data-skin] .aseel-autocomplete-price {
   flex: 0 0 auto; display: inline-flex; align-items: baseline; gap: 4px;
-  font-weight: 700; color: #15803d; font-size: 12px; white-space: nowrap;
+  font-weight: 700; color: var(--aseel-price-fg); font-size: 12px; white-space: nowrap;
   margin-inline-start: auto;
 }
-.aseel-autocomplete-price-src {
-  font-style: normal; font-weight: 600; font-size: 9px; color: #166534;
-  background: #dcfce7; border-radius: 6px; padding: 1px 4px;
+:root[data-skin] .aseel-autocomplete-price-src {
+  font-style: normal; font-weight: 600; font-size: 9px; color: var(--aseel-price-src-fg);
+  background: var(--aseel-price-src-bg); border-radius: 6px; padding: 1px 4px;
 }
 /* لا سعر مُعرّف (لا آخر بيع/شراء ولا عرض) — نص رمادي بدل الفراغ */
-.aseel-autocomplete-price--none { color: #a3a193; font-weight: 500; font-size: 9px; opacity: 0.8; }
-.aseel-autocomplete-row--create { color: #2f5f8f; font-weight: 700; justify-content: flex-start; border-bottom: none; }
+:root[data-skin] .aseel-autocomplete-price--none { color: var(--aseel-price-none-fg); font-weight: 500; font-size: 9px; opacity: 0.8; }
+:root[data-skin] .aseel-autocomplete-row--create { color: var(--aseel-accent); font-weight: 700; justify-content: flex-start; border-bottom: none; }
 /* DEF-008: زرّ المحتوى الأساسي داخل صف القائمة + أيقونة (i) لفتح بطاقة الصنف */
-.aseel-autocomplete-main {
+:root[data-skin] .aseel-autocomplete-main {
   display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0;
   background: transparent; border: none; padding: 0; text-align: start;
   cursor: pointer; font: inherit; color: inherit;
 }
-.aseel-autocomplete-info {
+:root[data-skin] .aseel-autocomplete-info {
   display: inline-flex; align-items: center; justify-content: center;
   flex: 0 0 auto; width: 22px; height: 22px; padding: 0;
   background: transparent; border: 1px solid transparent; border-radius: 3px;
-  color: #2f5f8f; cursor: pointer;
+  color: var(--aseel-accent); cursor: pointer;
 }
-.aseel-autocomplete-info:hover { background: #e3ecf6; border-color: #9bb4d0; }
+:root[data-skin] .aseel-autocomplete-info:hover { background: var(--aseel-info-hover-bg); border-color: var(--aseel-info-hover-bd); }
 
 /* DEF-005: شارة مصدر السعر المقترح على سطر الفاتورة */
-[data-skin="aseel"] .aseel-price-badge {
+:root[data-skin] .aseel-price-badge {
   flex: 0 0 auto; font-size: 10px; line-height: 1; white-space: nowrap;
   padding: 2px 5px; border-radius: 8px; font-weight: 700;
 }
-[data-skin="aseel"] .aseel-price-badge--last { background: #dbeafe; color: #1e40af; }
-[data-skin="aseel"] .aseel-price-badge--quote { background: #fef3c7; color: #92400e; }
+:root[data-skin] .aseel-price-badge--last { background: var(--aseel-badge-last-bg); color: var(--aseel-badge-last-fg); }
+:root[data-skin] .aseel-price-badge--quote { background: var(--aseel-badge-quote-bg); color: var(--aseel-badge-quote-fg); }
+/* «سعر عام» من كرت الصنف — أضعف المصادر: يظهر حين لا عرض للزبون ولا شراء سابق. */
+:root[data-skin] .aseel-price-badge--general {
+  background: color-mix(in srgb, var(--aseel-ink-soft) 18%, transparent);
+  color: var(--aseel-ink-soft);
+}
 
 /* ── Status bar ── */
-[data-skin="aseel"] .aseel-statusbar {
+:root[data-skin] .aseel-statusbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 20px;
   padding: 8px 16px;
-  background: #1f2937; /* Dark elegant gray */
+  background: var(--aseel-statusbar-bg);
   border-top: 2px solid var(--aseel-accent);
-  color: #e5e7eb;
+  color: var(--aseel-statusbar-fg);
   font-size: 14px;
   font-weight: 600;
   flex-shrink: 0;
-  box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+  box-shadow: var(--aseel-statusbar-shadow);
 }
-[data-skin="aseel"] .aseel-status-item { 
+:root[data-skin] .aseel-status-item {
   display: inline-flex; 
   align-items: center; 
   gap: 6px; 
 }
-[data-skin="aseel"] .aseel-status-item b { 
-  color: #fff; /* White numbers for high contrast */
-  font-weight: 800; 
+:root[data-skin] .aseel-status-item b {
+  color: var(--aseel-statusbar-strong-fg);
+  font-weight: 800;
   font-size: 15px;
-  background: rgba(255,255,255,0.1);
+  background: var(--aseel-statusbar-chip-bg);
   padding: 2px 8px;
   border-radius: 4px;
 }
 
 /* ── Index picker modal ── */
-[data-skin="aseel"] .aseel-picker-mask {
+:root[data-skin] .aseel-picker-mask {
   position: fixed; inset: 0; z-index: 70;
-  background: rgba(0,0,0,.2);
+  background: var(--aseel-mask);
   display: flex; align-items: stretch; justify-content: flex-end;
 }
-[data-skin="aseel"] .aseel-picker {
+:root[data-skin] .aseel-picker {
   width: 380px;
   max-height: 100vh;
   display: flex; flex-direction: column;
   background: var(--aseel-panel);
   border-left: 1px solid var(--aseel-border);
-  box-shadow: -4px 0 16px rgba(0,0,0,.15);
+  box-shadow: var(--aseel-shadow-panel);
   font-family: var(--aseel-font);
   direction: rtl;
 }
-[data-skin="aseel"] .aseel-picker-head {
+:root[data-skin] .aseel-picker-head {
   display: flex; align-items: center; justify-content: space-between;
   padding: 5px 10px;
   background: var(--aseel-accent-bg);
   border-bottom: 1px solid var(--aseel-accent-bd);
   color: var(--aseel-accent); font-weight: 700;
 }
-[data-skin="aseel"] .aseel-picker-body { flex: 1; overflow: auto; }
+:root[data-skin] .aseel-picker-body { flex: 1; overflow: auto; }
 
 /* ───────── M1 — Sales-invoice screen extras (scoped to data-skin) ───────── */
 
 /* message banner above the grid */
-[data-skin="aseel"] .aseel-banner {
+:root[data-skin] .aseel-banner {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -905,11 +1159,11 @@ tbody td {
   border-radius: var(--aseel-radius);
   font-size: var(--aseel-fs-sm);
 }
-[data-skin="aseel"] .aseel-banner--err { background: #f7dcd7; border-color: var(--aseel-state); color: #7a241a; }
-[data-skin="aseel"] .aseel-banner--ok { background: #dceadb; border-color: #5f8f5f; color: #2c4f2c; }
+:root[data-skin] .aseel-banner--err { background: var(--aseel-err-bg); border-color: var(--aseel-state); color: var(--aseel-err-fg); }
+:root[data-skin] .aseel-banner--ok { background: var(--aseel-ok-bg); border-color: var(--aseel-ok-bd); color: var(--aseel-ok-fg); }
 
 /* in-cell product picker button */
-[data-skin="aseel"] .aseel-cell-picker {
+:root[data-skin] .aseel-cell-picker {
   width: 100%;
   height: 20px;
   border: 1px solid transparent;
@@ -922,15 +1176,15 @@ tbody td {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-[data-skin="aseel"] .aseel-cell-picker:hover:not(:disabled) { background: var(--aseel-field-hl); }
-[data-skin="aseel"] .aseel-cell-picker:disabled { color: var(--aseel-ink-soft); cursor: default; }
+:root[data-skin] .aseel-cell-picker:hover:not(:disabled) { background: var(--aseel-field-hl); }
+:root[data-skin] .aseel-cell-picker:disabled { color: var(--aseel-ink-soft); cursor: default; }
 
 /* in-cell tax editor (select + manual % button) */
-[data-skin="aseel"] .aseel-cell-tax { display: flex; align-items: center; gap: 2px; }
-[data-skin="aseel"] .aseel-cell-tax > :first-child { flex: 1; min-width: 0; }
+:root[data-skin] .aseel-cell-tax { display: flex; align-items: center; gap: 2px; }
+:root[data-skin] .aseel-cell-tax > :first-child { flex: 1; min-width: 0; }
 
 /* small icon buttons (tax-edit / delete) */
-[data-skin="aseel"] .aseel-iconbtn {
+:root[data-skin] .aseel-iconbtn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -943,12 +1197,12 @@ tbody td {
   cursor: pointer;
   flex: none;
 }
-[data-skin="aseel"] .aseel-iconbtn:hover { background: var(--aseel-accent-bg); }
-[data-skin="aseel"] .aseel-iconbtn--danger { color: var(--aseel-state); }
-[data-skin="aseel"] .aseel-iconbtn--danger:hover { background: #f1d6d1; }
+:root[data-skin] .aseel-iconbtn:hover { background: var(--aseel-accent-bg); }
+:root[data-skin] .aseel-iconbtn--danger { color: var(--aseel-state); }
+:root[data-skin] .aseel-iconbtn--danger:hover { background: var(--aseel-danger-soft); }
 
 /* "add row" affordance under the grid */
-[data-skin="aseel"] .aseel-addrow {
+:root[data-skin] .aseel-addrow {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -961,12 +1215,12 @@ tbody td {
   font-size: var(--aseel-fs-sm);
   cursor: pointer;
 }
-[data-skin="aseel"] .aseel-addrow:hover { background: var(--aseel-accent-bg); }
+:root[data-skin] .aseel-addrow:hover { background: var(--aseel-accent-bg); }
 
 /* account/customer pick field with «…» affordance */
-[data-skin="aseel"] .aseel-pickfield { display: flex; align-items: stretch; gap: 2px; flex: 1; }
-[data-skin="aseel"] .aseel-pickfield .aseel-input { flex: 1; cursor: pointer; }
-[data-skin="aseel"] .aseel-ellipsis {
+:root[data-skin] .aseel-pickfield { display: flex; align-items: stretch; gap: 2px; flex: 1; }
+:root[data-skin] .aseel-pickfield .aseel-input { flex: 1; cursor: pointer; }
+:root[data-skin] .aseel-ellipsis {
   flex: none;
   width: 22px;
   border: 1px solid var(--aseel-border);
@@ -977,76 +1231,76 @@ tbody td {
   font-weight: 700;
   line-height: 1;
 }
-[data-skin="aseel"] .aseel-ellipsis:hover:not(:disabled) { background: var(--aseel-accent-bg); }
-[data-skin="aseel"] .aseel-ellipsis:disabled { color: var(--aseel-ink-soft); cursor: default; }
+:root[data-skin] .aseel-ellipsis:hover:not(:disabled) { background: var(--aseel-accent-bg); }
+:root[data-skin] .aseel-ellipsis:disabled { color: var(--aseel-ink-soft); cursor: default; }
 
 /* journal-preview tab (M1-T4) */
-[data-skin="aseel"] .aseel-journal { display: flex; flex-direction: column; gap: 5px; }
-[data-skin="aseel"] .aseel-journal-empty { color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); margin: 4px 0; }
-[data-skin="aseel"] .aseel-journal-errs { display: flex; flex-direction: column; gap: 2px; }
-[data-skin="aseel"] .aseel-journal-err {
+:root[data-skin] .aseel-journal { display: flex; flex-direction: column; gap: 5px; }
+:root[data-skin] .aseel-journal-empty { color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); margin: 4px 0; }
+:root[data-skin] .aseel-journal-errs { display: flex; flex-direction: column; gap: 2px; }
+:root[data-skin] .aseel-journal-err {
   display: flex;
   align-items: flex-start;
   gap: 4px;
   font-size: var(--aseel-fs-sm);
-  color: #7a241a;
+  color: var(--aseel-err-fg);
 }
-[data-skin="aseel"] .aseel-grid tbody tr.aseel-row--total td {
+:root[data-skin] .aseel-grid tbody tr.aseel-row--total td {
   background: var(--aseel-grid-head);
   font-weight: 700;
   border-top: 2px solid var(--aseel-border);
 }
-[data-skin="aseel"] .aseel-ok-text { color: #2c6f2c; font-weight: 700; }
-[data-skin="aseel"] .aseel-err-text { color: var(--aseel-state); font-weight: 700; }
+:root[data-skin] .aseel-ok-text { color: var(--aseel-ok-text); font-weight: 700; }
+:root[data-skin] .aseel-err-text { color: var(--aseel-state); font-weight: 700; }
 
 /* "other data" tab — config notes */
-[data-skin="aseel"] .aseel-other { display: flex; flex-direction: column; gap: 6px; }
+:root[data-skin] .aseel-other { display: flex; flex-direction: column; gap: 6px; }
 /* Wrapper for legacy section components embedded inside Aseel tabs (DealForm/ShipmentForm/etc.).
    Keeps modern card chrome subdued so the surrounding Aseel cream surface stays primary,
    without touching the section's own internal layout. */
-[data-skin="aseel"] .aseel-legacy-tab { padding: 4px; display: flex; flex-direction: column; gap: 10px; }
-[data-skin="aseel"] .aseel-legacy-tab .shadow,
-[data-skin="aseel"] .aseel-legacy-tab .shadow-sm,
-[data-skin="aseel"] .aseel-legacy-tab .shadow-md,
-[data-skin="aseel"] .aseel-legacy-tab .shadow-lg { box-shadow: none !important; }
-[data-skin="aseel"] .aseel-note {
+:root[data-skin] .aseel-legacy-tab { padding: 4px; display: flex; flex-direction: column; gap: 10px; }
+:root[data-skin] .aseel-legacy-tab .shadow,
+:root[data-skin] .aseel-legacy-tab .shadow-sm,
+:root[data-skin] .aseel-legacy-tab .shadow-md,
+:root[data-skin] .aseel-legacy-tab .shadow-lg { box-shadow: none !important; }
+:root[data-skin] .aseel-note {
   padding: 4px 8px;
   border: 1px solid var(--aseel-border);
   border-radius: var(--aseel-radius);
   font-size: var(--aseel-fs-sm);
 }
-[data-skin="aseel"] .aseel-note code {
-  background: rgba(0, 0, 0, .07);
+:root[data-skin] .aseel-note code {
+  background: var(--aseel-code-bg);
   padding: 0 3px;
-  border-radius: 2px;
+  border-radius: var(--aseel-radius);
   font-family: ui-monospace, monospace;
 }
-[data-skin="aseel"] .aseel-note--err { background: #f7dcd7; border-color: var(--aseel-state); color: #7a241a; }
-[data-skin="aseel"] .aseel-note--warn { background: #f3eccf; border-color: #b9982f; color: #6b551a; }
-[data-skin="aseel"] .aseel-hint { font-size: var(--aseel-fs-sm); color: var(--aseel-ink-soft); margin: 2px 0 0; }
-[data-skin="aseel"] .aseel-field--inline { flex-direction: row; align-items: center; gap: 6px; }
+:root[data-skin] .aseel-note--err { background: var(--aseel-err-bg); border-color: var(--aseel-state); color: var(--aseel-err-fg); }
+:root[data-skin] .aseel-note--warn { background: var(--aseel-warn-bg); border-color: var(--aseel-warn-bd); color: var(--aseel-warn-fg); }
+:root[data-skin] .aseel-hint { font-size: var(--aseel-fs-sm); color: var(--aseel-ink-soft); margin: 2px 0 0; }
+:root[data-skin] .aseel-field--inline { flex-direction: row; align-items: center; gap: 6px; }
 
 /* discount input inside the totals dock */
-[data-skin="aseel"] .aseel-total-input {
+:root[data-skin] .aseel-total-input {
   min-width: 110px;
   width: 110px;
   height: 18px;
   text-align: left;
   font-variant-numeric: tabular-nums;
 }
-[data-skin="aseel"] .aseel-total-row--warn .aseel-total-value { background: #f3eccf; border-color: #b9982f; }
+:root[data-skin] .aseel-total-row--warn .aseel-total-value { background: var(--aseel-warn-bg); border-color: var(--aseel-warn-bd); }
 
 /* ───────── N0/N1 primitives — Form section + Dense table + Report table ───── */
 
 /* AseelFormSection: bordered subsection with title + responsive grid */
-[data-skin="aseel"] .aseel-form-section {
+:root[data-skin] .aseel-form-section {
   border: 1px solid var(--aseel-border-soft);
   border-radius: var(--aseel-radius);
   padding: 8px 10px;
   margin-bottom: 6px;
   background: var(--aseel-panel);
 }
-[data-skin="aseel"] .aseel-form-section-title {
+:root[data-skin] .aseel-form-section-title {
   color: var(--aseel-ink-soft);
   font-size: var(--aseel-fs-sm);
   font-weight: 700;
@@ -1054,45 +1308,45 @@ tbody td {
   border-bottom: 1px dashed var(--aseel-border-soft);
   padding-bottom: 4px;
 }
-[data-skin="aseel"] .aseel-form-section-body {
+:root[data-skin] .aseel-form-section-body {
   display: grid;
   gap: 4px 10px;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
-[data-skin="aseel"] .aseel-form-section.aseel-grid-2 .aseel-form-section-body {
+:root[data-skin] .aseel-form-section.aseel-grid-2 .aseel-form-section-body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-[data-skin="aseel"] .aseel-form-section.aseel-grid-3 .aseel-form-section-body {
+:root[data-skin] .aseel-form-section.aseel-grid-3 .aseel-form-section-body {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
-[data-skin="aseel"] .aseel-form-section.aseel-grid-4 .aseel-form-section-body {
+:root[data-skin] .aseel-form-section.aseel-grid-4 .aseel-form-section-body {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 @media (max-width: 640px) {
-  [data-skin="aseel"] .aseel-form-section.aseel-grid-2 .aseel-form-section-body,
-  [data-skin="aseel"] .aseel-form-section.aseel-grid-3 .aseel-form-section-body,
-  [data-skin="aseel"] .aseel-form-section.aseel-grid-4 .aseel-form-section-body {
+  :root[data-skin] .aseel-form-section.aseel-grid-2 .aseel-form-section-body,
+  :root[data-skin] .aseel-form-section.aseel-grid-3 .aseel-form-section-body,
+  :root[data-skin] .aseel-form-section.aseel-grid-4 .aseel-form-section-body {
     grid-template-columns: 1fr;
   }
 }
 
 /* AseelDenseTable: list/index table wrapper */
-[data-skin="aseel"] .aseel-dense-table {
+:root[data-skin] .aseel-dense-table {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-[data-skin="aseel"] .aseel-dense-table .aseel-sortable {
+:root[data-skin] .aseel-dense-table .aseel-sortable {
   cursor: pointer;
   user-select: none;
 }
-[data-skin="aseel"] .aseel-dense-table .aseel-sortable:hover { background: var(--aseel-accent-bg); }
-[data-skin="aseel"] .aseel-sort-indicator { font-size: 9px; margin-inline-start: 4px; color: var(--aseel-accent); }
+:root[data-skin] .aseel-dense-table .aseel-sortable:hover { background: var(--aseel-accent-bg); }
+:root[data-skin] .aseel-sort-indicator { font-size: 9px; margin-inline-start: 4px; color: var(--aseel-accent); }
 
-[data-skin="aseel"] .aseel-grid tbody tr.aseel-row--selected td { background: var(--aseel-row-sel) !important; }
-[data-skin="aseel"] .aseel-grid tbody tr.aseel-row--hover td { background: #eef4fa; }
+:root[data-skin] .aseel-grid tbody tr.aseel-row--selected td { background: var(--aseel-row-sel) !important; }
+:root[data-skin] .aseel-grid tbody tr.aseel-row--hover td { background: var(--aseel-hover-soft); }
 
-[data-skin="aseel"] .aseel-pagination {
+:root[data-skin] .aseel-pagination {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1103,23 +1357,23 @@ tbody td {
   border-radius: var(--aseel-radius);
   font-size: var(--aseel-fs-sm);
 }
-[data-skin="aseel"] .aseel-pagination button {
+:root[data-skin] .aseel-pagination button {
   padding: 2px 10px;
   border: 1px solid var(--aseel-border);
   background: var(--aseel-field);
   border-radius: var(--aseel-radius);
   cursor: pointer;
 }
-[data-skin="aseel"] .aseel-pagination button:disabled { opacity: 0.4; cursor: default; }
-[data-skin="aseel"] .aseel-pagination button:hover:not(:disabled) { background: var(--aseel-accent-bg); }
+:root[data-skin] .aseel-pagination button:disabled { opacity: 0.4; cursor: default; }
+:root[data-skin] .aseel-pagination button:hover:not(:disabled) { background: var(--aseel-accent-bg); }
 
 /* AseelReportTable */
-[data-skin="aseel"] .aseel-report-table {
+:root[data-skin] .aseel-report-table {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-[data-skin="aseel"] .aseel-report-toolbar {
+:root[data-skin] .aseel-report-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -1129,7 +1383,7 @@ tbody td {
   border: 1px solid var(--aseel-border-soft);
   border-radius: var(--aseel-radius);
 }
-[data-skin="aseel"] .aseel-btn {
+:root[data-skin] .aseel-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1141,81 +1395,85 @@ tbody td {
   font-size: var(--aseel-fs-sm);
   cursor: pointer;
 }
-[data-skin="aseel"] .aseel-btn:hover:not(:disabled) { background: var(--aseel-accent-bg); }
-[data-skin="aseel"] .aseel-btn:disabled { opacity: 0.5; cursor: default; }
+:root[data-skin] .aseel-btn:hover:not(:disabled) { background: var(--aseel-accent-bg); }
+:root[data-skin] .aseel-btn:disabled { opacity: 0.5; cursor: default; }
 
 /* Banner warn variant (used by GroupConstantsPage seed-prompt) */
-[data-skin="aseel"] .aseel-banner--warn {
-  background: #f3eccf;
-  border-color: #b9982f;
-  color: #6b551a;
+:root[data-skin] .aseel-banner--warn {
+  background: var(--aseel-warn-bg);
+  border-color: var(--aseel-warn-bd);
+  color: var(--aseel-warn-fg);
 }
-[data-skin="aseel"] .aseel-picker-foot { padding: 5px 10px; border-top: 1px solid var(--aseel-border-soft); color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); }
+:root[data-skin] .aseel-picker-foot { padding: 5px 10px; border-top: 1px solid var(--aseel-border-soft); color: var(--aseel-ink-soft); font-size: var(--aseel-fs-sm); }
 
 /* N1-T5 AseelDateInput — year calendar modal */
-[data-skin="aseel"] .aseel-date-cal__backdrop {
-  position: fixed; inset: 0; background: rgba(0,0,0,.45);
+:root[data-skin] .aseel-date-cal__backdrop {
+  position: fixed; inset: 0; background: var(--aseel-mask-strong);
   z-index: 9999; display: flex; align-items: center; justify-content: center;
   padding: 16px;
 }
-[data-skin="aseel"] .aseel-date-cal {
+:root[data-skin] .aseel-date-cal {
   background: var(--aseel-panel);
   border: 1px solid var(--aseel-border);
   border-radius: var(--aseel-radius);
-  box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  box-shadow: var(--aseel-shadow-modal);
   width: min(960px, 95vw); max-height: 90vh; overflow: auto;
   padding: 12px;
 }
-[data-skin="aseel"] .aseel-date-cal__header {
+:root[data-skin] .aseel-date-cal__header {
   display: flex; align-items: center; gap: 6px;
   padding-bottom: 8px; border-bottom: 1px solid var(--aseel-border-soft);
   margin-bottom: 8px;
 }
-[data-skin="aseel"] .aseel-date-cal__year {
+:root[data-skin] .aseel-date-cal__year {
   width: 90px; text-align: center; font-weight: bold;
 }
-[data-skin="aseel"] .aseel-date-cal__grid {
+:root[data-skin] .aseel-date-cal__grid {
   display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
 }
 @media (max-width: 720px) {
-  [data-skin="aseel"] .aseel-date-cal__grid { grid-template-columns: repeat(2, 1fr); }
+  :root[data-skin] .aseel-date-cal__grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 480px) {
-  [data-skin="aseel"] .aseel-date-cal__grid { grid-template-columns: 1fr; }
+  :root[data-skin] .aseel-date-cal__grid { grid-template-columns: 1fr; }
 }
-[data-skin="aseel"] .aseel-date-cal__month {
+:root[data-skin] .aseel-date-cal__month {
   border: 1px solid var(--aseel-border-soft);
   border-radius: var(--aseel-radius);
   padding: 6px;
   background: var(--aseel-field);
 }
-[data-skin="aseel"] .aseel-date-cal__month-title {
+:root[data-skin] .aseel-date-cal__month-title {
   font-weight: bold; font-size: var(--aseel-fs-sm);
   text-align: center; padding-bottom: 4px;
   color: var(--aseel-accent);
 }
-[data-skin="aseel"] .aseel-date-cal__weekdays {
+:root[data-skin] .aseel-date-cal__weekdays {
   display: grid; grid-template-columns: repeat(7, 1fr);
   font-size: 10px; color: var(--aseel-ink-soft);
   text-align: center; padding-bottom: 2px;
 }
-[data-skin="aseel"] .aseel-date-cal__days {
+:root[data-skin] .aseel-date-cal__days {
   display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px;
 }
-[data-skin="aseel"] .aseel-date-cal__day {
+:root[data-skin] .aseel-date-cal__day {
   font-size: 11px; padding: 3px 0;
   border: 1px solid transparent;
   background: transparent;
   color: var(--aseel-ink);
-  cursor: pointer; border-radius: 2px;
+  cursor: pointer; border-radius: var(--aseel-radius);
   font-variant-numeric: tabular-nums;
 }
-[data-skin="aseel"] .aseel-date-cal__day:hover { background: var(--aseel-accent-bg); }
-[data-skin="aseel"] .aseel-date-cal__day--today { border-color: var(--aseel-accent); font-weight: bold; }
-[data-skin="aseel"] .aseel-date-cal__day--sel { background: var(--aseel-accent); color: var(--aseel-on-accent, #fff); }
+:root[data-skin] .aseel-date-cal__day:hover { background: var(--aseel-accent-bg); }
+:root[data-skin] .aseel-date-cal__day--today { border-color: var(--aseel-accent); font-weight: bold; }
+:root[data-skin] .aseel-date-cal__day--sel { background: var(--aseel-accent); color: var(--aseel-on-accent); }
 
-/* ── N9-T3: Dark Aseel (data-theme="dark") ───────────────────────────── */
-[data-skin="aseel"][data-theme="dark"] {
+/* ── N9-T3: Dark Aseel ─────────────────────────────────────────────────
+   M6: كان محددها `[data-skin="aseel"][data-theme="dark"]` وهو لا يُطابَق
+   أبداً — لا شيء في التطبيق يضبط data-theme (المبدّل يضيف كلاس .dark على
+   <html>). فبقيت الكتلة خاملة منذ كتابتها وجلد الأصيل بلا وضع داكن. الآن
+   رُبطت بـ .dark فصار الوضع الداكن يعمل على الجلدين، لا الحديث وحده. */
+.dark[data-skin="aseel"] {
   --aseel-bg: #2b2b1c;
   --aseel-panel: #363626;
   --aseel-field: #404030;
@@ -1237,56 +1495,368 @@ tbody td {
   --aseel-status-debit: #e57373;
   --aseel-status-paid: #81c784;
   --aseel-status-due: #ffb74d;
+
+  /* M6: نظائر داكنة للتوكنات التي عُرّفت في M5 (الأسطح والدلالات والظلال)
+     — بدونها كان الجلد الكلاسيكي الداكن يعرض جزراً فاتحة في ~280 موضعاً. */
+  --aseel-grid-bg: #2f2f20;
+  --aseel-tab-bg: #43432f;
+  --aseel-pop-line: #4a4a34;
+  --aseel-ink-faint: #a8a490;
+  --aseel-hover: #3a4a5a;
+  --aseel-hover-soft: #343a42;
+  --aseel-active: #44586c;
+  --aseel-accent-hover: #8ab8dd;
+  --aseel-code-bg: rgba(255, 255, 255, .08);
+  --aseel-info-hover-bg: #3a4a5a;
+  --aseel-info-hover-bd: #4a7aaa;
+  --aseel-danger-bg: #5a2a24;
+  --aseel-danger-bd: #8a4a40;
+  --aseel-danger-soft: #4a251f;
+  --aseel-ok: #81c784;
+  --aseel-danger: #e57373;
+  --aseel-err: #e57373;
+  --aseel-warn: #ffb74d;
+  --aseel-primary: #6a9fc8;
+  --aseel-accent-dark: #8ab8dd;
+  --aseel-accent-soft: #3a3a2a;
+  --aseel-surface: #363626;
+  --aseel-surface-2: #3f3f2c;
+  --aseel-surface-alt: rgba(255, 255, 255, .06);
+  --aseel-surface-accent: #2a4a6a;
+  --aseel-bg-soft: #3a3a2a;
+  --aseel-bg-strip: #3a3a2a;
+  --aseel-panel-hover: #43432f;
+  --aseel-head: #3a3a2a;
+  --aseel-ok-bg: #234a2c;
+  --aseel-ok-fg: #bbf7d0;
+  --aseel-ok-text: #81c784;
+  --aseel-err-bg: #5a2a24;
+  --aseel-err-fg: #fecaca;
+  --aseel-warn-bg: #4d3a14;
+  --aseel-warn-bd: #b9982f;
+  --aseel-warn-fg: #fde68a;
+  --aseel-badge-state-bg: #5a2a24;
+  --aseel-badge-ok-bg: #234a2c;
+  --aseel-badge-ok-fg: #bbf7d0;
+  --aseel-price-fg: #81c784;
+  --aseel-price-src-fg: #bbf7d0;
+  --aseel-price-src-bg: #234a2c;
+  --aseel-price-none-fg: #8a8778;
+  --aseel-badge-last-bg: #1e3a8a;
+  --aseel-badge-last-fg: #bfdbfe;
+  --aseel-badge-quote-bg: #4d3a14;
+  --aseel-badge-quote-fg: #fde68a;
 }
 
+/* حُذف placeholder «[data-skin="modern"][data-theme="dark"]» في M1-T2:
+   المحدد لا يُطابَق أبداً (data-theme غير مضبوط)، والوضع الداكن للجلد الحديث
+   يعمل عبر .dark[data-skin="modern"] أعلى الملف. */
+
 /* ── N9-T1: Aseel utility tokens (replace Tailwind named colors in screens) ── */
-[data-skin="aseel"] .aseel-bg-panel { background: var(--aseel-panel); }
-[data-skin="aseel"] .aseel-bg-field { background: var(--aseel-field); }
-[data-skin="aseel"] .aseel-bg-accent { background: var(--aseel-accent); }
-[data-skin="aseel"] .aseel-bg-accent-bg { background: var(--aseel-accent-bg); }
-[data-skin="aseel"] .aseel-bg-grid-head { background: var(--aseel-grid-head); }
-[data-skin="aseel"] .aseel-bg-row-alt { background: var(--aseel-row-alt); }
-[data-skin="aseel"] .aseel-text-ink { color: var(--aseel-ink); }
-[data-skin="aseel"] .aseel-text-soft { color: var(--aseel-ink-soft); }
-[data-skin="aseel"] .aseel-text-accent { color: var(--aseel-accent); }
-[data-skin="aseel"] .aseel-text-state { color: var(--aseel-state); }
-[data-skin="aseel"] .aseel-text-credit { color: var(--aseel-status-credit); }
-[data-skin="aseel"] .aseel-text-debit { color: var(--aseel-status-debit); }
-[data-skin="aseel"] .aseel-text-paid { color: var(--aseel-status-paid); }
-[data-skin="aseel"] .aseel-text-due { color: var(--aseel-status-due); }
-[data-skin="aseel"] .aseel-border-soft { border-color: var(--aseel-border-soft); }
-[data-skin="aseel"] .aseel-border-line { border-color: var(--aseel-line); }
-[data-skin="aseel"] .aseel-border-accent { border-color: var(--aseel-accent-bd); }
-[data-skin="aseel"] .aseel-btn-primary { background: var(--aseel-accent); color: #fff; border: 1px solid var(--aseel-accent-bd); border-radius: var(--aseel-radius); }
-[data-skin="aseel"] .aseel-btn-primary:hover { background: #1e4a75; }
-[data-skin="aseel"] .aseel-badge-state { background: #fce4e4; color: var(--aseel-state); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
-[data-skin="aseel"] .aseel-badge-ok { background: #e4f0e4; color: #2e7d32; padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
-[data-skin="aseel"] .aseel-badge-neutral { background: var(--aseel-panel); color: var(--aseel-ink-soft); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
+:root[data-skin] .aseel-bg-panel { background: var(--aseel-panel); }
+:root[data-skin] .aseel-bg-field { background: var(--aseel-field); }
+:root[data-skin] .aseel-bg-accent { background: var(--aseel-accent); }
+:root[data-skin] .aseel-bg-accent-bg { background: var(--aseel-accent-bg); }
+:root[data-skin] .aseel-bg-grid-head { background: var(--aseel-grid-head); }
+:root[data-skin] .aseel-bg-row-alt { background: var(--aseel-row-alt); }
+:root[data-skin] .aseel-text-ink { color: var(--aseel-ink); }
+:root[data-skin] .aseel-text-soft { color: var(--aseel-ink-soft); }
+:root[data-skin] .aseel-text-accent { color: var(--aseel-accent); }
+:root[data-skin] .aseel-text-state { color: var(--aseel-state); }
+:root[data-skin] .aseel-text-credit { color: var(--aseel-status-credit); }
+:root[data-skin] .aseel-text-debit { color: var(--aseel-status-debit); }
+:root[data-skin] .aseel-text-paid { color: var(--aseel-status-paid); }
+:root[data-skin] .aseel-text-due { color: var(--aseel-status-due); }
+:root[data-skin] .aseel-border-soft { border-color: var(--aseel-border-soft); }
+:root[data-skin] .aseel-border-line { border-color: var(--aseel-line); }
+:root[data-skin] .aseel-border-accent { border-color: var(--aseel-accent-bd); }
+:root[data-skin] .aseel-btn-primary { background: var(--aseel-accent); color: var(--aseel-on-accent); border: 1px solid var(--aseel-accent-bd); border-radius: var(--aseel-radius); }
+:root[data-skin] .aseel-btn-primary:hover { background: var(--aseel-accent-hover); }
+:root[data-skin] .aseel-badge-state { background: var(--aseel-badge-state-bg); color: var(--aseel-state); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
+:root[data-skin] .aseel-badge-ok { background: var(--aseel-badge-ok-bg); color: var(--aseel-badge-ok-fg); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
+:root[data-skin] .aseel-badge-neutral { background: var(--aseel-panel); color: var(--aseel-ink-soft); padding: 1px 6px; border-radius: var(--aseel-radius); font-size: 10px; }
+
+/* ════════════════════════════════════════════════════════════════════
+   M2 — كروم الجلد الحديث (دلتا هيكلية للجلد الحديث وحده)
+   ────────────────────────────────────────────────────────────────────
+   قواعد لا تُغيّر أسماء الكلاسات ولا تمسّ جلد الأصيل إطلاقاً. المحدد
+   :root[data-skin="modern"] بنفس نوعية القواعد الهيكلية أعلاه (0,3,0)
+   ويأتي بعدها فيفوز بالترتيب.
+   ⚠ موضع هذه الكتلة مقصود: قبل كتل @media (الجوال N9-T4/767 والطباعة
+   N9-T5) كي تبقى تلك متأخرة فتفوز على الجوال والورق. لا تنقلها للأسفل.
+   الهندسة محفوظة: لا تغيير في ارتفاع صفوف الشبكة ولا عرض الأعمدة؛
+   أقصى فرق مسموح ±4px في حشوة الأشرطة.
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ───────── M2-T1: شريط العنوان + شريط الأوامر ───────── */
+:root[data-skin="modern"] .aseel-titlebar {
+  padding: 4px 10px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+/* العنوان لم يعد chip محفوراً بل عنوان صفحة */
+:root[data-skin="modern"] .aseel-title-chip {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text);
+  font-size: var(--font-size-xl);
+  font-weight: 700;
+  padding: 2px 0;
+}
+/* حالة المستند: شارة بدل نص أحمر عارٍ */
+:root[data-skin="modern"] .aseel-title-state {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-danger) 12%, var(--color-surface));
+  color: var(--color-danger);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+:root[data-skin="modern"] .aseel-toolbar {
+  padding: 3px 8px;
+  gap: 2px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+:root[data-skin="modern"] .aseel-toolgrp { gap: 2px; }
+:root[data-skin="modern"] .aseel-toolsep {
+  background: var(--color-border);
+  margin: 4px 6px;
+}
+/* أزرار ghost: بلا حفر ولا حدود، وضوحها من الـ hover */
+:root[data-skin="modern"] .aseel-toolbtn {
+  gap: 5px;
+  padding: 4px 8px;
+  border-color: transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-weight: 500;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+:root[data-skin="modern"] .aseel-toolbtn:hover:not(:disabled) {
+  background: var(--color-surface-3);
+  border-color: transparent;
+  color: var(--color-primary);
+}
+:root[data-skin="modern"] .aseel-toolbtn:active:not(:disabled) {
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
+}
+:root[data-skin="modern"] .aseel-toolbtn:disabled { opacity: .45; }
+:root[data-skin="modern"] .aseel-toolbtn--danger { color: var(--color-danger); }
+:root[data-skin="modern"] .aseel-toolbtn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-danger) 10%, var(--color-surface));
+  border-color: transparent;
+  color: var(--color-danger);
+}
+:root[data-skin="modern"] .aseel-toolbtn svg { width: 16px; height: 16px; }
+:root[data-skin="modern"] .aseel-actionbar { border-top-color: var(--color-border); }
+
+/* ───────── M2-T2: حزام الحقول + النماذج + الشبكات + المجاميع ───────── */
+:root[data-skin="modern"] .aseel-headband {
+  padding: 8px 10px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+:root[data-skin="modern"] .aseel-field-label {
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+:root[data-skin="modern"] .aseel-input,
+:root[data-skin="modern"] .aseel-doc input:not([type="checkbox"]):not([type="radio"]),
+:root[data-skin="modern"] .aseel-doc select {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  border-radius: var(--radius-md);
+}
+:root[data-skin="modern"] .aseel-doc input:focus,
+:root[data-skin="modern"] .aseel-doc select:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 18%, transparent);
+}
+/* شبكة البنود: رأس أوضح، خطوط أنعم — بلا أي تغيير في الارتفاعات */
+:root[data-skin="modern"] .aseel-grid thead th {
+  background: var(--color-surface-3);
+  color: var(--color-text);
+  font-weight: 600;
+  border-color: var(--color-border);
+}
+:root[data-skin="modern"] .aseel-grid tbody td { border-color: var(--color-border); }
+:root[data-skin="modern"] .aseel-grid input:focus,
+:root[data-skin="modern"] .aseel-grid select:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 16%, transparent);
+}
+:root[data-skin="modern"] .aseel-grid tbody tr.aseel-row--total td {
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+  border-top-color: var(--color-border);
+}
+:root[data-skin="modern"] .aseel-gridwrap {
+  border-top-color: var(--color-border);
+  border-bottom-color: var(--color-border);
+}
+/* أقسام النموذج: بطاقة بيضاء بعنوان بحد سفلي خفيف */
+:root[data-skin="modern"] .aseel-form-section {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+:root[data-skin="modern"] .aseel-form-section-title {
+  color: var(--color-text);
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+}
+/* رصيف المجاميع */
+:root[data-skin="modern"] .aseel-totals {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 6px 8px;
+}
+:root[data-skin="modern"] .aseel-total-row--grand {
+  border-top-color: var(--color-border);
+  color: var(--color-text);
+}
+:root[data-skin="modern"] .aseel-total-value {
+  background: var(--color-surface-2);
+  border-color: var(--color-border);
+  border-radius: var(--radius-sm);
+}
+:root[data-skin="modern"] .aseel-pagination {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  border-radius: var(--radius-md);
+}
+:root[data-skin="modern"] .aseel-pagination button,
+:root[data-skin="modern"] .aseel-btn {
+  border-color: var(--color-border);
+  border-radius: var(--radius-md);
+}
+:root[data-skin="modern"] .aseel-report-toolbar {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* ───────── M2-T3: التبويبات + الشجرة + المنبثقات + شريط الحالة ───────── */
+/* تبويبات underline بدل المستطيلات المحفورة */
+:root[data-skin="modern"] .aseel-tabs {
+  gap: 4px;
+  border-bottom: 1px solid var(--color-border);
+}
+:root[data-skin="modern"] .aseel-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin-bottom: -1px;
+}
+:root[data-skin="modern"] .aseel-tab:hover:not(.aseel-tab--active) {
+  background: transparent;
+  border-bottom-color: var(--color-border);
+  color: var(--color-text);
+}
+:root[data-skin="modern"] .aseel-tab--active {
+  background: transparent;
+  border-bottom-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: 600;
+  box-shadow: none;
+}
+:root[data-skin="modern"] .aseel-tabpanel {
+  background: transparent;
+  border: none;
+  padding: 8px 4px;
+}
+:root[data-skin="modern"] .aseel-bottom { border-top-color: var(--color-border); }
+/* الشجرة الجانبية */
+:root[data-skin="modern"] .aseel-tree-panel {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+:root[data-skin="modern"] .aseel-tree-head,
+:root[data-skin="modern"] .aseel-tree-search,
+:root[data-skin="modern"] .aseel-tree-actions,
+:root[data-skin="modern"] .aseel-tree-toolbar { border-bottom-color: var(--color-border); }
+:root[data-skin="modern"] .aseel-tree-node:hover,
+:root[data-skin="modern"] .aseel-tree-leaf:hover:not(:disabled),
+:root[data-skin="modern"] .aseel-tree-cat:hover { background: var(--color-surface-3); }
+:root[data-skin="modern"] .aseel-tree-rail {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  border-radius: var(--radius-lg);
+}
+:root[data-skin="modern"] .aseel-tree-rail:hover { background: var(--color-surface-3); }
+/* منبثقات: زوايا أنعم وظل أوضح */
+:root[data-skin="modern"] .aseel-autocomplete-pop,
+:root[data-skin="modern"] .aseel-ctxmenu,
+:root[data-skin="modern"] .aseel-date-cal {
+  border-color: var(--color-border);
+  border-radius: var(--radius-lg);
+}
+:root[data-skin="modern"] .aseel-autocomplete-row--sel,
+:root[data-skin="modern"] .aseel-ctxmenu-item:hover { background: var(--color-surface-3); }
+:root[data-skin="modern"] .aseel-picker {
+  background: var(--color-surface);
+  border-left-color: var(--color-border);
+}
+:root[data-skin="modern"] .aseel-picker-head {
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+:root[data-skin="modern"] .aseel-picker-foot { border-top-color: var(--color-border); }
+/* شريط الحالة: سطر رفيع بدل اللوح الداكن */
+:root[data-skin="modern"] .aseel-statusbar {
+  padding: 5px 12px;
+  gap: 16px;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+}
+:root[data-skin="modern"] .aseel-status-item b {
+  padding: 1px 7px;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  font-size: var(--font-size-sm);
+}
+/* بانرات وشارات: حواف حديثة (الألوان أصلاً من توكنات M1) */
+:root[data-skin="modern"] .aseel-banner,
+:root[data-skin="modern"] .aseel-note { border-radius: var(--radius-md); }
+:root[data-skin="modern"] .aseel-badge-state,
+:root[data-skin="modern"] .aseel-badge-ok,
+:root[data-skin="modern"] .aseel-badge-neutral { border-radius: var(--radius-full); padding: 1px 8px; }
 
 /* ── N9-T4: Mobile RTL — headband single col <640px, toolbar 2 rows ── */
 @media (max-width: 640px) {
-  [data-skin="aseel"] .aseel-headband {
+  :root[data-skin] .aseel-headband {
     flex-direction: column !important;
     align-items: stretch !important;
     gap: 2px !important;
     padding: 4px !important;
   }
-  [data-skin="aseel"] .aseel-headband > .aseel-field {
+  :root[data-skin] .aseel-headband > .aseel-field {
     flex: 1 1 auto !important;
     max-width: none !important;
   }
-  [data-skin="aseel"] .aseel-toolbar {
+  :root[data-skin] .aseel-toolbar {
     flex-wrap: wrap !important;
     gap: 2px !important;
   }
-  [data-skin="aseel"] .aseel-toolbar .aseel-toolbar-group {
+  :root[data-skin] .aseel-toolbar .aseel-toolbar-group {
     flex: 1 1 45% !important;
     min-width: 0 !important;
   }
-  [data-skin="aseel"] .aseel-grid {
+  :root[data-skin] .aseel-grid {
     font-size: 10px !important;
   }
-  [data-skin="aseel"] .aseel-doc {
+  :root[data-skin] .aseel-doc {
     padding: 2px !important;
   }
 }
@@ -1298,85 +1868,102 @@ tbody td {
    ════════════════════════════════════════════════════════════════ */
 @media (max-width: 767px) {
   /* الشريط العلوي يلتف ويترك مساحة للهيدر العائم لزر القائمة (h-14) */
-  [data-skin="aseel"] .aseel-titlebar {
+  :root[data-skin] .aseel-titlebar {
     flex-wrap: wrap;
     row-gap: 4px;
     padding: 6px 8px;
     padding-top: 60px;
   }
-  [data-skin="aseel"] .aseel-company {
+  :root[data-skin] .aseel-company {
     flex-wrap: wrap;
     gap: 6px;
     width: 100%;
   }
   /* أدوات اليمين (بحث/كثافة/سمة) تأخذ سطراً كاملاً وتتمدد */
-  [data-skin="aseel"] .aseel-titlebar > .ms-auto {
+  :root[data-skin] .aseel-titlebar > .ms-auto {
     width: 100%;
     justify-content: flex-start;
     flex-wrap: wrap;
   }
 
   /* شريط الحالة السفلي مخفي على الجوال (زخرفي) لتوفير مساحة الشاشة */
-  [data-skin="aseel"] .aseel-statusbar { display: none; }
+  :root[data-skin] .aseel-statusbar { display: none; }
 
   /* الجداول الكثيفة: تمرير أفقي بدل ضغط الأعمدة */
-  [data-skin="aseel"] .aseel-gridwrap,
-  [data-skin="aseel"] .aseel-grid-wrap,
-  [data-skin="aseel"] .aseel-doc .aseel-bottom,
-  [data-skin="aseel"] .aseel-dense-table {
+  :root[data-skin] .aseel-gridwrap,
+  :root[data-skin] .aseel-grid-wrap,
+  :root[data-skin] .aseel-doc .aseel-bottom,
+  :root[data-skin] .aseel-dense-table {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-  [data-skin="aseel"] .aseel-grid { min-width: max-content; }
+  :root[data-skin] .aseel-grid { min-width: max-content; }
 
   /* أشرطة الأدوات تلتف وتكبر مساحة اللمس */
-  [data-skin="aseel"] .aseel-toolbar { flex-wrap: wrap; gap: 3px; padding: 3px 6px; }
-  [data-skin="aseel"] .aseel-toolbtn { min-height: 34px; }
+  :root[data-skin] .aseel-toolbar { flex-wrap: wrap; gap: 3px; padding: 3px 6px; }
+  :root[data-skin] .aseel-toolbtn { min-height: 34px; }
 
   /* المنتقيات الجانبية تصبح بملء العرض على الجوال */
-  [data-skin="aseel"] .aseel-picker {
+  :root[data-skin] .aseel-picker {
     width: 100vw !important;
     max-width: 100vw;
   }
-  [data-skin="aseel"] .aseel-picker-mask { justify-content: stretch; }
+  :root[data-skin] .aseel-picker-mask { justify-content: stretch; }
 
   /* حقول الإدخال أطول للمس + خط 16px يمنع التكبير التلقائي في iOS */
-  [data-skin="aseel"] .aseel-input,
-  [data-skin="aseel"] .aseel-doc input:not([type="checkbox"]):not([type="radio"]),
-  [data-skin="aseel"] .aseel-doc select {
+  :root[data-skin] .aseel-input,
+  :root[data-skin] .aseel-doc input:not([type="checkbox"]):not([type="radio"]),
+  :root[data-skin] .aseel-doc select {
     min-height: 38px;
     font-size: 16px;
   }
 }
 
-/* ── N9-T5: Print CSS ─────────────────────────────────── */
+/* ── N9-T5: Print CSS ───────────────────────────────────
+   القيم هنا صلبة عمداً (أسود على أبيض) ولا تُشتق من توكنات الجلد: الورق
+   واحد في الجلدين، وربطه بالمظهر يطبع خلفيات داكنة. لا تحوّلها لمتغيرات. */
 @media print {
-  [data-skin="aseel"] .aseel-sidebar,
-  [data-skin="aseel"] .aseel-toolbar,
-  [data-skin="aseel"] .aseel-actionbar,
-  [data-skin="aseel"] .aseel-statusbar-global,
-  [data-skin="aseel"] .aseel-doc-statusbar,
-  [data-skin="aseel"] .aseel-pagination {
+  :root[data-skin] .aseel-app-chrome,
+  :root[data-skin] .aseel-sidebar,
+  :root[data-skin] .aseel-sidebar-spacer,
+  :root[data-skin] .aseel-toolbar,
+  :root[data-skin] .aseel-actionbar,
+  :root[data-skin] .aseel-statusbar-global,
+  :root[data-skin] .aseel-doc-statusbar,
+  /* M5: الكلاس الفعلي الذي يرسمه AseelDocumentShell كان غائباً عن القائمة
+     (الموجودان أعلاه اسمان لا يستعملهما الشل) ⇒ شريط الحالة كان يُطبع. */
+  :root[data-skin] .aseel-statusbar,
+  :root[data-skin] .aseel-pagination,
+  :root[data-skin] .aseel-print-hidden {
     display: none !important;
   }
-  [data-skin="aseel"] .aseel-grid {
+  :root[data-skin] .app-shell,
+  :root[data-skin] .app-workspace,
+  :root[data-skin] .app-main,
+  :root[data-skin] .app-content {
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+  :root[data-skin] .aseel-grid {
     width: 100% !important;
     font-size: 9pt !important;
     border-collapse: collapse !important;
   }
-  [data-skin="aseel"] .aseel-grid th,
-  [data-skin="aseel"] .aseel-grid td {
+  :root[data-skin] .aseel-grid th,
+  :root[data-skin] .aseel-grid td {
     border: 1px solid #000 !important;
     padding: 3px 4px !important;
   }
-  [data-skin="aseel"] .aseel-doc {
+  :root[data-skin] .aseel-doc {
     height: auto !important;
     min-height: 0 !important;
     overflow: visible !important;
     background: #fff !important;
     color: #000 !important;
   }
-  [data-skin="aseel"] .aseel-doc-titlebar h2:after {
+  :root[data-skin] .aseel-doc-titlebar h2:after {
     content: " — مطبوع";
     font-size: 10pt;
     color: #666;

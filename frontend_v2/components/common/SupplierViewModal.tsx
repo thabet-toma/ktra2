@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { LoadingSpinner } from '../LoadingSpinner';
 import { AseelSidePanel } from '../aseel/AseelSidePanel';
+import { EntityActivityLog } from '../activity/EntityActivityLog';
+import { formatDateValue } from "../../utils/formatDate";
 
 interface SupplierViewModalProps {
     isOpen: boolean;
@@ -24,7 +26,7 @@ const getTypeInfo = (type?: string) => {
         case 'service_provider': return { icon: <FileText className="w-4 h-4" />, text: 'مخلّص جمركي', color: 'text-amber-700 bg-amber-50 border-amber-200' };
         case 'local_company': return { icon: <Building className="w-4 h-4" />, text: 'ناقل محلي', color: 'text-green-700 bg-green-50 border-green-200' };
         case 'international_trader': return { icon: <Globe className="w-4 h-4" />, text: 'مورد دولي', color: 'text-[var(--color-primary)] bg-[var(--color-surface-2)] border-[var(--color-border)]' };
-        default: return { icon: <Building className="w-4 h-4" />, text: 'مورد تجاري', color: 'text-gray-600 bg-gray-50 border-gray-200' };
+        default: return { icon: <Building className="w-4 h-4" />, text: 'مورد تجاري', color: 'text-[var(--color-text-muted)] bg-[var(--color-surface-2)] border-[var(--color-border)]' };
     }
 };
 
@@ -32,16 +34,16 @@ const DetailRow = ({ icon, label, value, isLink = false }: any) => {
     if (!value) return null;
     return (
         <div className="flex items-start gap-3 py-2 group">
-            <div className="mt-0.5 text-gray-400 dark:text-gray-500">{icon}</div>
+            <div className="mt-0.5 text-[var(--color-text-muted)]">{icon}</div>
             <div className="flex-1 min-w-0">
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">{label}</p>
+                <p className="text-xs text-[var(--color-text-muted)] mb-0.5">{label}</p>
                 <div className="flex items-center gap-2">
                     {isLink ? (
                         <a href={value} target="_blank" rel="noreferrer" className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:underline truncate block">
                             {value}
                         </a>
                     ) : (
-                        <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{value}</p>
+                        <p className="text-sm font-medium text-[var(--color-text)] truncate">{value}</p>
                     )}
                 </div>
             </div>
@@ -88,14 +90,14 @@ export const SupplierViewModal: React.FC<SupplierViewModalProps> = ({
             <div className="flex flex-col h-full">
 
                 {/* Header Section */}
-                <div className="flex-none border-b border-gray-100 dark:border-gray-700 pb-3 flex justify-between items-start">
+                <div className="flex-none border-b border-[var(--color-border)] pb-3 flex justify-between items-start">
                     <div className="flex gap-3">
                         <div className="relative">
                             {supplier?.logoUrl ? (
-                                <img src={supplier.logoUrl} alt="Logo" className="w-12 h-12 rounded-lg border border-gray-200 dark:border-gray-700 object-cover shadow-sm" />
+                                <img src={supplier.logoUrl} alt="Logo" className="w-12 h-12 rounded-lg border border-[var(--color-border)] object-cover shadow-sm" />
                             ) : (
-                                <div className="w-12 h-12 rounded-lg bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 flex items-center justify-center">
-                                    <Building className="w-6 h-6 text-gray-400" />
+                                <div className="w-12 h-12 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-border)] flex items-center justify-center">
+                                    <Building className="w-6 h-6 text-[var(--color-text-muted)]" />
                                 </div>
                             )}
                             <div className={`absolute -bottom-2 -right-2 px-2 py-0.5 rounded text-[10px] font-bold border ${typeInfo.color} shadow-sm`}>
@@ -103,20 +105,20 @@ export const SupplierViewModal: React.FC<SupplierViewModalProps> = ({
                             </div>
                         </div>
                         <div>
-                            <h2 className="text-lg font-bold text-gray-900 dark:text-white leading-tight">
+                            <h2 className="text-lg font-bold text-[var(--color-text)] leading-tight">
                                 {supplier?.tradeName}
                             </h2>
                             {supplier?.alias && (
-                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5 font-medium">
+                                <p className="text-sm text-[var(--color-text-muted)] mt-0.5 font-medium">
                                     ({supplier.alias})
                                 </p>
                             )}
                             <div className="flex items-center gap-2 mt-1">
-                                <span className="inline-flex items-center gap-1 text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">
+                                <span className="inline-flex items-center gap-1 text-xs text-[var(--color-text-muted)] bg-[var(--color-surface-3)] px-2 py-0.5 rounded">
                                     <Hash className="w-3 h-3" /> {supplier?.supplierId}
                                 </span>
                                 {supplier?.country && (
-                                    <span className="inline-flex items-center gap-1 text-xs text-gray-500 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded">
+                                    <span className="inline-flex items-center gap-1 text-xs text-[var(--color-text-muted)] bg-[var(--color-surface-3)] px-2 py-0.5 rounded">
                                         <Globe className="w-3 h-3" /> {supplier.country}
                                     </span>
                                 )}
@@ -145,8 +147,8 @@ export const SupplierViewModal: React.FC<SupplierViewModalProps> = ({
                         <>
                             {/* Contact Info */}
                             <div className="space-y-2">
-                                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">معلومات الاتصال</h3>
-                                <div className="space-y-1 bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-100 dark:border-gray-700">
+                                <h3 className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider">معلومات الاتصال</h3>
+                                <div className="space-y-1 bg-[var(--color-surface)] rounded-lg p-3 border border-[var(--color-border)]">
                                     <DetailRow icon={<Mail className="w-4 h-4" />} label="البريد الإلكتروني" value={supplier.email} />
                                     <DetailRow icon={<Phone className="w-4 h-4" />} label="الهاتف" value={supplier.phone} />
                                     <DetailRow icon={<Smartphone className="w-4 h-4" />} label="الجوال" value={supplier.mobile} />
@@ -156,10 +158,10 @@ export const SupplierViewModal: React.FC<SupplierViewModalProps> = ({
                             {/* Address */}
                             {(supplier.street || supplier.city) && (
                                 <div>
-                                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">العنوان</h3>
-                                    <div className="bg-white dark:bg-gray-800 rounded-lg p-3 border border-gray-100 dark:border-gray-700 text-sm">
+                                    <h3 className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">العنوان</h3>
+                                    <div className="bg-[var(--color-surface)] rounded-lg p-3 border border-[var(--color-border)] text-sm">
                                         <p className="font-medium">{supplier.street}</p>
-                                        <p className="text-gray-500 mt-1">
+                                        <p className="text-[var(--color-text-muted)] mt-1">
                                             {[supplier.city, supplier.region, supplier.postalCode, supplier.country].filter(Boolean).join('، ')}
                                         </p>
                                     </div>
@@ -168,15 +170,15 @@ export const SupplierViewModal: React.FC<SupplierViewModalProps> = ({
 
                             {/* Balance */}
                             <div className="grid grid-cols-2 gap-2">
-                                <div className="p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
-                                    <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                <div className="p-3 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg">
+                                    <div className="flex items-center gap-2 text-[var(--color-text-muted)] text-xs mb-1">
                                         <DollarSign className="w-3.5 h-3.5" />
                                         <span>العملة</span>
                                     </div>
-                                    <p className="text-lg font-bold text-gray-900 dark:text-white">{supplier.currency || 'ILS'}</p>
+                                    <p className="text-lg font-bold text-[var(--color-text)]">{supplier.currency || 'ILS'}</p>
                                 </div>
-                                <div className="p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg">
-                                    <div className="flex items-center gap-2 text-gray-500 text-xs mb-1">
+                                <div className="p-3 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg">
+                                    <div className="flex items-center gap-2 text-[var(--color-text-muted)] text-xs mb-1">
                                         <CreditCard className="w-3.5 h-3.5" />
                                         <span>الرصيد الافتتاحي</span>
                                     </div>
@@ -189,17 +191,22 @@ export const SupplierViewModal: React.FC<SupplierViewModalProps> = ({
                             {/* Notes */}
                             {supplier.notes && (
                                 <div>
-                                    <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">ملاحظات</h3>
+                                    <h3 className="text-xs font-bold text-[var(--color-text-muted)] uppercase tracking-wider mb-2">ملاحظات</h3>
                                     <div className="bg-amber-50/50 dark:bg-amber-900/10 rounded-lg border border-amber-100 dark:border-amber-800/30 p-3 text-sm whitespace-pre-wrap leading-relaxed">
                                         {supplier.notes}
                                     </div>
                                 </div>
                             )}
 
+                            <EntityActivityLog
+                                partnerId={supplierId || supplier.supplierId}
+                                title="سجل نشاطات المستخدمين"
+                            />
+
                             {/* Footer meta */}
-                            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-gray-100 dark:border-gray-700 text-xs text-gray-400">
-                                <span>تاريخ الإنشاء: {new Date(supplier.createdAt).toLocaleDateString('ar-EG')}</span>
-                                <span>آخر تحديث: {new Date(supplier.updatedAt).toLocaleDateString('ar-EG')}</span>
+                            <div className="grid grid-cols-2 gap-2 pt-2 border-t border-[var(--color-border)] text-xs text-[var(--color-text-muted)]">
+                                <span>تاريخ الإنشاء: {formatDateValue(supplier.createdAt)}</span>
+                                <span>آخر تحديث: {formatDateValue(supplier.updatedAt)}</span>
                             </div>
                         </>
                     ) : null}

@@ -13,6 +13,46 @@ const NETWORK_HINT =
   "(مثلاً: python manage.py runserver 0.0.0.0:8000) وتأكد أن VITE_API_URL يطابق العنوان " +
   `(الحالي: ${String(API_BASE).replace(/\/+$/, "")})`;
 
+/** إعدادات الشراء لكل شركة (التسعير + الصندوق + الاستلام مع الترحيل). */
+export interface PurchaseSettingsDto {
+  purchase_default_price_strategy: string;
+  default_cash_account: number | null;
+  receive_on_post: boolean;
+  /** تسمية مستند الاستلام المرتبط بفاتورة (يحرّرها المستخدم). */
+  receipt_doc_label: string;
+  /** تسمية المستند بلا فاتورة مرتبطة. */
+  standalone_receipt_label: string;
+  allow_standalone_receipt: boolean;
+  allow_edit_receipt: boolean;
+}
+
+/** سند صرف مورد كما يعيده الخادم (مع التوزيع والمتبقّي «على الحساب»). */
+export interface SupplierPaymentDto {
+  id: number;
+  partner: number;
+  partner_name?: string;
+  purchase_invoice?: number | null;
+  payment_date: string;
+  amount: string;
+  currency?: number | null;
+  currency_code?: string | null;
+  exchange_rate?: string;
+  cash_or_bank_account: number;
+  cash_account_name?: string | null;
+  is_posted: boolean;
+  journal?: number | null;
+  notes?: string | null;
+  allocations?: Array<{
+    id: number;
+    invoice: number;
+    invoice_number?: string;
+    amount: string;
+  }>;
+  allocated_amount?: string;
+  unallocated_amount?: string;
+  auto_post_error?: string;
+}
+
 export interface ClearanceImportOptionDeal {
   deal_id: number;
   deal_ref: string;
@@ -199,15 +239,32 @@ export const purchaseInvoiceApi = {
     return res.json();
   },
 
-  /** وصل دفع للمورد (Feature 2): يُنشئ SupplierPayment ثم يرحّله (Dr ذمم المورد / Cr صندوق). */
+  /**
+   * وصل دفع للمورد (Feature 2): يُنشئ SupplierPayment ويرحّله (Dr ذمم المورد / Cr صندوق).
+   * T-AUTOPOST: الترحيل صار في الخادم ضمن نفس الطلب — `auto_post` يسمو على إعداد
+   * الشركة (`auto_post_payments`): true = حفظ وترحيل، false = حفظ كمسودة.
+   */
   addSupplierPayment: async (body: {
     partner: number;
+    purchase_invoice?: number;
     payment_date: string;
     amount: string;
     currency?: number | null;
     cash_or_bank_account: number;
     notes?: string;
-  }): Promise<{ id: number; journal: number | null }> => {
+    /** T-ONEPAY: شيكات صادرة — مبالغها جزء من `amount` لا إضافة عليه. */
+    cheques?: Array<{
+      cheque_number: string;
+      amount: string | number;
+      bank_name?: string;
+      account_number?: string;
+      bank_branch?: string;
+      payee_name?: string;
+      due_date?: string | null;
+      issue_date?: string | null;
+    }>;
+    auto_post?: boolean;
+  }): Promise<{ id: number; journal: number | null; is_posted: boolean; auto_post_error?: string }> => {
     const SP = `${API_BASE}/logistics/supplier-payments`;
     const createRes = await safeFetch(`${SP}/`, {
       method: "POST",
@@ -215,13 +272,48 @@ export const purchaseInvoiceApi = {
       body: JSON.stringify(body),
     });
     await handle(createRes, "addSupplierPayment");
-    const created = (await createRes.json()) as { id: number; journal: number | null };
-    const postRes = await safeFetch(`${SP}/${created.id}/post/`, {
+    return createRes.json();
+  },
+
+  /**
+   * T-ONACC: سندات صرف مورد معيّن (لعرض الرصيد «على الحساب» وتوزيعه).
+   * `partner` فلتر خادم — لا تُسحب سندات الشركة كلها.
+   */
+  listSupplierPayments: async (partnerId?: number | string): Promise<SupplierPaymentDto[]> => {
+    const qs = partnerId ? `?partner=${partnerId}` : "";
+    const res = await safeFetch(`${API_BASE}/logistics/supplier-payments/${qs}`, {
+      headers: headers(),
+    });
+    await handle(res, "listSupplierPayments");
+    const data = await res.json();
+    return Array.isArray(data) ? data : (data?.results ?? []);
+  },
+
+  /**
+   * T-ONACC: توزيع سند صرف على فواتير شراء — بعد الترحيل ربط فقط بلا قيد جديد
+   * (ذمم المورد دُينت وقت الترحيل). مرآة `allocateCustomerPayment`.
+   */
+  allocateSupplierPayment: async (
+    id: number,
+    allocations: Array<{ invoice: number; amount: string | number }>,
+  ): Promise<SupplierPaymentDto> => {
+    const res = await safeFetch(`${API_BASE}/logistics/supplier-payments/${id}/allocate/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ allocations }),
+    });
+    await handle(res, "allocateSupplierPayment");
+    return res.json();
+  },
+
+  /** ترحيل سند صرف مسودة (زر «ترحيل» في قائمة سندات الصرف). */
+  postSupplierPayment: async (id: number): Promise<{ id: number; is_posted: boolean }> => {
+    const res = await safeFetch(`${API_BASE}/logistics/supplier-payments/${id}/post/`, {
       method: "POST",
       headers: headers(),
     });
-    await handle(postRes, "postSupplierPayment");
-    return postRes.json();
+    await handle(res, "postSupplierPayment");
+    return res.json();
   },
 
   previewClearanceImport: async (body: {
@@ -325,6 +417,8 @@ export const purchaseInvoiceApi = {
     currency?: number | null;
     exchange_rate?: number | string | null;
     strategy?: string;
+    /** مورد الفاتورة — يحصر «آخر شراء» به (يبقى «أقل شراء» عاماً). */
+    supplier?: number | string | null;
   }): Promise<{
     unit_price: string | null;
     strategy_used: string | null;
@@ -336,6 +430,7 @@ export const purchaseInvoiceApi = {
     if (params.currency != null) q.set("currency", String(params.currency));
     if (params.exchange_rate != null) q.set("exchange_rate", String(params.exchange_rate));
     if (params.strategy) q.set("strategy", params.strategy);
+    if (params.supplier) q.set("supplier", String(params.supplier));
     const res = await safeFetch(`${BASE}/resolve-price/?${q}`, { headers: headers() });
     await handle(res, "resolvePrice");
     return res.json();
@@ -345,7 +440,7 @@ export const purchaseInvoiceApi = {
    * task24: سعر الشراء المقترح لكل المنتجات دفعة واحدة — لعرضه داخل خيارات منتقي
    * الأصناف بلا نقر (يتجنّب نداء resolve-price لكل صف).
    */
-  priceList: async (): Promise<Array<{
+  priceList: async (supplierId?: number | string | null): Promise<Array<{
     product_id: number;
     unit_price: string | null;
     source_type: string;
@@ -358,13 +453,14 @@ export const purchaseInvoiceApi = {
       document_id: number | null;
     }>;
   }>> => {
-    const res = await safeFetch(`${BASE}/price-list/`, { headers: headers() });
+    const q = supplierId ? `?supplier=${encodeURIComponent(String(supplierId))}` : "";
+    const res = await safeFetch(`${BASE}/price-list/${q}`, { headers: headers() });
     await handle(res, "purchasePriceList");
     return res.json();
   },
 
   /** FEAT-1: إعدادات الشراء (استراتيجية التسعير + T-A4: الصندوق الافتراضي). */
-  getSettings: async (): Promise<{ purchase_default_price_strategy: string; default_cash_account: number | null }> => {
+  getSettings: async (): Promise<PurchaseSettingsDto> => {
     const res = await safeFetch(`${API_BASE}/logistics/purchase-settings/current/`, {
       headers: headers(),
     });
@@ -372,10 +468,9 @@ export const purchaseInvoiceApi = {
     return res.json();
   },
 
-  updateSettings: async (body: {
-    purchase_default_price_strategy?: string;
-    default_cash_account?: number | null;
-  }): Promise<{ purchase_default_price_strategy: string; default_cash_account: number | null }> => {
+  updateSettings: async (
+    body: Partial<PurchaseSettingsDto>,
+  ): Promise<PurchaseSettingsDto> => {
     const res = await safeFetch(`${API_BASE}/logistics/purchase-settings/current/`, {
       method: "PATCH",
       headers: headers(),

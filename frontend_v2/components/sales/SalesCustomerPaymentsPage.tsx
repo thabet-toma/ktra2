@@ -1,3 +1,14 @@
+/**
+ * SalesCustomerPaymentsPage — «سند قبض» (دفعات العملاء).
+ *
+ * التصميم موحَّد مع {@link SupplierPaymentsPage} (قرار المالك 2026-07-25): نفس
+ * الهيكل — AseelDocumentShell + شريط أدوات + AseelDenseTable + شريط حالة —
+ * والنافذة تُبنى من نفس قطع {@link PaymentVoucherParts} المشتركة مع سند الصرف.
+ *
+ * T-ONACC: التوزيع على الفواتير **اختياري**. سند بلا توزيع (أو بتوزيع جزئي)
+ * يُرحَّل ويظهر في كشف حساب العميل (Dr صندوق / Cr ذمم) دون تسديد أي فاتورة،
+ * ويُوزَّع لاحقاً عبر «توزيع» — ربط فقط بلا قيد جديد.
+ */
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { formatMoney, formatNumber } from "../../utils/formatNumber";
 import { useNavigate } from "react-router-dom";
@@ -6,24 +17,18 @@ import {
   Plus,
   Trash2,
   Check,
-  AlertCircle,
+  Split,
   Sparkles,
   X,
-  Search,
-  ChevronRight,
-  ChevronLeft,
-  ChevronsRight,
-  ChevronsLeft,
   Printer,
-  FileDown,
   RefreshCw,
 } from "lucide-react";
-import { AseelSpinner } from "../aseel/AseelStates";
 import {
   listCustomerPayments,
   createCustomerPayment,
   postCustomerPayment,
   deleteCustomerPayment,
+  allocateCustomerPayment,
   suggestFifoAllocations,
   getAgingReport,
   getSalesSettings,
@@ -31,14 +36,33 @@ import {
 } from "../../services/salesApi";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { accountingApi } from "../../services/accountingApi";
+import { apiGetObject } from "../../services/restApi";
+import { useConfirm } from "../../contexts/ConfirmContext";
+import { useToast } from "../../contexts/ToastContext";
 import {
   AseelDocumentShell,
+  AseelDenseTable,
   useRecordNavigation,
   useAseelKeymap,
-  AseelTabs,
+  type DenseColumn,
+  type AseelToolbarAction,
+  type AseelTab,
 } from "../aseel";
+import {
+  ChequeGrid,
+  PaymentFinanceFields,
+  PaymentVoucherModal,
+  type ChequeLine,
+} from "./PaymentVoucherParts";
+import { VoucherAllocationModal } from "../shared/VoucherAllocationModal";
+import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
+import { formatDateLocalized } from "../../utils/formatDate";
+import {
+  buildPartnerChequeDefaults,
+  type PartnerBankAccount,
+} from "../../utils/partnerChequeDefaults";
 
-type Partner = { id: number; name: string };
+type Partner = { id: number; name: string; legal_name?: string | null };
 type Account = { id: number; code: string; name: string; account_type?: string };
 type Currency = { CurrencyID: number; Code: string; Name?: string };
 
@@ -53,8 +77,18 @@ type AgingInvoice = {
   remaining: string;
 };
 
+const fmt = (n: string | number) => formatMoney(n);
+
+/** المتبقّي غير الموزَّع على الفواتير (يأتي محسوباً من الخادم، ويُشتق احتياطاً). */
+const unallocatedOf = (p: CustomerPaymentRow) =>
+  p.unallocated_amount != null
+    ? Number(p.unallocated_amount)
+    : Number(p.amount) - (p.allocations || []).reduce((s, a) => s + Number(a.amount || 0), 0);
+
 export const SalesCustomerPaymentsPage: React.FC = () => {
   const navigate = useNavigate();
+  const confirm = useConfirm();
+  const toast = useToast();
   const [payments, setPayments] = useState<CustomerPaymentRow[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -67,6 +101,10 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
   const [prefillPartnerId, setPrefillPartnerId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [defaultCashAccountId, setDefaultCashAccountId] = useState<number | "">("");
+  // T-AUTOPOST: إعداد الشركة «ترحيل السندات تلقائياً عند الحفظ».
+  const [autoPostPayments, setAutoPostPayments] = useState(true);
+  // T-ONACC: السند المُراد توزيعه على الفواتير (بعد الترحيل أو قبله).
+  const [allocatingPayment, setAllocatingPayment] = useState<CustomerPaymentRow | null>(null);
 
   useEffect(() => {
     const pid = new URLSearchParams(window.location.search).get("pay_partner");
@@ -78,7 +116,6 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
 
   // M4-T3: Aseel Navigation for customer payments
   const [selectedPayment, setSelectedPayment] = useState<CustomerPaymentRow | null>(null);
-  const [showPartnerPicker, setShowPartnerPicker] = useState(false);
 
   const nav = useRecordNavigation<CustomerPaymentRow>({
     items: payments,
@@ -95,44 +132,14 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     },
   });
 
-  // M4-T3: Aseel keyboard shortcuts — real handlers.
-  useAseelKeymap({
-    F2: () => window.print(),
-    F5: () => loadAll(),
-    F6: () => {
-      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
-      el?.focus();
-    },
-    Escape: () => {
-      if (showPartnerPicker) { setShowPartnerPicker(false); return; }
-      if (showForm || selectedPayment) {
-        setShowForm(false);
-        setSelectedPayment(null);
-      } else {
-        navigate(-1);
-      }
-    },
-    plus: () => {
-      const ae = document.activeElement;
-      if (ae?.getAttribute?.('data-aseel-key') === '1') {
-        setShowPartnerPicker(true);
-      }
-    },
-    // N0-T11: Ctrl+nav handlers
-    CtrlHome: () => nav?.first?.(),
-    CtrlEnd: () => nav?.last?.(),
-    CtrlPageUp: () => nav?.prev?.(),
-    CtrlPageDown: () => nav?.next?.(),
-    CtrlIns: () => { setSelectedPayment(null); setShowForm(true); },
-  }, { enabled: !showPartnerPicker });
-
   const loadAll = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
       const [pays, parts, accs, currs, ag, pSettings, sSettings] = await Promise.all([
         listCustomerPayments(),
-        accountingApi.getPartners() as Promise<Partner[]>,
+        // T-PARTYPURE: سند قبض من زبون — قائمة الأطراف زبائن فقط.
+        accountingApi.getPartners("Customer") as Promise<Partner[]>,
         accountingApi.getAccounts() as Promise<Account[]>,
         accountingApi.getCurrencies() as Promise<Currency[]>,
         getAgingReport(),
@@ -144,11 +151,17 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
       setAccounts(accs || []);
       setCurrencies(currs || []);
       setAging(ag || []);
+      const paymentId = Number(new URLSearchParams(window.location.search).get("payment_id"));
+      if (paymentId) {
+        setSearch(String(paymentId));
+        setSelectedPayment((pays || []).find((payment) => payment.id === paymentId) || null);
+      }
       // T-A4: Set default cash account (prefer sales settings, fallback to purchase settings)
       const defCash = sSettings?.default_cash_account || pSettings?.default_cash_account;
       if (defCash) {
         setDefaultCashAccountId(defCash);
       }
+      if (sSettings) setAutoPostPayments(!!sSettings.auto_post_payments);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
     } finally {
@@ -160,7 +173,30 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     loadAll();
   }, [loadAll]);
 
-  const fmt = (n: string | number) => formatMoney(n);
+  // M4-T3: Aseel keyboard shortcuts — real handlers.
+  useAseelKeymap({
+    F2: () => window.print(),
+    F5: () => loadAll(),
+    F6: () => {
+      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      el?.focus();
+    },
+    Escape: () => {
+      if (showForm || allocatingPayment || selectedPayment) {
+        setShowForm(false);
+        setAllocatingPayment(null);
+        setSelectedPayment(null);
+      } else {
+        navigate(-1);
+      }
+    },
+    // N0-T11: Ctrl+nav handlers
+    CtrlHome: () => nav?.first?.(),
+    CtrlEnd: () => nav?.last?.(),
+    CtrlPageUp: () => nav?.prev?.(),
+    CtrlPageDown: () => nav?.next?.(),
+    CtrlIns: () => { setSelectedPayment(null); setShowForm(true); },
+  });
 
   const partnerName = (id: number) =>
     partners.find((p) => p.id === id)?.name || `#${id}`;
@@ -170,28 +206,40 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     return a ? `${a.code} ${a.name}` : `#${id}`;
   };
 
-  const handlePost = async (id: number) => {
-    if (!confirm("ترحيل الدفعة سينشئ قيداً محاسبياً ويسدّد الفواتير. متابعة؟"))
-      return;
+  const handlePost = async (p: CustomerPaymentRow) => {
+    const unalloc = unallocatedOf(p);
+    const ok = await confirm({
+      title: "ترحيل السند",
+      message:
+        unalloc > 0.009
+          ? `ترحيل السند سينشئ قيداً محاسبياً. المبلغ غير الموزَّع (${fmt(unalloc)}) `
+            + "سيُسجَّل على حساب العميل (رصيد لصالحه) ويمكن توزيعه على الفواتير لاحقاً. متابعة؟"
+          : "ترحيل السند سينشئ قيداً محاسبياً ويسدّد الفواتير الموزَّعة. متابعة؟",
+      confirmText: "ترحيل",
+      danger: false,
+    });
+    if (!ok) return;
     try {
-      await postCustomerPayment(id);
+      await postCustomerPayment(p.id);
+      toast("تم ترحيل السند", "success");
       await loadAll();
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : "فشل الترحيل");
+      toast(e instanceof Error ? e.message : "فشل الترحيل", "error");
     }
   };
 
-  const handleDelete = async (id: number, isPosted: boolean) => {
-    if (isPosted) {
-      alert("لا يمكن حذف دفعة مرحّلة. ألغِ الترحيل أولاً.");
+  const handleDelete = async (p: CustomerPaymentRow) => {
+    if (p.is_posted) {
+      toast("لا يمكن حذف سند مرحّل. ألغِ الترحيل أولاً.", "error");
       return;
     }
-    if (!confirm("حذف الدفعة؟")) return;
+    if (!(await confirm({ message: `حذف السند #${p.id}؟` }))) return;
     try {
-      await deleteCustomerPayment(id);
-      setPayments((ps) => ps.filter((p) => p.id !== id));
+      await deleteCustomerPayment(p.id);
+      setPayments((ps) => ps.filter((x) => x.id !== p.id));
+      toast("تم حذف السند", "success");
     } catch (e: unknown) {
-      alert(e instanceof Error ? e.message : "فشل الحذف");
+      toast(e instanceof Error ? e.message : "فشل الحذف", "error");
     }
   };
 
@@ -200,7 +248,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     const s = search.toLowerCase();
     return payments.filter(
       (p) =>
-        partnerName(p.partner).toLowerCase().includes(s) ||
+        (p.partner_name || partnerName(p.partner)).toLowerCase().includes(s) ||
         (p.notes || "").toLowerCase().includes(s) ||
         String(p.id).includes(s),
     );
@@ -212,192 +260,179 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
   const totalPosted = payments
     .filter((p) => p.is_posted)
     .reduce((s, p) => s + Number(p.amount), 0);
+  const totalUnallocated = payments.reduce((s, p) => s + Math.max(0, unallocatedOf(p)), 0);
 
-  return (
-    <div
-      data-skin="aseel"
-      style={{ minHeight: 'calc(100vh - 5rem)', display: 'flex', flexDirection: 'column' }}
-    >
-    <AseelDocumentShell
-      title="سند قبض/صرف"
-      state={selectedPayment ? `سند #${selectedPayment.id}` : 'دفعات العملاء'}
-      nav={nav}
-      actions={[
-        { key: 'new', label: 'سند جديد', icon: <Plus />, onClick: () => setShowForm(true) },
-        { key: 'reload', label: 'تحديث', icon: <RefreshCw />, onClick: () => loadAll(), separatorBefore: true },
-        { key: 'print', label: 'طباعة', icon: <Printer />, onClick: () => window.print() },
-        { key: 'cancel', label: 'إلغاء', icon: <X />, onClick: () => {
-          if (showForm || selectedPayment) {
-            setShowForm(false);
-            setSelectedPayment(null);
-          } else {
-            navigate(-1);
-          }
-        }, danger: true, separatorBefore: true },
-      ]}
-      header={<></>}
-      status={
-        <>
-          <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
-          <span className="aseel-status-item">{payments.length} سند</span>
-        </>
-      }
-    >
-    <div className="space-y-4" dir="rtl" style={{ height: '100%', overflow: 'auto', padding: '12px', background: '#ffffff' }}>
-      <div className="flex flex-wrap items-center gap-3 p-4 bg-gradient-to-l aseel-bg-panel aseel-bg-panel text-white rounded-xl">
-        <Banknote className="w-8 h-8 aseel-text-soft" />
-        <div className="flex-1">
-          <h1 className="text-lg font-bold">دفعات العملاء</h1>
-          <p className="text-xs aseel-text-soft">
-            تحصيل من الذمم المدينة مع توزيع FIFO وترحيل محاسبي
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-2 px-4 py-2 aseel-bg-panel hover:aseel-bg-panel rounded-lg text-sm font-medium"
+  const columns: DenseColumn<CustomerPaymentRow>[] = [
+    { key: "id", header: "#", width: "60px", align: "center", render: (r) => <span className="font-mono text-xs">#{r.id}</span> },
+    { key: "payment_date", header: "التاريخ", width: "110px", align: "center", render: (r) => <span className="text-xs">{formatDateLocalized(r.payment_date)}</span> },
+    {
+      key: "customer", header: "العميل",
+      render: (r) => (
+        <span
+          className="text-xs"
+          data-ctx-partner-id={r.partner ?? undefined}
+          data-ctx-partner-name={r.partner_name || partnerName(r.partner)}
+          data-ctx-partner-kind="customer"
         >
-          <Plus className="w-4 h-4" />
-          دفعة جديدة
-        </button>
-      </div>
+          {r.partner_name || partnerName(r.partner)}
+        </span>
+      ),
+    },
+    { key: "amount", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => <span className="aseel-num font-mono text-xs font-semibold">{fmt(r.amount)}</span> },
+    {
+      key: "unallocated", header: "على الحساب", width: "110px", align: "left", numeric: true,
+      render: (r) => {
+        const u = unallocatedOf(r);
+        return (
+          <span
+            className="aseel-num font-mono text-xs"
+            style={{ color: u > 0.009 ? "var(--aseel-warn, #b06800)" : "var(--aseel-ink-soft)" }}
+          >
+            {fmt(u)}
+          </span>
+        );
+      },
+    },
+    { key: "cash_account", header: "الصندوق", render: (r) => <span className="text-xs">{accountName(r.cash_or_bank_account)}</span> },
+    {
+      key: "allocations", header: "التوزيعات",
+      render: (r) => (
+        <span className="text-[11px]">
+          {r.allocations && r.allocations.length > 0
+            ? r.allocations.map((a) => `#${a.invoice} = ${fmt(a.amount)}`).join(" · ")
+            : <span style={{ color: "var(--aseel-ink-soft)" }}>بدون توزيع</span>}
+        </span>
+      ),
+    },
+    {
+      key: "status", header: "الحالة", width: "100px", align: "center",
+      render: (r) => (
+        <span
+          style={{
+            fontSize: "11px",
+            fontWeight: 600,
+            color: r.is_posted ? "var(--aseel-ok, #2d7d46)" : "var(--aseel-warn, #b06800)",
+          }}
+        >
+          {r.is_posted ? `مرحَّل ${r.journal ? "#" + r.journal : ""}` : "مسودة"}
+        </span>
+      ),
+    },
+    {
+      key: "actions", header: "إجراءات", width: "110px", align: "center",
+      render: (r) => (
+        <div style={{ display: "flex", gap: "2px", justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
+          {!r.is_posted && (
+            <button type="button" className="aseel-toolbtn" title="ترحيل" onClick={() => void handlePost(r)}>
+              <Check className="w-3 h-3" />
+            </button>
+          )}
+          <button
+            type="button"
+            className="aseel-toolbtn"
+            title="توزيع على الفواتير"
+            disabled={unallocatedOf(r) <= 0.009}
+            onClick={() => setAllocatingPayment(r)}
+          >
+            <Split className="w-3 h-3" />
+          </button>
+          <button
+            type="button"
+            className="aseel-toolbtn"
+            title="حذف"
+            disabled={r.is_posted}
+            onClick={() => void handleDelete(r)}
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+        </div>
+      ),
+    },
+  ];
 
-      {err && (
-        <div className="p-3 rounded-lg aseel-bg-panel dark:aseel-bg-panel/20 aseel-text-state text-sm flex gap-2 items-center">
-          <AlertCircle className="w-4 h-4" />
-          {err}
-        </div>
-      )}
+  const actions: AseelToolbarAction[] = [
+    { key: "new", label: "سند قبض جديد (Ctrl+Ins)", icon: <Plus />, onClick: () => { setSelectedPayment(null); setShowForm(true); } },
+    { key: "refresh", label: "تحديث", icon: <RefreshCw className={loading ? "animate-spin" : ""} />, onClick: () => void loadAll(), separatorBefore: true },
+    { key: "print", label: "طباعة", icon: <Printer />, onClick: () => window.print() },
+    {
+      key: "cancel",
+      label: "إلغاء",
+      icon: <X />,
+      onClick: () => {
+        if (showForm || allocatingPayment || selectedPayment) {
+          setShowForm(false);
+          setAllocatingPayment(null);
+          setSelectedPayment(null);
+        } else {
+          navigate(-1);
+        }
+      },
+      danger: true,
+      separatorBefore: true,
+    },
+  ];
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="rounded-xl border aseel-border-soft dark:aseel-border-soft/40 aseel-bg-panel/60 dark:aseel-bg-panel/10 p-4">
-          <div className="text-xs aseel-text-ink dark:aseel-text-soft font-semibold">
-            إجمالي مرحّل
-          </div>
-          <div className="text-2xl font-bold aseel-text-ink dark:aseel-text-soft">
-            {fmt(totalPosted)}
-          </div>
-        </div>
-        <div className="rounded-xl border aseel-border-soft dark:aseel-border-soft/40 aseel-bg-panel/60 dark:aseel-bg-panel/10 p-4">
-          <div className="text-xs aseel-text-ink dark:aseel-text-soft font-semibold">
-            بانتظار الترحيل
-          </div>
-          <div className="text-2xl font-bold aseel-text-ink dark:aseel-text-soft">
-            {fmt(totalPending)}
-          </div>
-        </div>
-        <div className="rounded-xl border aseel-border-soft dark:aseel-border-soft/40 aseel-bg-panel/60 dark:aseel-bg-panel/10 p-4">
-          <div className="text-xs aseel-text-ink dark:aseel-text-soft font-semibold">
-            فواتير مفتوحة (AR)
-          </div>
-          <div className="text-2xl font-bold aseel-text-ink dark:aseel-text-soft">
-            {aging.length}
-          </div>
-          <div className="text-[11px] aseel-text-ink/70 mt-1">
-            {fmt(aging.reduce((s, a) => s + Number(a.remaining), 0))} متبقي
-          </div>
-        </div>
-      </div>
+  const tabs: AseelTab[] = [
+    {
+      key: "list",
+      label: "سندات القبض",
+      content: (
+        <div style={{ padding: "8px" }}>
+          {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
 
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 aseel-text-soft" />
-          <input
-            type="text"
-            placeholder="بحث..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pr-9 pl-3 py-2 border rounded-lg dark:aseel-bg-panel dark:aseel-border-soft"
+          <AseelDenseTable<CustomerPaymentRow>
+            columns={columns}
+            rows={filtered}
+            getRowKey={(r) => r.id}
+            loading={loading}
+            selectable
+            selectedKey={selectedPayment?.id ?? null}
+            onSelect={(key) => setSelectedPayment(filtered.find((p) => p.id === key) || null)}
+            emptyHint="لا سندات قبض — اضغط Ctrl+Ins للإضافة"
           />
         </div>
-      </div>
+      ),
+    },
+  ];
 
-      {loading ? (
-        <AseelSpinner />
-      ) : (
-        <div className="overflow-x-auto aseel-bg-field dark:aseel-bg-panel rounded-xl border aseel-border-soft dark:aseel-border-soft">
-          <table className="min-w-full text-sm">
-            <thead className="aseel-bg-panel dark:aseel-bg-panel/50">
-              <tr>
-                <th className="text-right p-3">#</th>
-                <th className="text-right p-3">التاريخ</th>
-                <th className="text-right p-3">العميل</th>
-                <th className="text-right p-3">المبلغ</th>
-                <th className="text-right p-3">الصندوق / البنك</th>
-                <th className="text-right p-3">التوزيعات</th>
-                <th className="text-center p-3">الحالة</th>
-                <th className="text-center p-3">إجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((p) => (
-                <tr
-                  key={p.id}
-                  className="border-t aseel-border-soft dark:aseel-border-soft"
-                >
-                  <td className="p-2 font-mono">#{p.id}</td>
-                  <td className="p-2">{p.payment_date}</td>
-                  <td className="p-2">{partnerName(p.partner)}</td>
-                  <td className="p-2 font-semibold">{fmt(p.amount)}</td>
-                  <td className="p-2 text-xs">
-                    {accountName(p.cash_or_bank_account)}
-                  </td>
-                  <td className="p-2">
-                    <div className="text-xs space-y-0.5">
-                      {p.allocations && p.allocations.length > 0 ? (
-                        p.allocations.map((a) => (
-                          <div key={a.id || a.invoice}>
-                            فاتورة #{a.invoice} = {fmt(a.amount)}
-                          </div>
-                        ))
-                      ) : (
-                        <span className="aseel-text-soft">بدون توزيع</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="p-2 text-center">
-                    {p.is_posted ? (
-                      <span className="text-xs px-2 py-1 aseel-bg-panel dark:aseel-bg-panel/30 aseel-text-ink dark:aseel-text-soft rounded-full">
-                        مرحّلة {p.journal ? `#${p.journal}` : ""}
-                      </span>
-                    ) : (
-                      <span className="text-xs px-2 py-1 aseel-bg-panel dark:aseel-bg-panel/30 aseel-text-ink dark:aseel-text-soft rounded-full">
-                        مسودة
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-2 text-center">
-                    <div className="flex items-center gap-1 justify-center">
-                      {!p.is_posted && (
-                        <button
-                          type="button"
-                          onClick={() => handlePost(p.id)}
-                          className="p-1.5 aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded"
-                          title="ترحيل"
-                        >
-                          <Check className="w-4 h-4" />
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(p.id, p.is_posted)}
-                        className="p-1.5 aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded disabled:opacity-40"
-                        disabled={p.is_posted}
-                        title="حذف"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {filtered.length === 0 && (
-            <p className="p-8 text-center aseel-text-soft">لا توجد دفعات</p>
-          )}
-        </div>
-      )}
+  return (
+    <div style={{ minHeight: "calc(100vh - 5rem)" }}>
+      <AseelDocumentShell
+        title="سندات القبض من العملاء"
+        state={selectedPayment ? `سند #${selectedPayment.id}` : `${filtered.length} سند`}
+        nav={nav}
+        actions={actions}
+        header={
+          <label className="aseel-field" style={{ flex: 1, minWidth: "200px" }}>
+            <span className="aseel-field-label">بحث (عميل / رقم / ملاحظة)</span>
+            <input
+              className="aseel-input"
+              data-aseel-field="search"
+              placeholder="بحث... (F6)"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </label>
+        }
+        tabs={tabs}
+        status={
+          <>
+            <span className="aseel-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
+            <span className="aseel-status-item"><Banknote className="w-3 h-3 inline" /> {filtered.length} سند</span>
+            <span className="aseel-status-item">مرحَّل <b className="aseel-num">{fmt(totalPosted)}</b></span>
+            <span className="aseel-status-item" style={{ color: "var(--aseel-warn, #b06800)" }}>
+              مسودة <b className="aseel-num">{fmt(totalPending)}</b>
+            </span>
+            <span className="aseel-status-item" style={{ color: "var(--aseel-warn, #b06800)" }}>
+              على الحساب <b className="aseel-num">{fmt(totalUnallocated)}</b>
+            </span>
+            <span className="aseel-status-item">
+              فواتير مفتوحة {aging.length} · متبقٍ{" "}
+              <b className="aseel-num">{fmt(aging.reduce((s, a) => s + Number(a.remaining), 0))}</b>
+            </span>
+          </>
+        }
+      />
 
       {showForm && (
         <NewPaymentModal
@@ -407,102 +442,186 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
           aging={aging}
           initialPartnerId={prefillPartnerId}
           defaultCashAccountId={defaultCashAccountId}
+          autoPostPayments={autoPostPayments}
           onClose={() => { setShowForm(false); setPrefillPartnerId(null); }}
           onSaved={async () => {
             setShowForm(false);
             setPrefillPartnerId(null);
+            toast(autoPostPayments ? "تم حفظ السند وترحيله" : "تم حفظ السند", "success");
+            await loadAll();
+          }}
+        />
+      )}
+
+      {allocatingPayment && (
+        <PaymentAllocationModal
+          payment={allocatingPayment}
+          partnerLabel={allocatingPayment.partner_name || partnerName(allocatingPayment.partner)}
+          aging={aging.filter((a) => a.customer_id === allocatingPayment.partner)}
+          onClose={() => setAllocatingPayment(null)}
+          onSaved={async () => {
+            setAllocatingPayment(null);
+            toast("تم توزيع السند على الفواتير", "success");
             await loadAll();
           }}
         />
       )}
     </div>
-    </AseelDocumentShell>
-    </div>
   );
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Modal إنشاء دفعة
-// N4-T4: + حقول خصم المصدر (withholding) + grid شيكات + tabs ملاحظات/حسابات
+// Modal إنشاء سند قبض — نفس هيكل «سند صرف» عبر PaymentVoucherParts
+// N4-T4: حقول خصم المصدر (withholding) + شبكة شيكات + توزيع على الفواتير
 // ═══════════════════════════════════════════════════════════════════════════
-interface ChequeLine {
-  cheque_number: string;
-  payee_name: string;
-  due_date: string;
-  amount: string;
-  bank_name: string;
-  branch: string;
-  account_number: string;
-}
-
-const newChequeLine = (): ChequeLine => ({
-  cheque_number: "",
-  payee_name: "",
-  due_date: "",
-  amount: "",
-  bank_name: "",
-  branch: "",
-  account_number: "",
-});
-
-const NewPaymentModal: React.FC<{
-  partners: Partner[];
-  accounts: Account[];
-  currencies: Currency[];
-  aging: AgingInvoice[];
+export const NewPaymentModal: React.FC<{
+  partners?: Partner[];
+  accounts?: Account[];
+  currencies?: Currency[];
+  aging?: AgingInvoice[];
   onClose: () => void;
   onSaved: () => void;
   /** T-P2: عميل مُسبق التعبئة عند الفتح من كشف الحساب. */
   initialPartnerId?: number | null;
+  initialPartner?: Partner | null;
+  lockPartner?: boolean;
   defaultCashAccountId?: number | "";
-}> = ({ partners, accounts, currencies, aging, onClose, onSaved, initialPartnerId, defaultCashAccountId }) => {
+  /** T-AUTOPOST: إعداد الشركة «ترحيل السندات تلقائياً» (يحدّد الزر الأساسي). */
+  autoPostPayments?: boolean;
+  /** T-ONEPAY: فاتورة مُسبقة التوزيع عند الفتح من داخلها (المبلغ = متبقّيها). */
+  initialInvoice?: { id: number; number?: string; remaining: number } | null;
+}> = ({
+  partners: providedPartners,
+  accounts: providedAccounts,
+  currencies: providedCurrencies,
+  aging: providedAging,
+  onClose,
+  onSaved,
+  initialPartnerId,
+  initialPartner,
+  lockPartner = false,
+  defaultCashAccountId,
+  autoPostPayments,
+  initialInvoice,
+}) => {
   const today = new Date().toISOString().split("T")[0];
-  const [partnerId, setPartnerId] = useState<number | "">(initialPartnerId ?? "");
+  const [loadedPartners, setLoadedPartners] = useState<Partner[]>(initialPartner ? [initialPartner] : []);
+  const [loadedAccounts, setLoadedAccounts] = useState<Account[]>([]);
+  const [loadedCurrencies, setLoadedCurrencies] = useState<Currency[]>([]);
+  const [loadedAging, setLoadedAging] = useState<AgingInvoice[]>([]);
+  const [loadedDefaultCashAccountId, setLoadedDefaultCashAccountId] = useState<number | "">("");
+  // T-AUTOPOST: يُحمَّل ذاتياً حين تُفتح النافذة من بطاقة الشريك (بلا props من الصفحة).
+  const [loadedAutoPost, setLoadedAutoPost] = useState<boolean | null>(null);
+  const effectiveAutoPost = autoPostPayments ?? loadedAutoPost ?? true;
+  const partners = providedPartners ?? loadedPartners;
+  const accounts = providedAccounts ?? loadedAccounts;
+  const currencies = providedCurrencies ?? loadedCurrencies;
+  const aging = providedAging ?? loadedAging;
+  const effectiveDefaultCashAccountId = defaultCashAccountId || loadedDefaultCashAccountId;
+  const [partnerId, setPartnerId] = useState<number | "">(initialPartnerId ?? initialPartner?.id ?? "");
   const [date, setDate] = useState(today);
-  const [amount, setAmount] = useState(""); // total payment amount
-  const [cashAmount, setCashAmount] = useState(""); // N4-T4: نقد جزء
+  const [cashAmount, setCashAmount] = useState(
+    initialInvoice ? String(initialInvoice.remaining) : "",
+  ); // N4-T4: نقد جزء
   const [currencyId, setCurrencyId] = useState<number | "">("");
   const [exchangeRate, setExchangeRate] = useState("1");
-  const [cashAccountId, setCashAccountId] = useState<number | "">(defaultCashAccountId ?? "");
+  const [cashAccountId, setCashAccountId] = useState<number | "">(effectiveDefaultCashAccountId);
   const [notes, setNotes] = useState("");
-  // N4-T4: withholding (خصم المصدر) — يُحسَب من amount
+  // N4-T4: withholding (خصم المصدر) — يُحسَب من المجموع
   const [withholdingPct, setWithholdingPct] = useState("0");
   const [withholdingAmt, setWithholdingAmt] = useState("0");
   // N4-T4: cheques inside payment (تفاصيل السند)
   const [cheques, setCheques] = useState<ChequeLine[]>([]);
-  const [activeTab, setActiveTab] = useState<"alloc" | "cheques" | "notes" | "accounts">("alloc");
+  const [chequeDefaults, setChequeDefaults] = useState<Partial<ChequeLine>>({});
   const [allocations, setAllocations] = useState<
     Array<{ invoice: number; invoice_number?: string; amount: string }>
-  >([]);
+  >(
+    initialInvoice
+      ? [{
+          invoice: initialInvoice.id,
+          invoice_number: initialInvoice.number,
+          amount: String(initialInvoice.remaining),
+        }]
+      : [],
+  );
   // T-P1: الفاتورة المحددة لتسوية الدفعة عليها (بديل لتوزيع FIFO).
   const [pickInvoiceId, setPickInvoiceId] = useState<number | "">("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (
+      providedPartners !== undefined &&
+      providedAccounts !== undefined &&
+      providedCurrencies !== undefined &&
+      providedAging !== undefined
+    ) return;
+
+    let cancelled = false;
+    Promise.all([
+      providedPartners !== undefined
+        ? Promise.resolve(providedPartners)
+        : lockPartner && initialPartner
+          ? Promise.resolve([initialPartner])
+          : accountingApi.getPartners("Customer") as Promise<Partner[]>,
+      providedAccounts !== undefined
+        ? Promise.resolve(providedAccounts)
+        : accountingApi.getAccounts() as Promise<Account[]>,
+      providedCurrencies !== undefined
+        ? Promise.resolve(providedCurrencies)
+        : accountingApi.getCurrencies() as Promise<Currency[]>,
+      providedAging !== undefined
+        ? Promise.resolve(providedAging)
+        : getAgingReport(),
+      defaultCashAccountId
+        ? Promise.resolve(null)
+        : purchaseInvoiceApi.getSettings().catch(() => null),
+      defaultCashAccountId
+        ? Promise.resolve(null)
+        : getSalesSettings().catch(() => null),
+    ])
+      .then(([parts, accs, currs, agingRows, purchaseSettings, salesSettings]) => {
+        if (cancelled) return;
+        setLoadedPartners(parts || []);
+        setLoadedAccounts(accs || []);
+        setLoadedCurrencies(currs || []);
+        setLoadedAging(agingRows || []);
+        const defaultAccount =
+          salesSettings?.default_cash_account || purchaseSettings?.default_cash_account;
+        if (defaultAccount) setLoadedDefaultCashAccountId(defaultAccount);
+        if (salesSettings) setLoadedAutoPost(!!salesSettings.auto_post_payments);
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "فشل تحميل إعدادات السند");
+      });
+
+    return () => { cancelled = true; };
+  }, [
+    providedPartners,
+    providedAccounts,
+    providedCurrencies,
+    providedAging,
+    lockPartner,
+    initialPartner,
+    defaultCashAccountId,
+  ]);
+
   // تحديث الصندوق الافتراضي في حال تم تحميله بعد فتح النافذة (مثال: فتح من رابط)
   useEffect(() => {
-    if (defaultCashAccountId && cashAccountId === "") {
-      setCashAccountId(defaultCashAccountId);
+    if (effectiveDefaultCashAccountId && cashAccountId === "") {
+      setCashAccountId(effectiveDefaultCashAccountId);
     }
-  }, [defaultCashAccountId, cashAccountId]);
+  }, [effectiveDefaultCashAccountId, cashAccountId]);
 
-  // مجموع الشيكات = sum cheques.amount
+  // المبلغ = نقد + شيكات (كما في سند الصرف)
   const totalCheques = cheques.reduce((s, c) => s + (Number(c.amount) || 0), 0);
-  const cashNum = Number(cashAmount) || 0;
-  // المجموع = نقد + شيكات
-  const computedTotal = cashNum + totalCheques;
-
-  // N4-T4: تَحديث amount auto عند تَغيير cash/cheques
-  useEffect(() => {
-    if (computedTotal > 0) setAmount(formatNumber(computedTotal, { maxDecimals: 2 }));
-  }, [computedTotal]);
+  const amtNum = (Number(cashAmount) || 0) + totalCheques;
 
   // N4-T4: تَحديث withholdingAmt من النسبة
   useEffect(() => {
     const pct = Number(withholdingPct) || 0;
-    const amt = (Number(amount) || 0) * (pct / 100);
-    setWithholdingAmt(formatNumber(amt, { maxDecimals: 2 }));
-  }, [withholdingPct, amount]);
+    setWithholdingAmt(formatNumber(amtNum * (pct / 100), { maxDecimals: 2 }));
+  }, [withholdingPct, amtNum]);
 
   useEffect(() => {
     // default currency = ILS if exists
@@ -511,6 +630,37 @@ const NewPaymentModal: React.FC<{
       setCurrencyId((ils?.CurrencyID ?? currencies[0].CurrencyID) as number);
     }
   }, [currencies, currencyId]);
+
+  useEffect(() => {
+    const partner = partners.find((p) => p.id === partnerId) || initialPartner || null;
+    if (!partnerId || !partner) {
+      setChequeDefaults({});
+      return;
+    }
+    let cancelled = false;
+    setChequeDefaults(buildPartnerChequeDefaults(partner, null, "Incoming"));
+    const currencyQuery = currencyId ? `&currency=${currencyId}` : "";
+    apiGetObject<{
+      selected_bank_account: PartnerBankAccount | null;
+    }>(
+      `partners/${partnerId}/payment-defaults/?direction=Incoming${currencyQuery}`,
+    )
+      .then((defaults) => {
+        if (!cancelled) {
+          setChequeDefaults(
+            buildPartnerChequeDefaults(
+              partner, defaults.selected_bank_account, "Incoming",
+            ),
+          );
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setChequeDefaults(buildPartnerChequeDefaults(partner, null, "Incoming"));
+        }
+      });
+    return () => { cancelled = true; };
+  }, [currencyId, initialPartner, partnerId, partners]);
 
   const cashboxAccounts = useMemo(
     () =>
@@ -541,14 +691,14 @@ const NewPaymentModal: React.FC<{
   );
 
   const totalAlloc = allocations.reduce((s, a) => s + Number(a.amount || 0), 0);
-  const amtNum = Number(amount || 0);
-  const diff = amtNum - totalAlloc;
+  // T-ONACC: الفرق ليس خطأً — هو ما سيُسجَّل على حساب العميل.
+  const onAccount = amtNum - totalAlloc;
   const canSubmit =
-    partnerId &&
+    !!partnerId &&
     amtNum > 0 &&
-    cashAccountId &&
-    currencyId &&
-    Math.abs(diff) < 0.02;
+    !!cashAccountId &&
+    !!currencyId &&
+    totalAlloc <= amtNum + 0.01;
 
   const suggestFifo = async () => {
     if (!partnerId || amtNum <= 0) {
@@ -558,7 +708,7 @@ const NewPaymentModal: React.FC<{
     try {
       const rows = await suggestFifoAllocations({
         partner: partnerId as number,
-        amount: amount,
+        amount: String(amtNum),
       });
       setAllocations(
         rows.map((r) => ({
@@ -582,8 +732,7 @@ const NewPaymentModal: React.FC<{
       setError("الفاتورة مضافة مسبقاً في التوزيع");
       return;
     }
-    const alreadyAlloc = allocations.reduce((s, a) => s + Number(a.amount || 0), 0);
-    const remainingPayment = Math.max(0, amtNum - alreadyAlloc);
+    const remainingPayment = Math.max(0, amtNum - totalAlloc);
     const invRemaining = Number(inv.remaining) || 0;
     const amt = remainingPayment > 0 ? Math.min(remainingPayment, invRemaining) : invRemaining;
     setAllocations((as) => [
@@ -602,27 +751,59 @@ const NewPaymentModal: React.FC<{
     setAllocations((as) => as.filter((_, i) => i !== idx));
   };
 
-  const submit = async () => {
+  // T-AUTOPOST: الحفظ يُرحّل مباشرةً حسب إعداد الشركة، والزر الثانوي هو البديل الصريح.
+  const submit = async (autoPost: boolean) => {
     setError(null);
     if (!canSubmit) {
-      setError("تأكد من تساوي مجموع التوزيعات مع مبلغ الدفعة");
+      setError(
+        totalAlloc > amtNum + 0.01
+          ? "مجموع التوزيعات يتجاوز مبلغ السند"
+          : "أكمل الحقول المطلوبة (العميل + الصندوق + مبلغ > 0)",
+      );
       return;
     }
     setSubmitting(true);
     try {
-      await createCustomerPayment({
+      const saved = await createCustomerPayment({
         partner: partnerId as number,
         payment_date: date,
-        amount,
+        amount: amtNum.toFixed(2),
         currency: currencyId as number,
         exchange_rate: exchangeRate,
         cash_or_bank_account: cashAccountId as number,
         notes,
-        allocations: allocations.map((a) => ({
-          invoice: a.invoice,
-          amount: a.amount,
-        })),
+        auto_post: autoPost,
+        // T-ONEPAY: الشيكات جزء من مبلغ السند — تُرسَل ليُقيَّد جزؤها على
+        // «شيكات برسم التحصيل» لا على الصندوق، وتُنشأ شيكات حقيقية.
+        ...(cheques.length > 0
+          ? {
+              cheques: cheques.map((c) => ({
+                cheque_number: c.cheque_number,
+                amount: c.amount,
+                bank_name: c.bank_name || "",
+                account_number: c.account_number || "",
+                bank_branch: c.branch || "",
+                payee_name: c.payee_name || "",
+                due_date: c.due_date || null,
+                issue_date: c.issue_date || null,
+              })),
+            }
+          : {}),
+        ...(allocations.length > 0
+          ? {
+              allocations: allocations.map((a) => ({
+                invoice: a.invoice,
+                amount: a.amount,
+              })),
+            }
+          : {}),
       });
+      // فشل الترحيل التلقائي لا يُضيع السند — يبقى مسودة ونُظهر السبب.
+      if (saved?.auto_post_error) {
+        setError(`حُفظ السند كمسودة — تعذّر الترحيل: ${saved.auto_post_error}`);
+        setSubmitting(false);
+        return;
+      }
       onSaved();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "فشل الإنشاء");
@@ -631,430 +812,210 @@ const NewPaymentModal: React.FC<{
     }
   };
 
-  const fmt = (n: string | number) => formatMoney(n);
-
   return (
-    <div
-      className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center p-4 overflow-auto"
-      dir="rtl"
+    <PaymentVoucherModal
+      title="سند قبض جديد"
+      error={error}
+      submitting={submitting}
+      disabled={!canSubmit}
+      submitLabel={effectiveAutoPost ? "حفظ وترحيل" : "حفظ"}
+      secondaryLabel={effectiveAutoPost ? "حفظ كمسودة" : "حفظ وترحيل"}
+      onSecondary={() => void submit(!effectiveAutoPost)}
+      onClose={onClose}
+      onSubmit={() => void submit(effectiveAutoPost)}
     >
-      <div className="aseel-bg-field dark:aseel-bg-panel rounded-xl shadow-xl w-full max-w-3xl mt-8">
-        <div className="flex items-center justify-between p-4 border-b aseel-border-soft dark:aseel-border-soft">
-          <h2 className="text-lg font-bold">دفعة عميل جديدة</h2>
-          <button type="button" onClick={onClose} className="p-1 hover:aseel-bg-panel dark:hover:aseel-bg-panel rounded">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="p-4 space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label className="block text-xs aseel-text-soft mb-1">العميل *</label>
-              <select
-                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
-                value={partnerId}
-                onChange={(e) => {
-                  setPartnerId(e.target.value ? Number(e.target.value) : "");
-                  setAllocations([]);
-                }}
-              >
-                <option value="">اختر...</option>
-                {partners.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs aseel-text-soft mb-1">التاريخ *</label>
-              <input
-                type="date"
-                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
-                value={date}
-                onChange={(e) => setDate(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs aseel-text-soft mb-1">المبلغ *</label>
-              <input
-                type="number"
-                step="0.01"
-                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs aseel-text-soft mb-1">العملة *</label>
-              <select
-                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
-                value={currencyId}
-                onChange={(e) =>
-                  setCurrencyId(e.target.value ? Number(e.target.value) : "")
-                }
-              >
-                {currencies.map((c) => (
-                  <option key={c.CurrencyID} value={c.CurrencyID}>
-                    {c.Code} {c.Name ? `— ${c.Name}` : ""}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-xs aseel-text-soft mb-1">سعر الصرف</label>
-              <input
-                type="number"
-                step="0.000001"
-                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
-                value={exchangeRate}
-                onChange={(e) => setExchangeRate(e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs aseel-text-soft mb-1">الصندوق / البنك *</label>
-              <select
-                className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
-                value={cashAccountId}
-                onChange={(e) =>
-                  setCashAccountId(e.target.value ? Number(e.target.value) : "")
-                }
-              >
-                <option value="">اختر...</option>
-                {cashboxAccounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code} {a.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* N4-T4: حقول مالية: نقدا + شيكات + المجموع + خصم المصدر */}
-          <div className="aseel-bg-panel/40 dark:aseel-bg-panel/10 border aseel-border-soft dark:aseel-border-soft/40 rounded-lg p-3">
-            <h3 className="text-xs font-semibold aseel-text-ink dark:aseel-text-soft mb-2">حقول الدفع (N4-T4)</h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-              <div>
-                <label className="block text-[11px] aseel-text-soft mb-0.5">نقدا (Space = remaining)</label>
-                <input
-                  type="number" step="0.01"
-                  data-aseel-field="remaining-amount"
-                  className="w-full border rounded px-2 py-1 text-sm dark:aseel-bg-panel dark:aseel-border-soft font-mono"
-                  value={cashAmount}
-                  onChange={(e) => setCashAmount(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] aseel-text-soft mb-0.5">مجموع الشيكات (auto)</label>
-                <input type="text" readOnly className="w-full border rounded px-2 py-1 text-sm aseel-bg-panel dark:aseel-bg-panel font-mono" value={fmt(totalCheques)} />
-              </div>
-              <div>
-                <label className="block text-[11px] aseel-text-soft mb-0.5">المجموع</label>
-                <input type="text" readOnly className="w-full border rounded px-2 py-1 text-sm aseel-bg-panel dark:aseel-bg-panel font-mono font-semibold" value={fmt(computedTotal)} />
-              </div>
-              <div>
-                <label className="block text-[11px] aseel-text-soft mb-0.5">نسبة خصم المصدر %</label>
-                <input
-                  type="number" step="0.01"
-                  className="w-full border rounded px-2 py-1 text-sm dark:aseel-bg-panel dark:aseel-border-soft font-mono"
-                  value={withholdingPct}
-                  onChange={(e) => setWithholdingPct(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] aseel-text-soft mb-0.5">مبلغ خصم المصدر</label>
-                <input
-                  type="number" step="0.01"
-                  className="w-full border rounded px-2 py-1 text-sm dark:aseel-bg-panel dark:aseel-border-soft font-mono"
-                  value={withholdingAmt}
-                  onChange={(e) => {
-                    setWithholdingAmt(e.target.value);
-                    const amt = Number(e.target.value) || 0;
-                    const t = Number(amount) || 0;
-                    if (t > 0) setWithholdingPct(formatNumber((amt / t) * 100, { maxDecimals: 2 }));
-                  }}
-                />
-              </div>
-              <div>
-                <label className="block text-[11px] aseel-text-soft mb-0.5">مبلغ الحساب (remaining)</label>
-                <input
-                  type="text" readOnly
-                  className="w-full border rounded px-2 py-1 text-sm aseel-bg-panel dark:aseel-bg-panel/20 font-mono font-semibold"
-                  value={fmt(Math.max(0, computedTotal - (Number(withholdingAmt) || 0)))}
-                />
-              </div>
-            </div>
-          </div>
-
-          {/* Tabs using AseelTabs */}
-          <AseelTabs
-            activeTab={activeTab}
-            onTabChange={(key) => setActiveTab(key as "alloc" | "cheques" | "notes" | "accounts")}
-            tabs={[
-              {
-                key: "alloc",
-                label: "التوزيع",
-                content: (
-                  <div className="border-t aseel-border-soft dark:aseel-border-soft pt-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="font-semibold text-sm">توزيع على الفواتير</h3>
-                      <button
-                        type="button"
-                        onClick={suggestFifo}
-                        disabled={!partnerId || amtNum <= 0}
-                        className="flex items-center gap-1 text-xs px-3 py-1.5 bg-[var(--color-primary)] text-white rounded-lg disabled:opacity-40"
-                      >
-                        <Sparkles className="w-3 h-3" />
-                        اقتراح FIFO
-                      </button>
-                    </div>
-
-                    {/* T-P1: تسوية على فاتورة محددة (بديل لـ FIFO). */}
-                    {partnerId && partnerAging.length > 0 && (
-                      <div className="flex items-center gap-2 mb-2">
-                        <select
-                          className="flex-1 border rounded px-2 py-1.5 text-xs dark:aseel-bg-panel dark:aseel-border-soft"
-                          value={pickInvoiceId}
-                          onChange={(e) => setPickInvoiceId(e.target.value ? Number(e.target.value) : "")}
-                        >
-                          <option value="">— اختر فاتورة محددة لتسويتها —</option>
-                          {partnerAging.map((a) => (
-                            <option key={a.invoice_id} value={a.invoice_id}>
-                              {a.invoice_number || `#${a.invoice_id}`} — متبقٍ {fmt(a.remaining)}
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          onClick={addInvoiceAllocation}
-                          disabled={!pickInvoiceId}
-                          className="text-xs px-3 py-1.5 border aseel-border-soft rounded-lg disabled:opacity-40 hover:aseel-bg-panel"
-                        >
-                          أضف الفاتورة
-                        </button>
-                      </div>
-                    )}
-
-                    {partnerAging.length > 0 && allocations.length === 0 && (
-                      <div className="mb-2 p-2 rounded aseel-bg-panel dark:aseel-bg-panel/20 text-xs aseel-text-ink">
-                        {partnerAging.length} فاتورة مفتوحة للعميل — اضغط "اقتراح FIFO" للتوزيع
-                        التلقائي أو أضف يدوياً.
-                      </div>
-                    )}
-
-                    {allocations.length === 0 ? (
-                      <div className="text-xs aseel-text-soft text-center py-3 border-2 border-dashed aseel-border-soft dark:aseel-border-soft rounded">
-                        لا توزيعات بعد
-                      </div>
-                    ) : (
-                      <table className="w-full text-sm">
-                        <thead className="aseel-bg-panel dark:aseel-bg-panel/40">
-                          <tr>
-                            <th className="text-right p-2">الفاتورة</th>
-                            <th className="text-right p-2">المبلغ</th>
-                            <th className="w-10"></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {allocations.map((a, idx) => (
-                            <tr key={idx} className="border-t aseel-border-soft dark:aseel-border-soft">
-                              <td className="p-2">
-                                {a.invoice_number || `#${a.invoice}`}
-                              </td>
-                              <td className="p-2">
-                                <input
-                                  type="number"
-                                  step="0.01"
-                                  className="w-full border rounded px-2 py-1 dark:aseel-bg-panel dark:aseel-border-soft"
-                                  value={a.amount}
-                                  onChange={(e) => updateAlloc(idx, e.target.value)}
-                                />
-                              </td>
-                              <td className="p-1 text-center">
-                                <button
-                                  type="button"
-                                  onClick={() => removeAlloc(idx)}
-                                  className="p-1 aseel-text-soft hover:aseel-bg-panel dark:hover:aseel-bg-panel/30 rounded"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot className="aseel-bg-panel dark:aseel-bg-panel/40 font-semibold text-sm">
-                          <tr>
-                            <td className="p-2">الإجمالي / المطلوب {fmt(amtNum)}</td>
-                            <td
-                              className={`p-2 ${
-                                Math.abs(diff) < 0.02 ? "aseel-text-ink" : "aseel-text-ink"
-                              }`}
-                            >
-                              {fmt(totalAlloc)}
-                              {Math.abs(diff) >= 0.02 && (
-                                <span className="text-xs mr-2">(فرق {fmt(diff)})</span>
-                              )}
-                            </td>
-                            <td></td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    )}
-                  </div>
-                )
-              },
-              {
-                key: "cheques",
-                label: `الشيكات (${cheques.length})`,
-                content: (
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-semibold text-sm">تفاصيل الشيكات</h3>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            // N4-T4 (الجديد:29) تَعبئة شيكات متشابهة متكرّرة
-                            const last = cheques[cheques.length - 1];
-                            if (!last || !last.bank_name) {
-                              setError("أضف شيكاً واحداً بكل البيانات أولاً");
-                              return;
-                            }
-                            const months = Number(window.prompt("عدد الشيكات المتتالية (شهور)؟", "3") || "0");
-                            if (months <= 0) return;
-                            const baseDate = new Date(last.due_date || today);
-                            const extra: ChequeLine[] = [];
-                            for (let i = 1; i <= months; i++) {
-                              const d = new Date(baseDate);
-                              d.setMonth(d.getMonth() + i);
-                              extra.push({
-                                ...last,
-                                cheque_number: "",
-                                due_date: d.toISOString().split("T")[0],
-                              });
-                            }
-                            setCheques((cs) => [...cs, ...extra]);
-                            setError(null);
-                          }}
-                          className="flex items-center gap-1 text-xs px-2 py-1 border aseel-border-soft aseel-text-ink rounded"
-                          title="تعبئة شيكات بنفس البنك/المبلغ لشهور متتالية (الجديد:29)"
-                        >
-                          تعبئة متشابهة
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setCheques((cs) => [...cs, newChequeLine()])}
-                          className="flex items-center gap-1 text-xs px-2 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded"
-                        >
-                          <Plus className="w-3 h-3" /> شيك
-                        </button>
-                      </div>
-                    </div>
-                    {cheques.length === 0 ? (
-                      <div className="text-xs aseel-text-soft text-center py-3 border-2 border-dashed aseel-border-soft dark:aseel-border-soft rounded">
-                        لا شيكات — اضغط «شيك» للإضافة
-                      </div>
-                    ) : (
-                      <table className="w-full text-xs">
-                        <thead className="aseel-bg-panel dark:aseel-bg-panel/40">
-                          <tr>
-                            <th className="text-right p-1.5">#</th>
-                            <th className="text-right p-1.5">رقم</th>
-                            <th className="text-right p-1.5">رقم الحساب</th>
-                            <th className="text-right p-1.5">صاحب الشيك</th>
-                            <th className="text-right p-1.5">الاستحقاق</th>
-                            <th className="text-right p-1.5">المبلغ</th>
-                            <th className="text-right p-1.5">البنك</th>
-                            <th className="text-right p-1.5">الفرع</th>
-                            <th className="w-8"></th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {cheques.map((c, i) => (
-                            <tr key={i} className="border-t aseel-border-soft dark:aseel-border-soft">
-                              <td className="p-1 text-center">{i + 1}</td>
-                              <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.cheque_number} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, cheque_number: e.target.value } : x))} /></td>
-                              <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.account_number} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, account_number: e.target.value } : x))} /></td>
-                              <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.payee_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, payee_name: e.target.value } : x))} /></td>
-                              <td className="p-1"><input type="date" className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.due_date} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, due_date: e.target.value } : x))} /></td>
-                              <td className="p-1"><input type="number" step="0.01" className="w-full border rounded px-1 py-0.5 text-xs font-mono dark:aseel-bg-panel" value={c.amount} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, amount: e.target.value } : x))} /></td>
-                              <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.bank_name} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, bank_name: e.target.value } : x))} /></td>
-                              <td className="p-1"><input className="w-full border rounded px-1 py-0.5 text-xs dark:aseel-bg-panel" value={c.branch} onChange={(e) => setCheques((cs) => cs.map((x, j) => i === j ? { ...x, branch: e.target.value } : x))} /></td>
-                              <td className="p-1 text-center">
-                                <button type="button" onClick={() => setCheques((cs) => cs.filter((_, j) => j !== i))} className="aseel-text-soft">
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                )
-              },
-              {
-                key: "notes",
-                label: "الملاحظات",
-                content: (
-                  <div>
-                    <label className="block text-xs aseel-text-soft mb-1">ملاحظات السند</label>
-                    <textarea
-                      rows={4}
-                      className="w-full border rounded-lg px-3 py-2 dark:aseel-bg-panel dark:aseel-border-soft"
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                    />
-                  </div>
-                )
-              },
-              {
-                key: "accounts",
-                label: "الحسابات",
-                content: (
-                  <div className="text-xs aseel-text-soft dark:aseel-text-soft p-3 aseel-bg-panel dark:aseel-bg-panel/40 rounded">
-                    معاينة القيد المحاسبي ستَظهر هنا بعد الترحيل. حالياً: Dr {(() => {
-                      const a = accounts.find((x) => x.id === cashAccountId);
-                      return a ? `${a.code} ${a.name}` : "—";
-                    })()} / Cr ذمم العميل {(partners.find((p) => p.id === partnerId)?.name) || "—"}.
-                  </div>
-                )
-              }
-            ]}
-          />
-
-          {error && (
-            <div className="p-2 rounded aseel-bg-panel dark:aseel-bg-panel/20 aseel-text-state text-sm">
-              {error}
-            </div>
+      {/* ملاحظة عاجلة مستحقة على هذا العميل — تظهر قبل إتمام السند. */}
+      <PartnerNoteAlert partnerId={partnerId === "" ? null : partnerId} className="mb-2" />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+        <label className="aseel-field" style={{ gridColumn: "span 2" }}>
+          <span className="aseel-field-label">العميل *</span>
+          {lockPartner && initialPartner ? (
+            <input className="aseel-input" value={initialPartner.name} readOnly style={{ background: "var(--aseel-surface-2)" }} />
+          ) : (
+            <select
+              className="aseel-input"
+              value={partnerId}
+              onChange={(e) => {
+                setPartnerId(e.target.value ? Number(e.target.value) : "");
+                setAllocations([]);
+              }}
+            >
+              <option value="">— اختر —</option>
+              {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
           )}
+        </label>
+        <label className="aseel-field">
+          <span className="aseel-field-label">التاريخ</span>
+          <input type="date" className="aseel-input" value={date} onChange={(e) => setDate(e.target.value)} />
+        </label>
+
+        <label className="aseel-field">
+          <span className="aseel-field-label">الصندوق / البنك *</span>
+          <select className="aseel-input" value={cashAccountId} onChange={(e) => setCashAccountId(e.target.value ? Number(e.target.value) : "")}>
+            <option value="">— اختر —</option>
+            {cashboxAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
+          </select>
+        </label>
+        <label className="aseel-field">
+          <span className="aseel-field-label">العملة *</span>
+          <select className="aseel-input" value={currencyId} onChange={(e) => setCurrencyId(e.target.value ? Number(e.target.value) : "")}>
+            {currencies.map((c) => (
+              <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}{c.Name ? ` — ${c.Name}` : ""}</option>
+            ))}
+          </select>
+        </label>
+        <label className="aseel-field">
+          <span className="aseel-field-label">سعر الصرف</span>
+          <input type="number" step="0.000001" className="aseel-input aseel-num" value={exchangeRate} onChange={(e) => setExchangeRate(e.target.value)} />
+        </label>
+      </div>
+
+      <PaymentFinanceFields
+        cashAmount={cashAmount}
+        onCashAmount={setCashAmount}
+        totalCheques={totalCheques}
+        total={amtNum}
+        withholdingPct={withholdingPct}
+        onWithholdingPct={setWithholdingPct}
+        withholdingAmt={withholdingAmt}
+        onWithholdingAmt={setWithholdingAmt}
+        netLabel="مبلغ الحساب"
+      />
+
+      {/* التوزيع على الفواتير — اختياري (T-ONACC) */}
+      <div style={{ marginTop: "12px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+          <span style={{ fontWeight: 600, fontSize: "12px" }}>توزيع على الفواتير (اختياري)</span>
+          <button
+            type="button"
+            className="aseel-toolbtn"
+            style={{ fontSize: "11px" }}
+            onClick={() => void suggestFifo()}
+            disabled={!partnerId || amtNum <= 0}
+          >
+            <Sparkles className="w-3 h-3" /> اقتراح FIFO
+          </button>
         </div>
 
-        <div className="flex items-center justify-end gap-2 p-4 border-t aseel-border-soft dark:aseel-border-soft">
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm rounded-lg border aseel-border-soft dark:aseel-border-soft"
-          >
-            إلغاء
-          </button>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={!canSubmit || submitting}
-            className="px-4 py-2 text-sm rounded-lg aseel-bg-panel text-white font-medium disabled:opacity-40"
-          >
-            {submitting ? "جاري الحفظ..." : "حفظ"}
-          </button>
-        </div>
+        {partnerId && partnerAging.length > 0 && (
+          <div style={{ display: "flex", gap: "6px", marginBottom: "6px" }}>
+            <select
+              className="aseel-input"
+              style={{ flex: 1, fontSize: "11px" }}
+              value={pickInvoiceId}
+              onChange={(e) => setPickInvoiceId(e.target.value ? Number(e.target.value) : "")}
+            >
+              <option value="">— اختر فاتورة محددة لتسويتها —</option>
+              {partnerAging.map((a) => (
+                <option key={a.invoice_id} value={a.invoice_id}>
+                  {a.invoice_number || `#${a.invoice_id}`} — متبقٍ {fmt(a.remaining)}
+                </option>
+              ))}
+            </select>
+            <button type="button" className="aseel-toolbtn" style={{ fontSize: "11px" }} onClick={addInvoiceAllocation} disabled={!pickInvoiceId}>
+              أضف الفاتورة
+            </button>
+          </div>
+        )}
+
+        {allocations.length === 0 ? (
+          <div style={{ textAlign: "center", fontSize: "11px", padding: "12px", color: "var(--aseel-ink-soft)", border: "1px dashed var(--aseel-border)", borderRadius: "4px" }}>
+            بلا توزيع — كامل المبلغ يُسجَّل على حساب العميل ويمكن توزيعه لاحقاً
+          </div>
+        ) : (
+          <table style={{ width: "100%", fontSize: "11px" }}>
+            <thead style={{ background: "var(--aseel-surface-2, #f4ede0)" }}>
+              <tr>
+                <th style={{ padding: "4px", textAlign: "right" }}>الفاتورة</th>
+                <th style={{ padding: "4px", textAlign: "right" }}>المبلغ</th>
+                <th style={{ width: "30px" }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {allocations.map((a, idx) => (
+                <tr key={idx} style={{ borderTop: "1px solid var(--aseel-border)" }}>
+                  <td style={{ padding: "2px" }}>{a.invoice_number || `#${a.invoice}`}</td>
+                  <td style={{ padding: "2px" }}>
+                    <input type="number" step="0.01" className="aseel-input aseel-num" style={{ fontSize: "11px" }} value={a.amount} onChange={(e) => updateAlloc(idx, e.target.value)} />
+                  </td>
+                  <td style={{ padding: "2px", textAlign: "center" }}>
+                    <button type="button" onClick={() => removeAlloc(idx)} style={{ color: "var(--aseel-err, #c0392b)" }}>
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot style={{ background: "var(--aseel-surface-2, #f4ede0)", fontWeight: 600 }}>
+              <tr>
+                <td style={{ padding: "4px" }}>المُوزَّع من {fmt(amtNum)}</td>
+                <td style={{ padding: "4px" }} className="aseel-num">{fmt(totalAlloc)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        )}
+
+        {amtNum > 0 && (
+          <div style={{ fontSize: "11px", marginTop: "6px", color: onAccount < -0.01 ? "var(--aseel-err, #c0392b)" : "var(--aseel-warn, #b06800)" }}>
+            {onAccount < -0.01
+              ? `التوزيع يتجاوز مبلغ السند بـ ${fmt(Math.abs(onAccount))}`
+              : `يُسجَّل على حساب العميل: ${fmt(onAccount)}`}
+          </div>
+        )}
       </div>
-    </div>
+
+      <ChequeGrid
+        cheques={cheques}
+        onChange={setCheques}
+        onError={setError}
+        newLineDefaults={chequeDefaults}
+      />
+
+      <label className="aseel-field" style={{ marginTop: "12px", display: "block" }}>
+        <span className="aseel-field-label">ملاحظات</span>
+        <textarea className="aseel-input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+      </label>
+
+      <div style={{ fontSize: "11px", marginTop: "8px", color: "var(--aseel-ink-soft)" }}>
+        القيد: Dr {(() => {
+          const a = accounts.find((x) => x.id === cashAccountId);
+          return a ? `${a.code} ${a.name}` : "—";
+        })()} / Cr ذمم العميل {(partners.find((p) => p.id === partnerId)?.name) || initialPartner?.name || "—"}
+      </div>
+    </PaymentVoucherModal>
   );
 };
+
+// ═══════════════════════════════════════════════════════════════════════════
+// T-ONACC — توزيع سند قبض قائم على الفواتير (بعد الترحيل أو قبله)
+// غلاف رقيق حول VoucherAllocationModal المشترك مع سند الصرف (تصميم واحد).
+// ═══════════════════════════════════════════════════════════════════════════
+export const PaymentAllocationModal: React.FC<{
+  payment: CustomerPaymentRow;
+  partnerLabel: string;
+  aging: AgingInvoice[];
+  onClose: () => void;
+  onSaved: () => void;
+}> = ({ payment, partnerLabel, aging, onClose, onSaved }) => (
+  <VoucherAllocationModal
+    kind="customer"
+    voucher={{
+      id: payment.id,
+      amount: payment.amount,
+      unallocated: unallocatedOf(payment),
+      is_posted: payment.is_posted,
+    }}
+    partnerLabel={partnerLabel}
+    docs={aging.map((a) => ({
+      id: a.invoice_id,
+      label: a.invoice_number || `#${a.invoice_id}`,
+      remaining: a.remaining,
+    }))}
+    onClose={onClose}
+    onSaved={onSaved}
+  />
+);
 
 export default SalesCustomerPaymentsPage;

@@ -13,6 +13,12 @@ import type { PagedList } from "./restApi";
 const tid = () => resolveTenantId();
 const BASE = "sales";
 
+/** حالة تسليم بضاعة الفاتورة للعميل (مرآة حالة الاستلام في الشراء). */
+export type DeliveryStatus =
+  | "not_delivered"
+  | "partially_delivered"
+  | "delivered";
+
 export type SalesInvoiceRow = {
   id: number;
   invoice_number: string;
@@ -24,8 +30,14 @@ export type SalesInvoiceRow = {
   status: string;
   grand_total: string;
   amount_paid?: string;
+  remaining_balance?: string;
+  payment_status?: "paid" | "partially_paid" | "unpaid";
+  payment_status_display?: string;
+  customer_balance?: string;
   currency: number;
   stock_on_post?: boolean;
+  delivery_status?: DeliveryStatus;
+  delivery_status_display?: string;
   /** M2-T1: book number (0 = manual). */
   book_number?: number;
 };
@@ -35,6 +47,8 @@ export type AttachedCheque = {
   id: number;
   cheque_number: string;
   bank_name?: string;
+  account_number?: string;
+  bank_branch?: string;
   amount: string;
   due_date?: string | null;
   issue_date?: string | null;
@@ -44,6 +58,15 @@ export type AttachedCheque = {
 };
 
 export type SalesInvoiceDetail = SalesInvoiceRow & {
+  /** T-SLINEAGE: المستند الذي وُلدت منه الفاتورة (طلبية زبون أو عرض سعر). */
+  source_document?: {
+    kind: "order" | "quotation";
+    id: number;
+    number: string;
+    origin_kind?: "quotation" | null;
+    origin_id?: number | null;
+    origin_number?: string | null;
+  } | null;
   exchange_rate: string;
   subtotal_excl_tax: string;
   invoice_discount: string;
@@ -58,6 +81,7 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
     product: number;
     product_name?: string | null;
     quantity: string;
+    delivered_quantity?: string;
     unit_price: string;
     line_discount: string;
     tax_rate: number | null;
@@ -84,34 +108,23 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
   attached_cash_amount?: string;
   attached_cash_account?: number | null;
   cheques?: AttachedCheque[];
+  customer_balance_before_invoice?: string;
+  customer_balance_after_invoice?: string;
+  payment_details?: Array<{
+    id: number;
+    payment_date: string;
+    allocated_amount: string;
+    total_payment_amount: string;
+    currency_code: string;
+    exchange_rate: string;
+    is_posted: boolean;
+    journal: number | null;
+    notes?: string;
+  }>;
   // M2-T4: source-discount overrides (null = use customer default)
   source_discount_percent_override?: string | null;
   source_discount_amount_override?: string | null;
 };
-
-/** M2-T3: payload for attaching cash + cheques to an invoice. */
-export type PaymentVoucherInput = {
-  cash_amount: string;
-  cash_account_id?: number | null;
-  cheques: Array<{
-    cheque_number: string;
-    amount: string;
-    bank_name?: string;
-    due_date?: string | null;
-    issue_date?: string | null;
-    payee_name?: string;
-    notes?: string;
-  }>;
-};
-
-export async function attachPaymentVoucher(
-  invoiceId: number,
-  payload: PaymentVoucherInput
-): Promise<SalesInvoiceDetail> {
-  return apiPostObject(`${BASE}/invoices/${invoiceId}/payment-voucher/`, payload, {
-    tenantId: tid(),
-  });
-}
 
 export async function listSalesInvoices(
   query?: Record<string, string | number | boolean | undefined>
@@ -190,6 +203,156 @@ export async function deliverOrder(deliveryOrderId: number): Promise<unknown> {
   );
 }
 
+/** بند فاتورة قابل للتسليم — المفوتر/المسلَّم/المتبقي (مصدره الخادم). */
+export type DeliveryLineRow = {
+  line_id: number;
+  product: number;
+  product_name: string;
+  quantity: string;
+  delivered_quantity: string;
+  remaining_quantity: string;
+};
+
+export type DeliveryLinesResponse = {
+  invoice_number: string;
+  delivery_status: DeliveryStatus;
+  delivery_status_display?: string;
+  stock_on_post: boolean;
+  lines: DeliveryLineRow[];
+};
+
+export async function getDeliveryLines(
+  invoiceId: number
+): Promise<DeliveryLinesResponse> {
+  return apiGetObject(`${BASE}/invoices/${invoiceId}/delivery-lines/`, {
+    tenantId: tid(),
+  });
+}
+
+/** إرسالية بيع كما يعيدها الخادم (مستند التسليم المرتبط بفاتورة). */
+export type DeliveryNoteLineDto = {
+  id: number;
+  invoice_line: number | null;
+  product: number;
+  product_name: string;
+  ordered_quantity: string;
+  delivered_total: string;
+  remaining_quantity: string;
+  quantity: string;
+  /** المستودع الذي خرجت منه البضاعة (مرآة سطر إرسالية الشراء). */
+  warehouse?: number | null;
+  warehouse_name?: string | null;
+};
+
+export type DeliveryNoteRow = {
+  id: number;
+  delivery_number: string;
+  delivery_date: string | null;
+  invoice: number | null;
+  invoice_number: string | null;
+  customer: number | null;
+  customer_name: string;
+  customer_ref: string;
+  is_standalone: boolean;
+  doc_label: string;
+  status: string;
+  status_display?: string;
+  auto_created: boolean;
+  notes: string;
+  lines_count: number;
+  total_quantity: string;
+  total_remaining: string;
+  delivered_at: string | null;
+  created_at: string;
+};
+
+export type DeliveryNoteDto = DeliveryNoteRow & { lines: DeliveryNoteLineDto[] };
+
+/** سطر باقٍ غير مسلَّم عبر كل الفواتير — تقرير الطباعة/PDF. */
+export type OutstandingDeliveryRow = {
+  invoice: number;
+  invoice_number: string;
+  invoice_date: string | null;
+  partner_name: string;
+  product: number;
+  product_name: string;
+  quantity: string;
+  delivered_quantity: string;
+  remaining_quantity: string;
+};
+
+/** بنود الحفظ: `line_id` للمرتبط بفاتورة، و`product_id` للسند المستقل. */
+export type DeliveryNoteSaveLine = {
+  line_id?: number;
+  product_id?: number;
+  quantity: number;
+  warehouse_id?: number;
+};
+
+export type DeliveryNoteSaveBody = {
+  invoice?: number | null;
+  partner?: number | null;
+  customer_ref?: string;
+  delivery_date?: string;
+  notes?: string;
+  lines: DeliveryNoteSaveLine[];
+};
+
+export async function listDeliveryNotes(
+  query?: Record<string, string | number | undefined>
+): Promise<DeliveryNoteRow[]> {
+  return apiGetList(`${BASE}/delivery-orders/`, { tenantId: tid(), query });
+}
+
+export async function getDeliveryNote(id: number): Promise<DeliveryNoteDto> {
+  return apiGetObject(`${BASE}/delivery-orders/${id}/`, { tenantId: tid() });
+}
+
+/** إنشاء إرسالية = تسليم البنود المحددة فعلياً (مخزون + قيد تكلفة). */
+export async function createDeliveryNote(
+  body: DeliveryNoteSaveBody
+): Promise<DeliveryNoteDto> {
+  return apiPostObject(`${BASE}/delivery-orders/`, body, { tenantId: tid() });
+}
+
+/** التعديل يعكس أثر الإرسالية القديم ويعيد تطبيق البنود الجديدة (على الخادم). */
+export async function updateDeliveryNote(
+  id: number,
+  body: DeliveryNoteSaveBody
+): Promise<DeliveryNoteDto> {
+  return apiPatchObject(`${BASE}/delivery-orders/${id}/`, body, { tenantId: tid() });
+}
+
+export async function deleteDeliveryNote(id: number): Promise<void> {
+  return apiDelete(`${BASE}/delivery-orders/${id}/`, { tenantId: tid() });
+}
+
+export async function getOutstandingDeliveryLines(): Promise<OutstandingDeliveryRow[]> {
+  const data = await apiGetObject<{ rows?: OutstandingDeliveryRow[] }>(
+    `${BASE}/delivery-orders/outstanding/`,
+    { tenantId: tid() }
+  );
+  return data?.rows || [];
+}
+
+/** تسليم بنود مختارة (إرسالية) — خصم مخزون + قيد تكلفة للمُسلَّم فقط. */
+export async function deliverInvoiceLines(
+  invoiceId: number,
+  lines: { line_id: number; quantity: number; warehouse_id?: number }[],
+  notes?: string
+): Promise<{
+  delivery_id: number;
+  delivery_status: DeliveryStatus;
+  delivery_status_display?: string;
+  lines_delivered: number;
+}> {
+  return apiPostObject(
+    `${BASE}/invoices/${invoiceId}/deliver/`,
+    { lines, notes: notes ?? "" },
+    { tenantId: tid() }
+  );
+}
+
 export type CreditPreviewResponse = {
   credit_limit: string | null;
   open_balance: string;
@@ -264,7 +427,8 @@ export type CustomerPriceRow = {
   sku: string | null;
   name: string;
   price: string | null;
-  source: "last_invoice" | "quote";
+  /** «default» = السعر العام في كرت الصنف (أضعف المصادر). */
+  source: "last_invoice" | "quote" | "default";
   source_label: string;
   editable: boolean;
   invoice_number: string | null;
@@ -386,6 +550,7 @@ export type CustomerPaymentAllocation = {
 export type CustomerPaymentRow = {
   id: number;
   partner: number;
+  partner_name?: string;
   payment_date: string;
   amount: string;
   currency: number;
@@ -395,6 +560,9 @@ export type CustomerPaymentRow = {
   is_posted: boolean;
   notes: string;
   allocations: CustomerPaymentAllocation[];
+  /** T-ONACC: المُوزَّع على الفواتير والمتبقّي «على الحساب» (محسوبان في الخادم). */
+  allocated_amount?: string;
+  unallocated_amount?: string;
   created_at?: string;
 };
 
@@ -418,8 +586,21 @@ export async function createCustomerPayment(
     cash_or_bank_account: number;
     notes?: string;
     allocations?: Array<{ invoice: number; amount: string | number }>;
+    /** T-ONEPAY: شيكات داخل السند — مبالغها جزء من `amount` لا إضافة عليه. */
+    cheques?: Array<{
+      cheque_number: string;
+      amount: string | number;
+      bank_name?: string;
+      account_number?: string;
+      bank_branch?: string;
+      payee_name?: string;
+      due_date?: string | null;
+      issue_date?: string | null;
+    }>;
+    /** T-AUTOPOST: يسمو على إعداد الشركة — true = حفظ وترحيل، false = مسودة. */
+    auto_post?: boolean;
   },
-): Promise<CustomerPaymentRow> {
+): Promise<CustomerPaymentRow & { auto_post_error?: string }> {
   return apiPostObject(`${BASE}/payments/`, body, { tenantId: tid() });
 }
 
@@ -429,6 +610,17 @@ export async function postCustomerPayment(id: number): Promise<CustomerPaymentRo
 
 export async function deleteCustomerPayment(id: number): Promise<void> {
   return apiDelete(`${BASE}/payments/${id}/`, { tenantId: tid() });
+}
+
+/**
+ * T-ONACC: توزيع سند قبض على فواتير — يعمل قبل الترحيل وبعده. بعد الترحيل هو
+ * ربط فقط (لا قيد جديد): الذمم خُفِّضت وقت الترحيل «على الحساب».
+ */
+export async function allocateCustomerPayment(
+  id: number,
+  allocations: Array<{ invoice: number; amount: string | number }>,
+): Promise<CustomerPaymentRow> {
+  return apiPostObject(`${BASE}/payments/${id}/allocate/`, { allocations }, { tenantId: tid() });
 }
 
 // -------------------------------------------------------------
@@ -457,13 +649,31 @@ export type SalesSettings = {
   default_vat_rate_value?: string;
   prices_include_tax: boolean;
   auto_post_invoices: boolean;
+  /** T-AUTOPOST: ترحيل سندات القبض/الصرف فور الحفظ (الافتراضي: مُفعَّل). */
+  auto_post_payments: boolean;
   show_journal_preview: boolean;
   /** T-S2: تنبيه عند تكرار الصنف (يقود T-R3). */
   warn_on_duplicate_item: boolean;
   /** منع حفظ/ترحيل فاتورة بيع بخسارة (الافتراضي مُعطّل). */
   block_loss_invoices: boolean;
+  /** T-DORMANT: أيام صمت العميل قبل إشعار «عميل مختفٍ» (0 = تعطيل، الافتراضي 30). */
+  dormant_customer_days: number;
+  /** T-ORDERS: أيام صلاحية عرض السعر افتراضياً (0 = بلا انتهاء، الافتراضي 14). */
+  quotation_valid_days: number;
+  /** T-ORDERS: أيام حجز الكمية للطلبية المؤكَّدة (0 = بلا حجز، الافتراضي 7). */
+  order_reserve_days: number;
+  /** T-ORDERS: إظهار «حذف» للعروض والطلبيات (الإلغاء متاح دائماً). */
+  allow_document_delete: boolean;
+  /** T-RESERVEGUARD: رفض ترحيل فاتورة تسحب كمية محجوزة لطلبية زبون آخر (مُفعَّل افتراضياً). */
+  block_reserved_stock_sale: boolean;
   default_shipping_origin: string;
   default_shipping_destination: string;
+  /** تسمية مستند التسليم المرتبط بفاتورة (يحرّرها المستخدم). */
+  delivery_doc_label: string;
+  /** تسمية المستند بلا فاتورة مرتبطة. */
+  standalone_delivery_label: string;
+  allow_standalone_delivery: boolean;
+  allow_edit_delivery: boolean;
   updated_at?: string;
 };
 
@@ -506,6 +716,59 @@ export async function getAgingReport(): Promise<
   return apiGetList(`${BASE}/reports/aging/`, { tenantId: tid() });
 }
 
+/** T-DORMANT: عملاء توقّفوا عن الشراء منذ عتبة الإعدادات (يغذّي إشعار «عميل مختفٍ»). */
+export type DormantCustomerRow = {
+  partner_id: number;
+  partner_name: string;
+  last_sale_date: string;
+  last_invoice_number: string | null;
+  days_since: number;
+};
+
+export async function getDormantCustomers(days?: number): Promise<DormantCustomerRow[]> {
+  const qs = days != null ? `?days=${days}` : "";
+  return apiGetList(`${BASE}/reports/dormant-customers/${qs}`, { tenantId: tid() });
+}
+
+/**
+ * T-RESERVEGUARD: «تقرير المحجوزات» — بنود الطلبيات المؤكَّدة التي ما زال حجزها
+ * سارياً. نفس مصدر الحارس الذي يرفض بيع الكمية المحجوزة لزبون آخر.
+ */
+export type ReservedStockRow = {
+  order_id: number;
+  order_number: string;
+  order_date: string | null;
+  reserved_until: string | null;
+  days_left: number | null;
+  customer_id: number;
+  customer_name: string;
+  product_id: number;
+  product_sku: string;
+  product_name: string;
+  quantity: string;
+  unit_price: string;
+  line_total: string;
+  quantity_on_hand: string;
+  reserved_quantity: string;
+  available_quantity: string;
+};
+
+export async function getReservedStock(params?: {
+  product?: number;
+  customer?: number;
+  /** نافذة «الحجز حتى» (ISO) — ما ينتهي داخل مدّة بعينها. */
+  from?: string;
+  to?: string;
+}): Promise<ReservedStockRow[]> {
+  const q = new URLSearchParams();
+  if (params?.product != null) q.set("product", String(params.product));
+  if (params?.customer != null) q.set("customer", String(params.customer));
+  if (params?.from) q.set("from", params.from);
+  if (params?.to) q.set("to", params.to);
+  const qs = q.toString();
+  return apiGetList(`${BASE}/reports/reserved-stock/${qs ? `?${qs}` : ""}`, { tenantId: tid() });
+}
+
 // -------------------------------------------------------------
 // Sales Quotations (العروض والطلبيات — T4-01)
 // -------------------------------------------------------------
@@ -517,6 +780,7 @@ export type SalesQuotationRow = {
   quotation_date: string;
   valid_until?: string | null;
   status: string;
+  status_display?: string;
   grand_total: string;
   notes?: string;
 };
@@ -574,14 +838,117 @@ export async function deleteQuotation(id: number): Promise<void> {
   return apiDelete(`${BASE}/quotations/${id}/`, { tenantId: tid() });
 }
 
-export async function convertQuotationToInvoice(
+/**
+ * T-ORDERS: تحويل عرض السعر — الهدف يختاره المستخدم من حوار داخل الموقع:
+ * `invoice` (فاتورة) أو `order` (طلبية تحجز الكمية).
+ */
+export async function convertQuotation(
   id: number,
-): Promise<{ invoice_id: number; invoice_number: string }> {
+  target: "invoice" | "order" = "invoice",
+): Promise<{
+  status: string;
+  target: string;
+  invoice?: { id: number; invoice_number: string };
+  order?: SalesOrderRow;
+}> {
   return apiPostObject(
     `${BASE}/quotations/${id}/convert/`,
-    {},
+    { target },
     { tenantId: tid() },
   );
+}
+
+/** إلغاء عرض السعر — يُبقي المستند (بديل الحذف). */
+export async function cancelQuotation(
+  id: number,
+  reason = "",
+): Promise<SalesQuotationDetail> {
+  return apiPostObject(`${BASE}/quotations/${id}/cancel/`, { reason }, { tenantId: tid() });
+}
+
+// -------------------------------------------------------------
+// T-ORDERS — طلبيات الزبائن (حجز كمية + عربون)
+// -------------------------------------------------------------
+
+export type SalesOrderLineRow = {
+  id?: number;
+  product: number;
+  product_name?: string;
+  quantity: string;
+  unit_price: string;
+  line_discount?: string;
+  line_total?: string;
+};
+
+export type SalesOrderRow = {
+  id: number;
+  order_number: string;
+  customer: number;
+  customer_name?: string;
+  order_date: string;
+  delivery_date?: string | null;
+  reserved_until?: string | null;
+  status: string;
+  status_display?: string;
+  grand_total: string;
+  deposit_amount: string;
+  remaining_amount: string;
+  quotation?: number | null;
+  quotation_number?: string | null;
+  invoice?: number | null;
+  invoice_number?: string | null;
+  notes?: string | null;
+  cancel_reason?: string;
+  lines: SalesOrderLineRow[];
+};
+
+export async function listSalesOrders(
+  query?: Record<string, string | number | boolean | undefined>,
+): Promise<SalesOrderRow[]> {
+  return apiGetList(`${BASE}/orders/`, { tenantId: tid(), query });
+}
+
+export async function getSalesOrder(id: number): Promise<SalesOrderRow> {
+  return apiGetObject(`${BASE}/orders/${id}/`, { tenantId: tid() });
+}
+
+export async function createSalesOrder(
+  body: Record<string, unknown>,
+): Promise<SalesOrderRow> {
+  return apiPostObject(`${BASE}/orders/`, body, { tenantId: tid() });
+}
+
+export async function updateSalesOrder(
+  id: number,
+  body: Record<string, unknown>,
+): Promise<SalesOrderRow> {
+  return apiPatchObject(`${BASE}/orders/${id}/`, body, { tenantId: tid() });
+}
+
+export async function deleteSalesOrder(id: number): Promise<void> {
+  return apiDelete(`${BASE}/orders/${id}/`, { tenantId: tid() });
+}
+
+export async function confirmSalesOrder(id: number): Promise<SalesOrderRow> {
+  return apiPostObject(`${BASE}/orders/${id}/confirm/`, {}, { tenantId: tid() });
+}
+
+export async function cancelSalesOrder(id: number, reason = ""): Promise<SalesOrderRow> {
+  return apiPostObject(`${BASE}/orders/${id}/cancel/`, { reason }, { tenantId: tid() });
+}
+
+export async function convertSalesOrderToInvoice(
+  id: number,
+): Promise<{ status: string; invoice: { id: number; invoice_number: string } }> {
+  return apiPostObject(`${BASE}/orders/${id}/convert/`, {}, { tenantId: tid() });
+}
+
+/** عربون الطلبية — سند قبض مرحَّل «على الحساب» مربوط بها. */
+export async function recordOrderDeposit(
+  id: number,
+  body: { amount: string | number; cash_or_bank_account: number; payment_date?: string },
+): Promise<SalesOrderRow> {
+  return apiPostObject(`${BASE}/orders/${id}/deposit/`, body, { tenantId: tid() });
 }
 
 // -------------------------------------------------------------

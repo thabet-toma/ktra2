@@ -9,6 +9,7 @@ import { Eye, RefreshCw } from 'lucide-react';
 import { buildShipmentOptionLabel, ShipmentLabelInput } from '@/utils/shipmentLabel';
 import { AseelDenseTable, type DenseColumn } from '../aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from '../aseel/useAseelIndexKeymap';
+import { formatDateLocalized } from "../../utils/formatDate";
 
 type ShipmentRow = ShipmentLabelInput & {
     status?: string;
@@ -70,8 +71,8 @@ export function SqlShipmentsPage() {
             key: 'status', header: 'الحالة', width: '100px',
             render: r => <span style={{ fontSize: 'var(--aseel-fs-sm)', fontWeight: 500 }}>{r.status || '—'}</span>,
         },
-        { key: 'departure_date', header: 'المغادرة', width: '90px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{r.departure_date || '—'}</span> },
-        { key: 'arrival_date', header: 'الوصول', width: '90px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{r.arrival_date || '—'}</span> },
+        { key: 'departure_date', header: 'المغادرة', width: '90px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{formatDateLocalized(r.departure_date) || '—'}</span> },
+        { key: 'arrival_date', header: 'الوصول', width: '90px', render: r => <span style={{ fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{formatDateLocalized(r.arrival_date) || '—'}</span> },
         {
             key: 'actions', header: '', width: '60px', align: 'center',
             render: r => (
@@ -120,7 +121,7 @@ export function SqlShipmentsPage() {
 
             {detailsOpen && (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50, padding: 12 }} onClick={() => setDetailsOpen(false)}>
-                    <div dir="rtl" data-skin="aseel" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, width: '100%', maxWidth: 640, maxHeight: '90vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
+                    <div dir="rtl" style={{ background: 'var(--aseel-surface, #fff)', borderRadius: 8, width: '100%', maxWidth: 640, maxHeight: '90vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
                         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--aseel-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <strong style={{ fontSize: 'var(--aseel-fs-title, 14px)', color: 'var(--aseel-ink)' }}>تفاصيل الشحنة</strong>
                             <button className="aseel-toolbtn" onClick={() => setDetailsOpen(false)}>إغلاق</button>

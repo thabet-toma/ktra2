@@ -1,19 +1,27 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useCompany, Tenant } from "../../contexts/CompanyContext";
 import { useTenantSettings } from "../../hooks/useTenantSettings";
-import { Building, Plus, ChevronDown, Check, Loader2, Settings2 } from "lucide-react";
+import { Building, Plus, ChevronDown, Check, Loader2, Settings2, Star } from "lucide-react";
 import { CompanyManagementModal, ROLE_LABELS } from "./CompanyManagementModal";
 
+const companyLabel = (tenant: Tenant) =>
+  `${tenant.CompanyName}${tenant.is_example ? " (مثال)" : ""}`;
+
 export const CompanySwitcher: React.FC = () => {
-  const { companies, currentCompany, switchCompany, createCompany, loading, refreshCompanies } = useCompany();
+  const { companies, currentCompany, switchCompany, createCompany, setDefaultCompany, loading, refreshCompanies } = useCompany();
   const { identity } = useTenantSettings();
+  const activeMembership = companies.find(
+    (membership) => membership.tenant.TenantID === currentCompany?.TenantID
+  );
+  const canManageCurrentCompany = activeMembership?.role === "manager";
   const [isOpen, setIsOpen] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [showManageModal, setShowManageModal] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  
+  const [pinning, setPinning] = useState<number | null>(null);
+
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -33,6 +41,19 @@ export const CompanySwitcher: React.FC = () => {
     }
     await switchCompany(tenant.TenantID);
     setIsOpen(false);
+  };
+
+  /** T-IMPOFFER: النجمة تثبّت الشركة التي تُفتح أول ما يدخل المستخدم. */
+  const handlePinDefault = async (tenantId: number) => {
+    setPinning(tenantId);
+    setError(null);
+    try {
+      await setDefaultCompany(tenantId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "فشل تعيين الشركة الافتراضية");
+    } finally {
+      setPinning(null);
+    }
   };
 
   const handleCreateCompany = async (e: React.FormEvent) => {
@@ -71,11 +92,11 @@ export const CompanySwitcher: React.FC = () => {
         style={{ color: "var(--aseel-ink)" }}
       >
         {identity?.logo_url ? (
-          <img src={identity.logo_url} alt="Logo" className="w-5 h-5 rounded object-cover bg-white" />
+          <img src={identity.logo_url} alt="Logo" className="w-5 h-5 rounded object-cover bg-[var(--color-surface)]" />
         ) : (
           <Building className="w-4 h-4 opacity-70" />
         )}
-        <span>{currentCompany?.CompanyName || "اختر الشركة"}</span>
+        <span>{currentCompany ? companyLabel(currentCompany) : "اختر الشركة"}</span>
         <ChevronDown className={`w-3.5 h-3.5 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
       </button>
 
@@ -89,28 +110,59 @@ export const CompanySwitcher: React.FC = () => {
             {companies.map((membership) => {
               const isActive = currentCompany?.TenantID === membership.tenant.TenantID;
               return (
-                <button
+                <div
                   key={membership.id}
-                  type="button"
-                  onClick={() => handleSelect(membership.tenant)}
-                  className={`w-full flex items-center justify-between px-4 py-2.5 text-sm text-right transition-colors duration-150 hover:bg-[var(--aseel-panel-hover)] ${isActive ? "bg-[var(--aseel-panel-hover)] font-bold" : ""}`}
+                  className={`w-full flex items-center gap-1 pl-1.5 pr-4 transition-colors duration-150 hover:bg-[var(--aseel-panel-hover)] ${isActive ? "bg-[var(--aseel-panel-hover)] font-bold" : ""}`}
                 >
-                  <div className="flex flex-col">
-                    <span style={{ color: isActive ? "var(--aseel-accent)" : "var(--aseel-ink)" }}>
-                      {membership.tenant.CompanyName}
-                    </span>
-                    <span className="text-[11px] opacity-60">
-                      الدور: {ROLE_LABELS[membership.role] || membership.role}
-                    </span>
-                  </div>
-                  {isActive && <Check className="w-4 h-4 text-[var(--aseel-accent)]" />}
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSelect(membership.tenant)}
+                    className="flex flex-1 items-center justify-between py-2.5 text-sm text-right"
+                  >
+                    <div className="flex flex-col">
+                      <span style={{ color: isActive ? "var(--aseel-accent)" : "var(--aseel-ink)" }}>
+                        {companyLabel(membership.tenant)}
+                      </span>
+                      <span className="text-[11px] opacity-60">
+                        الدور: {ROLE_LABELS[membership.role] || membership.role}
+                        {membership.is_default && " · افتراضية"}
+                      </span>
+                    </div>
+                    {isActive && <Check className="w-4 h-4 text-[var(--aseel-accent)]" />}
+                  </button>
+                  {/* T-IMPOFFER: تثبيت الشركة التي تُفتح عند الدخول. */}
+                  <button
+                    type="button"
+                    disabled={membership.is_default || pinning != null}
+                    onClick={() => void handlePinDefault(membership.tenant.TenantID)}
+                    className="p-1.5 rounded-lg hover:bg-[var(--aseel-panel)] disabled:cursor-default transition-colors"
+                    title={membership.is_default ? "الشركة الافتراضية عند الدخول" : "اجعلها الشركة الافتراضية عند الدخول"}
+                    aria-label="الشركة الافتراضية"
+                  >
+                    {pinning === membership.tenant.TenantID ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Star
+                        className="w-3.5 h-3.5"
+                        style={{
+                          color: membership.is_default ? "var(--aseel-accent)" : "var(--aseel-ink-soft)",
+                          fill: membership.is_default ? "var(--aseel-accent)" : "none",
+                        }}
+                      />
+                    )}
+                  </button>
+                </div>
               );
             })}
+            {error && !showModal && (
+              <p className="px-4 py-2 text-[11px] font-semibold text-[var(--color-danger)]">
+                {error}
+              </p>
+            )}
           </div>
 
           <div className="border-t border-[var(--aseel-border-soft)] p-1.5 bg-[var(--aseel-panel)] space-y-1.5">
-            {currentCompany && (
+            {currentCompany && canManageCurrentCompany && (
               <button
                 type="button"
                 onClick={() => {
@@ -140,7 +192,7 @@ export const CompanySwitcher: React.FC = () => {
       )}
 
       {/* Company Management Modal — task12 M4 */}
-      {showManageModal && currentCompany && (
+      {showManageModal && currentCompany && canManageCurrentCompany && (
         <CompanyManagementModal
           isOpen={showManageModal}
           onClose={() => setShowManageModal(false)}
@@ -174,7 +226,7 @@ export const CompanySwitcher: React.FC = () => {
 
             <form onSubmit={handleCreateCompany} className="space-y-5">
               {error && (
-                <div className="p-3 text-xs bg-red-50 text-red-700 rounded-lg border border-red-200 font-semibold">
+                <div className="p-3 text-xs bg-[color-mix(in_srgb,var(--color-danger)_10%,transparent)] text-[var(--color-danger)] rounded-lg border border-[color-mix(in_srgb,var(--color-danger)_35%,transparent)] font-semibold">
                   {error}
                 </div>
               )}
