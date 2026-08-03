@@ -71,7 +71,6 @@ export const SalesCustomersPage: React.FC = () => {
   const pageSize = 50;
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
 
   const tenantId = useMemo(() => resolveTenantId(), []);
 
@@ -104,17 +103,13 @@ export const SalesCustomersPage: React.FC = () => {
   const filtered = rows;
 
   const openNew = () => {
-    setEditingId(null);
     setModalOpen(true);
     setErr(null);
     setMsg(null);
   };
 
   const openEdit = (p: PartnerApi) => {
-    setEditingId(p.id);
-    setModalOpen(true);
-    setErr(null);
-    setMsg(null);
+    openInNewTab(`/partners/${p.id}?tab=edit`);
   };
 
   useAseelIndexKeymap({
@@ -306,12 +301,11 @@ export const SalesCustomersPage: React.FC = () => {
 
       <PartnerEditorModal
         open={modalOpen}
-        partnerId={editingId}
         fixedType="Customer"
         onClose={() => setModalOpen(false)}
         onSaved={() => {
           setModalOpen(false);
-          setMsg(editingId ? "تم تحديث بيانات العميل." : "تم إضافة العميل.");
+          setMsg("تم إضافة العميل.");
           void loadRows();
         }}
       />

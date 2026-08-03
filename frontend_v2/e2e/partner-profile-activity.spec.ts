@@ -160,6 +160,13 @@ test("partner statement sorting and related activity use the partner scope", asy
 
   await page.getByRole("button", { name: /فاتورة شراء INV-0008/ }).click();
   await expect(page).toHaveURL(/\/purchase-invoices\/8$/);
+
+  await page.goto("/partners/7?tab=edit");
+  const editTab = page.getByRole("tab", { name: "تعديل البطاقة" });
+  await expect(editTab).toBeVisible({ timeout: 15000 });
+  await editTab.click();
+  await expect(page.getByRole("heading", { name: "تعديل بطاقة الطرف" })).toBeVisible();
+  await expect(page.getByLabel("الاسم *")).toHaveValue("مورد الاختبار");
 });
 
 test("new customer receipt stays inside the profile and uses saved cheque defaults", async ({ page }) => {

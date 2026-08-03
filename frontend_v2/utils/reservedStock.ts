@@ -26,6 +26,7 @@ export type ProductReservation = {
   /** حجز الزبون نفسه — يُعرض للعلم ولا يُطرح من المتاح. */
   ownReserved: number;
   holders: { orderId: number; orderNumber: string; customerName: string; quantity: number }[];
+  ownHolders: { orderId: number; orderNumber: string; customerName: string; quantity: number }[];
 };
 
 const num = (value: string | number | null | undefined): number => {
@@ -44,10 +45,16 @@ export function buildReservationIndex(
   const index = new Map<number, ProductReservation>();
   for (const row of rows) {
     const entry = index.get(row.product_id)
-      ?? { reserved: 0, ownReserved: 0, holders: [] };
+      ?? { reserved: 0, ownReserved: 0, holders: [], ownHolders: [] };
     const quantity = num(row.quantity);
     if (excludeCustomerId != null && row.customer_id === excludeCustomerId) {
       entry.ownReserved += quantity;
+      entry.ownHolders.push({
+        orderId: row.order_id,
+        orderNumber: row.order_number,
+        customerName: row.customer_name,
+        quantity,
+      });
     } else {
       entry.reserved += quantity;
       entry.holders.push({
@@ -60,6 +67,11 @@ export function buildReservationIndex(
     index.set(row.product_id, entry);
   }
   return index;
+}
+
+/** إجمالي الحجز الظاهر للمستخدم، بما فيه حجز زبون الفاتورة نفسه. */
+export function totalReserved(entry?: ProductReservation): number {
+  return (entry?.reserved ?? 0) + (entry?.ownReserved ?? 0);
 }
 
 /** المتاح للبيع على هذه الفاتورة = الرصيد − المحجوز لغير زبونها. */
