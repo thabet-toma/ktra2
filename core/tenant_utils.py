@@ -36,10 +36,17 @@ def get_tenant(request=None, *, raise_on_missing: bool = False):
             or request.META.get('HTTP_X_TENANT_ID')
         )
         if tid:
+            cached_tenant = getattr(request, '_resolved_tenant', None)
+            if (
+                cached_tenant is not None
+                and str(getattr(cached_tenant, 'TenantID', '')) == str(tid)
+            ):
+                return cached_tenant
             try:
                 tenant = Tenant.objects.get(TenantID=int(tid))
                 # Optional: validate user has access to this tenant
                 _validate_user_tenant_access(request, tenant)
+                request._resolved_tenant = tenant
                 return tenant
             except Tenant.DoesNotExist:
                 logger.warning(
@@ -69,7 +76,9 @@ def get_tenant(request=None, *, raise_on_missing: bool = False):
         user_tenant_id = getattr(user, 'tenant_id', None)
         if user_tenant_id:
             try:
-                return Tenant.objects.get(TenantID=int(user_tenant_id))
+                tenant = Tenant.objects.get(TenantID=int(user_tenant_id))
+                _validate_user_tenant_access(request, tenant)
+                return tenant
             except (Tenant.DoesNotExist, ValueError, TypeError):
                 pass
 
@@ -85,6 +94,8 @@ def get_tenant(request=None, *, raise_on_missing: bool = False):
     if _single_tenant_cache is not None:
         # Re-verify it's still the only one (invalidate cache if more were added)
         if Tenant.objects.count() == 1:
+            if request is not None:
+                _validate_user_tenant_access(request, _single_tenant_cache)
             return _single_tenant_cache
         else:
             # Multiple tenants now exist — disable auto-resolve
@@ -116,13 +127,42 @@ def _validate_user_tenant_access(request, tenant: Tenant) -> None:
         return
 
     from tenants.models import UserCompanyMembership
-    if not UserCompanyMembership.objects.filter(user=user, tenant=tenant).exists():
+    membership = (
+        UserCompanyMembership.objects
+        .filter(user=user, tenant=tenant)
+        .only('role')
+        .first()
+    )
+    if membership is None:
         logger.error(
             "SECURITY ALERT: User %s attempted to access unauthorized tenant=%s. IP=%s",
             user, tenant.TenantID,
             _get_client_ip(request),
         )
         raise PermissionDenied("ليس لديك صلاحية الوصول لهذه الشركة.")
+
+    if membership.role == 'legal_accountant':
+        from accountant_portal.models import AccountantEngagement
+        from accountant_portal.permissions import EngagementInactive
+        from core.modules import module_enabled
+
+        has_active_engagement = module_enabled(
+            tenant,
+            'accountant_portal',
+        ) and AccountantEngagement.objects.filter(
+            accountant=user,
+            tenant=tenant,
+            status='active',
+        ).exists()
+        if not has_active_engagement:
+            logger.info(
+                "inactive_accountant_engagement user=%s tenant=%s",
+                user.pk,
+                tenant.TenantID,
+            )
+            raise EngagementInactive("ارتباط المحاسب بهذه الشركة غير نشط.")
+
+    request._tenant_membership_role = (tenant.pk, membership.role)
 
     # شركة أوقفتها إدارة المنصة — الإيقاف حالة نافذة لا وسماً في اللوحة.
     # السوبر أدمن يبقى قادراً على الدخول ليصلح/يعيد التفعيل.

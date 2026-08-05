@@ -7,6 +7,7 @@ from .models import Account, ExchangeRate, JournalHeader, JournalLine, Accountin
 from decimal import Decimal
 from partners.models import Partner
 from tenants.models import Currency, TenantBook
+from core.hooks import run_tax_period_guards
 
 logger = logging.getLogger(__name__)
 
@@ -507,6 +508,7 @@ def post_journal(
 
     # ── 1) Validate fiscal period + journal balance (pre-atomic — fast fail) ──
     validate_fiscal_period(tenant_id, transaction_date)
+    run_tax_period_guards(tenant_id, transaction_date)
     mock_hdr = JournalHeader(tenant_id=tenant_id, transaction_date=transaction_date)
     validate_journal_entry(mock_hdr, lines_data)
 

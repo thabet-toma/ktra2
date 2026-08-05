@@ -14,6 +14,8 @@ interface PermissionsValue {
   role: string;
   isManager: boolean;
   permissions: Set<string>;
+  /** أعلام ترخيص الوحدات لهذه الشركة — تفشل مغلقة (غياب العَلَم = مطفأة). */
+  modules: Record<string, boolean>;
   /** هل يملك المستخدم هذه الصلاحية؟ */
   can: (key: string) => boolean;
   loading: boolean;
@@ -26,6 +28,7 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [role, setRole] = useState('');
   const [isManager, setIsManager] = useState(false);
   const [permissions, setPermissions] = useState<Set<string>>(new Set());
+  const [modules, setModules] = useState<Record<string, boolean>>({});
   const [loaded, setLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [tick, setTick] = useState(0);
@@ -40,6 +43,7 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setRole(res.role);
         setIsManager(res.is_manager);
         setPermissions(new Set(res.permissions));
+        setModules(res.modules || {});
         setLoaded(true);
         clientLogger.info('permissions.loaded', { role: res.role, count: res.permissions.length });
       })
@@ -60,8 +64,8 @@ export const PermissionsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const reload = useCallback(() => setTick((t) => t + 1), []);
 
   const value = useMemo<PermissionsValue>(
-    () => ({ role, isManager, permissions, can, loading, reload }),
-    [role, isManager, permissions, can, loading, reload],
+    () => ({ role, isManager, permissions, modules, can, loading, reload }),
+    [role, isManager, permissions, modules, can, loading, reload],
   );
 
   return <PermissionsContext.Provider value={value}>{children}</PermissionsContext.Provider>;
@@ -75,6 +79,7 @@ export function usePermissions(): PermissionsValue {
       role: '',
       isManager: false,
       permissions: new Set<string>(),
+      modules: {},
       can: () => true,
       loading: false,
       reload: () => {},

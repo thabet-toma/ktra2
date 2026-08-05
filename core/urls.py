@@ -57,6 +57,10 @@ urlpatterns = [
     path('api/platform/super-admins/', platform_admin_api.platform_super_admins),
     path('api/platform/super-admins/<int:pk>/', platform_admin_api.platform_super_admin_detail),
     path('api/platform/companies/<int:pk>/', platform_admin_api.platform_company_detail),
+    path('api/platform/companies/<int:pk>/modules/', platform_admin_api.platform_company_modules),
+    path('api/platform/accountant-workspace/', platform_admin_api.platform_accountant_workspace),
+    path('api/platform/accountants/pending/', platform_admin_api.platform_accountants_pending),
+    path('api/platform/accountants/<int:profile_id>/verify/', platform_admin_api.platform_accountant_verify),
     path('api/platform/companies/<int:pk>/members/', platform_admin_api.platform_company_members),
     path('api/platform/companies/<int:pk>/members/<int:membership_id>/',
          platform_admin_api.platform_company_member_detail),
@@ -64,6 +68,7 @@ urlpatterns = [
     path('api/platform/', include(_platform_router.urls)),
     # T-PERM: محرّك الصلاحيات (صلاحياتي + مصفوفة الأدوار لكل شركة)
     path('api/permissions/me/', permissions_api.my_permissions),
+    path('api/permissions/roles/', permissions_api.permission_roles),
     path('api/permissions/matrix/', permissions_api.permissions_matrix),
     path('api/permissions/matrix/reset/', permissions_api.reset_permissions_matrix),
     path('api/permissions/members/', permissions_api.permission_members),
@@ -75,6 +80,7 @@ urlpatterns = [
     path('api/hr/', include('hr.urls')),
     path('api/realestate/', include('realestate.urls')),
     path('api/sales/', include('sales.urls')),
+    path('api/accountant/', include('accountant_portal.urls')),
     # N0-T4: Group Constants (F11) — tenant-level settings + books + currencies
     path('api/tenants/', include('tenants.urls')),
 ]

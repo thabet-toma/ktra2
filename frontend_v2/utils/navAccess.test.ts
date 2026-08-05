@@ -1,7 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { visibleLinks, groupVisible, type NavAccessLink } from './navAccess.ts';
-import { invoiceActionPermissions, memberOverrideForCheckbox } from './viewPermissions.ts';
+import {
+  invoiceActionPermissions,
+  memberOverrideForCheckbox,
+  moduleAllowsView,
+  moduleForView,
+} from './viewPermissions.ts';
 import { iconForShortcut, SHORTCUTABLE_VIEWS } from './quickShortcuts.ts';
 
 const links: NavAccessLink[] = [
@@ -81,6 +86,23 @@ test('خانة صلاحية العضو تُخزَّن تجاوزاً فقط إن
   // العودة لما يعطيه الدور ⇒ حذف التجاوز
   assert.equal(memberOverrideForCheckbox(true, true), null);
   assert.equal(memberOverrideForCheckbox(false, false), null);
+});
+
+test('تبويب المحاسب القانوني يُمنع قبل أي import ما لم يصل عَلَم ترخيصه', () => {
+  assert.equal(moduleForView('company-accountant-engagements'), 'accountant_portal');
+  // فشل مغلق: لا أعلام أصلاً، أو عَلَم مطفأ، أو حمولة بلا المفتاح.
+  assert.equal(moduleAllowsView('company-accountant-engagements', null), false);
+  assert.equal(moduleAllowsView('company-accountant-engagements', {}), false);
+  assert.equal(moduleAllowsView('company-accountant-engagements', { accountant_portal: false }), false);
+  assert.equal(moduleAllowsView('company-accountant-engagements', { accountant_portal: true }), true);
+});
+
+test('الشركة التجارية لا تحمل أي شاشة من شاشات مكتب المحاسبة', () => {
+  // شاشات المكتب تعيش في قشرته المستقلة، فلا تُذكر في خريطة الشاشات التجارية.
+  for (const officeView of ['accountant-companies', 'accountant-tax-periods', 'accountant-profile']) {
+    assert.equal(moduleForView(officeView), undefined);
+  }
+  assert.equal(moduleAllowsView('sales-invoices', null), true);
 });
 
 test('كل اختصار في الشريط العلوي يملك رمزاً دلالياً', () => {

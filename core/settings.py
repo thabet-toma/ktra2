@@ -105,6 +105,7 @@ INSTALLED_APPS = [
     'core',
     'realestate',
     'sales',
+    'accountant_portal.apps.AccountantPortalConfig',
 ]
 
 MIDDLEWARE = [
@@ -372,8 +373,29 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
         "core.permissions.TenantRolePermission",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.ScopedRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "accountant_signup": "5/hour",
+        "accountant_verify": "10/hour",
+        "accountant_invite": "20/hour",
+        "accountant_engagement_request": "10/hour",
+        # البحث عن شركة خطوة سابقة لطلب الارتباط — حصته أوسع، وحدُّه لمنع تخمين
+        # أسماء الشركات (T8) لا لتقنين الطلبات.
+        "accountant_company_lookup": "60/hour",
+    },
     'EXCEPTION_HANDLER': 'core.exception_handler.custom_exception_handler',
 }
+
+ACCOUNTANT_VERIFICATION_MODE = os.environ.get("ACCOUNTANT_VERIFICATION_MODE", "manual")
+ACCOUNTANT_EMAIL_TOKEN_MAX_AGE = 60 * 60 * 24
+# قرار المالك (2026-08-05): تحقق البريد **غير مطلوب**. الآلية باقية كاملةً خلف
+# هذا العَلَم لأن المنصة بلا SMTP اليوم، فاشتراطُ رسالةٍ لا تصل يقفل المحاسب
+# خارج حسابه. اضبط ACCOUNTANT_REQUIRE_EMAIL_VERIFICATION=true بعد ضبط البريد.
+ACCOUNTANT_REQUIRE_EMAIL_VERIFICATION = os.environ.get(
+    "ACCOUNTANT_REQUIRE_EMAIL_VERIFICATION", "false",
+).strip().lower() in ("1", "true", "yes")
 
 # Cloudinary credentials are environment-only; production refuses missing values.
 CLOUDINARY_STORAGE = {

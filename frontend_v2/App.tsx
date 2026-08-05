@@ -48,11 +48,14 @@ import { fetchUserProfile, logoutUser } from "./services/authService";
 import { useAuth } from "./contexts/AuthContext";
 import { useCompany } from "./contexts/CompanyContext";
 import { usePermissions } from "./contexts/PermissionsContext";
-import { permForView } from "./utils/viewPermissions";
+import { moduleAllowsView, permForView } from "./utils/viewPermissions";
+import { enterPlatformShell, platformShellActive } from "./utils/officeShell";
 import { activeTasksService } from "./services/activeTasksService";
 import { autoDisableScheduler } from "./services/autoDisableScheduler";
 import { PublicNavbar } from "./components/layout/PublicNavbar";
 import { useLocation, useNavigate } from "react-router-dom";
+import { apiGetObject } from "./services/restApi";
+import { clientLogger } from "./services/logger";
 
 // ── تقسيم الحزمة حسب الشاشة (صيانة الأداء 2026-07) ─────────────────────────
 // كانت كل الصفحات (~85 مكوّناً) مستورَدة ثابتاً ⇒ حزمة واحدة 3.2MB تحجب أول
@@ -152,9 +155,27 @@ const DeliveryNotesPage = lazyPage(() => import("./components/sales/DeliveryNote
 const LocalShippingPage = lazyPage(() => import("./components/logistics/LocalShippingPage"));
 // مصاريف شخصية — شاشة خاصة بالمستخدم، مفتوحة للجميع (العزل خادمي بالمستخدم).
 const PersonalExpensesPage = lazyPage(() => import("./components/personal/PersonalExpensesPage"));
+const AccountantSignupPage = lazyPage(() => import("./components/accountant/AccountantSignupPage"));
+const CompanyAccountantEngagementsPage = lazyPage(() => import("./components/accountant/CompanyAccountantEngagementsPage"));
+const AccountantOfficeApp = lazyPage(() => import("./components/accountant/office/AccountantOfficeApp"));
 
 type SourcingView = "search" | "loading" | "results";
-type AuthView = "landing" | "login" | "signup";
+type AuthView = "landing" | "login" | "signup" | "accountant-signup";
+
+/**
+ * حارس ترخيص الوحدة — يقرأ عَلَم `/api/permissions/me` (طلب قائم أصلاً، بلا شبكة
+ * إضافية) ويفشل **مغلقاً**. يسبق عرض الشاشة الكسولة، فلا يُطلب chunk الوحدة
+ * أصلاً للشركة غير المرخّصة.
+ */
+const AccountantModuleGuard: React.FC<{ view: string; children: React.ReactNode }> = ({ view, children }) => {
+  const { modules, loading } = usePermissions();
+
+  if (loading) return <div className="flex justify-center py-16"><LoadingSpinner /></div>;
+  if (!moduleAllowsView(view, modules)) {
+    return <div role="alert" className="mx-auto max-w-xl rounded-2xl border border-amber-300 bg-amber-50 p-8 text-center font-bold text-amber-900">بوابة المحاسب غير مفعّلة لهذه الشركة أو لا تملك صلاحية الوصول.</div>;
+  }
+  return <>{children}</>;
+};
 
 /**
  * task14 M1 (DEF-B1): جدول مسار↔شاشة واحد — مصدر الحقيقة للاتجاهين.
@@ -176,6 +197,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "points-management": "/points-management",
   "points-history": "/points-history",
   "personal-expenses": "/personal-expenses",
+  "company-accountant-engagements": "/accountant/company/engagements",
   "sales-invoices": "/sales/invoices",
   "sales-quotations": "/sales/quotations",
   "sales-orders": "/sales/orders",
@@ -273,6 +295,12 @@ const App: React.FC = () => {
   };
 
   const [authView, setAuthView] = useState<AuthView>("landing");
+  // سوبر أدمن يخرج من قشرة المكتب للوحة المنصة دون أن يفقد ملفه المهني.
+  const [platformShellOverride] = useState(() =>
+    typeof window === "undefined"
+      ? false
+      : platformShellActive(window.location.pathname)
+  );
   const [users, setUsers] = useState<User[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
 
@@ -281,6 +309,14 @@ const App: React.FC = () => {
   const [userTaskTime, setUserTaskTime] = useState(0);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [appView, setAppView] = useState<AppView>("dashboard");
+
+  useEffect(() => {
+    if (currentUser) return;
+    const path = (location.pathname || "/").replace(/\/$/, "") || "/";
+    if (path === "/accountant/signup" || path === "/accountant/verify-email") {
+      setAuthView("accountant-signup");
+    }
+  }, [currentUser, location.pathname]);
 
   // SEO: عنوان تبويب/فهرسة مختلف لكل شاشة عامة (غير مصادَق عليها) — index.html
   // يحمل عنواناً افتراضياً واحداً لكل الموقع، وهذا يُخصّصه لكل صفحة يزورها زائر
@@ -524,6 +560,11 @@ const App: React.FC = () => {
       setAppView("gallery");
     } else if (path.startsWith("/group-constants")) {
       setAppView("group-constants");
+    }
+
+    if (path === "/accountant/company/engagements") {
+      setAppView("company-accountant-engagements");
+      return;
     }
 
     if (!currentUser?.isApproved) return;
@@ -1340,6 +1381,16 @@ const App: React.FC = () => {
     }
 
     switch (appView) {
+      case "company-accountant-engagements":
+        if (!canView(appView)) {
+          return <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية إدارة ارتباطات المحاسبين (403).</div>;
+        }
+        return (
+          <AccountantModuleGuard view={appView}>
+            <CompanyAccountantEngagementsPage />
+          </AccountantModuleGuard>
+        );
+
       case "super-admin":
         if (!currentUser!.isSuperAdmin) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
@@ -1950,6 +2001,9 @@ const App: React.FC = () => {
   }
 
   if (!currentUser) {
+    if (authView === "accountant-signup") {
+      return <AccountantSignupPage />;
+    }
     if (appView === "about-us") {
       return (
         <div>
@@ -2006,6 +2060,44 @@ const App: React.FC = () => {
           onSignup={() => setAuthView("signup")}
           onGoToStore={() => setAppView('store')}
         />
+      </div>
+    );
+  }
+
+  // T-EXTACCT: المحاسب القانوني يعمل في **قشرة مستقلة** لا في واجهة الشركات
+  // التجارية. سوبر أدمن فتح واجهة تجريبية يخرج منها بمفتاح جلسة واحد.
+  if (currentUser.accountType === "legal_accountant" && !platformShellOverride) {
+    return (
+      <React.Suspense fallback={<div className="flex min-h-screen items-center justify-center"><LoadingSpinner /></div>}>
+        <AccountantOfficeApp
+          user={currentUser}
+          onLogout={logout}
+          onExitToPlatform={currentUser.isSuperAdmin ? () => {
+            enterPlatformShell();
+            clientLogger.info("accountant.shell_switched", { to: "platform" });
+            window.location.assign("/super-admin");
+          } : undefined}
+        />
+      </React.Suspense>
+    );
+  }
+
+  // مسار المكتب لحسابٍ ليس مكتب محاسبة: قل السبب صراحةً بدل عرض لوحة تجارية
+  // صامتة يظنها المستخدم «الواجهة لم تتغير».
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/office") && !platformShellOverride) {
+    return (
+      <div dir="rtl" className="flex min-h-screen items-center justify-center bg-slate-100 p-6">
+        <div className="w-full max-w-lg rounded-3xl bg-white p-8 text-center shadow-xl">
+          <h1 className="text-xl font-black text-slate-900">هذا الحساب ليس مكتب محاسبة قانونية</h1>
+          <p className="mt-3 text-sm leading-7 text-slate-600">
+            واجهة المكتب تفتح للحسابات التي لها ملف محاسب مهني. إن كنت سوبر أدمن فافتحها بزر
+            «افتح واجهة المحاسب القانوني» من لوحة المنصة، ثم أعد تحميل الصفحة.
+          </p>
+          <div className="mt-6 flex flex-wrap justify-center gap-3">
+            <button type="button" onClick={() => window.location.assign("/super-admin")} className="rounded-xl bg-blue-600 px-5 py-3 font-bold text-white">لوحة المنصة</button>
+            <button type="button" onClick={() => window.location.assign("/dashboard")} className="rounded-xl border border-slate-300 px-5 py-3 font-bold">الرئيسية</button>
+          </div>
+        </div>
       </div>
     );
   }

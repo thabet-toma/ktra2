@@ -256,6 +256,16 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToSignup, onGoTo
               </div>
             </button>
 
+            {/* T-EXTACCT: مدخل المحاسب القانوني — كان المسار موجوداً بلا أي رابط يقود إليه */}
+            <a
+              href="/accountant/signup"
+              className="block w-full mt-4 group bg-emerald-50 dark:bg-emerald-900/10 border-2 border-emerald-100 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-bold py-4 px-4 rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-all duration-300 text-center"
+            >
+              <div className="flex items-center justify-center gap-2">
+                <span>تسجيل كمحاسب قانوني خارجي</span>
+              </div>
+            </a>
+
             {/* زر الذهاب للمتجر */}
             <Link
               to="/store"

@@ -35,6 +35,7 @@ GROUP_ACCOUNTING = "المحاسبة"
 GROUP_IMPORT = "الاستيراد"
 GROUP_HR = "شؤون الموظفين"
 GROUP_ADMIN = "الإدارة والإعدادات"
+GROUP_TAX = "الضريبة والمراجعة"
 
 PERMISSIONS: list[dict] = [
     # المبيعات
@@ -93,6 +94,18 @@ PERMISSIONS: list[dict] = [
     {"key": "admin.permissions.manage", "label": "إدارة الصلاحيات", "group": GROUP_ADMIN},
     {"key": "admin.settings.manage", "label": "إعدادات الشركة العامة", "group": GROUP_ADMIN},
     {"key": "admin.activity.view", "label": "سجل نشاط المستخدمين", "group": GROUP_ADMIN},
+    # بوابة المحاسب القانوني — لا تظهر إلا للشركات المرخّصة للوحدة.
+    {"key": "tax.period.view", "label": "عرض فترات المراجعة الضريبية", "group": GROUP_TAX, "module": "accountant_portal"},
+    {"key": "tax.period.prepare", "label": "تجهيز الفترة وتشغيل قائمة الجاهزية", "group": GROUP_TAX, "module": "accountant_portal"},
+    {"key": "tax.period.approve", "label": "اعتماد الفترة الضريبية", "group": GROUP_TAX, "module": "accountant_portal"},
+    {"key": "tax.period.reopen", "label": "إعادة فتح فترة معتمدة", "group": GROUP_TAX, "module": "accountant_portal"},
+    {"key": "tax.filing.submit", "label": "تسجيل تقديم الإقرار", "group": GROUP_TAX, "module": "accountant_portal"},
+    {"key": "tax.clearance.issue", "label": "إصدار فاتورة مقاصة", "group": GROUP_TAX, "module": "accountant_portal"},
+    {"key": "tax.assignment.request", "label": "طلب رقم تخصيص إسرائيلي", "group": GROUP_TAX, "module": "accountant_portal"},
+    {"key": "tax.integration.manage", "label": "إدارة تفويض التكامل الضريبي", "group": GROUP_TAX, "module": "accountant_portal"},
+    {"key": "review.query.create", "label": "إنشاء طلب توضيح", "group": GROUP_TAX, "module": "accountant_portal"},
+    {"key": "review.query.respond", "label": "الرد على طلب توضيح", "group": GROUP_TAX, "module": "accountant_portal"},
+    {"key": "finance.export.package", "label": "تصدير حزمة المراجعة", "group": GROUP_TAX, "module": "accountant_portal"},
 ]
 
 # القراءة المجرّدة — ما يملكه «المستعرض» ويرثه كل دور أعلى منه.
@@ -161,6 +174,19 @@ _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | {
     "import.doc.unpost",
 }
 
+_LEGAL_ACCOUNTANT = {
+    "sales.invoice.view",
+    "purchase.invoice.view",
+    "sales.customer.view",
+    "purchase.supplier.view",
+    "accounting.journal.view",
+    "accounting.report.view",
+    "tax.period.view",
+    "tax.period.prepare",
+    "review.query.create",
+    "finance.export.package",
+}
+
 # موظف عام (الدور الافتراضي للعضو الجديد): إدخال بيانات بلا ترحيل ولا حذف.
 _STAFF = _VIEW_ONLY | {
     "hr.attendance.view",
@@ -173,6 +199,7 @@ _STAFF = _VIEW_ONLY | {
 ROLE_DEFAULTS: dict[str, object] = {
     "manager": "*",
     "accountant": _ACCOUNTANT,
+    "legal_accountant": _LEGAL_ACCOUNTANT,
     "sales": _SALES_EMPLOYEE,
     "procurement": _PROCUREMENT_EMPLOYEE,
     "staff": _STAFF,
@@ -183,25 +210,54 @@ ROLE_DEFAULTS: dict[str, object] = {
 ROLE_LABELS = (
     ("manager", "مدير"),
     ("accountant", "محاسب"),
+    ("legal_accountant", "محاسب قانوني خارجي"),
     ("sales", "موظف مبيعات"),
     ("procurement", "موظف مشتريات"),
     ("staff", "موظف"),
     ("viewer", "مستعرض"),
 )
 ROLE_ORDER = tuple(r for r, _ in ROLE_LABELS)
+ROLE_MODULES = {"legal_accountant": "accountant_portal"}
 
 
-def permission_keys() -> frozenset:
-    """كل مفاتيح الكتالوج."""
-    return frozenset(p["key"] for p in PERMISSIONS)
+def permission_catalog(tenant=None) -> tuple[dict, ...]:
+    """الكتالوج المرئي؛ تمرير شركة يزيل مفاتيح الوحدات غير المرخّصة."""
+    if tenant is None:
+        return tuple(PERMISSIONS)
+
+    from core.modules import module_enabled
+
+    return tuple(
+        entry
+        for entry in PERMISSIONS
+        if not entry.get("module") or module_enabled(tenant, entry["module"])
+    )
 
 
-def role_default_permissions(role: str) -> frozenset:
+def permission_keys(tenant=None) -> frozenset:
+    """كل مفاتيح الكتالوج المرئية للشركة، أو الكتالوج الكامل دون شركة."""
+    return frozenset(p["key"] for p in permission_catalog(tenant))
+
+
+def visible_role_labels(tenant=None) -> tuple[tuple[str, str], ...]:
+    if tenant is None:
+        return ROLE_LABELS
+
+    from core.modules import module_enabled
+
+    return tuple(
+        (role, label)
+        for role, label in ROLE_LABELS
+        if role not in ROLE_MODULES or module_enabled(tenant, ROLE_MODULES[role])
+    )
+
+
+def role_default_permissions(role: str, tenant=None) -> frozenset:
     """صلاحيات الدور الافتراضية قبل تجاوزات الشركة."""
     granted = ROLE_DEFAULTS.get(role, _VIEW_ONLY)
     if granted == "*":
-        return permission_keys()
-    return frozenset(granted)
+        return permission_keys(tenant)
+    return frozenset(granted) & permission_keys(tenant)
 
 
 def user_tenant_role(user, tenant) -> str:
@@ -251,7 +307,7 @@ def _apply(granted: set, overrides, valid: frozenset) -> None:
 def user_permissions(user, tenant) -> frozenset:
     """الصلاحيات الفعلية = افتراضي الدور ← تجاوز الدور ← تجاوز العضو (الأعلى)."""
     role = user_tenant_role(user, tenant)
-    granted = set(role_default_permissions(role))
+    granted = set(role_default_permissions(role, tenant))
     if role == "manager":
         # المدير مالك الشركة — لا يُقفل خارج نظامه بتجاوز، دوريّاً كان أو فردياً.
         return frozenset(granted)
@@ -260,7 +316,7 @@ def user_permissions(user, tenant) -> frozenset:
         from tenants.models import MemberPermission, RolePermission
 
         tenant_id = getattr(tenant, "TenantID", tenant)
-        valid = permission_keys()
+        valid = permission_keys(tenant)
         _apply(
             granted,
             RolePermission.objects.filter(tenant_id=tenant_id, role=role)
@@ -274,6 +330,10 @@ def user_permissions(user, tenant) -> frozenset:
             ).only("permission_key", "allowed"),
             valid,
         )
+    if role == "legal_accountant":
+        from accountant_portal.permissions import is_legal_accountant_forbidden
+
+        granted = {key for key in granted if not is_legal_accountant_forbidden(key)}
     return frozenset(granted)
 
 

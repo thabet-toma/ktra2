@@ -1,5 +1,5 @@
 
-export type UserRole = 'manager' | 'employee' | 'procurement' | 'store_guest';
+export type UserRole = 'manager' | 'employee' | 'procurement' | 'legal_accountant' | 'store_guest';
 
 export interface PointsSystem {
     activityPointsPerClick: number;
@@ -66,6 +66,8 @@ export interface User {
     isSuperAdmin?: boolean;
     /** صلاحية وحدة الاستيراد (إخفاء القائمة وقسم تكاليف الاستيراد) — الإنفاذ الموثوق على الخادم */
     canAccessImport?: boolean;
+    /** نوع الهوية العامة؛ مستقل عن دور العضوية في الشركة النشطة. */
+    accountType?: 'legal_accountant' | '';
 }
 
 export interface AttendanceSession {

@@ -6,7 +6,7 @@
 import { clientLogger } from "./logger";
 import { humanizeDrfError, extractDrfFieldErrors } from "../utils/drfError";
 import { resolveBranchId } from "../utils/tenantContext";
-import { emitSessionExpired, emitUserActivity } from "../utils/sessionEvents";
+import { emitEngagementRevoked, emitSessionExpired, emitUserActivity } from "../utils/sessionEvents";
 import { isUserActivityRequest, writeLastActivity } from "../utils/idleSession";
 import {
   remainingRequestBudgetMs,
@@ -226,6 +226,10 @@ async function handleResponseError(res: Response, path: string): Promise<never> 
     msg = "انتهت الجلسة. الرجاء تسجيل الدخول من جديد للمتابعة.";
     emitSessionExpired();
   }
+  const responseCode = (data as { code?: string } | null)?.code;
+  if (responseCode === "engagement_revoked" || responseCode === "engagement_inactive") {
+    emitEngagementRevoked();
+  }
   if (traceId) {
     msg = `${msg} [Trace ID: ${traceId}]`;
   }
@@ -397,6 +401,29 @@ export async function apiPostFormData<T = any>(
   }
 
   return (await res.json()) as T;
+}
+
+/** POST يُعيد ملفاً (CSV مثلاً) بدل JSON — نفس ترويسات المصادقة والشركة. */
+export async function apiPostForBlob(
+  path: string,
+  body: Record<string, any>,
+  opts?: { tenantId?: number }
+): Promise<Blob> {
+  const url = `${API_BASE}/${path.replace(/^\/+/, "")}`;
+  const res = await apiFetch(url, {
+    method: "POST",
+    headers: getHeaders(
+      opts?.tenantId ? { "X-Tenant-Id": String(opts.tenantId) } : undefined,
+      true
+    ),
+    body: JSON.stringify(body ?? {}),
+  });
+
+  if (!res.ok) {
+    await handleResponseError(res, path);
+  }
+
+  return await res.blob();
 }
 
 export async function apiPatchObject<T = any>(

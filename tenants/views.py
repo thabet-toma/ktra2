@@ -236,9 +236,12 @@ class TenantViewSet(viewsets.ModelViewSet):
         memberships = UserCompanyMembership.objects.filter(
             user=user, is_example_access=False,
         )
-        if not memberships.exists():
+        # الارتباطات الخارجية لا تعني أن المحاسب يملك شركة؛ لذلك لا تمنعه من
+        # إنشاء مكتبه (Tenant مستقل يصبح مديره) للمرة الأولى.
+        owned_memberships = memberships.exclude(role="legal_accountant")
+        if not owned_memberships.exists():
             return True  # bootstrapping the first company
-        return memberships.filter(role="manager").exists()
+        return owned_memberships.filter(role="manager").exists()
 
     def create(self, request, *args, **kwargs):
         if not self._can_create_company(request.user):
@@ -300,6 +303,10 @@ class TenantViewSet(viewsets.ModelViewSet):
         valid_roles = {r for r, _ in UserCompanyMembership.ROLE_CHOICES}
         if role not in valid_roles:
             raise DRFValidationError({"role": f"دور غير صالح. المسموح: {sorted(valid_roles)}"})
+        if role == "legal_accountant":
+            raise DRFValidationError({
+                "role": "يُنشأ دور المحاسب القانوني من دورة الارتباط المحمية فقط."
+            })
         if not ident:
             raise DRFValidationError({"username_or_email": "اسم المستخدم أو البريد مطلوب."})
         target = AuthUser.objects.filter(Q(username__iexact=ident) | Q(email__iexact=ident)).first()
@@ -339,6 +346,10 @@ class TenantViewSet(viewsets.ModelViewSet):
         valid_roles = {r for r, _ in UserCompanyMembership.ROLE_CHOICES}
         if role not in valid_roles:
             raise DRFValidationError({"role": f"دور غير صالح. المسموح: {sorted(valid_roles)}"})
+        if role == "legal_accountant":
+            raise DRFValidationError({
+                "role": "يُنشأ دور المحاسب القانوني من دورة الارتباط المحمية فقط."
+            })
         if role != "manager":
             self._assert_not_last_manager(tenant, m)
         m.role = role

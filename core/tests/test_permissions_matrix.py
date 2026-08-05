@@ -48,7 +48,7 @@ class RoleDefaultsTest(APITestCase):
             UserCompanyMembership.objects.create(user=user, tenant=cls.tenant, role=role)
 
     def test_manager_holds_every_permission(self):
-        assert user_permissions(self.boss, self.tenant) == permission_keys()
+        assert user_permissions(self.boss, self.tenant) == permission_keys(self.tenant)
         assert user_tenant_role(self.boss, self.tenant) == "manager"
 
     def test_sales_employee_posts_but_cannot_unpost(self):
@@ -140,7 +140,7 @@ class PermissionsApiTest(APITestCase):
         res = self.client.get("/api/permissions/matrix/", **self._as(self.boss))
         assert res.status_code == 200, res.content
         body = res.json()
-        assert len(body["permissions"]) == len(PERMISSIONS)
+        assert len(body["permissions"]) == len(permission_keys(self.tenant))
         assert body["matrix"]["sales"]["sales.invoice.unpost"] is False
         assert body["matrix"]["manager"]["sales.invoice.unpost"] is True
 

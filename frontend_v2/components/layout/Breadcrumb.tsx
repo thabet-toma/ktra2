@@ -15,6 +15,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'points-history': 'سجل نقاطي',
   'sales-orders': 'عروض وطلبيات البيع',
   'personal-expenses': 'مصاريفي الشخصية',
+  'company-accountant-engagements': 'واجهة المحاسب القانوني',
   'points-management': 'إدارة النقاط',
   settings: 'الإعدادات',
   attendance: 'الحضور والغياب',

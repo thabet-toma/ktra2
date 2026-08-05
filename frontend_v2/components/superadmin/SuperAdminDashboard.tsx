@@ -5,13 +5,14 @@ import {
 } from "lucide-react";
 
 import {
-  getPlatformDashboard, grantSuperAdmin, listSuperAdmins, revokeSuperAdmin,
-  updatePlatformCompany,
-  type PlatformDashboardData, type PlatformSuperAdmin,
+  getPlatformDashboard, grantSuperAdmin, listPendingAccountants, listSuperAdmins,
+  openAccountantWorkspace, revokeSuperAdmin, updatePlatformCompany, verifyAccountant,
+  type PlatformAccountantProfile, type PlatformDashboardData, type PlatformSuperAdmin,
 } from "../../services/platformAdminApi";
 import {
   COMPANY_PLAN_LABELS, COMPANY_STATUS_LABELS, PlatformCompanyPanel,
 } from "./PlatformCompanyPanel";
+import { enterOfficeShell } from "../../utils/officeShell";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import type { AppView } from "../../types";
@@ -35,6 +36,11 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
   const [assigningExample, setAssigningExample] = useState(false);
   /** الشركة المفتوحة في لوحة التحكم (خطة/حالة/استيراد/أعضاء) */
   const [managedCompanyId, setManagedCompanyId] = useState<number | null>(null);
+  /** ق6: التحقق المهني للمحاسبين قرار يدوي لسوبر أدمن المنصة. */
+  const [pendingAccountants, setPendingAccountants] = useState<PlatformAccountantProfile[]>([]);
+  const [accountantBusy, setAccountantBusy] = useState<number | null>(null);
+  const [rejectReason, setRejectReason] = useState<Record<number, string>>({});
+  const [openingWorkspace, setOpeningWorkspace] = useState(false);
 
   const loadAdmins = () => {
     listSuperAdmins()
@@ -42,10 +48,56 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
       .catch((cause) => setError(cause instanceof Error ? cause.message : "تعذّر تحميل قائمة السوبر أدمن"));
   };
 
+  /** يفتح واجهة المحاسب القانوني لحساب السوبر أدمن نفسه ثم ينقله إليها فوراً. */
+  const openAccountantView = async () => {
+    setOpeningWorkspace(true);
+    try {
+      const result = await openAccountantWorkspace();
+      // تُحفظ الشركة التجارية الحالية قبل تبديلها بالمكتب، فترجع كما هي عند
+      // «العودة للوحة المنصة».
+      enterOfficeShell();
+      localStorage.setItem("tenantId", String(result.office.tenant_id));
+      localStorage.removeItem("branchId");
+      toast(`جاهز: ${result.office.name}. تُفتح الآن واجهة مكتب المحاسبة.`, "success");
+      window.location.assign("/office");
+    } catch (cause) {
+      setOpeningWorkspace(false);
+      toast(cause instanceof Error ? cause.message : "تعذّر فتح واجهة المحاسب.", "error");
+    }
+  };
+
+  const loadPendingAccountants = () => {
+    listPendingAccountants()
+      .then((res) => setPendingAccountants(res.results))
+      .catch(() => setPendingAccountants([]));
+  };
+
+  const decideAccountant = async (
+    profile: PlatformAccountantProfile,
+    decision: "approve" | "reject" | "bar",
+  ) => {
+    const reason = (rejectReason[profile.id] || "").trim();
+    if (decision !== "approve" && !reason) {
+      toast("سبب القرار مطلوب عند الرفض أو المنع.", "error");
+      return;
+    }
+    setAccountantBusy(profile.id);
+    try {
+      await verifyAccountant(profile.id, decision, reason);
+      toast(decision === "approve" ? "وُثِّق ملف المحاسب." : "سُجِّل القرار.", "success");
+      loadPendingAccountants();
+    } catch (cause) {
+      toast(cause instanceof Error ? cause.message : "تعذّر تنفيذ القرار.", "error");
+    } finally {
+      setAccountantBusy(null);
+    }
+  };
+
   const load = () => {
     setLoading(true);
     setError(null);
     loadAdmins();
+    loadPendingAccountants();
     getPlatformDashboard()
       .then(setData)
       .catch((cause) => setError(cause instanceof Error ? cause.message : "تعذّر تحميل لوحة المنصة"))
@@ -201,6 +253,64 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
               ) : (
                 <span className="text-xs aseel-text-soft">مثبَّت في إعدادات المنصة</span>
               )}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section aria-label="بوابة المحاسب القانوني" className="mt-5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+          <div>
+            <h2 className="font-bold text-[var(--color-text)]">واجهة شركة المحاسبة القانونية</h2>
+            <p className="text-xs aseel-text-soft">
+              تفتح لحسابك ملفاً مهنياً موثَّقاً ومكتب محاسبة مرخَّصاً، فتدخل الواجهة كما يراها المحاسب
+              وترسل منها طلب ارتباط لأي شركة مسجَّلة عندنا لتراجع بياناتها.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void openAccountantView()}
+            disabled={openingWorkspace}
+            className="aseel-btn aseel-btn--primary"
+          >
+            {openingWorkspace ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+            افتح واجهة المحاسب القانوني
+          </button>
+        </div>
+      </section>
+
+      <section aria-label="ملفات المحاسبين بانتظار التحقق" className="mt-5 overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]">
+        <div className="border-b border-[var(--color-border)] px-4 py-3">
+          <h2 className="font-bold text-[var(--color-text)]">توثيق المحاسبين القانونيين ({pendingAccountants.length})</h2>
+          <p className="text-xs aseel-text-soft">
+            التوثيق يدوي (ق6): تحقّق من الرخصة والرقم الضريبي وعنوان العمل قبل القبول. «منع» يوقف ارتباطه بأي شركة (م116.2).
+          </p>
+        </div>
+        <ul className="divide-y divide-[var(--color-border)]">
+          {pendingAccountants.length === 0 ? (
+            <li className="px-4 py-6 text-center aseel-text-soft">لا ملفات بانتظار التحقق</li>
+          ) : pendingAccountants.map((profile) => (
+            <li key={profile.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+              <div className="min-w-[16rem]">
+                <p className="font-semibold text-[var(--color-text)]">{profile.full_name}</p>
+                <p className="text-xs aseel-text-soft">
+                  {profile.email} · ضريبي {profile.tax_registration_number}
+                  {profile.license_number ? ` · رخصة ${profile.license_number}` : ""}
+                </p>
+                <p className="text-[11px] aseel-text-soft">{profile.business_address}</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  className="aseel-input h-9 w-56"
+                  placeholder="سبب الرفض/المنع"
+                  aria-label={`سبب قرار ${profile.full_name}`}
+                  value={rejectReason[profile.id] || ""}
+                  onChange={(event) => setRejectReason((current) => ({ ...current, [profile.id]: event.target.value }))}
+                />
+                <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "approve")} className="aseel-btn aseel-btn--primary">توثيق</button>
+                <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "reject")} className="aseel-btn">رفض</button>
+                <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "bar")} className="aseel-btn text-red-600">منع</button>
+              </div>
             </li>
           ))}
         </ul>

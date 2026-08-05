@@ -19,8 +19,11 @@ import {
   Gauge, TableProperties,
 } from 'lucide-react';
 import { openInNewTab } from "../utils/openInNewTab";
+import { enterOfficeShell } from "../utils/officeShell";
+import { clientLogger } from "../services/logger";
 import { useCompany } from "../contexts/CompanyContext";
 import { usePermissions } from "../contexts/PermissionsContext";
+import { moduleAllowsView } from "../utils/viewPermissions";
 import { groupVisible, visibleLinks } from "../utils/navAccess";
 import { permForView } from "../utils/viewPermissions";
 import { useTenantSettings } from "../hooks/useTenantSettings";
@@ -36,7 +39,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   // صلاحية الاستيراد للشركة النشطة (تتفاعل مع تبديل الشركة) — لا تعتمد على علم ثابت من تسجيل الدخول.
   const { canAccessImport } = useCompany();
   // T-PERM: القائمة مشتقّة من الصلاحيات؛ ملخص الأعمال استثناء للمدير فقط.
-  const { can, isManager } = usePermissions();
+  const { can, isManager, permissions, modules } = usePermissions();
   const { identity } = useTenantSettings();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
@@ -261,6 +264,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                     className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("development-notes") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
                     <TableProperties className="h-4 w-4" /> ملاحظات التطوير
                   </button>
+                  {/* T-EXTACCT: طريق العودة لقشرة المكتب — «العودة للوحة المنصة»
+                      رحلة ذهاب وإياب، فمن خرج منها يجدها هنا حيث خرج. */}
+                  {user.accountType === "legal_accountant" && (
+                    <button type="button"
+                      onClick={() => {
+                        enterOfficeShell();
+                        clientLogger.info("accountant.shell_switched", { to: "office" });
+                        window.location.assign("/office");
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md p-2 text-sm text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30">
+                      <Scale className="h-4 w-4" /> العودة لواجهة المكتب
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -328,6 +344,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             <Wallet className="h-5 w-5 flex-shrink-0" />
             {showText && <span className="mr-3 text-right flex-1">مصاريفي الشخصية</span>}
           </button>
+
+          {/* T-EXTACCT: الشركة التجارية لها تبويب واحد لا أكثر — مَن المحاسب
+              الماسك ملفنا، وماذا طلب، وما الصلاحيات التي منحناه. لا تصير الشركة
+              التجارية محاسباً قانونياً، وشاشات المكتب ليست من شأنها. */}
+          {permissions.has("admin.members.manage") && moduleAllowsView("company-accountant-engagements", modules) && (
+            <button
+              onClick={() => { setView("company-accountant-engagements"); if (isMobile) setIsMobileMenuOpen(false); }}
+              className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("company-accountant-engagements") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
+              title="واجهة المحاسب القانوني"
+            >
+              <ShieldCheck className="h-5 w-5 flex-shrink-0" />
+              {showText && <span className="mr-3 text-right flex-1">واجهة المحاسب القانوني</span>}
+            </button>
+          )}
 
           <button
             onClick={() => { setView("settings"); if (isMobile) setIsMobileMenuOpen(false); }}

@@ -81,13 +81,44 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "task-management": "hr.tasks.manage",
   "activity-log": "admin.activity.view",
   permissions: "admin.permissions.manage",
+  "company-accountant-engagements": "admin.members.manage",
   // «الرئيسية» تختار بين اللوحة التجارية والشخصية — لا تُدرَج هنا كي لا تُحجب
   // الشاشة كلياً؛ الاختيار يتم بدور manager الفعلي في App.tsx.
+};
+
+/**
+ * T-EXTACCT: شاشات الوحدات المرخّصة لكل شركة. الشاشة هنا لا تُعرض ولا تُوجَّه
+ * إليها ما لم تكن وحدتها مرخّصة — والحارس يسبق `import()` فلا يُنزَّل chunkها
+ * أصلاً للشركة غير المرخّصة.
+ *
+ * ملاحظة مقصودة: شاشات المحاسب نفسه ليست هنا — فهي في قشرة المكتب المستقلة،
+ * ويبلغها المحاسب بلا أي عضوية في شركة تجارية.
+ */
+export const VIEW_MODULES: Record<string, string> = {
+  // شاشة واحدة فقط داخل النظام التجاري: «واجهة المحاسب القانوني». بقية شاشات
+  // المحاسب تعيش في قشرة المكتب المستقلة ولا تخصّ الشركة التجارية أصلاً.
+  "company-accountant-engagements": "accountant_portal",
 };
 
 /** صلاحية الشاشة إن وُجدت، وإلا undefined (شاشة مفتوحة). */
 export const permForView = (view: string): string | undefined =>
   VIEW_PERMISSIONS[view];
+
+/** وحدة الشاشة إن كانت شاشة وحدة مرخّصة. */
+export const moduleForView = (view: string): string | undefined =>
+  VIEW_MODULES[view];
+
+/**
+ * يفشل **مغلقاً**: ما لم تصل أعلام الوحدات بقيمة `true` صريحة تُعدّ الوحدة
+ * مطفأة. عكس `can()` — فهذه ترخيص لا تجميل.
+ */
+export const moduleAllowsView = (
+  view: string,
+  modules?: Record<string, boolean> | null,
+): boolean => {
+  const key = VIEW_MODULES[view];
+  return !key || modules?.[key] === true;
+};
 
 export type InvoicePermissionScope = "sales" | "purchase";
 

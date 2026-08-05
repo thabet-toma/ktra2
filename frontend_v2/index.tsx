@@ -1,7 +1,7 @@
 // index.tsx - تحديث المسارات
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import App from './App';
 
 import { AuthProvider } from './contexts/AuthContext';
@@ -44,6 +44,7 @@ const ApplicationProviders: React.FC = () => (
 );
 
 const ApplicationBoundary: React.FC = () => {
+  const location = useLocation();
   const { currentUser, loading: authLoading } = useAuth();
   const { companies, currentCompany, loading: companiesLoading, error, refreshCompanies } = useCompany();
 
@@ -63,11 +64,15 @@ const ApplicationBoundary: React.FC = () => {
     );
   }
 
-  if (currentUser && companies.length === 0) {
+  const accountantTenantlessPath =
+    location.pathname.startsWith('/accountant/profile') ||
+    location.pathname.startsWith('/accountant/engagements');
+
+  if (currentUser && companies.length === 0 && !accountantTenantlessPath) {
     return <FirstCompanyOnboarding />;
   }
 
-  if (currentUser && !currentCompany) {
+  if (currentUser && !currentCompany && !accountantTenantlessPath) {
     return null;
   }
 

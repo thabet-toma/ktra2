@@ -106,6 +106,30 @@ class CompanyIsolationTest(APITestCase):
         response = self.client.post("/api/tenants/companies/", {"CompanyName": "ممنوع"})
         self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_user_with_only_legal_accountant_membership_can_create_own_office(self):
+        external = User.objects.create_user(username="legal-office-owner", password="pw")
+        UserCompanyMembership.objects.create(
+            user=external,
+            tenant=self.tenant_a,
+            role="legal_accountant",
+        )
+        self.client.force_authenticate(user=external)
+
+        response = self.client.post(
+            "/api/tenants/companies/",
+            {"CompanyName": "مكتب المحاسب"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.content)
+        self.assertTrue(
+            UserCompanyMembership.objects.filter(
+                user=external,
+                tenant_id=response.data["TenantID"],
+                role="manager",
+            ).exists()
+        )
+
 
 
 class SignupOnboardingJourneyTest(APITestCase):
