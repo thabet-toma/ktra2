@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useState } from "react";
 import { Loader2, Save, ShieldOff, ShieldCheck, Trash2, UserPlus, X } from "lucide-react";
 
 import {
-  addPlatformCompanyMember, getPlatformCompany, removePlatformCompanyMember,
-  setPlatformUserActive, updatePlatformCompany, updatePlatformCompanyMember,
+  addPlatformCompanyMember, getPlatformCompany, listCompanyModules,
+  removePlatformCompanyMember, setCompanyModule, setPlatformUserActive,
+  updatePlatformCompany, updatePlatformCompanyMember,
   type PlatformCompanyDetail, type PlatformCompanyMember, type PlatformCompanyPatch,
+  type PlatformModuleRow,
 } from "../../services/platformAdminApi";
 import { ROLE_LABELS } from "../layout/CompanyManagementModal";
 import { useConfirm } from "../../contexts/ConfirmContext";
@@ -48,13 +50,20 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
   const [identifier, setIdentifier] = useState("");
   const [newRole, setNewRole] = useState("staff");
   const [adding, setAdding] = useState(false);
+  const [modules, setModules] = useState<PlatformModuleRow[]>([]);
+  const [moduleBusy, setModuleBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await getPlatformCompany(companyId);
+      const [data, moduleState] = await Promise.all([
+        getPlatformCompany(companyId),
+        listCompanyModules(companyId),
+      ]);
       setDetail(data);
+      // وحدة الاستيراد القديمة لها خانتها في «إعدادات الشركة» أعلاه — لا نكرّر ضبطها.
+      setModules(moduleState.results.filter((module) => !module.legacy));
       setForm({
         name: data.name, plan: data.plan, status: data.status,
         import_enabled: data.import_enabled,
@@ -138,6 +147,28 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
         setBusyId(null);
       }
     }, "تم إخراج العضو.");
+
+  const toggleModule = (module: PlatformModuleRow, enabled: boolean) =>
+    run(async () => {
+      if (!enabled && module.module_key === "accountant_portal") {
+        const ok = await confirm({
+          title: "تعطيل بوابة المحاسب",
+          message:
+            "ستختفي شاشات البوابة وصلاحياتها عن هذه الشركة فوراً، وتتوقف ارتباطات محاسبيها عن العمل. "
+            + "البيانات تبقى كما هي وتعود بإعادة التفعيل.",
+          confirmText: "تعطيل",
+          danger: true,
+        });
+        if (!ok) return;
+      }
+      setModuleBusy(module.module_key);
+      try {
+        await setCompanyModule(companyId, module.module_key, enabled, module.plan_note);
+        await load();
+      } finally {
+        setModuleBusy(null);
+      }
+    }, "تم تحديث ترخيص الوحدة.");
 
   const toggleAccount = (member: PlatformCompanyMember) =>
     run(async () => {
@@ -250,6 +281,44 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                     {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} حفظ
                   </button>
                 </div>
+              </section>
+
+              <section aria-label="وحدات الشركة المرخَّصة" className="mt-4 rounded-lg border border-[var(--color-border)] p-3">
+                <h3 className="mb-3 text-sm font-bold text-[var(--color-text)]">الوحدات المرخَّصة</h3>
+                <div className="space-y-2">
+                  {modules.length === 0 ? (
+                    <p className="text-xs aseel-text-soft">لا وحدات إضافية — وحدة الاستيراد تُضبط من «إعدادات الشركة» أعلاه.</p>
+                  ) : modules.map((module) => (
+                    <div
+                      key={module.module_key}
+                      className="flex flex-wrap items-center justify-between gap-3 rounded border border-[var(--color-border)] px-3 py-2"
+                    >
+                      <div className="min-w-[14rem]">
+                        <p className="text-sm font-bold text-[var(--color-text)]">{module.label}</p>
+                        <p className="text-[11px] aseel-text-soft">
+                          {module.plans.length ? `الخطط: ${module.plans.join("، ")}` : "بلا خطة محددة"}
+                          {module.plan_note ? ` · ${module.plan_note}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm font-bold text-[var(--color-text)]">
+                          <input
+                            type="checkbox"
+                            checked={module.enabled}
+                            disabled={moduleBusy === module.module_key}
+                            onChange={(event) => void toggleModule(module, event.target.checked)}
+                            aria-label={`ترخيص ${module.label}`}
+                          />
+                          {module.enabled ? "مفعّلة" : "معطّلة"}
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-2 text-[11px] aseel-text-soft">
+                  الشركة غير المرخَّصة لا ترى مسارات الوحدة ولا صلاحياتها ولا تُحمَّل شاشاتها في متصفحها.
+                  واجهة المكتب نفسها تُفتح من لوحة المنصة بزرّ «افتح واجهة المحاسب القانوني».
+                </p>
               </section>
 
               <section aria-label="أعضاء الشركة" className="mt-4 rounded-lg border border-[var(--color-border)] p-3">

@@ -19,6 +19,7 @@ from .serializers import (
 )
 from core.mixins import BaseTenantViewSet
 from core.tenant_utils import get_tenant
+from accountant_portal.permissions import LegalAccountantRoutePermission
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +72,7 @@ def _month_bounds(month: str):
 class PersonalExpenseOwnedViewSet(viewsets.ModelViewSet):
     """أساس مشترك لبيانات الدفتر الشخصي: مصادقة، عزل بالمستخدم، ومالك من الطلب."""
     authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, LegalAccountantRoutePermission]
     model = None
 
     def get_queryset(self):
@@ -166,7 +167,7 @@ class PersonalExpenseViewSet(viewsets.ModelViewSet):
     - الفلاتر: `?sheet=` · `?month=YYYY-MM` أو `?from=&?to=` · `?category=` · `?is_paid=`.
     """
     authentication_classes = [TokenAuthentication, SessionAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, LegalAccountantRoutePermission]
     serializer_class = PersonalExpenseSerializer
 
     def get_queryset(self):

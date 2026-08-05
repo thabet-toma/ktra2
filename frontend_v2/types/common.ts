@@ -93,6 +93,7 @@ export type AppView =
     | "activity-log"
     | "permissions"
     | "personal-expenses"
+    | "company-accountant-engagements"
     | "about-us"
     | "contact";
 

@@ -23,13 +23,25 @@ User = get_user_model()
 def _base_payload(user) -> Dict[str, Any]:
     name = (f"{user.first_name} {user.last_name}").strip() or user.username
     role = "manager" if user.is_superuser else "employee"
+    from accountant_portal.models import AccountantProfile
+
+    accountant_profile = (
+        AccountantProfile.objects
+        .filter(user_id=user.pk)
+        .only("email_verified_at")
+        .first()
+    )
     return {
         "id": str(user.pk),
         "name": name,
         "email": user.email or user.username,
         "role": role,
         "isApproved": user.is_active,
-        "isEmailVerified": True,
+        "isEmailVerified": (
+            accountant_profile.email_verified_at is not None
+            if accountant_profile is not None else True
+        ),
+        "accountType": "legal_accountant" if accountant_profile is not None else "",
         "employmentStatus": "",
         "phone": "",
         "address": "",

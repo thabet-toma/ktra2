@@ -22,7 +22,8 @@
 ## إعدادات مشروع K.T.R.A
 
 ### Tech Stack
-- **Backend:** Django 6.0.1, DRF 3.16, MySQL (prod) / SQLite (test)
+- **Backend:** Django 5.1.15 (requirements.txt), DRF 3.16, MySQL (prod) / SQLite (test)
+  — لا تستعمل ميزةً حصريةً بـ6.0
 - **Frontend:** React 19.2, TypeScript 5.8, Vite 6.2, Tailwind CSS 4.3
 - **Tests:** pytest-django (70 tests) · `python manage.py test --settings=core.test_settings`
 
@@ -41,6 +42,6 @@
 - الـ serializers والـ views في `api/` داخل كل app
 
 ### قواعد Frontend
-- الملفات في `frontend_v2/src/`
+- الملفات في `frontend_v2/` مباشرةً (`components/`، `services/`، `utils/`) — لا وجود لـ`src/`
 - استخدم `restApi.ts` كـ base client
 - CSS عبر Tailwind فقط — لا inline styles

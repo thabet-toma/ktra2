@@ -64,6 +64,47 @@ class ActivityLog(models.Model):
         return f"{self.action} {self.entity_type}#{self.entity_id} by {self.user_id}"
 
 
+class TenantModule(models.Model):
+    """ترخيص وحدة اختيارية لشركة بعينها؛ غياب الصف يعني أن الوحدة معطّلة."""
+
+    id = models.AutoField(primary_key=True)
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="module_licenses",
+        db_column="TenantID",
+    )
+    module_key = models.CharField(max_length=40, db_column="ModuleKey")
+    enabled = models.BooleanField(default=False, db_column="Enabled")
+    enabled_by = models.ForeignKey(
+        "auth.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="enabled_tenant_modules",
+        db_column="EnabledBy_UserID",
+    )
+    enabled_at = models.DateTimeField(null=True, blank=True, db_column="EnabledAt")
+    plan_note = models.CharField(
+        max_length=120,
+        blank=True,
+        default="",
+        db_column="PlanNote",
+    )
+
+    class Meta:
+        db_table = "tenant_modules"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "module_key"],
+                name="uniq_tenant_module",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant_id}:{self.module_key}={self.enabled}"
+
+
 class AssistantLesson(models.Model):
     """درس سلوكي عام يتعلّمه المساعد الذكي من تصحيح إنسان له أثناء محادثة.
 

@@ -126,6 +126,71 @@ export const setPlatformUserActive = (userId: number, isActive: boolean) =>
   apiPostObject<{ id: number; username: string; is_active: boolean }>(
     `platform/users/${userId}/set-active/`, { is_active: isActive });
 
+/** T-EXTACCT: ترخيص الوحدات لكل شركة — سوبر أدمن فقط. */
+export interface PlatformModuleRow {
+  module_key: string;
+  label: string;
+  plans: string[];
+  legacy: boolean;
+  enabled: boolean;
+  plan_note: string;
+  enabled_at: string | null;
+}
+
+export const listCompanyModules = (companyId: number) =>
+  apiGetObject<{ results: PlatformModuleRow[] }>(`platform/companies/${companyId}/modules/`);
+
+export const setCompanyModule = (
+  companyId: number,
+  moduleKey: string,
+  enabled: boolean,
+  planNote = "",
+) =>
+  apiPostObject<{ module_key: string; enabled: boolean; plan_note: string }>(
+    `platform/companies/${companyId}/modules/`,
+    { module_key: moduleKey, enabled, plan_note: planNote },
+  );
+
+export interface PlatformAccountantProfile {
+  id: number;
+  user_id: number;
+  full_name: string;
+  email: string;
+  professional_type: string;
+  license_number: string;
+  license_authority: string;
+  tax_registration_number: string;
+  business_address: string;
+  phone: string;
+  email_verified: boolean;
+  verification_status: string;
+  rejection_reason: string;
+  barred_until: string | null;
+  created_at: string;
+}
+
+/** يفتح لسوبر أدمن واجهة المحاسب القانوني كاملةً: ملف مهني + مكتب + ترخيص. */
+export const openAccountantWorkspace = () =>
+  apiPostObject<{
+    profile: PlatformAccountantProfile;
+    office: { tenant_id: number; name: string };
+    profile_created: boolean;
+    office_created: boolean;
+  }>("platform/accountant-workspace/", {});
+
+export const listPendingAccountants = () =>
+  apiGetObject<{ results: PlatformAccountantProfile[]; count: number }>(
+    "platform/accountants/pending/",
+  );
+
+export const verifyAccountant = (
+  profileId: number,
+  decision: "approve" | "reject" | "bar",
+  reason = "",
+) =>
+  apiPostObject<PlatformAccountantProfile>(
+    `platform/accountants/${profileId}/verify/`, { decision, reason });
+
 export const listDevelopmentNotes = () =>
   apiGetObject<DevelopmentNote[]>("platform/development-notes/");
 

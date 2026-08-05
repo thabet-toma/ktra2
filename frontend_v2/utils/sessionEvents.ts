@@ -9,6 +9,7 @@ export const SESSION_EXPIRED_EVENT = "ktra:session-expired";
  * لا يصل للتبويب الذي كتب القيمة، فنحتاج إشعاراً داخلياً ليعيد الحارس التسليح.
  */
 export const USER_ACTIVITY_EVENT = "ktra:user-activity";
+export const ENGAGEMENT_REVOKED_EVENT = "ktra:engagement-revoked";
 
 /** يُعلن نشاطاً للحارس داخل هذا التبويب. */
 export function emitUserActivity(): void {
@@ -23,6 +24,15 @@ export function emitUserActivity(): void {
 export function emitSessionExpired(): void {
   try {
     window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+  } catch {
+    /* بيئة بلا window (اختبارات) — تجاهل */
+  }
+}
+
+/** إلغاء ارتباط شركة لا ينهي جلسة المحاسب ولا يمس توكنه العام. */
+export function emitEngagementRevoked(): void {
+  try {
+    window.dispatchEvent(new Event(ENGAGEMENT_REVOKED_EVENT));
   } catch {
     /* بيئة بلا window (اختبارات) — تجاهل */
   }

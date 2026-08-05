@@ -140,8 +140,8 @@ class MemberGrantAllTest(APITestCase):
         assert res.status_code == 200, res.content
         body = res.json()
         assert body["grant_all"] is True
-        assert set(body["effective"]) == set(permission_keys())
-        assert user_permissions(self.seller, self.tenant) == permission_keys()
+        assert set(body["effective"]) == set(permission_keys(self.tenant))
+        assert user_permissions(self.seller, self.tenant) == permission_keys(self.tenant)
         # الدور لم يتبدّل — المنح فرديّ لا ترقية دور
         self.m.refresh_from_db()
         assert self.m.role == "sales"

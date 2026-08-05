@@ -4,14 +4,17 @@ import logging
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.db.models import Count, Q
+from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 
+from accounting.models import AccountingAuditLog
 from core.import_access import is_super_admin, super_admin_emails
-from core.models import DevelopmentNote
+from core.models import DevelopmentNote, TenantModule
+from core.modules import MODULES, invalidate_module_cache
 from tenants.models import Tenant, UserCompanyMembership
 
 
@@ -226,6 +229,139 @@ def platform_dashboard(request):
 _BOOL_FIELD = serializers.BooleanField()
 
 
+class TenantModuleToggleSerializer(serializers.Serializer):
+    module_key = serializers.ChoiceField(choices=tuple(MODULES))
+    enabled = serializers.BooleanField()
+    plan_note = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        default="",
+        max_length=120,
+        trim_whitespace=True,
+    )
+
+
+def _module_rows(tenant):
+    """حالة كل وحدة لهذه الشركة — استعلام واحد لسجل الوحدات، والقديمة من عَلَمها."""
+    stored = {
+        row.module_key: row
+        for row in TenantModule.objects.filter(tenant=tenant)
+    }
+    rows = []
+    for key, definition in MODULES.items():
+        legacy_flag = definition['legacy_flag']
+        row = stored.get(key)
+        rows.append({
+            'module_key': key,
+            'label': definition['label'],
+            'plans': list(definition['plans']),
+            'legacy': bool(legacy_flag),
+            'enabled': (
+                bool(getattr(tenant, legacy_flag, False)) if legacy_flag
+                else bool(row and row.enabled)
+            ),
+            'plan_note': row.plan_note if row else '',
+            'enabled_at': row.enabled_at if row else None,
+        })
+    return rows
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_company_modules(request, pk):
+    """اقرأ حالة وحدات الشركة (GET) أو فعّل/عطّل وحدة (POST) بتدقيق مالي وتشغيلي."""
+    if request.method == 'GET':
+        tenant = Tenant.objects.filter(pk=pk).first()
+        if tenant is None:
+            return Response(
+                {'detail': 'الشركة غير موجودة.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response({'results': _module_rows(tenant)})
+
+    serializer = TenantModuleToggleSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    module_key = serializer.validated_data['module_key']
+    enabled = serializer.validated_data['enabled']
+    plan_note = serializer.validated_data['plan_note']
+
+    with transaction.atomic():
+        tenant = Tenant.objects.select_for_update().filter(pk=pk).first()
+        if tenant is None:
+            return Response(
+                {'detail': 'الشركة غير موجودة.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        definition = MODULES[module_key]
+        legacy_flag = definition['legacy_flag']
+        if legacy_flag:
+            previous = bool(getattr(tenant, legacy_flag, False))
+            setattr(tenant, legacy_flag, enabled)
+            tenant.save(update_fields=[legacy_flag])
+            audit_model_name = 'Tenant'
+            audit_object_id = tenant.pk
+            entity_id = tenant.pk
+        else:
+            row, _ = TenantModule.objects.select_for_update().get_or_create(
+                tenant=tenant,
+                module_key=module_key,
+            )
+            previous = row.enabled
+            row.enabled = enabled
+            row.enabled_by = request.user
+            row.enabled_at = timezone.now() if enabled else None
+            row.plan_note = plan_note
+            row.save(update_fields=[
+                'enabled', 'enabled_by', 'enabled_at', 'plan_note',
+            ])
+            audit_model_name = 'TenantModule'
+            audit_object_id = row.pk
+            entity_id = row.pk
+
+        from core.activity import log_activity
+
+        AccountingAuditLog.objects.create(
+            tenant=tenant,
+            user=request.user,
+            action='MODULE_TOGGLED',
+            model_name=audit_model_name,
+            object_id=audit_object_id,
+            change_details=(
+                f'module={module_key}; enabled={str(enabled).lower()}'
+            ),
+        )
+        log_activity(
+            action='update',
+            entity_type='tenant_module',
+            entity_id=entity_id,
+            entity_label=definition['label'],
+            description='تم تحديث ترخيص وحدة للشركة.',
+            metadata={
+                'event_code': 'MODULE_TOGGLED',
+                'module': module_key,
+                'previous_enabled': previous,
+                'enabled': enabled,
+            },
+            request=request,
+            tenant=tenant,
+            user=request.user,
+        )
+        transaction.on_commit(
+            lambda tenant_id=tenant.pk: invalidate_module_cache(
+                tenant_id,
+                request=request,
+            )
+        )
+
+    return Response({
+        'module_key': module_key,
+        'enabled': enabled,
+        'plan_note': plan_note,
+    })
+
+
 def _member_rows(tenant):
     from tenants.services import member_payload
 
@@ -239,7 +375,187 @@ def _member_rows(tenant):
 
 
 def _valid_roles():
-    return {role for role, _ in UserCompanyMembership.ROLE_CHOICES}
+    # الدور الخارجي لا يُنشأ أو يُحوّل من إدارة الأعضاء العامة؛ مصدره الوحيد
+    # دورة AccountantEngagement التي تضمن وجود علاقة نشطة ونطاقاً صالحاً.
+    return {
+        role for role, _ in UserCompanyMembership.ROLE_CHOICES
+        if role != 'legal_accountant'
+    }
+
+
+def _accountant_profile_payload(profile):
+    return {
+        'id': profile.pk,
+        'user_id': profile.user_id,
+        'full_name': profile.user.get_full_name() or profile.user.username,
+        'email': profile.user.email,
+        'professional_type': profile.professional_type,
+        'license_number': profile.license_number,
+        'license_authority': profile.license_authority,
+        'tax_registration_number': profile.tax_registration_number,
+        'business_address': profile.business_address,
+        'phone': profile.phone,
+        'email_verified': profile.email_verified_at is not None,
+        'verification_status': profile.verification_status,
+        'rejection_reason': profile.rejection_reason,
+        'barred_until': profile.barred_until,
+        'created_at': profile.created_at,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_accountants_pending(request):
+    from accountant_portal.models import AccountantProfile
+
+    profiles = (
+        AccountantProfile.objects
+        .filter(verification_status='pending_review')
+        .select_related('user')
+        .order_by('created_at')
+    )
+    return Response({
+        'results': [_accountant_profile_payload(profile) for profile in profiles],
+        'count': profiles.count(),
+    })
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_accountant_verify(request, profile_id):
+    from accountant_portal.models import AccountantProfile
+
+    profile = AccountantProfile.objects.select_related('user').filter(pk=profile_id).first()
+    if profile is None:
+        return Response({'detail': 'ملف المحاسب غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+    raw_decision = str(request.data.get('decision') or '').strip().lower()
+    decisions = {
+        'approve': 'verified',
+        'approved': 'verified',
+        'verified': 'verified',
+        'reject': 'rejected',
+        'rejected': 'rejected',
+        'bar': 'barred',
+        'barred': 'barred',
+    }
+    decision = decisions.get(raw_decision)
+    if decision is None:
+        return Response(
+            {'decision': 'القرار يجب أن يكون verified أو rejected أو barred.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    reason = str(request.data.get('reason') or '').strip()
+    if decision in {'rejected', 'barred'} and not reason:
+        return Response({'reason': 'سبب القرار مطلوب.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    profile.verification_status = decision
+    profile.verified_by = request.user
+    profile.verified_at = timezone.now()
+    profile.rejection_reason = '' if decision == 'verified' else reason[:2000]
+    profile.save(update_fields=[
+        'verification_status', 'verified_by', 'verified_at',
+        'rejection_reason', 'updated_at',
+    ])
+    logger.info(
+        'platform accountant verification profile=%s decision=%s by_user=%s',
+        profile.pk,
+        decision,
+        request.user.pk,
+    )
+    return Response(_accountant_profile_payload(profile))
+
+
+ACCOUNTANT_OFFICE_NAME = 'مكتب المحاسبة القانونية (تجريبي)'
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_accountant_workspace(request):
+    """يفتح لسوبر أدمن المنصة واجهةَ المحاسب القانوني كاملةً بضغطة واحدة.
+
+    ينشئ (أو يعيد) ثلاثة أشياء متلازمة: ملفاً مهنياً موثَّقاً لحسابه، ومكتبَ
+    محاسبة (Tenant هو مديره كما في §16 — بلا وحدة فوترة جديدة)، وترخيصَ الوحدة
+    على المكتب. بعدها يظهر له قائمة المحاسب ويستطيع إرسال طلب ارتباط لأي شركة.
+    """
+    from accountant_portal.models import AccountantProfile
+    from core.modules import invalidate_module_cache
+    from tenants.services import create_company
+
+    with transaction.atomic():
+        profile, profile_created = AccountantProfile.objects.get_or_create(
+            user=request.user,
+            defaults={
+                'professional_type': 'licensed_auditor',
+                'tax_registration_number': f'DEMO-{request.user.pk}',
+                'business_address': 'عنوان تجريبي — عدّله من الملف المهني',
+                'email_verified_at': timezone.now(),
+                'verification_status': 'verified',
+                'verified_by': request.user,
+                'verified_at': timezone.now(),
+            },
+        )
+        if not profile_created and (
+            profile.email_verified_at is None or profile.verification_status != 'verified'
+        ):
+            profile.email_verified_at = profile.email_verified_at or timezone.now()
+            profile.verification_status = 'verified'
+            profile.verified_by = request.user
+            profile.verified_at = timezone.now()
+            profile.save(update_fields=[
+                'email_verified_at', 'verification_status', 'verified_by',
+                'verified_at', 'updated_at',
+            ])
+
+        office = (
+            Tenant.objects
+            .filter(
+                CompanyName=ACCOUNTANT_OFFICE_NAME,
+                memberships__user=request.user,
+                memberships__role='manager',
+            )
+            .first()
+        )
+        office_created = office is None
+        if office_created:
+            office = create_company(ACCOUNTANT_OFFICE_NAME, request.user)
+
+        module_row, _ = TenantModule.objects.get_or_create(
+            tenant=office,
+            module_key='accountant_portal',
+        )
+        if not module_row.enabled:
+            module_row.enabled = True
+            module_row.enabled_by = request.user
+            module_row.enabled_at = timezone.now()
+            module_row.plan_note = 'واجهة تجريبية لسوبر أدمن'
+            module_row.save(update_fields=[
+                'enabled', 'enabled_by', 'enabled_at', 'plan_note',
+            ])
+            AccountingAuditLog.objects.create(
+                tenant=office,
+                user=request.user,
+                action='MODULE_TOGGLED',
+                model_name='TenantModule',
+                object_id=module_row.pk,
+                change_details='module=accountant_portal; enabled=true',
+            )
+        transaction.on_commit(
+            lambda tenant_id=office.pk: invalidate_module_cache(tenant_id, request=request)
+        )
+
+    logger.info(
+        'platform accountant workspace opened user=%s office=%s profile_created=%s',
+        request.user.pk, office.pk, profile_created,
+    )
+    return Response({
+        'profile': _accountant_profile_payload(profile),
+        'office': {'tenant_id': office.pk, 'name': office.CompanyName},
+        'profile_created': profile_created,
+        'office_created': office_created,
+    })
 
 
 def _apply_company_changes(tenant, data):

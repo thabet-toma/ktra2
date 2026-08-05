@@ -9,20 +9,21 @@
 """
 import logging
 
+from django.db import transaction
 from rest_framework.decorators import api_view
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
 from core.access import (
-    PERMISSIONS,
-    ROLE_LABELS,
-    ROLE_ORDER,
+    permission_catalog,
     permission_keys,
     require_perm,
     role_default_permissions,
     user_permissions,
     user_tenant_role,
+    visible_role_labels,
 )
+from core.modules import MODULES, module_enabled
 from core.tenant_utils import get_tenant
 
 logger = logging.getLogger(__name__)
@@ -40,10 +41,12 @@ def _effective_matrix(tenant) -> dict:
             overrides[(o.role, o.permission_key)] = o.allowed
 
     matrix: dict[str, dict] = {}
-    for role in ROLE_ORDER:
-        defaults = role_default_permissions(role)
+    roles = tuple(role for role, _ in visible_role_labels(tenant))
+    valid_keys = permission_keys(tenant)
+    for role in roles:
+        defaults = role_default_permissions(role, tenant)
         row = {}
-        for key in permission_keys():
+        for key in valid_keys:
             if role == "manager":
                 row[key] = True  # المدير لا يُجرَّد (يطابق core.access)
             else:
@@ -53,10 +56,11 @@ def _effective_matrix(tenant) -> dict:
 
 
 def _matrix_payload(tenant) -> dict:
+    roles = visible_role_labels(tenant)
     return {
-        "roles": [{"key": r, "label": label} for r, label in ROLE_LABELS],
-        "permissions": PERMISSIONS,
-        "defaults": {r: sorted(role_default_permissions(r)) for r in ROLE_ORDER},
+        "roles": [{"key": r, "label": label} for r, label in roles],
+        "permissions": permission_catalog(tenant),
+        "defaults": {r: sorted(role_default_permissions(r, tenant)) for r, _ in roles},
         "matrix": _effective_matrix(tenant),
     }
 
@@ -70,10 +74,23 @@ def my_permissions(request):
         "role": role,
         "is_manager": role == "manager",
         "permissions": sorted(user_permissions(request.user, tenant)),
+        # حقل واحد يخدم كل الوحدات — الواجهة تحرس شاشاتها به قبل أي import().
+        "modules": {key: module_enabled(tenant, key) for key in MODULES},
     })
 
 
+@api_view(["GET"])
+def permission_roles(request):
+    """الأدوار المتاحة للشركة بعد إخفاء أدوار الوحدات غير المرخّصة."""
+    tenant = get_tenant(request)
+    return Response([
+        {"key": role, "label": label}
+        for role, label in visible_role_labels(tenant)
+    ])
+
+
 @api_view(["GET", "PUT", "PATCH"])
+@transaction.atomic
 def permissions_matrix(request):
     """قراءة/تحرير مصفوفة الصلاحيات لهذه الشركة — يتطلب admin.permissions.manage."""
     tenant = get_tenant(request)
@@ -89,7 +106,7 @@ def permissions_matrix(request):
     if not isinstance(changes, list):
         raise DRFValidationError({"changes": "قائمة التغييرات مطلوبة."})
 
-    valid_keys = permission_keys()
+    valid_keys = permission_keys(tenant)
     valid_roles = {r for r, _ in UserCompanyMembership.ROLE_CHOICES}
     for ch in changes:
         role = str((ch or {}).get("role") or "").strip()
@@ -102,8 +119,12 @@ def permissions_matrix(request):
             raise DRFValidationError(
                 {"role": "لا يمكن تعديل صلاحيات المدير — مالك الشركة يملك كل شيء."}
             )
+        from accountant_portal.permissions import reject_forbidden_accountant_permission
+
+        if bool(ch.get("allowed")):
+            reject_forbidden_accountant_permission(role, key)
         allowed = bool(ch.get("allowed"))
-        default_allowed = key in role_default_permissions(role)
+        default_allowed = key in role_default_permissions(role, tenant)
         if allowed == default_allowed:
             # العودة للافتراضي = حذف التجاوز (لا نُخزّن ما يساوي الافتراضي).
             RolePermission.objects.filter(
@@ -128,7 +149,7 @@ def _member_payload(membership) -> dict:
         o.permission_key: o.allowed
         for o in MemberPermission.objects.filter(membership=membership)
         .only("permission_key", "allowed")
-        if o.permission_key in permission_keys()
+        if o.permission_key in permission_keys(membership.tenant)
     }
     user = membership.user
     effective = user_permissions(user, membership.tenant)
@@ -142,7 +163,7 @@ def _member_payload(membership) -> dict:
         "effective": sorted(effective),
         # T-PERMBOX: خانة «كل الصلاحيات» — مشتقّة لا مخزَّنة، فلا تكذب إن تغيّر
         # الكتالوج أو نُزعت صلاحية واحدة بعد المنح الشامل.
-        "grant_all": permission_keys() <= effective,
+        "grant_all": permission_keys(membership.tenant) <= effective,
     }
 
 
@@ -162,6 +183,7 @@ def permission_members(request):
 
 
 @api_view(["PUT", "PATCH"])
+@transaction.atomic
 def member_permissions(request):
     """تجاوز فردي فوق الدور.
 
@@ -191,10 +213,14 @@ def member_permissions(request):
             {"membership_id": "لا تُعدَّل صلاحيات المدير — مالك الشركة يملك كل شيء."}
         )
 
-    valid_keys = permission_keys()
+    valid_keys = permission_keys(tenant)
     grant_all = request.data.get("grant_all")
     if grant_all is not None:
         if grant_all:
+            from accountant_portal.permissions import reject_forbidden_accountant_permission
+
+            for key in valid_keys:
+                reject_forbidden_accountant_permission(membership.role, key)
             # منحٌ صريح لكل مفتاح — لا اعتماد على دوره، فيبقى شاملاً ولو تبدّل.
             for key in sorted(valid_keys):
                 MemberPermission.objects.update_or_create(
@@ -218,6 +244,10 @@ def member_permissions(request):
         if key not in valid_keys:
             raise DRFValidationError({"permission_key": f"صلاحية غير معروفة: {key}"})
         allowed = (ch or {}).get("allowed")
+        if allowed:
+            from accountant_portal.permissions import reject_forbidden_accountant_permission
+
+            reject_forbidden_accountant_permission(membership.role, key)
         if allowed is None:
             MemberPermission.objects.filter(
                 membership=membership, permission_key=key).delete()

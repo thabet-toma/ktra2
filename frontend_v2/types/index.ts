@@ -11,3 +11,4 @@ export * from './finance';
 export * from './offer';
 export * from './notification';
 export * from './accounting';
+export * from './accountant';

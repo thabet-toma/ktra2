@@ -13,6 +13,8 @@ export type MyPermissions = {
   role: string;
   is_manager: boolean;
   permissions: string[];
+  /** T-EXTACCT: ترخيص الوحدات لهذه الشركة — حقل واحد يخدم كل الوحدات. */
+  modules?: Record<string, boolean>;
 };
 
 export type PermissionsMatrix = {

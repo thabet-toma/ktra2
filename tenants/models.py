@@ -280,6 +280,7 @@ class UserCompanyMembership(models.Model):
     ROLE_CHOICES = [
         ('manager', 'مدير (Manager)'),
         ('accountant', 'محاسب (Accountant)'),
+        ('legal_accountant', 'محاسب قانوني خارجي'),
         # T-PERM: دورا الموظف المتخصّص — لكلٍّ مصفوفة صلاحيات في core.access
         ('sales', 'موظف مبيعات (Sales)'),
         ('procurement', 'موظف مشتريات (Procurement)'),
