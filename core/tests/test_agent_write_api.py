@@ -166,3 +166,51 @@ def test_cannot_patch_posted_invoice(env):
     assert resp.status_code == 400
     inv.refresh_from_db()
     assert inv.notes != "لن يُقبل"
+
+
+def test_delete_draft_invoice(env):
+    tenant, customer, product = env
+    client = APIClient()
+    created = client.post(
+        URL, _body(customer, product, tenant_id=tenant.TenantID),
+        format="json", HTTP_X_AGENT_KEY=KEY,
+    ).data
+    detail_url = f"{URL}{created['id']}/"
+
+    resp = client.delete(f"{detail_url}?tenant_id={tenant.TenantID}", HTTP_X_AGENT_KEY=KEY)
+    assert resp.status_code == 204
+    assert not SalesInvoice.objects.filter(pk=created["id"]).exists()
+
+
+def test_delete_rejects_missing_or_wrong_key(env):
+    tenant, customer, product = env
+    client = APIClient()
+    created = client.post(
+        URL, _body(customer, product, tenant_id=tenant.TenantID),
+        format="json", HTTP_X_AGENT_KEY=KEY,
+    ).data
+    detail_url = f"{URL}{created['id']}/"
+
+    resp = client.delete(f"{detail_url}?tenant_id={tenant.TenantID}")
+    assert resp.status_code == 401
+    resp = client.delete(
+        f"{detail_url}?tenant_id={tenant.TenantID}", HTTP_X_AGENT_KEY="wrong")
+    assert resp.status_code == 401
+    assert SalesInvoice.objects.filter(pk=created["id"]).exists()
+
+
+def test_cannot_delete_posted_invoice(env):
+    from sales.services import post_sales_invoice
+
+    tenant, customer, product = env
+    client = APIClient()
+    created = client.post(
+        URL, _body(customer, product, tenant_id=tenant.TenantID),
+        format="json", HTTP_X_AGENT_KEY=KEY,
+    ).data
+    inv = SalesInvoice.objects.get(pk=created["id"])
+    post_sales_invoice(inv, user=None)
+
+    resp = client.delete(f"{URL}{inv.id}/?tenant_id={tenant.TenantID}", HTTP_X_AGENT_KEY=KEY)
+    assert resp.status_code == 400
+    assert SalesInvoice.objects.filter(pk=inv.id).exists()

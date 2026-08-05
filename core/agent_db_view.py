@@ -4,7 +4,9 @@
 - فواتير المبيعات/المشتريات (مسوّدات + مرحّلة): /api/agent/invoices/...
 - الموردون: /api/agent/suppliers/  — الأصناف: /api/agent/products/
   كل الكتابة تمر بالـ ORM (نفس السيريالايزرز المستخدَمة بالواجهة) — لا SQL
-  خام إطلاقاً، ولا مسار حذف على أي مسار من مسارات الوكيل.
+  خام إطلاقاً. مسار الحذف الوحيد على كل واجهة الوكيل هو
+  DELETE /api/agent/invoices/draft/<id>/ — ويُرفض إن لم تكن الفاتورة
+  بحالة draft (لا حذف على المرحّل أو الملغى).
 - يتطلب مفتاح API في الهيدر: X-Agent-Key
 - الحد الأقصى للنتائج: 200 صف لكل استعلام/قائمة.
 """
@@ -249,18 +251,20 @@ def agent_create_draft_invoice(request):
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
 
-@api_view(["GET", "PATCH", "OPTIONS"])
+@api_view(["GET", "PATCH", "DELETE", "OPTIONS"])
 @authentication_classes([])
 @permission_classes([])
-@agent_endpoint("GET, PATCH, OPTIONS")
+@agent_endpoint("GET, PATCH, DELETE, OPTIONS")
 def agent_draft_invoice_detail(request, pk):
     """
-    GET   /api/agent/invoices/draft/<id>/?tenant_id=1   — عرض فاتورة واحدة.
-    PATCH /api/agent/invoices/draft/<id>/                — تعديل مسوّدة فقط.
+    GET    /api/agent/invoices/draft/<id>/?tenant_id=1   — عرض فاتورة واحدة.
+    PATCH  /api/agent/invoices/draft/<id>/                — تعديل مسوّدة فقط.
+    DELETE /api/agent/invoices/draft/<id>/?tenant_id=1    — حذف مسوّدة فقط.
     Headers: X-Agent-Key: <AGENT_DB_API_KEY>
 
-    التعديل مرفوض إن كانت الفاتورة مرحّلة أو ملغاة (نفس قاعدة الواجهة) —
-    ولا يوجد مسار حذف إطلاقاً على واجهة الوكيل.
+    التعديل والحذف مرفوضان إن كانت الفاتورة مرحّلة أو ملغاة (نفس قاعدة
+    الواجهة) — هذا هو مسار الحذف الوحيد على كامل واجهة الوكيل، ومحصور
+    بالمسوّدات حصراً.
     """
     unauthorized = _check_agent_key(request)
     if unauthorized is not None:
@@ -271,7 +275,7 @@ def agent_draft_invoice_detail(request, pk):
 
     tenant_id = (
         request.query_params.get("tenant_id")
-        if request.method == "GET"
+        if request.method in ("GET", "DELETE")
         else (request.data or {}).get("tenant_id")
     )
     tenant, err = _resolve_agent_tenant(tenant_id)
@@ -285,13 +289,33 @@ def agent_draft_invoice_detail(request, pk):
     if request.method == "GET":
         return Response(SalesInvoiceSerializer(invoice).data)
 
+    from core.activity import log_activity
+
+    if request.method == "DELETE":
+        if invoice.status != SalesInvoice.STATUS_DRAFT:
+            return Response(
+                {"error": "لا يمكن حذف فاتورة مرحّلة أو ملغاة عبر واجهة الوكيل — المسوّدات فقط."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        invoice_number = invoice.invoice_number
+        customer_id = invoice.customer_id
+        invoice.delete()
+        log_activity(
+            action="delete", entity_type="sales_invoice", entity_id=pk,
+            entity_label=invoice_number,
+            description="حذف فاتورة مسوّدة عبر واجهة الوكيل",
+            partner_ids=[customer_id], tenant=tenant, request=request,
+        )
+        logger.info(
+            "[AgentDraftInvoice] deleted tenant=%s invoice=%s", tenant.TenantID, invoice_number,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     if invoice.status != SalesInvoice.STATUS_DRAFT:
         return Response(
             {"error": "لا يمكن تعديل فاتورة مرحّلة أو ملغاة عبر واجهة الوكيل."},
             status=status.HTTP_400_BAD_REQUEST,
         )
-
-    from core.activity import log_activity
 
     payload = {k: v for k, v in (request.data or {}).items()
                if k not in {"tenant_id", "branch_id", "auto_post", "status"}}
