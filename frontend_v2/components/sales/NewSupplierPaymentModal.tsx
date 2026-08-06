@@ -16,6 +16,8 @@ import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { getSalesSettings } from "../../services/salesApi";
 import { formatNumber } from "@/utils/formatNumber";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
+import { AccountTreeField } from "../accounting/AccountTreePicker";
+import { isCashAccount } from "../../utils/accountTree";
 import {
   ChequeGrid,
   PaymentFinanceFields,
@@ -26,7 +28,9 @@ import {
 export type SupplierPaymentPartner = { id: number; name: string };
 /** صف الشريك كما يعيده lookup (يحمل النوع) — نفلتره على الموردين فقط. */
 type PartnerRow = SupplierPaymentPartner & { partner_type?: string };
-type Account = { id: number; code: string; name: string; account_type?: string };
+type Account = {
+  id: number; code: string; name: string; parent: number | null; account_type?: string;
+};
 
 const isSupplierRow = (p: PartnerRow) =>
   String(p.partner_type || "").toLowerCase() === "supplier";
@@ -100,7 +104,12 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
       if (!alive) return;
       if (accs.status === "fulfilled") setAccounts(accs.value || []);
       if (currs.status === "fulfilled") setCurrencies(currs.value || []);
-      if (settings.status === "fulfilled") setAutoPost(!!settings.value?.auto_post_payments);
+      if (settings.status === "fulfilled") {
+        setAutoPost(!!settings.value?.auto_post_payments);
+        // T-DEFACC: سند الصرف كان وحده بلا صندوق افتراضي — يُملأ كما في سند القبض.
+        const defaultCash = settings.value?.default_cash_account;
+        if (defaultCash) setCashAccountId((prev) => prev || defaultCash);
+      }
       if (parts.status === "fulfilled") {
         // المورد المثبّت مسبقاً يمرّ كما هو؛ وإلا نعرض الموردين فقط (لا العملاء).
         const list = parts.value || [];
@@ -191,12 +200,13 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
 
         <label className="aseel-field">
           <span className="aseel-field-label">الصندوق / البنك *</span>
-          <select className="aseel-input" value={cashAccountId} onChange={(e) => setCashAccountId(e.target.value ? Number(e.target.value) : "")}>
-            <option value="">— اختر —</option>
-            {accounts.filter((a) => (a.account_type === "Asset") && /^110|صندوق|بنك|cash|bank/i.test(`${a.code} ${a.name}`)).map((a) => (
-              <option key={a.id} value={a.id}>{a.code} {a.name}</option>
-            ))}
-          </select>
+          <AccountTreeField
+            accounts={accounts}
+            value={cashAccountId}
+            onChange={(id) => setCashAccountId(id ?? "")}
+            isSelectable={isCashAccount}
+            title="اختيار الصندوق / البنك"
+          />
         </label>
         <label className="aseel-field">
           <span className="aseel-field-label">العملة</span>

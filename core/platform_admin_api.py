@@ -3,7 +3,7 @@ import logging
 
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Case, Count, IntegerField, Q, Value, When
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
@@ -29,6 +29,9 @@ class IsPlatformAdmin(BasePermission):
         return is_super_admin(request.user)
 
 
+MAX_NOTE_IMAGES = 10
+
+
 class DevelopmentNoteSerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
     updated_by_name = serializers.SerializerMethodField()
@@ -36,7 +39,7 @@ class DevelopmentNoteSerializer(serializers.ModelSerializer):
     class Meta:
         model = DevelopmentNote
         fields = [
-            'id', 'title', 'description', 'status', 'priority', 'assignee',
+            'id', 'title', 'description', 'status', 'priority', 'images',
             'due_date', 'position', 'created_by', 'created_by_name',
             'updated_by', 'updated_by_name', 'created_at', 'updated_at',
         ]
@@ -50,6 +53,26 @@ class DevelopmentNoteSerializer(serializers.ModelSerializer):
         if not value:
             raise serializers.ValidationError('عنوان الملاحظة مطلوب.')
         return value
+
+    def validate_images(self, value):
+        """يقبل روابط http(s) فقط ويعيد {url,caption} نظيفة — لا مفاتيح إضافية.
+
+        الرابط يُعرَض في `<img src>` فمنعُ أي مخطط آخر (javascript:/data:) شرطُ
+        سلامة لا تجميل: الحقل JSON حرّ الشكل بلا هذا التحقق.
+        """
+        if not isinstance(value, list):
+            raise serializers.ValidationError('الصور تُرسَل كقائمة [{url,caption}].')
+        if len(value) > MAX_NOTE_IMAGES:
+            raise serializers.ValidationError(f'أقصى عدد صور للملاحظة {MAX_NOTE_IMAGES}.')
+        cleaned = []
+        for entry in value:
+            if not isinstance(entry, dict):
+                raise serializers.ValidationError('كل صورة كائن فيه url.')
+            url = str(entry.get('url') or '').strip()
+            if not url.startswith(('http://', 'https://')):
+                raise serializers.ValidationError('رابط الصورة يجب أن يبدأ بـ http:// أو https://.')
+            cleaned.append({'url': url[:500], 'caption': str(entry.get('caption') or '').strip()[:200]})
+        return cleaned
 
     @staticmethod
     def _user_name(user):
@@ -68,7 +91,17 @@ class DevelopmentNoteViewSet(viewsets.ModelViewSet):
     authentication_classes = [TokenAuthentication, SessionAuthentication]
     permission_classes = [IsPlatformAdmin]
     serializer_class = DevelopmentNoteSerializer
-    queryset = DevelopmentNote.objects.select_related('created_by', 'updated_by')
+    # المكتملة تُزاح لآخر الورقة تلقائياً (بلا لمس `position` الذي يبقى ترتيب
+    # المستخدم اليدوي) — والواجهة تعيد نفس الفرز محلياً بعد كل تغيير حالة.
+    queryset = (
+        DevelopmentNote.objects
+        .select_related('created_by', 'updated_by')
+        .annotate(is_done=Case(
+            When(status='done', then=Value(1)), default=Value(0),
+            output_field=IntegerField(),
+        ))
+        .order_by('is_done', 'position', '-updated_at', '-id')
+    )
 
     def perform_create(self, serializer):
         note = serializer.save(created_by=self.request.user, updated_by=self.request.user)

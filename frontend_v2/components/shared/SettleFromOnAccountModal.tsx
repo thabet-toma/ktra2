@@ -17,6 +17,8 @@ import {
   allocateCustomerPayment,
 } from "../../services/salesApi";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
+import { AccountTreeField } from "../accounting/AccountTreePicker";
+import type { AccountNodeLike } from "../../utils/accountTree";
 import { formatDateLocalized } from "../../utils/formatDate";
 
 /** سند «على الحساب» موحَّد الشكل بين الجانبين. */
@@ -28,7 +30,13 @@ type OnAccountVoucher = {
 };
 
 type QuickReceiptConfig = {
+  /** الصناديق القابلة للاختيار (تُحكم صحّة الاختيار). */
   accounts: Array<{ id: number; code?: string | null; name?: string | null }>;
+  /**
+   * T-DEFACC: شجرة الحسابات كاملة لعرض الاختيار داخل مسارها. حين تغيب يُعرض
+   * `accounts` وحده (قائمة مسطّحة) — لا تنكسر الشاشة، لكنها بلا شجرة.
+   */
+  treeAccounts?: AccountNodeLike[];
   defaultAccountId?: number | null;
   onReceive: (amount: number, accountId: number) => Promise<void>;
 };
@@ -298,18 +306,17 @@ export const SettleFromOnAccountModal: React.FC<Props> = ({
               </label>
               <label className="flex min-w-0 flex-col gap-1.5">
                 <span className="text-xs font-medium text-[var(--aseel-ink-soft)]">الصندوق أو البنك</span>
-                <select
+                <AccountTreeField
                   className="aseel-input !h-10 !w-full !flex-none !px-3 text-sm"
+                  accounts={quickReceipt.treeAccounts ?? quickReceipt.accounts}
                   value={receiptAccountId}
-                  onChange={(event) => setReceiptAccountId(event.target.value ? Number(event.target.value) : "")}
-                >
-                  <option value="">اختر الحساب</option>
-                  {quickReceipt.accounts.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {[account.code, account.name].filter(Boolean).join(" — ")}
-                    </option>
-                  ))}
-                </select>
+                  onChange={(id) => setReceiptAccountId(id ?? "")}
+                  isSelectable={(account) =>
+                    quickReceipt.accounts.some((row) => row.id === account.id)
+                  }
+                  placeholder="اختر الحساب"
+                  title="اختيار الصندوق / البنك"
+                />
               </label>
               <button
                 type="button"

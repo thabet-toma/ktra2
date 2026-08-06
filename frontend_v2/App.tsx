@@ -49,7 +49,7 @@ import { useAuth } from "./contexts/AuthContext";
 import { useCompany } from "./contexts/CompanyContext";
 import { usePermissions } from "./contexts/PermissionsContext";
 import { moduleAllowsView, permForView } from "./utils/viewPermissions";
-import { enterPlatformShell, platformShellActive } from "./utils/officeShell";
+import { companyWorkspaceDeepLink, enterPlatformShell, platformShellActive } from "./utils/officeShell";
 import { activeTasksService } from "./services/activeTasksService";
 import { autoDisableScheduler } from "./services/autoDisableScheduler";
 import { PublicNavbar } from "./components/layout/PublicNavbar";
@@ -83,6 +83,9 @@ const TaskManagement = lazyPage(() => import("./components/TaskManagement").then
 const UserManagement = lazyPage(() => import("./components/UserManagement").then((m) => ({ default: m.UserManagement })));
 const ActivityLogPage = lazyPage(() => import("./components/ActivityLogPage").then((m) => ({ default: m.ActivityLogPage })));
 const Reports = lazyPage(() => import("./components/Reports").then((m) => ({ default: m.Reports })));
+// T-REPORTS: قسم التقارير — فهرس واحد وشاشة تشغيل عامّة لكل تقارير المنصة.
+const ReportsHubPage = lazyPage(() => import("./components/reports/ReportsHubPage").then((m) => ({ default: m.ReportsHubPage })));
+const ReportRunnerPage = lazyPage(() => import("./components/reports/ReportRunnerPage").then((m) => ({ default: m.ReportRunnerPage })));
 const EmployeeNotes = lazyPage(() => import("./components/EmployeeNotes").then((m) => ({ default: m.EmployeeNotes })));
 const SettingsPage = lazyPage(() => import("./components/SettingsPage").then((m) => ({ default: m.SettingsPage })));
 const PointsHistoryPage = lazyPage(() => import("./components/PointsHistoryPage").then((m) => ({ default: m.PointsHistoryPage })));
@@ -114,6 +117,8 @@ const AccountingCoaPage = lazyPage(() => import("./components/accounting/Account
 const AccountingJournalListPage = lazyPage(() => import("./components/accounting/AccountingJournalListPage").then((m) => ({ default: m.AccountingJournalListPage })));
 const AccountingJournalEntryPage = lazyPage(() => import("./components/accounting/AccountingJournalEntryPage").then((m) => ({ default: m.AccountingJournalEntryPage })));
 const AccountingChequesPage = lazyPage(() => import("./components/accounting/AccountingChequesPage").then((m) => ({ default: m.AccountingChequesPage })));
+const BanksPage = lazyPage(() => import("./components/accounting/BanksPage").then((m) => ({ default: m.BanksPage })));
+const BankReconciliationPage = lazyPage(() => import("./components/accounting/BankReconciliationPage").then((m) => ({ default: m.BankReconciliationPage })));
 const AccountingGeneralLedgerPage = lazyPage(() => import("./components/accounting/AccountingGeneralLedgerPage").then((m) => ({ default: m.AccountingGeneralLedgerPage })));
 const AccountingTrialBalancePage = lazyPage(() => import("./components/accounting/AccountingTrialBalancePage").then((m) => ({ default: m.AccountingTrialBalancePage })));
 const AccountingVatReportPage = lazyPage(() => import("./components/accounting/AccountingVatReportPage").then((m) => ({ default: m.AccountingVatReportPage })));
@@ -238,6 +243,8 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "accounting-coa": "/accounting/coa",
   "accounting-journals": "/accounting/journals",
   "accounting-cheques": "/accounting/cheques",
+  "accounting-banks": "/accounting/banks",
+  "accounting-bank-reconciliation": "/accounting/bank-reconciliation",
   "accounting-general-ledger": "/accounting/general-ledger",
   "accounting-trial-balance": "/accounting/trial-balance",
   "accounting-vat-report": "/accounting/vat-report",
@@ -251,6 +258,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "property-rental": "/property-rental",
   "cash-boxes": "/cash-boxes",
   reports: "/reports",
+  "team-time-report": "/reports-team",
   gallery: "/gallery",
   "about-us": "/about-us",
   contact: "/contact",
@@ -296,11 +304,17 @@ const App: React.FC = () => {
 
   const [authView, setAuthView] = useState<AuthView>("landing");
   // سوبر أدمن يخرج من قشرة المكتب للوحة المنصة دون أن يفقد ملفه المهني.
-  const [platformShellOverride] = useState(() =>
-    typeof window === "undefined"
-      ? false
-      : platformShellActive(window.location.pathname)
-  );
+  const [platformShellOverride] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const path = window.location.pathname;
+    // T-EXTACCT: الرابط الصريح لشاشة شركة يحسم القشرة — كان فتح «فاتورة مبيعات
+    // جديدة» يعرض لوحة المكتب لأن نوع الحساب وحده يقرر والمسار لا رأي له.
+    if (companyWorkspaceDeepLink(path, Object.values(VIEW_PATHS))) {
+      clientLogger.info("accountant.shell_switched", { to: "platform", reason: "deep_link", path });
+      return true;
+    }
+    return platformShellActive(path);
+  });
   const [users, setUsers] = useState<User[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
 
@@ -635,6 +649,11 @@ const App: React.FC = () => {
     }
     if (path.startsWith("/products/")) {
       setAppView("product-profile");
+      return;
+    }
+    // T-REPORTS: /reports فهرس، و/reports/<key> تشغيل تقرير بمفتاحه.
+    if (path.startsWith("/reports/")) {
+      setAppView("report-runner");
       return;
     }
     const journalMatch = path.match(/^\/accounting\/journals\/(.+)$/);
@@ -1451,6 +1470,13 @@ const App: React.FC = () => {
         return <ActivityLogPage />;
 
       case "reports":
+        return <ReportsHubPage />;
+
+      case "report-runner":
+        return <ReportRunnerPage />;
+
+      // تقارير وقت الفريق (مهام وموظفون) — كانت تشغل /reports قبل قسم التقارير.
+      case "team-time-report":
         if (currentUser!.role !== "manager")
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         return <Reports tasks={tasks} users={users} />;
@@ -1800,6 +1826,18 @@ const App: React.FC = () => {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <AccountingChequesPage />;
+
+      case "accounting-banks":
+        if (currentUser!.role !== "manager") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <BanksPage />;
+
+      case "accounting-bank-reconciliation":
+        if (currentUser!.role !== "manager") {
+          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
+        }
+        return <BankReconciliationPage />;
 
       case "accounting-general-ledger":
         if (currentUser!.role !== "manager") {

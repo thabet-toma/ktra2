@@ -26,6 +26,8 @@ import {
 import { resolveTenantId } from "../../utils/tenantContext";
 import { getSalesSettings, updateSalesSettings, type SalesSettings } from "../../services/salesApi";
 import { cloudinaryService } from "../../services/cloudinaryService";
+import { AccountTreeField } from "../accounting/AccountTreePicker";
+import { isCashAccount } from "../../utils/accountTree";
 import { usePasteImageUpload } from "../../utils/clipboardImage";
 import { Save, RefreshCw, Database, X, Upload } from "lucide-react";
 
@@ -66,7 +68,7 @@ type TenantBookRow = {
 };
 
 type CurrencyRow = { CurrencyID: number; Code: string; Name?: string | null };
-type AccountRow = { id: number; code?: string | null; name?: string | null; account_type?: string | null };
+type AccountRow = { id: number; code?: string | null; name?: string | null; parent?: number | null; account_type?: string | null };
 
 const DOC_TYPE_LABELS: Record<string, string> = {
   sales_invoice: "فاتورة مبيعات",
@@ -143,9 +145,8 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
   usePasteImageUpload((files) => { void uploadLogoFile(files[0]); }, !uploadingLogo);
 
   /** Account helpers */
-  const revenueAccounts = accounts.filter((a) => a.account_type === "Revenue");
-  const assetAccounts = accounts.filter((a) => a.account_type === "Asset");
-  const liabilityAccounts = accounts.filter((a) => a.account_type === "Liability");
+  // T-DEFACC: الشجرة تُعرض كاملة والنوع يحدّد ما يُختار منها فقط.
+  const isType = (type: string) => (a: AccountRow) => a.account_type === type;
 
   /** Load everything in parallel. Each call is fault-tolerant. */
   const loadData = useCallback(async () => {
@@ -460,54 +461,34 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
   const accountsTab = (
     <AseelFormSection title="الحسابات المحاسبية الافتراضية" cols={2}>
       {fld("حساب الإيراد (منتج)", (
-        <select className="aseel-input" value={salesSettings?.default_revenue_account_product || ""}
-          onChange={(e) => updSales("default_revenue_account_product", e.target.value ? Number(e.target.value) : null)}>
-          <option value="">— اختر —</option>
-          {revenueAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-        </select>
+        <AccountTreeField accounts={accounts} value={salesSettings?.default_revenue_account_product || ""}
+          onChange={(id) => updSales("default_revenue_account_product", id)} isSelectable={isType("Revenue")} title="حساب الإيراد (منتج)" />
       ))}
       {fld("حساب الإيراد (خدمة)", (
-        <select className="aseel-input" value={salesSettings?.default_revenue_account_service || ""}
-          onChange={(e) => updSales("default_revenue_account_service", e.target.value ? Number(e.target.value) : null)}>
-          <option value="">— اختر —</option>
-          {revenueAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-        </select>
+        <AccountTreeField accounts={accounts} value={salesSettings?.default_revenue_account_service || ""}
+          onChange={(id) => updSales("default_revenue_account_service", id)} isSelectable={isType("Revenue")} title="حساب الإيراد (خدمة)" />
       ))}
       {fld("حساب الصندوق الافتراضي", (
-        <select className="aseel-input" value={salesSettings?.default_cash_account || ""}
-          onChange={(e) => updSales("default_cash_account", e.target.value ? Number(e.target.value) : null)}>
-          <option value="">— اختر —</option>
-          {assetAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-        </select>
+        <AccountTreeField accounts={accounts} value={salesSettings?.default_cash_account || ""}
+          onChange={(id) => updSales("default_cash_account", id)} isSelectable={isCashAccount} title="حساب الصندوق الافتراضي" />
       ))}
       {fld("حساب ذمم العملاء الافتراضي", (
-        <select className="aseel-input" value={salesSettings?.default_ar_account || ""}
-          onChange={(e) => updSales("default_ar_account", e.target.value ? Number(e.target.value) : null)}>
-          <option value="">— اختر —</option>
-          {assetAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-        </select>
+        <AccountTreeField accounts={accounts} value={salesSettings?.default_ar_account || ""}
+          onChange={(id) => updSales("default_ar_account", id)} isSelectable={isType("Asset")} title="حساب ذمم العملاء" />
       ))}
       {fld("حساب المخزون", (
-        <select className="aseel-input" value={salesSettings?.default_inventory_account || ""}
-          onChange={(e) => updSales("default_inventory_account", e.target.value ? Number(e.target.value) : null)}>
-          <option value="">— اختر —</option>
-          {assetAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-        </select>
+        <AccountTreeField accounts={accounts} value={salesSettings?.default_inventory_account || ""}
+          onChange={(id) => updSales("default_inventory_account", id)} isSelectable={isType("Asset")} title="حساب المخزون" />
       ))}
       {fld("حساب تكلفة المبيعات (COGS)", (
-        <select className="aseel-input" value={salesSettings?.default_cogs_account || ""}
-          onChange={(e) => updSales("default_cogs_account", e.target.value ? Number(e.target.value) : null)}>
-          <option value="">— اختر —</option>
-          {accounts.filter((a) => a.account_type === "Expense").map((a) =>
-            <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-        </select>
+        <AccountTreeField accounts={accounts} value={salesSettings?.default_cogs_account || ""}
+          onChange={(id) => updSales("default_cogs_account", id)} isSelectable={isType("Expense")}
+          title="حساب تكلفة المبيعات" />
       ))}
       {fld("حساب أجرة الشحن (دائن)", (
-        <select className="aseel-input" value={settings?.default_freight_credit_account || ""}
-          onChange={(e) => upd("default_freight_credit_account", e.target.value ? Number(e.target.value) : null)}>
-          <option value="">— اختر —</option>
-          {liabilityAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} — {a.name}</option>)}
-        </select>
+        <AccountTreeField accounts={accounts} value={settings?.default_freight_credit_account || ""}
+          onChange={(id) => upd("default_freight_credit_account", id)} isSelectable={isType("Liability")}
+          title="حساب أجرة الشحن (دائن)" />
       ))}
     </AseelFormSection>
   );

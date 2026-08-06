@@ -61,6 +61,8 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "accounting-journals": "accounting.journal.view",
   "accounting-journal-entry": "accounting.journal.create",
   "accounting-cheques": "accounting.journal.view",
+  "accounting-banks": "accounting.account.manage",
+  "accounting-bank-reconciliation": "accounting.journal.view",
   "accounting-general-ledger": "accounting.journal.view",
   "accounting-exchange-rates": "accounting.journal.view",
   "property-rental": "accounting.journal.view",
@@ -70,7 +72,10 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "accounting-landed-cost": "accounting.report.view",
   "accounting-balance-sheet": "accounting.report.view",
   "accounting-income-statement": "accounting.report.view",
-  reports: "accounting.report.view",
+  // T-REPORTS: فهرس التقارير مفتوح — الخادم يصفّي كل تقرير بصلاحيته الخاصة
+  // (`/api/reports/`)، فحصْره بصلاحية محاسبية واحدة كان يحجب تقارير المبيعات
+  // والمخزون عن أصحابها. «تقارير الفريق» القديمة تبقى إدارية.
+  "team-time-report": "hr.employees.manage",
   "accounting-fiscal-periods": "accounting.period.manage",
   "accounting-year-end-close": "accounting.period.manage",
   // شؤون الموظفين والإدارة

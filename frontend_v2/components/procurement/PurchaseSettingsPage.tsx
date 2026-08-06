@@ -10,8 +10,10 @@ import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
+import { AccountTreeField } from "../accounting/AccountTreePicker";
+import { isCashAccount } from "../../utils/accountTree";
 
-type AccountOpt = { id: number; code?: string | null; name?: string | null; account_type?: string | null; is_active?: boolean };
+type AccountOpt = { id: number; code?: string | null; name?: string | null; parent?: number | null; account_type?: string | null; is_active?: boolean };
 
 const STRATEGIES: { value: string; label: string; hint: string }[] = [
   {
@@ -64,12 +66,8 @@ const PurchaseSettingsPage: React.FC = () => {
     }
   }, []);
 
-  const cashAccounts = (accounts || [])
-    .filter((a) => a.is_active !== false)
-    .filter((a) => {
-      const t = (a.account_type || "").toLowerCase();
-      return t === "asset" || t === "cash" || t === "bank";
-    });
+  // T-DEFACC: الشجرة تُعرض كاملة، والصناديق وحدها قابلة للاختيار منها.
+  const isSelectableCash = (a: AccountOpt) => a.is_active !== false && isCashAccount(a);
 
   useEffect(() => {
     load();
@@ -253,19 +251,17 @@ const PurchaseSettingsPage: React.FC = () => {
               <Info className="h-4 w-4 mt-0.5 shrink-0" />
               <span>يُستخدم تلقائياً للدفعات النقدية في فواتير الشراء بدل اختيار صندوق لكل فاتورة.</span>
             </p>
-            <select
-              className="aseel-input w-full max-w-md"
-              disabled={loading}
-              value={cashAccount ?? ""}
-              onChange={(e) => setCashAccount(e.target.value ? Number(e.target.value) : null)}
-            >
-              <option value="">— لا شيء —</option>
-              {cashAccounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {(a.code || "") + " — " + (a.name || "")}
-                </option>
-              ))}
-            </select>
+            <div className="w-full max-w-md">
+              <AccountTreeField
+                accounts={accounts}
+                value={cashAccount}
+                onChange={(id) => setCashAccount(id)}
+                isSelectable={isSelectableCash}
+                disabled={loading}
+                placeholder="— لا شيء —"
+                title="اختيار الصندوق / البنك"
+              />
+            </div>
           </div>
         </div>
       </AseelDocumentShell>

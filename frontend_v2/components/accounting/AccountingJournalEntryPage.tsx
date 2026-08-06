@@ -26,14 +26,20 @@ import {
 import {
   AseelDocumentShell,
   AseelGrid,
-  AseelIndexPicker,
   useRecordNavigation,
   useAseelKeymap,
   useAseelFieldShortcuts,
   type AseelGridColumn,
-  type AseelIndexColumn,
 } from "../aseel";
+import { AccountTreePicker } from "./AccountTreePicker";
 import OfflineGuard from "../offline/OfflineGuard";
+import {
+  buildHeaderNarration,
+  buildLineNarration,
+  isGeneratedLineNarration,
+  isGeneratedNarration,
+  type NarrationLine,
+} from "../../utils/journalNarration";
 
 /* ─────────── types ─────────── */
 
@@ -45,6 +51,8 @@ type LineState = {
   debit: string;
   credit: string;
   description: string;
+  /** كتب المستخدم بيان السطر بيده — فلا يدهسه التوليد التلقائي. */
+  descriptionTouched?: boolean;
 };
 
 type DealRef = {
@@ -72,16 +80,24 @@ const emptyLine = (): LineState => ({
   debit: "",
   credit: "",
   description: "",
+  descriptionTouched: false,
 });
+
+/** القيد المزدوج طرفان — تبدأ الشبكة بسطرين ويُضاف الثالث عند الحاجة. */
+const MIN_LINES = 2;
+
+const startingLines = (): LineState[] =>
+  Array.from({ length: MIN_LINES }, emptyLine);
 
 const REF_TYPE_LABELS: Record<string, string> = {
   LOGISTICS_PAYMENT: "دفعة صفقة",
   PURCHASE_RECEIPT: "استلام مخزون",
   JOURNAL_REVERSAL: "عكس قيد",
   LOGISTICS_EXPENSE: "مصروف لوجستي",
+  MANUAL: "قيد يدوي",
 };
 
-function refTypeLabel(t: string, description?: string) {
+function refTypeLabel(t: string, description?: string, sourceLabel?: string) {
   if (
     t === "LOGISTICS_PAYMENT" &&
     description &&
@@ -89,7 +105,8 @@ function refTypeLabel(t: string, description?: string) {
   ) {
     return "دفعة لوجستيات";
   }
-  return REF_TYPE_LABELS[t] || t;
+  // الخادم يسمّي كل مصادر القيود (source_label) — لا نكرّر الخريطة هنا.
+  return REF_TYPE_LABELS[t] || sourceLabel || t;
 }
 
 function fmtAmount(v: string | number) {
@@ -125,9 +142,12 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     currency: "" as string,
     exchange_rate: "1",
     currency_code: "" as string,
+    source_label: "" as string,
   });
 
-  const [lines, setLines] = useState<LineState[]>([emptyLine(), emptyLine(), emptyLine()]);
+  const [lines, setLines] = useState<LineState[]>(startingLines);
+  /** كتب المستخدم البيان الإجمالي بيده — فيتوقّف التوليد التلقائي. */
+  const [headerDescTouched, setHeaderDescTouched] = useState(false);
 
   // N3-T1: Aseel Navigation + account picker state
   const [journalsList, setJournalsList] = useState<any[]>([]);
@@ -137,6 +157,58 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   // tooltip: { lineIdx, balance }
   const [balanceTooltip, setBalanceTooltip] = useState<{ lineIdx: number; balance: string } | null>(null);
   const tooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** سطر القيد بصيغة مولّد البيان (أسماء بدل معرّفات). */
+  const toNarrationLine = useCallback(
+    (l: LineState, accs: AccountingAccount[], parts: AccountingPartner[]): NarrationLine => ({
+      accountName: accs.find((a) => String(a.id) === l.accountId)?.name || "",
+      partnerName: parts.find((p) => String(p.id) === l.partnerId)?.name || "",
+      debit: l.debit,
+      credit: l.credit,
+    }),
+    [],
+  );
+
+  /** ملء النموذج من قيد محمَّل — مشترك بين التحميل الأول والتنقّل بين السجلات. */
+  const hydrateFromJournal = useCallback(
+    (j: any, accs: AccountingAccount[], parts: AccountingPartner[]) => {
+      setPosted(!!j.is_posted);
+      const desc = j.description || "";
+      setHeader((h) => ({
+        ...h,
+        transaction_date: j.transaction_date || "",
+        description: desc,
+        reference_type: j.reference_type || "",
+        reference_id: j.reference_id != null ? String(j.reference_id) : "",
+        reference_summary: j.reference_summary || "",
+        deal_ref_number: j.deal_ref_number || "",
+        currency: j.currency != null ? String(j.currency) : h.currency,
+        exchange_rate: j.exchange_rate != null ? String(j.exchange_rate) : "1",
+        currency_code: j.currency_code || "",
+        source_label: j.source_label || "",
+      }));
+      const mapped: LineState[] = (j.lines || []).map((line: any) => ({
+        id: line.id,
+        accountId: line.account != null ? String(line.account) : "",
+        partnerId: line.partner != null ? String(line.partner) : "",
+        costCenterId: line.cost_center != null ? String(line.cost_center) : "",
+        debit: parseFloat(String(line.debit)) > 0 ? String(line.debit) : "",
+        credit: parseFloat(String(line.credit)) > 0 ? String(line.credit) : "",
+        description: line.description || "",
+        descriptionTouched: false,
+      }));
+      // بيان محفوظ يوافق ما يولّده النظام يبقى تلقائياً (يتبع تغيير الحسابات)،
+      // وما كتبه المستخدم بيده يُصان كما هو.
+      const narration = mapped.map((l) => toNarrationLine(l, accs, parts));
+      mapped.forEach((l, i) => {
+        l.descriptionTouched = !isGeneratedLineNarration(l.description, narration[i], desc);
+      });
+      setHeaderDescTouched(!isGeneratedNarration(desc, narration));
+      while (mapped.length < MIN_LINES) mapped.push(emptyLine());
+      setLines(mapped);
+    },
+    [toNarrationLine],
+  );
 
   const nav = useRecordNavigation<any>({
     items: journalsList,
@@ -148,41 +220,22 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         setHeader({
           transaction_date: new Date().toISOString().split("T")[0],
           description: "",
-          reference_type: "",
+          reference_type: "MANUAL",
           reference_id: "",
           reference_summary: "",
           deal_ref_number: "",
           currency: "",
           exchange_rate: "1",
           currency_code: "",
+          source_label: "",
         });
-        setLines([emptyLine(), emptyLine(), emptyLine()]);
+        setLines(startingLines());
+        setHeaderDescTouched(false);
         setPosted(false);
       } else {
         try {
           const j = await accountingApi.getJournal(Number(id));
-          setPosted(!!j.is_posted);
-          setHeader({
-            transaction_date: j.transaction_date || "",
-            description: j.description || "",
-            reference_type: j.reference_type || "",
-            reference_id: j.reference_id != null ? String(j.reference_id) : "",
-            reference_summary: j.reference_summary || "",
-            deal_ref_number: j.deal_ref_number || "",
-            currency: j.currency != null ? String(j.currency) : "",
-            exchange_rate: j.exchange_rate != null ? String(j.exchange_rate) : "1",
-            currency_code: j.currency_code || "",
-          });
-          const mapped: LineState[] = (j.lines || []).map((line: any) => ({
-            id: line.id,
-            accountId: String(line.account || ""),
-            partnerId: String(line.partner || ""),
-            costCenterId: String(line.cost_center || ""),
-            debit: String(line.debit || ""),
-            credit: String(line.credit || ""),
-            description: line.description || "",
-          }));
-          setLines(mapped.length > 0 ? mapped : [emptyLine(), emptyLine(), emptyLine()]);
+          hydrateFromJournal(j, accounts, partners);
         } catch (err) {
           // console suppressed
         }
@@ -255,7 +308,8 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         accountingApi.getCostCenters().catch(() => []),
         accountingApi.getCurrencies().catch(() => []),
       ]);
-      setAccounts((acc as AccountingAccount[]).filter((a) => a.is_active));
+      const activeAccounts = (acc as AccountingAccount[]).filter((a) => a.is_active);
+      setAccounts(activeAccounts);
       setPartners(part as AccountingPartner[]);
       setCostCenters(cc as CostCenterDto[]);
       setCurrencies(cur as CurrencyDto[]);
@@ -264,42 +318,12 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
 
       if (journalId != null) {
         const j = await accountingApi.getJournal(journalId);
-        setPosted(!!j.is_posted);
-        setHeader({
-          transaction_date: j.transaction_date || "",
-          description: j.description || "",
-          reference_type: j.reference_type || "",
-          reference_id: j.reference_id != null ? String(j.reference_id) : "",
-          reference_summary: j.reference_summary || "",
-          deal_ref_number: j.deal_ref_number || "",
-          currency: j.currency != null ? String(j.currency) : (baseCurrency ? String(baseCurrency.CurrencyID) : ""),
-          exchange_rate: j.exchange_rate != null ? String(j.exchange_rate) : "1",
-          currency_code: j.currency_code || "",
-        });
-        const mapped: LineState[] = (j.lines || []).map(
-          (line: {
-            id?: number;
-            account: number;
-            debit: string;
-            credit: string;
-            partner?: number | null;
-            cost_center?: number | null;
-            description?: string | null;
-          }) => ({
-            id: line.id,
-            accountId: String(line.account),
-            partnerId: line.partner != null ? String(line.partner) : "",
-            costCenterId: line.cost_center != null ? String(line.cost_center) : "",
-            debit: parseFloat(String(line.debit)) > 0 ? String(line.debit) : "",
-            credit: parseFloat(String(line.credit)) > 0 ? String(line.credit) : "",
-            description: line.description || "",
-          })
-        );
-        while (mapped.length < 3) mapped.push(emptyLine());
-        setLines(mapped);
+        if (j.currency == null && baseCurrency) j.currency = baseCurrency.CurrencyID;
+        hydrateFromJournal(j, activeAccounts, part as AccountingPartner[]);
       } else {
         setPosted(false);
-        setLines([emptyLine(), emptyLine(), emptyLine()]);
+        setLines(startingLines());
+        setHeader((h) => ({ ...h, reference_type: h.reference_type || "MANUAL" }));
         if (baseCurrency) {
           setHeader((h) => ({
             ...h,
@@ -313,6 +337,9 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
             ...h,
             description: h.description || `صفقة: ${dealRef.displayName}`,
           }));
+          setHeaderDescTouched(true);
+        } else {
+          setHeaderDescTouched(false);
         }
       }
     } catch (e: unknown) {
@@ -320,9 +347,35 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     } finally {
       setLoading(false);
     }
-  }, [journalId, dealRef?.displayName]);
+  }, [journalId, dealRef?.displayName, hydrateFromJournal]);
 
   useEffect(() => { void load(); }, [load]);
+
+  /* ── توليد البيان تلقائياً من الحسابات (يتوقف عند أي كتابة يدوية) ── */
+  useEffect(() => {
+    if (posted || loading) return;
+    const narration = lines.map((l) => toNarrationLine(l, accounts, partners));
+    const nextHeaderDesc = headerDescTouched
+      ? header.description
+      : buildHeaderNarration(narration);
+    if (!headerDescTouched && nextHeaderDesc !== header.description) {
+      setHeader((h) => ({ ...h, description: nextHeaderDesc }));
+    }
+    // بيان السطر يتبع حسابه حين يكون البيان الإجمالي مولَّداً (صيغة «من ح/ … إلى ح/ …»
+    // لا تصلح بياناً لسطر مفرد)، ويتبع ما كتبه المستخدم حين يكتبه بيده.
+    const lineBase = headerDescTouched ? nextHeaderDesc : "";
+    setLines((prev) => {
+      let changed = false;
+      const next = prev.map((l, i) => {
+        if (l.descriptionTouched || !narration[i]) return l;
+        const want = buildLineNarration(narration[i], lineBase);
+        if (want === l.description) return l;
+        changed = true;
+        return { ...l, description: want };
+      });
+      return changed ? next : prev;
+    });
+  }, [lines, accounts, partners, header.description, headerDescTouched, posted, loading, toNarrationLine]);
 
   /* ── N3-T1: account balance lookup helper (يَستخدم getGeneralLedger مع YTD) ── */
   const showAccountBalance = useCallback(async (lineIdx: number, accountId: string) => {
@@ -475,13 +528,6 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     { key: 'del',         header: '',            width: '36px',  align: 'center' },
   ];
 
-  /* ── N3-T1: AseelIndexPicker columns for accounts ── */
-  const accountPickerColumns: AseelIndexColumn<AccountingAccount>[] = [
-    { key: 'code', header: 'الكود', width: '90px', value: (a) => a.code || '' },
-    { key: 'name', header: 'الاسم', value: (a) => a.name || '' },
-    { key: 'type', header: 'النوع', width: '90px', value: (a) => a.account_type || '' },
-  ];
-
   type GridLine = LineState & { _idx: number };
 
   const gridLines: GridLine[] = lines.map((l, i) => ({ ...l, _idx: i }));
@@ -511,7 +557,8 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   };
 
   const gridOnChange = (rowIndex: number, key: string, value: string) => {
-    if (key === 'description') updateLine(rowIndex, { description: value });
+    // تفريغ البيان يدوياً يعيده إلى التوليد التلقائي.
+    if (key === 'description') updateLine(rowIndex, { description: value, descriptionTouched: !!value.trim() });
     else if (key === 'debit')  updateLine(rowIndex, { debit: value });
     else if (key === 'credit') updateLine(rowIndex, { credit: value });
   };
@@ -526,7 +573,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
           className="aseel-cell-picker"
           disabled={posted}
           data-aseel-key="1"
-          title="+ فتح فهرس الحسابات  |  * عرض الرصيد"
+          title="+ فتح شجرة الحسابات  |  * عرض الرصيد"
           onKeyDown={(e) => {
             if (e.key === '+') { e.preventDefault(); setPickerTargetLine(row._idx); setShowAccountPicker(true); }
             if (e.key === '*') { e.preventDefault(); void showAccountBalance(row._idx, row.accountId); }
@@ -737,32 +784,49 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
               onChange={(e) => setHeader((h) => ({ ...h, exchange_rate: e.target.value }))}
             />
           </label>
-          {/* نوع المرجع */}
+          {/* نوع المرجع — يحدده النظام من مصدر القيد ولا يُدخَل يدوياً */}
           <label className="aseel-field">
             <span className="aseel-field-label">نوع المرجع</span>
-            <select
-              className="aseel-input"
-              disabled={posted}
-              value={header.reference_type}
-              onChange={(e) => setHeader((h) => ({ ...h, reference_type: e.target.value }))}
-            >
-              <option value="">—</option>
-              {Object.entries(REF_TYPE_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
-              ))}
-              <option value="MANUAL">قيد يدوي</option>
-            </select>
-          </label>
-          {/* البيان الإجمالي */}
-          <label className="aseel-field" style={{ gridColumn: 'span 2' }}>
-            <span className="aseel-field-label">البيان الإجمالي</span>
             <input
               className="aseel-input"
-              disabled={posted}
-              placeholder="وصف موجز للقيد"
-              value={header.description}
-              onChange={(e) => setHeader((h) => ({ ...h, description: e.target.value }))}
+              readOnly
+              value={header.reference_type
+                ? refTypeLabel(header.reference_type, header.description, header.source_label)
+                : '—'}
             />
+          </label>
+          {/* البيان الإجمالي — يتولد من الحسابات ما لم يُكتب يدوياً */}
+          <label className="aseel-field" style={{ gridColumn: 'span 2' }}>
+            <span className="aseel-field-label">
+              البيان الإجمالي {headerDescTouched ? '(يدوي)' : '(تلقائي)'}
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <input
+                className="aseel-input"
+                style={{ flex: 1 }}
+                disabled={posted}
+                placeholder="يتولد تلقائياً: من ح/ … إلى ح/ …"
+                value={header.description}
+                onChange={(e) => {
+                  // تفريغ البيان يدوياً يعيده إلى التوليد التلقائي.
+                  setHeaderDescTouched(!!e.target.value.trim());
+                  setHeader((h) => ({ ...h, description: e.target.value }));
+                }}
+              />
+              {!posted && headerDescTouched && (
+                <button
+                  type="button"
+                  className="aseel-iconbtn"
+                  title="إرجاع البيان إلى التوليد التلقائي حسب الحسابات"
+                  onClick={() => {
+                    setHeaderDescTouched(false);
+                    setLines((prev) => prev.map((l) => ({ ...l, descriptionTouched: false })));
+                  }}
+                >
+                  <RefreshCw className="h-3 w-3" />
+                </button>
+              )}
+            </div>
           </label>
         </>
       }
@@ -823,30 +887,14 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         </div>
       )}
 
-      {/* ── شريط الإعدادات الثانوية: مرجع + مركز التكلفة ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px', marginBottom: '8px' }}>
-        <label className="aseel-field">
-          <span className="aseel-field-label">رقم المرجع</span>
-          <input
-            className="aseel-input"
-            type="number"
-            disabled={posted}
-            value={header.reference_id}
-            onChange={(e) => setHeader((h) => ({ ...h, reference_id: e.target.value }))}
-            placeholder="—"
-          />
-        </label>
-        <label className="aseel-field" style={{ gridColumn: 'span 2' }}>
-          <span className="aseel-field-label">معلومات المرجع</span>
-          <div className="aseel-input" style={{ display: 'flex', alignItems: 'center', minHeight: '28px', background: 'var(--aseel-surface-2, #f4ede0)' }}>
-            <Info className="w-3 h-3" style={{ marginInlineEnd: '6px', color: 'var(--aseel-ink-soft)' }} />
-            <span style={{ fontSize: '12px' }}>
-              {header.reference_type
-                ? `${refTypeLabel(header.reference_type, header.description)}${header.reference_id ? ' · #' + header.reference_id : ''}`
-                : '— لا مرجع —'}
-            </span>
-          </div>
-        </label>
+      {/* ── مصدر القيد: يعرضه النظام ولا يُدخَل يدوياً ── */}
+      <div className="aseel-input" style={{ display: 'flex', alignItems: 'center', minHeight: '28px', marginBottom: '8px', background: 'var(--aseel-surface-2, #f4ede0)' }}>
+        <Info className="w-3 h-3" style={{ marginInlineEnd: '6px', color: 'var(--aseel-ink-soft)' }} />
+        <span style={{ fontSize: '12px' }}>
+          {header.reference_type && header.reference_type !== 'MANUAL'
+            ? `مصدر القيد: ${refTypeLabel(header.reference_type, header.description, header.source_label)}${header.reference_id ? ' · #' + header.reference_id : ''}`
+            : 'قيد يدوي — لا مستند مصدر'}
+        </span>
       </div>
 
       {/* ── AseelGrid لبنود القيد ── */}
@@ -934,14 +982,14 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
       )}
     </div>
 
-    {/* ── AseelIndexPicker للحسابات (يُفتح بـ + على خلية الحساب) ── */}
-    <AseelIndexPicker<AccountingAccount>
+    {/* ── T-DEFACC: شجرة الحسابات (تُفتح بـ + على خلية الحساب) ── */}
+    <AccountTreePicker
       open={showAccountPicker}
-      title="فهرس الحسابات"
-      rows={accounts}
-      columns={accountPickerColumns}
-      getRowKey={(a) => a.id}
-      searchValue={(a) => `${a.code || ''} ${a.name || ''}`}
+      accounts={accounts}
+      value={pickerTargetLine != null && lines[pickerTargetLine]?.accountId
+        ? Number(lines[pickerTargetLine].accountId)
+        : null}
+      title="شجرة الحسابات"
       onSelect={(a) => {
         if (pickerTargetLine != null) {
           updateLine(pickerTargetLine, { accountId: String(a.id) });

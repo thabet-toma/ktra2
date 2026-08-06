@@ -54,6 +54,8 @@ import {
   PaymentVoucherModal,
   type ChequeLine,
 } from "./PaymentVoucherParts";
+import { AccountTreeField } from "../accounting/AccountTreePicker";
+import { isCashAccount } from "../../utils/accountTree";
 import { VoucherAllocationModal } from "../shared/VoucherAllocationModal";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { formatDateLocalized } from "../../utils/formatDate";
@@ -662,29 +664,6 @@ export const NewPaymentModal: React.FC<{
     return () => { cancelled = true; };
   }, [currencyId, initialPartner, partnerId, partners]);
 
-  const cashboxAccounts = useMemo(
-    () =>
-      accounts.filter((a) => {
-        // T-A4: Ensure consistent filtering with PurchaseSettings / SalesSettings
-        if (a.account_type === undefined) return false;
-        const t = (a.account_type || "").toLowerCase();
-        if (t === "cash" || t === "bank") return true;
-        if (t === "asset") {
-          const code = String(a.code || "");
-          const name = (a.name || "").toLowerCase();
-          return (
-            code.startsWith("110") ||
-            name.includes("صندوق") ||
-            name.includes("بنك") ||
-            name.includes("cash") ||
-            name.includes("bank")
-          );
-        }
-        return false;
-      }),
-    [accounts],
-  );
-
   const partnerAging = useMemo(
     () => aging.filter((a) => a.customer_id === partnerId),
     [aging, partnerId],
@@ -852,10 +831,13 @@ export const NewPaymentModal: React.FC<{
 
         <label className="aseel-field">
           <span className="aseel-field-label">الصندوق / البنك *</span>
-          <select className="aseel-input" value={cashAccountId} onChange={(e) => setCashAccountId(e.target.value ? Number(e.target.value) : "")}>
-            <option value="">— اختر —</option>
-            {cashboxAccounts.map((a) => <option key={a.id} value={a.id}>{a.code} {a.name}</option>)}
-          </select>
+          <AccountTreeField
+            accounts={accounts}
+            value={cashAccountId}
+            onChange={(id) => setCashAccountId(id ?? "")}
+            isSelectable={isCashAccount}
+            title="اختيار الصندوق / البنك"
+          />
         </label>
         <label className="aseel-field">
           <span className="aseel-field-label">العملة *</span>

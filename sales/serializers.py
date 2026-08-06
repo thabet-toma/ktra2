@@ -3,11 +3,15 @@ from decimal import Decimal
 from django.db import transaction
 from rest_framework import serializers
 
-from accounting.models import Cheque
+from accounting.models import Account, Cheque
 from inventory.models import Product
 from partners.models import Partner
 from tenants.models import Currency
-from core.payments import document_partner_balance_summary, document_payment_summary
+from core.payments import (
+    apply_default_cash_account,
+    document_partner_balance_summary,
+    document_payment_summary,
+)
 
 from .models import (
     CreditDebitNote,
@@ -593,6 +597,12 @@ class CustomerPaymentSerializer(serializers.ModelSerializer):
     allocated_amount = serializers.SerializerMethodField()
     unallocated_amount = serializers.SerializerMethodField()
 
+    # T-DEFACC: الصندوق يُملأ من افتراضي الشركة حين لا يُرسَل — سند القبض
+    # كان يُرفَض بـ«هذا الحقل مطلوب» في كل شاشة تنسى تمرير الحساب.
+    cash_or_bank_account = serializers.PrimaryKeyRelatedField(
+        queryset=Account.objects.all(), required=False, allow_null=True,
+    )
+
     def validate(self, attrs):
         # T-ONACC: التوزيع اختياري وجزئي مسموح — الباقي يُسجَّل على حساب العميل.
         # الممنوع فقط أن يتجاوز مجموع التوزيعات مبلغ السند.
@@ -611,7 +621,7 @@ class CustomerPaymentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"cheques": "مجموع الشيكات لا يجوز أن يتجاوز مبلغ السند."}
             )
-        return attrs
+        return apply_default_cash_account(self, attrs)
 
     def _allocated(self, obj) -> Decimal:
         # allocations مُحمَّلة مسبقاً (prefetch_related) — لا استعلام لكل صف.

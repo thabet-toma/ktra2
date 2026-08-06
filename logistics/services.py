@@ -518,6 +518,19 @@ def get_or_create_purchase_settings(tenant):
     obj = PurchaseSettings.objects.filter(tenant_id=tenant_id).first()
     if obj is None:
         obj = PurchaseSettings.objects.create(tenant_id=tenant_id)
+    # T-DEFACC: الصندوق الافتراضي يُملأ من مصدر الشركة الواحد (إعدادات المبيعات ثم
+    # الشجرة) بدل أن يبقى فارغاً فيرفض حفظ أي دفعة نقدية على فاتورة شراء.
+    if obj.default_cash_account_id is None:
+        from accounting.services import resolve_default_cash_account
+
+        acc = resolve_default_cash_account(tenant_id)
+        if acc:
+            obj.default_cash_account = acc
+            obj.save(update_fields=["default_cash_account"])
+            logger.info(
+                "purchase.settings.default_cash_filled tenant=%s account=%s",
+                tenant_id, acc.pk,
+            )
     return obj
 
 
@@ -529,6 +542,11 @@ def _resolve_ap_account(partner) -> Account:
     3. حساب برمز 2101 (حساب ذمم موردين معياري)
     4. أول حساب خصوم (Liability) نشط في الشركة
     """
+    # T-DEFACC: المورد بلا حساب مربوط يُنشأ له حسابه تحت «الدائنون» أولاً — بلا
+    # هذا كان القيد يقع على الأب العام فيختلط كل الموردين في حساب واحد.
+    from partners.signals import ensure_partner_linked_account
+
+    partner = ensure_partner_linked_account(partner) or partner
     if partner.linked_account_id:
         return partner.linked_account
     if partner.group_id:
@@ -601,7 +619,21 @@ def attach_pi_payment_voucher(
         )
 
     if cash_amount > 0 and not cash_account_id:
-        raise ValidationError("لا بدّ من تحديد حساب الصندوق عند وجود مبلغ نقدي.")
+        # T-DEFACC: الصندوق الافتراضي للشركة بدل رفض السند — نفس مصدر سندي
+        # القبض والصرف، فلا تختلف فاتورة الشراء عن بقية المعاملات.
+        from accounting.services import resolve_default_cash_account
+
+        default_cash = resolve_default_cash_account(invoice.tenant_id)
+        if default_cash is None:
+            raise ValidationError(
+                "لا بدّ من تحديد حساب الصندوق عند وجود مبلغ نقدي — أو عيّن صندوقاً "
+                "افتراضياً في إعدادات المبيعات."
+            )
+        cash_account_id = default_cash.pk
+        logger.info(
+            "purchase.invoice.cash_account_defaulted invoice=%s account=%s",
+            invoice.pk, cash_account_id,
+        )
 
     with transaction.atomic():
         invoice.attached_cash_amount = cash_amount

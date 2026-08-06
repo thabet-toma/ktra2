@@ -4,6 +4,13 @@
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
 import { apiFetch, toPagedList } from "./restApi";
 import { tenantScopedOfflineKey } from "../utils/offlineTenantScope";
+import type {
+  BankAccountDto,
+  BankBranchDto,
+  BankDto,
+  BankReconciliationSummaryDto,
+  BankStatementDto,
+} from "../types/accounting";
 
 // كل نداءات هذا العميل القديمة تمر الآن من دورة الطلب المحدودة والموحّدة.
 const fetch = apiFetch;
@@ -214,6 +221,153 @@ export const accountingApi = {
 
   getCostCenters: () =>
     fetch(`${ACC}/cost-centers/`, { headers: headers() }).then(asList),
+
+  /* ── T-BANKS: البنوك وفروعها وحساباتها والمطابقة البنكية ── */
+
+  getBanks: (activeOnly = false) =>
+    fetch(`${ACC}/banks/${activeOnly ? "?active_only=1" : ""}`, { headers: headers() }).then(asList),
+
+  createBank: async (body: Record<string, unknown>): Promise<BankDto> => {
+    const res = await fetch(`${ACC}/banks/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createBank");
+    return res.json();
+  },
+
+  updateBank: async (id: number, body: Record<string, unknown>): Promise<BankDto> => {
+    const res = await fetch(`${ACC}/banks/${id}/`, {
+      method: "PATCH", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "updateBank");
+    return res.json();
+  },
+
+  deleteBank: async (id: number) => {
+    const res = await fetch(`${ACC}/banks/${id}/`, { method: "DELETE", headers: headers() });
+    await handle(res, "deleteBank");
+  },
+
+  getBankBranches: (bankId?: number) =>
+    fetch(`${ACC}/bank-branches/${bankId ? `?bank=${bankId}` : ""}`, { headers: headers() }).then(asList),
+
+  createBankBranch: async (body: Record<string, unknown>): Promise<BankBranchDto> => {
+    const res = await fetch(`${ACC}/bank-branches/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createBankBranch");
+    return res.json();
+  },
+
+  updateBankBranch: async (id: number, body: Record<string, unknown>): Promise<BankBranchDto> => {
+    const res = await fetch(`${ACC}/bank-branches/${id}/`, {
+      method: "PATCH", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "updateBankBranch");
+    return res.json();
+  },
+
+  deleteBankBranch: async (id: number) => {
+    const res = await fetch(`${ACC}/bank-branches/${id}/`, { method: "DELETE", headers: headers() });
+    await handle(res, "deleteBankBranch");
+  },
+
+  getBankAccounts: (params: { bank?: number; activeOnly?: boolean } = {}) => {
+    const q = new URLSearchParams();
+    if (params.bank) q.set("bank", String(params.bank));
+    if (params.activeOnly) q.set("active_only", "1");
+    const qs = q.toString();
+    return fetch(`${ACC}/bank-accounts/${qs ? `?${qs}` : ""}`, { headers: headers() }).then(asList);
+  },
+
+  createBankAccount: async (body: Record<string, unknown>): Promise<BankAccountDto> => {
+    const res = await fetch(`${ACC}/bank-accounts/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createBankAccount");
+    return res.json();
+  },
+
+  updateBankAccount: async (id: number, body: Record<string, unknown>): Promise<BankAccountDto> => {
+    const res = await fetch(`${ACC}/bank-accounts/${id}/`, {
+      method: "PATCH", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "updateBankAccount");
+    return res.json();
+  },
+
+  deleteBankAccount: async (id: number) => {
+    const res = await fetch(`${ACC}/bank-accounts/${id}/`, { method: "DELETE", headers: headers() });
+    await handle(res, "deleteBankAccount");
+  },
+
+  getBankStatement: async (
+    id: number,
+    params: { start_date?: string; end_date?: string } = {},
+  ): Promise<BankStatementDto> => {
+    const q = new URLSearchParams();
+    if (params.start_date) q.set("start_date", params.start_date);
+    if (params.end_date) q.set("end_date", params.end_date);
+    const qs = q.toString();
+    const res = await fetch(`${ACC}/bank-accounts/${id}/statement/${qs ? `?${qs}` : ""}`, {
+      headers: headers(),
+    });
+    await handle(res, "bankStatement");
+    return res.json();
+  },
+
+  getBankReconciliations: (bankAccountId?: number) =>
+    fetch(`${ACC}/bank-reconciliations/${bankAccountId ? `?bank_account=${bankAccountId}` : ""}`, {
+      headers: headers(),
+    }).then(asList),
+
+  createBankReconciliation: async (body: Record<string, unknown>) => {
+    const res = await fetch(`${ACC}/bank-reconciliations/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createBankReconciliation");
+    return res.json();
+  },
+
+  getBankReconciliationSummary: async (id: number): Promise<BankReconciliationSummaryDto> => {
+    const res = await fetch(`${ACC}/bank-reconciliations/${id}/summary/`, { headers: headers() });
+    await handle(res, "bankReconciliationSummary");
+    return res.json();
+  },
+
+  toggleBankReconciliationLine: async (
+    id: number, journalLine: number, cleared: boolean,
+  ): Promise<BankReconciliationSummaryDto> => {
+    const res = await fetch(`${ACC}/bank-reconciliations/${id}/toggle-line/`, {
+      method: "POST", headers: headers(),
+      body: JSON.stringify({ journal_line: journalLine, cleared }),
+    });
+    await handle(res, "toggleBankReconciliationLine");
+    return res.json();
+  },
+
+  closeBankReconciliation: async (id: number): Promise<BankReconciliationSummaryDto> => {
+    const res = await fetch(`${ACC}/bank-reconciliations/${id}/close/`, {
+      method: "POST", headers: headers(), body: "{}",
+    });
+    await handle(res, "closeBankReconciliation");
+    return res.json();
+  },
+
+  reopenBankReconciliation: async (id: number): Promise<BankReconciliationSummaryDto> => {
+    const res = await fetch(`${ACC}/bank-reconciliations/${id}/reopen/`, {
+      method: "POST", headers: headers(), body: "{}",
+    });
+    await handle(res, "reopenBankReconciliation");
+    return res.json();
+  },
+
+  deleteBankReconciliation: async (id: number) => {
+    const res = await fetch(`${ACC}/bank-reconciliations/${id}/`, {
+      method: "DELETE", headers: headers(),
+    });
+    await handle(res, "deleteBankReconciliation");
+  },
 
   getCheques: () =>
     fetch(`${ACC}/cheques/`, { headers: headers() }).then(asList),

@@ -23,6 +23,7 @@ from accounting.services import (
 from inventory.models import Product, StockMovement
 from inventory.services import record_stock_movement
 from partners.models import Partner, PartnerGroup
+from partners.signals import ensure_partner_linked_account
 
 from .models import (
     CreditDebitNote,
@@ -104,11 +105,13 @@ def resolve_default_account(
     return None
 
 
-def _fill_missing_stock_accounts(settings_obj: SalesSettings, tenant_id) -> list[str]:
-    """يملأ حسابَي تكلفة المبيعات والمخزون إن كانا فارغين — يعيد الحقول المعدّلة.
+def _fill_missing_default_accounts(settings_obj: SalesSettings, tenant_id) -> list[str]:
+    """يملأ الحسابات الافتراضية الفارغة من الشجرة — يعيد الحقول المعدّلة.
 
-    تركهما NULL كان يوقف ترحيل أي فاتورة مبيعات في شركة جديدة برسالة «عيّن حساب
-    تكلفة المبيعات والمخزون…»، مع أن شجرة الحسابات القياسية تحوي الحسابين أصلاً.
+    تركها NULL كان يوقف ترحيل أي فاتورة مبيعات في شركة جديدة برسالة «عيّن حساب
+    تكلفة المبيعات والمخزون…»، مع أن شجرة الحسابات القياسية تحوي الحسابات أصلاً.
+    T-DEFACC: الصندوق والذمم انضمّا للقائمة — كانا يبقيان فارغين فيُجبَر المستخدم
+    على اختيار الصندوق يدوياً في كل سند.
     """
     filled: list[str] = []
     if settings_obj.default_cogs_account_id is None:
@@ -125,6 +128,26 @@ def _fill_missing_stock_accounts(settings_obj: SalesSettings, tenant_id) -> list
         if acc:
             settings_obj.default_inventory_account = acc
             filled.append("default_inventory_account")
+    if settings_obj.default_cash_account_id is None:
+        acc = resolve_default_account(
+            tenant_id, ["1101", "1102", "1110"], "Asset", "صندوق", allow_any_of_type=False
+        )
+        if acc:
+            settings_obj.default_cash_account = acc
+            filled.append("default_cash_account")
+    if settings_obj.default_ar_account_id is None:
+        # 1103 = المدينون التجاريون (أب حسابات الزبائن). القائمة القديمة كانت
+        # ["1201", "1106"] — أراضٍ ودفعات موردين، لا علاقة لهما بذمم العملاء.
+        acc = resolve_default_account(
+            tenant_id, ["1103"], "Asset", "مدينون", allow_any_of_type=False
+        )
+        if acc:
+            settings_obj.default_ar_account = acc
+            filled.append("default_ar_account")
+    if filled:
+        logger.info(
+            "sales.settings.defaults_filled tenant=%s fields=%s", tenant_id, filled,
+        )
     return filled
 
 
@@ -138,7 +161,7 @@ def get_or_create_sales_settings(tenant) -> SalesSettings:
         if settings_obj.default_customer_id is None:
             settings_obj.default_customer = get_or_create_default_customer(tenant_id)
             updates.append("default_customer")
-        updates += _fill_missing_stock_accounts(settings_obj, tenant_id)
+        updates += _fill_missing_default_accounts(settings_obj, tenant_id)
         if updates:
             settings_obj.save(update_fields=updates)
         return settings_obj
@@ -187,7 +210,7 @@ def get_or_create_sales_settings(tenant) -> SalesSettings:
         default_revenue_account_service=default_rev,
         default_vat_rate=default_vat,
     )
-    filled = _fill_missing_stock_accounts(settings_obj, tenant_id)
+    filled = _fill_missing_default_accounts(settings_obj, tenant_id)
     if filled:
         settings_obj.save(update_fields=filled)
     return settings_obj
@@ -329,12 +352,16 @@ def _resolve_ar_account(invoice: SalesInvoice) -> Account:
     if invoice.accounts_receivable_account_id:
         return invoice.accounts_receivable_account
     p: Partner = invoice.customer
+    # T-DEFACC: حساب الزبون نفسه في الشجرة أولاً. حساب المجموعة هو أب الذمم العام
+    # (المدينون التجاريون) — استعماله كان يخلط كل الزبائن في حساب واحد فيضيع
+    # كشف الحساب التفصيلي، مع أن للزبون حسابه المولَّد تحت الأب أصلاً.
+    p = ensure_partner_linked_account(p) or p
+    if p.linked_account_id:
+        return p.linked_account
     if p.group_id:
         g = PartnerGroup.objects.filter(pk=p.group_id).first()
         if g and g.account_receivable_id:
             return g.account_receivable
-    if p.linked_account_id:
-        return p.linked_account
     # fallback إلى إعدادات المبيعات
     ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
     if ss and ss.default_ar_account_id:
@@ -871,8 +898,11 @@ def _auto_settle_cash_sale(invoice: SalesInvoice, *, user=None) -> None:
     # حساب الصندوق: حساب الفاتورة النقدي → النقدي المرفق → افتراضي الإعدادات.
     cash_account_id = invoice.cash_or_bank_account_id or invoice.attached_cash_account_id
     if not cash_account_id:
-        ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
-        cash_account_id = ss.default_cash_account_id if ss else None
+        # T-DEFACC: مصدر الصندوق الافتراضي واحد لكل المعاملات.
+        from accounting.services import resolve_default_cash_account
+
+        default_cash = resolve_default_cash_account(invoice.tenant_id)
+        cash_account_id = default_cash.pk if default_cash else None
     if not cash_account_id:
         logger.warning(
             "Cash sale %s posted without a cash account — customer left as debtor "
@@ -1915,12 +1945,14 @@ def deliver_delivery_order(delivery: DeliveryOrder, *, user=None) -> DeliveryOrd
 
 
 def _resolve_ar_account_for_partner(partner: Partner) -> Account:
+    # T-DEFACC: نفس ترتيب `_resolve_ar_account` — حساب الزبون قبل أب المجموعة.
+    partner = ensure_partner_linked_account(partner) or partner
+    if partner.linked_account_id:
+        return partner.linked_account
     if partner.group_id:
         g = PartnerGroup.objects.filter(pk=partner.group_id).first()
         if g and g.account_receivable_id:
             return g.account_receivable
-    if partner.linked_account_id:
-        return partner.linked_account
     # Fallback to sales settings (matches _resolve_ar_account)
     ss = SalesSettings.objects.filter(tenant_id=partner.tenant_id).first()
     if ss and ss.default_ar_account_id:
