@@ -108,6 +108,50 @@ def test_create_supplier_requires_name(env):
     assert resp.status_code == 400
 
 
+# ─── عملاء ───────────────────────────────────────────────────────────────
+
+def test_create_customer_forces_partner_type(env):
+    tenant, _customer, _product = env
+    client = APIClient()
+    resp = client.post(
+        "/api/agent/customers/",
+        {"tenant_id": tenant.TenantID, "name": "زبون جديد", "partner_type": "Supplier"},
+        format="json", **_hdr(),
+    )
+    assert resp.status_code == 201, resp.data
+    customer = Partner.objects.get(pk=resp.data["id"])
+    assert customer.partner_type == "Customer"
+    assert customer.tenant_id == tenant.TenantID
+
+
+def test_list_customers_excludes_suppliers(env):
+    tenant, customer, _product = env
+    Partner.objects.create(tenant=tenant, name="مورد1", partner_type="Supplier")
+    client = APIClient()
+    resp = client.get(f"/api/agent/customers/?tenant_id={tenant.TenantID}", **_hdr())
+    assert resp.status_code == 200
+    names = [r["name"] for r in resp.data["results"]]
+    assert customer.name in names
+    assert "مورد1" not in names
+
+
+def test_create_customer_requires_name(env):
+    tenant, _customer, _product = env
+    resp = APIClient().post(
+        "/api/agent/customers/", {"tenant_id": tenant.TenantID}, format="json", **_hdr(),
+    )
+    assert resp.status_code == 400
+
+
+def test_create_customer_requires_key(env):
+    tenant, _customer, _product = env
+    resp = APIClient().post(
+        "/api/agent/customers/", {"tenant_id": tenant.TenantID, "name": "زبون"},
+        format="json",
+    )
+    assert resp.status_code == 401
+
+
 # ─── أصناف ───────────────────────────────────────────────────────────────
 
 def test_create_product_generates_sku_when_missing(env):

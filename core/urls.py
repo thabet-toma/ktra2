@@ -56,6 +56,7 @@ urlpatterns = [
     path('api/agent/invoices/draft/<int:pk>/', agent_db_view.agent_draft_invoice_detail),
     path('api/agent/invoices/', agent_db_view.agent_list_invoices),
     path('api/agent/suppliers/', agent_db_view.agent_suppliers),
+    path('api/agent/customers/', agent_db_view.agent_customers),
     path('api/agent/products/', agent_db_view.agent_products),
     path('api/dashboard/', dashboard_api.trade_dashboard),
     # T-REPORTS: قسم التقارير — فهرس واحد ومشغّل واحد لكل تقارير المنصة.

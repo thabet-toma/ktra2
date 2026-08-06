@@ -2,7 +2,8 @@
 واجهة برمجية للـ AI Agent للتحكم بقاعدة البيانات عن بُعد بمفتاح واحد.
 - القراءة الحرة: SELECT فقط عبر /api/agent/query/ (لا تعديل ولا حذف بالـ SQL).
 - فواتير المبيعات/المشتريات (مسوّدات + مرحّلة): /api/agent/invoices/...
-- الموردون: /api/agent/suppliers/  — الأصناف: /api/agent/products/
+- الموردون: /api/agent/suppliers/  — العملاء: /api/agent/customers/
+  — الأصناف: /api/agent/products/
   كل الكتابة تمر بالـ ORM (نفس السيريالايزرز المستخدَمة بالواجهة) — لا SQL
   خام إطلاقاً. مسار الحذف الوحيد على كل واجهة الوكيل هو
   DELETE /api/agent/invoices/draft/<id>/ — ويُرفض إن لم تكن الفاتورة
@@ -446,6 +447,71 @@ def agent_suppliers(request):
         action="create", entity_type="partner", entity_id=supplier.id,
         entity_label=supplier.name, description="إضافة مورد عبر واجهة الوكيل",
         partner_ids=[supplier.id], tenant=tenant, request=request,
+    )
+    return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+
+@api_view(["GET", "POST", "OPTIONS"])
+@authentication_classes([])
+@permission_classes([])
+@agent_endpoint("GET, POST, OPTIONS")
+def agent_customers(request):
+    """
+    GET  /api/agent/customers/?tenant_id=1&search=...
+    POST /api/agent/customers/
+    Headers: X-Agent-Key: <AGENT_DB_API_KEY>
+    Body: {"tenant_id": 1, "name": "عميل جديد", "phone": "...", "email": "...",
+           "tax_number": "...", "credit_limit": "0"}
+
+    partner_type ثابت دائماً على "Customer" بغضّ النظر عمّا يُرسَل — مرآة
+    agent_suppliers للطرف الآخر. لا مسار تعديل أو حذف على واجهة الوكيل.
+    """
+    unauthorized = _check_agent_key(request)
+    if unauthorized is not None:
+        return unauthorized
+
+    from partners.models import Partner
+    from partners.serializers import PartnerListSerializer, PartnerSerializer
+
+    if request.method == "GET":
+        tenant, err = _resolve_agent_tenant(request.query_params.get("tenant_id"))
+        if tenant is None:
+            return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
+        qs = Partner.objects.filter(
+            tenant_id=tenant.TenantID, partner_type="Customer",
+        ).order_by("name")
+        search = request.query_params.get("search", "").strip()
+        if search:
+            qs = qs.filter(name__icontains=search)
+        try:
+            limit = min(max(int(request.query_params.get("limit", MAX_ROWS)), 1), MAX_ROWS)
+        except (TypeError, ValueError):
+            limit = MAX_ROWS
+        rows = PartnerListSerializer(qs[:limit], many=True).data
+        return Response({"results": rows, "count": len(rows)})
+
+    from core.activity import log_activity
+
+    tenant, err = _resolve_agent_tenant((request.data or {}).get("tenant_id"))
+    if tenant is None:
+        return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
+
+    payload = {k: v for k, v in (request.data or {}).items() if k != "tenant_id"}
+    payload["partner_type"] = "Customer"
+    if not str(payload.get("name") or "").strip():
+        return Response({"error": "اسم العميل مطلوب."}, status=status.HTTP_400_BAD_REQUEST)
+
+    serializer = PartnerSerializer(data=payload)
+    if not serializer.is_valid():
+        return Response(
+            {"error": "بيانات غير صالحة.", "details": serializer.errors},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    customer = serializer.save(tenant=tenant)
+    log_activity(
+        action="create", entity_type="partner", entity_id=customer.id,
+        entity_label=customer.name, description="إضافة عميل عبر واجهة الوكيل",
+        partner_ids=[customer.id], tenant=tenant, request=request,
     )
     return Response(serializer.data, status=status.HTTP_201_CREATED)
 
