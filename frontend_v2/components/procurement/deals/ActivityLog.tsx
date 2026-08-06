@@ -4,6 +4,7 @@ import {
   Package, CheckCircle, AlertCircle, Edit, Trash2 
 } from 'lucide-react';
 import { DealActivity } from '../../../types';
+import { formatDateTimeValue } from '../../../utils/formatDate';
 
 interface ActivityLogProps {
   activities: DealActivity[];
@@ -84,7 +85,7 @@ export const ActivityLog: React.FC<ActivityLogProps> = ({ activities }) => {
                 </div>
                 <div className="flex items-center gap-2 text-sm aseel-text-soft dark:aseel-text-soft">
                   <Clock className="w-4 h-4" />
-                  {new Date(activity.timestamp).toLocaleString('ar-EG')}
+                  {formatDateTimeValue(activity.timestamp)}
                 </div>
               </div>
             </div>

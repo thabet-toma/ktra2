@@ -4,6 +4,7 @@ import { Task, Submission } from "../../types";
 import { PriorityIndicator } from "../common/PriorityIndicator";
 import { Users, ChevronDown, ChevronUp, Check, X, Eye, Filter, Search, Mail, Phone, Clock, AlertCircle, FileText, ImageIcon } from 'lucide-react';
 import { TaskDetailsModalProps } from "./TaskDetailsModal.types";
+import { formatDateTimeValue } from "../../utils/formatDate";
 
 interface ManagerViewProps extends TaskDetailsModalProps {
   stats: any;
@@ -184,7 +185,7 @@ export const ManagerTaskView: React.FC<ManagerViewProps> = ({
                              <div className="flex justify-between items-start mb-3">
                                <div>
                                  <h4 className="font-bold text-[var(--color-text)] text-sm">التسليم #{data.submissions.length - subIndex}</h4>
-                                 <p className="text-xs text-[var(--color-text-muted)] mt-1">{new Date(submission.createdAt).toLocaleString('ar-EG')}</p>
+                                 <p className="text-xs text-[var(--color-text-muted)] mt-1">{formatDateTimeValue(submission.createdAt)}</p>
                                </div>
                                <div className="flex gap-2">
                                  {submission.status === 'pending' && (

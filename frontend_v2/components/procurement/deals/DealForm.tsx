@@ -72,6 +72,7 @@ import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
 import { mergeSupplier } from "@/utils/supplierList";
 import { BANK_SWIFT_IMAGE_REQUIRED } from "@/utils/dealPaymentFlow";
 import { formatDateLocalized } from "../../../utils/formatDate";
+import { useSearchParams } from "react-router-dom";
 
 type OperationalStatus =
   | "initial"
@@ -162,6 +163,10 @@ export const DealForm: React.FC<DealFormProps> = ({
 }) => {
   const toast = useToast();
   const confirm = useConfirm();
+  /* مرشد الاستيراد يقود إلى تبويب بعينه (`/deals/7?tab=payments`) — بدون هذا
+     كان الرابط يفتح الصفقة على «البيانات الأساسية» ويترك المستخدم يبحث. */
+  const [dealSearchParams] = useSearchParams();
+  const requestedTab = dealSearchParams.get("tab") || undefined;
   /** حوار معلومات بزر واحد — بديل alert للرسائل الطويلة (نتائج المحاسبة). */
   const notify = (title: string, message: string) =>
     void confirm({ title, message, danger: false, hideCancel: true, confirmText: "حسناً" });
@@ -1221,6 +1226,7 @@ export const DealForm: React.FC<DealFormProps> = ({
         state={formData.id ? `صفقة ${formData.dealNumber || `#${formData.id}`}` : "صفقة جديدة"}
         nav={nav}
         actions={toolbarActions}
+        initialTab={requestedTab}
         tabs={viewMode ? [] : [
           { key: "basic", label: "البيانات الأساسية", content: basicInfoTab },
           { key: "terms", label: "الشروط والشحن", content: termsAndShippingTab },

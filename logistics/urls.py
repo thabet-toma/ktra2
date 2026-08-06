@@ -8,6 +8,7 @@ from .views import (
     SupplierPaymentViewSet,
     LandedCostReportViewSet, LocalShipmentViewSet,
     PurchaseSettingsViewSet, GoodsReceiptViewSet,
+    ImportJourneyViewSet,
 )
 
 router = DefaultRouter()
@@ -20,6 +21,7 @@ router.register(r'payments', LogisticsPaymentViewSet)
 router.register(r'purchase-invoices', PurchaseInvoiceViewSet, basename='purchase-invoices')
 router.register(r'supplier-payments', SupplierPaymentViewSet, basename='supplier-payments')
 router.register(r'local-shipments', LocalShipmentViewSet, basename='local-shipments')
+router.register(r'import-journey', ImportJourneyViewSet, basename='import-journey')
 router.register(r'reports/landed-cost', LandedCostReportViewSet, basename='landed-cost-report')
 router.register(r'purchase-settings', PurchaseSettingsViewSet, basename='purchase-settings')
 router.register(r'goods-receipts', GoodsReceiptViewSet, basename='goods-receipts')

@@ -36,6 +36,57 @@ export function formatDateValue(
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
+/** يحوّل أي قيمة إلى Date صالح، أو null إن تعذّر. `YYYY-MM-DD` تُقرأ كتاريخ
+ *  محلي لا UTC — وإلا انزاح اليوم في المناطق الزمنية الموجبة. */
+function toDate(value: string | number | Date | null | undefined): Date | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "string") {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  }
+  const d = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/**
+ * G10-B: الوقت بصيغة 24 ساعة `HH:mm` بأرقام لاتينية.
+ *
+ * `toLocaleTimeString('ar-EG')` يُخرج أرقاماً هندية (٠١٢…) على الأجهزة التي
+ * تحمل بيانات ICU كاملة ولاتينية على غيرها، فيختلف الشكل بين جهاز وآخر.
+ */
+export function formatTimeValue(
+  value: string | number | Date | null | undefined,
+): string {
+  const d = toDate(value);
+  if (!d) return "";
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+/** التاريخ والوقت معاً بصيغة الموقع: `dd/MM/yyyy HH:mm`. */
+export function formatDateTimeValue(
+  value: string | number | Date | null | undefined,
+): string {
+  const d = toDate(value);
+  if (!d) return typeof value === "string" ? value : "";
+  return `${formatDateValue(d)} ${formatTimeValue(d)}`;
+}
+
+/** أسماء الأيام ثابتة — لا تعتمد على بيانات ICU في المتصفّح. */
+const WEEKDAYS_AR = [
+  "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت",
+];
+
+/** اسم اليوم بالعربية (الأحد … السبت)، وفارغ لغير القابل للتفسير. */
+export function formatWeekdayName(
+  value: string | number | Date | null | undefined,
+): string {
+  const d = toDate(value);
+  if (!d) return "";
+  return WEEKDAYS_AR[d.getDay()];
+}
+
 /** التاريخ الحالي بصيغة ISO المحلية (YYYY-MM-DD) — لا UTC (يتجنّب انزياح اليوم). */
 export function todayIso(): string {
   const now = new Date();

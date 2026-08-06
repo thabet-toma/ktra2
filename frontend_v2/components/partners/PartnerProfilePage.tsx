@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { Pencil } from 'lucide-react';
 import { apiGetObject } from '../../services/restApi';
 import { formatMoney } from '../../utils/formatNumber';
 import { formatDateLocalized, todayIso } from '../../utils/formatDate';
@@ -459,6 +460,18 @@ export const PartnerProfilePage: React.FC = () => {
         <div className="p-4 grid grid-cols-2 gap-4 text-sm">
           {partner && (
             <>
+              <div className="col-span-2 flex justify-end">
+                <button
+                  type="button"
+                  className="aseel-toolbtn"
+                  onClick={() => {
+                    setActiveTabKey('edit');
+                    clientLogger.info('partner.edit_card_open', { partner_id: id });
+                  }}
+                >
+                  <Pencil className="h-3.5 w-3.5" /> تعديل البطاقة
+                </button>
+              </div>
               <div><span className="text-[var(--aseel-ink-soft)]">الاسم:</span> <b>{partner.name}</b></div>
               <div><span className="text-[var(--aseel-ink-soft)]">الاسم القانوني:</span> <b>{partner.legal_name || '—'}</b></div>
               <div><span className="text-[var(--aseel-ink-soft)]">النوع:</span> <b>{isSupplier ? 'مورد' : partner.partner_type === 'Customer' ? 'عميل' : partner.partner_type}</b></div>
@@ -762,6 +775,18 @@ export const PartnerProfilePage: React.FC = () => {
         title={partner ? `كشف حساب: ${partner.name}` : 'جاري التحميل...'}
         actions={[
           { key: 'back', label: 'عودة', onClick: () => navigate(-1) },
+          // التعديل كان تبويباً وحيداً بين تسعة تبويبات على صفحة عنوانها «كشف
+          // حساب»، فلا يُعثر عليه — والأمر مكانه شريط الأوامر كبقية الإجراءات.
+          ...(id && partner
+            ? [{
+                key: 'edit-card',
+                label: 'تعديل البطاقة',
+                onClick: () => {
+                  setActiveTabKey('edit');
+                  clientLogger.info('partner.edit_card_open', { partner_id: id });
+                },
+              }]
+            : []),
           // T-P2: سند قبض سريع من كشف الحساب — العميل مُعبّأ مسبقاً.
           ...(!isSupplier && id
             ? [

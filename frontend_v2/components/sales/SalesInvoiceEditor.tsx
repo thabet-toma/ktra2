@@ -78,7 +78,7 @@ import { ItemQuickCreateModal } from "../items/ItemQuickCreateModal";
 import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
 import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
 import { SalesInvoicePrintView } from "./SalesInvoicePrintView";
-import { formatDateLocalized } from "../../utils/formatDate";
+import { formatDateLocalized, formatDateTimeValue } from "../../utils/formatDate";
 import {
   AseelDocumentShell,
   AseelDocumentView,
@@ -2367,7 +2367,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       <AlertCircle className="h-4 w-4 shrink-0" />
       <span>
         توجد مسودة غير محفوظة محليّاً (
-        {new Date(recoverableDraft.updated_at).toLocaleString("ar")}). هل تريد
+        {formatDateTimeValue(recoverableDraft.updated_at)}). هل تريد
         استعادتها؟
       </span>
       <button

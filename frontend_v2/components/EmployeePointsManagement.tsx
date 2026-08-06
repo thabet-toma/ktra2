@@ -6,6 +6,7 @@ import { User, DailyPoints, ActivityStatus } from '../types';
 import { pointsHistoryService, activityService } from '../services/firestoreService';
 import { autoDisableScheduler } from '../services/autoDisableScheduler';
 import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
+import { formatDateValue, formatWeekdayName } from '../utils/formatDate';
 
 interface EmployeePointsManagementProps {
     users: User[];
@@ -117,7 +118,7 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
 
     const getTotalStats = (userId: string) => userStats[userId] || { totalPoints: 0, totalActivityPoints: 0, totalTaskPoints: 0 };
 
-    const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', calendar: 'gregory' });
+    const formatDate = (dateStr: string) => `${formatWeekdayName(dateStr)} ${formatDateValue(dateStr)}`.trim();
 
     const sortedDailyUsers = useMemo(() => {
         return [...dailyUsersPoints].sort((a, b) => {

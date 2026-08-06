@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Invoice, Supplier } from '../../types';
 import { FileText, Calendar, ArrowRight, Package, DollarSign, Eye, X, Hash } from 'lucide-react';
-import { formatDateValue } from "../../utils/formatDate";
+import { formatDateTimeValue, formatDateValue } from "../../utils/formatDate";
 
 interface SupplierRelatedInvoicesProps {
   supplier: Supplier;
@@ -99,7 +99,7 @@ export const SupplierRelatedInvoices: React.FC<SupplierRelatedInvoicesProps> = (
                 <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                         <span className="aseel-text-soft block">تاريخ الإنشاء</span>
-                        <span className="font-medium aseel-text-ink dark:text-white">{new Date(selectedInvoice.createdAt).toLocaleString('ar-EG')}</span>
+                        <span className="font-medium aseel-text-ink dark:text-white">{formatDateTimeValue(selectedInvoice.createdAt)}</span>
                     </div>
                     <div>
                         <span className="aseel-text-soft block">الوزن الكلي</span>

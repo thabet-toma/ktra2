@@ -2,7 +2,7 @@
 import React, { useState, useMemo } from 'react';
 import { Task, User, Submission } from '../../types';
 import { Check, X, Download, Eye, Clock, AlertCircle, Filter, Search, ExternalLink, Mail, Phone } from 'lucide-react';
-import { formatDateValue } from "../../utils/formatDate";
+import { formatDateValue, formatTimeValue } from "../../utils/formatDate";
 
 interface AllSubmissionsViewProps {
   task: Task;
@@ -355,7 +355,7 @@ export const AllSubmissionsView: React.FC<AllSubmissionsViewProps> = ({
                         {formatDateValue(data.latestSubmission.createdAt)}
                       </span>
                       <span className="text-xs text-[var(--color-text-muted)] block">
-                        {new Date(data.latestSubmission.createdAt).toLocaleTimeString('ar-EG')}
+                        {formatTimeValue(data.latestSubmission.createdAt)}
                       </span>
                       {data.latestSubmission.reviewedAt && (
                         <span className="text-xs text-[var(--color-text-muted)] block">

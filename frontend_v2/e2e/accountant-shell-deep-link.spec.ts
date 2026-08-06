@@ -55,6 +55,17 @@ async function stubAccountantSession(page: Page) {
         period_from: '2026-08-01', period_to: '2026-08-31', clients: [],
         totals: { clients: 0, vat_due: '0', profit: '0', draft_documents: 0, needs_attention: 0 },
       };
+    } else if (path.endsWith('/platform/dashboard/')) {
+      body = {
+        companies: { total: 0, active: 0, trial: 0, suspended: 0 },
+        users: { total: 0, active: 0 },
+        memberships: 0,
+        status_distribution: {},
+        plan_distribution: {},
+        company_rows: [],
+      };
+    } else if (path.endsWith('/platform/accountants/pending/')) {
+      body = { results: [], count: 0 };
     }
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });
@@ -80,4 +91,13 @@ test('بيت المكتب يبقى للمكتب — لا تسرّب للقشرة
   // علامة ثابتة في شريط المكتب (بلا انتظار بيانات) — والمهلة أطول لأن قشرة
   // المكتب تُحمَّل كسولاً (lazy chunk) وأول ترجمة في dev تتجاوز المهلة الافتراضية.
   await expect(page.getByText('مكتب المحاسبة القانونية').first()).toBeVisible({ timeout: 20000 });
+});
+
+test('دخول سوبر أدمن له ملف محاسب لا يفتح مكتب المحاسبة تلقائياً — بيته لوحة المنصة', async ({ page }) => {
+  await stubAccountantSession(page);
+  await page.goto('/');
+  await page.waitForLoadState('networkidle');
+
+  await expect(page.getByText('مكتب المحاسبة القانونية')).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'لوحة تحكم السوبر أدمن' })).toBeVisible();
 });

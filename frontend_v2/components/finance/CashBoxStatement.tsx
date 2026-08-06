@@ -12,7 +12,12 @@ import { CashBox, CashBoxTransaction } from "../../types";
 import { cashBoxTransactionsService } from "../../services/firestoreService";
 import { accountingApi } from "../../services/accountingApi";
 import { DepositModal } from "./modals/DepositModal";
-import { formatDateLocalized, formatDateValue } from "../../utils/formatDate";
+import {
+  formatDateLocalized,
+  formatDateValue,
+  formatTimeValue,
+  formatWeekdayName,
+} from "../../utils/formatDate";
 
 interface CashBoxStatementProps {
   cashBox: CashBox;
@@ -33,12 +38,9 @@ type GlRow = {
 
 const formatDate = (dateString: string) => {
   const date = new Date(dateString);
-  const dayName = date.toLocaleDateString("ar-EG", { weekday: "long" });
+  const dayName = formatWeekdayName(date);
   const datePart = formatDateValue(date);
-  const timePart = date.toLocaleTimeString("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const timePart = formatTimeValue(date);
   return { dayName, datePart, timePart };
 };
 

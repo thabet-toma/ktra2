@@ -9,6 +9,7 @@ import { ar } from 'date-fns/locale';
 import { RefreshCw } from 'lucide-react';
 import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
 import { useAseelIndexKeymap } from './aseel/useAseelIndexKeymap';
+import { formatTimeValue } from '../utils/formatDate';
 
 interface AttendanceManagementProps {
     users: User[];
@@ -121,7 +122,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
             width: '100px',
             render: (emp) => {
                 const rec = getEmployeeAttendance(emp.id);
-                return <span style={{ color: 'var(--aseel-ink-soft)', fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{rec ? new Date(rec.attendedAt).toLocaleTimeString('ar-EG') : '—'}</span>;
+                return <span style={{ color: 'var(--aseel-ink-soft)', fontFamily: 'monospace', fontSize: 'var(--aseel-fs-sm)' }}>{rec ? formatTimeValue(rec.attendedAt) : '—'}</span>;
             },
         },
         {
@@ -166,7 +167,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
                     </span>
                     {activeSession && (
                         <span style={{ color: 'var(--aseel-ink-soft)', fontSize: 'var(--aseel-fs-sm)' }}>
-                            بدأت: {new Date(activeSession.startTime).toLocaleTimeString('ar-EG')}
+                            بدأت: {formatTimeValue(activeSession.startTime)}
                         </span>
                     )}
                     <div style={{ flex: 1 }} />

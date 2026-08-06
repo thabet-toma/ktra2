@@ -9,14 +9,15 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 
-from accounting.models import Account
+from accounting.models import Account, JournalLine
 from accounting.services import (
     convert_amount,
     create_audit_log,
     post_journal,
     resolve_forex_account,
+    unpost_document,
     validate_fiscal_period,
     validate_journal_entry,
 )
@@ -715,18 +716,16 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:
     """حساب «شيكات برسم الدفع» — مرآة حساب الشيكات الواردة للجانب الدائن.
 
     الشيك الصادر ليس نقداً خرج من الصندوق بل التزام حتى يُصرف، فيُدائَن حساب
-    التزام مستقل. لا إعداد له بعد (مسجّل في النواقص) — يُطابَق بالاسم، وبلا
-    حساب مطابق يُرفض الترحيل صراحةً بدل تحميل الصندوق ما لم يخرج منه.
+    التزام مستقل. T-CHQ2: الحساب المبذور 2111 أولاً (مرآة 1107 للوارد) ثم
+    مطابقة الاسم للشجرات القديمة، وبلا حساب مطابق يُرفض الترحيل صراحةً بدل
+    تحميل الصندوق ما لم يخرج منه.
     """
+    base = Account.objects.filter(
+        tenant_id=tenant_id, account_type="Liability", is_active=True,
+    )
     acc = (
-        Account.objects.filter(
-            tenant_id=tenant_id,
-            account_type="Liability",
-            is_active=True,
-            name__icontains="شيكات",
-        )
-        .order_by("code")
-        .first()
+        base.filter(code="2111").first()
+        or base.filter(name__icontains="شيكات").order_by("code").first()
     )
     if not acc:
         raise ValidationError(
@@ -871,6 +870,210 @@ def attach_voucher_and_post(
     return invoice
 
 
+def _auto_settlement_note(invoice: SalesInvoice) -> str:
+    """توقيع سند التسوية النقدية التلقائي — يُطابَق عليه في البيانات القديمة."""
+    return f"تحصيل نقدي تلقائي — فاتورة {invoice.invoice_number}"
+
+
+def posted_allocations_total(invoice_id: int) -> Decimal:
+    """T-ARINT: مجموع توزيعات السندات **المرحّلة** على فاتورة (بعملة الفاتورة).
+
+    مصدر الحقيقة لما دُفع فعلاً — بخلاف `amount_paid` الذي تُصفّره مسارات إلغاء
+    الترحيل من الخارج فيفقد أي قدرة على حراسة الازدواج.
+    """
+    total = Decimal("0")
+    rows = PaymentAllocation.objects.filter(
+        invoice_id=invoice_id, payment__is_posted=True,
+    ).values_list("amount", "amount_in_invoice_currency")
+    for amount, in_inv_currency in rows:
+        total += Decimal(str(in_inv_currency if in_inv_currency is not None else amount))
+    return total.quantize(DEC)
+
+
+def guard_invoice_allocation_total(invoice: SalesInvoice, *, incoming: Decimal) -> None:
+    """T-ARINT: يمنع تجاوز مجموع التوزيعات المرحّلة إجماليَّ الفاتورة.
+
+    يُستدعى دائماً **داخل معاملة وبعد قفل صفّ الفاتورة** (select_for_update) —
+    نفس نمط `post_customer_payment` — فلا يتسلّل سندان متزامنان على نفس الفاتورة.
+    """
+    grand = Decimal(str(invoice.grand_total or 0)).quantize(DEC)
+    total = (posted_allocations_total(invoice.pk) + Decimal(str(incoming))).quantize(DEC)
+    if total > grand + DEC:
+        raise ValidationError(
+            f"مجموع التوزيعات المرحّلة على الفاتورة #{invoice.invoice_number} "
+            f"({total}) يتجاوز إجماليها ({grand}). راجع سندات القبض المرتبطة بها."
+        )
+
+
+def invoice_journal_debits_ar(invoice: SalesInvoice) -> bool:
+    """هل يحتوي قيد الفاتورة سطراً مديناً على حساب ذمم العميل؟
+
+    فواتير نقدية قديمة رُحّلت بنمط «Dr صندوق / Cr مبيعات» بلا سطر ذمم إطلاقاً؛
+    إنشاء سند قبض لها يُدائن ذمماً لم تُمدَّن (ازدواج نقدية + دائن بلا مقابل).
+    """
+    if not invoice.journal_id:
+        return False
+    try:
+        ar = _resolve_ar_account(invoice)
+    except ValidationError:
+        return False
+    return JournalLine.objects.filter(
+        journal_id=invoice.journal_id, account_id=ar.id, debit__gt=0,
+    ).exists()
+
+
+def is_auto_cash_settlement(payment: CustomerPayment, invoice: SalesInvoice) -> bool:
+    """هل هذا السند هو تسوية الفاتورة النقدية التلقائية (لا سند مستخدم)؟
+
+    العلامة الصريحة (`auto_settled_invoice`) هي المرجع. البيانات السابقة لها
+    تُطابَق بتوقيع صارم: نصّ الملاحظات الذي يولّده الكود + توزيع وحيد على هذه
+    الفاتورة نفسها — فلا يُلتقط سند مستخدم بالخطأ.
+    """
+    if payment.auto_settled_invoice_id == invoice.pk:
+        return True
+    if (payment.notes or "").strip() != _auto_settlement_note(invoice):
+        return False
+    allocs = list(payment.allocations.all())
+    return len(allocs) == 1 and allocs[0].invoice_id == invoice.pk
+
+
+def guard_invoice_payments_before_unpost(
+    invoice: SalesInvoice, *, action_label: str = "إلغاء ترحيل"
+) -> None:
+    """T-ARINT: يمنع إلغاء ترحيل فاتورة عليها سندات قبض مرحّلة.
+
+    الجذر المُصلَح: إلغاء الترحيل كان يصفّر `amount_paid` ويحذف قيود الفاتورة
+    وحدها، فيبقى سند القبض مرحّلاً وقيده يُدائن ذمم العميل بلا مقابل، ويبقى صفّ
+    التوزيع يتيماً يُدفع مرة ثانية عند أي تسوية لاحقة. مرآةُ حارس الاعتمادية
+    الموجود في `unpost_document` لحركات المخزون.
+    """
+    rows = list(
+        PaymentAllocation.objects.filter(
+            invoice=invoice, payment__is_posted=True,
+        ).select_related("payment")
+    )
+    if not rows:
+        return
+    listing = "، ".join(
+        f"سند #{r.payment_id} ({Decimal(str(r.amount)).quantize(DEC)})" for r in rows
+    )
+    logger.warning(
+        "unpost blocked for invoice %s: %d posted payment allocation(s)",
+        invoice.invoice_number, len(rows),
+    )
+    raise ValidationError(
+        f"تعذّر {action_label} الفاتورة {invoice.invoice_number}: توجد سندات قبض "
+        f"مرحّلة موزّعة عليها ({listing}). ألغِ ترحيل هذه السندات (أو احذفها) "
+        f"أولاً ثم أعد المحاولة."
+    )
+
+
+def release_auto_cash_settlement(invoice: SalesInvoice, *, user=None) -> list[int]:
+    """يحرّر سند التسوية النقدية التلقائي قبل إلغاء ترحيل فاتورته.
+
+    هذا السند من إنتاج الترحيل نفسه (`_auto_settle_cash_sale`) لا من إنشاء
+    المستخدم، فيُحذف مع قيوده ضمن نفس معاملة إلغاء الترحيل ويُعاد إنشاؤه عند
+    إعادة الترحيل — وإلا بقي معلّقاً وتضاعف عند كل إعادة ترحيل. سندات المستخدم
+    لا تُمَسّ: يحرسها `guard_invoice_payments_before_unpost`.
+    """
+    candidates = (
+        CustomerPayment.objects.filter(tenant_id=invoice.tenant_id)
+        .filter(
+            Q(auto_settled_invoice_id=invoice.pk)
+            | Q(allocations__invoice_id=invoice.pk)
+        )
+        .distinct()
+        .prefetch_related("allocations")
+    )
+    released: list[int] = []
+    for payment in candidates:
+        if not is_auto_cash_settlement(payment, invoice):
+            continue
+        if payment.is_posted:
+            unpost_document(
+                tenant_id=payment.tenant_id,
+                reference_id=payment.id,
+                journal_reference_types=["CUSTOMER_PAYMENT"],
+                user=user,
+                document_label=f"سند قبض تلقائي #{payment.id}",
+            )
+        payment_id = payment.id
+        payment.delete()  # صفوف التوزيع تُحذف تلقائياً (CASCADE)
+        released.append(payment_id)
+        logger.info(
+            "Released auto cash settlement %s of invoice %s (unpost).",
+            payment_id, invoice.invoice_number,
+        )
+    return released
+
+
+def unpost_customer_payment(payment: CustomerPayment, *, user=None) -> dict:
+    """التراجع عن ترحيل سند قبض: حذف قيوده وإرجاع ما سدّده من الفواتير.
+
+    المخرج الذي تُحيل إليه رسالة `guard_invoice_payments_before_unpost` — وبدونه
+    يبقى المستخدم عالقاً بين فاتورة لا تُلغى وسند لا يُتراجع عنه. يعكس أيضاً
+    `amount_paid` على كل فاتورة وُزِّع عليها (بعملة الفاتورة) فلا تبقى «مدفوعة»
+    بلا تحصيل، ويعيد شيكات السند إلى مسودة كما تفعل الفاتورة.
+    """
+    if not payment.is_posted:
+        raise ValidationError("السند غير مرحّل.")
+    with transaction.atomic():
+        payment = CustomerPayment.objects.select_for_update().get(pk=payment.pk)
+        if not payment.is_posted:
+            raise ValidationError("السند غير مرحّل.")
+        result = unpost_document(
+            tenant_id=payment.tenant_id,
+            reference_id=payment.id,
+            journal_reference_types=["CUSTOMER_PAYMENT"],
+            user=user,
+            document_label=f"سند قبض #{payment.id}",
+        )
+        allocations = list(payment.allocations.all())
+        inv_ids = sorted({a.invoice_id for a in allocations})
+        locked = {
+            inv.pk: inv
+            for inv in SalesInvoice.objects.select_for_update().filter(pk__in=inv_ids)
+        }
+        for alloc in allocations:
+            inv = locked.get(alloc.invoice_id)
+            if inv is None:
+                continue
+            back = Decimal(str(
+                alloc.amount_in_invoice_currency
+                if alloc.amount_in_invoice_currency is not None else alloc.amount
+            ))
+            inv.amount_paid = max(
+                Decimal(str(inv.amount_paid or 0)) - back, Decimal("0")
+            ).quantize(DEC)
+            inv.save(update_fields=["amount_paid"])
+        payment.is_posted = False
+        payment.journal = None
+        payment.save(update_fields=["is_posted", "journal"])
+
+        from accounting.models import Cheque
+        Cheque.objects.filter(
+            customer_payment=payment, status="Under_Collection"
+        ).update(status="Draft")
+
+        create_audit_log(
+            tenant=payment.tenant,
+            user=user,
+            action="UNPOST",
+            model_name="CustomerPayment",
+            object_id=payment.id,
+            change_details=(
+                f"Unposted customer payment {payment.id}: "
+                f"{result['journals_deleted']} journal(s), "
+                f"{len(allocations)} allocation(s) reversed"
+            ),
+        )
+    logger.info(
+        "Unposted customer payment %s (journals=%s, allocations=%s).",
+        payment.id, result["journals_deleted"], len(allocations),
+    )
+    return result
+
+
 def _auto_settle_cash_sale(invoice: SalesInvoice, *, user=None) -> None:
     """T-CASH2: البيع النقدي مدفوع فوراً — تسوية تلقائية فور الترحيل.
 
@@ -882,18 +1085,39 @@ def _auto_settle_cash_sale(invoice: SalesInvoice, *, user=None) -> None:
     البيع النقدي مديناً للأبد. لا يلمس قيد الفاتورة، فيبقى اختبار التوجيه الفرعي
     (`test_subledger_routing`) سليماً: التسوية قيد منفصل.
 
-    آمن: يقتصر على فواتير **البيع النقدية** (لا المراجيع/الآجل)، ويعتمد على
-    المتبقّي (grand − amount_paid) فلا يُسوّي مرتين عند إعادة الترحيل/الشيكات.
+    آمن: يقتصر على فواتير **البيع النقدية** (لا المراجيع/الآجل)، ويقتصر على
+    الفواتير التي مُدِّنت ذممها في قيدها فعلاً.
+
+    T-ARINT: المتبقّي (grand − amount_paid) وحده **لا يكفي** حارساً — فـ
+    `amount_paid` يُصفَّر من الخارج عند إلغاء الترحيل، فكان كل إعادة ترحيل تُنشئ
+    سنداً إضافياً يُدائن الذمم مرّة أخرى. الحارسان الفعليان:
+      1. وجود أي توزيع سند **مرحّل** على الفاتورة ⇒ سُوِّيت فعلاً، لا تُسوَّ ثانيةً.
+      2. خلوّ قيد الفاتورة من مدين على حساب ذمم العميل (نمط قديم سوّى الصندوق
+         داخل قيدها) ⇒ سندٌ هنا يُدائن ذمماً لم تُمدَّن.
     إن غاب حساب الصندوق يُسجَّل تحذير ويُتخطّى دون كسر الترحيل.
     """
     if invoice.invoice_type != SalesInvoice.INVOICE_CASH:
         return
     if (invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE) != SalesInvoice.INVOICE_KIND_SALE:
         return
+    settled = posted_allocations_total(invoice.pk)
+    if settled > 0:
+        logger.info(
+            "Cash sale %s already has posted payment allocations (%s) — "
+            "auto-settlement skipped.", invoice.invoice_number, settled,
+        )
+        return
     remaining = (
         Decimal(str(invoice.grand_total or 0)) - Decimal(str(invoice.amount_paid or 0))
     ).quantize(DEC)
     if remaining <= DEC:
+        return
+    if not invoice_journal_debits_ar(invoice):
+        logger.warning(
+            "Cash sale %s has no AR debit in its journal (legacy direct-cash "
+            "posting) — auto-settlement skipped to avoid crediting untouched AR.",
+            invoice.invoice_number,
+        )
         return
     # حساب الصندوق: حساب الفاتورة النقدي → النقدي المرفق → افتراضي الإعدادات.
     cash_account_id = invoice.cash_or_bank_account_id or invoice.attached_cash_account_id
@@ -918,7 +1142,10 @@ def _auto_settle_cash_sale(invoice: SalesInvoice, *, user=None) -> None:
         currency_id=invoice.currency_id,
         exchange_rate=invoice.exchange_rate or Decimal("1"),
         cash_or_bank_account_id=cash_account_id,
-        notes=f"تحصيل نقدي تلقائي — فاتورة {invoice.invoice_number}",
+        # T-ARINT: العلامة تجعل السند مملوكاً للفاتورة — يُحرَّر معها عند إلغاء
+        # ترحيلها بدل أن يبقى معلّقاً ويتكرّر عند إعادته.
+        auto_settled_invoice=invoice,
+        notes=_auto_settlement_note(invoice),
     )
     PaymentAllocation.objects.create(
         tenant_id=invoice.tenant_id,
@@ -2097,6 +2324,9 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
                     f"مبلغ التوزيع المحوّل ({total_increment} بعملة الفاتورة) "
                     f"يتجاوز المتبقي على الفاتورة #{inv.invoice_number} ({remaining})."
                 )
+            # T-ARINT: حارس ثانٍ مستقلّ عن amount_paid (يُصفَّر من الخارج) —
+            # مجموع توزيعات السندات المرحّلة نفسه لا يتجاوز إجمالي الفاتورة.
+            guard_invoice_allocation_total(inv, incoming=total_increment)
 
         # ── بناء أسطر القيد المحاسبي ──
         # فرق العملة (I4-03): إذا اختلفت عملة الدفعة عن عملة الفاتورة نحسب
@@ -2358,6 +2588,10 @@ def allocate_customer_payment(
                     f"مبلغ التوزيع ({amount_in_inv_curr}) يتجاوز المتبقي على "
                     f"الفاتورة #{inv.invoice_number} ({remaining})."
                 )
+            # T-ARINT: نفس الحارس المستقلّ عن amount_paid المطبَّق في الترحيل.
+            # قبل ترحيل السند لا يُحتسب توزيعه بعد — يحرسه `post_customer_payment`.
+            if payment.is_posted:
+                guard_invoice_allocation_total(inv, incoming=amount_in_inv_curr)
 
             PaymentAllocation.objects.create(
                 tenant_id=payment.tenant_id,

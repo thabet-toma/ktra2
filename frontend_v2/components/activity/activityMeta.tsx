@@ -3,6 +3,7 @@ import {
   Plus, Pencil, Trash2, CheckCircle2, RotateCcw, Copy,
   DollarSign, Eye, LogIn, LogOut, Activity as ActivityIcon,
 } from "lucide-react";
+import { formatDateTimeValue } from "../../utils/formatDate";
 
 /** بيانات عرض موحّدة لكل نوع إجراء — مشتركة بين سجل المستند والصفحة العامة. */
 export interface ActionMeta {
@@ -55,9 +56,5 @@ export function entityLabel(entityType: string): string {
 }
 
 export function formatActivityTime(ts: string): string {
-  try {
-    return new Date(ts).toLocaleString("ar-EG", { dateStyle: "short", timeStyle: "short" });
-  } catch {
-    return ts;
-  }
+  return formatDateTimeValue(ts) || ts;
 }

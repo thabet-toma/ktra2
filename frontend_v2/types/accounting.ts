@@ -76,6 +76,32 @@ export interface ChequeDto {
   notes?: string | null;
 }
 
+/** T-CHQ2: سطر حركة في مسار الشيك. */
+export interface ChequeMovementDto {
+  id: number;
+  cheque: number;
+  movement_type: string;
+  movement_type_display: string;
+  notes?: string | null;
+  created_at: string;
+  created_by_name?: string | null;
+}
+
+/** T-CHQ2: تجميعة محفظة الشيكات لجانب واحد (وارد/صادر). */
+export interface ChequeWalletSide {
+  open_total: string;
+  open_count: number;
+  buckets: Array<{ status: string; count: number; amount: string }>;
+  due_buckets: Array<{ key: string; label: string; count: number; amount: string }>;
+}
+
+export interface ChequeWalletDto {
+  as_of: string;
+  incoming: ChequeWalletSide;
+  outgoing: ChequeWalletSide;
+  net_open: string;
+}
+
 export interface TrialBalanceRow {
   id: number;
   code: string | null;

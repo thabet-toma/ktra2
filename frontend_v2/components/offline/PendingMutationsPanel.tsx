@@ -4,6 +4,7 @@ import db, { type MutationEntry } from '../../services/offline/db';
 import { useOnlineStatus } from '../../hooks/useOnlineStatus';
 import { resolveTenantId } from '../../utils/tenantContext';
 import { isOfflineRecordForTenant } from '../../utils/offlineTenantScope';
+import { formatDateTimeValue } from '../../utils/formatDate';
 
 export default function PendingMutationsPanel() {
   const [open, setOpen] = useState(false);
@@ -105,7 +106,7 @@ export default function PendingMutationsPanel() {
                   <span className={`px-2 py-0.5 rounded-full font-medium ${statusBadge(m.status)}`}>
                     {m.status === 'pending' ? 'معلق' : m.status === 'syncing' ? 'قيد المزامنة' : 'فشل'}
                   </span>
-                  <span className="text-[var(--color-text-muted)]">{new Date(m.created_at).toLocaleString('ar-SA')}</span>
+                  <span className="text-[var(--color-text-muted)]">{formatDateTimeValue(m.created_at)}</span>
                 </div>
                 <div className="text-[var(--color-text-muted)]">
                   <span className="font-medium">{m.method}</span>

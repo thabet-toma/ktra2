@@ -1002,6 +1002,23 @@ def _resolve_cheque_ar_account(cheque):
     raise ValidationError("لا يوجد حساب ذمم للعميل المرتبط بالشيك.")
 
 
+def _resolve_cheque_payable_account(tenant_id: int):
+    """T-CHQ2: حساب «شيكات برسم الدفع» — مصدر واحد مع ترحيل سند الصرف."""
+    from sales.services import resolve_cheques_payable_account
+    return resolve_cheques_payable_account(tenant_id)
+
+
+def _resolve_cheque_supplier_account(cheque):
+    """T-CHQ2: حساب ذمم المورد لارتداد/تسوية شيك صادر — مرآة حساب العميل."""
+    from logistics.services import _resolve_ap_account
+    partner = cheque.partner or (
+        cheque.supplier_payment.partner if cheque.supplier_payment_id else None
+    )
+    if partner is None:
+        raise ValidationError("الشيك الصادر بلا مورد مرتبط — لا يمكن تحديد حساب الذمم.")
+    return _resolve_ap_account(partner), partner
+
+
 def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
                     account_id=None, movement_date=None, bank_account_id=None):
     """task11 R2-A3 — تحويل حالة شيك مع القيد المحاسبي المرافق.
@@ -1012,8 +1029,15 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
       - bounce             : مدين ذمم العميل ÷ دائن شيكات برسم التحصيل
       - settle             : مدين صندوق/بنك ÷ دائن ذمم العميل
       - deposit / return_to_customer : حركة ورقية — بلا قيد
+
+    T-CHQ2: الجانب الصادر مرآة كاملة — كان بلا قيد إطلاقاً، فيبقى التزام
+    «شيكات برسم الدفع» في الميزانية حتى بعد أن يصرف المورد الشيك:
+      - collect / withdraw : مدين شيكات برسم الدفع ÷ دائن صندوق/بنك
+      - bounce             : مدين شيكات برسم الدفع ÷ دائن ذمم المورد
+      - settle             : مدين ذمم المورد ÷ دائن صندوق/بنك
+
     يُرحَّل القيد فقط إذا كان الشيك داخل الدفاتر أصلاً (مربوط بفاتورة أو
-    سند قبض) — الشيكات المستقلة legacy تتحول حالتها فقط مع تحذير في اللوغ.
+    سند) — الشيكات المستقلة legacy تتحول حالتها فقط مع تحذير في اللوغ.
     Idempotent عبر (CHEQUE_<MOVE>, cheque_id).
     """
     import datetime as _dt
@@ -1021,6 +1045,7 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
 
     cheque = Cheque.objects.select_related(
         'tenant', 'partner', 'partner__group', 'sales_invoice', 'currency',
+        'supplier_payment', 'supplier_payment__partner',
     ).get(pk=cheque_id)
     allowed = VALID_TRANSITIONS.get(cheque.status, set())
     if movement_type not in allowed:
@@ -1048,11 +1073,14 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             cheque.deposit_bank_account = ba
             deposit_account_changed = True
 
-    # GL يخص الشيكات الواردة المسجلة دفترياً فقط
-    in_books = bool(cheque.sales_invoice_id or cheque.customer_payment_id)
+    # GL يخص الشيكات المسجَّلة دفترياً فقط — كل اتجاه ومستنداته.
+    outgoing = cheque.direction == 'Outgoing'
+    in_books = bool(
+        (cheque.supplier_payment_id or cheque.purchase_invoice_id) if outgoing
+        else (cheque.sales_invoice_id or cheque.customer_payment_id)
+    )
     needs_gl = (
         movement_type in ('collect', 'withdraw', 'bounce', 'settle')
-        and cheque.direction == 'Incoming'
         and amount > 0
     )
     if needs_gl and not in_books:
@@ -1066,14 +1094,34 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
     with transaction.atomic():
         if needs_gl:
             branch_id = cheque.sales_invoice.branch_id if cheque.sales_invoice_id else None
-            if movement_type in ('collect', 'withdraw'):
+            # الشريك يُحمَّل على سطر الذمم وحده. كان يُحمَّل على السطرين، فسطرا
+            # الارتداد (ذمم + شيكات برسم التحصيل) يتعادلان داخل كشف العميل
+            # فلا يعود الدين يظهر عليه بعد ارتداد شيكه (نفس عطل task32).
+            dr_partner_id = cr_partner_id = None
+            if outgoing:
+                payable = _resolve_cheque_payable_account(cheque.tenant_id)
+                if movement_type in ('collect', 'withdraw'):
+                    cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
+                    dr, cr = payable, cash
+                    desc = f"صرف شيك صادر {cheque.cheque_number}"
+                elif movement_type == 'bounce':
+                    ap, partner = _resolve_cheque_supplier_account(cheque)
+                    dr, cr = payable, ap
+                    desc = f"ارتداد شيك صادر {cheque.cheque_number} — إعادة الذمم للمورد"
+                    cr_partner_id = partner.pk
+                else:  # settle
+                    ap, partner = _resolve_cheque_supplier_account(cheque)
+                    cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
+                    dr, cr = ap, cash
+                    desc = f"تسوية شيك صادر مرتد {cheque.cheque_number}"
+                    dr_partner_id = partner.pk
+            elif movement_type in ('collect', 'withdraw'):
                 uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
                 if not uc:
                     raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
                 cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
                 dr, cr = cash, uc
                 desc = f"تحصيل شيك {cheque.cheque_number}"
-                partner_id = cheque.partner_id
             elif movement_type == 'bounce':
                 uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
                 if not uc:
@@ -1081,13 +1129,13 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
                 ar, partner = _resolve_cheque_ar_account(cheque)
                 dr, cr = ar, uc
                 desc = f"ارتداد شيك {cheque.cheque_number} — إعادة الذمم على العميل"
-                partner_id = partner.pk
+                dr_partner_id = partner.pk
             else:  # settle
                 ar, partner = _resolve_cheque_ar_account(cheque)
                 cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
                 dr, cr = cash, ar
                 desc = f"تسوية شيك مرتد {cheque.cheque_number}"
-                partner_id = partner.pk
+                cr_partner_id = partner.pk
 
             journal = post_journal(
                 tenant_id=cheque.tenant_id,
@@ -1096,9 +1144,9 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
                 reference_id=cheque.pk,
                 description=desc,
                 lines_data=[
-                    {"account": dr.pk, "partner": partner_id,
+                    {"account": dr.pk, "partner": dr_partner_id,
                      "debit": amount, "credit": Decimal("0"), "description": desc},
-                    {"account": cr.pk, "partner": partner_id,
+                    {"account": cr.pk, "partner": cr_partner_id,
                      "debit": Decimal("0"), "credit": amount, "description": desc},
                 ],
                 currency=cheque.currency,
@@ -1128,6 +1176,96 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             ),
         )
     return cheque
+
+
+# T-CHQ2 — محفظة الشيكات: الحالات التي ما تزال الورقة فيها «في اليد»
+# (لم تُحصَّل ولم تُردّ ولم تُسوَّ) هي وحدها ما يشكّل رصيد المحفظة.
+CHEQUE_OPEN_STATUSES = ('Draft', 'Under_Collection', 'Bounced')
+
+CHEQUE_DUE_BUCKETS = (
+    ('overdue', 'متأخرة'),
+    ('due_7', 'تستحق خلال 7 أيام'),
+    ('due_30', 'تستحق خلال 30 يوماً'),
+    ('later', 'لاحقاً'),
+    ('no_due_date', 'بلا تاريخ استحقاق'),
+)
+
+
+def _cheque_due_bucket(due_date, today):
+    """يصنّف تاريخ الاستحقاق إلى دلو واحد — مصدر واحد للواجهة والتقارير."""
+    if due_date is None:
+        return 'no_due_date'
+    delta = (due_date - today).days
+    if delta < 0:
+        return 'overdue'
+    if delta <= 7:
+        return 'due_7'
+    if delta <= 30:
+        return 'due_30'
+    return 'later'
+
+
+def cheque_wallet(tenant_id: int, *, today=None) -> dict:
+    """T-CHQ2 — محفظة الشيكات: أين مال الشيكات المفتوحة الآن وما يستحق قريباً.
+
+    كانت شاشة الشيكات قائمة صفوف فقط، فلا أحد يعرف كم في اليد ولا ما تأخّر.
+    التجميعة على مستوى الشركة (لا تسرّب بين الشركات) وبالحالة وبتاريخ
+    الاستحقاق، لكل اتجاه على حدة، و`net_open` = وارد مفتوح − صادر مفتوح.
+    """
+    import datetime as _dt
+    from .models import Cheque
+
+    today = today or _dt.date.today()
+    rows = list(
+        Cheque.objects
+        .filter(tenant_id=tenant_id, status__in=CHEQUE_OPEN_STATUSES)
+        .values_list('direction', 'status', 'due_date', 'amount')
+    )
+
+    def side(direction):
+        mine = [r for r in rows if r[0] == direction]
+        by_status: dict[str, list] = {}
+        by_due: dict[str, list] = {}
+        for _dir, status, due_date, amount in mine:
+            by_status.setdefault(status, []).append(amount or Decimal('0'))
+            by_due.setdefault(_cheque_due_bucket(due_date, today), []).append(
+                amount or Decimal('0'))
+        total = sum((a for _d, _s, _dd, a in mine), Decimal('0'))
+        return {
+            'open_total': str(Decimal(total).quantize(Decimal('0.01'))),
+            'open_count': len(mine),
+            'buckets': [
+                {
+                    'status': status,
+                    'count': len(amounts),
+                    'amount': str(sum(amounts, Decimal('0')).quantize(Decimal('0.01'))),
+                }
+                for status, amounts in sorted(by_status.items())
+            ],
+            'due_buckets': [
+                {
+                    'key': key,
+                    'label': label,
+                    'count': len(by_due.get(key, [])),
+                    'amount': str(
+                        sum(by_due.get(key, []), Decimal('0')).quantize(Decimal('0.01'))),
+                }
+                for key, label in CHEQUE_DUE_BUCKETS
+            ],
+        }
+
+    incoming, outgoing = side('Incoming'), side('Outgoing')
+    net = Decimal(incoming['open_total']) - Decimal(outgoing['open_total'])
+    logger.info(
+        "cheque_wallet: tenant=%s incoming=%s outgoing=%s",
+        tenant_id, incoming['open_total'], outgoing['open_total'],
+    )
+    return {
+        'as_of': today.isoformat(),
+        'incoming': incoming,
+        'outgoing': outgoing,
+        'net_open': str(net.quantize(Decimal('0.01'))),
+    }
 
 
 # ─────────────────────────────────────────────────────────

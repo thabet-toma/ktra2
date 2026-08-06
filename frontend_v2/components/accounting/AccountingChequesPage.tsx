@@ -7,7 +7,9 @@ import type {
   BankBranchDto,
   BankDto,
   ChequeDto,
+  ChequeMovementDto,
 } from "../../types/accounting";
+import { ChequeWalletPanel } from "./ChequeWalletPanel";
 import {
   AseelDocumentShell,
   AseelDenseTable,
@@ -15,7 +17,7 @@ import {
 import type { AseelToolbarAction, AseelTab, DenseColumn } from "../aseel";
 import { Plus, Save, X, ArrowRightLeft } from "lucide-react";
 import OfflineGuard from "../offline/OfflineGuard";
-import { formatDateLocalized } from "../../utils/formatDate";
+import { formatDateLocalized, formatDateTimeValue } from "../../utils/formatDate";
 
 const CHEQUE_STATUSES = [
   { v: "Draft", l: "مسودة" },
@@ -68,6 +70,7 @@ export const AccountingChequesPage: React.FC = () => {
   const [filterDueFrom, setFilterDueFrom] = useState("");
   const [filterDueTo, setFilterDueTo] = useState("");
   const [filterPartner, setFilterPartner] = useState("");
+  const [activeTab, setActiveTab] = useState("list");
 
   // Transfer dialog — task11 R2-A3: الحركة (وليست الحالة) هي ما يُرسل للسيرفر،
   // فيمر التحويل بآلة الانتقالات ويُرحَّل القيد المحاسبي المرافق.
@@ -76,24 +79,51 @@ export const AccountingChequesPage: React.FC = () => {
   const [transferDate, setTransferDate] = useState(new Date().toISOString().split("T")[0]);
   const [transferNotes, setTransferNotes] = useState("");
   const [transferBankAccount, setTransferBankAccount] = useState("");
+  // T-CHQ2: مسار الشيك — الحركات كانت تُسجَّل في الخادم ولا تُعرض في أي مكان.
+  const [movements, setMovements] = useState<ChequeMovementDto[]>([]);
+  const [walletKey, setWalletKey] = useState(0);
 
-  const CHEQUE_MOVES: Record<string, { v: string; l: string }[]> = {
-    Draft: [
-      { v: "deposit", l: "إيداع للتحصيل (بنك)" },
-      { v: "withdraw", l: "تحصيل مباشر" },
-    ],
-    Under_Collection: [
-      { v: "collect", l: "تحصيل — دخل الصندوق/البنك" },
-      { v: "bounce", l: "ارتداد — إعادة الذمم على العميل" },
-    ],
-    Bounced: [
-      { v: "return_to_customer", l: "إعادة الورقة للعميل" },
-      { v: "settle", l: "تسوية نقدية" },
-    ],
-    Collected: [],
-    Returned: [],
-    Settled: [],
+  // T-CHQ2: الحركة نفسها معناها مختلف حسب الاتجاه — كانت التسميات واردةً دوماً
+  // فيقرأ المستخدم «تحصيل — دخل الصندوق» على شيك يخرج من حسابه.
+  const CHEQUE_MOVES: Record<string, Record<string, { v: string; l: string }[]>> = {
+    Incoming: {
+      Draft: [
+        { v: "deposit", l: "إيداع للتحصيل (بنك)" },
+        { v: "withdraw", l: "تحصيل مباشر" },
+      ],
+      Under_Collection: [
+        { v: "collect", l: "تحصيل — دخل الصندوق/البنك" },
+        { v: "bounce", l: "ارتداد — إعادة الذمم على العميل" },
+      ],
+      Bounced: [
+        { v: "return_to_customer", l: "إعادة الورقة للعميل" },
+        { v: "settle", l: "تسوية نقدية" },
+      ],
+      Collected: [],
+      Returned: [],
+      Settled: [],
+    },
+    Outgoing: {
+      Draft: [
+        { v: "deposit", l: "تسليم الشيك للمورد" },
+        { v: "withdraw", l: "صرف مباشر من حسابنا" },
+      ],
+      Under_Collection: [
+        { v: "collect", l: "صُرف من حسابنا — إغلاق الالتزام" },
+        { v: "bounce", l: "ارتداد — عاد الدين على المورد" },
+      ],
+      Bounced: [
+        { v: "return_to_customer", l: "استرجاع الورقة من المورد" },
+        { v: "settle", l: "تسوية نقدية للمورد" },
+      ],
+      Collected: [],
+      Returned: [],
+      Settled: [],
+    },
   };
+
+  const movesFor = (cheque: ChequeDto) =>
+    (CHEQUE_MOVES[cheque.direction] || CHEQUE_MOVES.Incoming)[cheque.status] || [];
 
   const formBranches: BankBranchDto[] =
     banks.find((b) => String(b.id) === form.bank)?.branches || [];
@@ -193,6 +223,7 @@ export const AccountingChequesPage: React.FC = () => {
       setTransferCheque(null);
       setTransferNotes("");
       setTransferBankAccount("");
+      setWalletKey((k) => k + 1);
       await load();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "فشل التحويل");
@@ -261,6 +292,10 @@ export const AccountingChequesPage: React.FC = () => {
             setNewMovement("");
             setTransferDate(new Date().toISOString().split("T")[0]);
             setTransferNotes("");
+            setMovements([]);
+            accountingApi.getChequeMovements(r.id)
+              .then((rows) => setMovements(rows as ChequeMovementDto[]))
+              .catch(() => setMovements([]));
           }}
         >
           <ArrowRightLeft className="w-3 h-3" />
@@ -320,6 +355,20 @@ export const AccountingChequesPage: React.FC = () => {
 
   const tabs: AseelTab[] = [
     { key: "list", label: "قائمة الشيكات", content: tableContent },
+    {
+      key: "wallet",
+      label: "محفظة الشيكات",
+      content: (
+        <ChequeWalletPanel
+          refreshKey={walletKey}
+          onPickStatus={(direction, status) => {
+            setFilterDirection(direction);
+            setFilterStatus(status);
+            setActiveTab("list");
+          }}
+        />
+      ),
+    },
   ];
 
   return (
@@ -329,6 +378,8 @@ export const AccountingChequesPage: React.FC = () => {
         actions={actions}
         header={filterBar}
         tabs={tabs}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
         status={
           <span className="aseel-status-item">{filteredRows.length} شيك</span>
         }
@@ -466,17 +517,18 @@ export const AccountingChequesPage: React.FC = () => {
             </div>
             <div style={{ display: "grid", gap: "10px" }}>
               <div style={{ fontSize: "0.85rem", color: "var(--aseel-ink-soft)" }}>
+                {transferCheque.direction === "Incoming" ? "شيك وارد" : "شيك صادر"} ·
                 الحالة الحالية: <strong>{CHEQUE_STATUSES.find((s) => s.v === transferCheque.status)?.l || transferCheque.status}</strong>
               </div>
               <div className="aseel-field">
                 <label className="aseel-field-label">الحركة</label>
                 <select className="aseel-input" value={newMovement} onChange={(e) => setNewMovement(e.target.value)}>
                   <option value="">— اختر الحركة —</option>
-                  {(CHEQUE_MOVES[transferCheque.status] || []).map((m) => (
+                  {movesFor(transferCheque).map((m) => (
                     <option key={m.v} value={m.v}>{m.l}</option>
                   ))}
                 </select>
-                {(CHEQUE_MOVES[transferCheque.status] || []).length === 0 && (
+                {movesFor(transferCheque).length === 0 && (
                   <span style={{ fontSize: "0.75rem", color: "var(--aseel-ink-soft)" }}>
                     حالة نهائية — لا حركات متاحة من «{CHEQUE_STATUSES.find((s) => s.v === transferCheque.status)?.l}»
                   </span>
@@ -505,6 +557,32 @@ export const AccountingChequesPage: React.FC = () => {
                 <label className="aseel-field-label">ملاحظات</label>
                 <textarea className="aseel-input" rows={2} value={transferNotes}
                   onChange={(e) => setTransferNotes(e.target.value)} />
+              </div>
+              {/* T-CHQ2: مسار الشيك — كل حركة سابقة بتاريخها ومنفّذها. */}
+              <div style={{ borderTop: "1px solid var(--aseel-border)", paddingTop: "8px" }}>
+                <div style={{ fontSize: "0.75rem", fontWeight: 700, color: "var(--aseel-ink-soft)", marginBottom: "4px" }}>
+                  مسار الشيك
+                </div>
+                {movements.length === 0 ? (
+                  <span style={{ fontSize: "0.75rem", color: "var(--aseel-ink-soft)" }}>
+                    لا حركات سابقة.
+                  </span>
+                ) : (
+                  <ol style={{ display: "grid", gap: "2px", fontSize: "0.8rem" }}>
+                    {movements.map((m) => (
+                      <li key={m.id} style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
+                        <span>
+                          {m.movement_type_display}
+                          {m.notes ? ` — ${m.notes}` : ""}
+                          {m.created_by_name ? ` (${m.created_by_name})` : ""}
+                        </span>
+                        <span style={{ color: "var(--aseel-ink-soft)", whiteSpace: "nowrap" }}>
+                          {formatDateTimeValue(m.created_at)}
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                )}
               </div>
             </div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
