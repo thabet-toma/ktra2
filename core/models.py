@@ -105,6 +105,51 @@ class TenantModule(models.Model):
         return f"{self.tenant_id}:{self.module_key}={self.enabled}"
 
 
+class TenantLimit(models.Model):
+    """T-PLANLIMITS: تجاوز حدّ خطة لشركة بعينها.
+
+    الافتراضات في `core.plans.PLAN_DEFAULTS`؛ هذا الجدول يحمل **الفروق فقط** كما
+    يضبطها سوبر أدمن المنصة. غياب السطر = «كما تقول الخطة»، فالاستعادة حذف.
+    `max_value = NULL` تجاوزٌ صريح بمعنى **بلا حدّ** — لا «غير مضبوط».
+    """
+
+    id = models.AutoField(primary_key=True)
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="plan_limits",
+        db_column="TenantID",
+    )
+    limit_key = models.CharField(max_length=40, db_column="LimitKey")
+    max_value = models.PositiveIntegerField(
+        null=True, blank=True, db_column="MaxValue",
+        help_text="NULL = بلا حدّ لهذه الشركة",
+    )
+    note = models.CharField(max_length=120, blank=True, default="", db_column="Note")
+    updated_by = models.ForeignKey(
+        "auth.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_tenant_limits",
+        db_column="UpdatedBy_UserID",
+    )
+    updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
+
+    class Meta:
+        db_table = "tenant_limits"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "limit_key"],
+                name="uniq_tenant_limit",
+            ),
+        ]
+
+    def __str__(self):
+        value = "بلا حدّ" if self.max_value is None else self.max_value
+        return f"{self.tenant_id}:{self.limit_key}={value}"
+
+
 class AssistantLesson(models.Model):
     """درس سلوكي عام يتعلّمه المساعد الذكي من تصحيح إنسان له أثناء محادثة.
 

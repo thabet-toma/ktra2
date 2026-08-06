@@ -63,6 +63,7 @@ from core.access import require_perm, requires_perm
 from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
 from core.mixins import BaseTenantViewSet
+from core.plans import enforce_limits
 from .landed_cost import (
     import_invoices_from_clearance,
     preview_landed_import,
@@ -112,6 +113,7 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
                 | Q(order_description__icontains=search)
                 | Q(supplier__name__icontains=search)
                 | Q(supplier__legal_name__icontains=search)
+                | Q(supplier_draft_name__icontains=search)
                 | Q(lines__name_snapshot__icontains=search)
                 | Q(lines__description_line__icontains=search)
                 | Q(lines__product__name_ar__icontains=search)
@@ -140,7 +142,8 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
             entity_label=quotation.quotation_number,
             description='إنشاء عرض سعر مورد',
             request=self.request,
-            partner_ids=[quotation.supplier_id],
+            # T-DRAFTPARTY: المورد قد يكون مبدئياً (بلا شريك مسجّل) فلا ربط له.
+            partner_ids=[quotation.supplier_id] if quotation.supplier_id else [],
         )
 
     def perform_update(self, serializer):
@@ -173,7 +176,7 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
                     + (f' — {quotation.decision_reason}' if quotation.decision_reason else '')
                 ),
                 request=self.request,
-                partner_ids=[quotation.supplier_id],
+                partner_ids=[quotation.supplier_id] if quotation.supplier_id else [],
                 metadata={'status': quotation.status},
             )
 
@@ -2809,6 +2812,8 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
     def perform_create(self, serializer):
         require_perm(self.request, 'purchase.invoice.create')
         tenant = self._get_tenant()
+        # T-PLANLIMITS: حدّ الخطة قبل الحفظ — الفاتورة المحفوظة تُحسب ضمن الحدّ.
+        enforce_limits(tenant, 'purchase.invoices', 'documents.invoices')
         inv_num = self.request.data.get('invoice_number') or self._next_invoice_number(tenant)
         # نوع الفاتورة: صريح إن مُرّر، وإلا يُشتق من ارتباط مسار الاستيراد.
         vd = serializer.validated_data

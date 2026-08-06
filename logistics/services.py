@@ -21,6 +21,100 @@ GR_IR_ACCOUNT_NAME = "بضاعة مُستلَمة لم تُفوتَر (GR/IR Cle
 DEC = Decimal("0.01")
 
 
+def materialize_quotation_draft_parties(quotation, *, user=None):
+    """T-DRAFTPARTY: يحوّل المورد/الأصناف **المبدئية** في عرض السعر إلى سجلات حقيقية.
+
+    عرض السعر يُكتب أثناء الاستكشاف: المورد قد يكون اسماً سمعه المشتري، والصنف
+    نصاً في رسالة. لا شيء من ذلك يدخل دفتر الشركاء أو فهرس الأصناف حتى **لحظة
+    التحويل** إلى صفقة/طلبية/فاتورة — عندها فقط صار القرار حقيقياً.
+
+    المطابقة بالاسم أولاً: الاسم الموجود مسبقاً يُعاد استعماله، فلا يتضاعف مورد
+    أو صنف لأن العرض كُتب يدوياً. مصدر واحد يستدعيه طُرق التحويل الثلاثة.
+    """
+    from django.db import IntegrityError
+
+    from inventory.models import Product
+    from inventory.services import generate_next_sku
+    from logistics.models import SupplierQuotation
+    from partners.models import Partner
+
+    created_supplier = None
+    created_products = []
+
+    if quotation.supplier_id is None:
+        name = (quotation.supplier_draft_name or '').strip()
+        if not name:
+            raise ValidationError('عرض السعر بلا مورد — اختر مورداً أو اكتب اسمه قبل التحويل.')
+        supplier = Partner.objects.filter(
+            tenant_id=quotation.tenant_id, partner_type='Supplier', name=name,
+        ).first()
+        if supplier is None:
+            supplier = Partner.objects.create(
+                tenant_id=quotation.tenant_id,
+                name=name,
+                partner_type='Supplier',
+                supplier_scope=(
+                    Partner.SUPPLIER_SCOPE_INTERNATIONAL
+                    if quotation.scope == SupplierQuotation.SCOPE_IMPORT
+                    else Partner.SUPPLIER_SCOPE_LOCAL
+                ),
+            )
+            created_supplier = supplier
+        quotation.supplier = supplier
+        quotation.supplier_draft_name = ''
+        quotation.save(update_fields=['supplier', 'supplier_draft_name', 'updated_at'])
+        logger.info(
+            'quotation.materialize supplier quotation=%s partner=%s created=%s',
+            quotation.pk, supplier.pk, created_supplier is not None,
+        )
+
+    # استعلام طازج لا ذاكرة prefetch: المستدعون يجلبون `lines__product` قبل النداء،
+    # فالقراءة من الذاكرة تعطي أصنافاً قديمة بعد الإنشاء.
+    for line in quotation.lines.select_related('product').all():
+        if line.product_id:
+            continue
+        name = (line.name_snapshot or '').strip()
+        if not name:
+            raise ValidationError(
+                f'بند بلا اسم في العرض {quotation.quotation_number} — أكمل البنود قبل التحويل.'
+            )
+        product = Product.objects.filter(
+            tenant_id=quotation.tenant_id, name_ar=name,
+        ).first()
+        if product is None:
+            # تفرّد SKU يضمنه قيد unique(tenant, sku) — نعيد المحاولة عند السباق
+            # كما في مسار إنشاء الصنف العادي.
+            for _ in range(5):
+                try:
+                    with transaction.atomic():
+                        product = Product.objects.create(
+                            tenant_id=quotation.tenant_id,
+                            sku=generate_next_sku(quotation.tenant),
+                            name_ar=name,
+                        )
+                    break
+                except IntegrityError:
+                    product = None
+            if product is None:
+                raise ValidationError('تعذّر توليد رقم صنف — أعد المحاولة.')
+            created_products.append(product)
+        line.product = product
+        line.save(update_fields=['product'])
+        logger.info(
+            'quotation.materialize product quotation=%s line=%s product=%s created=%s',
+            quotation.pk, line.pk, product.pk, product in created_products,
+        )
+
+    if created_supplier is not None or created_products:
+        logger.info(
+            'quotation.materialize done quotation=%s new_supplier=%s new_products=%s',
+            quotation.pk,
+            getattr(created_supplier, 'pk', None),
+            [p.pk for p in created_products],
+        )
+    return created_supplier, created_products
+
+
 @transaction.atomic
 def convert_local_quotation_to_order(quotation, *, user=None):
     """حوّل عرض شراء محلي مقبول إلى طلبية شراء واحدة قابلة لإعادة المحاولة."""
@@ -47,7 +141,11 @@ def convert_local_quotation_to_order(quotation, *, user=None):
     if quotation.status != SupplierQuotation.STATUS_ACCEPTED:
         raise ValidationError('يجب اعتماد عرض الشراء قبل تحويله إلى طلبية.')
 
-    lines = list(quotation.lines.all())
+    # T-DRAFTPARTY: المورد/الأصناف المبدئية تصير سجلات حقيقية هنا لا قبل ذلك.
+    materialize_quotation_draft_parties(quotation, user=user)
+
+    # طازج بعد تجسيد المبدئيّ: ذاكرة prefetch السابقة تحمل أصنافاً فارغة.
+    lines = list(quotation.lines.select_related('product').all())
     if not lines:
         raise ValidationError('لا يمكن تحويل عرض سعر بلا أصناف.')
     number = next_document_number(quotation.tenant_id, 'purchase_order')
@@ -238,7 +336,11 @@ def convert_local_quotation_to_invoice(quotation, *, user=None):
             f'{existing_order.order_number} — حوّل الطلبية إلى فاتورة.'
         )
 
-    lines = list(quotation.lines.all())
+    # T-DRAFTPARTY: المورد/الأصناف المبدئية تصير سجلات حقيقية هنا لا قبل ذلك.
+    materialize_quotation_draft_parties(quotation, user=user)
+
+    # طازج بعد تجسيد المبدئيّ: ذاكرة prefetch السابقة تحمل أصنافاً فارغة.
+    lines = list(quotation.lines.select_related('product').all())
     if not lines:
         raise ValidationError('لا يمكن تحويل عرض سعر بلا أصناف.')
 
@@ -292,10 +394,15 @@ def convert_import_quotation_to_deal(quotation, *, user=None):
         raise ValidationError('يجب اعتماد عرض الاستيراد قبل تحويله إلى طلبية.')
     if quotation.tax_rate or quotation.tax_amount:
         raise ValidationError('عرض الاستيراد لا يجوز أن يتضمن ضريبة قبل التخليص.')
+
+    # T-DRAFTPARTY: المورد/الأصناف المبدئية تصير سجلات حقيقية هنا لا قبل ذلك.
+    materialize_quotation_draft_parties(quotation, user=user)
+
     if quotation.supplier.tenant_id != quotation.tenant_id:
         raise ValidationError('مورد عرض السعر لا يتبع الشركة الحالية.')
 
-    lines = list(quotation.lines.all())
+    # طازج بعد تجسيد المبدئيّ: ذاكرة prefetch السابقة تحمل أصنافاً فارغة.
+    lines = list(quotation.lines.select_related('product').all())
     if not lines:
         raise ValidationError('لا يمكن تحويل عرض سعر بلا أصناف.')
     for line in lines:

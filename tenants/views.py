@@ -11,6 +11,7 @@ from rest_framework.response import Response
 
 from core.api_defaults import ApiAuthAndUser
 from core.access import require_perm
+from core.plans import enforce_limits
 from core.tenant_utils import get_tenant
 from .models import Branch, Currency, TenantBook, TenantSettings, Tenant, UserCompanyMembership
 from .serializers import BranchSerializer, TenantBookSerializer, TenantSettingsSerializer, TenantSerializer, UserCompanyMembershipSerializer
@@ -180,6 +181,8 @@ class BranchViewSet(viewsets.ModelViewSet):
         if not tenant:
             raise DRFValidationError({"tenant": "لا يوجد شركة محددة."})
         self._require_manager(request, tenant)
+        # T-PLANLIMITS: عدد الفروع المسموح به من خطة الشركة.
+        enforce_limits(tenant, "company.branches")
         from .services import create_branch
         try:
             branch = create_branch(
@@ -295,6 +298,8 @@ class TenantViewSet(viewsets.ModelViewSet):
             return Response([self._member_payload(m) for m in qs])
 
         self._require_company_manager(request, tenant)
+        # T-PLANLIMITS: عدد أعضاء الشركة المسموح به من خطتها.
+        enforce_limits(tenant, "company.members")
         from django.contrib.auth.models import User as AuthUser
         from django.db.models import Q
 

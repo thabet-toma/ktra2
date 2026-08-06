@@ -18,8 +18,7 @@ import {
   FileText, Upload, Link2, Plus,
 } from "lucide-react";
 import { formatDateValue } from "../../../utils/formatDate";
-import { ItemSearchModal, productToItem } from "./ItemSearchModal";
-import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
+import { ItemSearchModal } from "./ItemSearchModal";
 import { ProductCardModal } from "../../shared/ProductCardModal";
 import { FilePreviewModal } from "../../shared/FilePreviewModal";
 import { cloudinaryService } from "../../../services/cloudinaryService";
@@ -99,6 +98,8 @@ export const PriceOfferForm: React.FC<Props> = ({
   const [orderName, setOrderName] = useState(offer.orderName || "");
   const [orderDescription, setOrderDescription] = useState(offer.orderDescription || "");
   const [supplierId, setSupplierId] = useState(offer.supplierId || "");
+  // T-DRAFTPARTY: مورد مبدئي مكتوب بالنص — لا شريك في الدفاتر حتى التحويل.
+  const [supplierDraftName, setSupplierDraftName] = useState(offer.supplierDraftName || "");
   const [factoryName, setFactoryName] = useState(offer.factoryName || "");
   const [offerDate, setOfferDate] = useState(
     offer.offerDate || new Date().toISOString().slice(0, 10)
@@ -138,8 +139,7 @@ export const PriceOfferForm: React.FC<Props> = ({
   const [itemPickerLineKey, setItemPickerLineKey] = useState<string | null>(null);
   const [availableItems, setAvailableItems] = useState<Item[]>(items);
   // T-IMPOFFER: نفس مسار الإدخال المعتمد في باقي المنصة (فاتورة الشراء/الصفقة):
-  // إكمال تلقائي داخل الخلية، إنشاء صنف من النص الحر، وبطاقة الصنف عبر (i).
-  const [inlineCreate, setInlineCreate] = useState<{ lineKey: string; name: string } | null>(null);
+  // إكمال تلقائي داخل الخلية، ونص حرّ يبقى في العرض، وبطاقة الصنف عبر (i).
   const [cardProductId, setCardProductId] = useState<number | null>(null);
 
   // إعادة تحميل عند تغيير offer prop
@@ -148,6 +148,7 @@ export const PriceOfferForm: React.FC<Props> = ({
     setOrderName(offer.orderName || "");
     setOrderDescription(offer.orderDescription || "");
     setSupplierId(offer.supplierId || "");
+    setSupplierDraftName(offer.supplierDraftName || "");
     setFactoryName(offer.factoryName || "");
     setOfferDate(offer.offerDate || new Date().toISOString().slice(0, 10));
     setValidUntil(offer.validUntil || "");
@@ -197,7 +198,8 @@ export const PriceOfferForm: React.FC<Props> = ({
     orderName: orderName.trim(),
     orderDescription: orderDescription.trim(),
     supplierId,
-    factoryName: selectedSupplier?.tradeName || factoryName,
+    supplierDraftName: supplierId ? "" : supplierDraftName.trim(),
+    factoryName: selectedSupplier?.tradeName || supplierDraftName.trim() || factoryName,
     offerType,
     offerDate,
     validUntil: validUntil || undefined,
@@ -222,8 +224,10 @@ export const PriceOfferForm: React.FC<Props> = ({
     subtotal,
     taxAmount: tax,
     grandTotal,
+    // T-DRAFTPARTY: البند المكتوب يدوياً (بلا itemId) يبقى في العرض — كان يُحذف
+    // صامتاً عند الحفظ، فيختفي ما كتبه المستخدم.
     items: lines
-      .filter((line) => line.itemId)
+      .filter((line) => line.itemId || line.name.trim())
       .map(({ key: _k, ...rest }) => ({
         ...rest,
         totalPrice: (Number(rest.quantity) || 0) * (Number(rest.unitPrice) || 0),
@@ -238,15 +242,32 @@ export const PriceOfferForm: React.FC<Props> = ({
     updatedAt: new Date().toISOString(),
     createdAt: offer.createdAt || new Date().toISOString(),
     createdBy: offer.createdBy || "user",
-  }), [offer, offerNumber, orderName, orderDescription, supplierId, factoryName, selectedSupplier, supplierAddress, offerType, offerDate, validUntil,
+  }), [offer, offerNumber, orderName, orderDescription, supplierId, supplierDraftName, factoryName, selectedSupplier, supplierAddress, offerType, offerDate, validUntil,
     currency, exchangeRate, status, shippingMethod, paymentMethod, shippingCost, shippingIncluded,
     alibabaLink, supplierContact, decisionReason, attachments,
     deliveryDays, internalNotes, taxRate, discountAmount, subtotal, tax, grandTotal, lines]);
 
   const handleSave = async () => {
-    if (!supplierId) { setErr("اختر المورد."); return; }
-    if (!lines.some((line) => line.itemId && Number(line.quantity) > 0)) {
-      setErr("اختر صنفاً واحداً على الأقل وحدد كميته.");
+    // T-DRAFTPARTY: مورد مسجَّل **أو** اسم مبدئي؛ وكذلك البنود: صنف مختار أو اسم
+    // مكتوب. الطلبية والصفقة تبقيان ملزمتين بالمسجَّل (يمنعهما مسار الحفظ نفسه).
+    const isDraftDocument = offerType === "incoming_offer";
+    if (!supplierId && !supplierDraftName.trim()) {
+      setErr("اختر مورداً مسجَّلاً أو اكتب اسم المورد.");
+      return;
+    }
+    if (!supplierId && !isDraftDocument) {
+      setErr("الطلبية تلزمها مورد مسجَّل — المورد المبدئي متاح في عرض السعر فقط.");
+      return;
+    }
+    const usableLines = lines.filter(
+      (line) => (line.itemId || line.name.trim()) && Number(line.quantity) > 0,
+    );
+    if (usableLines.length === 0) {
+      setErr("أضف صنفاً واحداً على الأقل (باختياره أو بكتابة اسمه) وحدد كميته.");
+      return;
+    }
+    if (!isDraftDocument && usableLines.some((line) => !line.itemId)) {
+      setErr("الطلبية تلزمها أصناف مسجَّلة — اختر الصنف من القائمة.");
       return;
     }
     // T-IMPOFFER: «غير ملائم» بلا سبب لا يُحفظ في نطاق الاستيراد — الخادم يرفضه
@@ -297,6 +318,15 @@ export const PriceOfferForm: React.FC<Props> = ({
       sub: item.modelNumber || item.categoryName || undefined,
     })),
     [availableItems],
+  );
+
+  const supplierOptions = useMemo(
+    () => suppliers.map((supplier) => ({
+      id: supplier.id,
+      label: supplier.tradeName,
+      sub: supplier.alias || supplier.country || undefined,
+    })),
+    [suppliers],
   );
 
   /** T-IMPOFFER: رفع ملف عرض السعر — روابط مستضافة عبر نفس خدمة الوسائط. */
@@ -395,6 +425,10 @@ export const PriceOfferForm: React.FC<Props> = ({
    * الآن نفس المكوّن المشترك `AseelAutocomplete`: كتابة ← قائمة مرشَّحة ←
    * «إضافة كصنف جديد» للنص الحر، مع (i) لبطاقة الصنف. المنتقي العريض باقٍ خلف
    * أيقونة البحث لمن يريد الفهرس الكامل.
+   *
+   * T-DRAFTPARTY: النص الحر لم يعد يفتح نافذة إنشاء صنف — يبقى **اسماً داخل
+   * العرض**. العرض قد لا يُقبل أصلاً، فلا يجوز أن يترك أصنافاً في الفهرس؛
+   * الصنف يُنشأ (أو يُطابَق بالاسم) لحظة تحويل العرض إلى صفقة/طلبية/فاتورة.
    */
   gridColumns[1].render = (row: LineItem) => (
     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
@@ -408,7 +442,12 @@ export const PriceOfferForm: React.FC<Props> = ({
           if (item) fillLineWithItem(row.key, item);
         }}
         onInfo={(id) => { const pid = Number(id); if (pid) setCardProductId(pid); }}
-        onFreeText={(text) => setInlineCreate({ lineKey: row.key, name: text.trim() })}
+        onFreeText={(text) => updateLine(row.key, {
+          id: row.id || crypto.randomUUID(),
+          itemId: "",
+          name: text.trim(),
+        })}
+        createLabel={(text) => `إبقاء «${text}» كبند نصّي في العرض`}
       />
       {row.itemId && (
         <button
@@ -698,24 +737,45 @@ export const PriceOfferForm: React.FC<Props> = ({
     {
       key: "party",
       label: "المورد / الحساب",
+      /**
+       * T-DRAFTPARTY: القائمة المنسدلة كانت تحصر العرض بموردٍ مسجَّل، فيُسجَّل
+       * مورد وهمي لكل عرض استكشافي. الآن مربّع بحث كفواتير البيع: أول حرف يقترح
+       * المشابه، والاسم الجديد يبقى **مبدئياً** حتى التحويل.
+       */
       control: (
-        <select className="aseel-input" disabled={isReadOnly}
-          value={supplierId} onChange={(e) => {
-            setSupplierId(e.target.value);
-            const supplier = suppliers.find((item) => item.id === e.target.value);
+        <AseelAutocomplete
+          value={selectedSupplier?.tradeName || supplierDraftName}
+          options={supplierOptions}
+          disabled={isReadOnly}
+          placeholder="اكتب اسم المورد…"
+          onPick={(id) => {
+            const supplier = suppliers.find((item) => String(item.id) === String(id));
+            setSupplierId(String(id));
+            setSupplierDraftName("");
             if (supplier) setFactoryName(supplier.tradeName);
-          }}>
-          <option value="">— اختر المورد —</option>
-          {suppliers.map((supplier) => (
-            <option key={supplier.id} value={supplier.id}>{supplier.tradeName}</option>
-          ))}
-        </select>
+          }}
+          onFreeText={(text) => {
+            setSupplierId("");
+            setSupplierDraftName(text);
+            setFactoryName(text);
+          }}
+          createLabel={(text) => `إبقاء «${text}» كمورد مبدئي (بلا تسجيله)`}
+        />
       ),
     },
     {
       key: "partyName",
       label: "الاسم",
-      control: <input className="aseel-input" readOnly value={selectedSupplier?.tradeName ?? factoryName} />,
+      control: (
+        <input
+          className="aseel-input"
+          readOnly
+          value={
+            selectedSupplier?.tradeName
+            ?? (supplierDraftName ? `${supplierDraftName} — مبدئي` : factoryName)
+          }
+        />
+      ),
     },
     {
       key: "currency",
@@ -834,20 +894,6 @@ export const PriceOfferForm: React.FC<Props> = ({
             setItemPickerLineKey(null);
           }}
         />
-        {/* النص الحر يُنشئ صنفاً فعلياً (Product) بدل سطر بلا itemId يُحذف عند الحفظ. */}
-        {inlineCreate && (
-          <ItemQuickCreateModal
-            isOpen
-            initialName={inlineCreate.name}
-            onClose={() => setInlineCreate(null)}
-            onSaved={(newProduct) => {
-              const item = productToItem(newProduct);
-              setAvailableItems((prev) => prev.some((row) => row.id === item.id) ? prev : [...prev, item]);
-              fillLineWithItem(inlineCreate.lineKey, item);
-              setInlineCreate(null);
-            }}
-          />
-        )}
         {cardProductId != null && (
           <ProductCardModal
             productId={cardProductId}

@@ -13,8 +13,9 @@ from rest_framework.response import Response
 
 from accounting.models import AccountingAuditLog
 from core.import_access import is_super_admin, super_admin_emails
-from core.models import DevelopmentNote, TenantModule
+from core.models import DevelopmentNote, TenantLimit, TenantModule
 from core.modules import MODULES, invalidate_module_cache
+from core.plans import LIMITS, invalidate_limit_cache, limit_rows, plan_default
 from tenants.models import Tenant, UserCompanyMembership
 
 
@@ -288,6 +289,10 @@ def _module_rows(tenant):
             'module_key': key,
             'label': definition['label'],
             'plans': list(definition['plans']),
+            # هل تشمل خطةُ الشركة هذه الوحدةَ؟ الترخيص يبقى قراراً صريحاً للسوبر
+            # أدمن (تغيير الخطة لا يُطفئ وحدة عاملة بصمت)، لكن اللوحة تُظهر
+            # التعارض بدل أن يبقى مخفياً في جدول الأسعار.
+            'plan_allows': tenant.SubscriptionPlan in definition['plans'],
             'legacy': bool(legacy_flag),
             'enabled': (
                 bool(getattr(tenant, legacy_flag, False)) if legacy_flag
@@ -393,6 +398,83 @@ def platform_company_modules(request, pk):
         'enabled': enabled,
         'plan_note': plan_note,
     })
+
+
+class TenantLimitWriteSerializer(serializers.Serializer):
+    """ضبط حدّ لشركة: قيمة، أو «بلا حدّ» (null)، أو استعادة افتراضي الخطة."""
+
+    limit_key = serializers.ChoiceField(choices=tuple(LIMITS))
+    # ثلاث حالات مقصودة: رقم = حدّ صريح، null = بلا حدّ لهذه الشركة،
+    # و`reset=true` = احذف التجاوز فتعود الشركة لافتراضي خطتها.
+    max_value = serializers.IntegerField(
+        required=False, allow_null=True, min_value=0, max_value=1_000_000,
+    )
+    reset = serializers.BooleanField(required=False, default=False)
+    note = serializers.CharField(
+        required=False, allow_blank=True, default='', max_length=120,
+        trim_whitespace=True,
+    )
+
+    def validate(self, attrs):
+        if not attrs.get('reset') and 'max_value' not in attrs:
+            raise serializers.ValidationError({
+                'max_value': 'أرسل قيمة الحدّ، أو null لبلا حدّ، أو reset=true للعودة لافتراضي الخطة.',
+            })
+        return attrs
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_company_limits(request, pk):
+    """حدود خطة الشركة: قراءتها مع الاستهلاك (GET)، وضبط/استعادة حدّ (POST)."""
+    tenant = Tenant.objects.filter(pk=pk).first()
+    if tenant is None:
+        return Response({'detail': 'الشركة غير موجودة.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        return Response({'plan': tenant.SubscriptionPlan, 'results': limit_rows(tenant)})
+
+    serializer = TenantLimitWriteSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    limit_key = serializer.validated_data['limit_key']
+    reset = serializer.validated_data['reset']
+    note = serializer.validated_data['note']
+
+    with transaction.atomic():
+        if reset:
+            TenantLimit.objects.filter(tenant=tenant, limit_key=limit_key).delete()
+            new_value = plan_default(tenant.SubscriptionPlan, limit_key)
+        else:
+            new_value = serializer.validated_data['max_value']
+            TenantLimit.objects.update_or_create(
+                tenant=tenant,
+                limit_key=limit_key,
+                defaults={
+                    'max_value': new_value,
+                    'note': note,
+                    'updated_by': request.user,
+                },
+            )
+        AccountingAuditLog.objects.create(
+            tenant=tenant,
+            user=request.user,
+            action='LIMIT_CHANGED',
+            model_name='TenantLimit',
+            object_id=tenant.pk,
+            change_details=(
+                f'limit={limit_key}; value={"plan_default" if reset else new_value}'
+            ),
+        )
+        transaction.on_commit(
+            lambda tenant_id=tenant.pk: invalidate_limit_cache(tenant_id)
+        )
+
+    logger.info(
+        'platform limit set tenant=%s key=%s reset=%s value=%s by_user=%s',
+        tenant.pk, limit_key, reset, new_value, request.user.pk,
+    )
+    return Response({'plan': tenant.SubscriptionPlan, 'results': limit_rows(tenant)})
 
 
 def _member_rows(tenant):
