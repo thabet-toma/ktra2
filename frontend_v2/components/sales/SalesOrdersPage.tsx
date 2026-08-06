@@ -31,6 +31,8 @@ import { formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized, todayIso } from "../../utils/formatDate";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { isReservationActive } from "../../utils/documentBadges";
+import { isCashAccount } from "../../utils/accountTree";
+import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { SalesProductPickerModal, type SalesProductPickerItem, formatProductPrimaryName } from "./SalesProductPickerModal";
@@ -46,7 +48,9 @@ import {
 } from "../shared/CommercialDocumentsList";
 
 type Partner = { id: number; name: string };
-type Account = { id: number; code: string; name: string; account_type?: string };
+type Account = {
+  id: number; code: string; name: string; parent: number | null; account_type?: string;
+};
 type Product = SalesProductPickerItem & { name: string; unit_price?: string };
 
 type LineState = {
@@ -75,7 +79,7 @@ export const SalesOrdersPage: React.FC = () => {
   const [orders, setOrders] = useState<SalesOrderRow[]>([]);
   const [partners, setPartners] = useState<Partner[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [cashAccounts, setCashAccounts] = useState<Account[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [allowDelete, setAllowDelete] = useState(true);
   const [reserveDays, setReserveDays] = useState(7);
 
@@ -136,13 +140,7 @@ export const SalesOrdersPage: React.FC = () => {
           name: p.name_ar || p.name_en || p.name || p.sku || `#${p.id}`,
           unit_price: p.sale_price ?? p.selling_price ?? p.unit_price ?? "",
         })));
-        setCashAccounts(
-          (accs || []).filter((a) => {
-            const t = (a.account_type || "").toLowerCase();
-            if (t === "cash" || t === "bank") return true;
-            return t === "asset" && /^110|صندوق|بنك|cash|bank/i.test(`${a.code} ${a.name}`);
-          }),
-        );
+        setAccounts(accs || []);
         if (settings) {
           setAllowDelete(settings.allow_document_delete !== false);
           setReserveDays(Number(settings.order_reserve_days ?? 7));
@@ -617,16 +615,14 @@ export const SalesOrdersPage: React.FC = () => {
               </label>
               <label className="flex flex-col gap-1 text-xs text-[var(--color-text-muted)]">
                 حساب الصندوق / البنك
-                <select
-                  className={inputClass}
+                <AccountTreeField
+                  accounts={accounts}
                   value={depositAccount}
-                  onChange={(e) => setDepositAccount(e.target.value ? Number(e.target.value) : "")}
-                >
-                  <option value="">— اختر —</option>
-                  {cashAccounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
-                  ))}
-                </select>
+                  onChange={(id) => setDepositAccount(id ?? "")}
+                  isSelectable={isCashAccount}
+                  className={inputClass}
+                  title="اختيار الصندوق / البنك"
+                />
               </label>
               <p className="text-[11px] text-[var(--color-text-muted)]">
                 يُسجَّل سند قبض مرحَّل «على الحساب» باسم الزبون ويُربط بهذه الطلبية.

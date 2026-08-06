@@ -913,6 +913,45 @@ STATUS_MAP = {
 }
 
 
+# T-DEFACC: أكواد الصندوق/البنك في الشجرة المعيارية — 1101 النقدية، 1102 البنوك،
+# 1110 صناديق النقدية. تُستعمل حين تكون الإعدادات فارغة كي لا يبقى أي مستند بلا صندوق.
+DEFAULT_CASH_ACCOUNT_CODES = ("1101", "1102", "1110")
+
+
+def resolve_default_cash_account(tenant_id: int):
+    """حساب الصندوق/البنك الافتراضي للشركة — مصدر واحد لكل المستندات.
+
+    فاتورة البيع، فاتورة الشراء، سند القبض وسند الصرف كانت كلٌّ منها تحلّ
+    الصندوق بطريقتها (أو تترك الحقل فارغاً فيرفض الحفظ). الترتيب الآن:
+    إعدادات المبيعات ← إعدادات الشراء ← 1101/1102/1110 ← أول حساب أصل باسم نقدي.
+    يُعيد None فقط إن كانت الشجرة بلا أي حساب نقدي.
+    """
+    from django.db.models import Q
+    from sales.models import SalesSettings
+    from logistics.models import PurchaseSettings
+
+    ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
+    if ss and ss.default_cash_account_id:
+        return ss.default_cash_account
+    ps = PurchaseSettings.objects.filter(tenant_id=tenant_id).first()
+    if ps and ps.default_cash_account_id:
+        return ps.default_cash_account
+    base = Account.objects.filter(
+        tenant_id=tenant_id, account_type="Asset", is_active=True,
+    )
+    for code in DEFAULT_CASH_ACCOUNT_CODES:
+        hit = base.filter(code=code).first()
+        if hit:
+            return hit
+    return (
+        base.filter(
+            Q(name__icontains="صندوق") | Q(name__icontains="نقد") | Q(name__icontains="بنك")
+        )
+        .order_by("code")
+        .first()
+    )
+
+
 def _resolve_cheque_under_collection_account(tenant_id: int):
     """حساب «شيكات برسم التحصيل» — نفس منطق ترحيل الفاتورة (M2-T3).
 
@@ -934,15 +973,14 @@ def _resolve_cheque_under_collection_account(tenant_id: int):
 
 def _resolve_cheque_cash_account(tenant_id: int, account_id=None):
     """حساب الصندوق/البنك لوجهة التحصيل — صريح أو افتراضي الإعدادات."""
-    from sales.models import SalesSettings
     if account_id:
         acc = Account.objects.filter(pk=account_id, tenant_id=tenant_id, is_active=True).first()
         if not acc:
             raise ValidationError("حساب الصندوق/البنك المحدد غير موجود أو لا يتبع هذه الشركة.")
         return acc
-    ss = SalesSettings.objects.filter(tenant_id=tenant_id).first()
-    if ss and ss.default_cash_account_id:
-        return ss.default_cash_account
+    acc = resolve_default_cash_account(tenant_id)
+    if acc:
+        return acc
     raise ValidationError(
         "حدّد حساب الصندوق/البنك للتحويل، أو عيّن default_cash_account في إعدادات المبيعات."
     )
@@ -965,7 +1003,7 @@ def _resolve_cheque_ar_account(cheque):
 
 
 def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
-                    account_id=None, movement_date=None):
+                    account_id=None, movement_date=None, bank_account_id=None):
     """task11 R2-A3 — تحويل حالة شيك مع القيد المحاسبي المرافق.
 
     كانت آلة الحالات بلا قيود محاسبية (والواجهة تتجاوزها أصلاً بـ PATCH خام)
@@ -992,6 +1030,23 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
     next_status = STATUS_MAP[movement_type]
     when = movement_date or _dt.date.today()
     amount = Decimal(str(cheque.amount or 0)).quantize(Decimal("0.01"))
+
+    # T-BANKS: وجهة الإيداع/الصرف حساب بنكي مسجَّل — حسابه في الشجرة هو
+    # الطرف النقدي للقيد، ويُسجَّل على الشيك ليظهر في كشف البنك ومطابقته.
+    deposit_account_changed = False
+    if bank_account_id:
+        from .models import BankAccount
+        ba = (
+            BankAccount.objects
+            .filter(pk=bank_account_id, tenant_id=cheque.tenant_id, is_active=True)
+            .select_related('account').first()
+        )
+        if ba is None:
+            raise ValidationError("الحساب البنكي المحدد غير موجود أو لا يتبع هذه الشركة.")
+        account_id = ba.account_id
+        if cheque.deposit_bank_account_id != ba.pk:
+            cheque.deposit_bank_account = ba
+            deposit_account_changed = True
 
     # GL يخص الشيكات الواردة المسجلة دفترياً فقط
     in_books = bool(cheque.sales_invoice_id or cheque.customer_payment_id)
@@ -1058,7 +1113,9 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             created_by=user,
         )
         cheque.status = next_status
-        cheque.save(update_fields=['status'])
+        cheque.save(update_fields=(
+            ['status', 'deposit_bank_account'] if deposit_account_changed else ['status']
+        ))
         create_audit_log(
             tenant=cheque.tenant,
             user=user,
@@ -1071,6 +1128,180 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             ),
         )
     return cheque
+
+
+# ─────────────────────────────────────────────────────────
+#  T-BANKS: البنوك وحساباتها والمطابقة البنكية
+# ─────────────────────────────────────────────────────────
+
+BANK_PARENT_ACCOUNT_CODE = "1102"
+
+
+def get_bank_parent_account(tenant):
+    """حساب الأب «البنوك» في الشجرة — يُنشأ تحت الأصول المتداولة إن غاب.
+
+    بلا أب لا مكان لحسابات البنوك، وإنشاؤه مرة واحدة أفضل من رفض العملية
+    على شركة قديمة بُذرت قبل هذا الحساب.
+    """
+    acc = Account.objects.filter(tenant=tenant, code=BANK_PARENT_ACCOUNT_CODE).first()
+    if acc:
+        return acc
+    current_assets = Account.objects.filter(tenant=tenant, code="11").first()
+    if current_assets is None:
+        return (
+            Account.objects.filter(tenant=tenant, account_type="Asset",
+                                   code__startswith="11").order_by("code").first()
+            or Account.objects.filter(tenant=tenant, account_type="Asset").order_by("code").first()
+        )
+    acc = Account.objects.create(
+        tenant=tenant, code=BANK_PARENT_ACCOUNT_CODE, name="البنوك (Banks)",
+        parent=current_assets, account_type="Asset", is_active=True,
+    )
+    logger.info("get_bank_parent_account: created 1102 for tenant=%s", getattr(tenant, "TenantID", tenant))
+    return acc
+
+
+def create_bank_account(*, tenant, bank, name, currency, branch=None, account_number=None,
+                        iban=None, is_default=False, notes=None, user=None):
+    """ينشئ حساباً بنكياً وحسابه في الشجرة تحت «1102 البنوك» في معاملة واحدة."""
+    from .cashbox import allocate_child_account_code
+    from .models import BankAccount
+
+    parent = get_bank_parent_account(tenant)
+    if parent is None:
+        raise ValidationError(
+            "لا يوجد حساب أب للبنوك في شجرة الحسابات — أنشئ «11 الأصول المتداولة» أولاً."
+        )
+    label = (name or "").strip()
+    if not label:
+        raise ValidationError("اسم الحساب البنكي مطلوب.")
+    with transaction.atomic():
+        code = allocate_child_account_code(
+            parent, tenant,
+            marker="K",
+            seed=BankAccount.objects.filter(tenant=tenant).count() + 1,
+            fallback_prefix=BANK_PARENT_ACCOUNT_CODE,
+        )
+        gl = Account.objects.create(
+            tenant=tenant, code=code, name=f"{bank.name} — {label}"[:100],
+            parent=parent, account_type=parent.account_type or "Asset", is_active=True,
+        )
+        if is_default:
+            BankAccount.objects.filter(tenant=tenant, is_default=True).update(is_default=False)
+        ba = BankAccount.objects.create(
+            tenant=tenant, bank=bank, branch=branch, name=label[:150],
+            account_number=(account_number or None), iban=(iban or None),
+            currency=currency, account=gl, is_default=bool(is_default),
+            notes=(notes or None),
+        )
+    logger.info(
+        "create_bank_account: tenant=%s bank=%s account=%s gl=%s(%s)",
+        getattr(tenant, "TenantID", tenant), bank.pk, ba.pk, gl.pk, code,
+    )
+    return ba
+
+
+def bank_account_statement(bank_account, *, start_date=None, end_date=None, posted_only=True):
+    """حركة الحساب البنكي من دفتر الأستاذ + حالة المطابقة لكل سطر.
+
+    يعيد: opening (رصيد ما قبل start_date)، rows، وbook_balance (رصيد الدفاتر
+    حتى end_date)، وcleared_balance (المؤشَّر منه فقط).
+    """
+    from django.db.models import Sum
+
+    qs = (
+        JournalLine.objects
+        .filter(tenant_id=bank_account.tenant_id, account_id=bank_account.account_id)
+        .select_related("journal", "partner")
+    )
+    if posted_only:
+        qs = qs.filter(journal__is_posted=True)
+
+    opening = Decimal("0.00")
+    if start_date:
+        agg = qs.filter(journal__transaction_date__lt=start_date).aggregate(
+            d=Sum("debit"), c=Sum("credit"),
+        )
+        opening = (agg["d"] or Decimal("0")) - (agg["c"] or Decimal("0"))
+        qs = qs.filter(journal__transaction_date__gte=start_date)
+    if end_date:
+        qs = qs.filter(journal__transaction_date__lte=end_date)
+
+    rows = []
+    balance = opening
+    cleared = opening
+    for line in qs.order_by("journal__transaction_date", "journal_id", "id"):
+        movement = (line.debit or Decimal("0")) - (line.credit or Decimal("0"))
+        balance += movement
+        rec_line = getattr(line, "bank_reconciliation_line", None)
+        if rec_line is not None:
+            cleared += movement
+        rows.append({
+            "journal_line_id": line.id,
+            "journal_id": line.journal_id,
+            "date": line.journal.transaction_date,
+            "description": line.description or line.journal.description or "",
+            "partner": line.partner.name if line.partner_id else None,
+            "debit": line.debit,
+            "credit": line.credit,
+            "balance": balance,
+            "is_cleared": rec_line is not None,
+            "reconciliation_id": rec_line.reconciliation_id if rec_line is not None else None,
+        })
+    return {
+        "opening_balance": opening,
+        "book_balance": balance,
+        "cleared_balance": cleared,
+        "rows": rows,
+    }
+
+
+def bank_reconciliation_summary(reconciliation):
+    """ملخص المطابقة: رصيد الدفاتر، المؤشَّر، رصيد الكشف، والفرق."""
+    stmt = bank_account_statement(
+        reconciliation.bank_account, end_date=reconciliation.statement_date,
+    )
+    statement_balance = Decimal(str(reconciliation.statement_balance or 0))
+    cleared = stmt["cleared_balance"]
+    return {
+        "book_balance": stmt["book_balance"],
+        "cleared_balance": cleared,
+        "statement_balance": statement_balance,
+        "difference": (statement_balance - cleared).quantize(Decimal("0.01")),
+        "uncleared_count": sum(1 for r in stmt["rows"] if not r["is_cleared"]),
+        "rows": stmt["rows"],
+    }
+
+
+def close_bank_reconciliation(reconciliation, *, user=None):
+    """إقفال المطابقة — يُرفض ما لم يكن الفرق صفراً."""
+    from django.utils import timezone
+    from .models import BankReconciliation
+
+    if reconciliation.status == BankReconciliation.STATUS_CLOSED:
+        return reconciliation
+    summary = bank_reconciliation_summary(reconciliation)
+    if abs(summary["difference"]) >= Decimal("0.01"):
+        raise ValidationError(
+            f"لا يمكن إقفال المطابقة والفرق {summary['difference']} — "
+            "أشِّر باقي الحركات أو صحّح رصيد الكشف."
+        )
+    reconciliation.status = BankReconciliation.STATUS_CLOSED
+    reconciliation.closed_at = timezone.now()
+    reconciliation.save(update_fields=["status", "closed_at"])
+    create_audit_log(
+        tenant=reconciliation.tenant, user=user, action="POST",
+        model_name="BankReconciliation", object_id=reconciliation.pk,
+        change_details=(
+            f"إقفال مطابقة الحساب {reconciliation.bank_account_id} "
+            f"حتى {reconciliation.statement_date} برصيد {reconciliation.statement_balance}"
+        ),
+    )
+    logger.info(
+        "close_bank_reconciliation: id=%s bank_account=%s balance=%s",
+        reconciliation.pk, reconciliation.bank_account_id, reconciliation.statement_balance,
+    )
+    return reconciliation
 
 
 # ─────────────────────────────────────────────────────────

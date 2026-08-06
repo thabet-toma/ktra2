@@ -152,7 +152,12 @@ class DevelopmentNote(models.Model):
     description = models.TextField(blank=True, default='')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='todo')
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='medium')
-    assignee = models.CharField(max_length=150, blank=True, default='')
+    # صور توضيحية للملاحظة — روابط مستضافة (Cloudinary عبر /api/media/upload/)
+    # لا محتوى ثنائي في القاعدة؛ نفس نمط `SupplierQuotation.attachments`.
+    images = models.JSONField(
+        default=list, blank=True,
+        help_text='[{url,caption}] صور توضيحية مرفوعة للملاحظة',
+    )
     due_date = models.DateField(null=True, blank=True)
     position = models.PositiveIntegerField(default=0)
     created_by = models.ForeignKey(

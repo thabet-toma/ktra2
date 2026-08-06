@@ -74,12 +74,17 @@ def resolve_default_cash_box_account(tenant):
     return None
 
 
-def allocate_cash_box_account_code(parent: Account, tenant) -> str:
-    raw = (parent.code or "111").replace("-", "").strip() or "111"
+def allocate_child_account_code(parent: Account, tenant, *, marker: str, seed: int,
+                                fallback_prefix: str = "111") -> str:
+    """رمز حساب ابن شاغر تحت `parent` بصيغة <رمز الأب><marker><تسلسل>.
+
+    يخدم الصناديق والحسابات البنكية معاً — منطق واحد للتخصيص لا نسختان.
+    """
+    raw = (parent.code or fallback_prefix).replace("-", "").strip() or fallback_prefix
     prefix = raw[:10]
-    i = CashBoxLedgerAccount.objects.filter(tenant=tenant).count() + 1
+    i = max(seed, 1)
     for _ in range(8000):
-        cand = f"{prefix}B{i:04d}"
+        cand = f"{prefix}{marker}{i:04d}"
         if len(cand) > 20:
             cand = cand[:20]
         if not Account.objects.filter(tenant=tenant, code=cand).exists():
@@ -88,3 +93,11 @@ def allocate_cash_box_account_code(parent: Account, tenant) -> str:
     import random
 
     return f"{prefix[:12]}{random.randint(10000, 99999)}"[:20]
+
+
+def allocate_cash_box_account_code(parent: Account, tenant) -> str:
+    return allocate_child_account_code(
+        parent, tenant,
+        marker="B",
+        seed=CashBoxLedgerAccount.objects.filter(tenant=tenant).count() + 1,
+    )

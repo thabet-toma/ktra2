@@ -36,6 +36,7 @@ import {
 } from "@/services/firestoreService";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { accountingApi } from "@/services/accountingApi";
+import { AccountTreeField } from "@/components/accounting/AccountTreePicker";
 import { maxPaymentPrincipalForDeal } from "@/utils/dealPaymentLimits";
 import { resolvePaymentForSwiftInstallment } from "@/utils/dealPaymentMatch";
 import { SupplierModal } from "@/components/common/SupplierModal";
@@ -111,6 +112,16 @@ interface InvoiceFormProps {
   readOnly?: boolean;
 }
 
+type FeeAccountRow = {
+  id: number; code?: string; name?: string; parent?: number | null;
+  account_type?: string; is_active?: boolean;
+};
+
+/** حسابات صالحة لرسوم فاتورة الشراء (مصروف أو أصل نشط). */
+const isFeeAccount = (account: FeeAccountRow) =>
+  account.is_active !== false
+  && ["Expense", "Asset"].includes(String(account.account_type || ""));
+
 export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   invoice: initialInvoice,
   currentUser,
@@ -174,16 +185,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const [activeItemSearchIndex, setActiveItemSearchIndex] = useState<number | null>(null);
   // task18 DEF-B1/B3: إنشاء صنف جديد inline من خلية اسم الصنف (النص المكتوب يُمرَّر مسبقاً)
   const [inlineCreate, setInlineCreate] = useState<{ rowIndex: number; name: string } | null>(null);
-  const [feeAccounts, setFeeAccounts] = useState<Array<{ id: number; code?: string; name?: string; account_type?: string }>>([]);
+  // T-DEFACC: الشجرة تحتاج القائمة كاملة (الآباء منها) — و`feeAccounts` تبقى
+  // المجموعة القابلة للاختيار التي يستعملها الاختيار التلقائي للرسوم.
+  const [allAccounts, setAllAccounts] = useState<FeeAccountRow[]>([]);
+  const feeAccounts = useMemo(() => allAccounts.filter(isFeeAccount), [allAccounts]);
 
   useEffect(() => {
     accountingApi.getAccounts()
-      .then((rows) => setFeeAccounts(
-        rows.filter((account: any) => account.is_active !== false && ["Expense", "Asset"].includes(String(account.account_type || ""))),
-      ))
+      .then((rows) => setAllAccounts(rows as FeeAccountRow[]))
       .catch((error) => {
         console.error("[PurchaseInvoiceFees] Failed to load fee accounts", error);
-        setFeeAccounts([]);
+        setAllAccounts([]);
       });
   }, []);
 
@@ -1488,7 +1500,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const resolveImportFeeAccount = async (name: string) => {
     try {
       const account = await accountingApi.resolveImportExpenseAccount(name);
-      setFeeAccounts((prev) => (
+      setAllAccounts((prev) => (
         prev.some((a) => a.id === account.id) ? prev : [...prev, account]
       ));
       return account as { id: number; code?: string; name?: string };
@@ -1698,7 +1710,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             {(formData.fees || []).map((fee, index) => (
               <tr key={fee.id || index}>
                 <td className="p-1"><input className="aseel-input w-full" disabled={effectiveReadOnly} value={fee.description} placeholder="مثال: رسوم فحص أو ضريبة إضافية" onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, description: e.target.value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
-                <td className="p-1"><select className="aseel-input w-full" disabled={effectiveReadOnly} value={fee.expenseAccountId || ""} onChange={(e) => { const account = feeAccounts.find((row) => row.id === Number(e.target.value)); const fees = [...(formData.fees || [])]; fees[index] = { ...fee, expenseAccountId: account?.id || null, expenseAccountCode: account?.code, expenseAccountName: account?.name }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }}><option value="">— اختر الحساب —</option>{feeAccounts.map((account) => <option key={account.id} value={account.id}>{account.code} — {account.name}</option>)}</select></td>
+                <td className="p-1"><AccountTreeField accounts={allAccounts} value={fee.expenseAccountId || ""} disabled={effectiveReadOnly} isSelectable={isFeeAccount} title="اختيار حساب الرسم" onChange={(id, account) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, expenseAccountId: id, expenseAccountCode: account?.code, expenseAccountName: account?.name ?? undefined }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1"><input className="aseel-input w-full text-center" data-fee-amount={fee.id} type="number" min="0" step="0.01" disabled={effectiveReadOnly || fee.calculationType === "percentage"} value={fee.calculationType === "percentage" ? fee.amount : (fee.calculationValue ?? fee.amount)} onChange={(e) => { const value = Number(e.target.value) || 0; const fees = [...(formData.fees || [])]; fees[index] = { ...fee, amount: value, calculationValue: value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly} checked={fee.capitalizeToInventory} onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, capitalizeToInventory: e.target.checked }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
                 <td className="p-1 text-center">{!effectiveReadOnly && <button type="button" className="aseel-toolbtn" onClick={() => { setFormData((prev) => ({ ...prev, fees: (prev.fees || []).filter((_, i) => i !== index) })); markDirty(); }}><Trash2 size={14} /></button>}</td>

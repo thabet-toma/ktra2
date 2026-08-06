@@ -15,6 +15,8 @@ const QUICK_LINKS: { label: string; view: AppView }[] = [
   { label: 'فواتير الشراء', view: 'purchase-invoices' },
   { label: 'فواتير المبيعات', view: 'sales-invoices' },
   { label: 'الشيكات', view: 'accounting-cheques' },
+  { label: 'البنوك وفروعها', view: 'accounting-banks' },
+  { label: 'المطابقة البنكية', view: 'accounting-bank-reconciliation' },
 ];
 
 export const GlobalSearch: React.FC<GlobalSearchProps> = ({ userRole, onNavigate }) => {

@@ -2,6 +2,10 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     AccountViewSet,
+    BankAccountViewSet,
+    BankBranchViewSet,
+    BankReconciliationViewSet,
+    BankViewSet,
     JournalViewSet,
     ChequeViewSet,
     CostCenterViewSet,
@@ -21,6 +25,10 @@ router.register(r'accounts', AccountViewSet, basename='accounts')
 router.register(r'journals', JournalViewSet)
 router.register(r'cheques', ChequeViewSet)
 router.register(r'cost-centers', CostCenterViewSet)
+router.register(r'banks', BankViewSet, basename='banks')
+router.register(r'bank-branches', BankBranchViewSet, basename='bank-branches')
+router.register(r'bank-accounts', BankAccountViewSet, basename='bank-accounts')
+router.register(r'bank-reconciliations', BankReconciliationViewSet, basename='bank-reconciliations')
 router.register(r'general-ledger', GeneralLedgerView, basename='general-ledger')
 router.register(r'trial-balance', TrialBalanceView, basename='trial-balance')
 router.register(r'vat-report', VatReportView, basename='vat-report')

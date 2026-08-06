@@ -58,6 +58,13 @@ export interface ChequeDto {
   bank_name?: string | null;
   account_number?: string | null;
   bank_branch?: string | null;
+  /* T-BANKS: الربط بسجل البنوك — النصوص أعلاه لقطة للشيكات القديمة. */
+  bank?: number | null;
+  bank_branch_ref?: number | null;
+  deposit_bank_account?: number | null;
+  bank_display?: string | null;
+  bank_branch_display?: string | null;
+  deposit_bank_account_name?: string | null;
   amount: string;
   due_date?: string | null;
   issue_date?: string | null;
@@ -259,4 +266,90 @@ export interface CurrencyDto {
   Name: string | null;
   Symbol: string | null;
   IsBaseCurrency: boolean;
+}
+
+/* ── T-BANKS: البنوك وحساباتها والمطابقة البنكية ── */
+
+export interface BankBranchDto {
+  id: number;
+  bank: number;
+  bank_name?: string;
+  name: string;
+  branch_code?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  is_active: boolean;
+}
+
+export interface BankDto {
+  id: number;
+  name: string;
+  code?: string | null;
+  swift_code?: string | null;
+  country?: string | null;
+  notes?: string | null;
+  is_active: boolean;
+  branches: BankBranchDto[];
+  accounts_count: number;
+}
+
+export interface BankAccountDto {
+  id: number;
+  bank: number;
+  bank_name?: string;
+  branch: number | null;
+  branch_name?: string | null;
+  name: string;
+  account_number?: string | null;
+  iban?: string | null;
+  currency: number;
+  currency_code?: string;
+  account: number;
+  account_code?: string;
+  is_default: boolean;
+  is_active: boolean;
+  notes?: string | null;
+  balance?: string;
+}
+
+export interface BankStatementRowDto {
+  journal_line_id: number;
+  journal_id: number;
+  date: string;
+  description: string;
+  partner: string | null;
+  debit: string | number;
+  credit: string | number;
+  balance: string | number;
+  is_cleared: boolean;
+  reconciliation_id: number | null;
+}
+
+export interface BankStatementDto {
+  bank_account: BankAccountDto;
+  opening_balance: string | number;
+  book_balance: string | number;
+  cleared_balance: string | number;
+  rows: BankStatementRowDto[];
+}
+
+export interface BankReconciliationDto {
+  id: number;
+  bank_account: number;
+  bank_account_name?: string;
+  currency_code?: string;
+  statement_date: string;
+  statement_balance: string | number;
+  status: "Open" | "Closed";
+  notes?: string | null;
+  created_at?: string;
+  closed_at?: string | null;
+}
+
+export interface BankReconciliationSummaryDto extends BankReconciliationDto {
+  book_balance: string | number;
+  cleared_balance: string | number;
+  difference: string | number;
+  uncleared_count: number;
+  rows: BankStatementRowDto[];
 }

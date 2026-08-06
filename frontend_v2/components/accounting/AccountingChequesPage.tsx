@@ -1,7 +1,13 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import { formatMoney } from "../../utils/formatNumber";
-import type { ChequeDto, AccountingPartner } from "../../types/accounting";
+import type {
+  AccountingPartner,
+  BankAccountDto,
+  BankBranchDto,
+  BankDto,
+  ChequeDto,
+} from "../../types/accounting";
 import {
   AseelDocumentShell,
   AseelDenseTable,
@@ -20,6 +26,9 @@ const CHEQUE_STATUSES = [
   { v: "Settled", l: "مسوّى نقداً" },
 ];
 
+/** حركات تُدخل/تُخرج المال من حساب بنكي فعلي — تحتاج تحديد الحساب. */
+const NEEDS_BANK_ACCOUNT = ["collect", "withdraw", "settle"];
+
 const DIRECTIONS = [
   { v: "", l: "الكل" },
   { v: "Incoming", l: "وارد" },
@@ -29,11 +38,16 @@ const DIRECTIONS = [
 export const AccountingChequesPage: React.FC = () => {
   const [rows, setRows] = useState<ChequeDto[]>([]);
   const [partners, setPartners] = useState<AccountingPartner[]>([]);
+  // T-BANKS: البنك المسحوب عليه يُختار من سجل البنوك، وحساب الإيداع من حسابات الشركة.
+  const [banks, setBanks] = useState<BankDto[]>([]);
+  const [bankAccounts, setBankAccounts] = useState<BankAccountDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
     cheque_number: "",
+    bank: "",
+    bank_branch_ref: "",
     bank_name: "",
     account_number: "",
     bank_branch: "",
@@ -61,6 +75,7 @@ export const AccountingChequesPage: React.FC = () => {
   const [newMovement, setNewMovement] = useState("");
   const [transferDate, setTransferDate] = useState(new Date().toISOString().split("T")[0]);
   const [transferNotes, setTransferNotes] = useState("");
+  const [transferBankAccount, setTransferBankAccount] = useState("");
 
   const CHEQUE_MOVES: Record<string, { v: string; l: string }[]> = {
     Draft: [
@@ -80,16 +95,23 @@ export const AccountingChequesPage: React.FC = () => {
     Settled: [],
   };
 
+  const formBranches: BankBranchDto[] =
+    banks.find((b) => String(b.id) === form.bank)?.branches || [];
+
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
-      const [ch, pr] = await Promise.all([
+      const [ch, pr, bk, ba] = await Promise.all([
         accountingApi.getCheques(),
         accountingApi.getPartners().catch(() => []),
+        accountingApi.getBanks(true).catch(() => []),
+        accountingApi.getBankAccounts({ activeOnly: true }).catch(() => []),
       ]);
       setRows(ch as ChequeDto[]);
       setPartners(pr as AccountingPartner[]);
+      setBanks(bk as BankDto[]);
+      setBankAccounts(ba as BankAccountDto[]);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
     } finally {
@@ -110,6 +132,8 @@ export const AccountingChequesPage: React.FC = () => {
     try {
       await accountingApi.createCheque({
         cheque_number: form.cheque_number.trim(),
+        bank: form.bank ? parseInt(form.bank, 10) : null,
+        bank_branch_ref: form.bank_branch_ref ? parseInt(form.bank_branch_ref, 10) : null,
         bank_name: form.bank_name || null,
         account_number: form.account_number || null,
         bank_branch: form.bank_branch || null,
@@ -126,6 +150,8 @@ export const AccountingChequesPage: React.FC = () => {
       setShowForm(false);
       setForm({
         cheque_number: "",
+        bank: "",
+        bank_branch_ref: "",
         bank_name: "",
         account_number: "",
         bank_branch: "",
@@ -162,9 +188,11 @@ export const AccountingChequesPage: React.FC = () => {
         movement_type: newMovement,
         movement_date: transferDate,
         notes: transferNotes,
+        ...(transferBankAccount ? { bank_account: parseInt(transferBankAccount, 10) } : {}),
       });
       setTransferCheque(null);
       setTransferNotes("");
+      setTransferBankAccount("");
       await load();
     } catch (e: unknown) {
       alert(e instanceof Error ? e.message : "فشل التحويل");
@@ -190,8 +218,8 @@ export const AccountingChequesPage: React.FC = () => {
   const columns: DenseColumn<ChequeDto>[] = [
     { key: "cheque_number", header: "رقم الشيك", width: "100px", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.cheque_number}</span> },
     { key: "account_number", header: "رقم الحساب", width: "120px", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.account_number || "—"}</span> },
-    { key: "bank_name", header: "البنك", width: "120px", render: (r) => r.bank_name || "—" },
-    { key: "bank_branch", header: "الفرع", width: "100px", render: (r) => r.bank_branch || "—" },
+    { key: "bank_name", header: "البنك", width: "120px", render: (r) => r.bank_display || r.bank_name || "—" },
+    { key: "bank_branch", header: "الفرع", width: "100px", render: (r) => r.bank_branch_display || r.bank_branch || "—" },
     { key: "amount", header: "المبلغ", width: "110px", numeric: true, render: (r) => formatMoney(r.amount) },
     { key: "due_date", header: "تاريخ الاستحقاق", width: "110px", render: (r) => formatDateLocalized(r.due_date) || "—" },
     { key: "issue_date", header: "تاريخ الإصدار", width: "110px", render: (r) => formatDateLocalized(r.issue_date) || "—" },
@@ -329,22 +357,35 @@ export const AccountingChequesPage: React.FC = () => {
                 <input className="aseel-input" value={form.cheque_number}
                   onChange={(e) => setForm((f) => ({ ...f, cheque_number: e.target.value }))} />
               </div>
-              <div className="aseel-field">
-                <label className="aseel-field-label">البنك</label>
-                <input className="aseel-input" value={form.bank_name}
-                  onChange={(e) => setForm((f) => ({ ...f, bank_name: e.target.value }))} />
-              </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
                 <div className="aseel-field">
-                  <label className="aseel-field-label">رقم الحساب</label>
-                  <input className="aseel-input" value={form.account_number}
-                    onChange={(e) => setForm((f) => ({ ...f, account_number: e.target.value }))} />
+                  <label className="aseel-field-label">البنك المسحوب عليه</label>
+                  <select className="aseel-input" value={form.bank}
+                    onChange={(e) => setForm((f) => ({ ...f, bank: e.target.value, bank_branch_ref: "" }))}>
+                    <option value="">— غير مسجَّل —</option>
+                    {banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
                 </div>
                 <div className="aseel-field">
                   <label className="aseel-field-label">فرع البنك</label>
-                  <input className="aseel-input" value={form.bank_branch}
-                    onChange={(e) => setForm((f) => ({ ...f, bank_branch: e.target.value }))} />
+                  <select className="aseel-input" value={form.bank_branch_ref} disabled={!form.bank}
+                    onChange={(e) => setForm((f) => ({ ...f, bank_branch_ref: e.target.value }))}>
+                    <option value="">— بلا فرع —</option>
+                    {formBranches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
+                  </select>
                 </div>
+              </div>
+              {!form.bank && (
+                <div className="aseel-field">
+                  <label className="aseel-field-label">اسم البنك (نصاً — لبنك غير مسجَّل)</label>
+                  <input className="aseel-input" value={form.bank_name}
+                    onChange={(e) => setForm((f) => ({ ...f, bank_name: e.target.value }))} />
+                </div>
+              )}
+              <div className="aseel-field">
+                <label className="aseel-field-label">رقم حساب الساحب</label>
+                <input className="aseel-input" value={form.account_number}
+                  onChange={(e) => setForm((f) => ({ ...f, account_number: e.target.value }))} />
               </div>
               <div className="aseel-field">
                 <label className="aseel-field-label">المبلغ</label>
@@ -441,6 +482,20 @@ export const AccountingChequesPage: React.FC = () => {
                   </span>
                 )}
               </div>
+              {NEEDS_BANK_ACCOUNT.includes(newMovement) && (
+                <div className="aseel-field">
+                  <label className="aseel-field-label">حساب الإيداع/التحصيل البنكي</label>
+                  <select className="aseel-input" value={transferBankAccount}
+                    onChange={(e) => setTransferBankAccount(e.target.value)}>
+                    <option value="">— الصندوق الافتراضي —</option>
+                    {bankAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.bank_name} — {a.name} ({a.currency_code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="aseel-field">
                 <label className="aseel-field-label">تاريخ التحويل</label>
                 <input type="date" className="aseel-input" value={transferDate}

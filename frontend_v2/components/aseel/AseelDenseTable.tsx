@@ -14,6 +14,10 @@
  */
 import React, { useState, useRef } from 'react';
 import { AseelSpinner, AseelEmptyState } from './AseelStates';
+import {
+  columnWidthsKey, nextColumnWidth, readSizes, writeSizes,
+  type SizeMap,
+} from '../../utils/columnWidths';
 
 export type DenseColumn<T> = {
   key: string;
@@ -89,19 +93,11 @@ export function AseelDenseTable<T extends Record<string, any>>({
   // 1. حساب مفتاح فريد للجدول dựa على المسار والأعمدة للحفظ التلقائي
   const storageKey = React.useMemo(() => {
     if (typeof window === "undefined") return "";
-    return `aseel_table_widths_${window.location.pathname}_${columns.map(c => c.key).join(',')}`;
+    return columnWidthsKey(window.location.pathname, columns.map(c => c.key));
   }, [columns]);
 
   // 2. التهيئة من localStorage (T-G1 + Persistence)
-  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
-    if (!storageKey) return {};
-    try {
-      const saved = localStorage.getItem(storageKey);
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [colWidths, setColWidths] = useState<SizeMap>(() => readSizes(storageKey));
 
   const startResize = (e: React.MouseEvent, colKey: string) => {
     e.preventDefault();
@@ -113,8 +109,9 @@ export function AseelDenseTable<T extends Record<string, any>>({
     // RTL: السحب لليسار يزيد العرض — نعكس الإشارة حسب اتجاه الجدول.
     const rtl = getComputedStyle(th).direction === 'rtl';
     const onMove = (ev: MouseEvent) => {
-      const delta = (ev.clientX - startX) * (rtl ? -1 : 1);
-      setColWidths((prev) => ({ ...prev, [colKey]: Math.max(40, Math.round(startW + delta)) }));
+      setColWidths((prev) => ({
+        ...prev, [colKey]: nextColumnWidth(startW, ev.clientX - startX, rtl),
+      }));
     };
     const onUp = () => {
       document.removeEventListener('mousemove', onMove);
@@ -122,9 +119,7 @@ export function AseelDenseTable<T extends Record<string, any>>({
       document.body.style.userSelect = '';
       // 3. الحفظ عند التغيير (نهاية السحب)
       setColWidths(prev => {
-        if (storageKey) {
-           localStorage.setItem(storageKey, JSON.stringify(prev));
-        }
+        writeSizes(storageKey, prev);
         return prev;
       });
     };

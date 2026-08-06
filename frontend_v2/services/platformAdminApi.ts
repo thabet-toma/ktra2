@@ -65,13 +65,19 @@ export interface PlatformSuperAdmin {
 export type DevelopmentNoteStatus = "todo" | "in_progress" | "done";
 export type DevelopmentNotePriority = "low" | "medium" | "high";
 
+/** صورة توضيحية للملاحظة — الرابط من ‎/api/media/upload/‎ لا محتوى مخزَّن. */
+export interface DevelopmentNoteImage {
+  url: string;
+  caption: string;
+}
+
 export interface DevelopmentNote {
   id: number;
   title: string;
   description: string;
   status: DevelopmentNoteStatus;
   priority: DevelopmentNotePriority;
-  assignee: string;
+  images: DevelopmentNoteImage[];
   due_date: string | null;
   position: number;
   created_by: number | null;
@@ -84,7 +90,7 @@ export interface DevelopmentNote {
 
 export type DevelopmentNoteWrite = Pick<
   DevelopmentNote,
-  "title" | "description" | "status" | "priority" | "assignee" | "due_date" | "position"
+  "title" | "description" | "status" | "priority" | "images" | "due_date" | "position"
 >;
 
 export const getPlatformDashboard = () =>

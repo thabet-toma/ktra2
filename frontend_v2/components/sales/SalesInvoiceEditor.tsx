@@ -40,6 +40,7 @@ import {
 } from "../../utils/reservedStock";
 import { formatMoney, formatQuantity, formatNumber } from "../../utils/formatNumber";
 import { openInNewTab } from "../../utils/openInNewTab";
+import { isCashAccount } from "../../utils/accountTree";
 import { entityPathForReference } from "../../utils/entityLinks";
 import { DeliverGoodsModal } from "./DeliverGoodsModal";
 import { clientLogger } from "../../services/logger";
@@ -197,19 +198,12 @@ type Props = {
 };
 
 /** هل الحساب صندوق/بنك مناسب لاستلام نقد؟
- *  قواعد (ترتيب الأولوية):
- *    - نوع الحساب Asset
- *    - الكود يبدأ بـ 1101 / 1102 (الصناديق) أو 1103 (البنوك) حسب COA المقترح
- *    - أو الاسم يحتوي: صندوق، بنك، نقدية، cash، bank
+ *  T-DEFACC: القاعدة من `utils/accountTree` — كانت النسخة هنا تعدّ 1103
+ *  (المدينون التجاريون) صندوقاً، فيظهر حساب الذمم في قائمة الصناديق.
+ *  يبقى `till/petty` استثناءً محلياً لتسميات قديمة في هذه الشاشة.
  */
-const isCashboxAccount = (a: AccountRow): boolean => {
-  if (a.account_type && a.account_type !== "Asset") return false;
-  const code = (a.code || "").trim();
-  if (/^110[123]\b/.test(code) || /^(1101|1102|1103)/.test(code)) return true;
-  const name = (a.name || "").toLowerCase();
-  if (/صندوق|نقد|بنك|cash|bank|till|petty/i.test(name)) return true;
-  return false;
-};
+const isCashboxAccount = (a: AccountRow): boolean =>
+  isCashAccount(a) || /till|petty/i.test(a.name || "");
 
 /** هل الحساب حساب إيراد مناسب لفاتورة مبيعات؟ */
 const isRevenueAccount = (a: AccountRow): boolean => {
@@ -3262,6 +3256,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           }}
           quickReceipt={{
             accounts: cashboxAccounts,
+            treeAccounts: accounts,
             defaultAccountId: salesSettings?.default_cash_account ?? cashboxAccounts[0]?.id ?? null,
             onReceive: async (amount, accountId) => {
               if (currencyId === "") throw new Error("عملة الفاتورة غير محددة.");

@@ -75,3 +75,14 @@ test("extractDrfFieldErrors returns empty for strings/null", () => {
   assert.deepEqual(extractDrfFieldErrors(null), {});
   assert.deepEqual(extractDrfFieldErrors("boom"), {});
 });
+
+test('humanizeThrown يقرأ رسالة Error وجسم DRF المُسلسَل', async () => {
+  const { humanizeThrown } = await import('./drfError.ts');
+  assert.equal(humanizeThrown(new Error('الحساب البنكي غير موجود')), 'الحساب البنكي غير موجود');
+  assert.equal(
+    humanizeThrown(new Error('{"detail": "المطابقة مُقفلة"}')),
+    'المطابقة مُقفلة',
+  );
+  assert.equal(humanizeThrown({ detail: 'خطأ مباشر' }), 'خطأ مباشر');
+  assert.equal(humanizeThrown(new Error('')), 'حدث خطأ غير متوقع');
+});

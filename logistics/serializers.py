@@ -7,8 +7,13 @@ from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import serializers
 
+from accounting.models import Account
 from sales.models import SupplierPayment, SupplierPaymentAllocation
-from core.payments import document_partner_balance_summary, document_payment_summary
+from core.payments import (
+    apply_default_cash_account,
+    document_partner_balance_summary,
+    document_payment_summary,
+)
 from core.tenant_utils import get_tenant
 
 from .services import purchase_invoice_payment_summary
@@ -2297,6 +2302,10 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
     cash_account_name = serializers.CharField(
         source='cash_or_bank_account.name', read_only=True, default=None,
     )
+    # T-DEFACC: اختياري في الإدخال — `validate` يملؤه من افتراضي الشركة.
+    cash_or_bank_account = serializers.PrimaryKeyRelatedField(
+        queryset=Account.objects.all(), required=False, allow_null=True,
+    )
     # T-ONACC: التوزيع على فواتير الشراء + المتبقّي «على الحساب» (مرآة سند القبض).
     allocations = SupplierPaymentAllocationSerializer(many=True, read_only=True)
     allocated_amount = serializers.SerializerMethodField()
@@ -2341,8 +2350,8 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'amount': 'قيمة غير صالحة.'})
         if not attrs.get('payment_date'):
             raise serializers.ValidationError({'payment_date': 'تاريخ الدفعة مطلوب.'})
-        if not attrs.get('cash_or_bank_account'):
-            raise serializers.ValidationError({'cash_or_bank_account': 'الصندوق/البنك مطلوب.'})
+        # T-DEFACC: الصندوق يُملأ من افتراضي الشركة بدل رفض السند لفراغه.
+        attrs = apply_default_cash_account(self, attrs)
         invoice = attrs.get(
             'purchase_invoice',
             self.instance.purchase_invoice if self.instance else None,

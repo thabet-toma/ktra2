@@ -3884,6 +3884,13 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
             return
         cash_account_id = invoice.cash_or_bank_account_id
         if not cash_account_id:
+            # T-DEFACC: الصندوق الافتراضي للشركة بدل تخطّي التسوية — نفس مصدر
+            # فاتورة البيع وسندَي القبض والصرف.
+            from accounting.services import resolve_default_cash_account
+
+            default_cash = resolve_default_cash_account(invoice.tenant_id)
+            cash_account_id = default_cash.pk if default_cash else None
+        if not cash_account_id:
             logger.warning(
                 "Cash purchase %s posted without a cash account — supplier left as "
                 "creditor (no auto-settlement). Set the invoice cash/bank account.",

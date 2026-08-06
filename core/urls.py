@@ -20,7 +20,7 @@ from rest_framework.routers import DefaultRouter
 
 from core import (
     assistant_views, agent_db_view, dashboard_api, health, media_views,
-    permissions_api, platform_admin_api, whatsapp_views,
+    permissions_api, platform_admin_api, reports_api, whatsapp_views,
 )
 from core.activity_views import ActivityLogViewSet
 from core.platform_admin_api import DevelopmentNoteViewSet
@@ -58,6 +58,9 @@ urlpatterns = [
     path('api/agent/suppliers/', agent_db_view.agent_suppliers),
     path('api/agent/products/', agent_db_view.agent_products),
     path('api/dashboard/', dashboard_api.trade_dashboard),
+    # T-REPORTS: قسم التقارير — فهرس واحد ومشغّل واحد لكل تقارير المنصة.
+    path('api/reports/', reports_api.reports_catalog),
+    path('api/reports/<str:key>/', reports_api.report_run),
     path('api/platform/dashboard/', platform_admin_api.platform_dashboard),
     path('api/platform/super-admins/', platform_admin_api.platform_super_admins),
     path('api/platform/super-admins/<int:pk>/', platform_admin_api.platform_super_admin_detail),

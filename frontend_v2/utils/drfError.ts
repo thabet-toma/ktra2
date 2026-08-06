@@ -120,3 +120,19 @@ export function extractDrfFieldErrors(data: unknown): Record<string, string> {
   walk(data, "");
   return out;
 }
+
+/**
+ * رسالة خطأ مقروءة من أي شكل مرمي: `Error` (تُقرأ رسالته) أو جسم DRF أو نص.
+ * `humanizeDrfError` وحده يعيد "" لكائن Error لأن رسالته ليست خاصية قابلة للتعداد.
+ */
+export function humanizeThrown(e: unknown, fallback = "حدث خطأ غير متوقع"): string {
+  const raw = e instanceof Error ? e.message : e;
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (text.startsWith("{") || text.startsWith("[")) {
+      try { parsed = JSON.parse(text); } catch { parsed = raw; }
+    }
+  }
+  return humanizeDrfError(parsed) || fallback;
+}

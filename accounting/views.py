@@ -39,9 +39,14 @@ from .cashbox import (
 from .models import (
     Account, CashBoxLedgerAccount, JournalHeader, JournalLine, Cheque,
     CostCenter, ExchangeRate, FiscalPeriod, TaxRate,
+    Bank, BankBranch, BankAccount, BankReconciliation, BankReconciliationLine,
 )
 from .serializers import (
     AccountSerializer,
+    BankSerializer,
+    BankBranchSerializer,
+    BankAccountSerializer,
+    BankReconciliationSerializer,
     CashBoxLedgerAccountSerializer,
     JournalHeaderSerializer,
     JournalHeaderListSerializer,
@@ -52,6 +57,10 @@ from .serializers import (
     TaxRateSerializer,
 )
 from .services import (
+    bank_account_statement,
+    bank_reconciliation_summary,
+    close_bank_reconciliation,
+    create_bank_account,
     validate_journal_entry,
     post_journal_entry,
     post_journal,
@@ -211,6 +220,7 @@ class ChequeViewSet(viewsets.ModelViewSet):
                 notes=(request.data.get("notes") or "")[:500],
                 account_id=request.data.get("account_id"),
                 movement_date=request.data.get("movement_date") or None,
+                bank_account_id=request.data.get("bank_account") or None,
             )
         except DjangoValidationError as e:
             raise ValidationError(
@@ -1354,6 +1364,270 @@ class PurchaseReceiptViewSet(viewsets.ViewSet):
             return Response({"error": "حدث خطأ غير متوقع أثناء إنشاء قيد الاستلام."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         return Response({"journal_id": j.id, "net_amount": str(net_amount), "tax_amount": str(tax_amount)}, status=status.HTTP_201_CREATED)
+
+
+class BankViewSet(viewsets.ModelViewSet):
+    """T-BANKS: بنوك الشركة — مظلّة الفروع والحسابات."""
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    queryset = Bank.objects.all().prefetch_related('branches', 'accounts')
+    serializer_class = BankSerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return Bank.objects.none()
+        qs = super().get_queryset().filter(tenant=tenant)
+        if str(self.request.query_params.get('active_only', '')).lower() in ('1', 'true'):
+            qs = qs.filter(is_active=True)
+        return qs
+
+    def perform_create(self, serializer):
+        require_perm(self.request, 'accounting.account.manage')
+        tenant = get_tenant(self.request)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        serializer.save(tenant=tenant)
+
+    def perform_update(self, serializer):
+        require_perm(self.request, 'accounting.account.manage')
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        require_perm(self.request, 'accounting.account.manage')
+        if instance.accounts.exists():
+            raise ValidationError(
+                {"detail": "لا يمكن حذف بنك له حسابات — عطّله بدل حذفه."})
+        instance.delete()
+
+
+class BankBranchViewSet(viewsets.ModelViewSet):
+    """فروع البنوك — تُفلتر بـ ?bank=<id>."""
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    queryset = BankBranch.objects.all().select_related('bank')
+    serializer_class = BankBranchSerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return BankBranch.objects.none()
+        qs = super().get_queryset().filter(tenant=tenant)
+        bank_id = self.request.query_params.get('bank')
+        if bank_id:
+            qs = qs.filter(bank_id=bank_id)
+        return qs
+
+    def perform_create(self, serializer):
+        require_perm(self.request, 'accounting.account.manage')
+        tenant = get_tenant(self.request)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        bank = serializer.validated_data.get('bank')
+        if bank is None or bank.tenant_id != tenant.TenantID:
+            raise ValidationError({"bank": "البنك غير موجود في هذه الشركة."})
+        serializer.save(tenant=tenant)
+
+    def perform_update(self, serializer):
+        require_perm(self.request, 'accounting.account.manage')
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        require_perm(self.request, 'accounting.account.manage')
+        if instance.accounts.exists():
+            raise ValidationError(
+                {"detail": "لا يمكن حذف فرع مرتبط بحسابات بنكية — عطّله بدل حذفه."})
+        instance.delete()
+
+
+class BankAccountViewSet(viewsets.ModelViewSet):
+    """حسابات الشركة البنكية — لكل حساب عملته وحسابه في الشجرة (يُنشأ تلقائياً)."""
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    queryset = BankAccount.objects.all().select_related('bank', 'branch', 'currency', 'account')
+    serializer_class = BankAccountSerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return BankAccount.objects.none()
+        qs = super().get_queryset().filter(tenant=tenant)
+        bank_id = self.request.query_params.get('bank')
+        if bank_id:
+            qs = qs.filter(bank_id=bank_id)
+        if str(self.request.query_params.get('active_only', '')).lower() in ('1', 'true'):
+            qs = qs.filter(is_active=True)
+        return qs
+
+    def create(self, request, *args, **kwargs):
+        require_perm(request, 'accounting.account.manage')
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({"error": "لا يوجد شركة محددة لهذا الطلب."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        bank = data.get('bank')
+        if bank is None or bank.tenant_id != tenant.TenantID:
+            raise ValidationError({"bank": "البنك غير موجود في هذه الشركة."})
+        branch = data.get('branch')
+        if branch is not None and branch.bank_id != bank.pk:
+            raise ValidationError({"branch": "الفرع لا يتبع البنك المحدد."})
+        try:
+            ba = create_bank_account(
+                tenant=tenant, bank=bank, name=data.get('name'),
+                currency=data.get('currency'), branch=branch,
+                account_number=data.get('account_number'), iban=data.get('iban'),
+                is_default=data.get('is_default', False), notes=data.get('notes'),
+                user=request.user,
+            )
+        except DjangoValidationError as e:
+            raise ValidationError({"detail": e.messages if hasattr(e, 'messages') else str(e)})
+        create_audit_log(
+            tenant=tenant, user=request.user, action="CREATE",
+            model_name="BankAccount", object_id=ba.pk,
+            change_details=f"حساب بنكي {ba.name} → حساب {ba.account.code}",
+        )
+        return Response(self.get_serializer(ba).data, status=status.HTTP_201_CREATED)
+
+    def perform_update(self, serializer):
+        require_perm(self.request, 'accounting.account.manage')
+        tenant = get_tenant(self.request)
+        instance = serializer.instance
+        if serializer.validated_data.get('is_default'):
+            BankAccount.objects.filter(tenant=tenant, is_default=True).exclude(
+                pk=instance.pk).update(is_default=False)
+        ba = serializer.save()
+        # اسم الحساب في الشجرة يتبع تسمية الحساب البنكي.
+        new_name = f"{ba.bank.name} — {ba.name}"[:100]
+        if ba.account_id and ba.account.name != new_name:
+            Account.objects.filter(pk=ba.account_id).update(name=new_name)
+
+    def perform_destroy(self, instance):
+        require_perm(self.request, 'accounting.account.manage')
+        if JournalLine.objects.filter(account_id=instance.account_id).exists():
+            raise ValidationError(
+                {"detail": "لا يمكن حذف حساب بنكي عليه حركة محاسبية — عطّله بدل حذفه."})
+        gl_id = instance.account_id
+        instance.delete()
+        Account.objects.filter(pk=gl_id).delete()
+
+    @action(detail=True, methods=['get'], url_path='statement')
+    def statement(self, request, pk=None):
+        """كشف حركة الحساب البنكي من الدفاتر مع حالة المطابقة لكل سطر."""
+        require_perm(request, 'accounting.report.view')
+        ba = self.get_object()
+        data = bank_account_statement(
+            ba,
+            start_date=request.query_params.get('start_date') or None,
+            end_date=request.query_params.get('end_date') or None,
+        )
+        return Response({
+            "bank_account": self.get_serializer(ba).data,
+            **data,
+        })
+
+
+class BankReconciliationViewSet(viewsets.ModelViewSet):
+    """المطابقة البنكية: كشف البنك مقابل الدفاتر حتى تاريخ."""
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    queryset = BankReconciliation.objects.all().select_related(
+        'bank_account', 'bank_account__bank', 'bank_account__currency')
+    serializer_class = BankReconciliationSerializer
+
+    def get_queryset(self):
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return BankReconciliation.objects.none()
+        qs = super().get_queryset().filter(tenant=tenant)
+        ba = self.request.query_params.get('bank_account')
+        if ba:
+            qs = qs.filter(bank_account_id=ba)
+        return qs
+
+    def perform_create(self, serializer):
+        require_perm(self.request, 'accounting.journal.create')
+        tenant = get_tenant(self.request)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        ba = serializer.validated_data.get('bank_account')
+        if ba is None or ba.tenant_id != tenant.TenantID:
+            raise ValidationError({"bank_account": "الحساب البنكي غير موجود في هذه الشركة."})
+        if BankReconciliation.objects.filter(
+            tenant=tenant, bank_account=ba, status=BankReconciliation.STATUS_OPEN,
+        ).exists():
+            raise ValidationError(
+                {"detail": "توجد مطابقة مفتوحة لهذا الحساب — أقفلها أو احذفها أولاً."})
+        serializer.save(tenant=tenant, created_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        require_perm(self.request, 'accounting.journal.create')
+        if instance.status == BankReconciliation.STATUS_CLOSED:
+            raise ValidationError({"detail": "المطابقة مُقفلة — أعِد فتحها قبل الحذف."})
+        instance.delete()
+
+    @action(detail=True, methods=['get'], url_path='summary')
+    def summary(self, request, pk=None):
+        rec = self.get_object()
+        data = bank_reconciliation_summary(rec)
+        return Response({**self.get_serializer(rec).data, **data})
+
+    @action(detail=True, methods=['post'], url_path='toggle-line')
+    def toggle_line(self, request, pk=None):
+        """تأشير/إلغاء تأشير سطر دفاتر بأنه ظهر في كشف البنك."""
+        require_perm(request, 'accounting.journal.create')
+        rec = self.get_object()
+        if rec.status == BankReconciliation.STATUS_CLOSED:
+            raise ValidationError({"detail": "المطابقة مُقفلة — لا يمكن تعديل أسطرها."})
+        line_id = request.data.get('journal_line')
+        cleared = bool(request.data.get('cleared', True))
+        line = JournalLine.objects.filter(
+            pk=line_id, tenant_id=rec.tenant_id, account_id=rec.bank_account.account_id,
+        ).first()
+        if line is None:
+            raise ValidationError({"journal_line": "السطر غير موجود في حركة هذا الحساب البنكي."})
+        if cleared:
+            existing = BankReconciliationLine.objects.filter(journal_line=line).first()
+            if existing and existing.reconciliation_id != rec.pk:
+                raise ValidationError(
+                    {"detail": f"السطر مطابَق مسبقاً في مطابقة #{existing.reconciliation_id}."})
+            if not existing:
+                BankReconciliationLine.objects.create(reconciliation=rec, journal_line=line)
+        else:
+            BankReconciliationLine.objects.filter(reconciliation=rec, journal_line=line).delete()
+        return Response(bank_reconciliation_summary(rec))
+
+    @action(detail=True, methods=['post'], url_path='close')
+    def close(self, request, pk=None):
+        require_perm(request, 'accounting.journal.post')
+        rec = self.get_object()
+        try:
+            close_bank_reconciliation(rec, user=request.user)
+        except DjangoValidationError as e:
+            raise ValidationError({"detail": e.messages if hasattr(e, 'messages') else str(e)})
+        return Response(bank_reconciliation_summary(rec))
+
+    @action(detail=True, methods=['post'], url_path='reopen')
+    def reopen(self, request, pk=None):
+        require_perm(request, 'accounting.journal.unpost')
+        rec = self.get_object()
+        if rec.status == BankReconciliation.STATUS_OPEN:
+            return Response(bank_reconciliation_summary(rec))
+        rec.status = BankReconciliation.STATUS_OPEN
+        rec.closed_at = None
+        rec.save(update_fields=['status', 'closed_at'])
+        create_audit_log(
+            tenant=rec.tenant, user=request.user, action="UPDATE",
+            model_name="BankReconciliation", object_id=rec.pk,
+            change_details="إعادة فتح المطابقة البنكية",
+        )
+        return Response(bank_reconciliation_summary(rec))
 
 
 class ExchangeRateViewSet(viewsets.ModelViewSet):

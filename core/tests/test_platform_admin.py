@@ -69,13 +69,13 @@ class PlatformAdminApiTest(APITestCase):
                 "description": "إضافة صورة معاينة قرب رقم المستند",
                 "status": "todo",
                 "priority": "high",
-                "assignee": "فريق الواجهة",
                 "created_by": self.company_manager.id,
             },
             format="json",
         )
         self.assertEqual(created.status_code, 201, created.content)
         self.assertEqual(created.data["created_by"], self.superuser.id)
+        self.assertNotIn("assignee", created.data)
         note_id = created.data["id"]
 
         updated = self.client.patch(
@@ -205,6 +205,72 @@ class PlatformAdminApiTest(APITestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("status", response.data)
         self.assertIn("priority", response.data)
+
+    def _create_note(self, title, note_status, position):
+        response = self.client.post(
+            "/api/platform/development-notes/",
+            {"title": title, "status": note_status, "position": position},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        return response.data["id"]
+
+    def test_completed_notes_sink_to_the_end_of_the_sheet(self):
+        """المكتملة تُزاح لآخر القائمة مهما كان ترتيبها — بلا لمس `position`."""
+        self.client.force_authenticate(self.superuser)
+        done = self._create_note("منجزة قديمة", "done", 0)
+        todo = self._create_note("قيد الانتظار", "todo", 1)
+        in_progress = self._create_note("قيد التنفيذ", "in_progress", 2)
+
+        listed = self.client.get("/api/platform/development-notes/")
+
+        self.assertEqual(listed.status_code, 200, listed.content)
+        self.assertEqual([row["id"] for row in listed.data], [todo, in_progress, done])
+
+    def test_note_images_round_trip_and_drop_extra_keys(self):
+        self.client.force_authenticate(self.superuser)
+        created = self.client.post(
+            "/api/platform/development-notes/",
+            {
+                "title": "ملاحظة بصور توضيحية",
+                "images": [
+                    {
+                        "url": "https://res.cloudinary.com/demo/image/upload/v1/a.png",
+                        "caption": "  قبل التعديل  ",
+                        "secret": "يُهمَل",
+                    },
+                    {"url": "https://res.cloudinary.com/demo/image/upload/v1/b.png"},
+                ],
+            },
+            format="json",
+        )
+
+        self.assertEqual(created.status_code, 201, created.content)
+        self.assertEqual(created.data["images"], [
+            {
+                "url": "https://res.cloudinary.com/demo/image/upload/v1/a.png",
+                "caption": "قبل التعديل",
+            },
+            {"url": "https://res.cloudinary.com/demo/image/upload/v1/b.png", "caption": ""},
+        ])
+
+    def test_note_images_reject_non_list_and_non_http_url(self):
+        self.client.force_authenticate(self.superuser)
+        not_a_list = self.client.post(
+            "/api/platform/development-notes/",
+            {"title": "شكل خاطئ", "images": {"url": "https://example.com/a.png"}},
+            format="json",
+        )
+        bad_scheme = self.client.post(
+            "/api/platform/development-notes/",
+            {"title": "رابط خاطئ", "images": [{"url": "javascript:alert(1)"}]},
+            format="json",
+        )
+
+        self.assertEqual(not_a_list.status_code, 400, not_a_list.content)
+        self.assertIn("images", not_a_list.data)
+        self.assertEqual(bad_scheme.status_code, 400, bad_scheme.content)
+        self.assertIn("images", bad_scheme.data)
 
 
 class PlatformCompanyControlTest(APITestCase):

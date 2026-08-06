@@ -59,6 +59,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "accounting-coa", label: "شجرة الحسابات", icon: <BookMarked className="h-4 w-4" /> },
     { view: "accounting-journals", label: "دفتر اليومية (القيود)", icon: <FileText className="h-4 w-4" /> },
     { view: "accounting-cheques", label: "الشيكات", icon: <Banknote className="h-4 w-4" /> },
+    { view: "accounting-banks", label: "البنوك وفروعها", icon: <Landmark className="h-4 w-4" /> },
+    { view: "accounting-bank-reconciliation", label: "المطابقة البنكية", icon: <Scale className="h-4 w-4" /> },
     { view: "accounting-general-ledger", label: "الأستاذ العام", icon: <BookOpen className="h-4 w-4" /> },
     { view: "accounting-trial-balance", label: "ميزان المراجعة", icon: <Scale className="h-4 w-4" /> },
     { view: "accounting-vat-report", label: "تقرير ضريبة القيمة المضافة", icon: <Receipt className="h-4 w-4" /> },
@@ -138,15 +140,19 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     { view: "stocktake", label: "الجرد", icon: <ClipboardList className="h-4 w-4" /> },
   ];
 
-  // 7) المالية — (البنوك غير مبنية كشاشة مستقلة — مُدرجة بخارطة الطريق).
+  // 7) المالية — الصناديق والبنوك والشيكات ومطابقة كشف البنك.
   const financeLinks: NavLink[] = [
     { view: "cash-boxes", label: "صناديق الكاش", icon: <Banknote className="h-4 w-4" /> },
+    { view: "accounting-banks", label: "البنوك وفروعها", icon: <Landmark className="h-4 w-4" /> },
+    { view: "accounting-bank-reconciliation", label: "المطابقة البنكية", icon: <Scale className="h-4 w-4" /> },
     { view: "accounting-cheques", label: "الشيكات", icon: <Receipt className="h-4 w-4" /> },
   ];
 
   // 8) التقارير — كل تقرير يفتح في تبويبه الخاص (G2).
   const reportsLinks: NavLink[] = [
-    { view: "reports", label: "التقارير العامة", icon: <ReportsIcon className="h-4 w-4" />, path: "/reports", newTab: true },
+    // T-REPORTS: «كل التقارير» هو فهرس القسم — يقود لكل تقارير المنصة. البقية
+    // اختصارات للأكثر استعمالاً كي لا يمرّ المستخدم بالفهرس في كل مرة.
+    { view: "reports", label: "كل التقارير", icon: <ReportsIcon className="h-4 w-4" />, path: "/reports", newTab: true },
     { view: "stock-movements", label: "تقرير حركة صنف", icon: <ArrowLeftRight className="h-4 w-4" />, path: "/stock-movements", newTab: true },
     { view: "accounting-trial-balance", label: "ميزان المراجعة", icon: <Scale className="h-4 w-4" />, path: "/accounting/trial-balance", newTab: true },
     { view: "accounting-income-statement", label: "قائمة الدخل", icon: <TrendingUp className="h-4 w-4" />, path: "/accounting/income-statement", newTab: true },

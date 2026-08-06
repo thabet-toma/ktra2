@@ -280,3 +280,34 @@ def post_payment(
         lines_data=lines_data,
         user=user,
     )
+
+
+def apply_default_cash_account(serializer, attrs: dict, field: str = "cash_or_bank_account") -> dict:
+    """T-DEFACC: يملأ حساب الصندوق/البنك للسند من افتراضي الشركة حين لا يُرسَل.
+
+    سند القبض وسند الصرف كانا يُرفضان بـ«هذا الحقل مطلوب» متى نسيت الشاشة تمرير
+    الحساب، مع أن للشركة صندوقاً افتراضياً في الإعدادات. مشترك بين
+    `sales.CustomerPaymentSerializer` و`logistics.SupplierPaymentSerializer`
+    فلا تتفرّق القاعدة نسختين.
+    """
+    from rest_framework import serializers as drf_serializers
+
+    from accounting.services import resolve_default_cash_account
+    from core.tenant_utils import get_tenant
+
+    if attrs.get(field):
+        return attrs
+    instance = getattr(serializer, "instance", None)
+    if instance is not None and getattr(instance, f"{field}_id", None):
+        return attrs
+
+    request = serializer.context.get("request")
+    tenant = get_tenant(request) if request is not None else None
+    tenant_id = getattr(tenant, "TenantID", None) or getattr(instance, "tenant_id", None)
+    account = resolve_default_cash_account(tenant_id) if tenant_id else None
+    if account is None:
+        raise drf_serializers.ValidationError({
+            field: "حدّد الصندوق/البنك، أو عيّن صندوقاً افتراضياً في إعدادات المبيعات.",
+        })
+    attrs[field] = account
+    return attrs

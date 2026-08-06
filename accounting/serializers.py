@@ -2,6 +2,7 @@ from rest_framework import serializers
 from .models import (
     Account, JournalHeader, JournalLine, Cheque, CostCenter,
     CashBoxLedgerAccount, ExchangeRate, FiscalPeriod, TaxRate,
+    Bank, BankBranch, BankAccount, BankReconciliation,
 )
 from partners.models import Partner
 
@@ -372,9 +373,90 @@ class JournalHeaderSerializer(serializers.ModelSerializer):
         return instance
 
 class ChequeSerializer(serializers.ModelSerializer):
+    # T-BANKS: أسماء البنك/الفرع/حساب الإيداع للعرض بلا استعلام إضافي في الواجهة.
+    bank_display = serializers.SerializerMethodField(read_only=True)
+    bank_branch_display = serializers.SerializerMethodField(read_only=True)
+    deposit_bank_account_name = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Cheque
         fields = '__all__'
+
+    def get_bank_display(self, obj):
+        return (obj.bank.name if obj.bank_id else None) or obj.bank_name or ''
+
+    def get_bank_branch_display(self, obj):
+        return (obj.bank_branch_ref.name if obj.bank_branch_ref_id else None) or obj.bank_branch or ''
+
+    def get_deposit_bank_account_name(self, obj):
+        return str(obj.deposit_bank_account) if obj.deposit_bank_account_id else None
+
+
+class BankBranchSerializer(serializers.ModelSerializer):
+    bank_name = serializers.CharField(source='bank.name', read_only=True)
+
+    class Meta:
+        model = BankBranch
+        fields = ['id', 'bank', 'bank_name', 'name', 'branch_code', 'address', 'phone', 'is_active']
+        read_only_fields = ['id', 'bank_name']
+
+
+class BankSerializer(serializers.ModelSerializer):
+    branches = BankBranchSerializer(many=True, read_only=True)
+    accounts_count = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = Bank
+        fields = ['id', 'name', 'code', 'swift_code', 'country', 'notes', 'is_active',
+                  'branches', 'accounts_count']
+        read_only_fields = ['id', 'branches', 'accounts_count']
+
+    def get_accounts_count(self, obj):
+        return obj.accounts.count()
+
+
+class BankAccountSerializer(serializers.ModelSerializer):
+    bank_name = serializers.CharField(source='bank.name', read_only=True)
+    branch_name = serializers.CharField(source='branch.name', read_only=True, default=None)
+    currency_code = serializers.CharField(source='currency.Code', read_only=True)
+    account_code = serializers.CharField(source='account.code', read_only=True)
+    balance = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = BankAccount
+        fields = ['id', 'bank', 'bank_name', 'branch', 'branch_name', 'name',
+                  'account_number', 'iban', 'currency', 'currency_code',
+                  'account', 'account_code', 'is_default', 'is_active', 'notes', 'balance']
+        # حساب الشجرة يُنشئه الخادم — لا يُختار من الواجهة.
+        read_only_fields = ['id', 'account', 'account_code', 'bank_name', 'branch_name',
+                            'currency_code', 'balance']
+
+    def get_balance(self, obj):
+        from django.db.models import Sum, DecimalField
+        from django.db.models.functions import Coalesce
+        money = DecimalField(max_digits=18, decimal_places=2)
+        agg = JournalLine.objects.filter(
+            account_id=obj.account_id, journal__is_posted=True,
+        ).aggregate(
+            d=Coalesce(Sum("debit"), 0, output_field=money),
+            c=Coalesce(Sum("credit"), 0, output_field=money),
+        )
+        return str((agg["d"] or 0) - (agg["c"] or 0))
+
+
+class BankReconciliationSerializer(serializers.ModelSerializer):
+    bank_account_name = serializers.SerializerMethodField(read_only=True)
+    currency_code = serializers.CharField(source='bank_account.currency.Code', read_only=True)
+
+    class Meta:
+        model = BankReconciliation
+        fields = ['id', 'bank_account', 'bank_account_name', 'currency_code', 'statement_date',
+                  'statement_balance', 'status', 'notes', 'created_at', 'closed_at']
+        read_only_fields = ['id', 'bank_account_name', 'currency_code', 'status',
+                            'created_at', 'closed_at']
+
+    def get_bank_account_name(self, obj):
+        return str(obj.bank_account)
 
 
 class CashBoxLedgerAccountSerializer(serializers.ModelSerializer):

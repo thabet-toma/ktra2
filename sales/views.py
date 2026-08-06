@@ -1051,8 +1051,11 @@ class SalesSettingsViewSet(viewsets.ViewSet):
                 tenant.TenantID, code_prefixes, acc_type, name_kw
             )
 
-        ss.default_cash_account = resolve(["1101", "1102", "1103"], "Asset", "صندوق")
-        ss.default_ar_account = resolve(["1201", "1106"], "Asset", "ذمم")
+        # T-DEFACC: 1103 = المدينون التجاريون و1201 = الأراضي و1106 = دفعات
+        # الموردين — لم تكن أيٌّ منها صندوقاً ولا ذمم عملاء. الأكواد الصحيحة:
+        # النقدية/البنوك/صناديق النقدية للصندوق، والمدينون التجاريون للذمم.
+        ss.default_cash_account = resolve(["1101", "1102", "1110"], "Asset", "صندوق")
+        ss.default_ar_account = resolve(["1103"], "Asset", "مدينون")
         ss.default_revenue_account_product = resolve(["4101", "41"], "Revenue", "مبيعات")
         ss.default_revenue_account_service = (
             resolve(["4102"], "Revenue", "خدمات") or ss.default_revenue_account_product
