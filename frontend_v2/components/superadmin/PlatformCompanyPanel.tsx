@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Loader2, Save, ShieldOff, ShieldCheck, Trash2, UserPlus, X } from "lucide-react";
+import { Loader2, RotateCcw, Save, ShieldOff, ShieldCheck, Trash2, UserPlus, X } from "lucide-react";
 
 import {
-  addPlatformCompanyMember, getPlatformCompany, listCompanyModules,
-  removePlatformCompanyMember, setCompanyModule, setPlatformUserActive,
+  addPlatformCompanyMember, getPlatformCompany, listCompanyLimits, listCompanyModules,
+  removePlatformCompanyMember, setCompanyLimit, setCompanyModule, setPlatformUserActive,
   updatePlatformCompany, updatePlatformCompanyMember,
   type PlatformCompanyDetail, type PlatformCompanyMember, type PlatformCompanyPatch,
-  type PlatformModuleRow,
+  type PlatformLimitRow, type PlatformModuleRow,
 } from "../../services/platformAdminApi";
 import { ROLE_LABELS } from "../layout/CompanyManagementModal";
 import { useConfirm } from "../../contexts/ConfirmContext";
@@ -52,18 +52,27 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
   const [adding, setAdding] = useState(false);
   const [modules, setModules] = useState<PlatformModuleRow[]>([]);
   const [moduleBusy, setModuleBusy] = useState<string | null>(null);
+  // T-PLANLIMITS: حدود الخطة — الحقل يحمل النص المكتوب حتى الحفظ («» = بلا حدّ).
+  const [limits, setLimits] = useState<PlatformLimitRow[]>([]);
+  const [limitDraft, setLimitDraft] = useState<Record<string, string>>({});
+  const [limitBusy, setLimitBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [data, moduleState] = await Promise.all([
+      const [data, moduleState, limitState] = await Promise.all([
         getPlatformCompany(companyId),
         listCompanyModules(companyId),
+        listCompanyLimits(companyId),
       ]);
       setDetail(data);
       // وحدة الاستيراد القديمة لها خانتها في «إعدادات الشركة» أعلاه — لا نكرّر ضبطها.
       setModules(moduleState.results.filter((module) => !module.legacy));
+      setLimits(limitState.results);
+      setLimitDraft(Object.fromEntries(limitState.results.map((row) => [
+        row.key, row.effective === null ? "" : String(row.effective),
+      ])));
       setForm({
         name: data.name, plan: data.plan, status: data.status,
         import_enabled: data.import_enabled,
@@ -169,6 +178,36 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
         setModuleBusy(null);
       }
     }, "تم تحديث ترخيص الوحدة.");
+
+  /** حفظ حدّ واحد — الحقل الفارغ يعني «بلا حدّ» صراحةً لهذه الشركة. */
+  const saveLimit = (row: PlatformLimitRow) =>
+    run(async () => {
+      const raw = (limitDraft[row.key] ?? "").trim();
+      const parsed = raw === "" ? null : Number(raw);
+      if (parsed !== null && (!Number.isFinite(parsed) || parsed < 0)) {
+        setError(`قيمة «${row.label}» يجب أن تكون رقماً موجباً أو فارغة (بلا حدّ).`);
+        return;
+      }
+      setLimitBusy(row.key);
+      try {
+        await setCompanyLimit(companyId, row.key, { max_value: parsed });
+        await load();
+      } finally {
+        setLimitBusy(null);
+      }
+    }, "تم حفظ حدّ الخطة.");
+
+  /** استعادة افتراضي الخطة — يحذف التجاوز فتتبع الشركة خطتها من جديد. */
+  const resetLimit = (row: PlatformLimitRow) =>
+    run(async () => {
+      setLimitBusy(row.key);
+      try {
+        await setCompanyLimit(companyId, row.key, { reset: true });
+        await load();
+      } finally {
+        setLimitBusy(null);
+      }
+    }, "عاد الحدّ إلى افتراضي الخطة.");
 
   const toggleAccount = (member: PlatformCompanyMember) =>
     run(async () => {
@@ -299,6 +338,11 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                           {module.plans.length ? `الخطط: ${module.plans.join("، ")}` : "بلا خطة محددة"}
                           {module.plan_note ? ` · ${module.plan_note}` : ""}
                         </p>
+                        {module.plan_allows === false && (
+                          <p className="text-[11px] font-semibold text-amber-600">
+                            خارج خطة الشركة الحالية — يُرخَّص استثناءً فقط
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-3">
                         <label className="flex cursor-pointer items-center gap-2 text-sm font-bold text-[var(--color-text)]">
@@ -318,6 +362,92 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                 <p className="mt-2 text-[11px] aseel-text-soft">
                   الشركة غير المرخَّصة لا ترى مسارات الوحدة ولا صلاحياتها ولا تُحمَّل شاشاتها في متصفحها.
                   واجهة المكتب نفسها تُفتح من لوحة المنصة بزرّ «افتح واجهة المحاسب القانوني».
+                </p>
+              </section>
+
+              <section aria-label="حدود خطة الشركة" className="mt-4 rounded-lg border border-[var(--color-border)] p-3">
+                <h3 className="mb-3 text-sm font-bold text-[var(--color-text)]">
+                  حدود الاستخدام ({COMPANY_PLAN_LABELS[detail.plan] || detail.plan})
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-sm">
+                    <thead className="bg-[var(--color-surface-2)] aseel-text-soft">
+                      <tr>
+                        <th className="px-3 py-2 text-right">البند</th>
+                        <th className="px-3 py-2 text-center w-28">افتراضي الخطة</th>
+                        <th className="px-3 py-2 text-center w-28">المستهلَك</th>
+                        <th className="px-3 py-2 text-center w-32">الحدّ لهذه الشركة</th>
+                        <th className="px-3 py-2 text-center w-28">إجراءات</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {limits.map((row) => {
+                        const over = row.effective !== null && row.usage > row.effective;
+                        return (
+                          <tr key={row.key} className="border-t border-[var(--color-border)]">
+                            <td className="px-3 py-2">
+                              <div className="font-semibold text-[var(--color-text)]">{row.label}</div>
+                              <div className="text-[11px] aseel-text-soft">
+                                {row.unit} · {row.period_label}
+                                {row.has_override ? " · مخصّص لهذه الشركة" : ""}
+                              </div>
+                            </td>
+                            <td className="px-3 py-2 text-center aseel-text-soft">
+                              {row.plan_default === null ? "بلا حدّ" : row.plan_default}
+                            </td>
+                            <td className={`px-3 py-2 text-center ${over ? "font-bold text-amber-600" : ""}`}>
+                              {row.usage}
+                            </td>
+                            <td className="px-3 py-2">
+                              <input
+                                className="aseel-input h-8 w-full text-center"
+                                type="number"
+                                min={0}
+                                inputMode="numeric"
+                                value={limitDraft[row.key] ?? ""}
+                                placeholder="بلا حدّ"
+                                disabled={limitBusy === row.key}
+                                onChange={(event) => setLimitDraft((current) => ({
+                                  ...current, [row.key]: event.target.value,
+                                }))}
+                                aria-label={`حدّ ${row.label}`}
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="flex items-center justify-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => void saveLimit(row)}
+                                  disabled={limitBusy === row.key}
+                                  className="aseel-iconbtn text-emerald-600"
+                                  title={`حفظ حدّ ${row.label}`}
+                                  aria-label={`حفظ حدّ ${row.label}`}
+                                >
+                                  {limitBusy === row.key
+                                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                                    : <Save className="h-4 w-4" />}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void resetLimit(row)}
+                                  disabled={limitBusy === row.key || !row.has_override}
+                                  className="aseel-iconbtn"
+                                  title={`استعادة افتراضي الخطة لـ${row.label}`}
+                                  aria-label={`استعادة افتراضي الخطة لـ${row.label}`}
+                                >
+                                  <RotateCcw className="h-4 w-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-2 text-[11px] aseel-text-soft">
+                  الحقل الفارغ = بلا حدّ لهذه الشركة. تغيير الخطة يغيّر الافتراضيات، والقيمة المخصّصة هنا تبقى فوقها حتى تُستعاد.
+                  عند بلوغ الحدّ يُرفض الإنشاء برسالة واضحة للمستخدم؛ إضافة عضو من هذه اللوحة لا يحدّها الحدّ.
                 </p>
               </section>
 

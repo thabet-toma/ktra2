@@ -1934,7 +1934,8 @@ const quoteApiStatus = (status: PriceOfferStatus): SupplierQuotationStatus => ({
 
 const lineToUi = (line: {
   id?: number;
-  product: number;
+  /** T-DRAFTPARTY: null = صنف مكتوب يدوياً لم يُسجَّل بعد. */
+  product: number | null;
   product_name?: string;
   name_snapshot?: string;
   description_line?: string;
@@ -1942,9 +1943,9 @@ const lineToUi = (line: {
   unit_price: string;
   line_total?: string;
 }) => ({
-  id: String(line.id ?? `${line.product}-${Math.random()}`),
-  itemId: String(line.product),
-  name: line.name_snapshot || line.product_name || `#${line.product}`,
+  id: String(line.id ?? `${line.product ?? "draft"}-${Math.random()}`),
+  itemId: line.product ? String(line.product) : "",
+  name: line.name_snapshot || line.product_name || (line.product ? `#${line.product}` : ""),
   categoryId: "",
   categoryName: "",
   specifications: line.description_line || "",
@@ -1959,7 +1960,9 @@ const quoteToUi = async (row: SupplierQuotationDto): Promise<PriceOffer> => ({
   offerNumber: row.quotation_number,
   orderName: row.order_name || "",
   orderDescription: row.order_description || "",
-  supplierId: String(row.supplier),
+  // T-DRAFTPARTY: المورد المبدئي بلا معرّف — اسمه وحده هو ما يعرفه العرض.
+  supplierId: row.supplier ? String(row.supplier) : "",
+  supplierDraftName: row.supplier ? "" : (row.supplier_draft_name || ""),
   factoryName: row.supplier_name || "",
   offerType: "incoming_offer",
   offerDate: row.quotation_date,
@@ -2076,14 +2079,30 @@ const dealToUi = async (row: ImportDealDto): Promise<PriceOffer> => ({
   updatedAt: row.created_at || row.order_date,
 });
 
+/** T-DRAFTPARTY: بنود عرض السعر — الصنف قد يكون null (اسم مكتوب يدوياً). */
 const uiLinesToApi = (offer: PriceOffer) => (offer.items || []).map((line, index) => ({
-  product: Number(line.itemId || line.id),
+  product: line.itemId ? Number(line.itemId) : null,
   seq: index + 1,
   name_snapshot: line.name || "",
   description_line: line.specifications || "",
   quantity: String(Number(line.quantity || 0)),
   unit_price: String(Number(line.unitPrice || 0)),
 }));
+
+/**
+ * T-DRAFTPARTY: الطلبية والصفقة مستندان ملزمان — لا يقبلان مورداً أو صنفاً
+ * مبدئياً. المبدئي يبقى حكراً على عرض السعر، ويتجسَّد عند تحويل العرض نفسه.
+ */
+const registeredLinesToApi = (offer: PriceOffer) => {
+  if (!offer.supplierId) {
+    throw new Error("هذا المستند يلزمه مورد مسجَّل — الاسم المبدئي متاح في عرض السعر فقط.");
+  }
+  const draft = (offer.items || []).find((line) => !line.itemId);
+  if (draft) {
+    throw new Error(`الصنف «${draft.name || ""}» غير مسجَّل — اختره من الأصناف أو حوّل عرض السعر بدل إنشاء الطلبية مباشرةً.`);
+  }
+  return uiLinesToApi(offer).map((line) => ({ ...line, product: Number(line.product) }));
+};
 
 const parseSqlDocumentId = (id: string) => {
   const match = /^(quote|order|deal)-(\d+)$/.exec(id);
@@ -2155,7 +2174,7 @@ export const priceOffersService = {
           shipping_cost_estimate: Number(offer.shippingCost || 0),
           is_shipping_included: Boolean(offer.shippingIncluded),
           discount_amount: Number(offer.discountAmount || 0),
-          items: uiLinesToApi(offer),
+          items: registeredLinesToApi(offer),
         }, { tenantId: resolveTenantId() });
         return dealToUi(row);
       }
@@ -2175,7 +2194,7 @@ export const priceOffersService = {
         payment_method: offer.paymentMethod || "",
         delivery_days: Number(offer.deliveryDays || 0),
         notes: offer.internalNotes || "",
-        lines: uiLinesToApi(offer),
+        lines: registeredLinesToApi(offer),
       });
       return orderToUi(
         offer.status === "approved_for_shipping"
@@ -2188,7 +2207,8 @@ export const priceOffersService = {
       order_name: offer.orderName || "",
       order_description: offer.orderDescription || "",
       scope: scope === "import" ? "import" : "local",
-      supplier: Number(offer.supplierId),
+      supplier: offer.supplierId ? Number(offer.supplierId) : null,
+      supplier_draft_name: offer.supplierId ? "" : (offer.supplierDraftName || ""),
       quotation_date: offer.offerDate || new Date().toISOString().slice(0, 10),
       valid_until: offer.validUntil || null,
       status: quoteApiStatus(offer.status),
@@ -2226,7 +2246,8 @@ export const priceOffersService = {
         quotation_number: offer.offerNumber || undefined,
         order_name: offer.orderName || "",
         order_description: offer.orderDescription || "",
-        supplier: Number(offer.supplierId),
+        supplier: offer.supplierId ? Number(offer.supplierId) : null,
+        supplier_draft_name: offer.supplierId ? "" : (offer.supplierDraftName || ""),
         quotation_date: offer.offerDate,
         valid_until: offer.validUntil || null,
         status: quoteApiStatus(offer.status),
@@ -2266,7 +2287,7 @@ export const priceOffersService = {
         payment_method: offer.paymentMethod || "",
         delivery_days: Number(offer.deliveryDays || 0),
         notes: offer.internalNotes || "",
-        lines: uiLinesToApi(offer),
+        lines: registeredLinesToApi(offer),
       });
       if (offer.status === "approved_for_shipping") {
         return orderToUi(await confirmPurchaseOrder(row.id));
@@ -2289,7 +2310,7 @@ export const priceOffersService = {
       shipping_cost_estimate: Number(offer.shippingCost || 0),
       is_shipping_included: Boolean(offer.shippingIncluded),
       discount_amount: Number(offer.discountAmount || 0),
-      items: uiLinesToApi(offer),
+      items: registeredLinesToApi(offer),
     }, { tenantId: resolveTenantId() });
     return dealToUi(row);
   },

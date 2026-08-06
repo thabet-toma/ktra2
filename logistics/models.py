@@ -48,9 +48,17 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
     scope = models.CharField(
         max_length=10, choices=SCOPE_CHOICES, default=SCOPE_LOCAL, db_column='Scope',
     )
+    # T-DRAFTPARTY: عرض السعر مستند **استكشاف** — يُكتب قبل أن يُقرَّر المورد.
+    # فإجبار اختيار مورد مسجَّل كان يخلق مورداً وهمياً في دفتر الشركاء لكل عرض
+    # لم يُقبل. الآن: مورد مسجَّل **أو** اسم مبدئي نصّي، ويُنشأ الشريك الحقيقي
+    # لحظةَ التحويل إلى صفقة/طلبية/فاتورة لا قبلها.
     supplier = models.ForeignKey(
         Partner, on_delete=models.PROTECT, db_column='SupplierID',
-        related_name='supplier_quotations',
+        related_name='supplier_quotations', null=True, blank=True,
+    )
+    supplier_draft_name = models.CharField(
+        max_length=200, blank=True, default='', db_column='SupplierDraftName',
+        help_text='اسم مورد مبدئي غير مسجَّل — يُنشأ كشريك عند التحويل فقط',
     )
     quotation_date = models.DateField(db_column='QuotationDate')
     valid_until = models.DateField(null=True, blank=True, db_column='ValidUntil')
@@ -167,6 +175,14 @@ class SupplierQuotation(SoftDeleteMixin, models.Model):
                 condition=models.Q(shipping_cost_estimate__gte=0),
                 name='supplier_quote_shipping_gte_zero',
             ),
+            # T-DRAFTPARTY: العرض بلا مورد **وبلا** اسم مبدئي مستندٌ بلا طرف.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(supplier__isnull=False)
+                    | ~models.Q(supplier_draft_name='')
+                ),
+                name='supplier_quote_has_party',
+            ),
         ]
 
     def __str__(self):
@@ -183,9 +199,12 @@ class SupplierQuotationLine(models.Model):
         SupplierQuotation, on_delete=models.CASCADE, db_column='SupplierQuotationID',
         related_name='lines',
     )
+    # T-DRAFTPARTY: بند بلا صنف مسجَّل — الاسم النصّي (`name_snapshot`) يكفي داخل
+    # العرض، ويُنشأ الصنف الحقيقي عند التحويل فقط. عرضُ سعرٍ لم يُقبل لا يجوز أن
+    # يترك أصنافاً وهمية في فهرس الأصناف.
     product = models.ForeignKey(
         Product, on_delete=models.PROTECT, db_column='ProductID',
-        related_name='supplier_quotation_lines',
+        related_name='supplier_quotation_lines', null=True, blank=True,
     )
     seq = models.PositiveIntegerField(default=1, db_column='Seq')
     name_snapshot = models.CharField(max_length=255, blank=True, default='', db_column='NameSnapshot')
@@ -210,6 +229,14 @@ class SupplierQuotationLine(models.Model):
             models.CheckConstraint(
                 condition=models.Q(unit_price__gte=0),
                 name='supplier_quote_line_price_gte_zero',
+            ),
+            # T-DRAFTPARTY: بند بلا صنف يلزمه اسم — وإلا فهو سطر بلا معنى.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(product__isnull=False)
+                    | ~models.Q(name_snapshot='')
+                ),
+                name='supplier_quote_line_named',
             ),
         ]
 

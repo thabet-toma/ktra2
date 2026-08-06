@@ -10,6 +10,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from core.api_defaults import ApiAuthAndUser
+from core.plans import enforce_limits
 from core.tenant_utils import get_tenant
 from tenants.models import Currency, Tenant
 from .models import CustomerNote, Partner, PartnerBankAccount
@@ -416,7 +417,9 @@ class PartnerViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         tenant = self._get_tenant()
-        
+        # T-PLANLIMITS: عدد العملاء والموردين المسموح به من خطة الشركة.
+        enforce_limits(tenant, 'partners.records')
+
         # Prepare partner data
         partner_data = request.data.copy()
 

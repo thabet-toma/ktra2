@@ -31,6 +31,9 @@ export interface PriceOffer {
     orderName?: string;
     orderDescription?: string;
     supplierId: string;
+    /** T-DRAFTPARTY: اسم مورد **مبدئي** غير مسجَّل — يُستعمل حين يكون
+     *  `supplierId` فارغاً، ويصير شريكاً حقيقياً عند التحويل فقط. */
+    supplierDraftName?: string;
     factoryName?: string;
     offerType?: PriceOfferType;
     offerDate?: string;

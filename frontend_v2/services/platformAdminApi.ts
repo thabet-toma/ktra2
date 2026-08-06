@@ -137,6 +137,8 @@ export interface PlatformModuleRow {
   module_key: string;
   label: string;
   plans: string[];
+  /** هل تشمل خطة الشركة هذه الوحدة؟ الترخيص يبقى يدوياً، والعَلَم يُظهر التعارض. */
+  plan_allows?: boolean;
   legacy: boolean;
   enabled: boolean;
   plan_note: string;
@@ -155,6 +157,42 @@ export const setCompanyModule = (
   apiPostObject<{ module_key: string; enabled: boolean; plan_note: string }>(
     `platform/companies/${companyId}/modules/`,
     { module_key: moduleKey, enabled, plan_note: planNote },
+  );
+
+/** T-PLANLIMITS: حدود خطة الشركة — الافتراضي من الخطة، والتجاوز لهذه الشركة. */
+export interface PlatformLimitRow {
+  key: string;
+  label: string;
+  unit: string;
+  period: "month" | "total" | string;
+  period_label: string;
+  /** حدّ الخطة — null = بلا حدّ. */
+  plan_default: number | null;
+  /** تجاوز الشركة (null مع has_override=true يعني «بلا حدّ» صراحةً). */
+  override: number | null;
+  has_override: boolean;
+  effective: number | null;
+  usage: number;
+}
+
+export interface PlatformLimitsResponse {
+  plan: string;
+  results: PlatformLimitRow[];
+}
+
+export const listCompanyLimits = (companyId: number) =>
+  apiGetObject<PlatformLimitsResponse>(`platform/companies/${companyId}/limits/`);
+
+/** يضبط حدّاً (رقم أو null = بلا حدّ) أو يستعيد افتراضي الخطة بـreset. */
+export const setCompanyLimit = (
+  companyId: number,
+  limitKey: string,
+  value: { max_value: number | null } | { reset: true },
+  note = "",
+) =>
+  apiPostObject<PlatformLimitsResponse>(
+    `platform/companies/${companyId}/limits/`,
+    { limit_key: limitKey, note, ...value },
   );
 
 export interface PlatformAccountantProfile {

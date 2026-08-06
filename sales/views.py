@@ -13,6 +13,7 @@ from accounting.services import unpost_document
 from core.access import require_perm, requires_perm, user_has_perm
 from core.activity import log_activity, log_view
 from core.api_defaults import ApiAuthAndUser, POSTED_DOC_WARNING
+from core.plans import enforce_limits
 from core.tenant_utils import get_branch, get_tenant
 from .models import (
     CreditDebitNote,
@@ -174,6 +175,9 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                     )
                 }
             )
+        # T-PLANLIMITS: حدّ الخطة يُفحص قبل الحفظ — الفاتورة المحفوظة ثم المرفوضة
+        # تبقى محسوبة ضمن الحدّ.
+        enforce_limits(tenant, "sales.invoices", "documents.invoices")
         # ترحيل تلقائي إذا فُعِّل الإعداد وطلب المستخدم ذلك (أو auto_post من الـ body)
         auto_flag = self.request.data.get("auto_post")
         ss = get_or_create_sales_settings(tenant) if tenant else None

@@ -242,11 +242,17 @@ class SupplierQuotationLineSerializer(serializers.ModelSerializer):
             'description_line', 'quantity', 'unit_price', 'line_total',
         ]
         read_only_fields = ['id', 'product_name', 'line_total']
+        # T-DRAFTPARTY: بند بلا صنف مسجَّل مسموح — اسمه النصّي يكفي داخل العرض.
+        extra_kwargs = {
+            'product': {'required': False, 'allow_null': True},
+        }
 
 
 class SupplierQuotationSerializer(serializers.ModelSerializer):
     lines = SupplierQuotationLineSerializer(many=True)
-    supplier_name = serializers.CharField(source='supplier.name', read_only=True)
+    # T-DRAFTPARTY: اسم الطرف المعروض = المورد المسجَّل أو الاسم المبدئي.
+    supplier_name = serializers.SerializerMethodField()
+    is_draft_supplier = serializers.SerializerMethodField()
     currency_code = serializers.CharField(source='currency.Code', read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     scope_display = serializers.CharField(source='get_scope_display', read_only=True)
@@ -260,6 +266,7 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
         model = SupplierQuotation
         fields = [
             'id', 'quotation_number', 'scope', 'supplier', 'supplier_name',
+            'supplier_draft_name', 'is_draft_supplier',
             'quotation_date', 'valid_until', 'status', 'status_display',
             'scope_display', 'currency', 'exchange_rate', 'subtotal',
             'currency_code',
@@ -275,11 +282,22 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id', 'subtotal', 'tax_amount', 'grand_total', 'converted_deal',
-            'converted_order', 'converted_invoice', 'created_at', 'updated_at',
+            'converted_order', 'converted_invoice', 'is_draft_supplier',
+            'created_at', 'updated_at',
         ]
         extra_kwargs = {
             'quotation_number': {'required': False, 'allow_blank': True},
+            'supplier': {'required': False, 'allow_null': True},
+            'supplier_draft_name': {'required': False, 'allow_blank': True},
         }
+
+    def get_supplier_name(self, obj):
+        if obj.supplier_id:
+            return obj.supplier.name
+        return obj.supplier_draft_name
+
+    def get_is_draft_supplier(self, obj):
+        return not obj.supplier_id and bool(obj.supplier_draft_name)
 
     def get_converted_deal(self, obj):
         try:
@@ -373,6 +391,20 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
         if supplier and supplier.partner_type != 'Supplier':
             raise serializers.ValidationError({'supplier': 'الشريك المحدد ليس مورداً.'})
 
+        # T-DRAFTPARTY: مورد مسجَّل **أو** اسم مبدئي — لا عرضَ بلا طرف، ولا اسمَ
+        # مبدئياً معلّقاً بجانب مورد مسجَّل (فأيّهما الطرف حينها؟).
+        draft_name = str(attrs.get(
+            'supplier_draft_name', getattr(instance, 'supplier_draft_name', ''),
+        ) or '').strip()
+        if supplier is None and not draft_name:
+            raise serializers.ValidationError({
+                'supplier': 'اختر مورداً مسجَّلاً أو اكتب اسم مورد مبدئي.',
+            })
+        if supplier is not None:
+            draft_name = ''
+        if 'supplier_draft_name' in attrs or supplier is not None:
+            attrs['supplier_draft_name'] = draft_name
+
         scope = attrs.get('scope', getattr(instance, 'scope', SupplierQuotation.SCOPE_LOCAL))
         tax_rate = attrs.get('tax_rate', getattr(instance, 'tax_rate', Decimal('0')))
         if scope == SupplierQuotation.SCOPE_IMPORT and Decimal(str(tax_rate or 0)) != 0:
@@ -440,10 +472,15 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
         if lines is not None:
             seen_seq = set()
             for index, line in enumerate(lines, start=1):
-                product = line['product']
-                if product.tenant_id != tenant.pk:
+                product = line.get('product')
+                if product is not None and product.tenant_id != tenant.pk:
                     raise serializers.ValidationError({
                         'lines': f'الصنف في السطر {index} لا يتبع الشركة الحالية.',
+                    })
+                # T-DRAFTPARTY: السطر بلا صنف مسجّل يلزمه اسم نصّي يبقى داخل العرض.
+                if product is None and not str(line.get('name_snapshot') or '').strip():
+                    raise serializers.ValidationError({
+                        'lines': f'اكتب اسم الصنف في السطر {index} أو اختره من الأصناف.',
                     })
                 seq = line.get('seq', index)
                 if seq in seen_seq:
@@ -469,13 +506,14 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
 
     @staticmethod
     def _line_values(quotation, line, index):
-        product = line['product']
+        product = line.get('product')
         quantity = Decimal(str(line['quantity']))
         unit_price = Decimal(str(line['unit_price']))
         return {
             **line,
             'tenant': quotation.tenant,
             'quotation': quotation,
+            'product': product,
             'seq': line.get('seq') or index,
             'name_snapshot': line.get('name_snapshot')
             or getattr(product, 'name_ar', '')

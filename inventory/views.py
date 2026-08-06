@@ -29,6 +29,7 @@ from core.tenant_utils import get_tenant
 # صيانة الأداء 2026-07: الكلاس انتقل إلى core/pagination.py ليصبح الافتراضي
 # العام في REST_FRAMEWORK — يبقى الاستيراد هنا لأي مرجع قائم.
 from core.pagination import OptionalPageNumberPagination
+from core.plans import enforce_limits
 
 logger = logging.getLogger(__name__)
 
@@ -280,6 +281,8 @@ class ProductViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         tenant = self._get_tenant()
+        # T-PLANLIMITS: عدد الأصناف المسموح به من خطة الشركة.
+        enforce_limits(tenant, 'inventory.products')
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self._validate_category_tenant(serializer, tenant)
@@ -531,6 +534,8 @@ class WarehouseViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
+        # T-PLANLIMITS: عدد المستودعات المسموح به من خطة الشركة.
+        enforce_limits(tenant, 'inventory.warehouses')
         # أول مستودع للشركة يصبح الافتراضي تلقائياً
         is_first = not Warehouse.objects.filter(tenant=tenant).exists()
         is_default = bool(serializer.validated_data.get('is_default') or is_first)

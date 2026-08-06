@@ -61,6 +61,7 @@ urlpatterns = [
     path('api/platform/super-admins/<int:pk>/', platform_admin_api.platform_super_admin_detail),
     path('api/platform/companies/<int:pk>/', platform_admin_api.platform_company_detail),
     path('api/platform/companies/<int:pk>/modules/', platform_admin_api.platform_company_modules),
+    path('api/platform/companies/<int:pk>/limits/', platform_admin_api.platform_company_limits),
     path('api/platform/accountant-workspace/', platform_admin_api.platform_accountant_workspace),
     path('api/platform/accountants/pending/', platform_admin_api.platform_accountants_pending),
     path('api/platform/accountants/<int:profile_id>/verify/', platform_admin_api.platform_accountant_verify),

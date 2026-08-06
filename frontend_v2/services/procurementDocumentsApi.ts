@@ -26,7 +26,8 @@ export type SupplierQuotationStatus =
 
 export interface SupplierQuotationLineDto {
   id?: number;
-  product: number;
+  /** T-DRAFTPARTY: null = صنف مكتوب يدوياً داخل العرض، اسمه في name_snapshot. */
+  product: number | null;
   product_name?: string;
   seq?: number;
   name_snapshot?: string;
@@ -42,8 +43,12 @@ export interface SupplierQuotationDto {
   quotation_number: string;
   order_name?: string;
   order_description?: string;
-  supplier: number;
+  /** T-DRAFTPARTY: null = مورد مبدئي اسمه في supplier_draft_name. */
+  supplier: number | null;
+  supplier_draft_name?: string;
   supplier_name?: string;
+  /** اسم المورد المعروض مبدئيّ لا مسجَّل. */
+  is_draft_supplier?: boolean;
   quotation_date: string;
   valid_until?: string | null;
   status: SupplierQuotationStatus;
@@ -100,6 +105,7 @@ export type SupplierQuotationWrite = Omit<
   SupplierQuotationDto,
   | "id"
   | "supplier_name"
+  | "is_draft_supplier"
   | "currency_code"
   | "subtotal"
   | "tax_amount"
