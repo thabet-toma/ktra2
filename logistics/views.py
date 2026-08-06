@@ -72,6 +72,7 @@ from .landed_cost import (
     clearance_cost_line_dicts,
     build_import_trace,
 )
+from .import_journey import build_import_journey_summary
 from .domain.shipment_builder import create_shipment_from_deals
 from .domain.stages import derive_stage
 from .services import (
@@ -4447,6 +4448,31 @@ class LocalShipmentViewSet(BaseTenantViewSet):
             },
             status=status.HTTP_400_BAD_REQUEST,
         )
+
+
+class ImportJourneyViewSet(viewsets.ViewSet):
+    """مرشد رحلة الاستيراد — وقائع الرحلات النشطة، يقرأها المرشد في كل الشاشات.
+
+    نقطة واحدة خفيفة بدل أن يستجمع المرشد العام أربع قوائم كاملة (عروض، صفقات،
+    شحنات، فواتير) في كل صفحة. قرار «الخطوة التالية» ليس هنا — انظر
+    `logistics/import_journey.py`.
+
+      - GET /api/logistics/import-journey/
+    """
+
+    authentication_classes = [
+        *PurchaseInvoiceViewSet.authentication_classes,
+    ]
+    permission_classes = [
+        *PurchaseInvoiceViewSet.permission_classes,
+    ]
+
+    def list(self, request):
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'لا يوجد مستأجر.'}, status=status.HTTP_400_BAD_REQUEST)
+        require_perm(request, 'import.deal.manage', tenant=tenant)
+        return Response(build_import_journey_summary(tenant))
 
 
 class LandedCostReportViewSet(viewsets.ViewSet):

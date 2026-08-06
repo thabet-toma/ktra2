@@ -2,6 +2,7 @@ import React from 'react';
 import { DealActivity } from '@/types';
 import { History, CheckCircle, XCircle, FileText, DollarSign, Clock } from 'lucide-react';
 import { CollapsibleSection } from '@/components/ui/CollapsibleSection';
+import { formatDateTimeValue } from '@/utils/formatDate';
 
 interface DealActivityLogProps {
   activities: DealActivity[];
@@ -79,10 +80,7 @@ export const DealActivityLog: React.FC<DealActivityLogProps> = ({ activities }) 
                 </div>
                 <div className="text-right">
                   <p className="text-sm aseel-text-soft">
-                    {new Date(activity.timestamp).toLocaleString('ar-SA', {
-                      dateStyle: 'short',
-                      timeStyle: 'short'
-                    })}
+                    {formatDateTimeValue(activity.timestamp)}
                   </p>
                 </div>
               </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Task, User } from '../types';
-import { formatDateLocalized, formatDateValue } from "../utils/formatDate";
+import { formatDateLocalized, formatDateValue, formatTimeValue } from "../utils/formatDate";
 
 interface TaskCardProps {
     task: Task;
@@ -328,7 +328,7 @@ export const TaskCard: React.FC<TaskCardProps> = ({
                         قيد التنفيذ
                         {task.workStartTime && (
                             <span className="text-xs font-normal">
-                                (بدأت في {new Date(task.workStartTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})})
+                                (بدأت في {formatTimeValue(task.workStartTime)})
                             </span>
                         )}
                     </p>

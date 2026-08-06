@@ -384,6 +384,9 @@ class ChequeMovement(models.Model):
     MOVEMENT_TYPES = [
         ('deposit', 'إيداع'),
         ('withdraw', 'صرف'),
+        # T-CHQ2: `transfer_cheque` تكتب 'collect' منذ task11 وهي ليست ضمن
+        # الخيارات، فيعرضها `get_movement_type_display` خاماً بالإنجليزية.
+        ('collect', 'تحصيل'),
         ('bounce', 'رفض'),
         ('return_to_customer', 'إرجاع للعميل'),
         ('settle', 'تسوية'),

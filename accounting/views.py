@@ -227,6 +227,23 @@ class ChequeViewSet(viewsets.ModelViewSet):
                 {"detail": e.messages if hasattr(e, "messages") else str(e)})
         return Response(ChequeSerializer(cheque).data)
 
+    @action(detail=True, methods=["get"], url_path="movements")
+    def movements(self, request, pk=None):
+        """T-CHQ2: مسار الشيك كاملاً — كان يُسجَّل في الجدول ولا يُعرض أبداً."""
+        from .serializers import ChequeMovementSerializer
+        cheque = self.get_object()
+        rows = cheque.movements.select_related("created_by").order_by("id")
+        return Response(ChequeMovementSerializer(rows, many=True).data)
+
+    @action(detail=False, methods=["get"], url_path="wallet")
+    def wallet(self, request):
+        """T-CHQ2: محفظة الشيكات — الأوراق التي ما تزال في اليد وآجالها."""
+        from .services import cheque_wallet
+        tenant = get_tenant(request)
+        if not tenant:
+            raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
+        return Response(cheque_wallet(tenant.TenantID))
+
 class JournalViewSet(viewsets.ModelViewSet):
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]

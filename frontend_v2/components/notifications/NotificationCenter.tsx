@@ -3,6 +3,7 @@ import { AppNotification, AppView } from '../../types';
 import { notificationsService } from '../../services/notificationsService';
 import { Bell, Check, ExternalLink, Inbox, X } from 'lucide-react';
 import { isSafeInternalPath } from '../../utils/entityLinks';
+import { formatTimeValue } from '../../utils/formatDate';
 
 interface NotificationCenterProps {
     currentUserId: string;
@@ -123,7 +124,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({ currentU
                                                     {n.title}
                                                 </h4>
                                                 <span className="text-[10px] text-[var(--color-text-muted)]">
-                                                    {new Date(n.createdAt).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                                                    {formatTimeValue(n.createdAt)}
                                                 </span>
                                             </div>
                                             <p className="text-xs text-[var(--color-text-muted)] line-clamp-2 mb-2">

@@ -372,6 +372,17 @@ export const accountingApi = {
   getCheques: () =>
     fetch(`${ACC}/cheques/`, { headers: headers() }).then(asList),
 
+  /** T-CHQ2: محفظة الشيكات — الأوراق المفتوحة بالحالة وبآجال الاستحقاق. */
+  getChequeWallet: async () => {
+    const res = await fetch(`${ACC}/cheques/wallet/`, { headers: headers() });
+    await handle(res, "getChequeWallet");
+    return res.json();
+  },
+
+  /** T-CHQ2: مسار الشيك — حركاته بالترتيب. */
+  getChequeMovements: (id: number) =>
+    fetch(`${ACC}/cheques/${id}/movements/`, { headers: headers() }).then(asList),
+
   createCheque: async (body: Record<string, unknown>) => {
     const res = await fetch(`${ACC}/cheques/`, {
       method: "POST",

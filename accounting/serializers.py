@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from .models import (
-    Account, JournalHeader, JournalLine, Cheque, CostCenter,
+    Account, JournalHeader, JournalLine, Cheque, ChequeMovement, CostCenter,
     CashBoxLedgerAccount, ExchangeRate, FiscalPeriod, TaxRate,
     Bank, BankBranch, BankAccount, BankReconciliation,
 )
@@ -390,6 +390,23 @@ class ChequeSerializer(serializers.ModelSerializer):
 
     def get_deposit_bank_account_name(self, obj):
         return str(obj.deposit_bank_account) if obj.deposit_bank_account_id else None
+
+
+class ChequeMovementSerializer(serializers.ModelSerializer):
+    """T-CHQ2: سجل حركة الشيك — كان يُكتب ولا يُقرأ من أي واجهة."""
+    movement_type_display = serializers.CharField(
+        source='get_movement_type_display', read_only=True)
+    created_by_name = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = ChequeMovement
+        fields = [
+            'id', 'cheque', 'movement_type', 'movement_type_display',
+            'notes', 'created_at', 'created_by', 'created_by_name',
+        ]
+
+    def get_created_by_name(self, obj):
+        return obj.created_by.get_username() if obj.created_by_id else None
 
 
 class BankBranchSerializer(serializers.ModelSerializer):

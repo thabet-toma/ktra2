@@ -56,6 +56,7 @@ from .services import (
     deliver_delivery_order,
     deliver_invoice_lines,
     get_or_create_sales_settings,
+    guard_invoice_payments_before_unpost,
     invoice_profits,
     last_sale_price,
     next_invoice_number,
@@ -63,8 +64,10 @@ from .services import (
     post_customer_payment,
     post_sales_invoice,
     recalculate_invoice_amounts,
+    release_auto_cash_settlement,
     remaining_delivery_lines,
     suggest_fifo_allocations,
+    unpost_customer_payment,
 )
 
 logger = logging.getLogger(__name__)
@@ -242,6 +245,14 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 {"detail": POSTED_DOC_WARNING, "can_unpost": True},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        # T-ARINT: نفس حارس إلغاء الترحيل — حذف فاتورة عليها سند قبض مرحّل
+        # (شكل قديم فاسد) يُيتّم قيد السند فيبقى دائن الذمم بلا مقابل.
+        try:
+            guard_invoice_payments_before_unpost(instance, action_label="حذف")
+        except ValidationError as e:
+            return Response(
+                {"error": "؛ ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST
+            )
         inv_id, inv_no, customer_id = instance.id, instance.invoice_number, instance.customer_id
         response = super().destroy(request, *args, **kwargs)
         log_activity(
@@ -263,6 +274,11 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             )
         try:
             with transaction.atomic():
+                # T-ARINT: سند التسوية النقدية التلقائي من إنتاج الترحيل نفسه —
+                # يُحرَّر (قيوده + صفوفه) ذرّياً معه، فلا يبقى معلّقاً ولا يتكرّر
+                # عند إعادة الترحيل. سندات المستخدم يحرسها الفحص التالي فتُمنع.
+                released = release_auto_cash_settlement(invoice, user=request.user)
+                guard_invoice_payments_before_unpost(invoice)
                 result = unpost_document(
                     tenant_id=invoice.tenant_id,
                     reference_id=invoice.id,
@@ -274,6 +290,8 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 )
                 invoice.status = SalesInvoice.STATUS_DRAFT
                 invoice.journal = None
+                # آمن الآن: الحارس أعلاه أثبت ألّا سند قبض مرحّلاً بقي على
+                # الفاتورة، فلا يبقى تحصيل حيّ بينما تعود «غير مدفوعة».
                 invoice.amount_paid = Decimal("0")
                 invoice.delivery_status = SalesInvoice.DELIVERY_NOT
                 invoice.save(update_fields=[
@@ -288,6 +306,11 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
                 Cheque.objects.filter(
                     sales_invoice=invoice, status="Under_Collection"
                 ).update(status="Draft")
+        except ValidationError as e:
+            # رسائل الحُرّاس عربية موجّهة للمستخدم — تُعاد نصّاً لا ['...'].
+            return Response(
+                {"error": "؛ ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST
+            )
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         invoice.refresh_from_db()
@@ -298,7 +321,10 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
             request=request,
         )
         ser = SalesInvoiceSerializer(invoice, context={"request": request})
-        return Response({**ser.data, "unpost_result": result})
+        return Response({
+            **ser.data,
+            "unpost_result": {**result, "auto_settlements_released": released},
+        })
 
     @action(detail=True, methods=["post"], url_path="duplicate")
     def duplicate_invoice(self, request, pk=None):
@@ -948,6 +974,17 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         payment = self.get_object()
         payment_id, partner_id = payment.id, payment.partner_id
+        # T-ARINT: حذف سند مرحّل كان يترك قيوده (دائن ذمم العميل) يتيمة وفواتيره
+        # «مدفوعة» بلا تحصيل ⇒ رصيد دائن وهمي. الحذف الآن يتراجع عن الترحيل أولاً.
+        if payment.is_posted:
+            require_perm(request, "sales.payment.unpost")
+            try:
+                unpost_customer_payment(payment, user=request.user)
+            except ValidationError as e:
+                return Response(
+                    {"error": "؛ ".join(e.messages)},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
         response = super().destroy(request, *args, **kwargs)
         log_activity(
             action="delete", entity_type="customer_payment", entity_id=payment_id,
@@ -955,6 +992,31 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
             request=request, partner_ids=[partner_id],
         )
         return response
+
+    @action(detail=True, methods=["post"], url_path="unpost")
+    @requires_perm("sales.payment.unpost")
+    def unpost_payment(self, request, pk=None):
+        """التراجع عن ترحيل سند قبض: حذف قيوده وإرجاع ما سدّده من الفواتير.
+
+        المخرج الذي تُحيل إليه رسالة منع إلغاء ترحيل فاتورة عليها سند مرحّل.
+        """
+        payment = self.get_object()
+        try:
+            result = unpost_customer_payment(payment, user=request.user)
+        except ValidationError as e:
+            return Response(
+                {"error": "؛ ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:  # noqa: BLE001
+            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        payment.refresh_from_db()
+        log_activity(
+            action="unpost", entity_type="customer_payment", entity_id=payment.id,
+            entity_label=getattr(payment, "payment_number", "") or f"#{payment.id}",
+            description="التراجع عن ترحيل سند قبض عميل", request=request,
+            partner_ids=[payment.partner_id],
+        )
+        return Response({**CustomerPaymentSerializer(payment).data, "unpost_result": result})
 
     @action(detail=True, methods=["post"], url_path="post")
     @requires_perm("sales.payment.post")

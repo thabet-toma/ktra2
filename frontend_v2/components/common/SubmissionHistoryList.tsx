@@ -3,7 +3,7 @@ import React from "react";
 import { Submission } from "../../types";
 import { SubmissionItemGallery } from "./SubmissionItemGallery";
 import { StatusBadge } from "../TaskCard";
-import { formatDateValue } from "../../utils/formatDate";
+import { formatDateTimeValue, formatDateValue } from "../../utils/formatDate";
 
 interface SubmissionHistoryListProps {
   submissions: Submission[];
@@ -109,7 +109,7 @@ const handleApprove = async (submissionId: string) => {
                   {sub.reviewedAt && (
                     <p className="text-xs text-[var(--color-text-muted)] mt-1">
                       تم المراجعة في:{" "}
-                      {new Date(sub.reviewedAt).toLocaleString()}
+                      {formatDateTimeValue(sub.reviewedAt)}
                     </p>
                   )}
                 </div>

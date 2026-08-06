@@ -17,6 +17,7 @@ import OfflineGuard from "@/components/offline/OfflineGuard";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
 import { formatMoney } from "@/utils/formatNumber";
 import { getImportJourneyGuidance, getMissingDealMeasureRefs, type ImportJourneyAction } from "./importJourneyGuidance";
+import { ImportPartyDuesPanel, type ImportPartyDue } from "./ImportPartyDuesPanel";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { shipmentsService } from "@/services/shipmentsService";
 import { openInNewTab } from "@/utils/openInNewTab";
@@ -2054,8 +2055,66 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     </div>
   );
 
+  /* ذمم أطراف الاستيراد الثلاثة بلغة واحدة (مستحق ← مدفوع ← متبقٍ). المصادر
+     هي نفسها التي تغذّي الجداول أدناه — بلا حساب موازٍ ينحرف عنها. */
+  const localDueTotal = localShipments.reduce((sum, row) => sum + Number(row.amount || 0), 0);
+  const localPaidTotal = localShipments.reduce((sum, row) => sum + Number(row.amount_paid || 0), 0);
+  const importPartyDues: ImportPartyDue[] = [
+    {
+      key: "freight",
+      role: "وكيل الشحن الدولي",
+      party: s.agent_name || null,
+      symbol: "$",
+      due: freightTotalUsd,
+      paid: freightPaidUsd,
+      accrued: freightCostEstablished,
+      note: freightTotalUsd <= 0
+        ? "لا تكلفة شحن على هذه الشحنة."
+        : freightAccrued
+          ? `سعر الاستحقاق ${fmt(Number(s.freight_exchange_rate) || 0)} ₪/$ هو الذي يحكم التكلفة.`
+          : "أثبت الاستحقاق بسعر الصرف — الدفع لاحقاً ولا يشترطه الاستيراد.",
+      accrueLabel: "أثبت استحقاق الشحن",
+      onAccrue: freightTotalUsd > 0 ? () => void handlePostFreightAccrual() : undefined,
+      onPay: freightTotalUsd > 0
+        ? () => {
+            setShowAgentPayForm(true);
+            const remaining = Math.max(0, freightTotalUsd - freightPaidUsd);
+            setAgentPayAmount(remaining > 0 ? String(Math.round(remaining * 100) / 100) : "");
+          }
+        : undefined,
+    },
+    ...(clearance ? [{
+      key: "broker",
+      role: "المخلّص الجمركي",
+      party: clearanceForm?.broker_name || null,
+      symbol: "₪",
+      due: clearanceCostTotal,
+      paid: paidClearance,
+      accrued: Boolean(clearanceForm?.journal),
+      note: clearanceCostTotal <= 0 ? "أدخل تكلفة التخليص أولاً." : undefined,
+      accrueLabel: "أثبت استحقاق التخليص",
+      onAccrue: clearanceCostTotal > 0 ? () => void handlePostClearance() : undefined,
+      onPay: clearanceForm?.customs_broker ? openClearancePayment : undefined,
+    } as ImportPartyDue] : []),
+    ...(localShipments.length > 0 ? [{
+      key: "carrier",
+      role: "الناقل المحلي",
+      party: localShipments.map((row) => row.carrier_name).filter(Boolean).join("، ") || null,
+      symbol: "₪",
+      due: localDueTotal,
+      paid: localPaidTotal,
+      accrued: localShipments.every((row) => row.is_posted),
+      note: "التكلفة تدخل حصص الفواتير، والدفع للناقل يبقى مستقلاً.",
+      payLabel: "إدارة النقل والدفعات",
+      onPay: () => setActiveTab("local"),
+    } as ImportPartyDue] : []),
+  ];
+
   const paymentsContent = (
     <div style={{ padding: "4px 8px" }}>
+      {/* ملخّص واحد لأطراف الاستيراد الثلاثة — كان المستخدم يجمعه من تبويبين */}
+      <ImportPartyDuesPanel busy={saving} parties={importPartyDues} />
+
       {/* ── ٠) استحقاق شحن الوكيل — منفصل عن الدفع، وهو ما يثبّت التكلفة ── */}
       <div style={{ marginBottom: 10, border: "1px solid var(--aseel-border, #ddd)", borderRadius: 4, padding: 8 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>

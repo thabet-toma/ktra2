@@ -1,3 +1,5 @@
+import { formatDateTimeValue } from '../../utils/formatDate';
+
 type Props = {
   updatedAt: string | null | undefined;
 };
@@ -23,7 +25,7 @@ export default function StalenessBadge({ updatedAt }: Props) {
   return (
     <span
       className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${freshnessColor(updatedAt)}`}
-      title={`آخر تحديث: ${new Date(updatedAt).toLocaleString('ar-SA')}`}
+      title={`آخر تحديث: ${formatDateTimeValue(updatedAt)}`}
     >
       🕒 {relativeTime(updatedAt)}
     </span>

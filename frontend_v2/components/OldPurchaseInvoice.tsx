@@ -5,6 +5,7 @@ import { invoicesService, itemsService, suppliersService } from '../services/fir
 import { Plus, Archive, Package } from 'lucide-react';
 import { collection, query, where, orderBy, getDocs, limit, onSnapshot, db } from "../services/sqlApiClient";
 import { LoadingSpinner } from './LoadingSpinner';
+import { formatDateValue } from '../utils/formatDate';
 
 // New Components
 import { OldInvoiceList } from './procurement/old-invoices/OldInvoiceList';
@@ -81,7 +82,7 @@ export const OldPurchaseInvoice: React.FC = () => {
                 supplierInvoiceNumber: invoice.invoiceNumber || "",
 
                 // معلومات إضافية
-                notes: (invoice.notes || "") + "\n---\nتم التحويل من الأرشيف في: " + new Date().toLocaleDateString('ar-EG'),
+                notes: (invoice.notes || "") + "\n---\nتم التحويل من الأرشيف في: " + formatDateValue(new Date()),
 
                 // إضافة dealInfo إذا لم يكن موجوداً
                 dealInfo: invoice.dealInfo || {

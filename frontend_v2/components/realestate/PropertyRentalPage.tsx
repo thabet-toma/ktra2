@@ -15,17 +15,16 @@ import { Building2, Zap, Home, Warehouse, Plus, RefreshCw, ClipboardList, Users 
 import { AseelDenseTable, type DenseColumn } from "../aseel/AseelDenseTable";
 import { useAseelIndexKeymap } from "../aseel/useAseelIndexKeymap";
 import { formatDateLocalized } from "../../utils/formatDate";
+import { formatNumber } from "../../utils/formatNumber";
 
+// G1: العرض عبر المُنسّق الموحّد — `toLocaleString("ar-EG")` كان يُخرج أرقاماً
+// هندية (٠١٢…) على الأجهزة ذات بيانات ICU الكاملة فتظهر «بأحرف غير مفهومة».
 function fmtMoney(s: string | number) {
-  const n = typeof s === "string" ? parseFloat(s) : s;
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString("ar-EG", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  return formatNumber(s, { maxDecimals: 2, group: true, fallback: "—" });
 }
 
 function fmtKwh(s: string | number) {
-  const n = typeof s === "string" ? parseFloat(s) : s;
-  if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString("ar-EG", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+  return formatNumber(s, { maxDecimals: 3, group: true, fallback: "—" });
 }
 
 type ReadingWithDelta = MeterReadingRow & { delta: number | null };

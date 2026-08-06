@@ -2104,7 +2104,15 @@ const App: React.FC = () => {
 
   // T-EXTACCT: المحاسب القانوني يعمل في **قشرة مستقلة** لا في واجهة الشركات
   // التجارية. سوبر أدمن فتح واجهة تجريبية يخرج منها بمفتاح جلسة واحد.
-  if (currentUser.accountType === "legal_accountant" && !platformShellOverride) {
+  // سوبر أدمن له ملف محاسب قانوني: لا يُفتح له مكتب المحاسبة تلقائياً عند
+  // الدخول (بيته لوحة المنصة) — المكتب يُفتح فقط بدخول صريح على `/office`
+  // (زر «افتح واجهة المحاسب القانوني»)، لا بمجرّد غياب مفتاح القشرة.
+  const isOfficePath = typeof window !== "undefined" && window.location.pathname.startsWith("/office");
+  if (
+    currentUser.accountType === "legal_accountant"
+    && !platformShellOverride
+    && (!currentUser.isSuperAdmin || isOfficePath)
+  ) {
     return (
       <React.Suspense fallback={<div className="flex min-h-screen items-center justify-center"><LoadingSpinner /></div>}>
         <AccountantOfficeApp

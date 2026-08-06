@@ -784,6 +784,16 @@ class CustomerPayment(models.Model):
         db_column="SalesOrderID",
         related_name="deposits",
     )
+    # T-ARINT: سند التسوية النقدية التلقائي (`_auto_settle_cash_sale`) يملكه قيدُ
+    # الفاتورة نفسه — العلامة تُميّزه عن سندات المستخدم، فيُحرَّر تلقائياً مع إلغاء
+    # ترحيلها بدل أن يبقى معلّقاً (دائن ذمم بلا مقابل) أو يتكرّر عند إعادة الترحيل.
+    auto_settled_invoice = models.ForeignKey(
+        "SalesInvoice",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        db_column="AutoSettledInvoiceID",
+        related_name="auto_settlements",
+    )
     notes = models.CharField(max_length=500, blank=True, default="", db_column="Notes")
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
 

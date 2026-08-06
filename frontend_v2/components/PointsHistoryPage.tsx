@@ -5,6 +5,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { User, DailyPoints } from '../types';
 import { pointsHistoryService } from '../services/firestoreService';
 import { AseelDenseTable, type DenseColumn } from './aseel/AseelDenseTable';
+import { formatDateValue, formatWeekdayName } from '../utils/formatDate';
 
 interface PointsHistoryPageProps {
     user: User;
@@ -32,7 +33,7 @@ export const PointsHistoryPage: React.FC<PointsHistoryPageProps> = ({ user }) =>
         } catch (e) { console.error(e); } finally { setLoading(false); }
     };
 
-    const formatDate = (dateStr: string) => new Date(dateStr).toLocaleDateString('ar-SA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', calendar: 'gregory' });
+    const formatDate = (dateStr: string) => `${formatWeekdayName(dateStr)} ${formatDateValue(dateStr)}`.trim();
 
     const totalStats = useMemo(() => ({
         totalPoints: pointsHistory.reduce((s, d) => s + d.totalPoints, 0),

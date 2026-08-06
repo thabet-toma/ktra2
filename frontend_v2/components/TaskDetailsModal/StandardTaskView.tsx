@@ -7,6 +7,7 @@ import { TaskImagesGallery } from "../common/TaskImagesGallery";
 import { SubmissionHistoryList } from "../common/SubmissionHistoryList";
 import { formatMillisecondsToWords } from "../utils/formatters";
 import { StatusBadge } from "../TaskCard";
+import { formatDateTimeValue } from "../../utils/formatDate";
 import { TaskDetailsModalProps } from "./TaskDetailsModal.types";
 import SubmissionForm from "../modals/SubmissionForm";
 import { getUserTaskStatus } from "../modals/TaskDetailsModal.helpers";
@@ -222,7 +223,7 @@ export const StandardTaskView: React.FC<StandardViewProps> = ({
                     <li key={log.id} className="relative pr-4 border-r-2 border-[var(--color-border)]">
                        <div className="absolute -right-[5px] top-1 w-2 h-2 bg-blue-500 rounded-full"></div>
                        <p className="font-bold">{usersMap[log.userId] || "System"}</p>
-                       <span className="text-xs text-[var(--color-text-muted)] block mb-1">{new Date(log.timestamp).toLocaleString()}</span>
+                       <span className="text-xs text-[var(--color-text-muted)] block mb-1">{formatDateTimeValue(log.timestamp)}</span>
                        <p className="text-[var(--color-text-muted)]">{log.action} {log.newValue && `: ${log.newValue}`}</p>
                     </li>
                  ))}

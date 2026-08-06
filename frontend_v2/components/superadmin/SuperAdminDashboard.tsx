@@ -16,6 +16,7 @@ import { enterOfficeShell } from "../../utils/officeShell";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import type { AppView } from "../../types";
+import { formatDateValue } from "../../utils/formatDate";
 
 
 interface Props {
@@ -356,7 +357,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
                   <td className="px-3 py-2">{statusLabel(company.status)}</td>
                   <td className="px-3 py-2 text-center">{company.member_count}</td>
                   <td className="px-3 py-2 text-center">{company.import_enabled ? "مفعّل" : "غير مفعّل"}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">{new Date(company.created_at).toLocaleDateString("ar-EG")}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">{formatDateValue(company.created_at)}</td>
                   <td className="px-3 py-2 text-center">
                     <button
                       type="button"

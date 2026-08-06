@@ -26,6 +26,9 @@ import { GlobalContextMenu } from './GlobalContextMenu';
 import { NotificationCenter } from '../notifications/NotificationCenter';
 import { WhatsNewButton } from './WhatsNewButton';
 import { CustomerNotesTab } from '../partners/CustomerNotesTab';
+// استيراد مباشر لا عبر barrel الـimport-flow: البرميل يجرّ ImportDocumentScreen
+// كاملةً إلى حزمة القشرة ويُبطل تقسيم الحِزَم.
+import { ImportJourneyGuide } from '../import-flow/ImportJourneyGuide';
 import { platformNoteTarget, type PlatformNoteTarget } from '../../utils/entityLinks';
 import {
   User as UserIcon,
@@ -304,6 +307,9 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </main>
         </div>
       </div>
+
+      {/* مرشد رحلة الاستيراد — يرافق المستخدم في كل الشاشات حتى الفاتورة الدولية */}
+      <ImportJourneyGuide />
 
       {/* قائمة زر الفأرة اليمنى العامّة — تعمل في كامل الموقع (تُستثنى الحقول والقوائم الموضعية) */}
       <GlobalContextMenu user={user} onNavigate={onNavigate} />
