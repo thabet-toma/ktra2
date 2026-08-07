@@ -1626,8 +1626,61 @@ def partner_posted_journal_effect(
     return (credit - debit if supplier else debit - credit).quantize(Decimal("0.01"))
 
 
+def attach_partner_posted_balance(rows, partner_id_field: str, *, supplier: bool, attr: str):
+    """يضع رصيد الطرف المرحّل على صفوف **صفحة محمَّلة** باستعلام تجميعي واحد.
+
+    البديل `annotate_partner_posted_balance` أدنى يولّد DEPENDENT SUBQUERY فيه
+    GROUP BY، فتبني MySQL جدولاً مؤقتاً **لكل صف**: قياس على بيانات حقيقية
+    (927 فاتورة، 11 ألف سطر قيد) أعطى 15–20 ثانية للقائمة و~1 ثانية لصفحة
+    الخمسين — بينما هذا الشكل 27 ملّي ثانية للخمسين و129 للكل. الفهرسة لا
+    تُصلحه: الجدول المؤقت لكل صف يبقى مهما فُهرِس (تُحقّق بـEXPLAIN).
+
+    يُستعمل بعد الترقيم فقط: عدد الأطراف محدودٌ بحجم الصفحة، فالاستعلام واحد
+    مهما كثرت الصفوف. الصفحة الفارغة لا تستعلم إطلاقاً.
+    """
+    from django.db.models import DecimalField, F, Sum
+
+    rows = list(rows)
+    tenant_ids = {getattr(row, "tenant_id", None) for row in rows} - {None}
+    partner_ids = {getattr(row, partner_id_field, None) for row in rows} - {None}
+    if not partner_ids or not tenant_ids:
+        for row in rows:
+            setattr(row, attr, Decimal("0.00"))
+        return rows
+
+    money = DecimalField(max_digits=18, decimal_places=2)
+    balance_expression = (
+        F("base_credit") - F("base_debit")
+        if supplier
+        else F("base_debit") - F("base_credit")
+    )
+    grouped = (
+        JournalLine.objects
+        .filter(
+            tenant_id__in=tenant_ids,
+            partner_id__in=partner_ids,
+            journal__is_posted=True,
+        )
+        .values("tenant_id", "partner_id")
+        .annotate(total=Sum(balance_expression, output_field=money))
+    )
+    totals = {
+        (row["tenant_id"], row["partner_id"]): Decimal(str(row["total"] or 0))
+        for row in grouped
+    }
+    for row in rows:
+        key = (getattr(row, "tenant_id", None), getattr(row, partner_id_field, None))
+        setattr(row, attr, totals.get(key, Decimal("0.00")))
+    return rows
+
+
 def annotate_partner_posted_balance(queryset, partner_id_field: str, *, supplier: bool, alias: str):
-    """يضيف رصيد الشريك المرحّل إلى queryset واحد بلا استعلام لكل صف."""
+    """يضيف رصيد الشريك المرحّل إلى queryset واحد بلا استعلام لكل صف.
+
+    ⚠ للصف الواحد (المستند المفتوح) أو للفلترة/الترتيب فقط — لا للقوائم:
+    الاستعلام الفرعي المرتبط يُعاد تنفيذه لكل صف. للقوائم استعمل
+    `attach_partner_posted_balance` أعلاه.
+    """
     from django.db.models import DecimalField, F, OuterRef, Subquery, Sum, Value
     from django.db.models.functions import Coalesce
 

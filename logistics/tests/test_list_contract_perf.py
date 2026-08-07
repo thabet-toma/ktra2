@@ -127,9 +127,11 @@ class LogisticsListContractPerformanceTest(TestCase):
             "/api/logistics/deals/?page=1&page_size=2"
         )
         self.assertEqual(response.data["count"], 8)
-        # 6: أضيف prefetch لـ purchase_invoices (رابط «تحولت إلى فاتورة») — استعلام
+        # 7: أضيف prefetch لـ purchase_invoices (رابط «تحولت إلى فاتورة») ثم
+        # استعلام رصيد المورد المجمَّع لأطراف الصفحة (`PagePartnerBalanceMixin`)
+        # الذي حلّ محلّ استعلام فرعي مرتبط كان يُنفَّذ لكل صف. كلاهما استعلام
         # ثابت واحد لكل الصفحة لا N+1، تحرسه assertion ثبات العدد أدناه.
-        self.assertLessEqual(query_count, 6)
+        self.assertLessEqual(query_count, 7)
         _, large_query_count = self._get_with_query_count(
             "/api/logistics/deals/?page=1&page_size=8"
         )

@@ -9,10 +9,10 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.response import Response
 
-from accounting.services import unpost_document
+from accounting.services import attach_partner_posted_balance, unpost_document
 from core.access import require_perm, requires_perm, user_has_perm
 from core.activity import log_activity, log_view
-from core.api_defaults import ApiAuthAndUser, POSTED_DOC_WARNING
+from core.api_defaults import ApiAuthAndUser, PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.plans import enforce_limits
 from core.tenant_utils import get_branch, get_tenant
 from .models import (
@@ -73,9 +73,10 @@ from .services import (
 logger = logging.getLogger(__name__)
 
 
-class SalesInvoiceViewSet(viewsets.ModelViewSet):
+class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
+    partner_balance_spec = ("customer_id", False, "customer_balance")
 
     queryset = SalesInvoice.objects.all().select_related(
         "customer", "currency", "journal", "tenant"
@@ -92,10 +93,13 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         if not tenant:
             return qs.none()
         qs = qs.filter(tenant_id=tenant.TenantID)
-        from accounting.services import annotate_partner_posted_balance
-        qs = annotate_partner_posted_balance(
-            qs, "customer_id", supplier=False, alias="customer_balance",
-        )
+        # القائمة تأخذ الرصيد من `PagePartnerBalanceMixin` باستعلام واحد بعد
+        # الترقيم؛ الاستعلام الفرعي هنا للصف الواحد (المستند المفتوح) فقط.
+        if self.action not in {"list", "lookup"}:
+            from accounting.services import annotate_partner_posted_balance
+            qs = annotate_partner_posted_balance(
+                qs, "customer_id", supplier=False, alias="customer_balance",
+            )
         # task11 M4: الفرع النشط يرى فواتيره فقط (الرئيسي يشمل القديمة بلا فرع)
         branch = get_branch(self.request, tenant)
         if branch is not None:
@@ -151,7 +155,9 @@ class SalesInvoiceViewSet(viewsets.ModelViewSet):
         except (TypeError, ValueError):
             limit = 200
         limit = min(max(limit, 1), 500)
-        rows = self.get_queryset()[:limit]
+        rows = list(self.get_queryset()[:limit])
+        spec = self.partner_balance_spec
+        attach_partner_posted_balance(rows, spec[0], supplier=spec[1], attr=spec[2])
         return Response(self.get_serializer(rows, many=True).data)
 
     def create(self, request, *args, **kwargs):

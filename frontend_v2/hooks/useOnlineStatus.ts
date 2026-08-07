@@ -1,10 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { API_BASE } from '../services/restApi';
 
 const HEALTH_TIMEOUT_MS = 5_000;
 const HEALTH_RETRY_DELAY_MS = 500;
 
-type HealthResult = { ok: boolean; latencyMs: number };
+type HealthResult = { ok: boolean };
 
 // App, PendingMutationsPanel and some editors consume this hook concurrently.
 // Share one probe so they cannot disagree about the same instant or multiply
@@ -32,16 +32,12 @@ function checkApiHealth(): Promise<HealthResult> {
   if (healthCheckInFlight) return healthCheckInFlight;
 
   healthCheckInFlight = (async () => {
-    const startedAt = performance.now();
-    if (await probeHealth('HEAD')) {
-      return { ok: true, latencyMs: Math.round(performance.now() - startedAt) };
-    }
+    if (await probeHealth('HEAD')) return { ok: true };
 
     // Shared-hosting proxies can drop or delay an isolated HEAD while normal
     // API traffic is healthy. Confirm with a small GET before showing offline UX.
     await new Promise((resolve) => globalThis.setTimeout(resolve, HEALTH_RETRY_DELAY_MS));
-    const ok = await probeHealth('GET');
-    return { ok, latencyMs: Math.round(performance.now() - startedAt) };
+    return { ok: await probeHealth('GET') };
   })().finally(() => {
     healthCheckInFlight = null;
   });
@@ -55,13 +51,17 @@ export interface OnlineStatus {
    *  فالمتصفح متصل بالشبكة لكن نبض الخادم يفشل ⇒ اتصال/كاش عالق (يستدعي «إصلاح الاتصال»). */
   browserOnline: boolean;
   lastOnline: Date;
-  latencyMs: number;
 }
 
+/**
+ * ⚠ هذا الـhook يُستهلك في `App` (شجرة التطبيق كلها) وفي محرّر فاتورة المبيعات.
+ * كل `setState` فيه يُعيد رسم الشجرة الجالسة تحته — فلا يُخزَّن فيه إلا ما يتغيّر
+ * تغيّراً ذا معنى. (كان يخزّن `latencyMs` وهو رقم جديد بعد كل نبضة ولا يقرؤه أحد
+ * في الواجهة، فيُجبر التطبيق على إعادة رسم كاملة كل 30 ثانية بلا سبب.)
+ */
 export function useOnlineStatus(): OnlineStatus {
   const [online, setOnline] = useState(navigator.onLine);
   const [browserOnline, setBrowserOnline] = useState(navigator.onLine);
-  const [latencyMs, setLatencyMs] = useState(0);
   const lastOnlineRef = useRef(new Date());
   const intervalRef = useRef<ReturnType<typeof setInterval>>();
 
@@ -75,7 +75,6 @@ export function useOnlineStatus(): OnlineStatus {
       return;
     }
     if (result.ok) {
-      setLatencyMs(result.latencyMs);
       setOnline(true);
       lastOnlineRef.current = new Date();
     } else {
@@ -100,5 +99,10 @@ export function useOnlineStatus(): OnlineStatus {
     };
   }, [heartbeat]);
 
-  return { online, browserOnline, lastOnline: lastOnlineRef.current, latencyMs };
+  // مرجع ثابت ما دامت الحالة ثابتة — كي لا يُبطِل الكائنُ الجديدُ تبعيات
+  // `useEffect`/`useMemo` عند المستهلكين بعد كل رسم.
+  return useMemo(
+    () => ({ online, browserOnline, lastOnline: lastOnlineRef.current }),
+    [online, browserOnline],
+  );
 }

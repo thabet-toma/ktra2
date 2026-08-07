@@ -171,7 +171,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
     return (
       <div className="p-8 text-center" role="alert">
         <p className="text-red-600">{error}</p>
-        <button type="button" onClick={load} className="aseel-btn aseel-btn--primary mt-3">إعادة المحاولة</button>
+        <button type="button" onClick={load} className="aseel-btn aseel-btn-primary mt-3">إعادة المحاولة</button>
       </div>
     );
   }
@@ -197,7 +197,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" onClick={() => onNavigate("development-notes")} className="aseel-btn aseel-btn--primary">
+          <button type="button" onClick={() => onNavigate("development-notes")} className="aseel-btn aseel-btn-primary">
             <ClipboardList className="h-4 w-4" aria-hidden="true" /> ملاحظات التطوير
           </button>
           <button type="button" onClick={load} className="aseel-iconbtn" title="تحديث" aria-label="تحديث لوحة المنصة">
@@ -233,7 +233,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
               onChange={(event) => setIdentifier(event.target.value)}
               onKeyDown={(event) => { if (event.key === "Enter") void grant(); }}
             />
-            <button type="button" onClick={() => void grant()} disabled={granting || !identifier.trim()} className="aseel-btn aseel-btn--primary">
+            <button type="button" onClick={() => void grant()} disabled={granting || !identifier.trim()} className="aseel-btn aseel-btn-primary">
               <UserPlus className="h-4 w-4" aria-hidden="true" /> ترقية
             </button>
           </div>
@@ -272,7 +272,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
             type="button"
             onClick={() => void openAccountantView()}
             disabled={openingWorkspace}
-            className="aseel-btn aseel-btn--primary"
+            className="aseel-btn aseel-btn-primary"
           >
             {openingWorkspace ? <RefreshCw className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
             افتح واجهة المحاسب القانوني
@@ -308,7 +308,7 @@ export const SuperAdminDashboard: React.FC<Props> = ({ onNavigate }) => {
                   value={rejectReason[profile.id] || ""}
                   onChange={(event) => setRejectReason((current) => ({ ...current, [profile.id]: event.target.value }))}
                 />
-                <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "approve")} className="aseel-btn aseel-btn--primary">توثيق</button>
+                <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "approve")} className="aseel-btn aseel-btn-primary">توثيق</button>
                 <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "reject")} className="aseel-btn">رفض</button>
                 <button type="button" disabled={accountantBusy === profile.id} onClick={() => void decideAccountant(profile, "bar")} className="aseel-btn text-red-600">منع</button>
               </div>

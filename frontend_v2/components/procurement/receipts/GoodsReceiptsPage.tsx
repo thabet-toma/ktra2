@@ -25,7 +25,7 @@ import {
   type ReceivableLineRow,
 } from "../../../services/goodsReceiptsApi";
 import { purchaseInvoiceApi } from "../../../services/purchaseInvoiceApi";
-import { inventoryApi } from "../../../services/inventoryApi";
+import { inventoryApi, listPickerProducts } from "../../../services/inventoryApi";
 import { apiGetList } from "../../../services/restApi";
 import { resolveTenantId } from "../../../utils/tenantContext";
 import { openInNewTab } from "../../../utils/openInNewTab";
@@ -170,10 +170,7 @@ export const GoodsReceiptsPage: React.FC = () => {
           tenantId,
           query: { limit: 500 },
         }),
-        apiGetList<ProductOpt>("inventory/products/", {
-          tenantId,
-          query: { page_size: 500 },
-        }),
+        listPickerProducts<ProductOpt>(tenantId),
       ]);
       setInvoiceOptions(
         (invs || [])

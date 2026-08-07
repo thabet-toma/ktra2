@@ -58,7 +58,7 @@ from .accruals import (
     post_local_shipment_accrual,
 )
 from core.activity import log_activity, log_view
-from core.api_defaults import POSTED_DOC_WARNING
+from core.api_defaults import PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.access import require_perm, requires_perm
 from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
@@ -415,9 +415,10 @@ class PurchaseOrderViewSet(BaseTenantViewSet):
         )
 
 
-class LogisticsDealViewSet(BaseTenantViewSet):
+class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
     queryset = LogisticsDeal.objects.all().order_by('-order_date')
     serializer_class = LogisticsDealSerializer
+    partner_balance_spec = ("partner_id", True, "supplier_balance")
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -458,9 +459,12 @@ class LogisticsDealViewSet(BaseTenantViewSet):
             qs = qs.filter(order_date__lte=date_to)
 
         qs = qs.select_related('partner', 'currency', 'tenant', 'created_by')
-        qs = annotate_partner_posted_balance(
-            qs, "partner_id", supplier=True, alias="supplier_balance",
-        )
+        # القائمة تأخذ الرصيد من `PagePartnerBalanceMixin` باستعلام واحد بعد
+        # الترقيم؛ الاستعلام الفرعي هنا للصف الواحد (المستند المفتوح) فقط.
+        if self.action != 'list':
+            qs = annotate_partner_posted_balance(
+                qs, "partner_id", supplier=True, alias="supplier_balance",
+            )
         if self.action == 'list':
             return qs.prefetch_related(
                 Prefetch(
@@ -2664,8 +2668,9 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
         })
 
 
-class PurchaseInvoiceViewSet(BaseTenantViewSet):
+class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
     serializer_class = PurchaseInvoiceSerializer
+    partner_balance_spec = ("partner_id", True, "supplier_balance")
 
     def get_serializer_class(self):
         if self.action == 'list':
@@ -2676,9 +2681,11 @@ class PurchaseInvoiceViewSet(BaseTenantViewSet):
         qs = PurchaseInvoice.objects.all().select_related(
             'partner', 'deal', 'shipment', 'clearance', 'currency', 'journal',
         ).order_by('-created_at')
-        qs = annotate_partner_posted_balance(
-            qs, "partner_id", supplier=True, alias="supplier_balance",
-        )
+        # كما في الصفقات: الرصيد للقائمة يأتي من الـmixin بعد الترقيم.
+        if self.action != 'list':
+            qs = annotate_partner_posted_balance(
+                qs, "partner_id", supplier=True, alias="supplier_balance",
+            )
         if self.action == 'list':
             # عدّ البنود عبر Subquery لا Count('items'): الأخير يفرض GROUP BY فيمنع
             # Django من تقليم التعليقات في استعلام COUNT الخاص بالترقيم، فيُنفَّذ كل

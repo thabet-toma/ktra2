@@ -134,11 +134,10 @@ export function AseelDenseTable<T extends Record<string, any>>({
     onSort(col.key, newDir);
   };
 
-  const getAlign = (col: DenseColumn<T>) => {
-    if (col.align) return col.align;
-    if (col.numeric) return 'right';
-    return 'left';
-  };
+  // التطبيق كله RTL (`<html dir="rtl">`) فبداية السطر هي اليمين. الافتراضي
+  // السابق `left` كان نمطاً سطرياً يغلب كل قاعدة CSS، فيدفع النص العربي لحافة
+  // الخلية الخطأ في كل صفحة قائمة. الأرقام تبقى يميناً (عرف الأصيل + `.aseel-num`).
+  const getAlign = (col: DenseColumn<T>) => col.align ?? 'right';
 
   const handleExport = () => {
     const headers = columns.map((c) => c.header);

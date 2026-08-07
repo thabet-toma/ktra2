@@ -76,6 +76,9 @@ class PlatformAdminApiTest(APITestCase):
         self.assertEqual(created.status_code, 201, created.content)
         self.assertEqual(created.data["created_by"], self.superuser.id)
         self.assertNotIn("assignee", created.data)
+        # `position` غادر العقد كلياً: الترتيب صار بـ`created_at` وحده، وإبقاء
+        # حقلٍ يوحي بترتيب يدوي لا وجود له هو ما ولّد عشوائية مكان الملاحظة.
+        self.assertNotIn("position", created.data)
         note_id = created.data["id"]
 
         updated = self.client.patch(
@@ -206,26 +209,59 @@ class PlatformAdminApiTest(APITestCase):
         self.assertIn("status", response.data)
         self.assertIn("priority", response.data)
 
-    def _create_note(self, title, note_status, position):
+    def _create_note(self, title, note_status):
         response = self.client.post(
             "/api/platform/development-notes/",
-            {"title": title, "status": note_status, "position": position},
+            {"title": title, "status": note_status},
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.content)
         return response.data["id"]
 
     def test_completed_notes_sink_to_the_end_of_the_sheet(self):
-        """المكتملة تُزاح لآخر القائمة مهما كان ترتيبها — بلا لمس `position`."""
+        """المكتملة تُزاح لآخر القائمة مهما كان تاريخها."""
         self.client.force_authenticate(self.superuser)
-        done = self._create_note("منجزة قديمة", "done", 0)
-        todo = self._create_note("قيد الانتظار", "todo", 1)
-        in_progress = self._create_note("قيد التنفيذ", "in_progress", 2)
+        done = self._create_note("منجزة قديمة", "done")
+        todo = self._create_note("قيد الانتظار", "todo")
+        in_progress = self._create_note("قيد التنفيذ", "in_progress")
 
         listed = self.client.get("/api/platform/development-notes/")
 
         self.assertEqual(listed.status_code, 200, listed.content)
         self.assertEqual([row["id"] for row in listed.data], [todo, in_progress, done])
+
+    def test_notes_are_listed_oldest_first(self):
+        """أول ملاحظة هي الأقدم — لا ترتيب يدوي يقرّر مكانها.
+
+        الواجهة كانت ترسل `position=0` لأول ملاحظة تُضاف في كل جلسة و
+        `notes.length + 1` لما بعدها، فتقفز الأولى للأعلى وتنزل أخواتها —
+        وهذا مصدر «مرة بيسجلها في الأعلى ومرة بحطها في النص». الحقل حُذف.
+        """
+        self.client.force_authenticate(self.superuser)
+        oldest = self._create_note("الأقدم", "todo")
+        middle = self._create_note("الأوسط", "todo")
+        newest = self._create_note("الأحدث", "todo")
+
+        listed = self.client.get("/api/platform/development-notes/")
+
+        self.assertEqual(listed.status_code, 200, listed.content)
+        self.assertEqual([row["id"] for row in listed.data], [oldest, middle, newest])
+
+    def test_editing_an_old_note_keeps_it_in_place(self):
+        """تعديل ملاحظة قديمة لا يقفز بها للأعلى — `-updated_at` غادر الترتيب."""
+        self.client.force_authenticate(self.superuser)
+        oldest = self._create_note("الأقدم", "todo")
+        middle = self._create_note("الأوسط", "todo")
+        newest = self._create_note("الأحدث", "todo")
+
+        edited = self.client.patch(
+            f"/api/platform/development-notes/{oldest}/",
+            {"description": "تعديل لاحق"}, format="json",
+        )
+        listed = self.client.get("/api/platform/development-notes/")
+
+        self.assertEqual(edited.status_code, 200, edited.content)
+        self.assertEqual([row["id"] for row in listed.data], [oldest, middle, newest])
 
     def test_note_images_round_trip_and_drop_extra_keys(self):
         self.client.force_authenticate(self.superuser)

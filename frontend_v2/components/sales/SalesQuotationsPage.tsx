@@ -26,6 +26,7 @@ import { ConvertTargetDialog } from "./ConvertTargetDialog";
 import { clientLogger } from "../../services/logger";
 import { accountingApi } from "../../services/accountingApi";
 import { apiGetList } from "../../services/restApi";
+import { listPickerProducts } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { formatQuantity } from "../../utils/formatNumber";
 import type { SqlProduct } from "../../types/inventory";
@@ -263,9 +264,8 @@ export const SalesQuotationsPage: React.FC = () => {
       const [parts, prods] = await Promise.all([
         // T-PARTYPURE: عرض سعر بيع = زبائن فقط.
         accountingApi.getPartners("Customer") as Promise<Partner[]>,
-        apiGetList<SqlProduct & { sale_price?: string; selling_price?: string }>(
-          "inventory/products/",
-          { tenantId }
+        listPickerProducts<SqlProduct & { sale_price?: string; selling_price?: string }>(
+          tenantId,
         ),
       ]);
       setPartners(parts || []);

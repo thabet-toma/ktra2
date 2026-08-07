@@ -27,7 +27,7 @@ import {
   type DeliveryNoteSaveLine,
 } from "../../services/salesApi";
 import { apiGetList } from "../../services/restApi";
-import { inventoryApi } from "../../services/inventoryApi";
+import { inventoryApi, listPickerProducts } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { formatQuantity } from "../../utils/formatNumber";
@@ -172,10 +172,7 @@ export const DeliveryNotesPage: React.FC = () => {
           tenantId,
           query: { limit: 500 },
         }),
-        apiGetList<ProductOpt>("inventory/products/", {
-          tenantId,
-          query: { page_size: 500 },
-        }),
+        listPickerProducts<ProductOpt>(tenantId),
         inventoryApi.getWarehouses({ active_only: "true" }) as Promise<WarehouseOpt[]>,
       ]);
       setInvoiceOptions(

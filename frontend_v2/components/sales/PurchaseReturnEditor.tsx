@@ -11,6 +11,7 @@
  */
 import React, { useEffect, useState, useCallback } from "react";
 import { apiGetList, apiPostObject } from "../../services/restApi";
+import { listPickerProducts } from "../../services/inventoryApi";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -104,7 +105,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
     try {
       const [invs, prods] = await Promise.allSettled([
         apiGetList<PurchaseInvoice>("logistics/purchase-invoices/", { tenantId }),
-        apiGetList<Product>("inventory/products/", { tenantId }),
+        listPickerProducts<Product>(tenantId),
       ]);
       if (invs.status === "fulfilled") {
         // مرحّلة فقط، وليست هي نفسها مرجعاً — صالحة كـ«فاتورة أصلية».
@@ -511,7 +512,7 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
             </div>
             <div className="flex justify-end gap-2 px-4 py-3 border-t border-[var(--color-border)]">
               <button type="button" className="aseel-btn" onClick={() => setPickerOpen(false)}>إلغاء</button>
-              <button type="button" className="aseel-btn aseel-btn--primary" onClick={confirmPicker}>
+              <button type="button" className="aseel-btn aseel-btn-primary" onClick={confirmPicker}>
                 إضافة البنود المختارة
               </button>
             </div>
