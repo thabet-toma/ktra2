@@ -204,7 +204,6 @@ class DevelopmentNote(models.Model):
         help_text='[{url,caption}] صور توضيحية مرفوعة للملاحظة',
     )
     due_date = models.DateField(null=True, blank=True)
-    position = models.PositiveIntegerField(default=0)
     created_by = models.ForeignKey(
         'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='created_development_notes',
@@ -218,7 +217,7 @@ class DevelopmentNote(models.Model):
 
     class Meta:
         db_table = 'development_notes'
-        ordering = ['position', '-updated_at', '-id']
+        ordering = ['created_at', 'id']
 
     def __str__(self):
         return self.title

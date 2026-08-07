@@ -6,6 +6,13 @@ import { resolveTenantId } from '../../utils/tenantContext';
 import { isOfflineRecordForTenant } from '../../utils/offlineTenantScope';
 import { formatDateTimeValue } from '../../utils/formatDate';
 
+/** بصمة الطابور: المعرّف والحالة ونص الخطأ — ما تعرضه اللوحة فعلاً. */
+const sameQueue = (a: MutationEntry[], b: MutationEntry[]) =>
+  a.length === b.length
+  && a.every((row, i) => row.id === b[i].id
+    && row.status === b[i].status
+    && row.error === b[i].error);
+
 export default function PendingMutationsPanel() {
   const [open, setOpen] = useState(false);
   const [mutations, setMutations] = useState<MutationEntry[]>([]);
@@ -18,7 +25,9 @@ export default function PendingMutationsPanel() {
       .anyOf(['pending', 'syncing', 'failed'])
       .filter((m) => isOfflineRecordForTenant(m, tenantId))
       .toArray();
-    setMutations(items);
+    // الطابور فارغ في الاستعمال العادي: مصفوفة جديدة كل 5 ثوانٍ كانت تُعيد رسم
+    // اللوحة (وهي مركّبة في `App`) بلا أي تغيّر فعلي في المحتوى.
+    setMutations((current) => (sameQueue(current, items) ? current : items));
   }, []);
 
   useEffect(() => {

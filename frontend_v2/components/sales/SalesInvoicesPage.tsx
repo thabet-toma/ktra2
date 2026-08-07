@@ -23,6 +23,7 @@ import {
 } from "../../services/salesApi";
 import { DeliverGoodsModal } from "./DeliverGoodsModal";
 import { apiGetList } from "../../services/restApi";
+import { listPickerProducts } from "../../services/inventoryApi";
 import {
   Loader2,
   RefreshCw,
@@ -159,7 +160,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
     const parts = ["العملاء", "الأصناف", "العملات", "الحسابات", "الضرائب"] as const;
     const settled = await Promise.allSettled([
       apiGetList<PartnerRow>("partners/lookup/", { tenantId, query: { limit: 500 } }),
-      apiGetList<ProductRow>("inventory/products/", { tenantId }),
+      listPickerProducts<ProductRow>(tenantId),
       apiGetList<CurrOpt>("accounting/currencies/", { tenantId }),
       apiGetList<AccountOpt>("accounting/accounts/", { tenantId }),
       apiGetList<{
@@ -215,7 +216,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       } else if (event.type === "partners") {
         apiGetList<PartnerRow>("partners/lookup/", { tenantId, query: { limit: 500 } }).then(setPartners).catch(() => {});
       } else if (event.type === "products") {
-        apiGetList<ProductRow>("inventory/products/", { tenantId }).then(setProducts).catch(() => {});
+        listPickerProducts<ProductRow>(tenantId).then(setProducts).catch(() => {});
       }
     });
     return unsubscribe;

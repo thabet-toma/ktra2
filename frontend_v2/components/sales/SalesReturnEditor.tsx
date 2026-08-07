@@ -16,6 +16,7 @@ import {
   type SalesInvoiceRow,
 } from "../../services/salesApi";
 import { apiGetList } from "../../services/restApi";
+import { listPickerProducts } from "../../services/inventoryApi";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import {
@@ -89,7 +90,7 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
         apiGetList<SalesInvoiceRow>("sales/invoices/lookup/?limit=500&status=posted", { tenantId }),
         // T-PARTYPURE: مرجع البيع على عميل — الموردون لا مكان لهم في قائمته.
         apiGetList<Partner>("partners/lookup/?limit=500&partner_type=Customer", { tenantId }),
-        apiGetList<Product>("inventory/products/", { tenantId }),
+        listPickerProducts<Product>(tenantId),
       ]);
       if (invs.status === "fulfilled") {
         // Only posted invoices are eligible for return

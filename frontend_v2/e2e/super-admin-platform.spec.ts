@@ -54,18 +54,20 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
     import_enabled: true, is_example: false, member_count: 2, created_at: "2026-07-22T00:00:00Z",
     members: companyMembers.map((member) => ({ ...member })),
   };
-  // المكتملة أولاً عمداً — الورقة يجب أن تُنزلها لآخر القائمة بنفسها.
+  // مبعثرة عمداً (المكتملة أولاً والأقدم في الوسط) — الشاشة تُرتّبها بنفسها:
+  // الأقدم أولاً والمكتملة أخيراً.
   const developmentNotes = [
     {
       id: 3, title: "ترحيل الشاشة القديمة", description: "أُنجزت",
       status: "done", priority: "low", images: [],
-      due_date: null, position: 0, created_by: 1,
+      due_date: null, created_by: 1,
       created_by_name: "سوبر أدمن", updated_by: 1, updated_by_name: "سوبر أدمن",
       created_at: "2026-08-01T09:00:00Z", updated_at: "2026-08-01T09:00:00Z",
     },
     {
       id: 1, title: "تحسين شاشة الجرد",
-      // وصف طويل عمداً — أطول من ثلاثة أسطر مهما اتّسع العمود، فيُختبر الطيّ فعلاً.
+      // وصف طويل عمداً — أطول من سطرين في الجدول، فيُختبر القصّ وكشفُه الكامل
+      // داخل نافذة التعديل.
       description: [
         "إضافة فلتر للمستودع مع إظهار كامل تفاصيل الملاحظة الطويلة للمحاسب والمخلّص.",
         "ويشمل ذلك ترتيب الأعمدة وحفظ تفضيلات كل مستخدم على حدة دون خلط بين الشاشات.",
@@ -73,14 +75,14 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
         "وأخيراً تُراجع الحالات الحدّية: مستودع بلا حركة، وصنف محجوز بالكامل.",
       ].join("\n"),
       status: "in_progress", priority: "high", images: [],
-      due_date: "2026-08-10", position: 1, created_by: 1,
+      due_date: "2026-08-10", created_by: 1,
       created_by_name: "سوبر أدمن", updated_by: 1, updated_by_name: "سوبر أدمن",
       created_at: "2026-08-01T10:00:00Z", updated_at: "2026-08-01T10:00:00Z",
     },
     {
       id: 2, title: "تقرير الأرباح", description: "مطلوب من المالك",
       status: "todo", priority: "medium", images: [],
-      due_date: null, position: 2, created_by: 1,
+      due_date: null, created_by: 1,
       created_by_name: "سوبر أدمن", updated_by: 1, updated_by_name: "سوبر أدمن",
       created_at: "2026-08-01T11:00:00Z", updated_at: "2026-08-01T11:00:00Z",
     },
@@ -170,9 +172,9 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
     if (url.pathname.endsWith("/platform/development-notes/") && request.method() === "POST") {
       const payload = request.postDataJSON();
       return route.fulfill({ contentType: "application/json", body: JSON.stringify({
-        id: 2, ...payload, created_by: 1, created_by_name: "سوبر أدمن",
+        id: 9, ...payload, created_by: 1, created_by_name: "سوبر أدمن",
         updated_by: 1, updated_by_name: "سوبر أدمن",
-        created_at: "2026-08-01T11:00:00Z", updated_at: "2026-08-01T11:00:00Z",
+        created_at: "2026-08-01T12:00:00Z", updated_at: "2026-08-01T12:00:00Z",
       }) });
     }
     if (url.pathname.endsWith("/dashboard/")) {
@@ -206,103 +208,83 @@ test("super admin gets a separate platform dashboard and development notes sheet
   await expect(page).toHaveURL(/\/super-admin\/development-notes$/);
   await expect(page.getByRole("heading", { name: "ملاحظات التطوير" })).toBeVisible();
   await expect(page.locator('input[type="date"]')).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "حفظ تحسين شاشة الجرد" })).toBeInViewport();
-  await expect(page.getByRole("button", { name: "إضافة" })).toBeInViewport();
-  await expect(page.locator('input[value="تحسين شاشة الجرد"]')).toBeVisible();
+  await expect(page.getByRole("button", { name: "تعديل تحسين شاشة الجرد" })).toBeInViewport();
+  await expect(page.getByRole("button", { name: "إضافة ملاحظة" })).toBeInViewport();
+  await expect(page.getByText("تحسين شاشة الجرد", { exact: true })).toBeVisible();
 
-  await page.getByLabel("عنوان ملاحظة جديدة").fill("إضافة تقرير هامش الربح");
-  await page.getByRole("button", { name: "إضافة", exact: true }).click();
-  await expect(page.locator('input[value="إضافة تقرير هامش الربح"]')).toBeVisible();
+  // الإضافة من نافذة واحدة صريحة — لا صفّ شبح في ذيل الجدول.
+  await page.getByRole("button", { name: "إضافة ملاحظة" }).click();
+  await page.getByLabel("العنوان *").fill("إضافة تقرير هامش الربح");
+  await page.getByRole("button", { name: "إضافة الملاحظة" }).click();
+  await expect(page.getByText("إضافة تقرير هامش الربح", { exact: true })).toBeVisible();
 });
 
 /** جدول الملاحظات وحده — للصفحة جداول أخرى (شريط الأدوات) لا تُخلط بها الصفوف. */
 const notesTable = (page: Page) => page.locator('table:has(th:text-is("صور توضيحية"))');
 const noteRows = (page: Page) => notesTable(page).locator("tbody tr");
-const noteTitles = (page: Page) => noteRows(page).locator("td:nth-child(3) input");
+/** عمود «الملاحظة» = الثاني: عنوانٌ عريض فوق مقتطف الوصف (لا حقل إدخال). */
+const noteTitles = (page: Page) =>
+  noteRows(page).locator("td:nth-child(2) > div > div:first-child");
 
-test("ورقة الملاحظات: المكتملة خضراء وأخيرة، والعرض والصور يُحفظان", async ({ page }) => {
+test("جدول الملاحظات: الأقدم أولاً والمكتملة أخيراً، والوصف والصور من نافذة واحدة", async ({ page }) => {
   const calls = await installMocks(page, true);
   await page.goto("/super-admin/development-notes");
   await expect(page.getByRole("heading", { name: "ملاحظات التطوير" })).toBeVisible();
 
-  // عمود «المسؤول» أُزيل، وحلّ محلّه عمود الصور التوضيحية
-  await expect(page.getByRole("columnheader", { name: "المسؤول" })).toHaveCount(0);
-  await expect(page.getByRole("columnheader", { name: "صور توضيحية" })).toBeVisible();
-
-  // المكتملة وصلت أولاً من الخادم — الورقة تُنزلها لآخر القائمة وتُلوّنها بالأخضر
-  await expect(noteTitles(page).nth(0)).toHaveValue("تحسين شاشة الجرد");
-  await expect(noteTitles(page).nth(2)).toHaveValue("ترحيل الشاشة القديمة");
-  const rowTint = (index: number) => noteRows(page).nth(index).evaluate(
-    (element) => getComputedStyle(element).backgroundColor,
+  // كل الأعمدة ظاهرة داخل عرض الإطار — لا عمود يُقصّ خارج الشاشة
+  const headers = notesTable(page).locator("thead th");
+  await expect(headers).toHaveText(
+    ["#", "الملاحظة", "الحالة", "الأولوية", "الموعد", "صور توضيحية", "أُضيفت", "إجراءات"],
   );
-  const doneTint = await rowTint(2);
-  expect(doneTint).not.toBe(await rowTint(0));
-  const [red, green, blue] = doneTint.match(/[\d.]+/g)!.map(Number);
-  expect(green).toBeGreaterThan(red);
-  expect(green).toBeGreaterThan(blue);
+  await expect(headers.last()).toBeInViewport();
 
-  // الوصف الطويل يظهر مقصوصاً، وكامله خلف «عرض المزيد»
-  const description = page.getByLabel("وصف الملاحظة 1", { exact: true });
-  const fullyVisible = () => description.evaluate(
-    (element) => element.scrollHeight <= element.clientHeight + 1,
-  );
-  expect(await fullyVisible()).toBe(false);
-  await page.getByRole("button", { name: "عرض المزيد — وصف الملاحظة 1" }).click();
-  await expect.poll(fullyVisible).toBe(true);
-  await page.getByRole("button", { name: "عرض أقل — وصف الملاحظة 1" }).click();
-  await expect.poll(fullyVisible).toBe(false);
+  // وصلت مبعثرة من الخادم — الجدول يرتّبها بالأقدم ويُنزل المكتملة لآخر القائمة
+  await expect(noteTitles(page).nth(0)).toHaveText("تحسين شاشة الجرد");
+  await expect(noteTitles(page).nth(1)).toHaveText("تقرير الأرباح");
+  await expect(noteTitles(page).nth(2)).toHaveText("ترحيل الشاشة القديمة");
+  await expect(noteTitles(page).nth(2)).toHaveCSS("text-decoration-line", "line-through");
 
-  // تغيير الحالة يُحفظ فوراً ويُزيح الصف لأسفل
-  await page.getByLabel("حالة الملاحظة 1").selectOption("done");
-  await expect.poll(() => calls.notePatch?.status).toBe("done");
-  await expect(noteTitles(page).nth(0)).toHaveValue("تقرير الأرباح");
-  await expect(noteTitles(page).nth(1)).toHaveValue("تحسين شاشة الجرد");
+  // الصفحة RTL: النص العربي يبدأ من اليمين — `AseelDenseTable` كان يفرض `left`
+  await expect(noteRows(page).nth(0).locator("td").nth(1)).toHaveCSS("text-align", "right");
 
-  // إدراج صورة توضيحية: ترفع للخادم وتُحفظ على الملاحظة بلا زر حفظ
-  await page.getByLabel("إدراج صورة — الملاحظة 1").setInputFiles({
+  // الوصف الطويل مقصوص في الجدول، وكاملاً في نافذة التعديل
+  const excerpt = noteRows(page).nth(0).locator("td:nth-child(2) p");
+  expect(await excerpt.evaluate(
+    (element) => element.scrollHeight > element.clientHeight + 1,
+  )).toBe(true);
+  await page.getByRole("button", { name: "تعديل تحسين شاشة الجرد" }).click();
+  const description = page.getByLabel("الوصف", { exact: true });
+  await expect(description).toContainText("وأخيراً تُراجع الحالات الحدّية");
+
+  // الصور تُرفع داخل النافذة وتُحفظ مع الملاحظة عند الضغط على «حفظ التعديلات»
+  await page.getByLabel("إدراج صورة توضيحية").setInputFiles({
     name: "shot.png", mimeType: "image/png",
     buffer: Buffer.from(
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
       "base64",
     ),
   });
-  await expect(page.getByRole("button", { name: /معاينة صورة 1/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "معاينة صورة 1" })).toBeVisible();
+  await page.getByRole("button", { name: "حفظ التعديلات" }).click();
   await expect.poll(() => calls.notePatch?.images?.length).toBe(1);
 
-  // سحب حافة العنوان يوسّع العمود، والعرض يعود كما تُرك بعد الخروج والرجوع
-  const columnWidth = () => page.locator("colgroup col").nth(2).evaluate(
-    (element) => parseFloat((element as HTMLElement).style.width),
-  );
-  const before = await columnWidth();
-  const handle = page.getByRole("separator", { name: "تغيير عرض عمود العنوان" });
-  const box = (await handle.boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(box.x - 90, box.y + box.height / 2, { steps: 5 });
-  await page.mouse.up();
-  const widened = await columnWidth();
-  expect(widened).toBeGreaterThan(before);
+  // ملاحظة جديدة: التاريخ مملوء بتاريخ اليوم تلقائياً — لا يكتبه المستخدم
+  await page.getByRole("button", { name: "إضافة ملاحظة" }).click();
+  const today = new Date();
+  await expect(page.getByLabel("موعد الملاحظة")).toHaveValue([
+    String(today.getDate()).padStart(2, "0"),
+    String(today.getMonth() + 1).padStart(2, "0"),
+    String(today.getFullYear()),
+  ].join("/"));
+  await page.getByRole("button", { name: "إلغاء" }).click();
 
-  // وسحب حدّ الصف السفلي يزيد ارتفاعه — نفس قصة العمود
-  const rowHeight = () => noteRows(page).first().evaluate(
-    (element) => element.getBoundingClientRect().height,
-  );
-  const heightBefore = await rowHeight();
-  const rowHandle = page.getByRole("separator", { name: "تغيير ارتفاع الصف 1" });
-  const rowBox = (await rowHandle.boundingBox())!;
-  await page.mouse.move(rowBox.x + rowBox.width / 2, rowBox.y + rowBox.height / 2);
-  await page.mouse.down();
-  await page.mouse.move(rowBox.x + rowBox.width / 2, rowBox.y + 70, { steps: 5 });
-  await page.mouse.up();
-  const heightAfter = await rowHeight();
-  expect(heightAfter).toBeGreaterThan(heightBefore);
-
-  // العرض والارتفاع يعودان كما تُركا بعد مغادرة الشاشة والرجوع إليها
-  await page.goto("/super-admin");
-  await page.goto("/super-admin/development-notes");
-  await expect(noteTitles(page).nth(0)).toBeVisible();
-  expect(await columnWidth()).toBe(widened);
-  expect(Math.round(await rowHeight())).toBe(Math.round(heightAfter));
+  // تغيير الحالة من الجدول يُحفظ فوراً ويُزيح الصف لأسفل
+  await page.getByLabel("حالة الملاحظة تحسين شاشة الجرد").selectOption("done");
+  await expect.poll(() => calls.notePatch?.status).toBe("done");
+  // المفتوحة وحدها تتصدّر، والمكتملتان خلفها بترتيب الأقدم فالأحدث بينهما.
+  await expect(noteTitles(page).nth(0)).toHaveText("تقرير الأرباح");
+  await expect(noteTitles(page).nth(1)).toHaveText("ترحيل الشاشة القديمة");
+  await expect(noteTitles(page).nth(2)).toHaveText("تحسين شاشة الجرد");
 });
 
 test("super admin controls a company and its members from the platform panel", async ({ page }) => {

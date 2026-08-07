@@ -26,6 +26,7 @@ import {
 } from "../../services/salesApi";
 import { accountingApi } from "../../services/accountingApi";
 import { apiGetList } from "../../services/restApi";
+import { listPickerProducts } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized, todayIso } from "../../utils/formatDate";
@@ -124,7 +125,7 @@ export const SalesOrdersPage: React.FC = () => {
         const [parts, prods, accs, settings] = await Promise.all([
           // T-PARTYPURE: طلبية بيع = زبائن فقط — كانت القائمة تعرض الموردين معهم.
           accountingApi.getPartners("Customer") as Promise<Partner[]>,
-          apiGetList<any>("inventory/products/", { tenantId }),
+          listPickerProducts<any>(tenantId),
           accountingApi.getAccounts() as Promise<Account[]>,
           getSalesSettings().catch(() => null),
         ]);

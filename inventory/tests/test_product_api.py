@@ -3,6 +3,7 @@
 ترتيب حتمي + بحث + فلتر فترة + ترقيم صفحات opt-in، وعزل الشركات.
 """
 import datetime
+from decimal import Decimal
 
 from unittest.mock import patch
 
@@ -154,6 +155,30 @@ class ProductApiTest(APITestCase):
             "avg_cost", "is_for_sale_online", "online_price",
             "online_description", "attachments",
         }.issubset(row) for row in res.json())
+
+    def test_lookup_list_carries_every_field_the_invoice_picker_reads(self):
+        """منتقي الصنف في الفواتير يحتاج الباركود وسعر البيع وعلَم الخدمة.
+
+        بدونها كانت شاشات البيع تجلب العقد **الكامل** لكل الأصناف: قياس على
+        بيانات حقيقية (1490 صنفاً) أعطى 1,145 كيلوبايت و1,249 ملّي ثانية عند
+        كل فتح للشاشة، مقابل عقد المنتقي 609 كيلوبايت و331 ملّي ثانية.
+        """
+        Product.objects.create(
+            tenant=self.t_a, sku="PICK-1", name_ar="صنف المنتقي",
+            barcode="6291001", sale_price="12.50", is_service=False,
+        )
+        self._auth()
+
+        res = self._get("?view=lookup")
+
+        assert res.status_code == 200, res.content[:300]
+        row = next(r for r in res.json() if r["sku"] == "PICK-1")
+        assert row["barcode"] == "6291001"
+        assert Decimal(row["sale_price"]) == Decimal("12.50")
+        assert row["is_service"] is False
+        # وما زال العقد أضيق من الكامل — لا تحليلات ولا حقول الكرت.
+        assert "purchased_qty" not in row
+        assert "avg_monthly_sales" not in row
 
     def test_category_tree_query_count_is_constant(self):
         root = ProductCategory.objects.create(tenant=self.t_a, name="جذر")

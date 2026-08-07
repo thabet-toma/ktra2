@@ -154,14 +154,19 @@ class ProductSerializer(serializers.ModelSerializer):
 
 
 class ProductLookupSerializer(ProductSerializer):
-    """Small, explicit contract for invoice/deal product pickers."""
+    """Small, explicit contract for invoice/deal product pickers.
+
+    يجب أن يغطّي **كل** ما تقرؤه شاشات الفواتير من الصنف، وإلا رجعت تلك الشاشات
+    إلى العقد الكامل فتجلب لكل صنف تحليلاتٍ وحقولَ كرتٍ لا تعرضها (قياس على
+    1490 صنفاً: 1,145 كيلوبايت / 1,249 مِلّي ثانية مقابل 609 / 331).
+    """
 
     class Meta(ProductSerializer.Meta):
         fields = [
-            'id', 'sku', 'name_ar', 'name_en', 'display_name',
+            'id', 'sku', 'barcode', 'name_ar', 'name_en', 'display_name',
             'category', 'category_name', 'hs_code', 'min_stock_level',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity',
-            'avg_cost', 'is_for_sale_online',
+            'avg_cost', 'sale_price', 'is_service', 'is_for_sale_online',
             'online_price', 'online_description', 'attachments',
         ]
 

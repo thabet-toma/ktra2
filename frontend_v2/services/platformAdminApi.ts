@@ -79,7 +79,6 @@ export interface DevelopmentNote {
   priority: DevelopmentNotePriority;
   images: DevelopmentNoteImage[];
   due_date: string | null;
-  position: number;
   created_by: number | null;
   created_by_name: string;
   updated_by: number | null;
@@ -90,7 +89,7 @@ export interface DevelopmentNote {
 
 export type DevelopmentNoteWrite = Pick<
   DevelopmentNote,
-  "title" | "description" | "status" | "priority" | "images" | "due_date" | "position"
+  "title" | "description" | "status" | "priority" | "images" | "due_date"
 >;
 
 export const getPlatformDashboard = () =>

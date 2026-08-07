@@ -12,6 +12,7 @@ import { ArrowRight, Download, Printer, Search } from "lucide-react";
 import { reportsApi } from "../../services/reportsApi";
 import { accountingApi } from "../../services/accountingApi";
 import { apiGetList } from "../../services/restApi";
+import { listPickerProducts } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import {
   formatReportCell,
@@ -100,7 +101,7 @@ export const ReportRunnerPage: React.FC = () => {
       const tenantId = resolveTenantId();
       const [p, pr, wh, acc] = await Promise.allSettled([
         needed.partners ? (accountingApi.getPartners() as Promise<PartnerRow[]>) : Promise.resolve([]),
-        needed.products ? apiGetList<ProductRow>("inventory/products/", { tenantId }) : Promise.resolve([]),
+        needed.products ? listPickerProducts<ProductRow>(tenantId) : Promise.resolve([]),
         needed.warehouses ? apiGetList<WarehouseRow>("inventory/warehouses/", { tenantId }) : Promise.resolve([]),
         needed.accounts ? (accountingApi.getAccounts() as Promise<AccountNodeLike[]>) : Promise.resolve([]),
       ]);

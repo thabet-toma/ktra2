@@ -1,5 +1,5 @@
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
-import { apiFetch, toPagedList } from "./restApi";
+import { apiFetch, apiGetList, toPagedList } from "./restApi";
 
 // أبقِ عقد الخدمة كما هو، مع مهلة/إلغاء موحّدين لكل طلباتها.
 const fetch = apiFetch;
@@ -379,3 +379,15 @@ export const inventoryApi = {
     return res.json();
   },
 };
+
+/**
+ * أصناف منتقي المستندات — العقد الضيّق (`?view=lookup`) لا كرت الصنف الكامل.
+ *
+ * العقد الكامل يحمل لكل صنف تحليلاتٍ وحقولَ كرتٍ لا تعرضها شاشة الفاتورة
+ * (`purchased_qty`, `avg_monthly_sales`, `stock_status`, `group_key`, …):
+ * قياس على 1490 صنفاً أعطى 1,145 كيلوبايت / 1,249 مِلّي ثانية عند **كل** فتح
+ * للشاشة، مقابل 609 / 331 لعقد المنتقي. مصدر واحد لكل شاشات المستندات كي لا
+ * ترتدّ إحداها للعقد الكامل بصمت.
+ */
+export const listPickerProducts = <T>(tenantId?: number) =>
+  apiGetList<T>("inventory/products/", { tenantId, query: { view: "lookup" } });

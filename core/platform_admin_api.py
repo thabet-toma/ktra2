@@ -41,7 +41,7 @@ class DevelopmentNoteSerializer(serializers.ModelSerializer):
         model = DevelopmentNote
         fields = [
             'id', 'title', 'description', 'status', 'priority', 'images',
-            'due_date', 'position', 'created_by', 'created_by_name',
+            'due_date', 'created_by', 'created_by_name',
             'updated_by', 'updated_by_name', 'created_at', 'updated_at',
         ]
         read_only_fields = [
@@ -92,8 +92,10 @@ class DevelopmentNoteViewSet(viewsets.ModelViewSet):
     authentication_classes = [TokenAuthentication, SessionAuthentication]
     permission_classes = [IsPlatformAdmin]
     serializer_class = DevelopmentNoteSerializer
-    # المكتملة تُزاح لآخر الورقة تلقائياً (بلا لمس `position` الذي يبقى ترتيب
-    # المستخدم اليدوي) — والواجهة تعيد نفس الفرز محلياً بعد كل تغيير حالة.
+    # الأقدم أولاً والمكتملة أخيراً — والواجهة تعيد نفس الفرز محلياً بعد كل
+    # تغيير حالة. `created_at` مرساة ثابتة لا يحرّكها تعديل، بخلاف المفتاحين
+    # السابقين: `position` (حُذف — الواجهة كانت ترسل 0 لأول ملاحظة كل جلسة
+    # فتقفز للأعلى) و`-updated_at` (كل حفظة كانت تُقفز الملاحظة فوق أخواتها).
     queryset = (
         DevelopmentNote.objects
         .select_related('created_by', 'updated_by')
@@ -101,7 +103,7 @@ class DevelopmentNoteViewSet(viewsets.ModelViewSet):
             When(status='done', then=Value(1)), default=Value(0),
             output_field=IntegerField(),
         ))
-        .order_by('is_done', 'position', '-updated_at', '-id')
+        .order_by('is_done', 'created_at', 'id')
     )
 
     def perform_create(self, serializer):

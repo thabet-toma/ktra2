@@ -130,6 +130,37 @@ class SalesListPaginationFilterTest(APITestCase):
     def test_invoice_list_query_count_is_constant_as_page_grows(self):
         self.assertEqual(self._invoice_query_count(5), self._invoice_query_count(20))
 
+    def test_invoice_list_reads_partner_balance_in_one_grouped_query(self):
+        """رصيد العميل لا يُحسب كاستعلام فرعي مرتبط داخل استعلام القائمة.
+
+        الشكل السابق (`annotate_partner_posted_balance` على صف القائمة) يولّد
+        DEPENDENT SUBQUERY فيه GROUP BY، فتبني MySQL جدولاً مؤقتاً **لكل صف**:
+        قياس على بيانات حقيقية (927 فاتورة) أعطى 15–20 ثانية للقائمة، وثانية
+        كاملة لصفحة الخمسين. المطلوب: استعلام تجميعي واحد لأطراف الصفحة.
+        """
+        with CaptureQueriesContext(connection) as captured:
+            response = self.client.get(
+                "/api/sales/invoices/?page=1&page_size=20", **self.headers,
+            )
+        self.assertEqual(response.status_code, 200, response.content[:300])
+
+        statements = [q["sql"] for q in captured]
+        page_sql = [s for s in statements if "sales_module_invoices" in s]
+        self.assertTrue(page_sql)
+        for sql in page_sql:
+            self.assertNotIn(
+                "journal_lines", sql,
+                "استعلام صفحة الفواتير يحمل استعلام رصيد فرعياً لكل صف.",
+            )
+        grouped = [
+            s for s in statements
+            if "journal_lines" in s and "GROUP BY" in s.upper()
+        ]
+        self.assertEqual(
+            len(grouped), 1,
+            "الرصيد يجب أن يُجلب باستعلام تجميعي واحد لأطراف الصفحة.",
+        )
+
     def test_invoice_list_exposes_payment_summary_partner_balance_and_filter(self):
         partial = SalesInvoice.objects.get(
             tenant=self.tenant, invoice_number="INV-BOUND-10",
