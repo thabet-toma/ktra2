@@ -82,6 +82,7 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   users: "hr.employees.manage",
   "employee-notes": "hr.employees.manage",
   attendance: "hr.attendance.view",
+  payroll: "hr.payroll.view",
   "points-management": "hr.points.manage",
   "task-management": "hr.tasks.manage",
   "activity-log": "admin.activity.view",

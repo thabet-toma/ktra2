@@ -34,6 +34,19 @@ const FIELD_LABELS: Record<string, string> = {
   vat_percent: "نسبة الضريبة",
   discount_amount: "قيمة الخصم",
   discount_percent: "نسبة الخصم",
+  // الرواتب — رسالة رقمية بلا اسم حقل لا تدلّ المستخدم على مكان الخلل.
+  employee: "الموظف",
+  monthly_salary: "الراتب الشهري",
+  hourly_rate: "أجر الساعة",
+  working_days_per_month: "أيام الدوام في الشهر",
+  standard_hours_per_day: "ساعات الدوام اليومية",
+  hours: "الساعات",
+  days: "عدد الأيام",
+  minutes: "دقائق التأخير",
+  period_start: "بداية الفترة",
+  period_end: "نهاية الفترة",
+  hire_date: "تاريخ المباشرة",
+  code: "الرقم",
 };
 
 /** رسائل DRF الإنجليزية الافتراضية الشائعة → عربية (عند تشغيل الخادم بلغة إنجليزية). */

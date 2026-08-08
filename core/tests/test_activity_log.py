@@ -5,15 +5,25 @@
   - الصفحة العامة (بلا entity_id) للمدير فقط؛ سجل مستند واحد متاح لأي عضو.
   - الافتراضي = اليوم؛ أحداث is_view مستبعَدة من العام وتظهر مع include_views.
   - login/logout يُسجَّلان في سجل النشاط.
+  - تفصيل الحركة: فروقات الترويسة وبنود المستند (إضافة/حذف/تغيير سعر أو كمية).
 """
 import json
 from datetime import date
+from decimal import Decimal
+from types import SimpleNamespace
 
 from django.contrib.auth.models import User
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from core.activity import log_activity, log_view
+from core.activity import (
+    build_line_changes,
+    describe_activity_changes,
+    log_activity,
+    log_view,
+    snapshot_document_lines,
+    snapshot_fields,
+)
 from core.models import ActivityLog, ActivityLogPartner
 from logistics.models import LogisticsDeal, LogisticsShipment, PurchaseInvoice
 from partners.models import Partner
@@ -83,6 +93,81 @@ class ActivityServiceTest(APITestCase):
         before = ActivityLog.objects.count()
         log_activity(action="create", entity_type="x", tenant=None, request=None, user=self.manager)
         assert ActivityLog.objects.count() == before
+
+
+class DocumentChangeDetailTest(APITestCase):
+    """تفصيل الحركة: ماذا فعل المستخدم بالضبط داخل المستند — لا «تعديل» مجرّدة."""
+
+    LINE_LABELS = {"quantity": "الكمية", "unit_price": "السعر"}
+
+    def _lines(self, *rows):
+        return [
+            SimpleNamespace(product_id=pid, quantity=Decimal(q), unit_price=Decimal(p), label=name)
+            for pid, name, q, p in rows
+        ]
+
+    def _snapshot(self, lines):
+        return snapshot_document_lines(
+            lines, label=lambda line: line.label, fields=self.LINE_LABELS)
+
+    def test_price_change_is_captured_with_old_and_new_value(self):
+        before = self._snapshot(self._lines((3, "إطار 205", "2", "100")))
+        after = self._snapshot(self._lines((3, "إطار 205", "2", "120")))
+        changes = build_line_changes(before=before, after=after, labels=self.LINE_LABELS)
+        assert changes == [{
+            "kind": "line_changed",
+            "label": "إطار 205",
+            "changes": [{"field": "unit_price", "label": "السعر", "old": "100", "new": "120"}],
+        }]
+        assert describe_activity_changes(changes) == "«إطار 205»: السعر من 100 إلى 120"
+
+    def test_added_and_removed_items_are_named(self):
+        before = self._snapshot(self._lines((3, "إطار 205", "2", "100")))
+        after = self._snapshot(self._lines((7, "زيت محرك", "1", "50")))
+        changes = build_line_changes(before=before, after=after, labels=self.LINE_LABELS)
+        kinds = [c["kind"] for c in changes]
+        assert kinds == ["line_removed", "line_added"]
+        text = describe_activity_changes(changes)
+        assert "حذف صنف «إطار 205»" in text
+        assert "أضاف صنف «زيت محرك» (الكمية 1 · السعر 50)" in text
+
+    def test_repeated_product_keeps_two_distinct_lines(self):
+        before = self._snapshot(self._lines(
+            (3, "إطار 205", "2", "100"), (3, "إطار 205", "1", "90")))
+        after = self._snapshot(self._lines((3, "إطار 205", "2", "100")))
+        changes = build_line_changes(before=before, after=after, labels=self.LINE_LABELS)
+        assert [c["kind"] for c in changes] == ["line_removed"]
+
+    def test_unchanged_lines_produce_no_noise(self):
+        rows = ((3, "إطار 205", "2.0000", "100.00"),)
+        changes = build_line_changes(
+            before=self._snapshot(self._lines(*rows)),
+            after=self._snapshot(self._lines(*rows)),
+            labels=self.LINE_LABELS,
+        )
+        assert changes == []
+
+    def test_decimal_values_drop_trailing_zeros(self):
+        before = self._snapshot(self._lines((3, "إطار", "2.0000", "150.5000")))
+        after = self._snapshot(self._lines((3, "إطار", "2.0000", "175.0000")))
+        changes = build_line_changes(before=before, after=after, labels=self.LINE_LABELS)
+        assert changes[0]["changes"][0]["old"] == "150.5"
+        assert changes[0]["changes"][0]["new"] == "175"
+
+    def test_zero_valued_field_is_not_listed_on_added_line(self):
+        labels = {**self.LINE_LABELS, "discount": "الخصم"}
+        line = SimpleNamespace(
+            product_id=3, quantity=Decimal("1"), unit_price=Decimal("50"),
+            discount=Decimal("0.00"), label="زيت")
+        after = snapshot_document_lines([line], label=lambda l: l.label, fields=labels)
+        changes = build_line_changes(before=[], after=after, labels=labels)
+        assert describe_activity_changes(changes) == "أضاف صنف «زيت» (الكمية 1 · السعر 50)"
+
+    def test_snapshot_fields_prefers_display_label(self):
+        row = SimpleNamespace(
+            invoice_type="cash", get_invoice_type_display=lambda: "نقدي", notes="ملاحظة")
+        assert snapshot_fields(row, ["invoice_type", "notes"]) == {
+            "invoice_type": "نقدي", "notes": "ملاحظة"}
 
 
 class ActivityApiTest(APITestCase):

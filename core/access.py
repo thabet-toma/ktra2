@@ -89,6 +89,10 @@ PERMISSIONS: list[dict] = [
     {"key": "hr.attendance.view", "label": "شاشة الحضور والغياب", "group": GROUP_HR},
     {"key": "hr.points.manage", "label": "إدارة النقاط", "group": GROUP_HR},
     {"key": "hr.tasks.manage", "label": "إدارة المهام (لا مهامي)", "group": GROUP_HR},
+    # الرواتب — قراءة، وإدارة (موظفون/ساعات/غيابات/كشوف)، وترحيل وصرف.
+    {"key": "hr.payroll.view", "label": "عرض الرواتب وكشوفها", "group": GROUP_HR},
+    {"key": "hr.payroll.manage", "label": "إدارة الموظفين والساعات وكشوف الرواتب", "group": GROUP_HR},
+    {"key": "hr.payroll.post", "label": "ترحيل كشوف الرواتب وصرفها", "group": GROUP_HR},
     # الإدارة
     {"key": "admin.members.manage", "label": "إدارة أعضاء الشركة وأدوارهم", "group": GROUP_ADMIN},
     {"key": "admin.permissions.manage", "label": "إدارة الصلاحيات", "group": GROUP_ADMIN},
@@ -172,6 +176,10 @@ _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | {
     "accounting.period.manage",
     "finance.cashbox.manage",
     "import.doc.unpost",
+    # الرواتب مصروفٌ يمسّ الدفاتر — المحاسب صاحبها كسائر المستندات المالية.
+    "hr.payroll.view",
+    "hr.payroll.manage",
+    "hr.payroll.post",
 }
 
 _LEGAL_ACCOUNTANT = {

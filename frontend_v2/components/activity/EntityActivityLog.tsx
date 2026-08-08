@@ -6,6 +6,7 @@ import { getEntityActivity, getPartnerActivity } from "@/services/activityServic
 import { clientLogger } from "@/services/logger";
 import type { ActivityLogEntry } from "@/types/activity";
 import { actionMeta, entityLabel, formatActivityTime } from "./activityMeta";
+import { ActivityChanges } from "./ActivityChanges";
 
 interface EntityActivityLogProps {
   /** sales_invoice | purchase_invoice | deal | customer_payment */
@@ -82,8 +83,12 @@ export const EntityActivityLog: React.FC<EntityActivityLogProps> = ({
                       </span>
                     )}
                   </div>
-                  {r.description && (
-                    <p className="text-sm aseel-text-soft mt-0.5">{r.description}</p>
+                  {r.metadata?.changes?.length ? (
+                    <div className="mt-1"><ActivityChanges changes={r.metadata.changes} /></div>
+                  ) : (
+                    r.description && (
+                      <p className="text-sm aseel-text-soft mt-0.5">{r.description}</p>
+                    )
                   )}
                 </div>
                 <div className="text-xs aseel-text-soft whitespace-nowrap">

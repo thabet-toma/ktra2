@@ -80,6 +80,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     // T-PERM: مصفوفة (دور × صلاحية) — مدير الشركة فقط.
     { view: "permissions" as AppView, label: "الصلاحيات والأدوار", icon: <ShieldCheck className="h-5 w-5" /> },
     { view: "attendance" as AppView, label: "الحضور والغياب", icon: <AttendanceIcon className="h-5 w-5" /> },
+    // الرواتب — بندها في شجرة الحسابات وتحته حساب كل موظف.
+    { view: "payroll" as AppView, label: "الرواتب", icon: <Banknote className="h-5 w-5" /> },
     { view: "employee-notes" as AppView, label: "ملاحظات الموظفين", icon: <NoteIcon className="h-5 w-5" /> },
     { view: "points-management" as AppView, label: "إدارة النقاط", icon: <PointsIcon className="h-5 w-5" /> },
     { view: "points-history" as AppView, label: "سجل نقاطي", icon: <PointsIcon className="h-5 w-5" />, roles: ['employee', 'procurement', 'manager'] },
