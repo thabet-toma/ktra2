@@ -13,8 +13,16 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { accountingApi } from "../../services/accountingApi";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
+import { apiGetObject } from "../../services/restApi";
 import { getSalesSettings } from "../../services/salesApi";
-import { formatNumber } from "@/utils/formatNumber";
+import {
+  buildPartnerChequeDefaults,
+  validateChequeLines,
+  type OwnBankAccount,
+} from "../../utils/partnerChequeDefaults";
+import type { BankAccountDto } from "../../types/accounting";
+import { formatMoney, formatNumber } from "@/utils/formatNumber";
+import { buildVoucherEntryPreview } from "../../utils/voucherEntryPreview";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { isCashAccount } from "../../utils/accountTree";
@@ -73,6 +81,10 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
   const [withholdingPct, setWithholdingPct] = useState("0");
   const [withholdingAmt, setWithholdingAmt] = useState("0");
   const [cheques, setCheques] = useState<ChequeLine[]>([]);
+  // T-CHQ3/هـ: بيانات الشيك تُعبَّأ من بطاقة الطرف كما في سند القبض — الاسم من
+  // كرت المورد، والبنك/الحساب من حساب **الشركة** البنكي لأن الشيك الصادر
+  // يُسحب من حسابنا نحن. وتبقى كل الحقول قابلة للتعديل يدوياً.
+  const [chequeDefaults, setChequeDefaults] = useState<Partial<ChequeLine>>({});
   const [submitting, setSubmitting] = useState(false);
   // T-AUTOPOST: إعداد الشركة «ترحيل السندات تلقائياً» (الافتراضي مُفعَّل).
   const [autoPost, setAutoPost] = useState(true);
@@ -119,10 +131,58 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
     return () => { alive = false; };
   }, [lockPartner, initialPartner]);
 
+  // T-CHQ3/هـ: افتراضيات الشيك من كرت المورد + حسابنا البنكي الافتراضي.
+  useEffect(() => {
+    const partner = partners.find((p) => p.id === supplierId) || initialPartner || null;
+    if (!supplierId || !partner) {
+      setChequeDefaults({});
+      return;
+    }
+    let cancelled = false;
+    const ownAccountOf = (rows: BankAccountDto[]): OwnBankAccount | null => {
+      const active = rows.filter((a) => a.is_active);
+      const matching = currencyId
+        ? active.filter((a) => a.currency === Number(currencyId))
+        : active;
+      const picked = matching.find((a) => a.is_default)
+        ?? (matching.length === 1 ? matching[0] : null);
+      return picked
+        ? {
+            bank_name: picked.bank_name,
+            account_number: picked.account_number,
+            branch_name: picked.branch_name,
+          }
+        : null;
+    };
+    void (async () => {
+      const [defaults, ownAccounts] = await Promise.all([
+        apiGetObject<{ payee_name?: string; legal_name?: string | null }>(
+          `partners/${supplierId}/payment-defaults/?direction=Outgoing`,
+        ).catch(() => null),
+        accountingApi.getBankAccounts({ activeOnly: true }).catch(() => []),
+      ]);
+      if (cancelled) return;
+      setChequeDefaults(buildPartnerChequeDefaults(
+        // اسم المستفيد من كرت المورد (المستفيد أو الاسم القانوني ثم الاسم).
+        { id: partner.id, name: partner.name, legal_name: defaults?.payee_name ?? null },
+        null,
+        "Outgoing",
+        ownAccountOf(ownAccounts as BankAccountDto[]),
+      ));
+    })();
+    return () => { cancelled = true; };
+  }, [currencyId, initialPartner, partners, supplierId]);
+
   // T-AUTOPOST: الحفظ يُرحّل مباشرةً حسب إعداد الشركة، والزر الثانوي هو البديل الصريح.
   const submit = useCallback(async (postNow: boolean) => {
     if (!supplierId || !cashAccountId || computedTotal <= 0) {
       setErr("المورد + الصندوق + مبلغ > 0");
+      return;
+    }
+    // T-CHQ3/ط: سطور الشيكات تُفحص قبل الإرسال — الرسالة تسمّي السطر الناقص.
+    const chequeError = validateChequeLines(cheques);
+    if (chequeError) {
+      setErr(chequeError);
       return;
     }
     setSubmitting(true);
@@ -237,18 +297,32 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
         cheques={cheques}
         onChange={setCheques}
         onError={setErr}
-        newLineDefaults={{
-          payee_name:
-            partners.find((partner) => partner.id === supplierId)?.name
-            || initialPartner?.name
-            || "",
-        }}
+        direction="Outgoing"
+        newLineDefaults={chequeDefaults}
       />
 
       <label className="aseel-field" style={{ marginTop: "12px", display: "block" }}>
         <span className="aseel-field-label">ملاحظات</span>
         <textarea className="aseel-input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
+
+      {/* T-CHQ3/و: سطر القيد كما سيُرحَّل — الشيك الصادر التزام على «شيكات برسم
+          الدفع» لا نقدٌ خرج من الصندوق. */}
+      <div style={{ fontSize: "11px", marginTop: "8px", color: "var(--aseel-ink-soft)" }}>
+        القيد: {buildVoucherEntryPreview({
+          cashAmount: cashNum,
+          chequesAmount: totalCheques,
+          cashAccountLabel: (() => {
+            const a = accounts.find((x) => x.id === cashAccountId);
+            return a ? `${a.code} ${a.name}` : "—";
+          })(),
+          partnerLabel:
+            partners.find((p) => p.id === supplierId)?.name
+            || initialPartner?.name || "—",
+          direction: "Outgoing",
+        }).map((line) => `${line.side} ${line.label} ${formatMoney(line.amount)}`)
+          .join(" / ") || "—"}
+      </div>
     </PaymentVoucherModal>
   );
 };

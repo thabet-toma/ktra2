@@ -91,7 +91,8 @@ class VoucherAtomicityTest(TestCase):
                     cash_amount=2000,
                     cash_account_id=self.cash_account.id,
                     cheques=[
-                        {"cheque_number": "CHQ-ATOM", "amount": "3000"},
+                        {"cheque_number": "CHQ-ATOM", "amount": "3000",
+                         "due_date": "2026-09-01"},
                     ],
                     user=None,
                 )

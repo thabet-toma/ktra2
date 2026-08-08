@@ -1,3 +1,4 @@
+from django.conf import settings
 from rest_framework.views import exception_handler as drf_handler
 from rest_framework.exceptions import ValidationError as DRFVE
 from django.core.exceptions import ValidationError as DjangoVE
@@ -59,9 +60,16 @@ def custom_exception_handler(exc, context):
         from core.logger_middleware import get_current_trace_id
         trace_id = get_current_trace_id() or str(uuid.uuid4())
         logger.exception(f"Unhandled exception in view [trace_id:{trace_id}]")
-        return Response({
+        body = {
             "detail": "حدث خطأ داخلي في الخادم.",
             "code": "internal_error",
-            "trace_id": trace_id
-        }, status=500)
+            "trace_id": trace_id,
+        }
+        # في التطوير وحده: نوع الاستثناء ونصّه داخل الاستجابة. بدونهما يبقى
+        # البلاغ «بضرب إيرور» ونصّ الاستثناء حبيسَ طرفية الخادم — ومن يبلّغ عن
+        # العطل ليس بالضرورة من يقرأ اللوغ. لا يُسرَّب شيء في الإنتاج
+        # (DEBUG=False) حيث يبقى `trace_id` وحده هو الرابط.
+        if getattr(settings, "DEBUG", False):
+            body["error"] = f"{type(exc).__name__}: {exc}"[:500]
+        return Response(body, status=500)
     return response

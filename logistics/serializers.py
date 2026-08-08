@@ -9,6 +9,7 @@ from rest_framework import serializers
 
 from accounting.models import Account
 from sales.models import SupplierPayment, SupplierPaymentAllocation
+from sales.serializers import CHEQUE_DUE_DATE_REQUIRED
 from core.payments import (
     apply_default_cash_account,
     document_partner_balance_summary,
@@ -2315,7 +2316,14 @@ class _SupplierChequeInputSerializer(serializers.Serializer):
     bank_name = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
     account_number = serializers.CharField(max_length=50, required=False, allow_blank=True, default='')
     bank_branch = serializers.CharField(max_length=100, required=False, allow_blank=True, default='')
-    due_date = serializers.DateField(required=False, allow_null=True)
+    # T-CHQ3/ط: مرآة الجانب الوارد — لا شيك بلا موعد استحقاق (نفس الرسالة).
+    due_date = serializers.DateField(
+        error_messages={
+            'null': CHEQUE_DUE_DATE_REQUIRED,
+            'required': CHEQUE_DUE_DATE_REQUIRED,
+            'invalid': CHEQUE_DUE_DATE_REQUIRED,
+        },
+    )
     issue_date = serializers.DateField(required=False, allow_null=True)
     payee_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default='')
     notes = serializers.CharField(required=False, allow_blank=True, default='')

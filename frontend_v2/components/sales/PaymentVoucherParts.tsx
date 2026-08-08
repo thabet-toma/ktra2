@@ -10,6 +10,7 @@
 import React from "react";
 import { formatMoney, formatNumber } from "@/utils/formatNumber";
 import { Plus, Save, Trash2, X } from "lucide-react";
+import { applyBlankDefaults } from "@/utils/partnerChequeDefaults";
 
 const fmt = (n: string | number) => formatMoney(n);
 
@@ -185,9 +186,23 @@ export const ChequeGrid: React.FC<{
   onChange: (next: ChequeLine[]) => void;
   onError?: (msg: string) => void;
   newLineDefaults?: Partial<ChequeLine>;
-}> = ({ cheques, onChange, onError, newLineDefaults }) => {
+  /** T-CHQ3: الاسم على الورقة يختلف بالاتجاه — الوارد ساحبه الزبون، والصادر
+   *  نحن ساحبه والمورد مستفيده. */
+  direction?: "Incoming" | "Outgoing";
+}> = ({ cheques, onChange, onError, newLineDefaults, direction = "Incoming" }) => {
+  const nameHeader = direction === "Outgoing" ? "المستفيد" : "صاحب الشيك";
   const patch = (i: number, part: Partial<ChequeLine>) =>
     onChange(cheques.map((x, j) => (i === j ? { ...x, ...part } : x)));
+
+  // T-CHQ3/هـ: الافتراضيات تصل بعد اختيار الطرف (نداء بطاقته)، فالسطر الذي
+  // أُضيف قبلها كان يبقى فارغاً ويُملأ يدوياً. تُملأ الحقول **الفارغة** وحدها —
+  // ما كتبه المستخدم لا يُلمس.
+  React.useEffect(() => {
+    if (!newLineDefaults || !cheques.length) return;
+    const filled = cheques.map((line) => applyBlankDefaults(line, newLineDefaults));
+    if (filled.some((line, i) => line !== cheques[i])) onChange(filled);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newLineDefaults]);
 
   const fillSimilar = () => {
     const last = cheques[cheques.length - 1];
@@ -229,18 +244,26 @@ export const ChequeGrid: React.FC<{
           لا شيكات — اضغط «شيك» للإضافة
         </div>
       ) : (
-        <table style={{ width: "100%", fontSize: "11px" }}>
+        // T-CHQ3/ي: العناوين الأوضح («حساب الساحب»/«البنك المسحوب عليه») وسّعت
+        // الجدول فوق عرض النافذة فانحشر عمود الحذف خارج الشاشة — «عملت اثنين
+        // بالغلط وبدي أحذف واحد وفش زر». الجدول يمرّر أفقياً داخل حاويته، وعمود
+        // الحذف ملتصق بالحافة فيبقى ظاهراً مهما ضاقت الشاشة.
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", minWidth: "760px", fontSize: "11px" }}>
           <thead style={{ background: "var(--aseel-surface-2, #f4ede0)" }}>
             <tr>
               <th style={{ padding: "4px" }}>#</th>
               <th style={{ padding: "4px" }}>رقم</th>
-              <th style={{ padding: "4px" }}>رقم الحساب</th>
-              <th style={{ padding: "4px" }}>صاحب الشيك</th>
+              <th style={{ padding: "4px" }}>حساب الساحب</th>
+              <th style={{ padding: "4px" }}>{nameHeader}</th>
               <th style={{ padding: "4px" }}>الاستحقاق</th>
               <th style={{ padding: "4px" }}>المبلغ</th>
-              <th style={{ padding: "4px" }}>البنك</th>
+              <th style={{ padding: "4px" }}>البنك المسحوب عليه</th>
               <th style={{ padding: "4px" }}>الفرع</th>
-              <th style={{ width: "30px" }}></th>
+              <th style={{
+                width: "34px", position: "sticky", left: 0,
+                background: "var(--aseel-surface-2, #f4ede0)",
+              }}></th>
             </tr>
           </thead>
           <tbody>
@@ -254,8 +277,18 @@ export const ChequeGrid: React.FC<{
                 <td style={{ padding: "2px" }}><input type="number" step="0.01" className="aseel-input aseel-num" style={{ fontSize: "11px" }} value={c.amount} onChange={(e) => patch(i, { amount: e.target.value })} /></td>
                 <td style={{ padding: "2px" }}><input className="aseel-input" style={{ fontSize: "11px" }} value={c.bank_name} onChange={(e) => patch(i, { bank_name: e.target.value })} /></td>
                 <td style={{ padding: "2px" }}><input className="aseel-input" style={{ fontSize: "11px" }} value={c.branch} onChange={(e) => patch(i, { branch: e.target.value })} /></td>
-                <td style={{ padding: "2px", textAlign: "center" }}>
-                  <button type="button" onClick={() => onChange(cheques.filter((_, j) => j !== i))} style={{ color: "var(--aseel-err, #c0392b)" }}>
+                <td style={{
+                  padding: "2px", textAlign: "center",
+                  position: "sticky", left: 0,
+                  background: "var(--aseel-surface, #fff)",
+                }}>
+                  <button
+                    type="button"
+                    title={`حذف الشيك #${i + 1}`}
+                    aria-label={`حذف الشيك #${i + 1}`}
+                    onClick={() => onChange(cheques.filter((_, j) => j !== i))}
+                    style={{ color: "var(--aseel-err, #c0392b)", padding: "4px" }}
+                  >
                     <Trash2 className="w-3 h-3" />
                   </button>
                 </td>
@@ -263,6 +296,7 @@ export const ChequeGrid: React.FC<{
             ))}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );

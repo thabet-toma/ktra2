@@ -76,6 +76,7 @@ class PaymentChequesTest(APITestCase):
             "cheques": [{
                 "cheque_number": "CHQ-1",
                 "amount": "200",
+                "due_date": "2026-09-01",
                 "bank_name": "بنك",
                 "account_number": "0012300456",
                 "bank_branch": "رام الله",
@@ -154,18 +155,21 @@ class PaymentChequesTest(APITestCase):
     def test_cheques_may_not_exceed_the_voucher_amount(self):
         res = self.client.post(
             URL,
-            self._body(cheques=[{"cheque_number": "CHQ-BIG", "amount": "900"}]),
+            self._body(cheques=[{"cheque_number": "CHQ-BIG", "amount": "900",
+                                 "due_date": "2026-09-01"}]),
             format="json", **self.h,
         )
         assert res.status_code == 400, res.content
 
     def test_cheque_needs_a_number_and_a_positive_amount(self):
         assert self.client.post(
-            URL, self._body(cheques=[{"cheque_number": "", "amount": "100"}]),
+            URL, self._body(cheques=[{"cheque_number": "", "amount": "100",
+                                     "due_date": "2026-09-01"}]),
             format="json", **self.h,
         ).status_code == 400
         assert self.client.post(
-            URL, self._body(cheques=[{"cheque_number": "CHQ-0", "amount": "0"}]),
+            URL, self._body(cheques=[{"cheque_number": "CHQ-0", "amount": "0",
+                                     "due_date": "2026-09-01"}]),
             format="json", **self.h,
         ).status_code == 400
 
@@ -179,3 +183,31 @@ class PaymentChequesTest(APITestCase):
             ("1110", "500.00", "0.00"),
             ("1101", "0.00", "500.00"),
         }
+
+    def test_cheque_needs_a_due_date(self):
+        """قرار المالك: دورة الشيك كلها مبنية على «لما يجي موعده».
+
+        وقبل هذا الشرط كان الفراغ يصطدم بعمود `DueDate` في القاعدة فيرتدّ
+        بـ500 غامض بدل رسالة تقول للمستخدم ما ينقصه.
+        """
+        res = self.client.post(
+            URL,
+            self._body(cheques=[{"cheque_number": "CHQ-NODUE", "amount": "200"}]),
+            format="json", **self.h,
+        )
+        assert res.status_code == 400, res.content
+        assert "استحقاق" in str(res.json()), res.content
+
+    def test_cheque_with_a_due_date_passes(self):
+        res = self.client.post(
+            URL,
+            self._body(
+                auto_post=False,
+                cheques=[{
+                    "cheque_number": "CHQ-DUE", "amount": "200",
+                    "due_date": "2026-09-01",
+                }],
+            ),
+            format="json", **self.h,
+        )
+        assert res.status_code == 201, res.content

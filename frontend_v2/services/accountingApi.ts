@@ -3,6 +3,7 @@
  */
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
 import { apiFetch, toPagedList } from "./restApi";
+import { humanizeDrfError } from "../utils/drfError";
 import { tenantScopedOfflineKey } from "../utils/offlineTenantScope";
 import type {
   BankAccountDto,
@@ -37,9 +38,9 @@ async function handle(res: Response, ctx: string): Promise<void> {
   let msg = `${ctx}: ${res.status}`;
   try {
     const j = await res.json();
-    if (typeof j.error === "string") msg = j.error;
-    else if (typeof j.detail === "string") msg = j.detail;
-    else if (j.detail != null) msg = JSON.stringify(j.detail);
+    // T-CHQ3: أخطاء الحقول ({"tenant":["مطلوب"]}) كانت تسقط هنا فيرى المستخدم
+    // «createCheque: 400» بلا سبب — تمرّ الآن على الطبقة الموحّدة.
+    msg = humanizeDrfError(j) || msg;
   } catch {
     const t = await res.text();
     if (t) msg = t.slice(0, 400);
