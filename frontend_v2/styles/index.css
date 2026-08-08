@@ -719,6 +719,14 @@ tbody td {
   max-height: calc(100vh - 160px);
   min-height: 320px;
 }
+/* شجرة الحسابات: الشجرة هي موضوع الشاشة لا مساعداً جانبياً — فتأخذ عرضاً
+   وارتفاعاً أوسع من شريط منتقي المنتجات. */
+:root[data-skin] .aseel-tree-panel--coa {
+  flex: 0 0 320px;
+  max-width: 320px;
+  max-height: calc(100vh - 120px);
+  min-height: 420px;
+}
 :root[data-skin] .aseel-tree-head,
 :root[data-skin] .aseel-tree-search,
 :root[data-skin] .aseel-tree-actions {

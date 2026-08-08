@@ -2,10 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   accountLabel,
+  accountNature,
+  accountPath,
+  accountStatement,
   ancestorIdsOf,
   buildAccountIndex,
   isCashAccount,
   matchesAccountQuery,
+  nextChildCode,
   visibleAccountRows,
   type AccountNodeLike,
 } from './accountTree.ts';
@@ -109,4 +113,57 @@ test('شرط الصندوق موحّد: النوع أو الكود 110x أو ا�
     isCashAccount({ id: 3, code: '2101', name: 'بنك دائن', parent: null, account_type: 'Liability' }),
     false,
   );
+});
+
+test('طبيعة الحساب مشتقّة من نوعه — الأصول والمصروفات مدينة والبقية دائنة', () => {
+  const typed = (t: string | null) => ({ id: 1, code: '1', name: 'x', parent: null, account_type: t });
+  assert.equal(accountNature(typed('Asset')), 'debit');
+  assert.equal(accountNature(typed('Expense')), 'debit');
+  assert.equal(accountNature(typed('Liability')), 'credit');
+  assert.equal(accountNature(typed('Equity')), 'credit');
+  assert.equal(accountNature(typed('Revenue')), 'credit');
+  assert.equal(accountNature(typed('asset')), 'debit');
+  assert.equal(accountNature(typed(null)), null);
+  assert.equal(accountNature(typed('Nonsense')), null);
+});
+
+test('الحساب الختامي: الميزانية للأصول والخصوم والملكية، والأرباح للإيراد والمصروف', () => {
+  const typed = (t: string | null) => ({ id: 1, code: '1', name: 'x', parent: null, account_type: t });
+  assert.equal(accountStatement(typed('Asset')), 'balance');
+  assert.equal(accountStatement(typed('Liability')), 'balance');
+  assert.equal(accountStatement(typed('Equity')), 'balance');
+  assert.equal(accountStatement(typed('Revenue')), 'income');
+  assert.equal(accountStatement(typed('Expense')), 'income');
+  assert.equal(accountStatement(typed(null)), null);
+});
+
+test('مسار الحساب من الجذر إلى الحساب نفسه', () => {
+  const index = buildAccountIndex(TREE);
+  assert.deepEqual(accountPath(index, 5).map((a) => a.code), ['1', '11', '1103', '11030001']);
+  assert.deepEqual(accountPath(index, 1).map((a) => a.code), ['1']);
+  assert.deepEqual(accountPath(index, null), []);
+  assert.deepEqual(accountPath(index, 999), []);
+});
+
+test('كود الابن المقترح يكمل تسلسل الإخوة بنفس الطول', () => {
+  const index = buildAccountIndex(TREE);
+  // 1103 له ابن واحد 11030001 ⇒ التالي 11030002
+  assert.equal(nextChildCode(index, 4), '11030002');
+  // 1101 بلا أبناء ⇒ كود الأب + 01
+  assert.equal(nextChildCode(index, 3), '110101');
+  // الجذور: أعلى جذر «1» ⇒ «2»
+  assert.equal(nextChildCode(index, null), '2');
+});
+
+test('كود مقترح فارغ حين يتعذّر الاستنتاج بثقة', () => {
+  // إخوة بأطوال مختلفة ⇒ لا اقتراح
+  const mixed = buildAccountIndex([
+    acc(1, '1101', 'النقدية'),
+    acc(2, '110101', 'صندوق', 1),
+    acc(3, '11010102', 'صندوق فرعي', 1),
+  ]);
+  assert.equal(nextChildCode(mixed, 1), '');
+  // كود غير رقمي ⇒ لا اقتراح
+  const alpha = buildAccountIndex([acc(1, 'CASH', 'نقدية')]);
+  assert.equal(nextChildCode(alpha, 1), '');
 });
