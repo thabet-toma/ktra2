@@ -160,6 +160,8 @@ const DeliveryNotesPage = lazyPage(() => import("./components/sales/DeliveryNote
 const LocalShippingPage = lazyPage(() => import("./components/logistics/LocalShippingPage"));
 // مصاريف شخصية — شاشة خاصة بالمستخدم، مفتوحة للجميع (العزل خادمي بالمستخدم).
 const PersonalExpensesPage = lazyPage(() => import("./components/personal/PersonalExpensesPage"));
+// الرواتب — موظفون وساعات وغيابات وكشوف، مرتبطة بشجرة الحسابات.
+const PayrollPage = lazyPage(() => import("./components/hr/PayrollPage"));
 const AccountantSignupPage = lazyPage(() => import("./components/accountant/AccountantSignupPage"));
 const CompanyAccountantEngagementsPage = lazyPage(() => import("./components/accountant/CompanyAccountantEngagementsPage"));
 const AccountantOfficeApp = lazyPage(() => import("./components/accountant/office/AccountantOfficeApp"));
@@ -202,6 +204,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "points-management": "/points-management",
   "points-history": "/points-history",
   "personal-expenses": "/personal-expenses",
+  payroll: "/payroll",
   "company-accountant-engagements": "/accountant/company/engagements",
   "sales-invoices": "/sales/invoices",
   "sales-quotations": "/sales/quotations",
@@ -1492,6 +1495,12 @@ const App: React.FC = () => {
       // مصاريف شخصية — بلا صلاحية في الخريطة: لكل مستخدم دفتره وحده.
       case "personal-expenses":
         return <PersonalExpensesPage />;
+
+      case "payroll":
+        if (!canView(appView)) {
+          return <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 p-8 text-center font-bold text-red-800">لا تملك صلاحية عرض الرواتب (403).</div>;
+        }
+        return <PayrollPage />;
 
       case "points-management":
         if (currentUser!.role !== "manager")

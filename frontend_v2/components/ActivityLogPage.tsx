@@ -3,6 +3,7 @@ import { History, Search, ArrowRight, User as UserIcon, RefreshCw } from "lucide
 import { getActivityLog, getActivityUsers } from "@/services/activityService";
 import type { ActivityLogEntry, ActivityUserOption } from "@/types/activity";
 import { actionMeta, entityLabel, formatActivityTime, ENTITY_LABELS } from "./activity/activityMeta";
+import { ActivityChanges } from "./activity/ActivityChanges";
 
 /** تاريخ اليوم محلياً بصيغة YYYY-MM-DD (بدون انزياح UTC). */
 function todayLocal(): string {
@@ -134,7 +135,11 @@ export const ActivityLogPage: React.FC = () => {
                     {r.entity_label && <span className="text-sm font-medium text-[var(--color-text)]">{r.entity_label}</span>}
                     <span className="text-xs aseel-text-soft mr-auto">{formatActivityTime(r.timestamp)}</span>
                   </div>
-                  {r.description && <p className="text-sm aseel-text-soft mt-0.5">{r.description}</p>}
+                  {r.metadata?.changes?.length ? (
+                    <div className="mt-1"><ActivityChanges changes={r.metadata.changes} /></div>
+                  ) : (
+                    r.description && <p className="text-sm aseel-text-soft mt-0.5">{r.description}</p>
+                  )}
                 </li>
               );
             })}
@@ -233,7 +238,13 @@ export const ActivityLogPage: React.FC = () => {
                         <span className="aseel-text-soft">{entityLabel(r.entity_type)}</span>
                         {r.entity_label && <span className="font-medium text-[var(--color-text)]"> {r.entity_label}</span>}
                       </td>
-                      <td className="px-3 py-2 aseel-text-soft">{r.description}</td>
+                      <td className="px-3 py-2 aseel-text-soft max-w-lg">
+                        {r.metadata?.changes?.length ? (
+                          <ActivityChanges changes={r.metadata.changes} />
+                        ) : (
+                          r.description
+                        )}
+                      </td>
                       <td className="px-3 py-2 whitespace-nowrap aseel-text-soft text-xs">{r.ip_address || "—"}</td>
                     </tr>
                   );

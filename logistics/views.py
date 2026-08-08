@@ -57,7 +57,15 @@ from .accruals import (
     AccrualSkipped, post_clearance_accrual, post_freight_accrual,
     post_local_shipment_accrual,
 )
-from core.activity import log_activity, log_view
+from core.activity import (
+    build_activity_changes,
+    build_line_changes,
+    describe_activity_changes,
+    log_activity,
+    log_view,
+    snapshot_document_lines,
+    snapshot_fields,
+)
 from core.api_defaults import PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.access import require_perm, requires_perm
 from core.user_roles import user_can_unpost_logistics_deal_payment
@@ -2668,6 +2676,40 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
         })
 
 
+# تفصيل حركة التعديل في سجل النشاط — نفس عقد فاتورة البيع (core.activity).
+PURCHASE_ACTIVITY_FIELD_LABELS = {
+    'partner': 'المورد',
+    'invoice_name': 'اسم الفاتورة',
+    'invoice_date': 'تاريخ الفاتورة',
+    'payment_type': 'نوع الدفع',
+    'supplier_invoice_number': 'رقم فاتورة المورد',
+    'discount_amount': 'خصم الفاتورة',
+    'shipping_cost': 'تكلفة الشحن',
+    'exchange_rate': 'سعر الصرف',
+    'notes': 'الملاحظات',
+}
+PURCHASE_ACTIVITY_ITEM_LABELS = {
+    'name': 'البيان',
+    'quantity': 'الكمية',
+    'unit_price': 'السعر',
+    'discount_amount': 'خصم البند',
+}
+
+
+def _purchase_item_snapshot(invoice):
+    """لقطة بنود فاتورة الشراء من القاعدة — لا من ذاكرة prefetch (قديمة بعد الحفظ)."""
+    items = PurchaseInvoiceItem.objects.filter(invoice=invoice).select_related('product')
+    return snapshot_document_lines(
+        items,
+        label=lambda item: (
+            item.name
+            or (item.product and (item.product.name_ar or item.product.name_en or item.product.sku))
+            or '—'
+        ),
+        fields=PURCHASE_ACTIVITY_ITEM_LABELS,
+    )
+
+
 class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
     serializer_class = PurchaseInvoiceSerializer
     partner_balance_spec = ("partner_id", True, "supplier_balance")
@@ -3946,12 +3988,30 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         instance = serializer.instance
         if instance is not None and instance.is_posted:
             raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
+        before_header = snapshot_fields(instance, PURCHASE_ACTIVITY_FIELD_LABELS)
+        before_items = _purchase_item_snapshot(instance)
         invoice = serializer.save()
         self._sync_attachments(invoice)
+        changes = build_activity_changes(
+            before=before_header,
+            after=snapshot_fields(invoice, PURCHASE_ACTIVITY_FIELD_LABELS),
+            labels=PURCHASE_ACTIVITY_FIELD_LABELS,
+        ) + build_line_changes(
+            before=before_items,
+            after=_purchase_item_snapshot(invoice),
+            labels=PURCHASE_ACTIVITY_ITEM_LABELS,
+        )
+        details = describe_activity_changes(changes)
+        base = 'تعديل ' + ('مرجع شراء' if invoice.is_return else 'فاتورة شراء')
+        logger.info(
+            "Purchase invoice %s edited by %s with %s change(s).",
+            invoice.invoice_number, getattr(self.request.user, 'username', '—'), len(changes),
+        )
         log_activity(
             action='update', entity_type='purchase_invoice', entity_id=invoice.id,
             entity_label=invoice.invoice_number,
-            description='تعديل ' + ('مرجع شراء' if invoice.is_return else 'فاتورة شراء'),
+            description=f'{base} — {details}' if details else base,
+            metadata={'changes': changes} if changes else None,
             partner_ids=[invoice.partner_id],
             request=self.request,
         )

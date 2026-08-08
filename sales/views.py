@@ -11,7 +11,15 @@ from rest_framework.response import Response
 
 from accounting.services import attach_partner_posted_balance, unpost_document
 from core.access import require_perm, requires_perm, user_has_perm
-from core.activity import log_activity, log_view
+from core.activity import (
+    build_activity_changes,
+    build_line_changes,
+    describe_activity_changes,
+    log_activity,
+    log_view,
+    snapshot_document_lines,
+    snapshot_fields,
+)
 from core.api_defaults import ApiAuthAndUser, PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.plans import enforce_limits
 from core.tenant_utils import get_branch, get_tenant
@@ -71,6 +79,36 @@ from .services import (
 )
 
 logger = logging.getLogger(__name__)
+
+# تفصيل حركة التعديل في سجل النشاط: ما الذي يُقارَن قبل الحفظ وبعده، وبأي اسم
+# عربي يُعرض. البنود تُقارَن بالصنف فيظهر «أضاف/حذف صنفاً» و«غيّر السعر من…إلى».
+INVOICE_ACTIVITY_FIELD_LABELS = {
+    "customer": "العميل",
+    "invoice_date": "تاريخ الفاتورة",
+    "due_date": "تاريخ الاستحقاق",
+    "invoice_type": "نوع الفاتورة",
+    "invoice_discount": "خصم الفاتورة",
+    "discount_percent": "نسبة الخصم",
+    "exchange_rate": "سعر الصرف",
+    "notes": "الملاحظات",
+}
+INVOICE_ACTIVITY_LINE_LABELS = {
+    "quantity": "الكمية",
+    "unit_price": "السعر",
+    "line_discount": "خصم البند",
+}
+
+
+def _invoice_line_snapshot(invoice):
+    """لقطة بنود الفاتورة من القاعدة — لا من ذاكرة prefetch (تكون قديمة بعد الحفظ)."""
+    lines = SalesInvoiceLine.objects.filter(invoice=invoice).select_related("product")
+    return snapshot_document_lines(
+        lines,
+        label=lambda line: (
+            line.product.name_ar or line.product.name_en or line.product.sku
+        ),
+        fields=INVOICE_ACTIVITY_LINE_LABELS,
+    )
 
 
 class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
@@ -235,10 +273,28 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
             raise DRFValidationError(
                 {"detail": POSTED_DOC_WARNING, "can_unpost": True},
             )
+        before_header = snapshot_fields(instance, INVOICE_ACTIVITY_FIELD_LABELS)
+        before_lines = _invoice_line_snapshot(instance)
         invoice = serializer.save()
+        changes = build_activity_changes(
+            before=before_header,
+            after=snapshot_fields(invoice, INVOICE_ACTIVITY_FIELD_LABELS),
+            labels=INVOICE_ACTIVITY_FIELD_LABELS,
+        ) + build_line_changes(
+            before=before_lines,
+            after=_invoice_line_snapshot(invoice),
+            labels=INVOICE_ACTIVITY_LINE_LABELS,
+        )
+        details = describe_activity_changes(changes)
+        logger.info(
+            "Sales invoice %s edited by %s with %s change(s).",
+            invoice.invoice_number, getattr(self.request.user, "username", "—"), len(changes),
+        )
         log_activity(
             action="update", entity_type="sales_invoice", entity_id=invoice.id,
-            entity_label=invoice.invoice_number, description="تعديل فاتورة مبيعات",
+            entity_label=invoice.invoice_number,
+            description=f"تعديل فاتورة مبيعات — {details}" if details else "تعديل فاتورة مبيعات",
+            metadata={"changes": changes} if changes else None,
             partner_ids=[invoice.customer_id],
             request=self.request,
         )

@@ -402,14 +402,15 @@ class ProductApiTest(APITestCase):
         activity = ActivityLog.objects.filter(
             tenant=self.t_a, entity_type="product", entity_id=created["id"], action="update",
         ).latest("id")
+        # G1: بلا أصفار زائدة في نصّ السجل — «150.5» لا «150.5000».
         assert activity.description == (
-            "عدّل سعر البيع للمنتج «صنف بسعر بيع» من 150.5000 إلى 175.0000"
+            "عدّل سعر البيع للمنتج «صنف بسعر بيع» من 150.5 إلى 175"
         )
         assert activity.metadata["changes"] == [{
             "field": "sale_price",
             "label": "سعر البيع",
-            "old": "150.5000",
-            "new": "175.0000",
+            "old": "150.5",
+            "new": "175",
         }]
 
         before = ActivityLog.objects.filter(
