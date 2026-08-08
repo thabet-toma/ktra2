@@ -153,6 +153,74 @@ export const isCashAccount = (a: AccountNodeLike): boolean => {
   return /صندوق|بنك|نقدية|cash|bank/i.test(a.name ?? '');
 };
 
+/** أنواع الحسابات ذات الطبيعة المدينة؛ البقية دائنة. */
+const DEBIT_TYPES = ['asset', 'expense'];
+/** أنواع حسابات الميزانية؛ البقية تُقفَل في الأرباح والخسائر. */
+const BALANCE_TYPES = ['asset', 'liability', 'equity'];
+
+const knownType = (a: AccountNodeLike): string | null => {
+  const type = (a.account_type || '').toLowerCase();
+  return DEBIT_TYPES.includes(type) || BALANCE_TYPES.includes(type) || type === 'revenue'
+    ? type
+    : null;
+};
+
+/**
+ * طبيعة الحساب (مدين/دائن) مشتقّة من نوعه — لا تُدخَل يدوياً. كانت بطاقة الحساب
+ * تعرض النوع وحده، والمستخدم يحتاج أن يعرف أين يقع الحساب في القيد.
+ */
+export const accountNature = (a: AccountNodeLike): 'debit' | 'credit' | null => {
+  const type = knownType(a);
+  if (!type) return null;
+  return DEBIT_TYPES.includes(type) ? 'debit' : 'credit';
+};
+
+/** الحساب الختامي: ميزانية (يُرحَّل رصيده) أو أرباح وخسائر (يُقفَل آخر السنة). */
+export const accountStatement = (a: AccountNodeLike): 'balance' | 'income' | null => {
+  const type = knownType(a);
+  if (!type) return null;
+  return BALANCE_TYPES.includes(type) ? 'balance' : 'income';
+};
+
+/** مسار الحساب من الجذر إليه (شاملاً إياه) — لعرض موقعه في الشجرة نصّاً. */
+export const accountPath = <T extends AccountNodeLike>(
+  index: AccountIndex<T>,
+  accountId: number | null | undefined,
+): T[] => {
+  if (accountId == null) return [];
+  const self = index.byId.get(accountId);
+  if (!self) return [];
+  const parents = ancestorIdsOf(index, accountId)
+    .map((id) => index.byId.get(id))
+    .filter((a): a is T => !!a)
+    .reverse();
+  return [...parents, self];
+};
+
+/**
+ * الكود المقترح لحساب جديد تحت أبٍ ما (`null` = جذر جديد): يكمل تسلسل الإخوة
+ * بنفس طولهم، وبلا إخوةٍ يبني على كود الأب. يعود فارغاً حين يتعذّر الاستنتاج
+ * بثقة (أكواد غير رقمية أو إخوة بأطوال مختلفة) — اقتراحٌ خاطئ أسوأ من لا اقتراح.
+ */
+export const nextChildCode = <T extends AccountNodeLike>(
+  index: AccountIndex<T>,
+  parentId: number | null,
+): string => {
+  const siblings = (index.childrenOf.get(parentId) ?? [])
+    .map(codeOf)
+    .filter((c) => /^\d+$/.test(c));
+  if (siblings.length > 0) {
+    const width = siblings[0].length;
+    if (!siblings.every((c) => c.length === width)) return '';
+    const next = Math.max(...siblings.map((c) => Number(c))) + 1;
+    const out = String(next).padStart(width, '0');
+    return out.length === width ? out : '';
+  }
+  if (parentId == null) return '';
+  const parentCode = codeOf(index.byId.get(parentId) ?? ({} as AccountNodeLike));
+  return /^\d+$/.test(parentCode) ? `${parentCode}01` : '';
+};
+
 /** تسمية الحساب في الحقل المغلق: «الكود — الاسم». */
 export const accountLabel = (a: AccountNodeLike | null | undefined): string => {
   if (!a) return '';
