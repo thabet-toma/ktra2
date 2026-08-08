@@ -186,10 +186,40 @@ class ChequeViewSet(viewsets.ModelViewSet):
         return Cheque.objects.none()
 
     def perform_create(self, serializer):
+        """T-CHQ3: الورقة تدخل الدفاتر ضمن سندها لا وحدها.
+
+        الشيك في الأنظمة المهنية ليس مستنداً محاسبياً مستقلاً: يُسجَّل داخل سند
+        قبض/صرف (أو فاتورة) — بلا توزيع فهو دفعة «على الحساب»، وبتوزيع فهو
+        تسوية لفاتورة بعينها. إنشاء شيك سائب هنا كان يخلق ورقة خارج الدفاتر
+        لا يُرحَّل لها قيد أبداً (حتى قيد تحصيلها يتخطّاه `transfer_cheque`)،
+        فصار مرفوضاً ويُوجَّه للمسار الواحد.
+        """
         tenant = get_tenant(self.request)
         if not tenant:
             raise ValidationError({"error": "لا يوجد شركة محددة لهذا الطلب."})
-        serializer.save(tenant=tenant)
+        data = serializer.validated_data
+        linked = (
+            data.get("supplier_payment") or data.get("purchase_invoice")
+            if data.get("direction") == "Outgoing"
+            else data.get("customer_payment") or data.get("sales_invoice")
+        )
+        if not linked:
+            raise ValidationError({"detail": (
+                "الشيك يُسجَّل داخل سند قبض/صرف أو من الفاتورة — لا يُنشأ وحده. "
+                "من شاشة الشيكات: «شيك وارد» يفتح سند قبض و«شيك صادر» يفتح سند "
+                "صرف؛ اتركه بلا توزيع فيُسجَّل دفعةً على الحساب، أو وزّعه على "
+                "فاتورة فيُسوّيها."
+            )})
+        user = self.request.user
+        cheque = serializer.save(
+            tenant=tenant,
+            created_by=user if user and user.is_authenticated else None,
+        )
+        logger.info(
+            "cheque.create id=%s number=%s tenant=%s direction=%s amount=%s",
+            cheque.pk, cheque.cheque_number, tenant.TenantID,
+            cheque.direction, cheque.amount,
+        )
 
     def update(self, request, *args, **kwargs):
         # task11 R2-A3: تغيير الحالة بـ PATCH خام كان يتجاوز آلة الانتقالات

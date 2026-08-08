@@ -25,6 +25,7 @@ from inventory.models import Product, StockMovement
 from inventory.services import record_stock_movement
 from partners.models import Partner, PartnerGroup
 from partners.signals import ensure_partner_linked_account
+from tenants.models import Tenant
 
 from .models import (
     CreditDebitNote,
@@ -704,11 +705,21 @@ def resolve_cheques_under_collection_account(tenant_id: int) -> Account:
             .first()
         )
     if not uc_acc:
+        # T-CHQ3/هـ: كان يُرفض الترحيل ويُطلب من المستخدم تعيين الحساب بنفسه،
+        # فيقف عمله عند أول شيك في شركة شجرتها ناقصة. الحساب المعياري يُنشأ
+        # من الكود، ويبقى قابلاً للتغيير من إعدادات المبيعات.
+        from tenants.services import ensure_operational_account
+        uc_acc = ensure_operational_account(
+            ss.tenant if ss else Tenant.objects.get(pk=tenant_id), "1107")
+    if not uc_acc:
         raise ValidationError(
-            "توجد شيكات واردة لكن لا يوجد حساب «شيكات برسم التحصيل». "
-            "عيّن `default_cheques_under_collection_account` في إعدادات "
-            "المبيعات، أو أنشئ حساب Asset باسم يتضمّن «شيكات»."
+            "توجد شيكات واردة لكن تعذّر إنشاء حساب «شيكات برسم التحصيل». "
+            "عيّن `default_cheques_under_collection_account` في إعدادات المبيعات."
         )
+    # يُثبَّت في الإعدادات كي يظهر للمالك ويغيّره إن أراد حساباً آخر.
+    if ss and not ss.default_cheques_under_collection_account_id:
+        ss.default_cheques_under_collection_account = uc_acc
+        ss.save(update_fields=["default_cheques_under_collection_account"])
     return uc_acc
 
 
@@ -728,9 +739,12 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:
         or base.filter(name__icontains="شيكات").order_by("code").first()
     )
     if not acc:
+        # T-CHQ3/هـ: مرآة حساب الوارد — يُنشأ من الكود بدل ردّ المستخدم.
+        from tenants.services import ensure_operational_account
+        acc = ensure_operational_account(Tenant.objects.get(pk=tenant_id), "2111")
+    if not acc:
         raise ValidationError(
-            "يوجد شيك صادر لكن لا يوجد حساب «شيكات برسم الدفع». "
-            "أنشئ حساب Liability باسم يتضمّن «شيكات» (مثال: «شيكات برسم الدفع»)."
+            "يوجد شيك صادر لكن تعذّر إنشاء حساب «شيكات برسم الدفع»."
         )
     return acc
 

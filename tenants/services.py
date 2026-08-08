@@ -1,6 +1,6 @@
 import logging
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError
 from tenants.models import Branch, Tenant, TenantSettings, TenantBook, UserCompanyMembership
 from accounting.models import Account, Currency
@@ -110,6 +110,61 @@ def ensure_operational_accounts(tenant) -> list[str]:
         )
         created.append(code)
     return created
+
+
+def ensure_operational_account(tenant, code: str):
+    """يضمن حساباً تشغيلياً واحداً ويعيده — يُنشئه ولو غاب أبوه المعياري.
+
+    `ensure_operational_accounts` يتخطّى الحساب إن غاب أبوه (لا دمج أعمى في
+    شجرة غير معيارية)، لكن مسارات الترحيل التي تستهلكه — كترحيل سند فيه شيك —
+    تتوقّف عندها عمل المستخدم وتطلب منه تعيين الحساب يدوياً. فهنا نتدرّج في
+    الأب: الأب المعياري ← جذر نوعه ← بلا أب، ولا نردّ المستخدم أبداً.
+    """
+    row = next((r for r in COA_DATA if r[0] == code), None)
+    if row is None:
+        return None
+    _, acc_name, acc_type, parent_code = row
+
+    def _existing():
+        # بالكود أولاً، ثم بالاسم المعياري مهما كان نوعه أو حالته: الحساب
+        # المعطَّل أو المصنَّف خطأً موجودٌ فعلاً، وإنشاء ثانٍ باسمه يكرّر الشجرة
+        # (ويصطدم بقيد فريد على (tenant, name) في القواعد المُرحَّلة من 0001).
+        return (
+            Account.objects.filter(tenant=tenant, code=code).first()
+            or Account.objects.filter(tenant=tenant, name=acc_name).first()
+        )
+
+    existing = _existing()
+    if existing is not None:
+        return existing
+
+    parent = (
+        Account.objects.filter(tenant=tenant, code=parent_code).first()
+        or Account.objects.filter(tenant=tenant, code=parent_code[:1]).first()
+    )
+    if parent is None:
+        logger.warning(
+            "ensure_operational_account: tenant=%s creating %s without a parent "
+            "(non-standard tree)", tenant.TenantID, code,
+        )
+    try:
+        account = Account.objects.create(
+            tenant=tenant, code=code, name=acc_name,
+            account_type=acc_type, parent=parent, is_active=True,
+        )
+    except IntegrityError:
+        # قيد فريد قديم أو سباق بين طلبين — لا يجوز أن يتحول إلى 500 في وجه
+        # المستخدم وهو يحفظ سنداً. نعيد القراءة ونستعمل الموجود.
+        logger.warning(
+            "ensure_operational_account: tenant=%s insert of %s hit a unique "
+            "constraint — reusing the existing account", tenant.TenantID, code,
+        )
+        return _existing()
+    logger.info(
+        "ensure_operational_account: tenant=%s created %s (%s) parent=%s",
+        tenant.TenantID, code, acc_name, parent.code if parent else "-",
+    )
+    return account
 
 
 DEFAULT_CURRENCIES = [

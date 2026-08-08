@@ -51,7 +51,8 @@ class SupplierPaymentChequesTest(APITestCase):
             "amount": "500",
             "currency": self.currency.CurrencyID,
             "cash_or_bank_account": self.cash.pk,
-            "cheques": [{"cheque_number": "OUT-1", "amount": "200", "bank_name": "بنك"}],
+            "cheques": [{"cheque_number": "OUT-1", "amount": "200", "bank_name": "بنك",
+                         "due_date": "2026-09-01"}],
         }
         body.update(over)
         return body
@@ -100,10 +101,21 @@ class SupplierPaymentChequesTest(APITestCase):
     def test_cheques_may_not_exceed_the_voucher_amount(self):
         res = self.client.post(
             URL,
-            self._body(cheques=[{"cheque_number": "OUT-BIG", "amount": "900"}]),
+            self._body(cheques=[{"cheque_number": "OUT-BIG", "amount": "900",
+                                 "due_date": "2026-09-01"}]),
             format="json", **self.h,
         )
         assert res.status_code == 400, res.content
+
+    def test_cheque_needs_a_due_date(self):
+        """مرآة الجانب الوارد: لا شيك بلا موعد استحقاق."""
+        res = self.client.post(
+            URL,
+            self._body(cheques=[{"cheque_number": "OUT-NODUE", "amount": "200"}]),
+            format="json", **self.h,
+        )
+        assert res.status_code == 400, res.content
+        assert "استحقاق" in str(res.json()), res.content
 
     def test_payment_without_cheques_is_unchanged(self):
         res = self.client.post(URL, self._body(cheques=[]), format="json", **self.h)
@@ -116,27 +128,33 @@ class SupplierPaymentChequesTest(APITestCase):
 
 
 class ChequeAccountResolutionTest(APITestCase):
-    """حساب الشيكات لا يُخمَّن: بلا حساب «شيكات» صريح يفشل الترحيل برسالة واضحة
-    بدل أن تهبط أموال الشيكات في حساب آخر يصادف كوده 1106 (في شجرة الحسابات
-    الاحترافية 1106 = «دفعات مقدمة للموردين»).
+    """حساب الشيكات لا يُخمَّن بالكود: 1106 في الشجرة الاحترافية = «دفعات مقدمة
+    للموردين»، فقبولُه كان يُهبِط أموال الشيكات في حساب لا علاقة له بها.
+
+    T-CHQ3/هـ: بلا حساب «شيكات» كان الترحيل يفشل ويطلب من المستخدم تعيينه —
+    والآن يُنشأ الحساب المعياري من الكود (قرار المالك). الحارس الأصلي قائم:
+    الحساب الناتج حساب شيكات حقيقي، لا 1106 ولا أي حساب مصادف.
     """
 
     @classmethod
     def setUpTestData(cls):
         cls.tenant = Tenant.objects.create(TenantID=153, CompanyName="No Cheque Acct")
-        Account.objects.create(
+        cls.advances = Account.objects.create(
             tenant=cls.tenant, code="1106", name="دفعات مقدمة للموردين",
             account_type="Asset", is_active=True)
 
     def test_advances_account_is_not_mistaken_for_cheques(self):
-        from django.core.exceptions import ValidationError
-
         from sales.services import (
             resolve_cheques_payable_account,
             resolve_cheques_under_collection_account,
         )
 
-        with self.assertRaises(ValidationError):
-            resolve_cheques_under_collection_account(self.tenant.TenantID)
-        with self.assertRaises(ValidationError):
-            resolve_cheques_payable_account(self.tenant.TenantID)
+        uc = resolve_cheques_under_collection_account(self.tenant.TenantID)
+        self.assertNotEqual(uc.pk, self.advances.pk)
+        self.assertEqual(uc.code, "1107")
+        self.assertIn("شيكات", uc.name)
+
+        payable = resolve_cheques_payable_account(self.tenant.TenantID)
+        self.assertNotEqual(payable.pk, self.advances.pk)
+        self.assertEqual(payable.code, "2111")
+        self.assertEqual(payable.account_type, "Liability")

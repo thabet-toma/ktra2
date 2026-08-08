@@ -59,8 +59,10 @@ import { isCashAccount } from "../../utils/accountTree";
 import { VoucherAllocationModal } from "../shared/VoucherAllocationModal";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { formatDateLocalized } from "../../utils/formatDate";
+import { buildVoucherEntryPreview } from "../../utils/voucherEntryPreview";
 import {
   buildPartnerChequeDefaults,
+  validateChequeLines,
   type PartnerBankAccount,
 } from "../../utils/partnerChequeDefaults";
 
@@ -741,6 +743,12 @@ export const NewPaymentModal: React.FC<{
       );
       return;
     }
+    // T-CHQ3/ط: سطور الشيكات تُفحص قبل الإرسال — الرسالة تسمّي السطر الناقص.
+    const chequeError = validateChequeLines(cheques);
+    if (chequeError) {
+      setError(chequeError);
+      return;
+    }
     setSubmitting(true);
     try {
       const saved = await createCustomerPayment({
@@ -960,11 +968,22 @@ export const NewPaymentModal: React.FC<{
         <textarea className="aseel-input" rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
       </label>
 
+      {/* T-CHQ3/و: كان السطر يقول «Dr الصندوق» دائماً ولو كان السند كلّه شيكات —
+          وهو كذبٌ على المستخدم: الشيك لا يدخل الصندوق حتى يُحصَّل. الخادم يقسم
+          الجانب المدين أصلاً؛ هذا السطر يعرض القسمة نفسها. */}
       <div style={{ fontSize: "11px", marginTop: "8px", color: "var(--aseel-ink-soft)" }}>
-        القيد: Dr {(() => {
-          const a = accounts.find((x) => x.id === cashAccountId);
-          return a ? `${a.code} ${a.name}` : "—";
-        })()} / Cr ذمم العميل {(partners.find((p) => p.id === partnerId)?.name) || initialPartner?.name || "—"}
+        القيد: {buildVoucherEntryPreview({
+          cashAmount: Number(cashAmount) || 0,
+          chequesAmount: totalCheques,
+          cashAccountLabel: (() => {
+            const a = accounts.find((x) => x.id === cashAccountId);
+            return a ? `${a.code} ${a.name}` : "—";
+          })(),
+          partnerLabel:
+            (partners.find((p) => p.id === partnerId)?.name)
+            || initialPartner?.name || "—",
+          direction: "Incoming",
+        }).map((line) => `${line.side} ${line.label} ${fmt(line.amount)}`).join(" / ") || "—"}
       </div>
     </PaymentVoucherModal>
   );

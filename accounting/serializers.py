@@ -381,6 +381,28 @@ class ChequeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cheque
         fields = '__all__'
+        # T-CHQ3: الشركة من الترويسة والمستخدم من التوكن — وبقاؤهما مطلوبَين
+        # (FK بلا blank=True) كان يردّ كل إنشاء شيك من الشاشة بـ400.
+        read_only_fields = ['tenant', 'created_by', 'created_at']
+
+    def validate(self, attrs):
+        """T-CHQ3: البنك المسحوب عليه أهمّ ما في الورقة — مسجَّلاً أو نصاً.
+
+        على التعديل لا يُطبَّق الشرط إلا إذا مسّ الطلب حقول البنك، كي لا يمنع
+        تحرير شيكات قديمة سُجِّلت بلا بنك.
+        """
+        if self.instance is not None and not (
+                'bank' in attrs or 'bank_name' in attrs):
+            return attrs
+        bank = attrs.get('bank', getattr(self.instance, 'bank', None))
+        bank_name = attrs.get(
+            'bank_name', getattr(self.instance, 'bank_name', None))
+        if not bank and not (bank_name or '').strip():
+            raise serializers.ValidationError({
+                'bank': 'البنك المسحوب عليه الشيك مطلوب — اخترْه من البنوك '
+                        'المسجَّلة أو اكتب اسمه نصاً.',
+            })
+        return attrs
 
     def get_bank_display(self, obj):
         return (obj.bank.name if obj.bank_id else None) or obj.bank_name or ''

@@ -4,18 +4,18 @@ import { formatMoney } from "../../utils/formatNumber";
 import type {
   AccountingPartner,
   BankAccountDto,
-  BankBranchDto,
-  BankDto,
   ChequeDto,
   ChequeMovementDto,
 } from "../../types/accounting";
 import { ChequeWalletPanel } from "./ChequeWalletPanel";
+import { NewPaymentModal } from "../sales/SalesCustomerPaymentsPage";
+import { NewSupplierPaymentModal } from "../sales/NewSupplierPaymentModal";
 import {
   AseelDocumentShell,
   AseelDenseTable,
 } from "../aseel";
 import type { AseelToolbarAction, AseelTab, DenseColumn } from "../aseel";
-import { Plus, Save, X, ArrowRightLeft } from "lucide-react";
+import { Plus, X, ArrowRightLeft } from "lucide-react";
 import OfflineGuard from "../offline/OfflineGuard";
 import { formatDateLocalized, formatDateTimeValue } from "../../utils/formatDate";
 
@@ -40,29 +40,12 @@ const DIRECTIONS = [
 export const AccountingChequesPage: React.FC = () => {
   const [rows, setRows] = useState<ChequeDto[]>([]);
   const [partners, setPartners] = useState<AccountingPartner[]>([]);
-  // T-BANKS: البنك المسحوب عليه يُختار من سجل البنوك، وحساب الإيداع من حسابات الشركة.
-  const [banks, setBanks] = useState<BankDto[]>([]);
+  // T-BANKS: حساب الإيداع/الصرف يُختار من حسابات الشركة عند التحويل.
   const [bankAccounts, setBankAccounts] = useState<BankAccountDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    cheque_number: "",
-    bank: "",
-    bank_branch_ref: "",
-    bank_name: "",
-    account_number: "",
-    bank_branch: "",
-    amount: "",
-    due_date: "",
-    issue_date: new Date().toISOString().split("T")[0],
-    payee_name: "",
-    direction: "Incoming",
-    status: "Draft",
-    partner: "",
-    currency: "1",
-    notes: "",
-  });
+  // T-CHQ3: أي سند يُفتح للإدخال — سند قبض للوارد وسند صرف للصادر.
+  const [voucher, setVoucher] = useState<"Incoming" | "Outgoing" | null>(null);
 
   // Filters — تاريخ الاستحقاق + شريك + حالة + اتجاه (per N3-T4 spec)
   const [filterDirection, setFilterDirection] = useState("");
@@ -125,22 +108,17 @@ export const AccountingChequesPage: React.FC = () => {
   const movesFor = (cheque: ChequeDto) =>
     (CHEQUE_MOVES[cheque.direction] || CHEQUE_MOVES.Incoming)[cheque.status] || [];
 
-  const formBranches: BankBranchDto[] =
-    banks.find((b) => String(b.id) === form.bank)?.branches || [];
-
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
-      const [ch, pr, bk, ba] = await Promise.all([
+      const [ch, pr, ba] = await Promise.all([
         accountingApi.getCheques(),
         accountingApi.getPartners().catch(() => []),
-        accountingApi.getBanks(true).catch(() => []),
         accountingApi.getBankAccounts({ activeOnly: true }).catch(() => []),
       ]);
       setRows(ch as ChequeDto[]);
       setPartners(pr as AccountingPartner[]);
-      setBanks(bk as BankDto[]);
       setBankAccounts(ba as BankAccountDto[]);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل التحميل");
@@ -152,54 +130,6 @@ export const AccountingChequesPage: React.FC = () => {
   useEffect(() => {
     load();
   }, [load]);
-
-  const submit = async () => {
-    if (!form.cheque_number.trim()) {
-      setErr("رقم الشيك مطلوب");
-      return;
-    }
-    setErr(null);
-    try {
-      await accountingApi.createCheque({
-        cheque_number: form.cheque_number.trim(),
-        bank: form.bank ? parseInt(form.bank, 10) : null,
-        bank_branch_ref: form.bank_branch_ref ? parseInt(form.bank_branch_ref, 10) : null,
-        bank_name: form.bank_name || null,
-        account_number: form.account_number || null,
-        bank_branch: form.bank_branch || null,
-        amount: form.amount || "0",
-        due_date: form.due_date || null,
-        issue_date: form.issue_date || null,
-        payee_name: form.payee_name || null,
-        direction: form.direction,
-        status: form.status,
-        partner: form.partner ? parseInt(form.partner, 10) : null,
-        currency: parseInt(form.currency, 10) || 1,
-        notes: form.notes || null,
-      });
-      setShowForm(false);
-      setForm({
-        cheque_number: "",
-        bank: "",
-        bank_branch_ref: "",
-        bank_name: "",
-        account_number: "",
-        bank_branch: "",
-        amount: "",
-        due_date: "",
-        issue_date: new Date().toISOString().split("T")[0],
-        payee_name: "",
-        direction: "Incoming",
-        status: "Draft",
-        partner: "",
-        currency: "1",
-        notes: "",
-      });
-      await load();
-    } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : "فشل الحفظ");
-    }
-  };
 
   const remove = async (id: number) => {
     if (!confirm("حذف الشيك؟")) return;
@@ -248,8 +178,10 @@ export const AccountingChequesPage: React.FC = () => {
 
   const columns: DenseColumn<ChequeDto>[] = [
     { key: "cheque_number", header: "رقم الشيك", width: "100px", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.cheque_number}</span> },
-    { key: "account_number", header: "رقم الحساب", width: "120px", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.account_number || "—"}</span> },
-    { key: "bank_name", header: "البنك", width: "120px", render: (r) => r.bank_display || r.bank_name || "—" },
+    { key: "account_number", header: "حساب الساحب", width: "120px", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.account_number || "—"}</span> },
+    { key: "bank_name", header: "البنك المسحوب عليه", width: "120px", render: (r) => r.bank_display || r.bank_name || "—" },
+    // T-CHQ3: الاسم المكتوب على الورقة (صاحب الشيك في الوارد / المستفيد في الصادر).
+    { key: "payee_name", header: "الاسم على الشيك", width: "140px", render: (r) => r.payee_name || "—" },
     { key: "bank_branch", header: "الفرع", width: "100px", render: (r) => r.bank_branch_display || r.bank_branch || "—" },
     { key: "amount", header: "المبلغ", width: "110px", numeric: true, render: (r) => formatMoney(r.amount) },
     { key: "due_date", header: "تاريخ الاستحقاق", width: "110px", render: (r) => formatDateLocalized(r.due_date) || "—" },
@@ -305,8 +237,18 @@ export const AccountingChequesPage: React.FC = () => {
     },
   ];
 
+  // T-CHQ3: الشيك ليس مستنداً مستقلاً — يدخل الدفاتر ضمن سنده كما في الأنظمة
+  // المهنية. فزرّا الإدخال يفتحان سند القبض/الصرف نفسه المستعمل في بطاقة
+  // الطرف وفي الفاتورة: بلا توزيع = دفعة على الحساب، وبتوزيع = تسوية فاتورة.
   const actions: AseelToolbarAction[] = [
-    { key: "new", label: "شيك جديد", icon: <Plus className="w-4 h-4" />, onClick: () => setShowForm(true) },
+    {
+      key: "new-in", label: "شيك وارد (سند قبض)",
+      icon: <Plus className="w-4 h-4" />, onClick: () => setVoucher("Incoming"),
+    },
+    {
+      key: "new-out", label: "شيك صادر (سند صرف)",
+      icon: <Plus className="w-4 h-4" />, onClick: () => setVoucher("Outgoing"),
+    },
     { key: "refresh", label: "تحديث", onClick: load },
   ];
 
@@ -387,118 +329,19 @@ export const AccountingChequesPage: React.FC = () => {
         <></>
       </AseelDocumentShell>
 
-      {/* Add cheque dialog */}
-      {showForm && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50">
-          <div style={{
-            background: "var(--aseel-surface)", borderRadius: "var(--aseel-radius)",
-            boxShadow: "0 8px 32px #0004", maxWidth: "520px", width: "100%",
-            padding: "24px", border: "1px solid var(--aseel-border)", maxHeight: "90vh", overflowY: "auto",
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <h3 style={{ fontWeight: "bold", fontSize: "1.1rem" }}>شيك جديد</h3>
-              <button type="button" className="aseel-toolbtn" onClick={() => setShowForm(false)}>
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            {err && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
-            <div style={{ display: "grid", gap: "10px" }}>
-              <div className="aseel-field">
-                <label className="aseel-field-label">رقم الشيك *</label>
-                <input className="aseel-input" value={form.cheque_number}
-                  onChange={(e) => setForm((f) => ({ ...f, cheque_number: e.target.value }))} />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                <div className="aseel-field">
-                  <label className="aseel-field-label">البنك المسحوب عليه</label>
-                  <select className="aseel-input" value={form.bank}
-                    onChange={(e) => setForm((f) => ({ ...f, bank: e.target.value, bank_branch_ref: "" }))}>
-                    <option value="">— غير مسجَّل —</option>
-                    {banks.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-                  </select>
-                </div>
-                <div className="aseel-field">
-                  <label className="aseel-field-label">فرع البنك</label>
-                  <select className="aseel-input" value={form.bank_branch_ref} disabled={!form.bank}
-                    onChange={(e) => setForm((f) => ({ ...f, bank_branch_ref: e.target.value }))}>
-                    <option value="">— بلا فرع —</option>
-                    {formBranches.map((br) => <option key={br.id} value={br.id}>{br.name}</option>)}
-                  </select>
-                </div>
-              </div>
-              {!form.bank && (
-                <div className="aseel-field">
-                  <label className="aseel-field-label">اسم البنك (نصاً — لبنك غير مسجَّل)</label>
-                  <input className="aseel-input" value={form.bank_name}
-                    onChange={(e) => setForm((f) => ({ ...f, bank_name: e.target.value }))} />
-                </div>
-              )}
-              <div className="aseel-field">
-                <label className="aseel-field-label">رقم حساب الساحب</label>
-                <input className="aseel-input" value={form.account_number}
-                  onChange={(e) => setForm((f) => ({ ...f, account_number: e.target.value }))} />
-              </div>
-              <div className="aseel-field">
-                <label className="aseel-field-label">المبلغ</label>
-                <input type="number" step="0.01" className="aseel-input aseel-num" value={form.amount}
-                  onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                <div className="aseel-field">
-                  <label className="aseel-field-label">تاريخ الإصدار</label>
-                  <input type="date" className="aseel-input" value={form.issue_date}
-                    onChange={(e) => setForm((f) => ({ ...f, issue_date: e.target.value }))} />
-                </div>
-                <div className="aseel-field">
-                  <label className="aseel-field-label">تاريخ الاستحقاق</label>
-                  <input type="date" className="aseel-input" value={form.due_date}
-                    onChange={(e) => setForm((f) => ({ ...f, due_date: e.target.value }))} />
-                </div>
-              </div>
-              <div className="aseel-field">
-                <label className="aseel-field-label">اسم المستفيد</label>
-                <input className="aseel-input" value={form.payee_name}
-                  onChange={(e) => setForm((f) => ({ ...f, payee_name: e.target.value }))} />
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                <div className="aseel-field">
-                  <label className="aseel-field-label">الاتجاه</label>
-                  <select className="aseel-input" value={form.direction}
-                    onChange={(e) => setForm((f) => ({ ...f, direction: e.target.value }))}>
-                    <option value="Incoming">وارد</option>
-                    <option value="Outgoing">صادر</option>
-                  </select>
-                </div>
-                <div className="aseel-field">
-                  <label className="aseel-field-label">الحالة</label>
-                  <select className="aseel-input" value={form.status}
-                    onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}>
-                    {CHEQUE_STATUSES.map((s) => <option key={s.v} value={s.v}>{s.l}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="aseel-field">
-                <label className="aseel-field-label">الشريك</label>
-                <select className="aseel-input" value={form.partner}
-                  onChange={(e) => setForm((f) => ({ ...f, partner: e.target.value }))}>
-                  <option value="">— اختياري —</option>
-                  {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
-              </div>
-              <div className="aseel-field">
-                <label className="aseel-field-label">ملاحظات</label>
-                <textarea className="aseel-input" rows={2} value={form.notes}
-                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
-              </div>
-            </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "16px" }}>
-              <button type="button" className="aseel-toolbtn" onClick={() => setShowForm(false)}>إلغاء</button>
-              <button type="button" className="aseel-toolbtn" onClick={submit}>
-                <Save className="w-4 h-4" />حفظ
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* T-CHQ3: إدخال الشيك عبر سنده — نفس النافذة المستعملة في بطاقة الطرف
+          وفي الفاتورة، فلا يوجد مسار ثانٍ للشيك ولا قيد موازٍ. */}
+      {voucher === "Incoming" && (
+        <NewPaymentModal
+          onClose={() => setVoucher(null)}
+          onSaved={() => { setVoucher(null); void load(); }}
+        />
+      )}
+      {voucher === "Outgoing" && (
+        <NewSupplierPaymentModal
+          onClose={() => setVoucher(null)}
+          onSaved={() => { setVoucher(null); void load(); }}
+        />
       )}
 
       {/* Transfer dialog */}

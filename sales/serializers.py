@@ -573,6 +573,13 @@ class PaymentAllocationSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "amount_in_invoice_currency", "conversion_rate"]
 
 
+# T-CHQ3/ط: رسالة واحدة لشرط تاريخ الاستحقاق — يستهلكها سند القبض وسند الصرف
+# ومسار إرفاق الشيكات بالفاتورة، فلا تتفرّع صياغتها بين الشاشات.
+CHEQUE_DUE_DATE_REQUIRED = (
+    "تاريخ استحقاق الشيك مطلوب — عليه تقوم المحفظة والتحصيل عند الموعد."
+)
+
+
 class _PaymentChequeInputSerializer(serializers.Serializer):
     """شيك داخل سند القبض — مبلغه جزء من مبلغ السند لا إضافة عليه."""
     cheque_number = serializers.CharField(max_length=50)
@@ -580,7 +587,15 @@ class _PaymentChequeInputSerializer(serializers.Serializer):
     bank_name = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
     account_number = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
     bank_branch = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
-    due_date = serializers.DateField(required=False, allow_null=True)
+    # T-CHQ3/ط: دورة الشيك كلها مبنية على موعده (المحفظة · الآجال · «تم
+    # التحصيل» عند الاستحقاق)، فشيك بلا موعد ورقة لا تُدار.
+    due_date = serializers.DateField(
+        error_messages={
+            "null": CHEQUE_DUE_DATE_REQUIRED,
+            "required": CHEQUE_DUE_DATE_REQUIRED,
+            "invalid": CHEQUE_DUE_DATE_REQUIRED,
+        },
+    )
     issue_date = serializers.DateField(required=False, allow_null=True)
     payee_name = serializers.CharField(max_length=150, required=False, allow_blank=True, default="")
     notes = serializers.CharField(required=False, allow_blank=True, default="")

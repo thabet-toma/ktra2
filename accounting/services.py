@@ -1019,6 +1019,91 @@ def _resolve_cheque_supplier_account(cheque):
     return _resolve_ap_account(partner), partner
 
 
+def cheque_is_linked_to_document(cheque) -> bool:
+    """الشيك داخل الدفاتر عبر سند قبض/صرف أو فاتورة — قيده مُرحَّل من هناك.
+
+    T-CHQ3: لا يوجد مسار ترحيل خاص بالشيك: الورقة تدخل الدفاتر ضمن سندها
+    (أو فاتورتها) كما في الأنظمة المهنية، فما يُرحَّل هنا حركاتها لاحقاً فقط.
+    """
+    if cheque.direction == 'Outgoing':
+        return bool(cheque.supplier_payment_id or cheque.purchase_invoice_id)
+    return bool(cheque.sales_invoice_id or cheque.customer_payment_id)
+
+
+def _cheque_movement_gl(cheque, movement_type, account_id=None):
+    """طرفا قيد حركة الشيك ووصفه — مصدر واحد لـ`transfer_cheque` وللترحيل الرجعي.
+
+    يُرجع (مدين، دائن، شريك المدين، شريك الدائن، الوصف).
+    الشريك يُحمَّل على سطر الذمم وحده. كان يُحمَّل على السطرين، فسطرا الارتداد
+    (ذمم + شيكات برسم التحصيل) يتعادلان داخل كشف العميل فلا يعود الدين يظهر
+    عليه بعد ارتداد شيكه (نفس عطل task32).
+    """
+    dr_partner_id = cr_partner_id = None
+    if cheque.direction == 'Outgoing':
+        payable = _resolve_cheque_payable_account(cheque.tenant_id)
+        if movement_type in ('collect', 'withdraw'):
+            cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
+            dr, cr = payable, cash
+            desc = f"صرف شيك صادر {cheque.cheque_number}"
+        elif movement_type == 'bounce':
+            ap, partner = _resolve_cheque_supplier_account(cheque)
+            dr, cr = payable, ap
+            desc = f"ارتداد شيك صادر {cheque.cheque_number} — إعادة الذمم للمورد"
+            cr_partner_id = partner.pk
+        else:  # settle
+            ap, partner = _resolve_cheque_supplier_account(cheque)
+            cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
+            dr, cr = ap, cash
+            desc = f"تسوية شيك صادر مرتد {cheque.cheque_number}"
+            dr_partner_id = partner.pk
+    elif movement_type in ('collect', 'withdraw'):
+        uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
+        if not uc:
+            raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
+        cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
+        dr, cr = cash, uc
+        desc = f"تحصيل شيك {cheque.cheque_number}"
+    elif movement_type == 'bounce':
+        uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
+        if not uc:
+            raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
+        ar, partner = _resolve_cheque_ar_account(cheque)
+        dr, cr = ar, uc
+        desc = f"ارتداد شيك {cheque.cheque_number} — إعادة الذمم على العميل"
+        dr_partner_id = partner.pk
+    else:  # settle
+        ar, partner = _resolve_cheque_ar_account(cheque)
+        cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
+        dr, cr = cash, ar
+        desc = f"تسوية شيك مرتد {cheque.cheque_number}"
+        cr_partner_id = partner.pk
+    return dr, cr, dr_partner_id, cr_partner_id, desc
+
+
+def post_cheque_movement_journal(cheque, movement_type, *, when, user=None,
+                                 account_id=None, branch_id=None):
+    """ترحيل قيد حركة شيك واحدة — Idempotent عبر (CHEQUE_<MOVE>, cheque_id)."""
+    amount = Decimal(str(cheque.amount or 0)).quantize(Decimal("0.01"))
+    dr, cr, dr_partner_id, cr_partner_id, desc = _cheque_movement_gl(
+        cheque, movement_type, account_id)
+    return post_journal(
+        tenant_id=cheque.tenant_id,
+        transaction_date=when,
+        reference_type=f"CHEQUE_{movement_type.upper()}",
+        reference_id=cheque.pk,
+        description=desc,
+        lines_data=[
+            {"account": dr.pk, "partner": dr_partner_id,
+             "debit": amount, "credit": Decimal("0"), "description": desc},
+            {"account": cr.pk, "partner": cr_partner_id,
+             "debit": Decimal("0"), "credit": amount, "description": desc},
+        ],
+        currency=cheque.currency,
+        user=user,
+        branch_id=branch_id,
+    )
+
+
 def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
                     account_id=None, movement_date=None, bank_account_id=None):
     """task11 R2-A3 — تحويل حالة شيك مع القيد المحاسبي المرافق.
@@ -1074,11 +1159,7 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
             deposit_account_changed = True
 
     # GL يخص الشيكات المسجَّلة دفترياً فقط — كل اتجاه ومستنداته.
-    outgoing = cheque.direction == 'Outgoing'
-    in_books = bool(
-        (cheque.supplier_payment_id or cheque.purchase_invoice_id) if outgoing
-        else (cheque.sales_invoice_id or cheque.customer_payment_id)
-    )
+    in_books = cheque_is_linked_to_document(cheque)
     needs_gl = (
         movement_type in ('collect', 'withdraw', 'bounce', 'settle')
         and amount > 0
@@ -1093,65 +1174,11 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
     journal = None
     with transaction.atomic():
         if needs_gl:
-            branch_id = cheque.sales_invoice.branch_id if cheque.sales_invoice_id else None
-            # الشريك يُحمَّل على سطر الذمم وحده. كان يُحمَّل على السطرين، فسطرا
-            # الارتداد (ذمم + شيكات برسم التحصيل) يتعادلان داخل كشف العميل
-            # فلا يعود الدين يظهر عليه بعد ارتداد شيكه (نفس عطل task32).
-            dr_partner_id = cr_partner_id = None
-            if outgoing:
-                payable = _resolve_cheque_payable_account(cheque.tenant_id)
-                if movement_type in ('collect', 'withdraw'):
-                    cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
-                    dr, cr = payable, cash
-                    desc = f"صرف شيك صادر {cheque.cheque_number}"
-                elif movement_type == 'bounce':
-                    ap, partner = _resolve_cheque_supplier_account(cheque)
-                    dr, cr = payable, ap
-                    desc = f"ارتداد شيك صادر {cheque.cheque_number} — إعادة الذمم للمورد"
-                    cr_partner_id = partner.pk
-                else:  # settle
-                    ap, partner = _resolve_cheque_supplier_account(cheque)
-                    cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
-                    dr, cr = ap, cash
-                    desc = f"تسوية شيك صادر مرتد {cheque.cheque_number}"
-                    dr_partner_id = partner.pk
-            elif movement_type in ('collect', 'withdraw'):
-                uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
-                if not uc:
-                    raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
-                cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
-                dr, cr = cash, uc
-                desc = f"تحصيل شيك {cheque.cheque_number}"
-            elif movement_type == 'bounce':
-                uc = _resolve_cheque_under_collection_account(cheque.tenant_id)
-                if not uc:
-                    raise ValidationError("لا يوجد حساب «شيكات برسم التحصيل» (1107).")
-                ar, partner = _resolve_cheque_ar_account(cheque)
-                dr, cr = ar, uc
-                desc = f"ارتداد شيك {cheque.cheque_number} — إعادة الذمم على العميل"
-                dr_partner_id = partner.pk
-            else:  # settle
-                ar, partner = _resolve_cheque_ar_account(cheque)
-                cash = _resolve_cheque_cash_account(cheque.tenant_id, account_id)
-                dr, cr = cash, ar
-                desc = f"تسوية شيك مرتد {cheque.cheque_number}"
-                cr_partner_id = partner.pk
-
-            journal = post_journal(
-                tenant_id=cheque.tenant_id,
-                transaction_date=when,
-                reference_type=f"CHEQUE_{movement_type.upper()}",
-                reference_id=cheque.pk,
-                description=desc,
-                lines_data=[
-                    {"account": dr.pk, "partner": dr_partner_id,
-                     "debit": amount, "credit": Decimal("0"), "description": desc},
-                    {"account": cr.pk, "partner": cr_partner_id,
-                     "debit": Decimal("0"), "credit": amount, "description": desc},
-                ],
-                currency=cheque.currency,
-                user=user,
-                branch_id=branch_id,
+            journal = post_cheque_movement_journal(
+                cheque, movement_type, when=when, user=user,
+                account_id=account_id,
+                branch_id=(cheque.sales_invoice.branch_id
+                           if cheque.sales_invoice_id else None),
             )
 
         ChequeMovement.objects.create(
