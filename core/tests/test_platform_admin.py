@@ -209,14 +209,37 @@ class PlatformAdminApiTest(APITestCase):
         self.assertIn("status", response.data)
         self.assertIn("priority", response.data)
 
-    def _create_note(self, title, note_status):
+    def _create_note(self, title, note_status, priority="medium"):
         response = self.client.post(
             "/api/platform/development-notes/",
-            {"title": title, "status": note_status},
+            {"title": title, "status": note_status, "priority": priority},
             format="json",
         )
         self.assertEqual(response.status_code, 201, response.content)
         return response.data["id"]
+
+    def test_high_priority_note_precedes_an_older_low_priority_one(self):
+        """الأولوية تسبق التاريخ داخل المجموعة غير المكتملة.
+
+        الأقدم أولاً وحده كان يدفن ملاحظةً عاليةَ الأولوية خلف ملاحظات
+        منخفضة سبقتها بالتاريخ — فصار المفتاح (المكتملة أخيراً ← الأولوية
+        ← `created_at` ← `id`)، و`created_at` يبقى المرساة الثابتة داخل
+        الأولوية الواحدة (لا `updated_at`).
+        """
+        self.client.force_authenticate(self.superuser)
+        old_low = self._create_note("قديمة منخفضة", "todo", "low")
+        old_medium = self._create_note("قديمة متوسطة", "todo", "medium")
+        new_high = self._create_note("جديدة عالية", "todo", "high")
+        older_high = self._create_note("أقدم عالية", "todo", "high")
+        done_high = self._create_note("مكتملة عالية", "done", "high")
+
+        listed = self.client.get("/api/platform/development-notes/")
+
+        self.assertEqual(listed.status_code, 200, listed.content)
+        self.assertEqual(
+            [row["id"] for row in listed.data],
+            [new_high, older_high, old_medium, old_low, done_high],
+        )
 
     def test_completed_notes_sink_to_the_end_of_the_sheet(self):
         """المكتملة تُزاح لآخر القائمة مهما كان تاريخها."""
@@ -262,6 +285,141 @@ class PlatformAdminApiTest(APITestCase):
 
         self.assertEqual(edited.status_code, 200, edited.content)
         self.assertEqual([row["id"] for row in listed.data], [oldest, middle, newest])
+
+    def test_completed_at_is_stamped_on_done_and_cleared_when_reopened(self):
+        """«متى أُنجزت» ختمٌ يتبع الانتقال — لا يتجدّد بحفظة ولا يبقى بعد الفتح."""
+        self.client.force_authenticate(self.superuser)
+        note_id = self._create_note("قابلة للإنجاز", "todo")
+        url = f"/api/platform/development-notes/{note_id}/"
+
+        self.assertIsNone(self.client.get(url).data["completed_at"])
+
+        done = self.client.patch(url, {"status": "done"}, format="json")
+        self.assertEqual(done.status_code, 200, done.content)
+        stamp = done.data["completed_at"]
+        self.assertIsNotNone(stamp)
+
+        resaved = self.client.patch(
+            url, {"description": "تفصيل لاحق"}, format="json")
+        self.assertEqual(resaved.status_code, 200, resaved.content)
+        self.assertEqual(resaved.data["completed_at"], stamp)
+
+        reopened = self.client.patch(url, {"status": "todo"}, format="json")
+        self.assertEqual(reopened.status_code, 200, reopened.content)
+        self.assertIsNone(reopened.data["completed_at"])
+
+    def test_note_created_already_done_carries_its_stamp(self):
+        self.client.force_authenticate(self.superuser)
+        created = self.client.post(
+            "/api/platform/development-notes/",
+            {"title": "أُنجزت قبل تسجيلها", "status": "done"},
+            format="json",
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        self.assertIsNotNone(created.data["completed_at"])
+
+    def test_note_comments_round_trip_add_list_and_delete(self):
+        self.client.force_authenticate(self.superuser)
+        note_id = self._create_note("ملاحظة عليها نقاش", "todo")
+        comments_url = f"/api/platform/development-notes/{note_id}/comments/"
+
+        first = self.client.post(comments_url, {"body": "  أول ردّ  "}, format="json")
+        second = self.client.post(comments_url, {"body": "ثاني ردّ"}, format="json")
+
+        self.assertEqual(first.status_code, 201, first.content)
+        self.assertEqual(first.data["body"], "أول ردّ")
+        self.assertEqual(first.data["created_by"], self.superuser.id)
+        self.assertEqual(first.data["created_by_name"], "platform-root")
+        self.assertEqual(second.status_code, 201, second.content)
+
+        listed = self.client.get("/api/platform/development-notes/")
+        self.assertEqual(
+            [row["body"] for row in listed.data[0]["comments"]],
+            ["أول ردّ", "ثاني ردّ"],
+        )
+
+        deleted = self.client.delete(f"{comments_url}{first.data['id']}/")
+        self.assertEqual(deleted.status_code, 204, deleted.content)
+        remaining = self.client.get(f"/api/platform/development-notes/{note_id}/")
+        self.assertEqual(
+            [row["id"] for row in remaining.data["comments"]], [second.data["id"]])
+
+    def test_comment_rejects_blank_body_and_a_foreign_comment_id(self):
+        self.client.force_authenticate(self.superuser)
+        note_id = self._create_note("ملاحظة أولى", "todo")
+        other_id = self._create_note("ملاحظة ثانية", "todo")
+        comment = self.client.post(
+            f"/api/platform/development-notes/{other_id}/comments/",
+            {"body": "ردّ على الثانية"}, format="json",
+        )
+
+        blank = self.client.post(
+            f"/api/platform/development-notes/{note_id}/comments/",
+            {"body": "   "}, format="json",
+        )
+        foreign = self.client.delete(
+            f"/api/platform/development-notes/{note_id}/comments/"
+            f"{comment.data['id']}/"
+        )
+
+        self.assertEqual(blank.status_code, 400, blank.content)
+        self.assertIn("body", blank.data)
+        # ردّ ملاحظةٍ أخرى لا يُحذف من مسار هذه الملاحظة — الرقم وحده لا يكفي.
+        self.assertEqual(foreign.status_code, 404, foreign.content)
+        self.assertEqual(
+            self.client.get(f"/api/platform/development-notes/{other_id}/")
+            .data["comments"][0]["id"],
+            comment.data["id"],
+        )
+
+    def test_company_manager_cannot_add_or_delete_note_comments(self):
+        self.client.force_authenticate(self.superuser)
+        note_id = self._create_note("ملاحظة محروسة", "todo")
+        comment = self.client.post(
+            f"/api/platform/development-notes/{note_id}/comments/",
+            {"body": "ردّ سوبر أدمن"}, format="json",
+        )
+
+        self.client.force_authenticate(self.company_manager)
+        added = self.client.post(
+            f"/api/platform/development-notes/{note_id}/comments/",
+            {"body": "ردّ متطفّل"}, format="json",
+        )
+        deleted = self.client.delete(
+            f"/api/platform/development-notes/{note_id}/comments/"
+            f"{comment.data['id']}/"
+        )
+
+        self.assertEqual(added.status_code, 403, added.content)
+        self.assertEqual(deleted.status_code, 403, deleted.content)
+
+    def test_note_list_query_count_does_not_grow_with_notes_or_comments(self):
+        """الردود تُجلَب بـ`prefetch` — لا استعلام لكل ملاحظة (N+1)."""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        self.client.force_authenticate(self.superuser)
+        note_id = self._create_note("ملاحظة وحيدة", "todo")
+        self.client.post(
+            f"/api/platform/development-notes/{note_id}/comments/",
+            {"body": "ردّ"}, format="json",
+        )
+
+        with CaptureQueriesContext(connection) as one_note:
+            self.client.get("/api/platform/development-notes/")
+
+        for index in range(4):
+            extra = self._create_note(f"ملاحظة {index}", "todo")
+            self.client.post(
+                f"/api/platform/development-notes/{extra}/comments/",
+                {"body": f"ردّ {index}"}, format="json",
+            )
+
+        with CaptureQueriesContext(connection) as five_notes:
+            listed = self.client.get("/api/platform/development-notes/")
+
+        self.assertEqual(len(listed.data), 5)
+        self.assertEqual(len(five_notes), len(one_note))
 
     def test_note_images_round_trip_and_drop_extra_keys(self):
         self.client.force_authenticate(self.superuser)
