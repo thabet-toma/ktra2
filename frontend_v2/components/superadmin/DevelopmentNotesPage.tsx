@@ -1,9 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { ImagePlus, Pencil, Plus, RefreshCw, Save, Trash2, X } from "lucide-react";
+import {
+  ChevronDown, ImagePlus, MessageSquare, Pencil, Plus, RefreshCw, Save, Send,
+  Trash2, X,
+} from "lucide-react";
 
 import {
-  createDevelopmentNote, deleteDevelopmentNote, listDevelopmentNotes,
-  updateDevelopmentNote, type DevelopmentNote, type DevelopmentNoteImage,
+  addDevelopmentNoteComment, createDevelopmentNote, deleteDevelopmentNote,
+  deleteDevelopmentNoteComment, listDevelopmentNotes, updateDevelopmentNote,
+  type DevelopmentNote, type DevelopmentNoteComment, type DevelopmentNoteImage,
   type DevelopmentNoteWrite,
 } from "../../services/platformAdminApi";
 import { cloudinaryService } from "../../services/cloudinaryService";
@@ -11,6 +15,7 @@ import {
   NOTE_PRIORITY_LABELS, NOTE_STATUS_LABELS, isNoteDone, sortDevelopmentNotes,
 } from "../../utils/developmentNotes";
 import { formatDateLocalized, todayIso } from "../../utils/formatDate";
+import { formatNumber } from "../../utils/formatNumber";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { AseelDateInput } from "../aseel/AseelDateInput";
 import { AseelDenseTable } from "../aseel";
@@ -72,6 +77,15 @@ const fieldInput = "w-full rounded-lg border border-[var(--color-border)] bg-[va
 /** الملاحظة المفتوحة في النافذة: `"new"` = إضافة، أو ملاحظة قائمة للتعديل. */
 type EditorTarget = { mode: "new" } | { mode: "edit"; note: DevelopmentNote };
 
+/**
+ * الحقلان المتداخلان يصلان `null` من عقود قديمة أو من ردّ لم يُسلسِلهما، وكل
+ * الشاشة تقرؤهما مباشرةً — فالتطبيع مرّة واحدة عند الدخول أأمن من فحصٍ في كل
+ * موضع عرض.
+ */
+const hydrate = (note: DevelopmentNote): DevelopmentNote => ({
+  ...note, images: note.images ?? [], comments: note.comments ?? [],
+});
+
 export const DevelopmentNotesPage: React.FC = () => {
   const confirm = useConfirm();
   const [notes, setNotes] = useState<DevelopmentNote[]>([]);
@@ -82,29 +96,32 @@ export const DevelopmentNotesPage: React.FC = () => {
   const [form, setForm] = useState<DevelopmentNoteWrite>(emptyNote);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<number | null>(null);
+  const [doneOpen, setDoneOpen] = useState(true);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [commentBusy, setCommentBusy] = useState(false);
+  // خطأ الردّ يُعرض داخل النافذة لا في شريط الصفحة خلفها — الشريط لا يُرى وقتها.
+  const [commentError, setCommentError] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
     setError(null);
     listDevelopmentNotes()
-      .then((rows) => setNotes(sortDevelopmentNotes(rows.map(
-        (note) => ({ ...note, images: note.images ?? [] }),
-      ))))
+      .then((rows) => setNotes(sortDevelopmentNotes(rows.map(hydrate))))
       .catch((cause) => setError(cause instanceof Error ? cause.message : "تعذّر تحميل الملاحظات"))
       .finally(() => setLoading(false));
   };
 
   useEffect(load, []);
 
-  const counts = useMemo(() => ({
-    total: notes.length,
-    done: notes.filter(isNoteDone).length,
-    open: notes.filter((note) => !isNoteDone(note)).length,
-  }), [notes]);
+  /** قسمان مستقلّان: الترتيب داخل كلٍّ منهما هو ترتيب الخادم نفسه بلا فرزٍ ثانٍ. */
+  const openNotes = useMemo(() => notes.filter((note) => !isNoteDone(note)), [notes]);
+  const doneNotes = useMemo(() => notes.filter(isNoteDone), [notes]);
 
   const openNew = () => {
     setForm(emptyNote());
     setPreview(null);
+    setCommentDraft("");
+    setCommentError(null);
     setEditor({ mode: "new" });
   };
 
@@ -114,7 +131,9 @@ export const DevelopmentNotesPage: React.FC = () => {
       priority: note.priority, images: note.images ?? [], due_date: note.due_date,
     });
     setPreview(null);
-    setEditor({ mode: "edit", note });
+    setCommentDraft("");
+    setCommentError(null);
+    setEditor({ mode: "edit", note: hydrate(note) });
   };
 
   /** تغيير الحالة من الجدول يُحفظ فوراً — المكتملة تنزل لآخر القائمة حالاً. */
@@ -127,7 +146,7 @@ export const DevelopmentNotesPage: React.FC = () => {
     try {
       const saved = await updateDevelopmentNote(note.id, { status });
       setNotes((current) => sortDevelopmentNotes(current.map(
-        (row) => row.id === saved.id ? { ...saved, images: saved.images ?? [] } : row,
+        (row) => row.id === saved.id ? hydrate(saved) : row,
       )));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "فشل حفظ حالة الملاحظة");
@@ -149,14 +168,12 @@ export const DevelopmentNotesPage: React.FC = () => {
       if (editor?.mode === "edit") {
         const saved = await updateDevelopmentNote(editor.note.id, payload);
         setNotes((current) => sortDevelopmentNotes(current.map(
-          (row) => row.id === saved.id ? { ...saved, images: saved.images ?? [] } : row,
+          (row) => row.id === saved.id ? hydrate(saved) : row,
         )));
       } else {
         const created = await createDevelopmentNote(payload);
-        // الأحدث يذهب لآخر القائمة — الفرز نفسه الذي يطبّقه الخادم.
-        setNotes((current) => sortDevelopmentNotes(
-          [...current, { ...created, images: created.images ?? [] }],
-        ));
+        // مكانها يتحدّد بالأولوية ثم التاريخ — الفرز نفسه الذي يطبّقه الخادم.
+        setNotes((current) => sortDevelopmentNotes([...current, hydrate(created)]));
       }
       setEditor(null);
     } catch (cause) {
@@ -183,6 +200,61 @@ export const DevelopmentNotesPage: React.FC = () => {
       setError(cause instanceof Error ? cause.message : "فشل حذف الملاحظة");
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * الردود تعيش في نسختين: صفّ الجدول والنافذة المفتوحة فوقه. تحديثهما معاً من
+   * ردّ الخادم وحده يبقيهما متطابقتين بلا إعادة تحميل القائمة كلها.
+   */
+  const applyComments = (
+    noteId: number,
+    update: (comments: DevelopmentNoteComment[]) => DevelopmentNoteComment[],
+  ) => {
+    setNotes((current) => current.map(
+      (row) => row.id === noteId ? { ...row, comments: update(row.comments ?? []) } : row,
+    ));
+    setEditor((current) => current?.mode === "edit" && current.note.id === noteId
+      ? { mode: "edit", note: { ...current.note, comments: update(current.note.comments ?? []) } }
+      : current);
+  };
+
+  /** الإرسال مستقلّ عن زر حفظ الملاحظة — الردّ يُثبَّت فور كتابته. */
+  const sendComment = async (note: DevelopmentNote) => {
+    const body = commentDraft.trim();
+    if (!body) {
+      setCommentError("اكتب نصّ الردّ أولاً.");
+      return;
+    }
+    setCommentBusy(true);
+    setCommentError(null);
+    try {
+      const created = await addDevelopmentNoteComment(note.id, body);
+      applyComments(note.id, (comments) => [...comments, created]);
+      setCommentDraft("");
+    } catch (cause) {
+      setCommentError(cause instanceof Error ? cause.message : "فشل إرسال الردّ");
+    } finally {
+      setCommentBusy(false);
+    }
+  };
+
+  const removeComment = async (note: DevelopmentNote, comment: DevelopmentNoteComment) => {
+    const ok = await confirm({
+      title: "حذف ردّ",
+      message: "سيُحذف هذا الردّ نهائياً من الملاحظة.",
+      confirmText: "حذف",
+    });
+    if (!ok) return;
+    setCommentBusy(true);
+    setCommentError(null);
+    try {
+      await deleteDevelopmentNoteComment(note.id, comment.id);
+      applyComments(note.id, (comments) => comments.filter((row) => row.id !== comment.id));
+    } catch (cause) {
+      setCommentError(cause instanceof Error ? cause.message : "فشل حذف الردّ");
+    } finally {
+      setCommentBusy(false);
     }
   };
 
@@ -216,19 +288,62 @@ export const DevelopmentNotesPage: React.FC = () => {
     setPreview(null);
   };
 
-  const columns: DenseColumn<DevelopmentNote>[] = [
+  /** خلية الحالة — تبقى قابلة للتغيير في القسمين معاً فالإنجاز قرار قابل للتراجع. */
+  const statusSelect = (note: DevelopmentNote) => (
+    <select
+      aria-label={`حالة الملاحظة ${note.title}`}
+      className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1 text-xs font-semibold text-[var(--color-text)]"
+      style={{ color: TONES[STATUS_TONE[note.status]] }}
+      disabled={busy}
+      value={note.status}
+      onChange={(event) => void changeStatus(
+        note, event.target.value as DevelopmentNote["status"],
+      )}
+    >
+      {STATUS_OPTIONS.map(([value, label]) => (
+        <option key={value} value={value}>{label}</option>
+      ))}
+    </select>
+  );
+
+  const buildColumns = (section: "open" | "done"): DenseColumn<DevelopmentNote>[] => [
     {
-      key: "seq", header: "#", width: "52px", align: "center",
-      render: (_note, index) => (
-        <span className="text-xs text-[var(--color-text-muted)]">{index + 1}</span>
+      key: "seq", header: "#", width: "62px", align: "center",
+      render: (note, index) => (
+        // شريط الأولوية على حافة الصف: داخل عنصر ابن لأن قاعدة `tbody td` غير
+        // المُطبَّقة في `styles/index.css` تغلب أصناف Tailwind على الخلية نفسها.
+        <span className="flex items-center gap-2">
+          <span
+            aria-hidden className="inline-block h-6 w-[3px] shrink-0 rounded-full"
+            style={{ backgroundColor: TONES[PRIORITY_TONE[note.priority]] }}
+          />
+          <span className="text-xs text-[var(--color-text-muted)]">
+            {formatNumber(index + 1)}
+          </span>
+        </span>
       ),
     },
     {
       key: "title", header: "الملاحظة",
       render: (note) => (
         <div className="py-0.5">
-          <div className={`font-semibold ${isNoteDone(note) ? "text-[var(--color-text-muted)] line-through" : "text-[var(--color-text)]"}`}>
-            {note.title}
+          <div className="flex items-center gap-2">
+            <span className={`font-semibold ${isNoteDone(note) ? "text-[var(--color-text-muted)] line-through" : "text-[var(--color-text)]"}`}>
+              {note.title}
+            </span>
+            {note.comments.length > 0 && (
+              <span
+                className="inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[11px] font-semibold"
+                title={`${formatNumber(note.comments.length)} ردّ على الملاحظة`}
+                style={{
+                  color: TONES.info,
+                  backgroundColor: `color-mix(in srgb, ${TONES.info} 12%, transparent)`,
+                }}
+              >
+                <MessageSquare className="h-3 w-3" />
+                {formatNumber(note.comments.length)}
+              </span>
+            )}
           </div>
           {note.description.trim() && (
             // سطران يكفيان للتمييز، والنص كاملاً في نافذة التعديل — فلا يبتلع
@@ -241,22 +356,18 @@ export const DevelopmentNotesPage: React.FC = () => {
       ),
     },
     {
-      key: "status", header: "الحالة", width: "136px", align: "center",
-      render: (note) => (
-        <select
-          aria-label={`حالة الملاحظة ${note.title}`}
-          className="w-full rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-1.5 py-1 text-xs font-semibold text-[var(--color-text)]"
-          style={{ color: TONES[STATUS_TONE[note.status]] }}
-          disabled={busy}
-          value={note.status}
-          onChange={(event) => void changeStatus(
-            note, event.target.value as DevelopmentNote["status"],
-          )}
-        >
-          {STATUS_OPTIONS.map(([value, label]) => (
-            <option key={value} value={value}>{label}</option>
-          ))}
-        </select>
+      key: "status", header: "الحالة", width: section === "done" ? "152px" : "136px",
+      align: "center",
+      render: (note) => section === "open" ? statusSelect(note) : (
+        <div className="flex flex-col items-center gap-1 py-0.5">
+          <Badge tone="success">تم تنفيذها ✓</Badge>
+          <span className="whitespace-nowrap text-[11px] text-[var(--color-text-muted)]">
+            {/* المكتملة قبل إضافة `completed_at` تصل بلا ختم — «غير مسجَّل»
+                جوابٌ صادق، ولا يجوز تلفيقه من `updated_at`. */}
+            {note.completed_at ? formatDateLocalized(note.completed_at) : "تاريخ غير مسجَّل"}
+          </span>
+          {statusSelect(note)}
+        </div>
       ),
     },
     {
@@ -331,13 +442,14 @@ export const DevelopmentNotesPage: React.FC = () => {
         <div>
           <h1 className="text-xl font-bold text-[var(--color-text)]">ملاحظات التطوير</h1>
           <p className="text-sm aseel-text-soft">
-            مرتَّبة من الأقدم إلى الأحدث، والمكتملة تنزل لآخر القائمة.
+            الأهمّ أولاً ثم الأقدم داخل الأولوية الواحدة، والمكتملة في قسمٍ مستقلّ.
             الإضافة والتعديل من نافذة واحدة، وتغيير الحالة من الجدول يُحفظ فوراً.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full bg-[var(--color-surface-2)] px-3 py-1 text-xs aseel-text-soft">
-            {counts.total} ملاحظة · {counts.open} مفتوحة · {counts.done} مكتملة
+            {formatNumber(notes.length)} ملاحظة · {formatNumber(openNotes.length)} مفتوحة
+            · {formatNumber(doneNotes.length)} مكتملة
           </span>
           <button type="button" onClick={openNew} className="aseel-btn aseel-btn-primary">
             <Plus className="h-4 w-4" /> إضافة ملاحظة
@@ -355,18 +467,57 @@ export const DevelopmentNotesPage: React.FC = () => {
         </div>
       )}
 
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
-        <AseelDenseTable<DevelopmentNote>
-          columns={columns}
-          rows={notes}
-          getRowKey={(note) => note.id}
-          onRowDoubleClick={openEdit}
-          loading={loading}
-          emptyHint="لا توجد ملاحظات تطوير بعد — ابدأ بزر «إضافة ملاحظة»."
-        />
-      </div>
+      <section>
+        <div className="mb-2 flex items-center gap-2">
+          <h2 className="text-sm font-bold text-[var(--color-text)]">
+            قيد العمل ({formatNumber(openNotes.length)})
+          </h2>
+          <span className="h-px flex-1 bg-[var(--color-border)]" />
+        </div>
+        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+          <AseelDenseTable<DevelopmentNote>
+            columns={buildColumns("open")}
+            rows={openNotes}
+            getRowKey={(note) => note.id}
+            onRowDoubleClick={openEdit}
+            loading={loading}
+            emptyHint="لا توجد ملاحظات مفتوحة — ابدأ بزر «إضافة ملاحظة»."
+          />
+        </div>
+      </section>
+
+      <div className="my-5 border-t-2 border-dashed border-[var(--color-border)]" />
+
+      <section>
+        <button
+          type="button" aria-expanded={doneOpen}
+          className="mb-2 flex w-full items-center gap-2 text-right"
+          onClick={() => setDoneOpen((current) => !current)}
+          title={doneOpen ? "طيّ المكتملة" : "عرض المكتملة"}
+        >
+          {/* في RTL يشير الشيفرون المطوي لليسار — جهة الانفتاح. */}
+          <ChevronDown className={`h-4 w-4 text-[var(--color-text-muted)] transition-transform ${doneOpen ? "" : "rotate-90"}`} />
+          <h2 className="text-sm font-bold text-[var(--color-text)]">
+            تم تنفيذها ({formatNumber(doneNotes.length)})
+          </h2>
+          <span className="h-px flex-1 bg-[var(--color-border)]" />
+        </button>
+        {doneOpen && (
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-2">
+            <AseelDenseTable<DevelopmentNote>
+              columns={buildColumns("done")}
+              rows={doneNotes}
+              getRowKey={(note) => note.id}
+              onRowDoubleClick={openEdit}
+              loading={loading}
+              emptyHint="لم تُنجَز أي ملاحظة بعد."
+            />
+          </div>
+        )}
+      </section>
+
       <p className="mt-2 text-xs aseel-text-soft">
-        نقرتان على الصف تفتحان الملاحظة للتعديل.
+        نقرتان على الصف تفتحان الملاحظة للتعديل والردّ عليها.
       </p>
 
       {editor !== null && (
@@ -480,6 +631,96 @@ export const DevelopmentNotesPage: React.FC = () => {
                   </label>
                 </div>
               </div>
+
+              {editor.mode === "edit" ? (
+                <div className="border-t border-[var(--color-border)] pt-4">
+                  <span className={fieldLabel}>
+                    الردود ({formatNumber(editor.note.comments.length)})
+                  </span>
+                  <div className="space-y-2">
+                    {editor.note.comments.length === 0 && (
+                      <p className="text-xs aseel-text-soft">
+                        لا ردود بعد — اكتب أول ردّ على هذه الملاحظة.
+                      </p>
+                    )}
+                    {editor.note.comments.map((comment) => {
+                      // ردّ من غير صاحب الملاحظة يُلوَّن أحمر — نقاشٌ وارد لا صدى
+                      // لصاحبها، فيُميَّز بلمحة واحدة.
+                      const tone: Tone =
+                        comment.created_by !== editor.note.created_by ? "danger" : "neutral";
+                      return (
+                        <div
+                          key={comment.id}
+                          className="rounded-lg border px-3 py-2"
+                          style={{
+                            borderColor: `color-mix(in srgb, ${TONES[tone]} 32%, transparent)`,
+                            backgroundColor: `color-mix(in srgb, ${TONES[tone]} 8%, transparent)`,
+                          }}
+                        >
+                          <div className="mb-1 flex items-center justify-between gap-2">
+                            <span
+                              className="text-xs font-semibold"
+                              style={{ color: TONES[tone] }}
+                            >
+                              {comment.created_by_name || "مستخدم محذوف"}
+                              <span className="mx-2 font-normal text-[var(--color-text-muted)]">
+                                {formatDateLocalized(comment.created_at)}
+                              </span>
+                            </span>
+                            <button
+                              type="button" className="aseel-iconbtn aseel-iconbtn--danger"
+                              disabled={commentBusy}
+                              aria-label={`حذف ردّ ${comment.created_by_name}`} title="حذف الردّ"
+                              onClick={() => void removeComment(editor.note, comment)}
+                            ><Trash2 className="h-3.5 w-3.5" /></button>
+                          </div>
+                          <p className="whitespace-pre-line text-sm leading-6 text-[var(--color-text)]">
+                            {comment.body}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {commentError && (
+                    <div className="mt-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700" role="alert">
+                      {commentError}
+                    </div>
+                  )}
+
+                  <div className="mt-2 flex items-end gap-2">
+                    <textarea
+                      aria-label="نص الردّ" rows={2}
+                      className={`${fieldInput} min-h-[52px] leading-6`}
+                      placeholder="اكتب ردّك… (Ctrl+Enter للإرسال)"
+                      value={commentDraft}
+                      disabled={commentBusy}
+                      onChange={(event) => setCommentDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                          event.preventDefault();
+                          void sendComment(editor.note);
+                        }
+                      }}
+                    />
+                    <button
+                      type="button" className="aseel-btn aseel-btn-primary whitespace-nowrap"
+                      disabled={commentBusy}
+                      onClick={() => void sendComment(editor.note)}
+                    >
+                      <Send className="h-4 w-4" />
+                      {commentBusy ? "جارٍ الإرسال…" : "إرسال"}
+                    </button>
+                  </div>
+                  <p className="mt-1 text-[11px] aseel-text-soft">
+                    الردّ يُحفظ فور إرساله — مستقلّاً عن زر حفظ الملاحظة.
+                  </p>
+                </div>
+              ) : (
+                <p className="border-t border-[var(--color-border)] pt-4 text-xs aseel-text-soft">
+                  الردود تُفتح بعد حفظ الملاحظة.
+                </p>
+              )}
             </div>
 
             <div className="sticky bottom-0 flex items-center justify-between gap-2 border-t border-[var(--color-border)] bg-[var(--color-surface)] p-4">

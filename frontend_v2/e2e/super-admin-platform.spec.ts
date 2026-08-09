@@ -55,14 +55,15 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
     members: companyMembers.map((member) => ({ ...member })),
   };
   // مبعثرة عمداً (المكتملة أولاً والأقدم في الوسط) — الشاشة تُرتّبها بنفسها:
-  // الأقدم أولاً والمكتملة أخيراً.
+  // الأهمّ أولاً، والأقدم أولاً داخل الأولوية الواحدة، والمكتملة في قسمها.
   const developmentNotes = [
     {
       id: 3, title: "ترحيل الشاشة القديمة", description: "أُنجزت",
       status: "done", priority: "low", images: [],
-      due_date: null, created_by: 1,
+      due_date: null, completed_at: "2026-08-05T09:00:00Z", created_by: 1,
       created_by_name: "سوبر أدمن", updated_by: 1, updated_by_name: "سوبر أدمن",
       created_at: "2026-08-01T09:00:00Z", updated_at: "2026-08-01T09:00:00Z",
+      comments: [],
     },
     {
       id: 1, title: "تحسين شاشة الجرد",
@@ -75,16 +76,30 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
         "وأخيراً تُراجع الحالات الحدّية: مستودع بلا حركة، وصنف محجوز بالكامل.",
       ].join("\n"),
       status: "in_progress", priority: "high", images: [],
-      due_date: "2026-08-10", created_by: 1,
+      due_date: "2026-08-10", completed_at: null, created_by: 1,
       created_by_name: "سوبر أدمن", updated_by: 1, updated_by_name: "سوبر أدمن",
       created_at: "2026-08-01T10:00:00Z", updated_at: "2026-08-01T10:00:00Z",
+      comments: [{
+        id: 11, body: "بدأت بالفلتر، والباقي غداً.", created_by: 1,
+        created_by_name: "سوبر أدمن", created_at: "2026-08-02T08:00:00Z",
+      }],
     },
     {
       id: 2, title: "تقرير الأرباح", description: "مطلوب من المالك",
       status: "todo", priority: "medium", images: [],
-      due_date: null, created_by: 1,
+      due_date: null, completed_at: null, created_by: 1,
       created_by_name: "سوبر أدمن", updated_by: 1, updated_by_name: "سوبر أدمن",
       created_at: "2026-08-01T11:00:00Z", updated_at: "2026-08-01T11:00:00Z",
+      comments: [],
+    },
+    {
+      // الأقدم على الإطلاق ومنخفضة الأولوية — تُثبت أن الأولوية تسبق التاريخ.
+      id: 4, title: "توثيق شاشة الإعدادات", description: "متى ما توفّر وقت",
+      status: "todo", priority: "low", images: [],
+      due_date: null, completed_at: null, created_by: 1,
+      created_by_name: "سوبر أدمن", updated_by: 1, updated_by_name: "سوبر أدمن",
+      created_at: "2026-08-01T08:00:00Z", updated_at: "2026-08-01T08:00:00Z",
+      comments: [],
     },
   ];
 
@@ -158,10 +173,37 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
     if (url.pathname.endsWith("/platform/development-notes/") && request.method() === "GET") {
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(developmentNotes) });
     }
+    if (/\/platform\/development-notes\/\d+\/comments\/\d+\/$/.test(url.pathname)
+      && request.method() === "DELETE") {
+      const [, noteId, commentId] = url.pathname.match(/\/(\d+)\/comments\/(\d+)\/$/)!;
+      calls.commentDeleted = Number(commentId);
+      const note = developmentNotes.find((row) => row.id === Number(noteId));
+      note!.comments = note!.comments.filter((row) => row.id !== Number(commentId));
+      return route.fulfill({ status: 204, body: "" });
+    }
+    if (/\/platform\/development-notes\/\d+\/comments\/$/.test(url.pathname)
+      && request.method() === "POST") {
+      calls.commentPost = request.postDataJSON();
+      const note = developmentNotes.find((row) => url.pathname.includes(`/${row.id}/comments/`));
+      // الخادم يختم كاتب الردّ — هنا مستخدم آخر غير صاحب الملاحظة (created_by 1).
+      const comment = {
+        id: 99, body: calls.commentPost.body, created_by: 2,
+        created_by_name: "المالك", created_at: "2026-08-06T07:00:00Z",
+      };
+      note!.comments = [...note!.comments, comment];
+      return route.fulfill({
+        status: 201, contentType: "application/json", body: JSON.stringify(comment),
+      });
+    }
     if (/\/platform\/development-notes\/\d+\/$/.test(url.pathname) && request.method() === "PATCH") {
       calls.notePatch = request.postDataJSON();
       const note = developmentNotes.find((row) => url.pathname.includes(`/${row.id}/`));
+      const wasStatus = note!.status;
       Object.assign(note!, calls.notePatch);
+      // مرآة ختم الخادم: يُختم عند الانتقال إلى done ويُمحى عند الخروج منها.
+      if (note!.status !== wasStatus) {
+        note!.completed_at = note!.status === "done" ? "2026-08-09T06:00:00Z" : null;
+      }
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(note) });
     }
     if (url.pathname.endsWith("/media/upload/")) {
@@ -172,9 +214,10 @@ async function installMocks(page: Page, isSuperAdmin: boolean) {
     if (url.pathname.endsWith("/platform/development-notes/") && request.method() === "POST") {
       const payload = request.postDataJSON();
       return route.fulfill({ contentType: "application/json", body: JSON.stringify({
-        id: 9, ...payload, created_by: 1, created_by_name: "سوبر أدمن",
+        id: 9, ...payload, completed_at: null, created_by: 1, created_by_name: "سوبر أدمن",
         updated_by: 1, updated_by_name: "سوبر أدمن",
         created_at: "2026-08-01T12:00:00Z", updated_at: "2026-08-01T12:00:00Z",
+        comments: [],
       }) });
     }
     if (url.pathname.endsWith("/dashboard/")) {
@@ -219,14 +262,18 @@ test("super admin gets a separate platform dashboard and development notes sheet
   await expect(page.getByText("إضافة تقرير هامش الربح", { exact: true })).toBeVisible();
 });
 
-/** جدول الملاحظات وحده — للصفحة جداول أخرى (شريط الأدوات) لا تُخلط بها الصفوف. */
-const notesTable = (page: Page) => page.locator('table:has(th:text-is("صور توضيحية"))');
-const noteRows = (page: Page) => notesTable(page).locator("tbody tr");
-/** عمود «الملاحظة» = الثاني: عنوانٌ عريض فوق مقتطف الوصف (لا حقل إدخال). */
-const noteTitles = (page: Page) =>
-  noteRows(page).locator("td:nth-child(2) > div > div:first-child");
+/** القسم من عنوانه — للصفحة قسمان لكلٍّ جدوله، فلا تُخلط صفوفهما. */
+const notesSection = (page: Page, heading: RegExp) =>
+  page.locator("section").filter({ has: page.getByRole("heading", { name: heading }) });
+const notesTable = (page: Page, heading: RegExp = /قيد العمل/) =>
+  notesSection(page, heading).locator('table:has(th:text-is("صور توضيحية"))');
+const noteRows = (page: Page, heading: RegExp = /قيد العمل/) =>
+  notesTable(page, heading).locator("tbody tr");
+/** عمود «الملاحظة» = الثاني: عنوانٌ عريض (بجانبه عدّاد الردود) فوق مقتطف الوصف. */
+const noteTitles = (page: Page, heading: RegExp = /قيد العمل/) =>
+  noteRows(page, heading).locator("td:nth-child(2) > div > div:first-child > span:first-child");
 
-test("جدول الملاحظات: الأقدم أولاً والمكتملة أخيراً، والوصف والصور من نافذة واحدة", async ({ page }) => {
+test("قسما الملاحظات: الأهمّ أولاً، ختم الإنجاز بتاريخه، والوصف والصور من نافذة واحدة", async ({ page }) => {
   const calls = await installMocks(page, true);
   await page.goto("/super-admin/development-notes");
   await expect(page.getByRole("heading", { name: "ملاحظات التطوير" })).toBeVisible();
@@ -238,11 +285,42 @@ test("جدول الملاحظات: الأقدم أولاً والمكتملة أ
   );
   await expect(headers.last()).toBeInViewport();
 
-  // وصلت مبعثرة من الخادم — الجدول يرتّبها بالأقدم ويُنزل المكتملة لآخر القائمة
+  // قسمان بعدّاديهما — المفتوحة ثلاث والمكتملة واحدة
+  await expect(page.getByRole("heading", { name: "قيد العمل (3)" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "تم تنفيذها (1)" })).toBeVisible();
+
+  // وصلت مبعثرة من الخادم: الأولوية تسبق التاريخ — «تحسين شاشة الجرد» (عالية،
+  // أُنشئت 10:00) تتقدّم «توثيق شاشة الإعدادات» (منخفضة، أقدم الجميع 08:00)
   await expect(noteTitles(page).nth(0)).toHaveText("تحسين شاشة الجرد");
   await expect(noteTitles(page).nth(1)).toHaveText("تقرير الأرباح");
-  await expect(noteTitles(page).nth(2)).toHaveText("ترحيل الشاشة القديمة");
-  await expect(noteTitles(page).nth(2)).toHaveCSS("text-decoration-line", "line-through");
+  await expect(noteTitles(page).nth(2)).toHaveText("توثيق شاشة الإعدادات");
+  await expect(noteRows(page)).toHaveCount(3);
+
+  // المكتملة في قسمها: شطبٌ + شارة «تم تنفيذها ✓» + تاريخ الإنجاز لا تاريخ التعديل
+  const doneTitle = noteTitles(page, /تم تنفيذها/).nth(0);
+  await expect(doneTitle).toHaveText("ترحيل الشاشة القديمة");
+  await expect(doneTitle).toHaveCSS("text-decoration-line", "line-through");
+  const doneStatusCell = noteRows(page, /تم تنفيذها/).nth(0).locator("td").nth(2);
+  await expect(doneStatusCell).toContainText("تم تنفيذها ✓");
+  await expect(doneStatusCell).toContainText("05/08/2026");
+  // ويبقى التراجع ممكناً من نفس الخلية.
+  await expect(doneStatusCell.locator("select")).toHaveValue("done");
+
+  // شريط الأولوية على حافة الصف: أحمر للعالية، ولونٌ آخر للمنخفضة
+  const strip = (row: number, heading?: RegExp) =>
+    noteRows(page, heading).nth(row).locator("td:first-child span[aria-hidden]");
+  await expect(strip(0)).toHaveCSS("background-color", "rgb(220, 38, 38)");
+  expect(await strip(2).evaluate((el) => getComputedStyle(el).backgroundColor))
+    .not.toBe("rgb(220, 38, 38)");
+
+  // عدّاد الردود بجانب العنوان — ملاحظةٌ واحدة لها ردّ
+  await expect(noteRows(page).nth(0).locator("td:nth-child(2)")).toContainText("1");
+
+  // القسم المكتمل يُطوى ويُفتح
+  await page.getByRole("button", { name: /تم تنفيذها/ }).click();
+  await expect(notesTable(page, /تم تنفيذها/)).toHaveCount(0);
+  await page.getByRole("button", { name: /تم تنفيذها/ }).click();
+  await expect(notesTable(page, /تم تنفيذها/)).toBeVisible();
 
   // الصفحة RTL: النص العربي يبدأ من اليمين — `AseelDenseTable` كان يفرض `left`
   await expect(noteRows(page).nth(0).locator("td").nth(1)).toHaveCSS("text-align", "right");
@@ -278,13 +356,58 @@ test("جدول الملاحظات: الأقدم أولاً والمكتملة أ
   ].join("/"));
   await page.getByRole("button", { name: "إلغاء" }).click();
 
-  // تغيير الحالة من الجدول يُحفظ فوراً ويُزيح الصف لأسفل
+  // تغيير الحالة من الجدول يُحفظ فوراً وينقل الصف إلى قسم المكتملة بختمه
   await page.getByLabel("حالة الملاحظة تحسين شاشة الجرد").selectOption("done");
   await expect.poll(() => calls.notePatch?.status).toBe("done");
-  // المفتوحة وحدها تتصدّر، والمكتملتان خلفها بترتيب الأقدم فالأحدث بينهما.
   await expect(noteTitles(page).nth(0)).toHaveText("تقرير الأرباح");
-  await expect(noteTitles(page).nth(1)).toHaveText("ترحيل الشاشة القديمة");
-  await expect(noteTitles(page).nth(2)).toHaveText("تحسين شاشة الجرد");
+  await expect(noteRows(page)).toHaveCount(2);
+  // داخل المكتملة أيضاً الأولوية أولاً — العالية المُنجَزة توّاً تتصدّر المنخفضة.
+  await expect(noteTitles(page, /تم تنفيذها/).nth(0)).toHaveText("تحسين شاشة الجرد");
+  await expect(noteTitles(page, /تم تنفيذها/).nth(1)).toHaveText("ترحيل الشاشة القديمة");
+  // الختم جاء من ردّ الخادم لا من ساعة المتصفح.
+  await expect(noteRows(page, /تم تنفيذها/).nth(0).locator("td").nth(2))
+    .toContainText("09/08/2026");
+});
+
+test("ردود الملاحظة: إرسالٌ فوري، تمييز ردّ غير صاحبها بالأحمر، ثم حذفه", async ({ page }) => {
+  const calls = await installMocks(page, true);
+  await page.goto("/super-admin/development-notes");
+  await expect(page.getByRole("heading", { name: "ملاحظات التطوير" })).toBeVisible();
+
+  await page.getByRole("button", { name: "تعديل تحسين شاشة الجرد" }).click();
+  const thread = page.locator("div", { hasText: /^الردود \(/ }).last();
+  await expect(page.getByText("بدأت بالفلتر، والباقي غداً.")).toBeVisible();
+
+  // ردّ صاحب الملاحظة نفسه محايد — لا حدّ أحمر. (`color-mix` يُحسب
+  // `color(srgb …)` لا `rgb(…)`، فالمطابقة على الصيغتين معاً.)
+  const bubble = (body: string) => thread.locator("div.rounded-lg").filter({ hasText: body });
+  const DANGER = /220, 38, 38|0\.862745/;
+  const borderOf = (body: string) =>
+    bubble(body).evaluate((el) => getComputedStyle(el).borderTopColor);
+  expect(await borderOf("بدأت بالفلتر")).not.toMatch(DANGER);
+
+  // الإرسال مستقلّ عن حفظ الملاحظة — يصل الخادم فوراً ويظهر في الحال
+  await page.getByLabel("نص الردّ").fill("المطلوب أيضاً فلتر المورّد.");
+  await page.getByRole("button", { name: "إرسال" }).click();
+  await expect.poll(() => calls.commentPost?.body).toBe("المطلوب أيضاً فلتر المورّد.");
+  await expect(page.getByText("المطلوب أيضاً فلتر المورّد.")).toBeVisible();
+  await expect(page.getByLabel("نص الردّ")).toHaveValue("");
+  await expect(bubble("فلتر المورّد")).toContainText("المالك");
+
+  // كاتبه غير صاحب الملاحظة ⇒ فقاعة حمراء
+  expect(await borderOf("فلتر المورّد")).toMatch(DANGER);
+
+  // العدّاد على العنوان صار ردّين — النافذة والجدول يتحدّثان معاً
+  await page.getByRole("button", { name: "إغلاق النافذة" }).click();
+  await expect(noteRows(page).nth(0).locator("td:nth-child(2)")).toContainText("2");
+
+  // الحذف بتأكيد صريح (لا confirm المتصفح)
+  await page.getByRole("button", { name: "تعديل تحسين شاشة الجرد" }).click();
+  await page.getByRole("button", { name: "حذف ردّ المالك" }).click();
+  await page.getByRole("alertdialog").getByRole("button", { name: "حذف" }).click();
+  await expect.poll(() => calls.commentDeleted).toBe(99);
+  await expect(page.getByText("المطلوب أيضاً فلتر المورّد.")).toHaveCount(0);
+  await expect(page.getByText("بدأت بالفلتر، والباقي غداً.")).toBeVisible();
 });
 
 test("super admin controls a company and its members from the platform panel", async ({ page }) => {

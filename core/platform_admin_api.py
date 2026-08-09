@@ -7,13 +7,17 @@ from django.db.models import Case, Count, IntegerField, Q, Value, When
 from django.utils import timezone
 from rest_framework import serializers, status, viewsets
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
-from rest_framework.decorators import api_view, authentication_classes, permission_classes
+from rest_framework.decorators import (
+    action, api_view, authentication_classes, permission_classes,
+)
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 
 from accounting.models import AccountingAuditLog
 from core.import_access import is_super_admin, super_admin_emails
-from core.models import DevelopmentNote, TenantLimit, TenantModule
+from core.models import (
+    DevelopmentNote, DevelopmentNoteComment, TenantLimit, TenantModule,
+)
 from core.modules import MODULES, invalidate_module_cache
 from core.plans import LIMITS, invalidate_limit_cache, limit_rows, plan_default
 from tenants.models import Tenant, UserCompanyMembership
@@ -33,21 +37,63 @@ class IsPlatformAdmin(BasePermission):
 MAX_NOTE_IMAGES = 10
 
 
+def _user_display_name(user):
+    if user is None:
+        return ''
+    return (f'{user.first_name} {user.last_name}').strip() or user.username
+
+
+class DevelopmentNoteCommentSerializer(serializers.ModelSerializer):
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DevelopmentNoteComment
+        fields = ['id', 'body', 'created_by', 'created_by_name', 'created_at']
+        read_only_fields = ['id', 'created_by', 'created_by_name', 'created_at']
+
+    def validate_body(self, value):
+        value = str(value or '').strip()
+        if not value:
+            raise serializers.ValidationError('نص الردّ مطلوب.')
+        return value
+
+    def get_created_by_name(self, obj):
+        return _user_display_name(obj.created_by)
+
+
 class DevelopmentNoteSerializer(serializers.ModelSerializer):
     created_by_name = serializers.SerializerMethodField()
     updated_by_name = serializers.SerializerMethodField()
+    comments = DevelopmentNoteCommentSerializer(many=True, read_only=True)
 
     class Meta:
         model = DevelopmentNote
         fields = [
             'id', 'title', 'description', 'status', 'priority', 'images',
-            'due_date', 'created_by', 'created_by_name',
+            'due_date', 'completed_at', 'created_by', 'created_by_name',
             'updated_by', 'updated_by_name', 'created_at', 'updated_at',
+            'comments',
         ]
         read_only_fields = [
-            'id', 'created_by', 'created_by_name', 'updated_by',
-            'updated_by_name', 'created_at', 'updated_at',
+            'id', 'completed_at', 'created_by', 'created_by_name', 'updated_by',
+            'updated_by_name', 'created_at', 'updated_at', 'comments',
         ]
+
+    def create(self, validated_data):
+        if validated_data.get('status') == 'done':
+            validated_data['completed_at'] = timezone.now()
+        return super().create(validated_data)
+
+    def update(self, instance, validated_data):
+        # الختم يتبع **الانتقال** لا الحالة: حفظةٌ ثانية على ملاحظة مكتملة لا
+        # تعيد ختمها، والخروج من `done` يمحو الختم فلا يبقى تاريخ إنجازٍ لشيء
+        # لم يُنجَز.
+        new_status = validated_data.get('status', instance.status)
+        if new_status != instance.status:
+            validated_data['completed_at'] = (
+                timezone.now() if new_status == 'done' else None
+            )
+        return super().update(instance, validated_data)
 
     def validate_title(self, value):
         value = str(value or '').strip()
@@ -75,35 +121,39 @@ class DevelopmentNoteSerializer(serializers.ModelSerializer):
             cleaned.append({'url': url[:500], 'caption': str(entry.get('caption') or '').strip()[:200]})
         return cleaned
 
-    @staticmethod
-    def _user_name(user):
-        if user is None:
-            return ''
-        return (f'{user.first_name} {user.last_name}').strip() or user.username
-
     def get_created_by_name(self, obj):
-        return self._user_name(obj.created_by)
+        return _user_display_name(obj.created_by)
 
     def get_updated_by_name(self, obj):
-        return self._user_name(obj.updated_by)
+        return _user_display_name(obj.updated_by)
 
 
 class DevelopmentNoteViewSet(viewsets.ModelViewSet):
     authentication_classes = [TokenAuthentication, SessionAuthentication]
     permission_classes = [IsPlatformAdmin]
     serializer_class = DevelopmentNoteSerializer
-    # الأقدم أولاً والمكتملة أخيراً — والواجهة تعيد نفس الفرز محلياً بعد كل
-    # تغيير حالة. `created_at` مرساة ثابتة لا يحرّكها تعديل، بخلاف المفتاحين
-    # السابقين: `position` (حُذف — الواجهة كانت ترسل 0 لأول ملاحظة كل جلسة
-    # فتقفز للأعلى) و`-updated_at` (كل حفظة كانت تُقفز الملاحظة فوق أخواتها).
+    # الأهمّ أولاً، والأقدم أولاً داخل الأولوية الواحدة، والمكتملة أخيراً —
+    # والواجهة تعيد نفس الفرز محلياً بعد كل تغيير حالة. `created_at` مرساة
+    # ثابتة لا يحرّكها تعديل، بخلاف المفتاحين السابقين: `position` (حُذف —
+    # الواجهة كانت ترسل 0 لأول ملاحظة كل جلسة فتقفز للأعلى) و`-updated_at`
+    # (كل حفظة كانت تُقفز الملاحظة فوق أخواتها).
     queryset = (
         DevelopmentNote.objects
         .select_related('created_by', 'updated_by')
-        .annotate(is_done=Case(
-            When(status='done', then=Value(1)), default=Value(0),
-            output_field=IntegerField(),
-        ))
-        .order_by('is_done', 'created_at', 'id')
+        .prefetch_related('comments__created_by')
+        .annotate(
+            is_done=Case(
+                When(status='done', then=Value(1)), default=Value(0),
+                output_field=IntegerField(),
+            ),
+            priority_rank=Case(
+                When(priority='high', then=Value(0)),
+                When(priority='medium', then=Value(1)),
+                default=Value(2),
+                output_field=IntegerField(),
+            ),
+        )
+        .order_by('is_done', 'priority_rank', 'created_at', 'id')
     )
 
     def perform_create(self, serializer):
@@ -118,6 +168,43 @@ class DevelopmentNoteViewSet(viewsets.ModelViewSet):
         note_id = instance.id
         instance.delete()
         logger.info('platform development note deleted id=%s by_user=%s', note_id, self.request.user.pk)
+
+    @action(detail=True, methods=['post'], url_path='comments')
+    def comments(self, request, pk=None):
+        """يضيف ردّاً على الملاحظة ويعيده وحده — لا إعادة تحميل للملاحظة كلها."""
+        note = self.get_object()
+        serializer = DevelopmentNoteCommentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        comment = serializer.save(note=note, created_by=request.user)
+        logger.info(
+            'platform development note comment added note=%s id=%s by_user=%s',
+            note.id, comment.id, request.user.pk,
+        )
+        return Response(
+            DevelopmentNoteCommentSerializer(comment).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=True, methods=['delete'],
+        url_path=r'comments/(?P<comment_id>[0-9]+)',
+    )
+    def comment_detail(self, request, pk=None, comment_id=None):
+        """حذف ردّ — أي سوبر أدمن يحذف أي ردّ (لوحة داخلية لفريق واحد)."""
+        note = self.get_object()
+        comment = DevelopmentNoteComment.objects.filter(
+            pk=comment_id, note=note).first()
+        if comment is None:
+            return Response(
+                {'detail': 'الردّ غير موجود على هذه الملاحظة.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        comment.delete()
+        logger.info(
+            'platform development note comment deleted note=%s id=%s by_user=%s',
+            note.id, comment_id, request.user.pk,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 def _super_admin_row(user):

@@ -71,6 +71,15 @@ export interface DevelopmentNoteImage {
   caption: string;
 }
 
+/** ردّ على ملاحظة — نقاشٌ مؤرَّخ بجانبها، يُكتب ويُحذف بنداء مستقلّ عن حفظها. */
+export interface DevelopmentNoteComment {
+  id: number;
+  body: string;
+  created_by: number | null;
+  created_by_name: string;
+  created_at: string;
+}
+
 export interface DevelopmentNote {
   id: number;
   title: string;
@@ -79,12 +88,15 @@ export interface DevelopmentNote {
   priority: DevelopmentNotePriority;
   images: DevelopmentNoteImage[];
   due_date: string | null;
+  /** لحظة الإنجاز — يختمها الخادم عند الانتقال لـdone، و`null` للمكتملة قبل الميزة. */
+  completed_at: string | null;
   created_by: number | null;
   created_by_name: string;
   updated_by: number | null;
   updated_by_name: string;
   created_at: string;
   updated_at: string;
+  comments: DevelopmentNoteComment[];
 }
 
 export type DevelopmentNoteWrite = Pick<
@@ -245,3 +257,11 @@ export const updateDevelopmentNote = (id: number, note: Partial<DevelopmentNoteW
 
 export const deleteDevelopmentNote = (id: number) =>
   apiDelete(`platform/development-notes/${id}/`);
+
+/** يعيد الردّ المُنشأ وحده — الشاشة تضيفه محلياً بلا إعادة تحميل الملاحظات. */
+export const addDevelopmentNoteComment = (noteId: number, body: string) =>
+  apiPostObject<DevelopmentNoteComment>(
+    `platform/development-notes/${noteId}/comments/`, { body });
+
+export const deleteDevelopmentNoteComment = (noteId: number, commentId: number) =>
+  apiDelete(`platform/development-notes/${noteId}/comments/${commentId}/`);

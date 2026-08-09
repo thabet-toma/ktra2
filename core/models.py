@@ -204,6 +204,10 @@ class DevelopmentNote(models.Model):
         help_text='[{url,caption}] صور توضيحية مرفوعة للملاحظة',
     )
     due_date = models.DateField(null=True, blank=True)
+    # لحظة الإنجاز — تُختم عند دخول الحالة `done` وتُمحى عند الخروج منها.
+    # ليست `updated_at` (كل حفظة تحرّكها) ولا تُشتقّ من الحالة وحدها: «متى
+    # أُنجزت» سؤالٌ لا تجيبه حالةٌ حاضرة.
+    completed_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
         'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
         related_name='created_development_notes',
@@ -221,6 +225,27 @@ class DevelopmentNote(models.Model):
 
     def __str__(self):
         return self.title
+
+
+class DevelopmentNoteComment(models.Model):
+    """ردّ على ملاحظة تطوير — نقاشٌ مؤرَّخ بجانب الملاحظة لا داخل وصفها."""
+
+    note = models.ForeignKey(
+        DevelopmentNote, on_delete=models.CASCADE, related_name='comments',
+    )
+    body = models.TextField()
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='development_note_comments',
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'development_note_comments'
+        ordering = ['created_at', 'id']
+
+    def __str__(self):
+        return self.body[:80]
 
 
 class ActivityLogPartner(models.Model):
