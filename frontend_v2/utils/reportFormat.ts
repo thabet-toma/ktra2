@@ -37,6 +37,8 @@ export interface ReportSummaryDto {
   description: string;
   permission: string | null;
   screen_path: string | null;
+  /** مسار المستند خلف السطر بقوالب من مفاتيح الصف — «/sales/invoices/{id}». */
+  row_link?: string | null;
   filters: ReportFilterDto[];
   columns: ReportColumnDto[];
 }
@@ -54,9 +56,13 @@ export interface ReportResultDto {
   title: string;
   category: string;
   description: string;
+  row_link?: string | null;
   columns: ReportColumnDto[];
   rows: ReportRow[];
   totals: Record<string, string>;
+  /** عدد الصفوف قبل القصّ — الإجماليات محسوبة عليه كاملاً لا على المعروض. */
+  total_rows?: number;
+  truncated?: boolean;
   generated_at: string;
 }
 
@@ -105,6 +111,85 @@ export const initialFilterValues = (
     out[filter.key] = seed[filter.key] ?? filter.default ?? '';
   }
   return out;
+};
+
+/**
+ * نطاقات الفترة الجاهزة — «هذا الشهر» بضغطة بدل كتابة تاريخين، كما في دفترة
+ * وزوهو. التاريخ يُبنى من أجزاء محليّة صريحة لا عبر `toLocale*`/`toISOString`:
+ * الأولى تُعطي هجرياً أو أرقاماً هنديّة حسب جهاز المستخدم، والثانية تُزيح اليوم
+ * بفارق المنطقة الزمنية فتُسقط حركات آخر يوم من الفترة.
+ */
+export type DatePresetKey =
+  | 'today' | 'week' | 'month' | 'quarter' | 'year' | 'prev-month' | 'prev-year' | 'all';
+
+export const DATE_PRESETS: { key: DatePresetKey; label: string }[] = [
+  { key: 'today', label: 'اليوم' },
+  { key: 'week', label: 'هذا الأسبوع' },
+  { key: 'month', label: 'هذا الشهر' },
+  { key: 'quarter', label: 'هذا الربع' },
+  { key: 'year', label: 'هذه السنة' },
+  { key: 'prev-month', label: 'الشهر الماضي' },
+  { key: 'prev-year', label: 'السنة الماضية' },
+  { key: 'all', label: 'كل الفترات' },
+];
+
+const isoLocal = (date: Date): string => {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+};
+
+/** `{from, to}` للنطاق المختار. «كل الفترات» يُفرِغ الحقلين لا يملؤهما بحدّ وهمي. */
+export const datePresetRange = (
+  preset: DatePresetKey,
+  today: Date = new Date(),
+): { from: string; to: string } => {
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const at = (y: number, m: number, d: number) => isoLocal(new Date(y, m, d));
+  switch (preset) {
+    case 'today':
+      return { from: isoLocal(today), to: isoLocal(today) };
+    case 'week': {
+      // الأسبوع يبدأ السبت في التقويم العربي — لا الأحد ولا الإثنين.
+      const start = new Date(today);
+      start.setDate(today.getDate() - ((today.getDay() + 1) % 7));
+      return { from: isoLocal(start), to: isoLocal(today) };
+    }
+    case 'month':
+      return { from: at(year, month, 1), to: at(year, month + 1, 0) };
+    case 'quarter': {
+      const first = Math.floor(month / 3) * 3;
+      return { from: at(year, first, 1), to: at(year, first + 3, 0) };
+    }
+    case 'year':
+      return { from: at(year, 0, 1), to: at(year, 11, 31) };
+    case 'prev-month':
+      return { from: at(year, month - 1, 1), to: at(year, month, 0) };
+    case 'prev-year':
+      return { from: at(year - 1, 0, 1), to: at(year - 1, 11, 31) };
+    case 'all':
+    default:
+      return { from: '', to: '' };
+  }
+};
+
+/** مسار المستند خلف صفٍّ بعينه، أو null إن نقص أحد مفاتيح القالب. */
+export const resolveRowLink = (
+  template: string | null | undefined,
+  row: ReportRow,
+): string | null => {
+  if (!template) return null;
+  let missing = false;
+  const path = template.replace(/\{(\w+)\}/g, (_match, key: string) => {
+    const value = row[key];
+    if (value === null || value === undefined || value === '') {
+      missing = true;
+      return '';
+    }
+    return encodeURIComponent(String(value));
+  });
+  return missing ? null : path;
 };
 
 const csvCell = (value: string) => `"${value.replace(/"/g, '""')}"`;

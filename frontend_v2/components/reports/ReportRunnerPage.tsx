@@ -6,7 +6,7 @@
  * تاريخ، طرف (عميل/مورد)، صنف، مستودع، حساب من الشجرة، قائمة، أو نص.
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowRight, Download, Printer, Search } from "lucide-react";
 
 import { reportsApi } from "../../services/reportsApi";
@@ -14,17 +14,25 @@ import { accountingApi } from "../../services/accountingApi";
 import { apiGetList } from "../../services/restApi";
 import { listPickerProducts } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
+import { useCompany } from "../../contexts/CompanyContext";
+import { useToast } from "../../contexts/ToastContext";
 import {
+  DATE_PRESETS,
+  datePresetRange,
   formatReportCell,
   initialFilterValues,
   isNumericKind,
   reportFileName,
   reportToCsv,
+  resolveRowLink,
+  type DatePresetKey,
   type ReportColumnDto,
   type ReportFilterDto,
   type ReportResultDto,
   type ReportRow,
 } from "../../utils/reportFormat";
+import { formatDateLocalized } from "../../utils/formatDate";
+import { printReport } from "../../utils/printReport";
 import { isCashAccount, type AccountNodeLike } from "../../utils/accountTree";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { AseelDocumentShell, AseelReportTable } from "../aseel";
@@ -46,8 +54,17 @@ const lookupsNeeded = (filters: ReportFilterDto[]) => ({
 });
 
 export const ReportRunnerPage: React.FC = () => {
-  const { reportKey = "" } = useParams();
+  // App مركّب على مسار splat (`/*`) بلا `<Route>` فيه `:reportKey` ⇒ كان
+  // `useParams()` يُرجع فارغاً فتُطلب `/api/reports//` وتردّ 404 — أي أن كل
+  // تقرير في القسم كان يفتح على خطأ. المفتاح يُقرأ من المسار كما في كرت الطرف.
+  const location = useLocation();
+  const reportKey = useMemo(() => {
+    const match = location.pathname.match(/\/reports\/([^/?#]+)/);
+    return match ? decodeURIComponent(match[1]) : "";
+  }, [location.pathname]);
   const navigate = useNavigate();
+  const { currentCompany } = useCompany();
+  const toast = useToast();
 
   const [result, setResult] = useState<ReportResultDto | null>(null);
   const [filters, setFilters] = useState<ReportFilterDto[]>([]);
@@ -65,6 +82,7 @@ export const ReportRunnerPage: React.FC = () => {
 
   /** المواصفة من الفهرس — نحتاج الفلاتر قبل أول تشغيل. */
   useEffect(() => {
+    if (!reportKey) return;
     let alive = true;
     setSpecLoaded(false);
     setRanOnce(false);
@@ -81,11 +99,10 @@ export const ReportRunnerPage: React.FC = () => {
       if (!alive) return;
       setFilters(specFilters);
       // الافتراضي: هذه السنة — تقرير بلا نطاق يجرّ كل تاريخ الشركة.
-      const year = new Date().getFullYear();
+      const thisYear = datePresetRange("year");
       setValues(initialFilterValues(specFilters, {
-        from: specFilters.some((f) => f.key === "from") ? `${year}-01-01` : "",
-        to: specFilters.some((f) => f.key === "to")
-          ? new Date().toISOString().slice(0, 10) : "",
+        from: specFilters.some((f) => f.key === "from") ? thisYear.from : "",
+        to: specFilters.some((f) => f.key === "to") ? thisYear.to : "",
       }));
       setSpecLoaded(true);
     })();
@@ -115,6 +132,11 @@ export const ReportRunnerPage: React.FC = () => {
   }, [filters]);
 
   const run = useCallback(async (overrides?: Record<string, string>) => {
+    if (!reportKey) {
+      setError("لا تقرير في هذا الرابط — افتح تقريراً من فهرس التقارير.");
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -220,30 +242,89 @@ export const ReportRunnerPage: React.FC = () => {
     );
   };
 
+  /** نطاق جاهز: يملأ الحقلين ويُشغّل فوراً — الضغطة الواحدة هي الفائدة كلها. */
+  const applyPreset = useCallback((preset: DatePresetKey) => {
+    const range = datePresetRange(preset);
+    setValues((prev) => {
+      const next = { ...prev, from: range.from, to: range.to };
+      void run(next);
+      return next;
+    });
+  }, [run]);
+
+  const hasDateRange = useMemo(
+    () => filters.some((f) => f.key === "from") && filters.some((f) => f.key === "to"),
+    [filters],
+  );
+
+  const activePreset = useMemo(() => {
+    if (!hasDateRange) return null;
+    return DATE_PRESETS.find((p) => {
+      const range = datePresetRange(p.key);
+      return range.from === (values.from ?? "") && range.to === (values.to ?? "");
+    })?.key ?? null;
+  }, [hasDateRange, values.from, values.to]);
+
   const filterBar = (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
-      {filters.map((filter) => (
-        <div className="aseel-field" key={filter.key}>
-          <label className="aseel-field-label">{filter.label}</label>
-          {renderFilter(filter)}
+    <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+      {hasDateRange && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+          {DATE_PRESETS.map((preset) => (
+            <button
+              key={preset.key}
+              type="button"
+              onClick={() => applyPreset(preset.key)}
+              className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                activePreset === preset.key
+                  ? "border-[var(--color-accent,#2563eb)] bg-[var(--color-accent,#2563eb)] text-white"
+                  : "border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent,#2563eb)]"
+              }`}
+            >
+              {preset.label}
+            </button>
+          ))}
         </div>
-      ))}
-      <button type="button" className="aseel-toolbtn" style={{ marginTop: "18px" }}
-        onClick={() => void run()}>
-        <Search className="w-4 h-4" /> تشغيل
-      </button>
+      )}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-end" }}>
+        {filters.map((filter) => (
+          <div className="aseel-field" key={filter.key}>
+            <label className="aseel-field-label">{filter.label}</label>
+            {renderFilter(filter)}
+          </div>
+        ))}
+        <button type="button" className="aseel-toolbtn" style={{ marginTop: "18px" }}
+          onClick={() => void run()}>
+          <Search className="w-4 h-4" /> تشغيل
+        </button>
+      </div>
     </div>
   );
 
+  /** التقرير سؤال، وسطره بابٌ إلى مستنده: العمود الأول يصير رابطاً حين يعرف
+   *  الخادم مسار المستند. سطر بلا معرّف (رصيد افتتاحي مثلاً) يبقى نصّاً. */
   const columns: ReportColumn<ReportRow>[] = useMemo(
-    () => (result?.columns ?? []).map((col: ReportColumnDto) => ({
+    () => (result?.columns ?? []).map((col: ReportColumnDto, index: number) => ({
       key: col.key,
       header: col.header,
       width: col.width || undefined,
       numeric: isNumericKind(col.kind),
-      render: (row: ReportRow) => formatReportCell(row[col.key], col.kind),
+      render: (row: ReportRow) => {
+        const text = formatReportCell(row[col.key], col.kind);
+        const path = index === 0 ? resolveRowLink(result?.row_link, row) : null;
+        if (!path) return text;
+        return (
+          <button
+            type="button"
+            className="text-[var(--color-accent,#2563eb)] underline-offset-2 hover:underline"
+            onClick={() => navigate(path)}
+            title="فتح المستند"
+          >
+            {text}
+          </button>
+        );
+      },
     })),
-    [result],
+    [result, navigate],
   );
 
   const totals = useMemo(() => {
@@ -268,9 +349,78 @@ export const ReportRunnerPage: React.FC = () => {
     URL.revokeObjectURL(url);
   }, [result]);
 
+  /** الفترة كما تُقرأ في الترويسة — لا تقرير مطبوع بلا نطاقه. */
+  const periodLabel = useMemo(() => {
+    const from = values.from ? formatDateLocalized(values.from) : "";
+    const to = values.to ? formatDateLocalized(values.to) : "";
+    if (from && to) return `الفترة من ${from} إلى ${to}`;
+    if (from) return `الفترة من ${from}`;
+    if (to) return `الفترة حتى ${to}`;
+    return "كل الفترات";
+  }, [values.from, values.to]);
+
+  /**
+   * الطباعة بترويسة الشركة والفترة والإجماليات — لا `window.print()` على
+   * الصفحة كلها (كانت تطبع القائمة الجانبية والشريط العلوي مع التقرير).
+   */
+  const print = useCallback(() => {
+    if (!result) return;
+    const applied = filters
+      .filter((f) => f.key !== "from" && f.key !== "to" && (values[f.key] ?? "").trim())
+      .map((f) => {
+        const raw = values[f.key];
+        if (f.kind === "select") {
+          return { label: f.label, value: f.options?.find((o) => o.value === raw)?.label ?? raw };
+        }
+        if (PARTNER_KINDS.has(f.kind)) {
+          return { label: f.label, value: partners.find((p) => String(p.id) === raw)?.name ?? raw };
+        }
+        if (f.kind === "product") {
+          const p = products.find((x) => String(x.id) === raw);
+          return { label: f.label, value: p ? (p.name_ar || p.name_en || p.name || raw) : raw };
+        }
+        if (f.kind === "warehouse") {
+          return { label: f.label, value: warehouses.find((w) => String(w.id) === raw)?.name ?? raw };
+        }
+        if (ACCOUNT_KINDS.has(f.kind)) {
+          const acc = accounts.find((a) => String(a.id) === raw);
+          return { label: f.label, value: acc ? `${acc.code} — ${acc.name}` : raw };
+        }
+        return { label: f.label, value: raw };
+      });
+
+    const opened = printReport<ReportRow>({
+      title: result.title,
+      subtitle: [currentCompany?.CompanyName, periodLabel].filter(Boolean).join(" · "),
+      columns: result.columns.map((col) => ({
+        header: col.header,
+        numeric: isNumericKind(col.kind),
+        value: (row: ReportRow) => formatReportCell(row[col.key], col.kind),
+      })),
+      rows: result.rows,
+      meta: applied,
+      totals: totals
+        ? result.columns.map((col, i) => (totals[col.key] ?? (i === 0 ? "الإجمالي" : "")))
+        : undefined,
+      footer: result.truncated
+        ? `عُرض أول ${result.rows.length} سطر من ${result.total_rows} — ضيّق الفترة لطباعة التقرير كاملاً.`
+        : undefined,
+      emptyHint: "لا توجد بيانات في النطاق المحدد",
+    });
+    if (!opened) toast("المتصفح منع نافذة الطباعة — اسمح بالنوافذ المنبثقة لهذا الموقع.", "error");
+  }, [result, filters, values, partners, products, warehouses, accounts,
+      currentCompany, periodLabel, totals, toast]);
+
   const content = (
     <>
       {error && <div className="aseel-banner aseel-banner--err" style={{ marginBottom: "8px" }}>{error}</div>}
+      {result?.truncated && (
+        <div className="aseel-banner aseel-banner--warn" style={{ marginBottom: "8px" }}>
+          التقرير أكبر من أن يُعرض كاملاً: ظهر أول {result.rows.length} سطر من{" "}
+          {result.total_rows}. الإجماليات أدناه محسوبة على الصفوف كلها — ضيّق الفترة
+          لتصفّح الباقي.
+        </div>
+      )}
       {result?.description && (
         <p className="mb-2 text-xs text-[var(--color-text-muted)]">{result.description}</p>
       )}
@@ -282,7 +432,7 @@ export const ReportRunnerPage: React.FC = () => {
         exportable
         onExport={exportCsv}
         loading={loading}
-        getRowKey={(row, idx) => String(row.id ?? idx)}
+        getRowKey={(_row, idx) => idx}
       />
     </>
   );
@@ -291,7 +441,7 @@ export const ReportRunnerPage: React.FC = () => {
     { key: "back", label: "كل التقارير", icon: <ArrowRight />, onClick: () => navigate("/reports") },
     { key: "run", label: "تشغيل", icon: <Search />, onClick: () => void run() },
     { key: "export", label: "تصدير CSV", icon: <Download />, onClick: exportCsv },
-    { key: "print", label: "طباعة", icon: <Printer />, onClick: () => window.print() },
+    { key: "print", label: "طباعة / PDF", icon: <Printer />, onClick: print },
   ];
 
   const tabs: AseelTab[] = [
@@ -306,9 +456,16 @@ export const ReportRunnerPage: React.FC = () => {
         header={<></>}
         tabs={tabs}
         status={
-          <span className="aseel-status-item">
-            {result ? `${result.rows.length} سطر` : "…"}
-          </span>
+          <>
+            <span className="aseel-status-item">
+              {result
+                ? (result.truncated
+                    ? `${result.rows.length} من ${result.total_rows} سطر`
+                    : `${result.rows.length} سطر`)
+                : "…"}
+            </span>
+            <span className="aseel-status-item">{periodLabel}</span>
+          </>
         }
       >
         <></>

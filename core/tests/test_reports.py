@@ -9,8 +9,8 @@ from decimal import Decimal
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
-from accounting.models import Account
-from accounting.services import create_fiscal_year
+from accounting.models import Account, JournalHeader, JournalLine
+from accounting.services import create_fiscal_year, partner_posted_balance
 from core.reports import REPORTS, report_catalog
 from inventory.models import Product
 from partners.models import Partner
@@ -73,6 +73,9 @@ class ReportEngineTest(APITestCase):
         )
 
         cash = Account.objects.get(tenant=cls.tenant, code="1101")
+        # حساب الذمم المدينة — مادّة اختبارات كشف الحساب ودفتر الأستاذ.
+        cls.ar_account = Account.objects.filter(
+            tenant=cls.tenant, code__startswith="1102").first() or cash
         CustomerPayment.objects.create(
             tenant=cls.tenant, partner=cls.customer, currency=cls.currency,
             exchange_rate=Decimal("1"), amount=Decimal("16"),
@@ -170,6 +173,109 @@ class ReportEngineTest(APITestCase):
                 self.assertEqual(res.status_code, 200, f"{key}: {res.data}")
                 self.assertIn("rows", res.data)
                 self.assertIn("columns", res.data)
+
+    # ── الدفاتر (T-REPORTS2) ─────────────────────────────────────────
+    def _post_line(self, date, debit, credit, *, partner=None, description=""):
+        """قيد مرحَّل بسطر واحد على حساب الذمم — مادّة كشف الحساب والأستاذ."""
+        journal = JournalHeader.objects.create(
+            tenant=self.tenant, transaction_date=date, description=description,
+            is_posted=True, currency=self.currency, exchange_rate=Decimal("1"),
+        )
+        return JournalLine.objects.create(
+            tenant=self.tenant, journal=journal, account=self.ar_account,
+            debit=debit, credit=credit, base_debit=debit, base_credit=credit,
+            partner=partner, description=description,
+        )
+
+    def test_partner_statement_carries_opening_balance_into_the_period(self):
+        """الحركة السابقة للفترة لا تُهمَل ولا تُعرَض — تُطوى في رصيد افتتاحي.
+
+        بلا هذا يقرأ صاحب الحساب رصيداً يبدأ من الصفر في كل فترة يفتحها.
+        """
+        self._post_line("2025-11-01", Decimal("300"), Decimal("0"),
+                        partner=self.customer, description="قبل الفترة")
+        self._post_line("2026-03-05", Decimal("200"), Decimal("0"),
+                        partner=self.customer, description="داخل الفترة")
+        self._post_line("2026-04-05", Decimal("0"), Decimal("50"),
+                        partner=self.customer, description="تحصيل")
+
+        res = self._run("partner-statement", partner=self.customer.id)
+        self.assertEqual(res.status_code, 200, res.data)
+        rows = res.data["rows"]
+        self.assertEqual(rows[0]["description"], "رصيد افتتاحي")
+        self.assertEqual(Decimal(rows[0]["balance"]), Decimal("300"))
+        # الافتتاحي لا يُعرَض كحركة: 3 أسطر = افتتاحي + حركتا الفترة.
+        self.assertEqual(len(rows), 3)
+        self.assertEqual([r["description"] for r in rows[1:]], ["داخل الفترة", "تحصيل"])
+        self.assertEqual(Decimal(rows[-1]["balance"]), Decimal("450"))
+        # الإجمالي على حركات الفترة وحدها — الافتتاحي ليس مديناً ولا دائناً.
+        self.assertEqual(Decimal(res.data["totals"]["debit"]), Decimal("200"))
+        self.assertEqual(Decimal(res.data["totals"]["credit"]), Decimal("50"))
+
+    def test_partner_statement_matches_posted_balance_source_of_truth(self):
+        """الختامي يساوي `partner_posted_balance` — لا مصدر حقيقة موازٍ."""
+        self._post_line("2026-02-01", Decimal("700"), Decimal("0"), partner=self.customer)
+        self._post_line("2026-02-09", Decimal("0"), Decimal("120"), partner=self.customer)
+        debit, credit = partner_posted_balance(self.tenant.TenantID, self.customer.id)
+
+        res = self._run("partner-statement", partner=self.customer.id,
+                        **{"from": "1990-01-01", "to": "2099-12-31"})
+        self.assertEqual(Decimal(res.data["rows"][-1]["balance"]), debit - credit)
+
+    def test_supplier_statement_flips_the_sign(self):
+        """المورد دائن بطبعه: دائن−مدين، وإلا قرأ الطرفان الرقم نفسه بإشارتين."""
+        self._post_line("2026-02-01", Decimal("0"), Decimal("400"), partner=self.supplier)
+        res = self._run("partner-statement", partner=self.supplier.id)
+        self.assertEqual(Decimal(res.data["rows"][-1]["balance"]), Decimal("400"))
+
+    def test_partner_statement_without_a_partner_returns_nothing(self):
+        """كشفٌ بلا طرف لا معنى له — لا يجرّ دفتر الشركة كله."""
+        res = self._run("partner-statement")
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["rows"], [])
+
+    def test_account_ledger_runs_a_debit_minus_credit_balance(self):
+        self._post_line("2026-05-01", Decimal("90"), Decimal("0"))
+        self._post_line("2026-05-02", Decimal("0"), Decimal("40"))
+        res = self._run("account-ledger", account=self.ar_account.id)
+        rows = res.data["rows"]
+        self.assertEqual(rows[0]["description"], "رصيد افتتاحي")
+        self.assertEqual(Decimal(rows[-1]["balance"]), Decimal("50"))
+
+    def test_general_journal_shows_posted_entries_with_their_totals(self):
+        self._post_line("2026-06-20", Decimal("75"), Decimal("0"), description="قيد اليومية")
+        res = self._run("general-journal")
+        row = next(r for r in res.data["rows"] if r["description"] == "قيد اليومية")
+        self.assertEqual(row["state"], "مرحّل")
+        self.assertEqual(Decimal(row["debit"]), Decimal("75"))
+
+    # ── القصّ لا يكذب ────────────────────────────────────────────────
+    def test_truncation_trims_rows_but_never_the_totals(self):
+        """التقرير الضخم يُقصّ للعرض؛ الإجمالي يبقى على الصفوف كلها."""
+        from core import reports as reports_module
+
+        original = reports_module.MAX_ROWS
+        reports_module.MAX_ROWS = 2
+        try:
+            for day in range(1, 5):
+                self._post_line(f"2026-07-0{day}", Decimal("10"), Decimal("0"))
+            res = self._run("general-journal")
+        finally:
+            reports_module.MAX_ROWS = original
+
+        self.assertTrue(res.data["truncated"])
+        self.assertEqual(len(res.data["rows"]), 2)
+        self.assertGreaterEqual(res.data["total_rows"], 4)
+        self.assertGreaterEqual(Decimal(res.data["totals"]["debit"]), Decimal("40"))
+
+    # ── مسار المستند خلف السطر ───────────────────────────────────────
+    def test_document_reports_expose_the_path_behind_the_row(self):
+        """السطر بابٌ إلى مستنده: الخادم يُعلن المسار فتفتحه الشاشة العامّة."""
+        res = self._run("sales-invoices")
+        self.assertEqual(res.data["row_link"], "/sales/invoices/{id}")
+        self.assertTrue(all("id" in row for row in res.data["rows"]))
+        catalog = {r["key"]: r for c in report_catalog() for r in c["reports"]}
+        self.assertEqual(catalog["import-deals"]["row_link"], "/deals/{id}")
 
     # ── العزل ────────────────────────────────────────────────────────
     def test_report_is_scoped_to_active_company(self):
