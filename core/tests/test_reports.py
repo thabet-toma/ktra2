@@ -12,7 +12,7 @@ from rest_framework.test import APITestCase
 from accounting.models import Account, JournalHeader, JournalLine
 from accounting.services import create_fiscal_year, partner_posted_balance
 from core.reports import REPORTS, report_catalog
-from inventory.models import Product
+from inventory.models import Product, StockMovement
 from partners.models import Partner
 from sales.models import CustomerPayment, SalesInvoice, SalesInvoiceLine
 from tenants.models import Currency
@@ -138,13 +138,33 @@ class ReportEngineTest(APITestCase):
         self.assertEqual(Decimal(row["grand_total"]), Decimal("116"))
         self.assertEqual(Decimal(row["remaining"]), Decimal("100"))
 
-    def test_sales_by_product_reports_quantity_and_profit(self):
+    def test_sales_by_product_declares_quantity_that_has_no_movement(self):
+        """THA-60: بلا حركة مخزون لا تُختلَق تكلفة — الكمية تُعلَن كما هي.
+
+        فاتورة هذه التجهيزة مكتوبة مباشرةً بلا ترحيل، فلا حركة لها. كانت
+        التكلفة تُشتقّ من `avg_cost` (5×4=20 ⇒ ربح 80)، وهو رقم يتغيّر مع كل
+        شراء لاحق؛ الآن التكلفة صفر **مُعلَناً** في «كمية بلا تكلفة».
+        """
         res = self._run("sales-by-product")
         row = next(r for r in res.data["rows"] if r["sku"] == "RPT-1")
         self.assertEqual(Decimal(row["quantity"]), Decimal("5"))
         self.assertEqual(Decimal(row["net_sales"]), Decimal("100"))
-        # التكلفة = 5 × 4 = 20 ⇒ الربح 80
-        self.assertEqual(Decimal(row["profit"]), Decimal("80"))
+        self.assertEqual(Decimal(row["cost"]), Decimal("0"))
+        self.assertEqual(Decimal(row["uncosted_qty"]), Decimal("5"))
+
+    def test_sales_by_product_reads_cost_from_the_stock_movement(self):
+        """وبوجود الحركة تُقرأ تكلفتها هي — لا متوسط الصنف اليوم (4)."""
+        StockMovement.objects.create(
+            tenant=self.tenant, product=self.product, movement_type="OUT",
+            quantity=Decimal("5"), unit_cost=Decimal("6"), total_cost=Decimal("30"),
+            reference_type="SALE", reference_id=self.invoice.id,
+            movement_date="2026-06-10",
+        )
+        res = self._run("sales-by-product")
+        row = next(r for r in res.data["rows"] if r["sku"] == "RPT-1")
+        self.assertEqual(Decimal(row["cost"]), Decimal("30"))
+        self.assertEqual(Decimal(row["profit"]), Decimal("70"))
+        self.assertEqual(Decimal(row["uncosted_qty"]), Decimal("0"))
 
     def test_low_stock_report_flags_item_under_minimum(self):
         res = self._run("low-stock")
