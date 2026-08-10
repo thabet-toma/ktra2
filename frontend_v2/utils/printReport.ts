@@ -21,6 +21,8 @@ export type PrintReportOptions<T> = {
   rows: T[];
   /** سطور معلومات فوق الجدول (رقم المستند، الطرف، الملاحظات…). */
   meta?: { label: string; value: string }[];
+  /** سطر الإجمالي أسفل الجدول — بترتيب `columns` نفسه. فراغ في خلية بلا مجموع. */
+  totals?: (string | number | null | undefined)[];
   /** نص ذيل اختياري (توقيع المستلم مثلاً). */
   footer?: string;
   /** رسالة عند غياب الصفوف. */
@@ -38,7 +40,7 @@ const esc = (v: unknown) =>
  * الشاشة رسالة بدل الصمت.
  */
 export function printReport<T>(options: PrintReportOptions<T>): boolean {
-  const { title, subtitle, columns, rows, meta = [], footer, emptyHint } = options;
+  const { title, subtitle, columns, rows, meta = [], totals, footer, emptyHint } = options;
   const win = window.open("", "_blank");
   if (!win) return false;
 
@@ -61,6 +63,18 @@ export function printReport<T>(options: PrintReportOptions<T>): boolean {
     : `<tr><td colspan="${columns.length}" class="empty">${esc(
         emptyHint || "لا توجد بيانات"
       )}</td></tr>`;
+
+  const totalsHtml = totals?.length
+    ? `<tfoot><tr class="totals">${columns
+        .map(
+          (c, i) =>
+            // خليّة بلا مجموع تبقى فارغة — لا شرطة توحي بقيمة مفقودة.
+            `<td class="${c.numeric ? "num" : ""}"${
+              c.numeric ? ' style="direction: ltr"' : ""
+            }>${esc(totals[i] ?? "")}</td>`
+        )
+        .join("")}</tr></tfoot>`
+    : "";
 
   const metaHtml = meta.length
     ? `<div class="meta">${meta
@@ -85,6 +99,7 @@ export function printReport<T>(options: PrintReportOptions<T>): boolean {
           th { background-color: #f9fafb; color: #374151; font-weight: 600; }
           tr:nth-child(even) { background-color: #fcfcfd; }
           .num { text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+          tfoot .totals td { background-color: #f3f4f6; font-weight: 700; border-top: 2px solid #d1d5db; }
           .empty { text-align: center; color: #6b7280; }
           .footer { margin-top: 28px; font-size: 13px; color: #374151; }
           @media print { body { padding: 0; } @page { margin: 1.5cm; } }
@@ -96,7 +111,7 @@ export function printReport<T>(options: PrintReportOptions<T>): boolean {
           subtitle ? " · " : ""
         }عدد السطور: ${rows.length} · التاريخ: ${today}</div>
         ${metaHtml}
-        <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+        <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody>${totalsHtml}</table>
         ${footer ? `<div class="footer">${esc(footer)}</div>` : ""}
         <script>window.onload = () => { window.print(); };</script>
       </body>

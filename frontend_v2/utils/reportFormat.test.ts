@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  datePresetRange,
   formatReportCell,
   initialFilterValues,
   isNumericKind,
   reportFileName,
   reportQuery,
   reportToCsv,
+  resolveRowLink,
   type ReportResultDto,
 } from './reportFormat.ts';
 
@@ -100,4 +102,55 @@ test('اسم الملف يجمع العنوان والتاريخ وينظّف ا
     reportFileName({ ...RESULT, title: 'أرباح/خسائر' }, 'pdf'),
     'أرباح-خسائر — 2026-08-06.pdf',
   );
+});
+
+// ── نطاقات الفترة الجاهزة (T-REPORTS2) ─────────────────────────────────
+// يوم مرجعي: الأربعاء 12 أغسطس 2026 — منتصف شهر ومنتصف ربع، فيكشف الحدود.
+const REF = new Date(2026, 7, 12);
+
+test('«هذا الشهر» يمتدّ من أوله إلى آخره لا إلى اليوم', () => {
+  assert.deepEqual(datePresetRange('month', REF), { from: '2026-08-01', to: '2026-08-31' });
+});
+
+test('«هذا الربع» يبدأ من أول شهور الربع', () => {
+  assert.deepEqual(datePresetRange('quarter', REF), { from: '2026-07-01', to: '2026-09-30' });
+});
+
+test('«الشهر الماضي» يقف عند آخر يوم فيه', () => {
+  assert.deepEqual(datePresetRange('prev-month', REF), { from: '2026-07-01', to: '2026-07-31' });
+});
+
+test('حدود السنة لا تتأثر بالمنطقة الزمنية', () => {
+  assert.deepEqual(datePresetRange('year', REF), { from: '2026-01-01', to: '2026-12-31' });
+  assert.deepEqual(datePresetRange('prev-year', REF), { from: '2025-01-01', to: '2025-12-31' });
+  // toISOString كان يُرجع 2025-12-31 لتاريخ 2026-01-01 في المناطق الموجبة.
+  assert.equal(datePresetRange('year', new Date(2026, 0, 1)).from, '2026-01-01');
+});
+
+test('الأسبوع يبدأ السبت', () => {
+  // 12/8/2026 أربعاء ⇒ سبت الأسبوع هو 8/8.
+  assert.deepEqual(datePresetRange('week', REF), { from: '2026-08-08', to: '2026-08-12' });
+  // السبت نفسه يبدأ أسبوعه لا الذي قبله.
+  assert.equal(datePresetRange('week', new Date(2026, 7, 8)).from, '2026-08-08');
+});
+
+test('«كل الفترات» يُفرغ الحقلين بلا حدّ وهمي', () => {
+  assert.deepEqual(datePresetRange('all', REF), { from: '', to: '' });
+});
+
+test('اليوم الواحد من وإلى نفسه', () => {
+  assert.deepEqual(datePresetRange('today', REF), { from: '2026-08-12', to: '2026-08-12' });
+});
+
+// ── مسار المستند خلف السطر ─────────────────────────────────────────────
+
+test('رابط السطر يملأ القالب من مفاتيح الصف', () => {
+  assert.equal(resolveRowLink('/sales/invoices/{id}', { id: 12 }), '/sales/invoices/12');
+});
+
+test('السطر الذي ينقصه مفتاح القالب لا يصير رابطاً', () => {
+  // سطر «الرصيد الافتتاحي» في كشف الحساب بلا مستند — يجب ألّا يُفتَح.
+  assert.equal(resolveRowLink('/accounting/journals/{id}', { id: null }), null);
+  assert.equal(resolveRowLink('/accounting/journals/{id}', {}), null);
+  assert.equal(resolveRowLink(null, { id: 3 }), null);
 });
