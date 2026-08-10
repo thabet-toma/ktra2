@@ -3449,6 +3449,18 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         tenant = invoice.tenant or self._get_tenant()
         partner = invoice.partner
 
+        # نمط «إجباري»: الأرقام شرط الترحيل نفسه لا الاستلام وحده — الاستلام مع
+        # الترحيل مشروط (محلية + GR/IR + قيمة موجبة)، وترحيلٌ بلا أرقام يُقفل
+        # التعديل فيسدّ الطريق. الحارس قبل أي كتابة.
+        from inventory.serials import assert_purchase_serials_declared
+        try:
+            assert_purchase_serials_declared(invoice)
+        except DjangoValidationError as e:
+            return Response(
+                {'error': e.message if hasattr(e, 'message') else '؛ '.join(e.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         # ─── 1) الحساب الدائن دائماً = ذمم المورد (subledger) ───────────────────
         # Feature 2: ترحيل الفاتورة يدائن ذمم المورد بالكامل ولا يُسوّي النقدية —
         # الدفع للمورد يُسجَّل كوصل دفع مستقل (SupplierPayment) بعد الترحيل.
@@ -3849,6 +3861,14 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             it.save(update_fields=['received_quantity', 'warehouse'])
             movements += 1
 
+        # نفس قاعدة الاستلام المؤجَّل (`receive_purchase_invoice`): الوحدات
+        # المُرقَّمة تُنشأ حين تدخل البضاعة المخزن، من مصدر إلزامٍ واحد.
+        from inventory.serials import apply_purchase_serials
+        apply_purchase_serials(
+            tenant=tenant,
+            rows=[(it, Decimal(str(it.quantity or 0))) for it in goods_lines],
+        )
+
         # قيد الاستلام: مدين المخزون / دائن الوسيط (يُصفّر الوسيط مع قيد الفاتورة).
         receipt_journal = post_journal(
             tenant_id=tenant.TenantID,
@@ -4034,6 +4054,10 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 return Response({'error': 'المرجع غير مرحّل'}, status=status.HTTP_400_BAD_REQUEST)
             try:
                 with transaction.atomic():
+                    # الكمية تعود للمخزن ⇒ وحداتها المُرقَّمة تعود معها، وإلا بقي
+                    # الرصيد يقول شيئاً وكرت الصنف شيئاً آخر.
+                    from inventory.serials import restock_returned_purchase_serials
+                    restock_returned_purchase_serials(invoice)
                     result = unpost_document(
                         tenant_id=invoice.tenant_id,
                         reference_id=invoice.pk,
@@ -4065,6 +4089,17 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             )
         try:
             with transaction.atomic():
+                # الوحدات المُرقَّمة تخرج مع مخزونها: حارس يمنع التراجع إن بِيعت
+                # إحداها (بجانب حارس اعتمادية المخزون داخل unpost_document، لا بدلاً
+                # منه — ذاك يرى الكميات وهذا يرى الوحدة بعينها).
+                from inventory.serials import release_purchase_serials
+                release_purchase_serials(
+                    tenant_id=invoice.tenant_id,
+                    quantities_by_item={
+                        it.pk: None for it in invoice.items.all() if it.product_id
+                    },
+                    document_label=f"ترحيل فاتورة الشراء {invoice.invoice_number}",
+                )
                 result = unpost_document(
                     tenant_id=invoice.tenant_id,
                     reference_id=invoice.pk,

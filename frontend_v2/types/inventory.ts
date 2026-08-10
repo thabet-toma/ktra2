@@ -31,8 +31,27 @@ export interface SqlProduct {
   purchased_qty?: string | null;
   /** W8: متوسط المبيعات الشهري = صافي (OUT−RETURN_IN) 90ي ÷ 3. */
   avg_monthly_sales?: string | null;
+  /** T-SERIAL: الصنف يتتبّع وحداته برقم تسلسلي (يفعّله كرت الصنف). */
+  is_serialized?: boolean;
   stock_status: "in_stock" | "low_stock" | "out_of_stock";
 }
+
+/**
+ * T-SERIAL: نمط إدخال الرقم التسلسلي في مستندات الشراء والبيع — مرآة
+ * `inventory/serials.py::SERIAL_MODE_CHOICES`. الإعداد لكل شركة وعلى كل جانب
+ * مستقلاً (`PurchaseSettings.serial_entry_mode` / `SalesSettings.serial_entry_mode`).
+ */
+export type SerialEntryMode = "off" | "optional" | "required";
+
+/** خيارات النمط — معرَّفة مرة واحدة كي لا تتباعد شاشتا الشراء والبيع. */
+export const SERIAL_ENTRY_MODE_OPTIONS: { value: SerialEntryMode; label: string }[] = [
+  { value: "off", label: "معطّل" },
+  { value: "optional", label: "اختياري" },
+  { value: "required", label: "إجباري" },
+];
+
+export const SERIAL_ENTRY_MODE_HINT =
+  "إجباري = لا تُرحَّل الفاتورة بدون الأرقام؛ اختياري = تظهر ويمكن الترحيل بدونها.";
 
 export interface StockMovementDto {
   id: number;

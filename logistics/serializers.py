@@ -1478,11 +1478,16 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
             'landed_unit_price_ils', 'landed_line_total_ils',
             'seq', 'catalog_number', 'name_snapshot', 'description_line', 'unit', 'warehouse',
             'extra_qty', 'batch_number', 'serial_number', 'manufacture_number', 'expiry_date',
+            'serials',
             'line_currency', 'line_exchange_rate', 'second_date', 'is_taxable', 'vat_percent',
             'discount_percent', 'discount_amount',
             'expense_account', 'expense_account_code', 'expense_account_name',
         ]
         read_only_fields = ['id', 'received_quantity']
+
+    def validate_serials(self, value):
+        from inventory.serials import normalize_serials
+        return normalize_serials(value)
 
     def get_product_name(self, obj):
         if obj.product:
@@ -1852,6 +1857,16 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'cash_or_bank_account': 'الدفع النقدي يتطلب اختيار حساب صندوق/بنك.'
             })
+        # نمط «بدون» في إعدادات الشراء: لا تُخزَّن أرقام تسلسلية على البنود إطلاقاً.
+        from core.tenant_utils import get_tenant
+        from inventory.serials import purchase_serial_mode, strip_serials_when_off
+
+        request = self.context.get('request')
+        tenant = get_tenant(request) if request is not None else None
+        if tenant is not None and attrs.get('items'):
+            strip_serials_when_off(
+                attrs['items'], purchase_serial_mode(tenant.TenantID),
+            )
         return attrs
 
     def get_cheques(self, obj):
@@ -2188,7 +2203,8 @@ class PurchaseSettingsSerializer(serializers.ModelSerializer):
         model = PurchaseSettings
         fields = ['id', 'purchase_default_price_strategy', 'default_cash_account',
                   'receive_on_post', 'receipt_doc_label', 'standalone_receipt_label',
-                  'allow_standalone_receipt', 'allow_edit_receipt', 'updated_at']
+                  'allow_standalone_receipt', 'allow_edit_receipt',
+                  'serial_entry_mode', 'updated_at']
         read_only_fields = ['id', 'updated_at']
 
 

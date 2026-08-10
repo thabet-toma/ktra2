@@ -1,3 +1,4 @@
+import { humanizeDrfError } from "../utils/drfError";
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
 import { apiFetch, apiGetList, toPagedList } from "./restApi";
 
@@ -52,6 +53,27 @@ export interface WarehouseStockDetail {
   valuation_method: "moving_average_cost";
 }
 
+/**
+ * وحدة مُرقَّمة كما يعيدها الخادم (`inventory/serials.py::_serial_row`) —
+ * من أين جاءت الوحدة (فاتورة الشراء ومورّدها) وإلى أين ذهبت (فاتورة البيع وزبونها).
+ */
+export interface ProductSerialRow {
+  id: number;
+  serial: string;
+  status: "in_stock" | "sold";
+  status_display: string;
+  product: number;
+  product_name: string;
+  product_sku: string;
+  purchase_invoice: number | null;
+  purchase_invoice_number: string | null;
+  supplier_name: string | null;
+  sales_invoice: number | null;
+  sales_invoice_number: string | null;
+  customer_name: string | null;
+  created_at: string | null;
+}
+
 const headers = (): HeadersInit => {
   const token = localStorage.getItem("token");
   // task11 R2: الشركة النشطة + الفرع النشط مع كل طلب مخزون
@@ -68,9 +90,10 @@ async function handle(res: Response, ctx: string): Promise<void> {
   if (res.ok) return;
   let msg = `${ctx}: ${res.status}`;
   try {
-    const j = await res.json();
-    if (typeof j.error === "string") msg = j.error;
-    else if (typeof j.detail === "string") msg = j.detail;
+    // G2: خطأ حقل من DRF ({"barcode": ["…"]}) كان يسقط هنا فيصل للمستخدم «‎: 400»
+    // بلا أي سبب — يمرّ الآن على نفس المحوّل الذي يستعمله restApi.
+    const humanized = humanizeDrfError(await res.json());
+    if (humanized) msg = humanized;
   } catch {
     const t = await res.text();
     if (t) msg = t.slice(0, 400);
@@ -204,6 +227,70 @@ export const inventoryApi = {
     });
     await handle(res, "getProductStockMovements");
     return res.json();
+  },
+
+  // ─── الباركود والأرقام التسلسلية (T-SERIAL) ───
+  /**
+   * باركود EAN-13 داخلي غير مستخدم لهذه الشركة. التوليد خادمي عمداً: فحص
+   * «غير مستخدم» يجب أن يقع على مصدر البيانات، لا على الأصناف المحمَّلة في الشاشة.
+   */
+  generateBarcode: async (): Promise<string> => {
+    const res = await fetch(`${INV}/products/generate_barcode/`, {
+      method: "POST",
+      headers: headers(),
+      body: "{}",
+    });
+    await handle(res, "generateBarcode");
+    const data = await res.json();
+    return String(data.barcode || "");
+  },
+
+  /**
+   * سلسلة أرقام من رقم بداية وعدد وحدات — «SN-0098» + 3 ⇒ 0098/0099/0100.
+   * قاعدة التزايد (البادئة وخانات الصفر) تبقى في الخادم وحده: نسخة ثانية منها
+   * في TypeScript تعني قاعدتين تتباعدان بلا أن يلاحظ أحد.
+   */
+  generateSerials: async (start: string, count: number): Promise<string[]> => {
+    const res = await fetch(`${INV}/products/generate_serials/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ start, count }),
+    });
+    await handle(res, "generateSerials");
+    const data = await res.json();
+    return Array.isArray(data.serials) ? data.serials.map(String) : [];
+  },
+
+  /**
+   * ترقيم مخزون قائم: وحدات «في المخزن» بلا فاتورة شراء — مخرج الشركة التي
+   * تُشغّل «إجباري» في البيع وكل مخزونها سابقٌ للميزة. السقف خادمي (رصيد الصنف).
+   */
+  registerProductSerials: async (
+    productId: number,
+    serials: string[],
+  ): Promise<ProductSerialRow[]> => {
+    const res = await fetch(`${INV}/products/${productId}/serials/register/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ serials }),
+    });
+    await handle(res, "registerProductSerials");
+    const data = await res.json();
+    return Array.isArray(data.serials) ? data.serials : [];
+  },
+
+  /** وحدات صنف واحد المُرقَّمة — `status` يفلتر «في المخزن»/«مُباع». */
+  getProductSerials: async (
+    productId: number,
+    status?: "in_stock" | "sold",
+  ): Promise<ProductSerialRow[]> => {
+    const q = status ? `?status=${encodeURIComponent(status)}` : "";
+    const res = await fetch(`${INV}/products/${productId}/serials/${q}`, {
+      headers: headers(),
+    });
+    await handle(res, "getProductSerials");
+    const data = await res.json();
+    return Array.isArray(data) ? data : [];
   },
 
   // ─── البراندات/المجموعات المستخدمة (مميّزة) — لمنتقيات اختر/أضف ───

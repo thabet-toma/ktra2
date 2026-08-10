@@ -73,6 +73,7 @@ from .services import (
     post_sales_invoice,
     recalculate_invoice_amounts,
     release_auto_cash_settlement,
+    release_sales_serials,
     remaining_delivery_lines,
     suggest_fifo_allocations,
     unpost_customer_payment,
@@ -341,6 +342,9 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
                 # عند إعادة الترحيل. سندات المستخدم يحرسها الفحص التالي فتُمنع.
                 released = release_auto_cash_settlement(invoice, user=request.user)
                 guard_invoice_payments_before_unpost(invoice)
+                # الوحدات المُرقَّمة تعود للمخزن مع مخزونها؛ ما اختاره المستخدم يبقى
+                # على البند فتستهلك إعادة الترحيل الوحدات ذاتها.
+                release_sales_serials(invoice)
                 result = unpost_document(
                     tenant_id=invoice.tenant_id,
                     reference_id=invoice.id,
@@ -467,6 +471,13 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
         invoice = self.get_object()
         try:
             post_sales_invoice(invoice, user=request.user)
+        except ValidationError as e:
+            # `str(ValidationError)` يطبع تمثيل بايثون (`['…']`) — أول رسالة يراها
+            # المستخدم من الحارس يجب أن تكون جملةً، كما في جانب الشراء.
+            return Response(
+                {"error": e.message if hasattr(e, "message") else "؛ ".join(e.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         invoice.refresh_from_db()

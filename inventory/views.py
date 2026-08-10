@@ -2,6 +2,7 @@ import datetime
 import logging
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import F, Sum, Q, Value, DecimalField
 from django.db.models.functions import Coalesce
@@ -516,6 +517,99 @@ class ProductViewSet(viewsets.ModelViewSet):
             return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
         return Response(product_linked_invoices(
             tenant_id=tenant.pk, product_ids=self._group_ids(request)))
+
+    # ── الباركود والأرقام التسلسلية ────────────────────────────────────
+    @action(detail=False, methods=['post'], url_path='generate_barcode')
+    def generate_barcode(self, request):
+        """باركود EAN-13 داخلي (بادئة 2) غير مستخدم لهذه الشركة، بخانة تحقق سليمة.
+
+        التوليد خادمي كي يبقى فحص «غير مستخدم» على مصدر البيانات نفسه — واجهةٌ
+        تولّد رقماً محلياً قد تصطدم بصنف لم تكن قد حمّلته.
+        """
+        from inventory.serials import generate_product_barcode
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            barcode = generate_product_barcode(tenant.TenantID)
+        except DjangoValidationError as e:
+            return Response(
+                {'error': '؛ '.join(e.messages)}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({'barcode': barcode})
+
+    @action(detail=False, methods=['post'], url_path='generate_serials')
+    def generate_serials(self, request):
+        """سلسلة أرقام تسلسلية من رقم بداية وعدد وحدات — «SN-0098» + 3.
+
+        نقطة النهاية موجودة كي تبقى قاعدة التزايد (البادئة وخانات الصفر) في مكان
+        واحد مُختبَر؛ إعادة تنفيذها في الواجهة تعني قاعدتين تتباعدان.
+        """
+        from inventory.serials import generate_serial_range
+        try:
+            serials = generate_serial_range(
+                request.data.get('start'), request.data.get('count'),
+            )
+        except DjangoValidationError as e:
+            return Response(
+                {'error': '؛ '.join(e.messages)}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({'serials': serials})
+
+    @action(detail=True, methods=['get'], url_path='serials')
+    def serials(self, request, pk=None):
+        """وحدات هذا الصنف المُرقَّمة — `?status=in_stock|sold` للفلترة."""
+        from inventory.serials import product_serials
+        product = self.get_object()
+        return Response(product_serials(
+            tenant_id=product.tenant_id,
+            product_id=product.id,
+            status=request.query_params.get('status') or None,
+        ))
+
+    @action(detail=True, methods=['post'], url_path='serials/register')
+    def register_serials(self, request, pk=None):
+        """ترقيم مخزون قائم — `{"serials": ["…"]}` ⇒ وحدات «في المخزن» بلا فاتورة.
+
+        مخرج الشركة التي تُشغّل «إجباري» في البيع وكل مخزونها سابقٌ للميزة: بلا
+        هذه النقطة يبقى النمط طريقاً مسدوداً لا يُفتح إلا بإطفائه.
+        """
+        from inventory.serials import product_serials, register_existing_serials
+        product = self.get_object()
+        try:
+            created = register_existing_serials(
+                tenant_id=product.tenant_id,
+                product=product,
+                serials=request.data.get('serials'),
+            )
+        except DjangoValidationError as e:
+            return Response(
+                {'error': e.message if hasattr(e, 'message') else '؛ '.join(e.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response({
+            'created': created,
+            'serials': product_serials(
+                tenant_id=product.tenant_id, product_id=product.id,
+            ),
+        }, status=status.HTTP_201_CREATED)
+
+
+class ProductSerialViewSet(viewsets.ViewSet):
+    """بحث الأرقام التسلسلية على مستوى الشركة: من أين جاءت الوحدة وإلى أين ذهبت."""
+
+    def list(self, request):
+        from inventory.serials import search_serials
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response([])
+        return Response(search_serials(
+            tenant_id=tenant.TenantID,
+            q=request.query_params.get('q', ''),
+            status=request.query_params.get('status') or None,
+            product_id=request.query_params.get('product') or None,
+            limit=request.query_params.get('limit') or 100,
+        ))
 
 
 class WarehouseViewSet(viewsets.ModelViewSet):

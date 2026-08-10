@@ -294,6 +294,67 @@ class ProductPriceTier(models.Model):
         return f"{self.product} — {self.tier_type} #{self.tier_number}: {self.price}"
 
 
+class ProductSerial(models.Model):
+    """وحدة واحدة مُرقَّمة من صنف يتتبّع أرقامه التسلسلية (`Product.is_serialized`).
+
+    سجلّ الوحدة الفعلية لا نيّةَ المستخدم: تُنشأ حين تدخل البضاعة المخزن باستلام
+    الشراء، وتُوسم «مُباع» حين تُرحَّل فاتورة بيعها — فيُجاب سؤال «أي وحدة ذهبت
+    لأي زبون» من الجانبين. الأرقام المدخلة على بند المستند تبقى على البند نفسه
+    (`serials`) كنيّةٍ تُتَرجَم إلى صفوف هنا عند الاستلام/الترحيل، تماماً كما
+    تُترجَم الكمية إلى `StockMovement`.
+
+    الروابط قابلة للإفراغ: تعديل مستند غير مرحّل يحذف بنوده ويعيد إنشاءها، ووحدةٌ
+    موجودة في المخزن فعلاً لا تُمحى لأن ورقتها تغيّرت.
+    """
+
+    STATUS_IN_STOCK = 'in_stock'
+    STATUS_SOLD = 'sold'
+    STATUS_CHOICES = [
+        (STATUS_IN_STOCK, 'في المخزن'),
+        (STATUS_SOLD, 'مُباع'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='ProductSerialID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, db_column='ProductID',
+        related_name='serials',
+    )
+    serial = models.CharField(max_length=100, db_column='Serial')
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_IN_STOCK,
+        db_column='Status',
+    )
+    purchase_item = models.ForeignKey(
+        'logistics.PurchaseInvoiceItem', on_delete=models.SET_NULL,
+        null=True, blank=True, db_column='PurchaseInvoiceItemID',
+        # `serial_units` لا `serials`: البند يحمل حقلاً بهذا الاسم للأرقام المُعلَنة
+        # (نيّة)، وهذه هي الوحدات الفعلية (حالة) — الاسمان يجب أن يتفرّقا.
+        related_name='serial_units',
+        help_text='بند فاتورة الشراء الذي أدخل هذه الوحدة للمخزن',
+    )
+    sales_line = models.ForeignKey(
+        'sales.SalesInvoiceLine', on_delete=models.SET_NULL,
+        null=True, blank=True, db_column='SalesInvoiceLineID',
+        related_name='serial_units',
+        help_text='بند فاتورة البيع الذي استهلك هذه الوحدة',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'product_serials'
+        managed = True
+        unique_together = [['tenant', 'product', 'serial']]
+        indexes = [
+            models.Index(
+                fields=['tenant', 'product', 'status'],
+                name='prodserial_tenant_prod_stat',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.serial} ({self.get_status_display()})"
+
 
 # ════════════════════════════════════════════════════════════════════
 # Phase 7 (T-I1/T-I2): مستندات المخزون — تحويل بين المستودعات + جرد

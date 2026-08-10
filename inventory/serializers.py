@@ -126,7 +126,42 @@ class ProductSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {'name_ar': 'اسم الصنف مطلوب — أدخل الاسم بالعربية أو بالإنجليزية.'}
             )
+        self._validate_barcode_unique(attrs)
         return attrs
+
+    def _validate_barcode_unique(self, attrs):
+        """الباركود يجب أن يميّز صنفاً واحداً في الشركة — وإلا فقد معناه.
+
+        العمود ليس فريداً في المخطّط ولن يُجعَل كذلك: بياناتٌ قديمة تحمل تكراراً،
+        وقيدٌ فريد يمنع حفظ أي صنف منها. الحرس هنا على **ما يُكتَب**: تكرارٌ قائم
+        يبقى كما هو حتى يُحرَّر صاحبه.
+        """
+        if 'barcode' not in attrs:
+            return
+        barcode = (attrs.get('barcode') or '').strip()
+        if not barcode:
+            return
+        tenant_id = getattr(self.instance, 'tenant_id', None)
+        if tenant_id is None:
+            request = self.context.get('request')
+            if request is None:
+                return
+            from core.tenant_utils import get_tenant
+            tenant = get_tenant(request)
+            if tenant is None:
+                return
+            tenant_id = tenant.TenantID
+        clash = Product.objects.filter(tenant_id=tenant_id, barcode=barcode)
+        if self.instance is not None:
+            clash = clash.exclude(pk=self.instance.pk)
+        other = clash.only('sku', 'name_ar', 'name_en').first()
+        if other is not None:
+            raise serializers.ValidationError({
+                'barcode': (
+                    f'الباركود «{barcode}» مستخدم للصنف '
+                    f'«{other.name_ar or other.name_en or other.sku}».'
+                )
+            })
 
     def get_attachments(self, obj):
         attachment_map = self.context.get('product_attachments')
@@ -166,7 +201,8 @@ class ProductLookupSerializer(ProductSerializer):
             'id', 'sku', 'barcode', 'name_ar', 'name_en', 'display_name',
             'category', 'category_name', 'hs_code', 'min_stock_level',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity',
-            'avg_cost', 'sale_price', 'is_service', 'is_for_sale_online',
+            'avg_cost', 'sale_price', 'is_service', 'is_serialized',
+            'is_for_sale_online',
             'online_price', 'online_description', 'attachments',
         ]
 

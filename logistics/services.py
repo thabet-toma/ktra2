@@ -994,6 +994,7 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
     import datetime
     import logging
     from inventory.models import Warehouse
+    from inventory.serials import apply_purchase_serials
     from inventory.services import record_stock_movement
     from accounting.services import post_journal
     from .models import PurchaseInvoice
@@ -1137,6 +1138,12 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
 
             inv_net += p['line_net']
             inv_vat += p['line_vat']
+
+        # الوحدات المُرقَّمة تدخل المخزن مع بضاعتها — لا قبل ذلك: بندٌ يحمل أرقاماً
+        # ولم يُستلَم بعد ليس مخزوناً. مُطفأ ما لم تطلبه الشركة من إعدادات الشراء.
+        apply_purchase_serials(
+            tenant=invoice.tenant, rows=[(p['item'], p['qty']) for p in planned],
+        )
 
         # ── ترحيل قيد الاستلام للقيمة المستلمة في هذا النداء ──
         # استلام بقيمة صفرية (فاتورة كمية فقط بلا أسعار) مشروع: ينعكس على المخزن
@@ -1316,6 +1323,11 @@ def create_standalone_goods_receipt(
     if not planned:
         raise ValidationError('لا يوجد ما يُستلَم — تحقق من الكميات.')
 
+    # السند المستقل لا يحمل أرقاماً تسلسلية: تحت «إجباري» يُرفض بدل أن يُدخل
+    # مخزوناً غير متتبَّع يرفض البيعُ بيعه لاحقاً.
+    from inventory.serials import assert_receipt_without_serials_allowed
+    assert_receipt_without_serials_allowed(tenant_id, [p['product'] for p in planned])
+
     with transaction.atomic():
         journal = None
         doc = receipt
@@ -1396,6 +1408,7 @@ def void_goods_receipt(receipt, *, user=None):
     """
     from accounting.models import JournalHeader
     from inventory.models import StockMovement
+    from inventory.serials import release_purchase_serials
     from inventory.services import _recompute_product_stock, apply_purchase_cost_model
     from .models import PurchaseInvoice
 
@@ -1403,6 +1416,24 @@ def void_goods_receipt(receipt, *, user=None):
         lines = list(receipt.lines.select_related('item', 'product', 'movement'))
         movement_ids = [l.movement_id for l in lines if l.movement_id]
         products = {l.product_id: l.product for l in lines if l.product_id}
+
+        # الوحدات المُرقَّمة تخرج مع بضاعتها. الحصّة التي جاءت بهذه الإرسالية هي
+        # الأحدث (الاستلام يُنشئ بالترتيب والبيع يستهلك من الأقدم)، وأيُّ وحدة
+        # مُباعة منها تمنع الإلغاء — لا بيع لوحدة يُمحى أصلها.
+        quantities_by_item: dict[int, Decimal] = {}
+        for line in lines:
+            if not line.item_id:
+                continue
+            quantities_by_item[line.item_id] = (
+                quantities_by_item.get(line.item_id, Decimal('0'))
+                + Decimal(str(line.quantity or 0))
+            )
+        if quantities_by_item:
+            release_purchase_serials(
+                tenant_id=receipt.tenant_id,
+                quantities_by_item=quantities_by_item,
+                document_label=f"إلغاء الإرسالية {receipt.receipt_number}",
+            )
 
         if movement_ids:
             StockMovement.objects.filter(pk__in=movement_ids).delete()
@@ -1663,6 +1694,7 @@ def post_purchase_return(invoice, *, user=None):
     import datetime
     import logging
     from decimal import Decimal as _D
+    from inventory.serials import release_returned_purchase_serials
     from inventory.services import record_stock_movement
     from accounting.services import post_journal, validate_fiscal_period
 
@@ -1684,6 +1716,11 @@ def post_purchase_return(invoice, *, user=None):
         items = list(invoice.items.select_related('product').all())
         if not items:
             raise ValidationError("المرجع بلا بنود.")
+
+        # البضاعة تعود للمورد ⇒ وحداتها المُرقَّمة تخرج من المخزن معها، وإلا بقي
+        # كرت الصنف يقول «في المخزن» عن وحدة غادرت. يسبق أي كتابة: وحدة مُباعة
+        # منها تمنع الترحيل.
+        release_returned_purchase_serials(invoice)
 
         inv_net = _D('0')
         inv_vat = _D('0')

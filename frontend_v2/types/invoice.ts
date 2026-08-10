@@ -77,6 +77,8 @@ export interface InvoiceItem {
     landedUnitPriceIls?: number;
     /** إجمالي السطر بالشيقل شامل التوزيع */
     landedLineTotalIls?: number;
+    /** T-SERIAL: أرقام وحدات هذا البند — تُجسَّد في المخزن عند الاستلام. */
+    serials?: string[];
 }
 
 /** مصدر استيراد الفاتورة من تخليص + شحنة (نفس منطق ربط الصفقات بالشحنة) */
