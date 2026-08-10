@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Invoice,
   InvoiceItem,
@@ -30,6 +30,8 @@ import {
   Truck,
 } from "lucide-react";
 import { ProductCardModal } from "../../shared/ProductCardModal";
+import { SerialEntryModal } from "../../shared/SerialEntryModal";
+import type { SerialEntryMode } from "@/types/inventory";
 import { AseelDatePicker } from "../../ui/AseelDatePicker";
 import {
   suppliersService,
@@ -199,6 +201,19 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       });
   }, []);
 
+  /* T-SERIAL: نمط إدخال الرقم التسلسلي في الشراء. `off` (الافتراضي، وحال تعذّر
+     قراءة الإعدادات) ⇒ لا عمود ولا نافذة ولا حقل في الحمولة. */
+  const [serialMode, setSerialMode] = useState<SerialEntryMode>("off");
+  useEffect(() => {
+    let cancelled = false;
+    purchaseInvoiceApi.getSettings()
+      .then((s) => { if (!cancelled) setSerialMode(s.serial_entry_mode || "off"); })
+      .catch(() => { /* بلا إعدادات: يبقى «معطّل» — الشاشة كما كانت */ });
+    return () => { cancelled = true; };
+  }, []);
+  /** بند مفتوح في نافذة الأرقام التسلسلية (بفهرس السطر). */
+  const [serialRowIndex, setSerialRowIndex] = useState<number | null>(null);
+
   // حارس التغييرات غير المحفوظة (Dirty state tracking)
   const [viewMode, setViewMode] = useState<boolean>(!!initialInvoice?.id);
   const effectiveReadOnly = readOnly || viewMode;
@@ -304,7 +319,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   useAseelKeymap({
     F2: () => setShowPrintView(true),
     F6: () => {
-      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="search"]');
+      // كان المحدِّد يشير إلى حقل غير موجود في هذه الشاشة — صار على صندوق
+      // الباركود نفسه المستعمل في المبيعات.
+      const el = document.querySelector<HTMLInputElement>('[data-aseel-field="barcode"]');
       el?.focus();
     },
     F12: () => handleSave(),
@@ -581,6 +598,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               item.landedLineTotalIls != null && item.landedLineTotalIls !== ""
                 ? roundSqlMoney2(item.landedLineTotalIls)
                 : null,
+            // T-SERIAL: تُرسَل دائماً — الفارغة تمسح إدخالاً سابقاً بدل أن يبقى
+            // معلّقاً على البند بلا ظهور في الشاشة.
+            serials: Array.isArray(item.serials) ? item.serials : [],
           })),
       };
 
@@ -738,6 +758,27 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       console.error("resolvePrice failed", err);
       return 0;
     }
+  };
+
+  /* بحث سريع/باركود — نفس سلوك `handleBarcodeEnter` في محرر المبيعات: الماسح
+     يكتب الرقم ويضغط ⏎ فيهبط الصنف على أول سطر فارغ، وإلا على سطر جديد.
+     كانت الشاشتان غير متكافئتين: البيع يمسح والشراء لا. */
+  const [barcodeQuery, setBarcodeQuery] = useState("");
+  const handleBarcodeEnter = async (raw: string) => {
+    const t = raw.trim();
+    if (!t) return;
+    const hit = allDbItems.find(
+      (i) => (i.barcode || "").trim() === t || (i.modelNumber || "").trim() === t || String(i.id) === t,
+    );
+    if (!hit) {
+      toast(`لا صنف بالباركود/الرقم «${t}».`, "error");
+      return;
+    }
+    const items = formData.items || [];
+    const emptyIdx = items.findIndex((i) => !i.itemId);
+    const price = await resolveSuggestedPrice(hit.id);
+    await applyItemAt(emptyIdx >= 0 ? emptyIdx : null, hit, price);
+    setBarcodeQuery("");
   };
 
   const applyItemAt = async (index: number | null, item: Item, lastPrice?: number, qtyOverride?: number) => {
@@ -1170,6 +1211,25 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     finalCostFeesTotal,
   ]);
 
+  /* T-SERIAL: من يتتبّع وحداته؟ الجواب من كتالوج الأصناف (`view=lookup`)، فالبند
+     نفسه لا يحمل العَلَم. الخدمة مستثناة — بلا مخزون فبلا وحدات. */
+  const dbItemsById = useMemo(() => {
+    const m = new Map<string, Item>();
+    allDbItems.forEach((it) => m.set(String(it.id), it));
+    return m;
+  }, [allDbItems]);
+  const itemTracksSerials = useCallback(
+    (row: InvoiceItem) => {
+      if (serialMode === "off" || !row.itemId) return false;
+      return Boolean(dbItemsById.get(String(row.itemId))?.isSerialized);
+    },
+    [serialMode, dbItemsById],
+  );
+  const anySerializedItem = useMemo(
+    () => (formData.items || []).some(itemTracksSerials),
+    [formData.items, itemTracksSerials],
+  );
+
   const itemColumns: AseelGridColumn<InvoiceItem>[] = [
     { key: "seq", header: "مسلسل", width: "52px", align: "center", readOnly: true },
     { key: "itemId", header: "رقم الصنف", width: "100px" },
@@ -1208,6 +1268,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       )
     },
     { key: "quantity", header: "الكمية", width: "80px", align: "center", type: "number" },
+    // T-SERIAL: عمود الأرقام على الأصناف التسلسلية وحدها، ويختفي بنمط «معطّل».
+    ...(anySerializedItem ? [{
+      key: "serials", header: "الأرقام التسلسلية", width: "120px", align: "center" as const, readOnly: true,
+    }] : []),
     { key: "unitPrice", header: isShipmentLinkedImport ? "قبل ض.ق.م والرسوم/وحدة" : costLabels.unitPrice, width: isShipmentLinkedImport ? "160px" : "100px", align: "center", type: "number" },
     { key: "totalPrice", header: isShipmentLinkedImport ? "قبل ض.ق.م والرسوم/سطر" : costLabels.lineTotal, width: isShipmentLinkedImport ? "160px" : "100px", align: "center", readOnly: true },
     ...(isShipmentLinkedImport ? [{ key: "finalUnitCost", header: "التكلفة النهائية/وحدة", width: "160px", align: "center" as const, readOnly: true }] : []),
@@ -1389,6 +1453,29 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     );
   };
 
+  /* T-SERIAL: زر أرقام البند — العدد مقابل الكمية، وأحمر حين ينقص في النمط
+     الإجباري. المنع نفسه عند الاستلام/الترحيل على الخادم. */
+  const renderSerialsCell = (row: InvoiceItem, rowIndex: number) => {
+    if (!itemTracksSerials(row)) return <span className="aseel-text-soft">—</span>;
+    const entered = row.serials?.length ?? 0;
+    const qty = Math.max(0, Math.trunc(Number(row.quantity) || 0));
+    const incomplete = serialMode === "required" && entered !== qty;
+    return (
+      <button
+        type="button"
+        className="aseel-toolbtn"
+        style={{
+          width: "100%", fontWeight: 600,
+          ...(incomplete ? { color: "var(--aseel-danger, #c00)" } : {}),
+        }}
+        onClick={() => setSerialRowIndex(rowIndex)}
+        title={entered > 0 ? `الأرقام: ${row.serials!.join("، ")}` : "لم تُدخَل أرقام بعد"}
+      >
+        {entered > 0 ? `${entered}/${qty}` : (serialMode === "required" ? `0/${qty}` : "إدخال")}
+      </button>
+    );
+  };
+
   const renderDeleteCell = (row: InvoiceItem) =>
     effectiveReadOnly ? null : (
       <button
@@ -1403,6 +1490,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   itemColumns[1].render = renderItemIdCell;
   itemColumns[2].render = renderItemNameCell;
+  const serialsColumn = itemColumns.find((column) => column.key === "serials");
+  if (serialsColumn) serialsColumn.render = renderSerialsCell;
   const finalUnitColumn = itemColumns.find((column) => column.key === "finalUnitCost");
   if (finalUnitColumn) {
     finalUnitColumn.render = (row) => {
@@ -2183,6 +2272,23 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               placeholder="رقم فاتورة المورد"
             />
           )}
+          {/* تكافؤ مع محرر المبيعات: الماسح يُدخل الصنف مباشرةً بلا فتح المنتقي. */}
+          {fld(
+            "بحث سريع / باركود (F6)",
+            <input
+              className="aseel-input"
+              data-aseel-field="barcode"
+              disabled={effectiveReadOnly}
+              value={barcodeQuery}
+              onChange={(e) => setBarcodeQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                void handleBarcodeEnter(barcodeQuery);
+              }}
+              placeholder="الاسم/SKU/الباركود ⏎"
+            />
+          )}
           {fld(
             "المورد",
             <div className="aseel-pickfield">
@@ -2640,6 +2746,37 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             applyItemAt(null, it, price, opts?.quantity);
           }}
           onClose={() => setCardProductId(null)}
+        />
+      );
+    })()}
+    {/* T-SERIAL: أرقام وحدات البند — الكمية تتبع عدد الأرقام (قاعدة المالك:
+        تبدأ برقم والعدد يقود الأكواد، فلا تُدخل الكمية مرتين). */}
+    {serialRowIndex != null && (() => {
+      const row = (formData.items || [])[serialRowIndex];
+      if (!row) return null;
+      return (
+        <SerialEntryModal
+          mode="capture"
+          productId={Number(row.itemId)}
+          productName={row.name || `#${row.itemId}`}
+          quantity={Number(row.quantity) || 0}
+          value={row.serials ?? []}
+          required={serialMode === "required"}
+          readOnly={effectiveReadOnly}
+          onClose={() => setSerialRowIndex(null)}
+          onSave={(entered) => {
+            const items = [...(formData.items || [])];
+            const target = { ...items[serialRowIndex], serials: entered };
+            // قائمة فارغة لا تصفّر الكمية — المستخدم مسح الأرقام لا البند.
+            if (entered.length > 0) {
+              target.quantity = entered.length;
+              target.totalPrice = roundSqlMoney2(entered.length * (target.unitPrice || 0));
+            }
+            items[serialRowIndex] = target;
+            recalculateTotals({ items });
+            markDirty();
+            setSerialRowIndex(null);
+          }}
         />
       );
     })()}

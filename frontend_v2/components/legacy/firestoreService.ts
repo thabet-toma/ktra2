@@ -1337,6 +1337,10 @@ export const itemsService = {
       salePrice: Number(p.online_price || 0),
       storeName: p.name_ar || p.name_en || "",
       storeDescription: p.online_description || "",
+      // T-SERIAL: يصلان من عقد `view=lookup` — الأول للبحث بالماسح، والثاني
+      // ليعرف سطر الفاتورة أنه صنف يُتتبَّع بالوحدة.
+      barcode: p.barcode || "",
+      isSerialized: Boolean(p.is_serialized),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     } as Item;

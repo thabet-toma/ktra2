@@ -8,9 +8,11 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGetObject } from "../../services/restApi";
+import { inventoryApi, type ProductSerialRow } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import type { AseelTab } from "../aseel";
 import { LedgerTable, DocRefCell, type LedgerColumn } from "../shared/LedgerTable";
+import SerialEntryModal from "../shared/SerialEntryModal";
 import { formatQuantity, formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
 
@@ -232,10 +234,64 @@ const invoiceColumns: LedgerColumn<InvoiceRow>[] = [
 ];
 
 /**
- * يجلب بيانات الكرت القرائية لصنف محفوظ (`productId=null` عند صنف جديد → بلا نداءات)
- * ويبني التبويبات الثلاثة جاهزة للتركيب في `AseelDocumentShell`.
+ * T-SERIAL: وحدات الصنف المُرقَّمة — «أي وحدة جاءت من أي مورّد وذهبت لأي زبون».
+ * الحالة والمستندان يأتيان من الخادم كما هي (`inventory/serials.py::_serial_row`).
  */
-export const useProductInsights = (productId: number | null) => {
+const serialColumns: LedgerColumn<ProductSerialRow>[] = [
+  {
+    key: "serial",
+    header: "الرقم التسلسلي",
+    render: (r) => <b style={{ direction: "ltr", display: "inline-block" }}>{r.serial}</b>,
+  },
+  {
+    key: "status",
+    header: "الحالة",
+    align: "center",
+    render: (r) => (
+      <span style={{ color: r.status === "sold" ? "var(--aseel-ink-soft)" : "var(--aseel-ok,#267346)" }}>
+        {r.status_display}
+      </span>
+    ),
+  },
+  {
+    key: "purchase",
+    header: "فاتورة الشراء",
+    render: (r) => (
+      <DocRefCell
+        referenceType="PURCHASE_INVOICE"
+        referenceId={r.purchase_invoice}
+        label={r.purchase_invoice_number || "—"}
+      />
+    ),
+  },
+  { key: "supplier_name", header: "المورد", render: (r) => r.supplier_name || "—" },
+  {
+    key: "sales",
+    header: "فاتورة البيع",
+    render: (r) => (
+      <DocRefCell
+        referenceType="SALES_INVOICE"
+        referenceId={r.sales_invoice}
+        label={r.sales_invoice_number || "—"}
+      />
+    ),
+  },
+  { key: "customer_name", header: "الزبون", render: (r) => r.customer_name || "—" },
+  { key: "created_at", header: "تاريخ الإدخال", render: (r) => formatDateLocalized(r.created_at) || "—" },
+];
+
+/**
+ * يجلب بيانات الكرت القرائية لصنف محفوظ (`productId=null` عند صنف جديد → بلا نداءات)
+ * ويبني تبويباته جاهزة للتركيب في `AseelDocumentShell`.
+ *
+ * `isSerialized` يأتي من الكرت لا من نقطة `profile` (لا تحمله): تبويب الأرقام
+ * التسلسلية لا يُبنى أصلاً لصنف غير متتبَّع، فلا نداء ولا تبويب فارغ.
+ */
+export const useProductInsights = (
+  productId: number | null,
+  options: { isSerialized?: boolean } = {},
+) => {
+  const { isSerialized = false } = options;
   const tenantId = useMemo(() => resolveTenantId(), []);
   const [profile, setProfile] = useState<ProductProfileData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -249,6 +305,11 @@ export const useProductInsights = (productId: number | null) => {
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
   const [invLoading, setInvLoading] = useState(false);
   const [invError, setInvError] = useState<string | null>(null);
+
+  const [serials, setSerials] = useState<ProductSerialRow[]>([]);
+  const [serLoading, setSerLoading] = useState(false);
+  const [serError, setSerError] = useState<string | null>(null);
+  const [serQuery, setSerQuery] = useState("");
 
   const loadProfile = useCallback(() => {
     if (productId == null) { setProfile(null); return; }
@@ -287,6 +348,59 @@ export const useProductInsights = (productId: number | null) => {
       })
       .finally(() => setInvLoading(false));
   }, [productId, tenantId]);
+
+  useEffect(() => {
+    if (productId == null || !isSerialized) { setSerials([]); return; }
+    setSerLoading(true);
+    setSerError(null);
+    inventoryApi.getProductSerials(productId)
+      .then((rows) => setSerials(rows))
+      .catch((err) => {
+        setSerError(err instanceof Error ? err.message : String(err));
+        setSerials([]);
+      })
+      .finally(() => setSerLoading(false));
+  }, [productId, isSerialized]);
+
+  /**
+   * ترقيم مخزون قائم: الوحدة لا تُنشأ إلا من فاتورة شراء، فمخزون ما قبل الميزة
+   * كان يبقى بلا أرقام — و«إجباري» في البيع يرفض بيعه بلا مخرج. الزر يفتح نافذة
+   * الإدخال نفسها (`capture`)، والسقف خادمي: لا ترقيم فوق رصيد الصنف.
+   */
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const inStockUnits = useMemo(
+    () => serials.filter((r) => r.status === "in_stock").length,
+    [serials],
+  );
+  const untrackedQty = useMemo(() => {
+    const onHand = Math.trunc(Number(profile?.quantity_on_hand ?? 0)) || 0;
+    return Math.max(0, onHand - inStockUnits);
+  }, [profile, inStockUnits]);
+
+  const registerSerials = useCallback((list: string[]) => {
+    if (productId == null || list.length === 0) { setRegisterOpen(false); return; }
+    setSerLoading(true);
+    inventoryApi.registerProductSerials(productId, list)
+      .then((rows) => { setSerials(rows); setSerError(null); setRegisterOpen(false); })
+      .catch((err) => {
+        // الرسالة تُعرض في التبويب لا داخل النافذة: النافذة تُغلق فيبقى السبب
+        // ظاهراً مع القائمة التي يخصّه (السقف، أو رقم مستخدم مسبقاً).
+        setSerError(err instanceof Error ? err.message : String(err));
+        setRegisterOpen(false);
+      })
+      .finally(() => setSerLoading(false));
+  }, [productId]);
+
+  // البحث على الرقم وعلى رقمَي المستند والطرفين معاً — الجرد يبحث بالرقم،
+  // وخدمة ما بعد البيع تبحث باسم الزبون أو رقم فاتورته.
+  const filteredSerials = useMemo(() => {
+    const term = serQuery.trim().toLowerCase();
+    if (!term) return serials;
+    return serials.filter((r) =>
+      [r.serial, r.purchase_invoice_number, r.supplier_name, r.sales_invoice_number, r.customer_name]
+        .some((v) => (v || "").toLowerCase().includes(term)),
+    );
+  }, [serials, serQuery]);
 
   const emptyHint = "احفظ الصنف أولاً لتظهر بياناته هنا.";
 
@@ -340,5 +454,71 @@ export const useProductInsights = (productId: number | null) => {
     },
   ];
 
-  return { profile, loading, error, reload: loadProfile, tabs };
+  /**
+   * T-SERIAL: تبويب الوحدات — منفصل عن `tabs` عمداً كي يركّبه الكرت **آخر** القائمة.
+   * `AseelDocumentShell` يتتبّع التبويب النشط بالفهرس لا بالمفتاح، فإدراج تبويب في
+   * وسط القائمة وقت التفعيل كان يقفز بالمستخدم من «بيانات عامة» إلى التبويب الجديد.
+   * تبويبٌ يُلحق في النهاية لا يزحزح فهرس أحد. (بلا تتبّع: لا تبويب أصلاً.)
+   */
+  const serialsTab: AseelTab | null = !isSerialized ? null : {
+      key: "serials",
+      label: "الأرقام التسلسلية",
+      content: productId == null
+        ? <div className="p-4 text-[var(--aseel-ink-soft)]">{emptyHint}</div>
+        : (
+          <div className="p-2">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <input
+                className="aseel-input"
+                style={{ maxWidth: 280 }}
+                value={serQuery}
+                onChange={(e) => setSerQuery(e.target.value)}
+                placeholder="بحث برقم الوحدة أو الفاتورة أو الطرف…"
+              />
+              <span className="text-xs text-[var(--aseel-ink-soft)]">
+                {formatQuantity(inStockUnits)} في المخزن
+                {" · "}
+                {formatQuantity(serials.filter((r) => r.status === "sold").length)} مُباعة
+                {untrackedQty > 0 ? ` · ${formatQuantity(untrackedQty)} بلا ترقيم` : ""}
+                {serQuery.trim() ? ` · ${formatQuantity(filteredSerials.length)} مطابقة` : ""}
+              </span>
+              {untrackedQty > 0 && (
+                <button
+                  type="button"
+                  className="aseel-addrow"
+                  style={{ margin: 0 }}
+                  title="أعطِ أرقاماً لوحدات موجودة في المخزن قبل تفعيل التتبّع"
+                  onClick={() => setRegisterOpen(true)}
+                >
+                  تسجيل أرقام لمخزون قائم
+                </button>
+              )}
+            </div>
+            {registerOpen && (
+              <SerialEntryModal
+                mode="capture"
+                productId={productId}
+                productName={profile?.name || ""}
+                quantity={untrackedQty}
+                value={[]}
+                onClose={() => setRegisterOpen(false)}
+                onSave={registerSerials}
+              />
+            )}
+            <LedgerTable<ProductSerialRow>
+              columns={serialColumns}
+              rows={filteredSerials}
+              loading={serLoading}
+              error={serError}
+              emptyText={
+                serQuery.trim()
+                  ? "لا وحدة تطابق البحث."
+                  : "لا وحدات مُرقَّمة بعد — تُنشأ عند استلام بضاعة فاتورة شراء تحمل أرقاماً، أو سجّل أرقام المخزون القائم."
+              }
+            />
+          </div>
+        ),
+    };
+
+  return { profile, loading, error, reload: loadProfile, tabs, serialsTab };
 };

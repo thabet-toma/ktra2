@@ -126,8 +126,13 @@ class SalesInvoiceLineSerializer(serializers.ModelSerializer):
             "expiry_date",
             "extra_quantity",
             "line_tax_percent",
+            "serials",
         ]
         read_only_fields = ["line_total_excl_tax", "line_tax_amount", "delivered_quantity"]
+
+    def validate_serials(self, value):
+        from inventory.serials import normalize_serials
+        return normalize_serials(value)
 
     def get_product_name(self, obj):
         return str(obj.product) if obj.product_id else None
@@ -382,6 +387,19 @@ class SalesInvoiceSerializer(
             "delivery_status_display",
             "cheques",  # mutated only via /payment-voucher endpoint
         ]
+
+    def validate(self, attrs):
+        # نمط «بدون» في إعدادات البيع: لا تُخزَّن أرقام تسلسلية على البنود إطلاقاً.
+        from core.tenant_utils import get_tenant
+        from inventory.serials import sales_serial_mode, strip_serials_when_off
+
+        request = self.context.get("request")
+        tenant = get_tenant(request) if request is not None else None
+        if tenant is not None and attrs.get("lines"):
+            strip_serials_when_off(
+                attrs["lines"], sales_serial_mode(tenant.TenantID),
+            )
+        return attrs
 
     def create(self, validated_data):
         from .services import get_or_create_sales_settings
@@ -769,6 +787,7 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "show_journal_preview",
             "warn_on_duplicate_item",
             "block_loss_invoices",
+            "serial_entry_mode",
             "dormant_customer_days",
             # T-ORDERS: صلاحية العرض، مدة حجز الطلبية، وإظهار زر الحذف.
             "quotation_valid_days",

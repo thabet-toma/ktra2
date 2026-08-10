@@ -29,7 +29,9 @@ import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { AseelDatePicker } from "../ui/AseelDatePicker";
 
 import { ProductCardModal } from "../shared/ProductCardModal";
+import { SerialEntryModal } from "../shared/SerialEntryModal";
 import { Item } from "../../types";
+import type { SerialEntryMode } from "../../types/inventory";
 import db from "../../services/offline/db";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
 import {
@@ -104,6 +106,8 @@ export type ProductRow = {
   avg_cost?: string | null;
   /** T-SERVICELINE: خدمة لا بضاعة — بلا مخزون، وإيرادها على حساب الخدمات. */
   is_service?: boolean;
+  /** T-SERIAL: الصنف يتتبّع وحداته برقم تسلسلي — يُظهر عمود الأرقام على سطره. */
+  is_serialized?: boolean;
 };
 
 export type PartnerRow = {
@@ -148,6 +152,8 @@ export type DraftLine = {
   priceSource?: "last_invoice" | "quote" | "sales_quote" | "default" | null;
   /** رابط فتح مصدر السعر عند النقر (عرض العروض أو تبويب عرض السعر بكرت الزبون). */
   priceSourceLink?: string | null;
+  /** T-SERIAL: الوحدات المختارة صراحةً لهذا البند — الفارغ يعني «أي وحدة» (FIFO خادمي). */
+  serials?: string[];
 };
 
 const newLineKey = () => `ln-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -194,6 +200,8 @@ type Props = {
     warn_on_duplicate_item?: boolean;
     /** منع حفظ/ترحيل فاتورة بيع بخسارة (الافتراضي مُعطّل). */
     block_loss_invoices?: boolean;
+    /** T-SERIAL: نمط اختيار الوحدة المباعة — `off` يخفي العمود بالكامل. */
+    serial_entry_mode?: SerialEntryMode;
   } | null;
 };
 
@@ -356,6 +364,26 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     () => lines.some((l) => l.product !== ""
       && totalReserved(reservationIndex.get(Number(l.product))) > 0),
     [lines, reservationIndex],
+  );
+
+  /* T-SERIAL: نمط اختيار الوحدة المباعة. `off` (الافتراضي) ⇒ لا عمود ولا زر
+     ولا حقل في الحمولة — الشاشة كما كانت تماماً. */
+  const serialMode: SerialEntryMode = salesSettings?.serial_entry_mode ?? "off";
+  /** بند مفتوح في نافذة اختيار الوحدات (بمفتاح السطر). */
+  const [serialLineKey, setSerialLineKey] = useState<string | null>(null);
+  /** الصنف يتتبّع وحداته؟ الخدمة مستثناة — بلا مخزون فبلا وحدات. */
+  const lineTracksSerials = useCallback(
+    (row: DraftLine) => {
+      if (serialMode === "off" || row.product === "") return false;
+      const pr = productsById.get(Number(row.product));
+      return Boolean(pr?.is_serialized && !pr?.is_service);
+    },
+    [serialMode, productsById],
+  );
+  /** عمود الأرقام يظهر فقط حين تحمل الفاتورة صنفاً تسلسلياً — لا عمود فارغ. */
+  const anyLineSerialized = useMemo(
+    () => lines.some(lineTracksSerials),
+    [lines, lineTracksSerials],
   );
 
   /** تنبيه بيع المحجوز — يسمّي الطلبية وصاحبها قبل أن يرفض الخادم الترحيل. */
@@ -779,6 +807,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         tax_rate: ln.tax_rate != null ? ln.tax_rate : null,
         // FEAT-2: أسعار فاتورة محمَّلة مُثبّتة — لا يُعاد تسعيرها عند تغيير العميل.
         priceTouched: true,
+        // T-SERIAL: الاختيار نيّةٌ على البند تبقى بعد إلغاء الترحيل، فإعادة
+        // الترحيل تستهلك الوحدات ذاتها لا غيرها.
+        serials: Array.isArray(ln.serials) ? ln.serials.map(String) : [],
       }))
     );
     dirtyRef.current = false;
@@ -906,6 +937,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           unit_price: l.unit_price,
           line_discount: Number(l.line_discount) || 0,
           tax_rate: l.tax_rate === "" || l.tax_rate === null ? null : l.tax_rate,
+          // T-SERIAL: يُرسَل دائماً — القائمة الفارغة تمسح اختياراً سابقاً بدل
+          // أن يبقى معلّقاً على البند بلا ظهور في الشاشة.
+          serials: l.serials ?? [],
         })),
       // ── M2-T1: Aseel header fields ───────────────────────────────
       book_number: Number(bookNumber) || 0,
@@ -1520,6 +1554,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       product: productId,
       unit_price: price,
       priceSource: opts?.source ?? null,
+      // T-SERIAL: وحدات الصنف السابق لا معنى لها على صنف جديد.
+      serials: [],
       // سعر مُدخَل من البطاقة = مُثبّت (لا يُعاد تسعيره تلقائياً).
       ...(opts?.unitPrice != null ? { quantity: String(opts.quantity ?? 1), priceTouched: true } : {}),
     });
@@ -1810,6 +1846,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       },
     ] : []),
     { key: "quantity", header: "الكمية", width: "84px", align: "center", type: "number" },
+    // T-SERIAL: زر الوحدات على الأصناف التسلسلية وحدها، ويختفي كلياً بنمط «معطّل».
+    ...(anyLineSerialized ? [{
+      key: "serials", header: "الوحدات", width: "92px", align: "center" as const, readOnly: true,
+    }] : []),
     { key: "unit_price", header: "سعر الوحدة", width: "100px", align: "center", type: "number" },
     { key: "line_discount", header: "خصم سطر", width: "84px", align: "center", type: "number" },
     { key: "tax", header: "الضريبة", width: "150px" },
@@ -2092,6 +2132,31 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     );
   };
 
+  /* T-SERIAL: شارة الوحدات على السطر — «تلقائي» حين لا اختيار، والعدد حين يوجد.
+     النقص في النمط الإجباري يظهر أحمرَ هنا، والمنع نفسه يقع على الخادم. */
+  const renderSerialCell = (row: DraftLine) => {
+    if (!lineTracksSerials(row)) return <span className="aseel-text-soft">—</span>;
+    const chosen = row.serials?.length ?? 0;
+    const qty = Math.max(0, Math.trunc(Number(row.quantity) || 0));
+    const incomplete = serialMode === "required" && chosen !== qty;
+    return (
+      <button
+        type="button"
+        className="aseel-toolbtn"
+        style={{
+          width: "100%", fontWeight: 600,
+          ...(incomplete ? { color: "var(--aseel-danger, #c00)" } : {}),
+        }}
+        onClick={() => setSerialLineKey(row.key)}
+        title={chosen > 0
+          ? `الوحدات المختارة: ${row.serials!.join("، ")}`
+          : "لم تُختر وحدة — الخادم يخصّص الأقدم (FIFO)"}
+      >
+        {chosen > 0 ? `${chosen}/${qty}` : (incomplete ? `0/${qty}` : "تلقائي")}
+      </button>
+    );
+  };
+
   const renderDeleteCell = (row: DraftLine) =>
     readOnly ? null : (
       <button
@@ -2111,6 +2176,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     if (column) column.render = render;
   };
   injectRender("product", renderProductCell);
+  injectRender("serials", renderSerialCell);
   injectRender("unit_price", renderUnitPriceCell);
   injectRender("tax", renderTaxCell);
   injectRender("del", renderDeleteCell);
@@ -3234,6 +3300,29 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           onConfirm={cardCanAdd && !readOnly && !isPosted ? (opts) => insertProductIntoInvoice(cardProductId, opts) : undefined}
           onClose={() => setCardProductId(null)} />
       )}
+
+      {/* T-SERIAL: اختيار الوحدات المباعة لهذا البند (أو تركها للخادم FIFO). */}
+      {serialLineKey != null && (() => {
+        const row = lines.find((l) => l.key === serialLineKey);
+        if (!row || row.product === "") return null;
+        const pr = productsById.get(Number(row.product));
+        return (
+          <SerialEntryModal
+            mode="pick"
+            productId={Number(row.product)}
+            productName={pr ? (pr.name_ar || pr.name_en || pr.sku) : `#${row.product}`}
+            quantity={Number(row.quantity) || 0}
+            value={row.serials ?? []}
+            required={serialMode === "required"}
+            readOnly={readOnly}
+            onClose={() => setSerialLineKey(null)}
+            onSave={(picked) => {
+              updateLine(row.key, { serials: picked });
+              setSerialLineKey(null);
+            }}
+          />
+        );
+      })()}
 
       {/* Attached payment voucher modal removed - now a bottom tab */}
       {/* P3-2-b: stale-data confirmation portal for offline product picks */}

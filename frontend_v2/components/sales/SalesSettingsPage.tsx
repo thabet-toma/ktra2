@@ -18,6 +18,11 @@ import { resolveTenantId } from "../../utils/tenantContext";
 import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { isCashAccount } from "../../utils/accountTree";
+import {
+  SERIAL_ENTRY_MODE_HINT,
+  SERIAL_ENTRY_MODE_OPTIONS,
+  type SerialEntryMode,
+} from "../../types/inventory";
 
 type AccountOpt = {
   id: number;
@@ -169,6 +174,7 @@ export const SalesSettingsPage: React.FC = () => {
         order_reserve_days: rest.order_reserve_days,
         allow_document_delete: rest.allow_document_delete,
         block_reserved_stock_sale: rest.block_reserved_stock_sale,
+        serial_entry_mode: rest.serial_entry_mode,
         default_shipping_origin: rest.default_shipping_origin,
         default_shipping_destination: rest.default_shipping_destination,
       };
@@ -600,6 +606,19 @@ export const SalesSettingsPage: React.FC = () => {
             />
             <span>منع ترحيل فاتورة تسحب كمية محجوزة (يظهر المحجوز في «تقرير المحجوزات»)</span>
           </label>
+        </FieldLabel>
+        {/* T-SERIAL: نمط الأرقام التسلسلية في بنود البيع — يُفعَّل على الأصناف المتتبَّعة وحدها. */}
+        <FieldLabel label="إدخال الأرقام التسلسلية في فاتورة البيع">
+          <select
+            className={input}
+            value={settings.serial_entry_mode ?? "off"}
+            onChange={(e) => setField("serial_entry_mode", e.target.value as SerialEntryMode)}
+          >
+            {SERIAL_ENTRY_MODE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <div className="text-[11px] aseel-text-soft mt-1">{SERIAL_ENTRY_MODE_HINT}</div>
         </FieldLabel>
       </Section>
 

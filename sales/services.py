@@ -22,6 +22,11 @@ from accounting.services import (
     validate_journal_entry,
 )
 from inventory.models import Product, StockMovement
+from inventory.serials import (
+    consume_sales_serials,
+    release_sales_serials,
+    restore_returned_sales_serials,
+)
 from inventory.services import record_stock_movement
 from partners.models import Partner, PartnerGroup
 from partners.signals import ensure_partner_linked_account
@@ -1543,6 +1548,15 @@ def post_sales_invoice(
             SalesInvoiceLine.objects.bulk_update(lines, ["delivered_quantity"])
             _create_auto_delivery_document(invoice, lines)
         sync_invoice_delivery_status(invoice, lines)
+
+        # الوحدة المُرقَّمة تُستهلَك بترحيل فاتورتها لا بخروجها من المستودع: البيع
+        # هو ما يُسند الوحدة لزبون، ويبقى السؤال «أي وحدة ذهبت لمن» مُجاباً حتى
+        # حين يتأخّر التسليم (`stock_on_post=False`). ومرجع البيع يعكسها: البضاعة
+        # رجعت للمخزن (RETURN_IN) فوحداتها تعود «في المخزن» بترتيب استهلاكها.
+        if kind == SalesInvoice.INVOICE_KIND_SALE:
+            consume_sales_serials(invoice, lines)
+        elif kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+            restore_returned_sales_serials(invoice, lines)
 
         create_audit_log(
             tenant=invoice.tenant,

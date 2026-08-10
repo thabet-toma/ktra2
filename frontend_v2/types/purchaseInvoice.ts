@@ -15,6 +15,8 @@ export interface PurchaseInvoiceItemDto {
   expense_account?: number | null;
   expense_account_code?: string | null;
   expense_account_name?: string | null;
+  /** T-SERIAL: أرقام وحدات البند (نيّة على البند؛ الوحدات تُنشأ عند الاستلام). */
+  serials?: string[] | null;
 }
 
 export type ReceiptStatus =

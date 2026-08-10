@@ -25,6 +25,8 @@ export const productToItem = (p: any): Item => ({
     modelNumber: p.sku || undefined,
     specifications: "",
     imageUrls: [],
+    barcode: p.barcode || "",
+    isSerialized: Boolean(p.is_serialized),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
 });

@@ -32,6 +32,8 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
       landedLineTotalIls: item.landed_line_total_ils
         ? Number(item.landed_line_total_ils)
         : undefined,
+      // T-SERIAL: الأرقام تعود مع البند فتبقى ظاهرة بعد الحفظ وإعادة الفتح.
+      serials: Array.isArray(item.serials) ? item.serials.map(String) : [],
     })),
     status: dto.status as Invoice["status"],
     subtotal: dto.subtotal,

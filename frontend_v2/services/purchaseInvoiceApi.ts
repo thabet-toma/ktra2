@@ -2,6 +2,7 @@ import type {
   PurchaseInvoiceDto,
   PurchaseInvoiceListDto,
 } from "../types/purchaseInvoice";
+import type { SerialEntryMode } from "../types/inventory";
 import { resolveTenantId } from "../utils/tenantContext";
 import { apiFetch } from "./restApi";
 
@@ -24,6 +25,8 @@ export interface PurchaseSettingsDto {
   standalone_receipt_label: string;
   allow_standalone_receipt: boolean;
   allow_edit_receipt: boolean;
+  /** T-SERIAL: نمط إدخال الرقم التسلسلي في بنود فاتورة الشراء (الافتراضي «معطّل»). */
+  serial_entry_mode: SerialEntryMode;
 }
 
 /** سند صرف مورد كما يعيده الخادم (مع التوزيع والمتبقّي «على الحساب»). */

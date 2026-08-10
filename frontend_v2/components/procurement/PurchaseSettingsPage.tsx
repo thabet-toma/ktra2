@@ -12,6 +12,11 @@ import { resolveTenantId } from "../../utils/tenantContext";
 import { AseelDocumentShell, type AseelToolbarAction } from "../aseel";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { isCashAccount } from "../../utils/accountTree";
+import {
+  SERIAL_ENTRY_MODE_HINT,
+  SERIAL_ENTRY_MODE_OPTIONS,
+  type SerialEntryMode,
+} from "../../types/inventory";
 
 type AccountOpt = { id: number; code?: string | null; name?: string | null; parent?: number | null; account_type?: string | null; is_active?: boolean };
 
@@ -39,6 +44,8 @@ const PurchaseSettingsPage: React.FC = () => {
   const [standaloneLabel, setStandaloneLabel] = useState("سند استلام");
   const [allowStandalone, setAllowStandalone] = useState(true);
   const [allowEditReceipt, setAllowEditReceipt] = useState(true);
+  // T-SERIAL: نمط إدخال الرقم التسلسلي في بنود الشراء.
+  const [serialMode, setSerialMode] = useState<SerialEntryMode>("off");
   const [accounts, setAccounts] = useState<AccountOpt[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -58,6 +65,7 @@ const PurchaseSettingsPage: React.FC = () => {
       setStandaloneLabel(s.standalone_receipt_label || "سند استلام");
       setAllowStandalone(s.allow_standalone_receipt !== false);
       setAllowEditReceipt(s.allow_edit_receipt !== false);
+      setSerialMode(s.serial_entry_mode || "off");
       setAccounts(accs || []);
     } catch (e) {
       setBanner({ ok: false, msg: e instanceof Error ? e.message : String(e) });
@@ -85,6 +93,7 @@ const PurchaseSettingsPage: React.FC = () => {
         standalone_receipt_label: standaloneLabel.trim() || "سند استلام",
         allow_standalone_receipt: allowStandalone,
         allow_edit_receipt: allowEditReceipt,
+        serial_entry_mode: serialMode,
       });
       setBanner({ ok: true, msg: "حُفظت إعدادات الشراء بنجاح." });
     } catch (e) {
@@ -94,7 +103,7 @@ const PurchaseSettingsPage: React.FC = () => {
     }
   }, [
     strategy, cashAccount, receiveOnPost, receiptLabel, standaloneLabel,
-    allowStandalone, allowEditReceipt,
+    allowStandalone, allowEditReceipt, serialMode,
   ]);
 
   const actions: AseelToolbarAction[] = [
@@ -242,6 +251,27 @@ const PurchaseSettingsPage: React.FC = () => {
               />
               <span>السماح بتعديل/إلغاء الإرسالية بعد حفظها (يعكس أثرها ويعيد تطبيقه)</span>
             </label>
+          </div>
+
+          {/* T-SERIAL: نمط الأرقام التسلسلية في بنود الشراء — يخصّ الأصناف المتتبَّعة وحدها. */}
+          <div className="mt-6 pt-4 border-t border-[var(--aseel-border)]">
+            <h3 className="font-bold mb-1 text-[var(--aseel-ink)]">
+              إدخال الأرقام التسلسلية في فاتورة الشراء
+            </h3>
+            <p className="text-sm text-[var(--aseel-ink-soft)] mb-2 flex items-start gap-1">
+              <Info className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>{SERIAL_ENTRY_MODE_HINT}</span>
+            </p>
+            <select
+              className="aseel-input w-full max-w-md"
+              disabled={loading}
+              value={serialMode}
+              onChange={(e) => setSerialMode(e.target.value as SerialEntryMode)}
+            >
+              {SERIAL_ENTRY_MODE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
           </div>
 
           {/* T-A4: الصندوق الافتراضي لفواتير الشراء النقدية (مرآة إعدادات المبيعات). */}

@@ -24,6 +24,7 @@ import { cloudinaryService } from "../../services/cloudinaryService";
 import { usePasteImageUpload } from "../../utils/clipboardImage";
 import { useProductInsights } from "./ProductInsightTabs";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { completeEan13, ean13Svg, isValidEan13, printBarcodeLabels } from "../../utils/barcode";
 
 const pendingN8 = (msg: string) => (
   <div className="aseel-banner" style={{
@@ -70,6 +71,10 @@ const extractDatasheets = (p: Record<string, unknown>): DatasheetRef[] =>
 type FormState = {
   sku: string; catalog_no: string; name_ar: string; name_en: string;
   brand: string;
+  /** T-SERIAL: باركود الصنف (EAN-13) — فريد داخل الشركة، يحرسه الخادم. */
+  barcode: string;
+  /** T-SERIAL: تتبّع وحدات الصنف بأرقام تسلسلية. */
+  is_serialized: boolean;
   description: string; location: string;
   uom_primary: string; uom2: string; uom2_factor: string;
   uom3: string; uom3_factor: string;
@@ -90,6 +95,7 @@ type FormState = {
 const blankForm = (): FormState => ({
   sku: "", catalog_no: "", name_ar: "", name_en: "",
   brand: "",
+  barcode: "", is_serialized: false,
   description: "", location: "",
   uom_primary: "عدد", uom2: "", uom2_factor: "1",
   uom3: "", uom3_factor: "1",
@@ -125,8 +131,8 @@ export const ItemFormAseel: React.FC<Props> = ({
 }) => {
   const [form, setForm] = useState<FormState>(blankForm());
   const [currentId, setCurrentId] = useState<number | null>(productId);
-  // الجزء القرائي من الكرت (نظرة عامة/فواتير/حركة) — يتبع الصنف المعروض حالياً.
-  const insights = useProductInsights(currentId);
+  // الجزء القرائي من الكرت (نظرة عامة/فواتير/حركة/أرقام تسلسلية) — يتبع الصنف المعروض.
+  const insights = useProductInsights(currentId, { isSerialized: form.is_serialized });
   // W10: صنف موجود (تعديل) — اسمه يُحرَّر مباشرةً بحقل نصّي بدل منتقي «اختر/أضف»
   // الذي كان يحبس الاسم في قائمة منسدلة (نقر «+» يمسح القيمة) فيبدو «غير قابل للتعديل».
   const isExistingProduct = productId != null;
@@ -177,11 +183,55 @@ export const ItemFormAseel: React.FC<Props> = ({
   const patch = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
+  // ── T-SERIAL: الباركود ─────────────────────────────────────────────────
+  const [barcodeBusy, setBarcodeBusy] = useState(false);
+  const [labelCopies, setLabelCopies] = useState("1");
+  const barcodeValue = form.barcode.trim();
+  const barcodeValid = isValidEan13(barcodeValue);
+
+  /** رقم كتبه المستخدم → EAN-13 كامل. القاعدة محلّية: خانة التحقق حسابٌ لا استعلام. */
+  const handleCompleteBarcode = () => {
+    const out = completeEan13(form.barcode);
+    if (!out) { setErr("اكتب رقماً أولاً، أو استخدم «توليد تلقائي»."); return; }
+    setErr(null);
+    patch("barcode", out.code);
+    setMsg(`${out.note} احفظ (F12) لتثبيته على الصنف.`);
+  };
+
+  /** رقم عشوائي غير مستخدم — خادمي عمداً: التفرّد يُفحص على قاعدة البيانات لا على الشاشة. */
+  const handleGenerateBarcode = async () => {
+    setBarcodeBusy(true); setErr(null); setMsg(null);
+    try {
+      const barcode = await inventoryApi.generateBarcode();
+      patch("barcode", barcode);
+      setMsg("وُلِّد باركود غير مستخدم — احفظ (F12) لتثبيته على الصنف.");
+    } catch (ex: unknown) {
+      setErr(ex instanceof Error ? ex.message : "تعذّر توليد الباركود");
+    } finally {
+      setBarcodeBusy(false);
+    }
+  };
+
+  const handlePrintLabels = () => {
+    if (!barcodeValid) { setErr("لا يمكن طباعة ملصق بلا باركود صالح."); return; }
+    const ok = printBarcodeLabels([{
+      barcode: barcodeValue,
+      name: form.name_ar || form.name_en || form.sku || "—",
+      sku: form.sku || null,
+      price: formatMoney(insights.profile?.effective_sale_price ?? form.sale_price, ""),
+    }], Number(labelCopies) || 1);
+    if (!ok) setErr("الرجاء السماح بالنوافذ المنبثقة (Pop-ups) للطباعة");
+    else setErr(null);
+  };
+
   const applyProduct = useCallback((p: Record<string, unknown>, isDuplicate = false) => {
     setForm((prev) => ({
       ...prev,
       sku: isDuplicate ? "" : String(p.sku ?? ""),
-      catalog_no: isDuplicate ? "" : String(p.catalog_no ?? p.barcode ?? ""),
+      catalog_no: isDuplicate ? "" : String(p.catalog_no ?? ""),
+      // الباركود يميّز صنفاً واحداً في الشركة — النسخة تبدأ بلا باركود لا بباركود أخيها.
+      barcode: isDuplicate ? "" : String(p.barcode ?? ""),
+      is_serialized: Boolean(p.is_serialized),
       // التكرار (براند آخر): الاسم والتصنيف يبقيان كما هما، فيُحفظ المنتج تحت نفس
       // التصنيف بجانب إخوته؛ يُفرّغ البراند فقط ليكتبه المستخدم.
       name_ar: String(p.name_ar ?? ""),
@@ -257,6 +307,9 @@ export const ItemFormAseel: React.FC<Props> = ({
         category: categoryId,
         // is_service: الحقل الفعلي الذي يقرأه الترحيل المحاسبي (مبيعات خدمات لا بضاعة).
         is_service: form.item_type === "service",
+        // T-SERIAL: الباركود فارغ = null لا "" — كي لا يتصادم صنفان بلا باركود.
+        barcode: form.barcode.trim() || null,
+        is_serialized: form.is_serialized,
         // روابط الداتا شيت — يلتقطها الخادم في _handle_attachments (خارج حقول الـserializer).
         datasheet_urls: form.datasheets.map((d) => d.url),
       };
@@ -338,6 +391,59 @@ export const ItemFormAseel: React.FC<Props> = ({
         onChange={(e) => patch("item_type", e.target.value)}>
         {ITEM_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
       </select>)}
+      {/* T-SERIAL: الباركود — توليد (من رقم مكتوب أو عشوائي) ومعاينة وطباعة ملصق. */}
+      {fld("الباركود (EAN-13)",
+        <div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <input className="aseel-input" style={{ flex: "1 1 170px", direction: "ltr", minWidth: 150 }}
+              value={form.barcode} onChange={(e) => patch("barcode", e.target.value)}
+              placeholder="اكتب رقماً ثم «إكمال»، أو ولّد تلقائياً" inputMode="numeric" />
+            <button type="button" className="aseel-addrow" style={{ margin: 0 }}
+              title="يُكمل الرقم المكتوب إلى 13 خانة بخانة تحقق سليمة"
+              onClick={handleCompleteBarcode}>إكمال</button>
+            <button type="button" className="aseel-addrow" style={{ margin: 0 }}
+              title="باركود عشوائي غير مستخدم في هذه الشركة"
+              disabled={barcodeBusy} onClick={() => void handleGenerateBarcode()}>
+              {barcodeBusy ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+              توليد تلقائي
+            </button>
+          </div>
+          {barcodeValue && !barcodeValid && (
+            <div style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-warn, #b8800a)", marginTop: 4 }}>
+              ليس باركود EAN-13 صالحاً (13 رقماً بخانة تحقق) — اضغط «إكمال» لتصحيحه.
+              يُحفَظ كما هو، لكن لا ملصق له.
+            </div>
+          )}
+          {barcodeValid && (
+            <div style={{ marginTop: 6 }}>
+              {/* المُدخَل أرقام فقط (isValidEan13) والمُخرَج نصّ SVG من الوحدة نفسها. */}
+              <div style={{ direction: "ltr", lineHeight: 0 }}
+                dangerouslySetInnerHTML={{ __html: ean13Svg(barcodeValue, { moduleWidth: 1.6, barHeight: 38, fontSize: 9 }) }} />
+              <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 4 }}>
+                <span style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)" }}>عدد النسخ</span>
+                <input className="aseel-input" type="number" min="1" max="200" style={{ width: 70 }}
+                  value={labelCopies} onChange={(e) => setLabelCopies(e.target.value)} />
+                <button type="button" className="aseel-addrow" style={{ margin: 0 }}
+                  onClick={handlePrintLabels}>طباعة ملصق</button>
+              </div>
+            </div>
+          )}
+        </div>, 2)}
+      {/* T-SERIAL: التتبّع بالرقم التسلسلي — بجانب «نوع الصنف» (is_service) لأنهما
+          معاً يحدّدان ما إذا كان للصنف وحدات مادّية تُتتبَّع أصلاً. */}
+      {/* غلاف span لا label: `fld` يلفّ الحقل بـ<label> أصلاً، و<label> داخل
+          <label> يوصّل النقرة مرّتين فيعود المربّع كما كان — أي زرّ لا يعمل. */}
+      {fld("تتبّع بالرقم التسلسلي",
+        <span style={{ display: "flex", alignItems: "center", gap: 6, minHeight: 30 }}>
+          <input type="checkbox" checked={form.is_serialized}
+            disabled={form.item_type === "service"}
+            onChange={(e) => patch("is_serialized", e.target.checked)} />
+          <span style={{ fontSize: "var(--aseel-fs-sm)" }}>
+            {form.item_type === "service"
+              ? "الخدمة بلا وحدات تُتتبَّع"
+              : "كل وحدة برقمها — يظهر تبويب «الأرقام التسلسلية»"}
+          </span>
+        </span>)}
       {fld(isExistingProduct ? "اسم المنتج" : "اسم المنتج (اختر موجوداً لبراند آخر، أو اكتب جديداً)",
         isExistingProduct
           ? <input className="aseel-input" value={form.name_ar}
@@ -643,6 +749,9 @@ export const ItemFormAseel: React.FC<Props> = ({
           { key: "trading", label: "بيانات المتاجرة", content: tabTrading },
           { key: "other", label: "بيانات أخرى", content: tabOther },
           { key: "mfg", label: "معادلات التصنيع", content: tabManufacturing },
+          // آخر القائمة: تفعيل التتبّع يُلحق تبويباً ولا يزحزح فهرس تبويب قائم
+          // (الغلاف يتتبّع النشط بالفهرس) — فيبقى المستخدم حيث هو.
+          ...(insights.serialsTab ? [insights.serialsTab] : []),
         ]}
         totals={
           <div style={{ fontSize: "var(--aseel-fs-sm)", color: "var(--aseel-ink-soft)", padding: "4px 0", display: "grid", gap: 2 }}>

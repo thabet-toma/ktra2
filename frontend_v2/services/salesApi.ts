@@ -9,6 +9,7 @@ import {
   apiPostObject,
 } from "./restApi";
 import type { PagedList } from "./restApi";
+import type { SerialEntryMode } from "../types/inventory";
 
 const tid = () => resolveTenantId();
 const BASE = "sales";
@@ -94,6 +95,8 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
     expiry_date?: string | null;
     extra_quantity?: string | null;
     line_tax_percent?: string | null;
+    /** T-SERIAL: الوحدات التي اختارها البائع لهذا البند (تبقى بعد إلغاء الترحيل). */
+    serials?: string[] | null;
   }[];
   created_at?: string;
   // M2-T1: Aseel header fields
@@ -666,6 +669,8 @@ export type SalesSettings = {
   allow_document_delete: boolean;
   /** T-RESERVEGUARD: رفض ترحيل فاتورة تسحب كمية محجوزة لطلبية زبون آخر (مُفعَّل افتراضياً). */
   block_reserved_stock_sale: boolean;
+  /** T-SERIAL: نمط إدخال الرقم التسلسلي في بنود فاتورة البيع (الافتراضي «معطّل»). */
+  serial_entry_mode: SerialEntryMode;
   default_shipping_origin: string;
   default_shipping_destination: string;
   /** تسمية مستند التسليم المرتبط بفاتورة (يحرّرها المستخدم). */

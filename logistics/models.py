@@ -2,6 +2,7 @@ from django.db import models
 from tenants.models import Tenant, Currency
 from partners.models import Partner
 from inventory.models import Product
+from inventory.serials import SERIAL_MODE_CHOICES, SERIAL_MODE_OFF
 from accounting.models import Account, JournalHeader
 from django.contrib.auth.models import User
 from core.base_models import SoftDeleteMixin, TimeStampMixin
@@ -1655,6 +1656,13 @@ class PurchaseInvoiceItem(models.Model):
     extra_qty = models.DecimalField(max_digits=18, decimal_places=4, null=True, blank=True, db_column='ExtraQty')
     batch_number = models.CharField(max_length=100, blank=True, default='', db_column='BatchNumber')
     serial_number = models.CharField(max_length=100, blank=True, default='', db_column='SerialNumber')
+    # الأرقام التسلسلية المُعلَنة لوحدات هذا البند — نيّةٌ تُترجَم إلى صفوف
+    # `inventory.ProductSerial` عند **استلام** البضاعة، كما تُترجَم الكمية إلى
+    # حركة مخزون. تبقى محفوظة بعد الاستلام كسجلٍّ لما أُدخل على المستند.
+    serials = models.JSONField(
+        default=list, blank=True, db_column='Serials',
+        help_text='أرقام تسلسلية للوحدات المشتراة في هذا البند (تُنشأ عند الاستلام)',
+    )
     manufacture_number = models.CharField(max_length=100, blank=True, default='', db_column='ManufactureNumber')
     expiry_date = models.DateField(null=True, blank=True, db_column='ExpiryDate')
     line_currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True, db_column='LineCurrencyID')
@@ -1977,6 +1985,15 @@ class PurchaseSettings(models.Model):
     allow_edit_receipt = models.BooleanField(
         default=True, db_column="AllowEditReceipt",
         help_text="السماح بتعديل/إلغاء الإرسالية بعد حفظها (يعكس أثرها ويعيد تطبيقه)",
+    )
+    # الأرقام التسلسلية في بنود الشراء: مُطفأ افتراضياً فلا أثر على شركة لم تطلبه.
+    # «إجباري» يمنع استلام بضاعة صنف تسلسلي بلا أرقام بعدد كميته.
+    serial_entry_mode = models.CharField(
+        max_length=20,
+        choices=SERIAL_MODE_CHOICES,
+        default=SERIAL_MODE_OFF,
+        db_column="SerialEntryMode",
+        help_text="إدخال الأرقام التسلسلية في بنود فاتورة الشراء: بدون/اختياري/إجباري",
     )
     updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
 

@@ -4,6 +4,7 @@ from django.db import models
 
 from accounting.models import Account, JournalHeader, TaxRate
 from inventory.models import Product
+from inventory.serials import SERIAL_MODE_CHOICES, SERIAL_MODE_OFF
 from partners.models import Partner
 from tenants.models import Currency, Tenant
 
@@ -258,6 +259,16 @@ class SalesSettings(models.Model):
         default=True,
         db_column="BlockReservedStockSale",
         help_text="رفض ترحيل فاتورة تستهلك كمية محجوزة لطلبية زبون آخر",
+    )
+
+    # الأرقام التسلسلية في بنود البيع: مُطفأ افتراضياً فلا أثر على شركة لم تطلبه.
+    # «إجباري» يمنع ترحيل فاتورة صنف تسلسلي لا تُغطّي وحداتُه المتاحة كميتها.
+    serial_entry_mode = models.CharField(
+        max_length=20,
+        choices=SERIAL_MODE_CHOICES,
+        default=SERIAL_MODE_OFF,
+        db_column="SerialEntryMode",
+        help_text="اختيار الأرقام التسلسلية في بنود فاتورة البيع: بدون/اختياري/إجباري",
     )
 
     default_shipping_origin = models.CharField(
@@ -592,6 +603,13 @@ class SalesInvoiceLine(models.Model):
     line_tax_percent = models.DecimalField(
         max_digits=5, decimal_places=2, null=True, blank=True, db_column="LineTaxPercent",
         help_text="نسبة ضريبة مخصصة للسطر (تجاوز النسبة الافتراضية)",
+    )
+    # الوحدات المُرقَّمة المختارة لهذا البند — نيّةٌ تُستهلَك عند **ترحيل** الفاتورة
+    # (وسم `inventory.ProductSerial` بـ«مُباع»). ما لم يُختَر يُخصَّص FIFO تلقائياً.
+    # تبقى محفوظة بعد إلغاء الترحيل فتستهلك إعادةُ الترحيل الوحدات ذاتها.
+    serials = models.JSONField(
+        default=list, blank=True, db_column="Serials",
+        help_text="أرقام تسلسلية مختارة للوحدات المبيعة في هذا البند (تُستهلَك عند الترحيل)",
     )
 
     class Meta:
