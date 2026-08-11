@@ -43,6 +43,7 @@ from partners.models import Partner
 from partners.signals import ensure_partner_linked_account
 from tenants.models import Tenant, Currency
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
+from accounting import api as accounting_api
 from accounting.cashbox import resolve_default_cash_box_account
 from accounting.services import (
     annotate_partner_posted_balance,
@@ -1179,7 +1180,6 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 orig = (
                     JournalHeader.objects.select_for_update()
                     .select_related("tenant")
-                    .prefetch_related("lines")
                     .get(pk=jid_locked)
                 )
                 if not orig.is_posted:
@@ -1187,13 +1187,6 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                         {
                             "error": "القيد المرتبط بالدفعة غير مرحّل — البيانات غير متسقة؛ راجع المحاسبة."
                         },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-                lines = list(orig.lines.all())
-                if not lines:
-                    return Response(
-                        {"error": "القيد الأصلي بلا أسطر — لا يمكن إنشاء عكس آمن."},
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
@@ -1207,64 +1200,21 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                     rev_date = datetime.date.today()
 
                 tenant = orig.tenant
-                tid = getattr(tenant, "pk", None) if tenant is not None else None
-                validate_fiscal_period(tid if tid is not None else 0, rev_date)
 
-                sum_dr = sum(Decimal(str(l.debit or 0)) for l in lines)
-                sum_cr = sum(Decimal(str(l.credit or 0)) for l in lines)
-                if abs(sum_dr - sum_cr) > Decimal("0.02"):
-                    return Response(
-                        {
-                            "error": f"القيد الأصلي غير متوازن (مدين {sum_dr} ≠ دائن {sum_cr}) — راجع القيد #{orig.id}."
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-                rev = JournalHeader.objects.create(
-                    tenant=tenant,
+                # المرحلة 2: آلية القيد العكسي + تخفيض is_posted على الأصل انتقلت
+                # إلى accounting.api (فحص الفترة/الأسطر/التوازن + وسم الأصل).
+                rev = accounting_api.reverse_journal(
+                    orig,
+                    reference_type="LOGISTICS_PAYMENT_UNPOST",
+                    reference_id=int(pay_row.id),
                     transaction_date=rev_date,
                     description=(
                         f"[إلغاء ترحيل دفعة] صفقة {deal.ref_number} — {pay_row.title} — "
                         f"عكس القيد #{orig.id}"
-                    )[:500],
-                    reference_type="LOGISTICS_PAYMENT_UNPOST",
-                    reference_id=int(pay_row.id),
-                    is_posted=True,
-                )
-                for line in lines:
-                    JournalLine.objects.create(
-                        tenant=line.tenant,
-                        journal=rev,
-                        account=line.account,
-                        debit=line.credit or 0,
-                        credit=line.debit or 0,
-                        partner=line.partner,
-                        cost_center=line.cost_center,
-                        description=(f"عكس قيد #{orig.id}: {(line.description or '')}")[:500],
-                        project_id=line.project_id,
-                    )
-
-                rev_sum_dr = sum(
-                    Decimal(str(x.debit or 0))
-                    for x in JournalLine.objects.filter(journal=rev)
-                )
-                rev_sum_cr = sum(
-                    Decimal(str(x.credit or 0))
-                    for x in JournalLine.objects.filter(journal=rev)
-                )
-                if abs(rev_sum_dr - rev_sum_cr) > Decimal("0.02"):
-                    raise RuntimeError(
-                        f"فشل التحقق من توازن القيد العكسي: مدين {rev_sum_dr} دائن {rev_sum_cr}"
-                    )
-
-                # I4-02: الغارد يحجب .save() على قيد مرحّل؛ نستخدم .update() الذي يتجاوز الغارد
-                # بشكل مقصود — هذا هو الموضع الوحيد المشروع الذي يُخفَّض فيه is_posted.
-                orig_desc = (orig.description or "").strip()
-                tag = f" [ملغى ترحيل — عكس مرحّل #{rev.id}]"
-                new_desc = (orig_desc + tag)[:500] if tag.strip() not in orig_desc else orig_desc
-                JournalHeader.objects.filter(pk=orig.pk).update(
-                    is_posted=False,
-                    description=new_desc,
+                    ),
+                    line_description_prefix=f"عكس قيد #{orig.id}: ",
+                    copy_project=True,
+                    unpost_original=True,
                 )
 
                 LogisticsPayment.objects.filter(pk=pay_row.pk).update(
