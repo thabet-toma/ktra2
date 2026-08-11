@@ -741,9 +741,15 @@ class DeliveryOrderViewSet(viewsets.ModelViewSet):
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
 
+    # P1-1 (SCALABILITY_AUDIT §2-2): `partner` و`invoice__lines` كانا خارج الجلب
+    # المسبق، والمُسلسِل يقرأ `obj.partner.name` (سند مستقل) و`obj.invoice.lines`
+    # (حساب المتبقّي) ⇒ استعلامان لكل صف على قائمة كاملة.
     queryset = DeliveryOrder.objects.all().select_related(
-        "invoice", "invoice__customer", "tenant",
-    ).prefetch_related("lines__product", "lines__invoice_line", "lines__warehouse")
+        "invoice", "invoice__customer", "partner", "tenant",
+    ).prefetch_related(
+        "lines__product", "lines__invoice_line", "lines__warehouse",
+        "invoice__lines",
+    )
     serializer_class = DeliveryOrderSerializer
     http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
 

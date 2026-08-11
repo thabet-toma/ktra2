@@ -96,7 +96,10 @@ class AccountViewSet(viewsets.ModelViewSet):
                 ),
                 to_attr="_api_linked_partners",
             )
-        )
+        # P2-12 (SCALABILITY_AUDIT): شجرة الحسابات كانت بلا ترتيب صريح. `code`
+        # فريد لكل شركة (unique_together) فهو ترتيب حتمي بذاته، وهو أيضاً الترتيب
+        # الطبيعي للدليل المحاسبي.
+        ).order_by("code")
 
     @action(detail=False, methods=["post"], url_path="resolve-import-expense")
     def resolve_import_expense(self, request):
@@ -183,7 +186,10 @@ class ChequeViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         tenant = get_tenant(self.request)
         if tenant:
-            return Cheque.objects.filter(tenant=tenant)
+            # P2-12 (SCALABILITY_AUDIT): بلا ترتيب صريح يتركه MySQL لخطة التنفيذ،
+            # فصفٌّ واحد قد يظهر في صفحتين أو لا يظهر إطلاقاً عند الترقيم. `-id`
+            # يكسر التعادل حتماً (مفتاح أساسي).
+            return Cheque.objects.filter(tenant=tenant).order_by("-due_date", "-id")
         return Cheque.objects.none()
 
     def perform_create(self, serializer):
