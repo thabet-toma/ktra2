@@ -39,7 +39,7 @@ def test_create_quotation_without_number_or_currency(env):
             {"product": product.id, "quantity": "2", "unit_price": "75", "line_discount": "0"},
         ],
     }
-    ser = SalesQuotationSerializer(data=data)
+    ser = SalesQuotationSerializer(context={"tenant": tenant}, data=data)
     ser.is_valid(raise_exception=True)  # كان يفشل: رقم/عملة مطلوبان
     q = ser.save(tenant=tenant, created_by=None)
 
@@ -55,7 +55,7 @@ def test_quotation_numbers_are_unique_sequence(env):
             "lines": [{"product": product.id, "quantity": "1", "unit_price": "10"}]}
     nums = []
     for _ in range(2):
-        ser = SalesQuotationSerializer(data=dict(base))
+        ser = SalesQuotationSerializer(context={"tenant": tenant}, data=dict(base))
         ser.is_valid(raise_exception=True)
         nums.append(ser.save(tenant=tenant, created_by=None).quotation_number)
     assert nums[0] != nums[1]

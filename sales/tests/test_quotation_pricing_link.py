@@ -32,7 +32,7 @@ def env():
 
 
 def _make_quote(tenant, customer, product, price):
-    ser = SalesQuotationSerializer(data={
+    ser = SalesQuotationSerializer(context={"tenant": tenant}, data={
         "customer": customer.id, "quotation_date": "2026-06-20",
         "lines": [{"product": product.id, "quantity": "1", "unit_price": str(price)}],
     })

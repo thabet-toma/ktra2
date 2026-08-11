@@ -1051,7 +1051,13 @@ class SalesOrderSerializer(serializers.ModelSerializer):
         from core.tenant_utils import get_tenant
 
         request = self.context.get("request")
-        tenant = get_tenant(request) if request is not None else attrs.get("tenant")
+        # الاستخدام البرمجي (خدمات/اختبارات) بلا request يمرّر الشركة عبر
+        # context={"tenant": ...} — المسار الإنتاجي (viewset يمرّر request)
+        # لم يتغيّر. نفس بديل SalesQuotationSerializer أدناه، للاتساق.
+        tenant = (
+            get_tenant(request) if request is not None
+            else attrs.get("tenant") or self.context.get("tenant")
+        )
         if tenant is None:
             raise serializers.ValidationError({"tenant": "لا توجد شركة محددة."})
 
@@ -1234,7 +1240,14 @@ class SalesQuotationSerializer(serializers.ModelSerializer):
         from core.tenant_utils import get_tenant
 
         request = self.context.get("request")
-        tenant = get_tenant(request) if request is not None else attrs.get("tenant")
+        # الاستخدام البرمجي (خدمات/اختبارات) بلا request يمرّر الشركة عبر
+        # context={"tenant": ...} — المسار الإنتاجي (viewset يمرّر request)
+        # لم يتغيّر. أُضيف لأن validate هذا (227c51a) كسر نمط
+        # ser.save(tenant=...) الذي تعتمده اختبارات العروض الثلاثة.
+        tenant = (
+            get_tenant(request) if request is not None
+            else attrs.get("tenant") or self.context.get("tenant")
+        )
         if tenant is None:
             raise serializers.ValidationError({"tenant": "لا توجد شركة محددة."})
         customer = attrs.get("customer") or getattr(self.instance, "customer", None)
