@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { clientLogger } from '../services/logger';
-import { apiGetObject, apiPatchObject } from '../services/restApi';
+import { apiPatchObject } from '../services/restApi';
+import { getTenantSettings, invalidateTenantSettings } from '../services/tenantSettingsApi';
 import { resolveTenantId } from '../utils/tenantContext';
 
 /**
@@ -119,6 +120,7 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   /** حفظ التفضيل خادمياً (per-company). غير حظري — لا يُعطّل الواجهة. */
   const persist = useCallback((patch: { font_scale?: FontScale; font_family?: FontFamilyId }) => {
     if (!hasToken()) return; // زائر (صفحة الهبوط/الدخول) — cache محلي فقط
+    invalidateTenantSettings();
     void apiPatchObject('tenants/settings/current/', patch, { tenantId })
       .catch((e) => clientLogger.warn('appearance.persist_failed', { error: String(e) }));
   }, [tenantId]);
@@ -130,8 +132,8 @@ export const AppearanceProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     syncedRef.current = true;
     void (async () => {
       try {
-        const s = await apiGetObject<{ font_scale?: string; font_family?: string }>(
-          'tenants/settings/current/', { tenantId },
+        const s = await getTenantSettings<{ font_scale?: string; font_family?: string }>(
+          tenantId,
         );
         const srvScale = SCALE_IDS.includes(s?.font_scale as FontScale) ? (s!.font_scale as FontScale) : null;
         const srvFamily = FAMILY_IDS.includes(s?.font_family as FontFamilyId) ? (s!.font_family as FontFamilyId) : null;

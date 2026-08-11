@@ -2,7 +2,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User } from '../types';
 import { fetchUserProfile as fetchUserProfileApi, logoutUser as logoutApi } from '../services/authService';
-import { activityService } from '../services/firestoreService';
 import { clientLogger } from '../services/logger';
 
 interface AuthContextType {
@@ -24,6 +23,9 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
  */
 const bootstrapActivityStatus = async (userId: string): Promise<void> => {
     try {
+        // P2-8: استيراد ديناميكي كي لا يجرّ هذا السياق `firestoreService` كاملاً
+        // إلى حزمة الإقلاع من أجل نداءين ثانويين.
+        const { activityService } = await import('../services/firestoreService');
         const status = await activityService.getActivityStatus(userId);
         if (!status) {
             await activityService.initializeActivityStatus(userId);

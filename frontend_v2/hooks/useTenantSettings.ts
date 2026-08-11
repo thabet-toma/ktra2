@@ -4,7 +4,7 @@
  * حتى تتغير معلومات الشركة ديناميكياً في كل الصفحات عند التبديل.
  */
 import { useEffect, useState } from "react";
-import { apiGetObject } from "../services/restApi";
+import { getTenantSettings } from "../services/tenantSettingsApi";
 import { resolveTenantId } from "../utils/tenantContext";
 
 export interface TenantIdentity {
@@ -27,9 +27,9 @@ export function useTenantSettings(): {
 
   useEffect(() => {
     let alive = true;
-    apiGetObject<TenantIdentity>("tenants/settings/current/", {
-      tenantId: resolveTenantId(),
-    })
+    // P2-9: الشريط الجانبي ومبدّل الشركات يركّبان هذا الخطّاف معاً عند الإقلاع؛
+    // المصدر المشترك يجعلهما طلباً واحداً بدل اثنين.
+    getTenantSettings<TenantIdentity>(resolveTenantId())
       .then((s) => {
         if (alive) setIdentity(s);
       })

@@ -65,6 +65,8 @@ import {
   type SupplierQuotationDto,
   type SupplierQuotationStatus,
 } from "../../services/procurementDocumentsApi";
+import { invalidatePickerProducts, listPickerProducts } from "../../services/inventoryApi";
+import { MIN_VISIBILITY_REFRESH_MS } from "../../services/sqlApiClient";
 
 // --- Helper: Sanitize Data ---
 export const removeUndefined = <T>(obj: T): T => {
@@ -1371,10 +1373,7 @@ export const itemsService = {
   checkItemHsCodeUnique: async (hsCode: string, excludeItemId?: string): Promise<boolean> => {
     if (!hsCode) return true;
     try {
-      const all = await apiGetList<any>("inventory/products/", {
-        tenantId: resolveTenantId(),
-        query: { view: "lookup" },
-      });
+      const all = await listPickerProducts<any>(resolveTenantId());
       return !all.some((p: any) => String(p.id) !== String(excludeItemId || "") && (p.hs_code || "") === hsCode);
     } catch {
       return true;
@@ -1387,14 +1386,15 @@ export const itemsService = {
   ) => {
     let alive = true;
     let inFlight = false;
+    let lastLoadAt = 0;
     const load = async () => {
       if (!alive || inFlight) return;
       inFlight = true;
+      lastLoadAt = Date.now();
       try {
-        const products = await apiGetList<any>("inventory/products/", {
-          tenantId: resolveTenantId(),
-          query: { view: "lookup" },
-        });
+        // P1-9: نفس نافذة منتقي المستندات — الكتالوج كان يُسحب مرة لكل مشترك
+        // ومرة أخرى عند كل عودة للتبويب.
+        const products = await listPickerProducts<any>(resolveTenantId());
         if (alive) callback(products.map((p: any) => itemsService._mapProductToItem(p)));
       } catch (error) {
         // احتفظ بآخر snapshot ناجح؛ فشل refresh عابر لا يمسح المحددات.
@@ -1405,7 +1405,9 @@ export const itemsService = {
     };
     void load();
     const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void load();
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastLoadAt < MIN_VISIBILITY_REFRESH_MS) return;
+      void load();
     };
     window.addEventListener("focus", refreshWhenVisible);
     document.addEventListener("visibilitychange", refreshWhenVisible);
@@ -1422,14 +1424,17 @@ export const itemsService = {
 
   addItemToDb: async (item: Item) => {
     await apiPostObject("inventory/products/", itemsService._mapItemToProductPayload(item), { tenantId: resolveTenantId() });
+    invalidatePickerProducts();
   },
 
   updateItemInDb: async (item: Item) => {
     await apiPatchObject(`inventory/products/${item.id}/`, itemsService._mapItemToProductPayload(item), { tenantId: resolveTenantId() });
+    invalidatePickerProducts();
   },
 
   deleteItemFromDb: async (itemId: string) => {
     await apiDelete(`inventory/products/${itemId}/`, { tenantId: resolveTenantId() });
+    invalidatePickerProducts();
   },
 };
 

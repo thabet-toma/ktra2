@@ -183,6 +183,9 @@ export const getCountFromServer = async (queryRef: any) => {
     return { data: () => ({ count: docs.length }) };
 };
 
+/** أقصر فاصل مقبول بين لقطتين متتاليتين عند عودة التبويب للواجهة. */
+export const MIN_VISIBILITY_REFRESH_MS = 60_000;
+
 export const onSnapshot = (ref: any, callbackOrObserver: any) => {
     // Firestore supports both onSnapshot(q, fn) and onSnapshot(q, {next, error}).
     // Passing the observer object straight into Promise.then() silently ignored
@@ -199,9 +202,11 @@ export const onSnapshot = (ref: any, callbackOrObserver: any) => {
 
     let alive = true;
     let inFlight = false;
+    let lastTickAt = 0;
     const tick = async (silent: boolean) => {
         if (!alive || inFlight) return;
         inFlight = true;
+        lastTickAt = Date.now();
         try {
             const snap = await (ref.queryString !== undefined ? getDocs(ref) : getDoc(ref));
             if (alive) next?.(snap);
@@ -216,10 +221,13 @@ export const onSnapshot = (ref: any, callbackOrObserver: any) => {
     // Mapper subscriptions are HTTP snapshots, not server-pushed streams. Polling every
     // five seconds made every signed-in tab repeatedly download users/tasks/activity even
     // while idle. Keep the immediate snapshot, then refresh only when the user returns.
+    // P1-9: بلا نافذة تهدئة كانت كل عودة للتبويب تسحب الجدول كاملاً، و`focus`
+    // و`visibilitychange` يقعان معاً عند العودة الواحدة فيتضاعف الطلب. مع مئات
+    // المستخدمين المتنقّلين بين التبويبات هذه قفزات حمل على لقطة عمرها ثوانٍ.
     const refreshWhenVisible = () => {
-        if (typeof document === "undefined" || document.visibilityState === "visible") {
-            void tick(true);
-        }
+        if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+        if (Date.now() - lastTickAt < MIN_VISIBILITY_REFRESH_MS) return;
+        void tick(true);
     };
     if (typeof window !== "undefined") window.addEventListener("focus", refreshWhenVisible);
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", refreshWhenVisible);

@@ -23,6 +23,7 @@ import {
   apiPatchObject,
   apiPostObject,
 } from "../../services/restApi";
+import { invalidateTenantSettings } from "../../services/tenantSettingsApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { getSalesSettings, updateSalesSettings, type SalesSettings } from "../../services/salesApi";
 import { cloudinaryService } from "../../services/cloudinaryService";
@@ -223,6 +224,9 @@ export const GroupConstantsPage: React.FC<GroupConstantsPageProps> = ({ currentU
     setMsg(null);
     try {
       await apiPatchObject("tenants/settings/current/", settings, { tenantId });
+      // P2-9: النافذة المشتركة تخدم المظهر/المهلة/هوية الشركة — أفرِغها بعد
+      // الحفظ كي تلتقطها بالقيم الجديدة لا المحفوظة.
+      invalidateTenantSettings();
       localStorage.setItem("offline_notification_message", offlineMessage);
 
       // Save each modified book (PATCH per row)

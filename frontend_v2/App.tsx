@@ -28,22 +28,14 @@ import { IdleTimeoutGuard } from "./components/IdleTimeoutGuard";
 import SyncConflictModal from "./components/offline/SyncConflictModal";
 import { useBroadcastSync } from "./hooks/useBroadcastSync";
 import { cleanOldCache } from "./services/offline/cacheCleaner";
-import {
-  seedUsersIfEmpty,
-  subscribeToUsers,
-  loadCompanyMemberUsers,
-  subscribeToTasks,
-  createTaskInDb,
-  updateTaskInDb,
-  addSubmissionToTaskInDb,
-  updateSubmissionInTaskInDb,
-  updateUserInDb,
-  deleteUserFromDb,
-  activityService,
-  updateUserTaskStatus,
-  pointsHistoryService,
-  getCategories,
-} from "./services/firestoreService";
+// P2-8: `firestoreService` (2,600+ سطر — منطق المشتريات القديم كله) كان
+// مستورَداً ثابتاً هنا فيدخل حزمة الإقلاع رغم أن الشل لا يستعمل منه إلا
+// المهام والمستخدمين. الاستيراد الديناميكي ينقله إلى chunk مستقل يُحمَّل عند
+// أول استعمال، والوعد محفوظ كي لا يتكرّر الطلب.
+type LegacyDataModule = typeof import("./services/firestoreService");
+let legacyDataPromise: Promise<LegacyDataModule> | null = null;
+const legacyData = (): Promise<LegacyDataModule> =>
+  (legacyDataPromise ??= import("./services/firestoreService"));
 import { fetchUserProfile, logoutUser } from "./services/authService";
 import { useAuth } from "./contexts/AuthContext";
 import { useCompany } from "./contexts/CompanyContext";
@@ -512,7 +504,7 @@ const App: React.FC = () => {
   // أو بدلاً من الاشتراك، يمكنك جلب الفئات مرة واحدة
   useEffect(() => {
     const loadCategories = async () => {
-      const fetchedCategories = await getCategories();
+      const fetchedCategories = await (await legacyData()).getCategories();
       setCategories(fetchedCategories);
     };
     loadCategories();
@@ -717,20 +709,24 @@ const App: React.FC = () => {
     if (!currentUser) return;
     let active = true;
     let unsubscribeUsers = () => { };
-    if (currentUser.isSuperAdmin) {
-      void seedUsersIfEmpty();
-      unsubscribeUsers = subscribeToUsers(true, (fetchedUsers) => {
-        if (active) setUsers(fetchedUsers);
+    let unsubscribeTasks = () => { };
+    void legacyData().then((m) => {
+      if (!active) return;
+      if (currentUser.isSuperAdmin) {
+        void m.seedUsersIfEmpty();
+        unsubscribeUsers = m.subscribeToUsers(true, (fetchedUsers) => {
+          if (active) setUsers(fetchedUsers);
+        });
+      } else if (currentCompany) {
+        void m.loadCompanyMemberUsers(currentCompany.TenantID)
+          .then((companyUsers) => { if (active) setUsers(companyUsers); })
+          .catch(() => { if (active) setUsers([]); });
+      } else {
+        setUsers([]);
+      }
+      unsubscribeTasks = m.subscribeToTasks((fetchedTasks) => {
+        setTasks(fetchedTasks);
       });
-    } else if (currentCompany) {
-      void loadCompanyMemberUsers(currentCompany.TenantID)
-        .then((companyUsers) => { if (active) setUsers(companyUsers); })
-        .catch(() => { if (active) setUsers([]); });
-    } else {
-      setUsers([]);
-    }
-    const unsubscribeTasks = subscribeToTasks((fetchedTasks) => {
-      setTasks(fetchedTasks);
     });
     return () => {
       active = false;
@@ -832,7 +828,7 @@ const App: React.FC = () => {
         activeTasksService.startTask(taskId, userId, accumulatedTime);
       }
 
-      await updateUserTaskStatus(taskId, userId, status);
+      await (await legacyData()).updateUserTaskStatus(taskId, userId, status);
 
       setTasks((prevTasks) =>
         prevTasks.map((task) =>
@@ -937,7 +933,7 @@ const App: React.FC = () => {
       }
 
       const log = createLog(currentUser.id, "SUBMISSION_CREATED");
-      await addSubmissionToTaskInDb(taskId, newSubmission, log);
+      await (await legacyData()).addSubmissionToTaskInDb(taskId, newSubmission, log);
 
       await handleUpdateUserTaskStatus(taskId, currentUser.id, {
         status: "submitted",
@@ -966,7 +962,7 @@ const App: React.FC = () => {
     if (!currentUser) return;
     try {
       const log = createLog(currentUser.id, "SUBMISSION_EDITED");
-      await updateSubmissionInTaskInDb(taskId, submissionId, updateData, log);
+      await (await legacyData()).updateSubmissionInTaskInDb(taskId, submissionId, updateData, log);
       setTasks((prevTasks) =>
         prevTasks.map((t) => {
           if (t.id === taskId) {
@@ -1027,9 +1023,9 @@ const App: React.FC = () => {
 
           // Note: pointsHistory is handled by pointsHistoryService below, not in the User object directly
 
-          await updateUserInDb(updatedUser);
+          await (await legacyData()).updateUserInDb(updatedUser);
 
-          const currentPoints = await pointsHistoryService.getDailyPoints(
+          const currentPoints = await (await legacyData()).pointsHistoryService.getDailyPoints(
             submission.userId,
             today
           );
@@ -1038,7 +1034,7 @@ const App: React.FC = () => {
           const updatedCompletedTasks = (currentPoints?.completedTasks || 0) + 1;
           const updatedTotalPoints = (currentPoints?.totalPoints || 0) + 5;
 
-          await pointsHistoryService.updatePointsManually(
+          await (await legacyData()).pointsHistoryService.updatePointsManually(
             submission.userId,
             today,
             {
@@ -1126,7 +1122,7 @@ const App: React.FC = () => {
         setSelectedTaskDetails(updatedTask);
       }
 
-      await updateTaskInDb(updatedTask);
+      await (await legacyData()).updateTaskInDb(updatedTask);
     } catch (error) {
       // console suppressed
       alert("حدث خطأ أثناء تحديث حالة التسليم");
@@ -1241,7 +1237,7 @@ const App: React.FC = () => {
   const handleUpdateTask = async (updatedTask: Task) => {
     if (!currentUser) return;
     const log = createLog(currentUser.id, "TASK_EDITED");
-    await updateTaskInDb({ ...updatedTask, logs: [...updatedTask.logs, log] });
+    await (await legacyData()).updateTaskInDb({ ...updatedTask, logs: [...updatedTask.logs, log] });
   };
 
   const handleUpdateTaskStatus = async (
@@ -1291,7 +1287,7 @@ const App: React.FC = () => {
       }
     }
 
-    await updateTaskInDb(updatedTask);
+    await (await legacyData()).updateTaskInDb(updatedTask);
     setSelectedTaskDetails(null);
   };
 
@@ -1311,7 +1307,7 @@ const App: React.FC = () => {
       activeTasksService.stopTask(taskId, currentUser.id);
       setActiveTask(null);
     }
-    await updateTaskInDb(updatedTask);
+    await (await legacyData()).updateTaskInDb(updatedTask);
     setRejectingTask(null);
     setSelectedTaskDetails(null);
   };
@@ -1348,7 +1344,7 @@ const App: React.FC = () => {
       logs: [createLog(currentUser.id, "TASK_CREATED")],
       userStatuses: {},
     };
-    await createTaskInDb(newTask);
+    await (await legacyData()).createTaskInDb(newTask);
   };
 
   const handleResetSourcing = () => {
@@ -1357,18 +1353,18 @@ const App: React.FC = () => {
   };
 
   const handleUpdateUser = async (user: User) => {
-    await updateUserInDb(user);
+    await (await legacyData()).updateUserInDb(user);
     if (user.id === currentUser?.id) {
       updateUser(user);
     }
   };
 
   const handleDeleteUser = async (userId: string) => {
-    await deleteUserFromDb(userId);
+    await (await legacyData()).deleteUserFromDb(userId);
   };
 
   const handleSaveNotes = async (userId: string, notes: string) => {
-    await updateUserInDb({ id: userId, notes });
+    await (await legacyData()).updateUserInDb({ id: userId, notes });
   };
 
   const renderMainContent = () => {

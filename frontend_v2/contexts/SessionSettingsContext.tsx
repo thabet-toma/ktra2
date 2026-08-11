@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { clientLogger } from '../services/logger';
-import { apiGetObject, apiPatchObject } from '../services/restApi';
+import { apiPatchObject } from '../services/restApi';
+import { getTenantSettings, invalidateTenantSettings } from '../services/tenantSettingsApi';
 import { resolveTenantId } from '../utils/tenantContext';
 import { IDLE_TIMEOUT_MS } from '../constants/session';
 import {
@@ -60,6 +61,7 @@ export const SessionSettingsProvider: React.FC<{ children: React.ReactNode }> = 
   /** حفظ التفضيل خادمياً (per-company). غير حظري — لا يُعطّل الواجهة. */
   const persist = useCallback((minutes: number) => {
     if (!hasToken()) return; // زائر — cache محلي فقط
+    invalidateTenantSettings();
     void apiPatchObject('tenants/settings/current/', { idle_timeout_minutes: minutes }, { tenantId })
       .catch((e) => clientLogger.warn('session.idle_persist_failed', { error: String(e) }));
   }, [tenantId]);
@@ -71,9 +73,7 @@ export const SessionSettingsProvider: React.FC<{ children: React.ReactNode }> = 
     syncedRef.current = true;
     void (async () => {
       try {
-        const s = await apiGetObject<{ idle_timeout_minutes?: number }>(
-          'tenants/settings/current/', { tenantId },
-        );
+        const s = await getTenantSettings<{ idle_timeout_minutes?: number }>(tenantId);
         const srv = Number(s?.idle_timeout_minutes);
         if (Number.isFinite(srv)) {
           const clamped = clampMinutes(srv);

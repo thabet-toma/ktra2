@@ -417,6 +417,7 @@ export const inventoryApi = {
       body: JSON.stringify(body),
     });
     await handle(res, "createProduct");
+    invalidatePickerProducts();
     return res.json();
   },
 
@@ -427,6 +428,7 @@ export const inventoryApi = {
       body: JSON.stringify(body),
     });
     await handle(res, "updateProduct");
+    invalidatePickerProducts();
     return res.json();
   },
 
@@ -436,6 +438,7 @@ export const inventoryApi = {
       headers: headers(),
     });
     await handle(res, "deleteProduct");
+    invalidatePickerProducts();
   },
 
   // حذف مرفق داتا شيت محفوظ (SQL + Cloudinary أفضل-جهد على الخادم)
@@ -496,6 +499,28 @@ export const inventoryApi = {
   },
 };
 
+// P1-9: نافذة مشتركة قصيرة + دمج الطلبات الطائرة. الحمل الموثّق أدناه لم يكن
+// يُدفع مرة واحدة بل مرة لكل فتح شاشة (9 شاشات مستندات، وبعضها يطلبها مرتين:
+// القائمة ثم المحرّر) — والنافذة تُحوّل التكرار إلى إصابة ذاكرة بلا اقتطاع أي
+// صف. مفتاحها الشركة كي لا تتسرّب قائمة شركةٍ إلى أخرى.
+const PICKER_PRODUCTS_TTL_MS = 60_000;
+const pickerProductsCache = new Map<string, { at: number; rows: unknown[] }>();
+const pickerProductsInFlight = new Map<string, Promise<unknown[]>>();
+
+// المفتاح يعكس ما أُرسِل فعلاً لا ما نظنّه: المستدعي الذي يترك الشركة فارغة
+// لا يُرسل ترويسة X-Tenant-Id فيحسمها الخادم، فلا يجوز أن يتقاسم نتيجته مع
+// مستدعٍ أرسل رقماً صريحاً قد يخالفها.
+const pickerCacheKey = (tenantId?: number) =>
+  tenantId === undefined ? "auto" : String(tenantId);
+
+/**
+ * تُفرَغ النافذة عند أي تعديل على الأصناف كي لا يختفي صنفٌ أُنشئ للتوّ من
+ * منتقي الفاتورة التي أُنشئ من داخلها.
+ */
+export const invalidatePickerProducts = (): void => {
+  pickerProductsCache.clear();
+};
+
 /**
  * أصناف منتقي المستندات — العقد الضيّق (`?view=lookup`) لا كرت الصنف الكامل.
  *
@@ -505,5 +530,25 @@ export const inventoryApi = {
  * للشاشة، مقابل 609 / 331 لعقد المنتقي. مصدر واحد لكل شاشات المستندات كي لا
  * ترتدّ إحداها للعقد الكامل بصمت.
  */
-export const listPickerProducts = <T>(tenantId?: number) =>
-  apiGetList<T>("inventory/products/", { tenantId, query: { view: "lookup" } });
+export const listPickerProducts = <T>(tenantId?: number): Promise<T[]> => {
+  const key = pickerCacheKey(tenantId);
+  const cached = pickerProductsCache.get(key);
+  // نسخة سطحية لكل مستدعٍ: الشاشات تضع المصفوفة في state وبعضها يفرزها
+  // موضعياً، ومشاركة المرجع نفسه تجعل فرز شاشةٍ يعيد ترتيب أخرى.
+  if (cached && Date.now() - cached.at < PICKER_PRODUCTS_TTL_MS) {
+    return Promise.resolve((cached.rows as T[]).slice());
+  }
+  let req = pickerProductsInFlight.get(key);
+  if (!req) {
+    req = apiGetList<T>("inventory/products/", { tenantId, query: { view: "lookup" } })
+      .then((rows) => {
+        pickerProductsCache.set(key, { at: Date.now(), rows: rows as unknown[] });
+        return rows as unknown[];
+      })
+      .finally(() => {
+        pickerProductsInFlight.delete(key);
+      });
+    pickerProductsInFlight.set(key, req);
+  }
+  return req.then((rows) => (rows as T[]).slice());
+};
