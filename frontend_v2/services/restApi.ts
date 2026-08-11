@@ -350,9 +350,14 @@ export async function apiGetPagedList<T = any>(
 
 export async function apiGetObject<T = any>(
   path: string,
-  opts?: { tenantId?: number }
+  opts?: { tenantId?: number; query?: Record<string, string | number | boolean | undefined> }
 ): Promise<T> {
-  const url = `${API_BASE}/${path.replace(/^\/+/, "")}`;
+  const q = new URLSearchParams();
+  Object.entries(opts?.query || {}).forEach(([k, v]) => {
+    if (v === undefined) return;
+    q.set(k, String(v));
+  });
+  const url = `${API_BASE}/${path.replace(/^\/+/, "")}${q.toString() ? `?${q}` : ""}`;
   const res = await apiFetch(url, {
     headers: getHeaders(
       opts?.tenantId ? { "X-Tenant-Id": String(opts.tenantId) } : undefined,

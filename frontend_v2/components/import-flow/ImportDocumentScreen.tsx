@@ -3,7 +3,7 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useSearchParams } from "react-router-dom";
 import { Save, Plus, FileText, Pencil } from "lucide-react";
-import { apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "@/services/restApi";
+import { apiGetList, apiGetObject, apiGetPagedList, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
 import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, unpostClearanceAccrual } from "@/services/clearanceApi";
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
@@ -671,7 +671,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     if (!shipment) return;
     setLinkPickerOpen(true);
     try {
-      const rows = await apiGetList<DealRow>("logistics/deals/", { tenantId: tid() });
+      // P0-5: منتقي الربط يعمل على أحدث 200 صفقة (القائمة مُرقَّمة إلزامياً).
+      const rows = (await apiGetPagedList<DealRow>("logistics/deals/", { tenantId: tid(), query: { page: 1, page_size: 200 } })).results;
       const linkedIds = new Set(shipmentDeals.map((d) => d.deal));
       const unlinked = rows.filter((r) => !linkedIds.has(r.id));
       // الجاهزات للشحن (المصنع سلّم للوكيل) أولاً — هي المرشح الطبيعي للربط

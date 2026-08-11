@@ -490,9 +490,25 @@ function isNumericSqlPaymentId(id: string | number | undefined): boolean {
 // معرّفات tmp- الناتجة عن الكتابة المتداخلة؛ بعد فصل الدفعات صار المعرّف حقيقياً
 // دائماً من endpoint الإنشاء، فلا حاجة لأي مطابقة تخمينية.
 
+/**
+ * P0-5: القائمة صارت مُرقَّمة إلزامياً خادمياً — الجلب الكامل يمشي صفحات
+ * محدودة (200) بدل طلب واحد بلا حد. ما زال جلباً كاملاً للجدول: مستهلكوه
+ * الوحيدون subscribeToDeals/listDeals (تنقّل سجلات وإثراء صفوف) — استبدالهم
+ * بجلب مُقيَّد بمعرّفات دين P1-9 موثّق في SCALABILITY_AUDIT.
+ */
 async function fetchDealsMapped(): Promise<Deal[]> {
-  const rows = await apiGetList<SqlDeal>("logistics/deals/", { tenantId: getTenantId() });
-  return rows.map(mapDealFromSql);
+  const all: SqlDeal[] = [];
+  let page = 1;
+  for (;;) {
+    const paged = await apiGetPagedList<SqlDeal>("logistics/deals/", {
+      tenantId: getTenantId(),
+      query: { page, page_size: 200 },
+    });
+    all.push(...paged.results);
+    if (!paged.hasNext || paged.results.length === 0) break;
+    page += 1;
+  }
+  return all.map(mapDealFromSql);
 }
 
 export const dealsService = {
@@ -582,13 +598,11 @@ export const dealsService = {
   },
 
   async getNextDealNumber(): Promise<string> {
-    const deals = await fetchDealsMapped();
-    const nums = deals
-      .map((d) => (d.dealNumber || "").match(/^D-(\d+)$/)?.[1])
-      .filter(Boolean)
-      .map((v) => Number(v));
-    const next = (nums.length ? Math.max(...nums) : 0) + 1;
-    return `D-${String(next).padStart(4, "0")}`;
+    // P0-5: كان يسحب كل الصفقات ويحسب max(D-nnnn) في المتصفح — الخادم يملك
+    // المنطق نفسه (next-ref)، والرقم النهائي يصحّحه perform_create عند السباق.
+    const res = await apiGetObject<{ ref_number: string }>(
+      "logistics/deals/next-ref/", { tenantId: getTenantId() });
+    return res.ref_number;
   },
 
   async createDeal(dealData: Record<string, any>): Promise<string> {
@@ -908,18 +922,28 @@ export const dealsService = {
   },
 
   async checkDealUniqueness(invoiceNumber?: string, alibabaLink?: string, currentDealId?: string) {
-    const deals = await fetchDealsMapped();
+    // P0-5: كان يسحب كل الصفقات ويفحص التكرار في JS — صار استعلامين مفهرسين
+    // خادمياً (check-uniqueness) بنفس عقد الإرجاع.
     const inv = (invoiceNumber || "").trim();
     const link = (alibabaLink || "").trim();
-    if (inv) {
-      const duplicate = deals.find((d) => d.id !== currentDealId && (d.supplierInvoiceNumber || "").trim() === inv);
-      if (duplicate) return { isUnique: false, errorField: "invoice", existingDealNumber: duplicate.dealNumber };
-    }
-    if (link) {
-      const duplicate = deals.find((d) => d.id !== currentDealId && (d.alibabaOrderLink || "").trim() === link);
-      if (duplicate) return { isUnique: false, errorField: "link", existingDealNumber: duplicate.dealNumber };
-    }
-    return { isUnique: true };
+    if (!inv && !link) return { isUnique: true as const };
+    const res = await apiGetObject<{
+      is_unique: boolean; error_field?: "invoice" | "link";
+      existing_deal_number?: string;
+    }>("logistics/deals/check-uniqueness/", {
+      tenantId: getTenantId(),
+      query: {
+        invoice: inv || undefined,
+        link: link || undefined,
+        exclude: currentDealId || undefined,
+      },
+    });
+    if (res.is_unique) return { isUnique: true as const };
+    return {
+      isUnique: false as const,
+      errorField: res.error_field,
+      existingDealNumber: res.existing_deal_number,
+    };
   },
 
   async deleteDeal(dealId: string): Promise<void> {

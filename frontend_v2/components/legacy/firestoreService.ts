@@ -46,7 +46,7 @@ import {
   CashBoxTransaction,
   Currency
 } from "../../types";
-import { apiDelete, apiGetList, apiGetObject, apiPatchObject, apiPostObject } from "../../services/restApi";
+import { apiDelete, apiGetList, apiGetObject, apiGetPagedList, apiPatchObject, apiPostObject } from "../../services/restApi";
 import { tryPostPurchaseReceiptFromInvoice } from "../../services/invoiceAccountingBridge";
 import { resolveTenantId } from "../../utils/tenantContext";
 import {
@@ -1691,7 +1691,7 @@ export const suppliersService = {
 
         // Fallback: if partners list is empty but deals exist, synthesize supplier list from deals.
         if (mapped.length === 0) {
-              const deals = await apiGetList<any>("logistics/deals/", { tenantId: resolveTenantId() });
+              const deals = (await apiGetPagedList<any>("logistics/deals/", { tenantId: resolveTenantId(), query: { page: 1, page_size: 200 } })).results;
           const byName = new Map<string, Supplier>();
           deals.forEach((d: any) => {
             const rawPartner = d?.partner;
@@ -1723,7 +1723,7 @@ export const suppliersService = {
       } catch (e) {
         // console suppressed
         try {
-          const deals = await apiGetList<any>("logistics/deals/", { tenantId: resolveTenantId() });
+          const deals = (await apiGetPagedList<any>("logistics/deals/", { tenantId: resolveTenantId(), query: { page: 1, page_size: 200 } })).results;
           const byName = new Map<string, Supplier>();
           deals.forEach((d: any) => {
             const rawPartner = d?.partner;

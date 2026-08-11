@@ -2,7 +2,7 @@
  * N7-T8 — SqlDealsPage — AseelDenseTable للصفقات (SQL)
  */
 import React, { useEffect, useMemo, useState, useRef } from 'react';
-import { apiGetList, apiGetObject, apiPostObject } from '../../services/restApi';
+import { apiGetList, apiGetPagedList, apiGetObject, apiPostObject } from '../../services/restApi';
 import { resolveTenantId } from '../../utils/tenantContext';
 import { SqlDataPageShell } from './SqlDataPageShell';
 import { Eye, RefreshCw, Plus } from 'lucide-react';
@@ -76,8 +76,9 @@ export function SqlDealsPage() {
     useEffect(() => {
         let mounted = true;
         setLoading(true); setErr(null);
-        apiGetList<DealRow>('logistics/deals/', { tenantId: resolveTenantId() })
-            .then(d => mounted && setRows(d))
+        // P0-5: القائمة مُرقَّمة إلزامياً — أحدث 200 صفقة تكفي شاشة الفحص هذه.
+        apiGetPagedList<DealRow>('logistics/deals/', { tenantId: resolveTenantId(), query: { page: 1, page_size: 200 } })
+            .then(d => mounted && setRows(d.results))
             .catch(e => mounted && setErr(e instanceof Error ? e.message : String(e)))
             .finally(() => mounted && setLoading(false));
         return () => { mounted = false; };
@@ -115,7 +116,7 @@ export function SqlDealsPage() {
 
     const refreshDeals = async () => {
         setLoading(true);
-        try { setRows(await apiGetList<DealRow>('logistics/deals/', { tenantId: resolveTenantId() })); }
+        try { setRows((await apiGetPagedList<DealRow>('logistics/deals/', { tenantId: resolveTenantId(), query: { page: 1, page_size: 200 } })).results); }
         catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
         finally { setLoading(false); }
     };

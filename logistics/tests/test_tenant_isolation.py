@@ -54,7 +54,8 @@ class TenantIsolationDealTest(TestCase):
         _set_tenant_on_client(self.client, 10)
         resp = self.client.get('/api/logistics/deals/')
         self.assertEqual(resp.status_code, 200)
-        ids = [d['id'] for d in resp.data]
+        # P0-5: القائمة مُرقَّمة إلزامياً — الصفوف داخل غلاف results.
+        ids = [d['id'] for d in resp.data['results']]
         self.assertIn(self.deal_a.id, ids)
         self.assertNotIn(self.deal_b.id, ids)
 

@@ -18,6 +18,7 @@ from tenants.services import create_company
 #  لكل endpoint عند تركيبه — هنا يكفي التحقق من شكل الاستجابة الفارغة/الصغيرة)
 ENFORCED_ENDPOINTS = [
     "/api/logistics/payments/",
+    "/api/logistics/deals/",
 ]
 
 

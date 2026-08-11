@@ -100,6 +100,10 @@ logger = logging.getLogger("logistics.views")
 class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
     # P0-5: كاسر تعادل -id — ترتيب حتمي شرط مسبق للترقيم المستقر.
     queryset = LogisticsDeal.objects.all().order_by('-order_date', '-id')
+    # P0-5: ترقيم إلزامي — كل مستهلكي القائمة في الواجهة صاروا مُرقَّمين
+    # (DealManagement عبر listDealsPage، والبقية صفحة أولى بسقف 200، وready-to-ship
+    # وnext-ref وcheck-uniqueness نقاط action مستقلة لا يمسّها ترقيم القائمة).
+    pagination_class = EnforcedPageNumberPagination
     serializer_class = LogisticsDealSerializer
     partner_balance_spec = ("partner_id", True, "supplier_balance")
 
@@ -183,6 +187,46 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             if m:
                 nums.append(int(m.group(1)))
         return f"D-{max(nums) + 1:04d}"
+
+    @action(detail=False, methods=['get'], url_path='next-ref')
+    def next_ref(self, request):
+        """P0-5: معاينة الرقم التالي للواجهة — كانت تسحب **كل** الصفقات وتحسب
+        max(D-nnnn) في المتصفح. الرقم النهائي يبقى من perform_create (الخادم
+        يولّد/يصحّح عند السباق) — هذه معاينة عرض فقط."""
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'لا يوجد شركة محددة.'}, status=400)
+        return Response({'ref_number': self._next_deal_ref(tenant)})
+
+    @action(detail=False, methods=['get'], url_path='check-uniqueness')
+    def check_uniqueness(self, request):
+        """P0-5: فحص تفرّد رقم فاتورة المورد/رابط علي بابا باستعلامين مفهرسين —
+        كانت الواجهة تسحب كل الصفقات وتفحص التكرار في JS."""
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'لا يوجد شركة محددة.'}, status=400)
+        invoice = (request.query_params.get('invoice') or '').strip()
+        link = (request.query_params.get('link') or '').strip()
+        exclude = request.query_params.get('exclude')
+        qs = LogisticsDeal.objects.filter(tenant=tenant)
+        if exclude:
+            qs = qs.exclude(pk=exclude)
+        if invoice:
+            dup = qs.filter(supplier_invoice_number=invoice).only(
+                'id', 'ref_number').first()
+            if dup:
+                return Response({
+                    'is_unique': False, 'error_field': 'invoice',
+                    'existing_deal_number': dup.ref_number,
+                })
+        if link:
+            dup = qs.filter(alibaba_link=link).only('id', 'ref_number').first()
+            if dup:
+                return Response({
+                    'is_unique': False, 'error_field': 'link',
+                    'existing_deal_number': dup.ref_number,
+                })
+        return Response({'is_unique': True})
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
