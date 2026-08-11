@@ -161,6 +161,47 @@ def _log_session_event(request, user, action):
     )
 
 
+# ── حدّ محاولات الدخول (المرحلة 5 / P0-13 — SCALABILITY_AUDIT §1.7) ─────────
+# login_view دالة Django عادية لا view من DRF ⇒ DEFAULT_THROTTLE_CLASSES لا
+# يمسّها، ولم تكن في المشروع أي آلية قفل حساب ⇒ تخمين كلمات مرور بلا سقف،
+# وكل محاولة = تجزئة PBKDF2 بطيئة عمداً (استنزاف CPU أيضاً). الحدّ هنا على
+# **المحاولات الفاشلة** فقط (النجاح لا يستهلك الحصة)، بمفتاحين مستقلين:
+# البريد (يمنع استهداف حساب من IPs متعددة) وIP المصدر (يمنع مسح حسابات كثيرة
+# من مصدر واحد). الفحص يسبق check_password فالمحظور لا يكلّف تجزئة أصلاً.
+LOGIN_MAX_FAILURES = 10          # لكل مفتاح داخل النافذة
+LOGIN_FAILURE_WINDOW = 15 * 60   # ثانية
+
+
+def _login_rate_key(kind: str, value: str) -> str:
+    return f"login_fail:{kind}:{value}"
+
+
+def _login_locked(*keys: str) -> bool:
+    from django.core.cache import cache
+
+    return any((cache.get(k) or 0) >= LOGIN_MAX_FAILURES for k in keys)
+
+
+def _login_register_failure(*keys: str) -> None:
+    from django.core.cache import cache
+
+    for k in keys:
+        # add ثم incr: العدّاد يبدأ بنافذة ثابتة من أول فشل، وincr ذرّي على
+        # Redis/LocMem. أسوأ حالة على FileBasedCache سباقٌ يفقد عدّة — الحدّ
+        # يبقى فعّالاً، والدقة الكاملة تأتي مع REDIS_URL (P0-6).
+        if not cache.add(k, 1, LOGIN_FAILURE_WINDOW):
+            try:
+                cache.incr(k)
+            except ValueError:  # انتهت صلاحية المفتاح بين add وincr
+                cache.add(k, 1, LOGIN_FAILURE_WINDOW)
+
+
+def _login_clear_failures(*keys: str) -> None:
+    from django.core.cache import cache
+
+    cache.delete_many(list(keys))
+
+
 @csrf_exempt
 def login_view(request):
     if request.method != "POST":
@@ -170,10 +211,29 @@ def login_view(request):
         return JsonResponse({"detail": "Invalid JSON"}, status=400)
     email = (body.get("email") or "").strip()
     password = body.get("password") or ""
+
+    from core.tenant_utils import _get_client_ip
+
+    rate_keys = (
+        _login_rate_key("email", email.lower()),
+        _login_rate_key("ip", _get_client_ip(request)),
+    )
+    if _login_locked(*rate_keys):
+        logger.warning("auth.login.rate_limited email=%s", email.lower())
+        response = JsonResponse(
+            {"detail": "محاولات دخول كثيرة. حاول مجدداً بعد قليل.",
+             "code": "RATE_LIMITED"},
+            status=429,
+        )
+        response["Retry-After"] = str(LOGIN_FAILURE_WINDOW)
+        return response
+
     # Signup يضع نفس قيمة البريد في username، لكن تعديلات يدوية على DB قد تفصل الحقلين.
     user = User.objects.filter(Q(username__iexact=email) | Q(email__iexact=email)).first()
     if not user or not user.check_password(password):
+        _login_register_failure(*rate_keys)
         return JsonResponse({"detail": "Invalid credentials"}, status=401)
+    _login_clear_failures(*rate_keys)
     if not user.is_active:
         return JsonResponse(
             {"detail": "Account not approved", "code": "NOT_APPROVED"},
