@@ -3,11 +3,37 @@
 > **طريقة الاستخدام:** كل مرحلة = برومت واحد يُنسخ كاملاً في **جلسة وكيل جديدة ومستقلة**.
 > ممنوع تشغيل أكثر من مرحلة في نفس الجلسة — هذا يعيد مشكلة انتفاخ السياق نفسها.
 >
-> **الترتيب المقترح:** 0 ← 1 ← 4 ← 2 ← 3 ← 5 ← 6
+> **الترتيب المقترح:** ~~0~~ ← 1 ← 4 ← 2 ← 3 ← 5 ← 6
 > (المرحلة 4 تحليل خالص بصفر خطر، وتنفيذها مبكراً يعطي صورة الأداء قبل الجراحة.)
 >
 > **قبل أي مرحلة:** `python manage.py test --settings=core.test_settings` يجب أن تكون خضراء.
-> لو مش خضراء — إصلاحها هو المهمة الأولى.
+> لو مش خضراء — إصلاحها هي المهمة الأولى.
+
+## سجلّ التنفيذ
+
+| المرحلة | الحالة | الفرع / commit | التحقق |
+|---|---|---|---|
+| 0 — فصل السياق | ✅ منفّذة 2026-08-11 | `newktra` / `7a23fbf` | 1,025 اختباراً خضراء قبل وبعد · صفر تعديل على `.py`/`.ts`/`.tsx` |
+| 1 — خريطة اعتماديات + حاجز | ⬜ التالية | — | — |
+| 2 — accounting facade | ⬜ | — | — |
+| 3 — تفكيك الملفات العملاقة | ⬜ | — | — |
+| 4 — تدقيق جاهزية 500 مستخدم | ⬜ | — | — |
+| 5 — تنفيذ P0 | ⬜ | — | — |
+| 6 — اختبار حمل + قرار Celery | ⬜ | — | — |
+
+### نتائج المرحلة 0 (ما يهم المراحل التالية)
+
+**المُنجَز:** `ARCHITECTURE.md` (141 سطراً) · `docs/modules/*.md` لـ8 apps (1,021 سطراً، من قراءة الكود لا من PROJECT_MAP) · نقل `PROJECT_MAP.md` إلى `docs/history/` بـ`git mv` · قسم «قراءة السياق» في `CLAUDE.md`. رُوجعت عيّنة من مراجع `file:line` عبر الملفات الثمانية ووُجدت دقيقة.
+
+**تصحيحان في `CLAUDE.md` كانا يضلّلان الوكيل:**
+- الـviews/serializers في **جذر كل app** (`sales/views.py`) — القاعدة القديمة «في `api/`» لم تكن مطابقة للواقع.
+- عدد الاختبارات الفعلي **1,025** لا 70. (وانتبه: `pytest.ini` لا يشمل `accountant_portal`/`after_sales`/`device_registry` — استخدم `manage.py test` للتغطية الكاملة.)
+
+**اكتشافات معمارية للمراحل القادمة:**
+- **للمرحلة 2:** المتجاوزون لـ`post_journal` المؤكّدون: `logistics/views.py:1223-1265` و`:2633-2660` (قيد عكسي يدوي + `.update(is_posted=False)`)، و`partners/signals.py:202` (`create_opening_balance_entry` يكتب `is_posted=True` مباشرةً بلا فحص فترة ولا audit log، وأكواد حسابات hardcoded: `2101/1103/2106-2109` والرصيد الافتتاحي `3300`، و`Account.DoesNotExist` تُبتلع بـ`pass`).
+- **للمرحلتين 1-2:** اعتماد معكوس الاتجاه: قرار «السماح بالمخزون السالب» يسكن في `sales.SalesSettings`، فتستورده `inventory.services.record_stock_movement` كسولاً (`inventory/services.py:208`) — inventory يعتمد على sales لا العكس.
+- **للمرحلة 3:** `hr` لا يملك `services.py` — منطقه في `hr/payroll.py`؛ و`partners` بلا `services.py` إطلاقاً (منطقه في views/signals).
+- **بيئة التنفيذ:** حاوية الوكيل لا تأتي بـDjango مثبّتاً — أول أمر في أي جلسة تنفيذ: `pip install -r requirements.txt` (يكفي: Django, DRF, cors-headers, dotenv, cloudinary×2, Pillow, requests, websocket-client, sqlglot, pytest, pytest-django). الاختبارات تأخذ ~3.5 دقيقة.
 
 ---
 
@@ -15,7 +41,7 @@
 
 المشروع: 87,500 سطر Python / 13 Django app / React SPA. بطء الوكيل سببه 4 «ضرائب» يدفعها قبل أول سطر تعديل:
 
-1. **ضريبة السياق:** `PROJECT_MAP.md` = 8,104 سطر changelog، ولا يوجد `ARCHITECTURE.md`.
+1. **ضريبة السياق:** `PROJECT_MAP.md` = 8,104 سطر changelog، ولا يوجد `ARCHITECTURE.md`. *(عولجت في المرحلة 0.)*
 2. **ضريبة الملفات العملاقة:** `logistics/views.py` = 5,050 سطر · `sales/services.py` = 4,087 · `logistics/serializers.py` = 2,466 · `core/reports.py` = 2,350.
 3. **ضريبة التشابك:** `accounting.models` (Account/JournalHeader/JournalLine) god module مستورد مباشرة من 8 apps. أمثلة موثّقة:
    - `logistics/views.py:1223-1265` ينشئ ويعكس قيوداً يدوياً متجاوزاً `accounting.services`
@@ -29,7 +55,7 @@
 
 ---
 
-## المرحلة 0 — فصل السياق (2-3 ساعات · صفر تعديل منطق)
+## المرحلة 0 — فصل السياق (2-3 ساعات · صفر تعديل منطق) — ✅ منفّذة (`newktra` / `7a23fbf`)
 
 ```text
 اقرأ الكود الفعلي للمشروع (مش PROJECT_MAP.md — هو changelog تاريخي وممكن يكون قديم)
