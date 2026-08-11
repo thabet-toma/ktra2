@@ -186,13 +186,58 @@ MUTATED=0
 log() { printf '\n==> %s\n' "$1"; }
 require() { command -v "$1" >/dev/null 2>&1 || { echo "Required server command not found: $1" >&2; exit 3; }; }
 
-restart_gunicorn() {
-  pkill -f "gunicorn.*core.wsgi" >/dev/null 2>&1 || true
-  sleep 1
+# ── gunicorn (المرحلة 5 / P0-1 — SCALABILITY_AUDIT §6) ──────────────────────
+# كان: --workers 3 من نوع sync بلا threads ⇒ **السقف المطلق 3 طلبات متزامنة**،
+# بلا --timeout (الافتراضي 30ث < مهلة المساعد 60–120ث ⇒ الـworker يُقتل وسط
+# استدعاء المساعد)، وإعادة التشغيل بـpkill + sleep ⇒ انقطاع كامل عند كل نشر.
+#
+# صار: gthread — السعة = workers × threads. السقف الأعلى ليس الـCPU بل **اتصالات
+# MySQL**: مع CONN_MAX_AGE=60 (core/settings.py:172) كل خيط يمسك اتصالاً دائماً،
+# فـworkers × threads هو عدد الاتصالات التي يحجزها التطبيق. الافتراضات أدناه
+# تُبقيه ≤20 — يناسب حصة الاستضافة المشتركة، ويظل ~7 أضعاف الوضع السابق.
+# ارفعها بمتغيّرات البيئة بعد التأكد من حصة max_connections على الخادم.
+GUNICORN_PID_FILE="$HOME_ROOT/logs/gunicorn.pid"
+if [[ -z "${GUNICORN_WORKERS:-}" ]]; then
+  _cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+  GUNICORN_WORKERS=$(( _cores * 2 + 1 ))
+  (( GUNICORN_WORKERS > 5 )) && GUNICORN_WORKERS=5
+fi
+GUNICORN_THREADS="${GUNICORN_THREADS:-4}"
+# 180ث > أطول مهلة مساعد مُعلنة (core/settings.py:302-304,329).
+GUNICORN_TIMEOUT="${GUNICORN_TIMEOUT:-180}"
+
+start_gunicorn() {
   cd "$BACKEND_DIR"
-  "$GUNICORN" --bind 127.0.0.1:8000 --workers 3 --daemon \
+  "$GUNICORN" --bind 127.0.0.1:8000 --daemon \
+    --worker-class gthread \
+    --workers "$GUNICORN_WORKERS" --threads "$GUNICORN_THREADS" \
+    --timeout "$GUNICORN_TIMEOUT" --graceful-timeout 60 --keep-alive 5 \
+    --max-requests 1000 --max-requests-jitter 100 \
+    --pid "$GUNICORN_PID_FILE" \
     --access-logfile "$HOME_ROOT/logs/gunicorn-access.log" \
     --error-logfile "$HOME_ROOT/logs/gunicorn.log" core.wsgi
+}
+
+restart_gunicorn() {
+  local pid=""
+  [[ -f "$GUNICORN_PID_FILE" ]] && pid="$(cat "$GUNICORN_PID_FILE" 2>/dev/null || true)"
+  # إعادة تحميل رشيقة: SIGHUP يُنهي الطلبات الجارية ويُقلع عمّالاً جدداً بالكود
+  # الجديد بلا إسقاط اتصال واحد. **قيد معروف:** HUP لا يلتقط تغيّر وسائط سطر
+  # الأوامر (workers/threads/timeout) — بعد تعديل أيٍّ منها شغّل النشر مرة
+  # بـGUNICORN_FORCE_RESTART=1 لإعادة تشغيل كاملة.
+  if [[ -n "$pid" ]] && [[ "${GUNICORN_FORCE_RESTART:-0}" != "1" ]] \
+     && kill -0 "$pid" 2>/dev/null; then
+    kill -HUP "$pid" 2>/dev/null && return 0
+  fi
+  # لا pidfile (أول نشر بعد هذا التغيير) أو العملية ميتة أو إعادة تشغيل مفروضة.
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
+  else
+    pkill -f "gunicorn.*core.wsgi" >/dev/null 2>&1 || true
+  fi
+  sleep 2
+  rm -f "$GUNICORN_PID_FILE"
+  start_gunicorn
 }
 
 rollback() {
