@@ -606,28 +606,34 @@ class GeneralLedgerView(viewsets.ViewSet):
         except Account.DoesNotExist:
             return Response({'error': 'Account not found'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Helper to get all sub-accounts (recursive + code based)
-        def get_all_child_accounts(acc, visited=None):
-            if visited is None:
-                visited = set()
-            if acc.id in visited:
-                return [acc]
-            visited.add(acc.id)
-            acc_list = {acc.id: acc}
-            children = Account.objects.filter(parent=acc, tenant=tenant)
-            for child in children:
-                sub_children = get_all_child_accounts(child, visited)
-                for sub in sub_children:
-                    acc_list[sub.id] = sub
-            if acc.code:
-                code_children = Account.objects.filter(
-                    tenant=tenant, code__startswith=acc.code,
-                ).exclude(id__in=acc_list.keys())
-                for child in code_children:
-                    acc_list[child.id] = child
-            return list(acc_list.values())
+        # P1-3 (SCALABILITY_AUDIT §2-5): كان التوسّع تعاودياً باستعلامين لكل حساب
+        # (أبناء بالـFK ثم أبناء بالكود) ⇒ شجرة من 300 حساب = 600 استعلام قبل أن
+        # يبدأ التقرير أصلاً. الشجرة كلها تُجلب الآن باستعلام واحد وتُوسَّع في
+        # الذاكرة بنفس الدلالة حرفياً: إغلاق تعاودي على الأب، ولكل عقدة فيه
+        # تُضاف الحسابات التي يبدأ كودها بكودها (بلا توسيع هذه الأخيرة).
+        all_accounts = list(Account.objects.filter(tenant=tenant))
+        children_by_parent = {}
+        for acc in all_accounts:
+            children_by_parent.setdefault(acc.parent_id, []).append(acc)
 
-        target_accounts = get_all_child_accounts(account)
+        fk_closure = {}
+        stack = [account]
+        while stack:
+            node = stack.pop()
+            if node.id in fk_closure:
+                continue
+            fk_closure[node.id] = node
+            stack.extend(children_by_parent.get(node.id, []))
+
+        target_map = dict(fk_closure)
+        for node in fk_closure.values():
+            if not node.code:
+                continue
+            for candidate in all_accounts:
+                if candidate.id not in target_map and (candidate.code or "").startswith(node.code):
+                    target_map[candidate.id] = candidate
+
+        target_accounts = list(target_map.values())
 
         # 1. Calculate Opening Balance
         # Sum of (Debit - Credit) for all Posted entries before start_date
@@ -662,12 +668,23 @@ class GeneralLedgerView(viewsets.ViewSet):
         if not include_unposted:
             query_filters['journal__is_posted'] = True
 
+        # P1-3: `journal__currency` كان خارج select_related رغم أن كل سطر يقرأ
+        # `line.journal.currency.Code` ⇒ استعلام لكل سطر في التقرير.
         transactions = (
             JournalLine.objects.filter(**query_filters)
             .filter(branch_q)
-            .select_related('journal', 'account')
-            .order_by('journal__transaction_date', 'journal__id')
+            .select_related('journal', 'journal__currency', 'account')
+            .order_by('journal__transaction_date', 'journal__id', 'id')
         )
+
+        # P1-3: التقرير كان بلا أي سقف — دفتر أستاذ حساب الصندوق على سنة كاملة
+        # يبني كل أسطره في الذاكرة ويُسلسلها دفعةً واحدة. السقف هنا لا يُخفي شيئاً:
+        # `truncated` و`total_count` يُعادان في الاستجابة لتضيّق الواجهة المدى.
+        max_rows = 5000
+        total_count = transactions.count()
+        truncated = total_count > max_rows
+        if truncated:
+            transactions = transactions[:max_rows]
 
         # 3. Calculate Running Balance
         results = []
@@ -705,7 +722,12 @@ class GeneralLedgerView(viewsets.ViewSet):
             'account_code': account.code,
             'opening_balance': opening_balance,
             'transactions': results,
-            'closing_balance': current_balance
+            'closing_balance': current_balance,
+            # P1-3: القصّ معلَن لا صامت — الواجهة تعرض تنبيهاً وتضيّق المدى،
+            # والرصيد الختامي أدناه يخصّ الأسطر المُعادة فقط عند القصّ.
+            'total_count': total_count,
+            'truncated': truncated,
+            'max_rows': max_rows,
         })
 
 class TrialBalanceView(viewsets.ViewSet):
