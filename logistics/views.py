@@ -1019,6 +1019,11 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                     lines_data=lines_data,
                     currency=journal_currency,
                     exchange_rate=journal_rate,
+                    # قرار 2026-08-11: الدفعة قابلة لإعادة الترحيل بعد عكسها،
+                    # وقيود المرجع السابقة (الأصل وعكسه) تبقى في الدفاتر — البحث
+                    # الـidempotent كان يعيد قيد دورة سابقة بدل إنشاء الجديد.
+                    # حارس التكرار الفعلي: قفل صف الدفعة + فحص is_posted أعلاه.
+                    idempotent=False,
                 )
 
                 # تحديث الدفعة
@@ -1200,8 +1205,12 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
 
                 tenant = orig.tenant
 
-                # المرحلة 2: آلية القيد العكسي + تخفيض is_posted على الأصل انتقلت
-                # إلى accounting.api (فحص الفترة/الأسطر/التوازن + وسم الأصل).
+                # قرار 2026-08-11 (توحيد نمط العكس — معالجة ديون المرحلة 2):
+                # القيد الأصلي يبقى مرحّلاً ويعادله قيد العكس بعملة الأصل وسعره،
+                # فصافي الأثر على التقارير المرحّلة (الاسمية والأساسية) صفر،
+                # وتقارير الفترة الأصلية لا تتغيّر بأثر رجعي — نفس نمط دفعات
+                # التخليص. (النمط القديم كان يلغي ترحيل الأصل فيُظهر أثر العكس
+                # وحده بإشارة معكوسة في التقارير المرحّلة.)
                 rev = accounting_api.reverse_journal(
                     orig,
                     reference_type="LOGISTICS_PAYMENT_UNPOST",
@@ -1212,8 +1221,8 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                         f"عكس القيد #{orig.id}"
                     ),
                     line_description_prefix=f"عكس قيد #{orig.id}: ",
+                    copy_currency=True,
                     copy_project=True,
-                    unpost_original=True,
                 )
 
                 LogisticsPayment.objects.filter(pk=pay_row.pk).update(
@@ -1233,8 +1242,8 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                         model_name="LogisticsPayment",
                         object_id=pay_row.id,
                         change_details=(
-                            f"إلغاء ترحيل دفعة: إلغاء ترحيل القيد #{orig.id}، "
-                            f"قيد عكسي مرحّل #{rev.id}، صفقة {deal.ref_number}"
+                            f"إلغاء ترحيل دفعة: قيد عكسي مرحّل #{rev.id} يعادل "
+                            f"القيد #{orig.id} (بقي مرحّلاً)، صفقة {deal.ref_number}"
                         )[:2000],
                     )
                 except Exception:
@@ -1242,16 +1251,16 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
 
             return Response(
                 {
-                    "status": "تم إلغاء ترحيل الدفعة وإنشاء قيد عكسي مرحّل — يُحدَّث ميزان المراجعة ودفتر الأستاذ للقيود المرحّلة.",
+                    "status": "تم إلغاء ترحيل الدفعة بقيد عكسي مرحّل — القيد الأصلي يبقى مرحّلاً ويعادله قيد العكس فيصير صافي أثر الدفعة صفراً.",
                     "payment_id": int(payment_id),
                     "voided_journal_id": orig.id,
-                    "voided_journal_posted": False,
+                    "voided_journal_posted": True,
                     "reversal_journal_id": rev.id,
                     "reversal_journal_posted": True,
                     "reversal_date": str(rev_date),
                     "accounting_note": (
-                        "القيد الأصلي بقي في النظام غير مرحّل للتدقيق؛ "
-                        "التقارير المرحّلة تعكس أثر قيد العكس فقط في الفترة الحالية."
+                        "القيد الأصلي بقي مرحّلاً للتدقيق وتقارير فترته لم تتغيّر؛ "
+                        "قيد العكس يلغي أثره فيصير صافي الدفعة صفراً في الدفاتر."
                     ),
                 },
                 status=status.HTTP_200_OK,

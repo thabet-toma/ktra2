@@ -116,6 +116,10 @@ def reverse_journal(
 
     ترمي `ValidationError` إن كان الأصل غير مرحّل أو بلا أسطر أو غير متوازن
     (سماحية 0.02)، و`RuntimeError` إن فشل توازن العكس بعد الإنشاء.
+
+    قرار 2026-08-11: العكس **معفى عمداً من فحص طبيعة الحساب**
+    (debit_only/credit_only) — قلب الأطراف يعني أن حساباً «مدين فقط» سيستقبل
+    دائناً في العكس، وفرض الفحص كان سيجعل قيوداً مشروعة غير قابلة للعكس.
     """
     if transaction_date is None:
         transaction_date = datetime.date.today()
@@ -428,10 +432,13 @@ def create_partner_opening_balance(partner) -> None:
     عميل ⇒ مدين على حسابه / دائن على 3300؛ غير العميل ⇒ العكس.
     يُنشئ 3300 تحت جذر حقوق الملكية «3» إن لم يوجد.
 
-    ⚠️ منقول كما هو (المرحلة 2 = صفر تغيير سلوك): يكتب القيد مرحّلاً مباشرةً
-    بلا فحص فترة مالية ولا audit log ولا idempotency ذرّية، والأخطاء تُبتلع
-    بالتسجيل فقط — موثّق كدين محاسبي في تقرير المرحلة 2
-    (docs/REFACTOR_PROMPTS.md) ولا يُصلَح هنا.
+    قرار 2026-08-11 (معالجة ديون المرحلة 2): يمرّ عبر `post_journal` فيكسب
+    فحص الفترة المالية والتوازن وaudit log وidempotency ذرّية على المرجع
+    (PARTNER_OPENING, partner.id) — فحص `exists` غير المقفول في الـsignal لم
+    يعد الحامي الوحيد من التكرار تحت السباق.
+    فشل الترحيل (مثل فترة مقفلة/غائبة عند تاريخ الرصيد) يُسجَّل ولا يُرمى —
+    حفظ الشريك لا يسقط بسبب المحاسبة (عقد الـsignal الأصلي)؛ تصحيح التاريخ
+    وإعادة حفظ الشريك يعيدان المحاولة.
     """
     try:
         tenant = partner.tenant
@@ -458,24 +465,32 @@ def create_partner_opening_balance(partner) -> None:
         if not opening_offset_account:
             return
 
-        with transaction.atomic():
-            date = partner.opening_balance_date or datetime.date.today()
+        date = partner.opening_balance_date or datetime.date.today()
+        amount = Decimal(str(partner.opening_balance))
+        description = f"Opening Balance for {partner.name}"
+        partner_line = {
+            'account': partner.linked_account_id,
+            'partner': partner.id,
+            'description': description,
+        }
+        offset_line = {'account': opening_offset_account.id, 'description': description}
+        if partner.partner_type == 'Customer':
+            partner_line.update(debit=amount, credit=Decimal('0'))
+            offset_line.update(debit=Decimal('0'), credit=amount)
+            lines_data = [partner_line, offset_line]
+        else:
+            offset_line.update(debit=amount, credit=Decimal('0'))
+            partner_line.update(debit=Decimal('0'), credit=amount)
+            lines_data = [offset_line, partner_line]
 
-            header = JournalHeader.objects.create(
-                tenant=tenant,
-                transaction_date=date,
-                reference_type='PARTNER_OPENING',
-                reference_id=partner.id,
-                description=f"Opening Balance for {partner.name}",
-                is_posted=True
-            )
-
-            if partner.partner_type == 'Customer':
-                JournalLine.objects.create(tenant=tenant, journal=header, account=partner.linked_account, debit=partner.opening_balance, credit=0, partner_id=partner.id)
-                JournalLine.objects.create(tenant=tenant, journal=header, account=opening_offset_account, debit=0, credit=partner.opening_balance)
-            else:
-                JournalLine.objects.create(tenant=tenant, journal=header, account=opening_offset_account, debit=partner.opening_balance, credit=0)
-                JournalLine.objects.create(tenant=tenant, journal=header, account=partner.linked_account, debit=0, credit=partner.opening_balance, partner_id=partner.id)
+        post_journal(
+            tenant_id=tenant.pk,
+            transaction_date=date,
+            reference_type='PARTNER_OPENING',
+            reference_id=partner.id,
+            description=description,
+            lines_data=lines_data,
+        )
 
     except Exception:
         logger.exception("Failed to create opening balance for partner id=%s", partner.id)

@@ -9,6 +9,7 @@
 - sync_partner_accounting / ensure_partner_account / create_partner_opening_balance:
   نفس عقد partners/signals قبل النقل (الأكواد المعيارية 2101/1103/… و3300).
 """
+import datetime
 from decimal import Decimal
 
 import pytest
@@ -335,3 +336,39 @@ def test_create_partner_opening_balance_customer_and_supplier(env):
     assert JournalHeader.objects.filter(
         tenant=tenant, reference_type="PARTNER_OPENING", reference_id=supplier.id,
     ).count() == 1
+
+
+def test_create_partner_opening_balance_is_race_safe_idempotent(env):
+    """قرار 2026-08-11: القيد الافتتاحي عبر post_journal — إعادة الاستدعاء
+    المباشر (تجاوز فحص exists في sync، كما في سباق متزامن) لا تكرر القيد."""
+    tenant, owner, ils, usd, ar, rev = env
+    customer = Partner.objects.create(
+        tenant=tenant, name="عميل السباق", partner_type="Customer")
+    customer.refresh_from_db()
+    customer.opening_balance = D("250")
+    api.create_partner_opening_balance(customer)
+    api.create_partner_opening_balance(customer)
+    assert JournalHeader.objects.filter(
+        tenant=tenant, reference_type="PARTNER_OPENING", reference_id=customer.id,
+    ).count() == 1
+
+
+def test_create_partner_opening_balance_requires_open_period(env):
+    """قرار 2026-08-11: تاريخ رصيد بلا فترة مالية مفتوحة ⇒ لا قيد (يُسجَّل
+    الخطأ ولا يسقط حفظ الشريك)؛ تصحيح التاريخ وإعادة الحفظ يُنشئ القيد."""
+    tenant, owner, ils, usd, ar, rev = env
+    partner = Partner.objects.create(
+        tenant=tenant, name="مورد خارج الفترة", partner_type="Supplier",
+        opening_balance=D("400"), opening_balance_date=datetime.date(2020, 1, 15))
+    partner.refresh_from_db()
+    assert partner.linked_account_id is not None  # الحساب يُربط رغم فشل القيد
+    assert not JournalHeader.objects.filter(
+        tenant=tenant, reference_type="PARTNER_OPENING", reference_id=partner.id,
+    ).exists()
+
+    partner.opening_balance_date = datetime.date(2026, 5, 1)
+    partner.save()  # signal ⇒ sync ⇒ المحاولة تنجح الآن
+    header = JournalHeader.objects.get(
+        tenant=tenant, reference_type="PARTNER_OPENING", reference_id=partner.id)
+    assert header.is_posted is True
+    assert str(header.transaction_date) == "2026-05-01"
