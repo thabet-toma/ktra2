@@ -19,20 +19,22 @@ logger = logging.getLogger(__name__)
 # task11 M7: «tasks» أصبحت tenant-scoped — كانت global فظهرت مهام الشركة
 # القديمة في الصفحة الرئيسية لأي شركة جديدة.
 #
-# ⚠️ تسريب عزل معروف (مؤجَّل عمداً — راجع docs/SCALABILITY_AUDIT.md P0-3):
-# attendanceSessions/attendanceRecords/pointsHistory عالمية ⇒ مقروءة عبر كل
-# الشركات. محاولة تقييدها في الجلسة الأمنية (2026-08-11) رُوجعت لأن الواجهة
-# تقرأ هذه المجموعات عبر الـmapper نفسه (`services/sqlApiClient.ts` — عميل
-# Firestore-شكلاً على `/api/mapper/`، لا Firebase)، وتقييدها كان:
-#   (أ) يكسر صفحة «تواصل معنا» العامة (تقرأ departments بلا سياق شركة)،
-#   (ب) والهجرة التي تنسب اليتيمة لشركة #1 تمحو تاريخ حضور/نقاط بقية الشركات.
-# الإصلاح الصحيح = هجرة تنسب كل وثيقة لشركة مالكها الحقيقي (عبر userId ↔
-# UserCompanyMembership) ثم التقييد — جلسة بيانات مستقلة، لا تغيير تهيئة سطر.
+# P0-3 (مُغلَق — كان آخر ثغرة P0 مفتوحة): attendanceSessions/attendanceRecords/
+# pointsHistory خرجت من هنا وصارت مُنطاقة بالشركة. كانت عالمية ⇒ أي مستخدم من
+# أي شركة يقرأ سجلات حضور ونقاط موظفي كل الشركات.
+# العائقان اللذان أجّلاها في الجلسة الأمنية (2026-08-11) عولجا لا التُفَّ عليهما:
+#   (أ) «تواصل معنا» العامة تقرأ `departments` بلا سياق شركة — و`departments`
+#       محتوى عام فعلاً فبقيت عالمية هنا وفي PUBLIC_COLLECTIONS. لم تكن يوماً
+#       جزءاً من التسريب.
+#   (ب) الهجرة الساذجة (نسب اليتيمة لشركة #1) كانت تمحو تاريخ بقية الشركات؛
+#       بديلها `0005_scope_attendance_and_points_to_tenant` ينسب كل وثيقة
+#       لمالكها الفعلي المستخرَج من بنيتها (مسار pointsHistory، أو userId/
+#       createdBy في الحمولة) عبر UserCompanyMembership، ويترك ما لا يُحسم
+#       مالكه بلا نسب ⇒ غير مقروء لأحد بدل نسبه لشركة قد لا تملكه.
+# فرض القراءة/الكتابة نفسه قائم منذ P0-4 (`_get_doc_checked` و`_write`): وثيقة
+# مُنطاقة بلا مالك لا تُقرأ ولا يُستولى عليها.
 GLOBAL_COLLECTIONS = {
     'users',
-    'attendanceSessions',
-    'attendanceRecords',
-    'pointsHistory',
     'publicGallery',
     'departments',
     'aboutLinks',
