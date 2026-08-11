@@ -27,16 +27,18 @@
 
 ## جدول P0 — يكسر عند 500 مستخدم (أو خرق أمني فعلي)
 
+> **تحديث 2026-08-11:** بنود الأمن الأربعة (P0-2/P0-3/P0-4/P0-8) **نُفِّذت في الجلسة الأمنية** — تفاصيلها في `docs/REFACTOR_PROMPTS.md` («نتائج الجلسة الأمنية»). البنود أدناه تبقى للمرجع مع وسم ✅.
+
 | # | البند | الدليل | الجهد | النوع |
 |---|---|---|---|---|
 | P0-1 | gunicorn: 3 sync workers، بلا `--timeout` مخصص (مهلة المساعد 60–120ث > مهلة gunicorn 30ث)، إعادة تشغيل بـ`pkill` (انقطاع كامل) | `deploy.ps1:189-195` · `core/settings.py:302-304,329` | ساعة | نشر |
-| P0-2 | نقطة SQL خام بلا مصادقة ولا فلترة tenant — قراءة بيانات كل الشركات بمفتاح ثابت واحد، والمرشّح قائمة سوداء regex قابلة للتجاوز | `core/agent_db_view.py:48-51,24-32,81` · `core/urls.py:54` | ساعة (حذف/تقييد) | **أمن** |
-| P0-3 | مجموعات bridge «عالمية» مشتركة: أي مستخدم من أي شركة يقرأ `attendanceRecords`/`pointsHistory`/`attendanceSessions`/`departments` لكل الشركات | `bridge/views.py:21-29,43-44,200-202` | ساعتان | **أمن** |
-| P0-4 | bridge يتبنّى الوثائق يتيمة الـtenant: أي وثيقة `tenant_id=NULL` مقروءة وقابلة للكتابة والاستيلاء من أي شركة | `bridge/views.py:353-359,417-420,458-461` | ساعتان | **أمن** |
+| ✅ P0-2 | نقطة SQL خام بلا مصادقة ولا فلترة tenant — قراءة بيانات كل الشركات بمفتاح ثابت واحد، والمرشّح قائمة سوداء regex قابلة للتجاوز | `core/agent_db_view.py:48-51,24-32,81` · `core/urls.py:54` | ساعة (حذف/تقييد) | **أمن — منفّذ** |
+| ✅ P0-3 | مجموعات bridge «عالمية» مشتركة: أي مستخدم من أي شركة يقرأ `attendanceRecords`/`pointsHistory`/`attendanceSessions`/`departments` لكل الشركات | `bridge/views.py:21-29,43-44,200-202` | ساعتان | **أمن — منفّذ** |
+| ✅ P0-4 | bridge يتبنّى الوثائق يتيمة الـtenant: أي وثيقة `tenant_id=NULL` مقروءة وقابلة للكتابة والاستيلاء من أي شركة | `bridge/views.py:353-359,417-420,458-461` | ساعتان | **أمن — منفّذ** |
 | P0-5 | الترقيم opt-in — فرضه على endpoints الفئة أ (حركات مخزون، قيود، فواتير بيع/شراء، صفقات، مدفوعات) مع تعديل مستهلكي الواجهة | `core/pagination.py:16-19` · القائمة الكاملة في §2 | 2-3 أيام (backend+frontend معاً) | أداء |
 | P0-6 | Redis بدل FileBasedCache (أو على الأقل LocMemCache+رفع MAX_ENTRIES مرحلياً) — الكاش الحالي يتصرف كأنه معطّل تحت الحمل وعدّادات الـthrottle عليه | `core/settings.py:352-358` | نصف يوم | أداء |
 | P0-7 | throttle عام: `UserRateThrottle`/`AnonRateThrottle` بمعدلات معقولة (الحالي: 5 نطاقات كلها لـaccountant_portal فقط) | `core/settings.py:378-389` | ساعتان | أداء |
-| P0-8 | رفع وسائط مجهول بلا throttle حتى 25MB — رفع Cloudinary متزامن يقفل worker ومفتوح للعالم | `core/media_views.py:28,44-101` | ساعتان | أمن+أداء |
+| ✅ P0-8 | رفع وسائط مجهول بلا throttle حتى 25MB — رفع Cloudinary متزامن يقفل worker ومفتوح للعالم | `core/media_views.py:28,44-101` | ساعتان | أمن+أداء — **منفّذ** |
 | P0-9 | تقرير أعمار الدائنين: ≥6 استعلامات لكل فاتورة على كل الفواتير المرحّلة منذ النشأة (بلا فلتر تاريخ) — ~20 ألف استعلام/طلب | `core/reports.py:921-928` → `logistics/services.py:479,489-490,497-498,506` | نصف يوم (prefetch أو تجميع SQL) | أداء |
 | P0-10 | فهارس `StockMovement` — أضخم جدول بلا أي فهرس مركّب، وقائمته بلا `order_by` حتمي | `inventory/models.py:261-264` · استعلامات: `inventory/views.py:694-733`، `inventory/services.py:901-903`، `core/reports.py:1180-1190` | نصف يوم (migration واحد) | أداء |
 | P0-11 | فهارس `JournalLine` — فهرس واحد `(tenant,account)` لأكبر جدول محاسبي؛ تقرير أرصدة الشركاء = full scan | `accounting/models.py:152-155` · `core/reports.py:999-1006` · `accounting/views.py:622-655` | ضمن migration P0-10 | أداء |
